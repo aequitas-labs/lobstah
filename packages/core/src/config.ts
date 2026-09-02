@@ -18,6 +18,8 @@ export interface RepoConfig {
   setup?: string[];
   env?: Record<string, string>;
   harness?: HarnessDefaults;
+  /** Opt this repo into tracker pickup (multi-repo [pickup.github] mode). */
+  pickup?: boolean;
 }
 
 export interface LimitsConfig {
@@ -71,6 +73,7 @@ export function loadConfig(): Config {
       setup: Array.isArray(r.setup) ? r.setup.map(String) : undefined,
       env: (r.env as Record<string, string>) ?? undefined,
       harness: (r.harness as HarnessDefaults) ?? undefined,
+      pickup: r.pickup === undefined ? undefined : Boolean(r.pickup),
     };
   }
   return {

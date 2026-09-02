@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   acknowledge,
   appendStatus,
+  codexInvocation,
   readEvidence,
   loadConfig,
   lobstahHome,
+  lobstahVersion,
   mergeEvidence,
   unhandled,
   configPath,
@@ -32,6 +36,9 @@ import { mergeHaulHook } from './hooks.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { applyCull, planCull } from './cull.js';
 import { MANUAL } from './manual.js';
+import { runDoctor } from './doctor.js';
+import { installService, uninstallService } from './service.js';
+import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -60,11 +67,14 @@ work (humans and agents):
                                   Dry run by default (14 days).
   cancel <uuid>                   request cancellation
 
-host processes (run under launchd/systemd/pm2):
+host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
                                   restart ladder, notifyCommand. One per home.
   pick [once]                     tracker loops: poll Linear/GitHub, dispatch
                                   assigned work, report back, reconcile, merge
+  daemon install|uninstall        write + load the launchd agent / systemd user
+  pick install|uninstall          unit for this host, with resolved node and
+                                  lobstah paths (launchd gets no shell env)
 
 lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man tend [--json]               tend the whole string: fleet verdict (daemon
@@ -77,10 +87,13 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   print the event and what to do next; exit 2
                                   on timeout. Unanswered questions re-fire
                                   every remindSecs until answered.
-  man init [--shared] [--marker]  install the haul Stop hook into this
-                                  project's .claude/settings.local.json
-                                  (--shared: settings.json); --marker touches
-                                  .lobstah-man. Idempotent.
+  man init [--shared|--global] [--marker]
+                                  install the haul Stop hook: this project's
+                                  .claude/settings.local.json by default,
+                                  settings.json with --shared, or once into
+                                  ~/.claude/settings.json with --global (any
+                                  directory with a .lobstah-man file then
+                                  parks); --marker touches .lobstah-man.
   man haul [--timeout <secs>]     Stop-hook entry point: park the session while
                                   work is in flight; prints hook-decision JSON
                                   on an event, silent exit 0 otherwise. Gate:
@@ -92,7 +105,16 @@ workers (dispatched agents; injected into every brief):
                                   (${VERBS.join(' | ')})
 
 setup:
-  init                            create ~/.lobstah + example config
+  init [--scan <dir>... [--pickup]]
+                                  create ~/.lobstah + example config; --scan
+                                  detects git repos under the given roots and
+                                  appends a [repos.*] block per repo (--pickup
+                                  marks them pickable by [pickup.github])
+  repos [add <path> [--pickup] [--key <k>]]
+                                  list configured repos, or detect + append one
+  doctor                          check binaries, config, repos, harnesses, and
+                                  the daemon heartbeat; exit 1 on failures
+  version | --version             the installed lobstah version
 
 Everything except daemon and pick works with both stopped: writes are files,
 reads are files. Output is TOON; agents can drive this CLI directly.
@@ -277,8 +299,10 @@ async function mainCli(): Promise<void> {
       if (!sessionId) throw new Error(`${id} has no recorded harness session to attach to`);
       const worktree = path.join(lobstahHome(), 'worktrees', id);
       const cwd = fs.existsSync(worktree) ? worktree : process.cwd();
+      // codex may exist only as the SDK's vendored CLI, never on PATH.
       const invocation =
-        harness === 'codex' ? { file: 'codex', argv: ['resume', sessionId] } : { file: 'claude', argv: ['--resume', sessionId] };
+        harness === 'codex' ? codexInvocation(['resume', sessionId]) : { file: 'claude', argv: ['--resume', sessionId] };
+      if (!invocation) throw new Error('no codex CLI found — neither on PATH nor vendored by @openai/codex-sdk');
       if (args.includes('--print')) {
         console.log(toonKV({ id, harness, sessionId, cwd, command: `${invocation.file} ${invocation.argv.join(' ')}` }));
         break;
@@ -431,7 +455,12 @@ ${progress}`,
       break;
     }
     case 'man:init': {
-      const file = path.join('.claude', args.includes('--shared') ? 'settings.json' : 'settings.local.json');
+      // --global installs once into the user's Claude settings; the haul hook
+      // still gates per directory (marker file or LOBSTAH_MAN=1), so a global
+      // install parks nothing until a project opts in.
+      const file = args.includes('--global')
+        ? path.join(os.homedir(), '.claude', 'settings.json')
+        : path.join('.claude', args.includes('--shared') ? 'settings.json' : 'settings.local.json');
       let existing: unknown;
       try {
         existing = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -440,7 +469,7 @@ ${progress}`,
       }
       const { settings, changed } = mergeHaulHook(existing);
       if (changed) {
-        fs.mkdirSync('.claude', { recursive: true });
+        fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
       }
       if (args.includes('--marker')) fs.writeFileSync('.lobstah-man', '');
@@ -449,7 +478,11 @@ ${progress}`,
           hook: 'lobstah man haul',
           file,
           installed: changed || 'already present',
-          gate: args.includes('--marker') ? '.lobstah-man (this directory)' : 'launch with LOBSTAH_MAN=1 claude',
+          gate: args.includes('--marker')
+            ? '.lobstah-man (this directory)'
+            : args.includes('--global')
+              ? 'touch .lobstah-man in a project (or LOBSTAH_MAN=1) to arm it there'
+              : 'launch with LOBSTAH_MAN=1 claude',
         }),
       );
       break;
@@ -492,17 +525,70 @@ ${progress}`,
       }
       break;
     }
-    case 'daemon': {
-      const interval = Number(arg(args, '--interval') ?? '5000');
-      await daemon(interval);
+    case 'daemon':
+    case 'pick': {
+      const kind = cmd as 'daemon' | 'pick';
+      if (args[0] === 'install') {
+        const res = installService(kind);
+        console.log(toonKV({ service: kind, file: res.file, loaded: res.loaded, detail: res.detail }));
+        break;
+      }
+      if (args[0] === 'uninstall') {
+        const res = uninstallService(kind);
+        console.log(toonKV({ service: kind, file: res.file, removed: res.removed }));
+        break;
+      }
+      if (kind === 'daemon') await daemon(Number(arg(args, '--interval') ?? '5000'));
+      else await runPickup(args[0] === 'once' ? 'once' : 'daemon');
       break;
     }
-    case 'pick': {
-      await runPickup(args[0] === 'once' ? 'once' : 'daemon');
+    case 'doctor': {
+      const rows = runDoctor();
+      console.log(toonTable('doctor', rows as unknown as Array<Record<string, unknown>>, ['check', 'status', 'detail']));
+      if (rows.some((r) => r.status === 'fail')) process.exitCode = 1;
+      break;
+    }
+    case 'repos': {
+      if (args[0] === 'add') {
+        const target = args[1];
+        if (!target) throw new Error('repos add requires a path');
+        const detected = detectRepo(target);
+        if (!detected) throw new Error(`${target} is not the root of a git repository`);
+        const key = arg(args, '--key') ?? detected.key;
+        if (configuredRepoKeys().has(key)) throw new Error(`repos.${key} already configured — edit ${configPath()} directly`);
+        appendRepoBlock({ ...detected, key }, { pickup: args.includes('--pickup') });
+        console.log(toonKV({ key, path: detected.path, trunk: detected.trunk, origin: detected.origin, pickup: args.includes('--pickup') }));
+        break;
+      }
+      const repos = loadConfig().repos;
+      const rows = Object.entries(repos).map(([key, r]) => ({
+        key,
+        path: r.path,
+        trunk: r.trunk,
+        pickup: r.pickup ?? false,
+        exists: fs.existsSync(r.path),
+      }));
+      console.log(toonTable('repos', rows, ['key', 'path', 'trunk', 'pickup', 'exists']));
+      break;
+    }
+    case 'version': {
+      console.log(lobstahVersion());
       break;
     }
     case 'init': {
       if (!fs.existsSync(configPath())) {
+        // --scan fills [repos.*] with real repos; only a bare init needs the
+        // placeholder to show the shape (doctor would flag its fake path).
+        const exampleRepo = args.includes('--scan')
+          ? ''
+          : `[repos.example]
+path  = "~/src/example"
+trunk = "main"
+# origin = "git@github.com:you/example.git"
+# setup  = ["pnpm install"]
+# pickup = true   # opt into [pickup.github] multi-repo tracker pickup
+
+`;
         fs.writeFileSync(
           configPath(),
           `# lobstah workspace definitions — the descriptor's repo key resolves here.
@@ -510,13 +596,7 @@ ${progress}`,
 # notifyCommand = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
 # notifyVerbs   = ["needs-decision", "blocked", "done", "failed"]   # the default
 
-[repos.example]
-path  = "~/src/example"
-trunk = "main"
-# origin = "git@github.com:you/example.git"
-# setup  = ["pnpm install"]
-
-[harness]
+${exampleRepo}[harness]
 default = "claude"
 
 [limits]
@@ -528,16 +608,49 @@ wallClockSecs      = 3600
 `,
         );
       }
+      const scanIdx = args.indexOf('--scan');
+      const added: string[] = [];
+      const unmarked: string[] = [];
+      if (scanIdx >= 0) {
+        const roots = args.slice(scanIdx + 1).filter((a) => !a.startsWith('--'));
+        if (roots.length === 0) throw new Error('--scan requires at least one directory');
+        const known = configuredRepoKeys();
+        const pickup = args.includes('--pickup');
+        for (const repo of scanForRepos(roots)) {
+          if (known.has(repo.key)) continue;
+          known.add(repo.key);
+          appendRepoBlock(repo, { pickup });
+          added.push(repo.key);
+          if (!pickup) unmarked.push(repo.key);
+        }
+      }
+      // The npm package ships docs/ next to dist/; running from source falls
+      // back to the canonical URL rather than printing a path that isn't there.
+      let reference = 'https://github.com/aequitas-labs/lobstah/blob/main/docs/configuration.md';
+      try {
+        const local = fileURLToPath(new URL('../docs/configuration.md', import.meta.url));
+        if (fs.existsSync(local)) reference = local;
+      } catch {
+        // keep the URL
+      }
       console.log(
         toonKV({
           home: path.dirname(configPath()),
           config: configPath(),
-          reference: 'docs/configuration.md',
+          ...(added.length > 0 ? { added: added.join(', ') } : {}),
+          ...(unmarked.length > 0
+            ? { note: `none marked pickable — set pickup = true per [repos.*] (or rerun with --pickup)` }
+            : {}),
+          reference,
           initialized: true,
         }),
       );
       break;
     }
+    case '--version':
+    case '-v':
+      console.log(lobstahVersion());
+      break;
     case undefined:
     case '--help':
     case 'help':

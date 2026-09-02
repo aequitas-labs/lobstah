@@ -47,9 +47,13 @@ ln -s "$PWD/bin/lobstah" /usr/local/bin/lobstah   # Windows: add .\bin to PATH
 ## Quick start 🪝
 
 ```bash
-lobstah init                 # ~/.lobstah + example config
+lobstah init --scan ~/src    # ~/.lobstah + a [repos.*] block per repo found
+                             # (bare `init` writes an example config instead;
+                             #  `lobstah repos add <path>` appends one repo)
 $EDITOR ~/.lobstah/config.toml
-lobstah daemon &             # under tmux/pm2/launchd for real use
+lobstah doctor               # binaries, config, repos, harnesses, heartbeat
+lobstah daemon install       # launchd agent / systemd user unit — survives
+                             # reboots, restarts on crash (`daemon &` for a try)
 lobstah dispatch --repo myapp --brief ./brief.md
 ```
 
@@ -103,7 +107,9 @@ continues the turn the moment something needs it.
 - **Tracker pickup** — `lobstah pick` polls Linear and GitHub outbound (no
   webhooks, no tunnel), dispatches assigned work, streams status back as
   comments, forwards replies into the running dispatch, reconciles drift, and
-  optionally merges approved PRs. [docs/pickup.md](docs/pickup.md)
+  optionally merges approved PRs. GitHub pickup spans every repo you mark
+  `pickup = true`; `lobstah pick install` runs it as a service.
+  [docs/pickup.md](docs/pickup.md)
 - **OpenClaw plugin** — gives fleet agents `lobstah_dispatch` / `lobstah_status`
   / `lobstah_send` / `lobstah_cancel` tools and operators a `/lobstah` command.
   [docs/openclaw.md](docs/openclaw.md)

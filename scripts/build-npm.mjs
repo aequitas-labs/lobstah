@@ -30,7 +30,7 @@ fs.writeFileSync(
       author: 'aequitas labs LLC',
       type: 'module',
       bin: { lobstah: 'dist/main.js' },
-      files: ['dist', 'README.md', 'LICENSE'],
+      files: ['dist', 'docs', 'README.md', 'LICENSE'],
       engines: { node: '>=20' },
       keywords: ['agents', 'claude-code', 'codex', 'supervisor', 'coding-agents', 'worktree', 'orchestration'],
       repository: { type: 'git', url: 'git+https://github.com/aequitas-labs/lobstah.git' },
@@ -49,5 +49,8 @@ const readme = fs
   .replaceAll('](LICENSE)', '](https://github.com/aequitas-labs/lobstah/blob/main/LICENSE)');
 fs.writeFileSync(path.join(out, 'README.md'), readme);
 fs.copyFileSync(path.join(root, 'LICENSE'), path.join(out, 'LICENSE'));
+// `lobstah init` points at docs/configuration.md — ship the docs so the
+// reference resolves on an installed copy, not just in the repo.
+fs.cpSync(path.join(root, 'docs'), path.join(out, 'docs'), { recursive: true });
 fs.chmodSync(path.join(out, 'dist', 'main.js'), 0o755);
 console.log(`built ${out} @ ${version}`);

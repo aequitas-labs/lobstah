@@ -136,6 +136,8 @@ Install it from the project you'll run the lobsterman in:
 ```bash
 lobstah man init            # merges the Stop hook into .claude/settings.local.json
 lobstah man init --shared   # …or the committed .claude/settings.json
+lobstah man init --global   # …or once into ~/.claude/settings.json — any
+                            # directory with a .lobstah-man file then parks
 lobstah man init --marker   # also touch .lobstah-man (per-directory gate)
 ```
 

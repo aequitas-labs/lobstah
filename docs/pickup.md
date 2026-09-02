@@ -123,6 +123,11 @@ startState  = "Todo"
 route       = { ENG = "myapp" }      # team key → repo key
 ```
 
+GitHub routing needs no map: with no `repo` named in `[pickup.github]`, every
+`[repos.<key>]` that opted in with `pickup = true` and has a GitHub `origin`
+is polled, and the repo key doubles as the routing key. Opt-in is explicit —
+being configured for dispatch never makes a repo pickable by itself.
+
 The brief is assembled from the item — title, description, comments to date —
 through an optional per-repo template. The issue is the durable instruction's
 source; `brief.md` in `active/<uuid>/` remains the durable instruction itself.

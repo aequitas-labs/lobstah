@@ -8,12 +8,14 @@ import {
   appendStatus,
   cancelRequested,
   claimNext,
+  detectHarnesses,
   ensureLayout,
   executorPath,
   laneDirs,
   lastEventAt,
   loadConfig,
   lobstahHome,
+  lobstahVersion,
   readStatusLog,
 } from '@lobstah/core';
 import type { Config, Lane, RunnerInfo } from '@lobstah/core';
@@ -200,9 +202,9 @@ function writeHeartbeat(cfg: Config): void {
   const payload = {
     machineId: os.hostname(),
     repos: Object.keys(cfg.repos),
-    harnesses: ['claude', 'codex'],
+    harnesses: detectHarnesses(),
     maxConcurrent: cfg.limits.maxConcurrent,
-    version: '0.1.0',
+    version: lobstahVersion(),
     heartbeat: new Date().toISOString(),
   };
   const tmp = `${executorPath()}.tmp`;

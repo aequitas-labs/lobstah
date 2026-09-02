@@ -27,9 +27,15 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 | `origin` | no | Enables clone-on-first-use when `path` doesn't exist. |
 | `setup` | no | Commands run in each fresh worktree, in order (e.g. `["pnpm install"]`). |
 | `env` | no | Environment merged into every dispatch for this repo. |
+| `pickup` | no (`false`) | Opt this repo into `[pickup.github]` multi-repo mode. Explicit per repo — nothing becomes pickable by being configured. |
 
 `[repos.<key>.harness]` — per-repo harness defaults: `default` (`claude` \|
 `codex`), `model`, `effort`.
+
+`lobstah repos add <path> [--pickup]` detects and appends a block (origin,
+default branch from `origin/HEAD`, setup from the lockfile); `lobstah init
+--scan <dir>...` does the same for every git repo found under the given
+roots. Both append text — hand-written comments survive.
 
 ## `[harness]` — global harness defaults
 
@@ -78,13 +84,22 @@ secret:
 
 ### `[pickup.github]`
 
+Two modes. **Single-repo**: name the forge repo explicitly. **Multi-repo**:
+omit `repo`/`key` and the `[repos.*]` table becomes the source of truth —
+every repo with `pickup = true` and a GitHub `origin` is polled, its lobstah
+key reused as the routing key. Opt-in is per repo, never implied.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `repo` | required | `owner/name`. |
-| `key` | required | Lobstah repo key for dispatches and rebase chores. |
 | `identity` | required | The bot login work is assigned to / authored by. |
+| `repo` | single-repo mode | `owner/name`. Omit for multi-repo mode. |
+| `key` | single-repo mode | Lobstah repo key for dispatches and rebase chores. |
 | `startLabel` | `lobstah` | Label + assignee + open = pickup. |
 | `claimedLabel` | `lobstah:claimed` | Applied on claim. |
+
+`[pickup.github.overrides.<key>]` — multi-repo per-repo overrides:
+`startLabel`, `claimedLabel`, and a nested `merge` table layered over
+`[pickup.github.merge]`.
 
 ### `[pickup.github.merge]` — off by default
 

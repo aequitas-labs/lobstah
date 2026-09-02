@@ -13,6 +13,8 @@ import type { MergePolicy, MergeSource, Source } from './types.js';
 
 export { readMergeView, readPickupMap } from './merge-view.js';
 export type { MergeView, MergeViewPr } from './merge-view.js';
+export { githubRepoFromOrigin, loadPickupConfig } from './config.js';
+export type { PickupConfig } from './config.js';
 
 /**
  * Generic notification hook: exec the configured command with LOBSTAH_* env
@@ -73,10 +75,10 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
 
   const sources: Source[] = [];
   const merges: Array<{ source: MergeSource; policy: MergePolicy }> = [];
-  if (cfg.github) {
-    const gh = new GithubSource(cfg.github);
+  for (const ghCfg of cfg.github) {
+    const gh = new GithubSource(ghCfg);
     sources.push(gh);
-    merges.push({ source: gh, policy: cfg.github.merge });
+    merges.push({ source: gh, policy: ghCfg.merge });
   }
   if (cfg.linear) sources.push(new LinearSource(cfg.linear));
   if (sources.length === 0) {

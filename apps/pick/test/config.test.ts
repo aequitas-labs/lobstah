@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { loadPickupConfig, resolveTokenSource } from '../src/config.js';
+import { githubRepoFromOrigin, loadPickupConfig, resolveTokenSource } from '../src/config.js';
 
 let dir: string;
 beforeEach(() => {
@@ -94,5 +94,139 @@ describe('loadPickupConfig — linear assignment modes', () => {
   it('rejects an unknown assignField at startup', () => {
     writeConfig('assignField = "owner"');
     expect(() => loadPickupConfig()).toThrow(/assignee.*delegate/);
+  });
+});
+
+describe('githubRepoFromOrigin', () => {
+  it('parses the usual origin shapes', () => {
+    expect(githubRepoFromOrigin('git@github.com:acme/widgets.git')).toBe('acme/widgets');
+    expect(githubRepoFromOrigin('git@github.com:acme/widgets')).toBe('acme/widgets');
+    expect(githubRepoFromOrigin('https://github.com/acme/widgets.git')).toBe('acme/widgets');
+    expect(githubRepoFromOrigin('https://github.com/acme/widgets')).toBe('acme/widgets');
+    expect(githubRepoFromOrigin('ssh://git@github.com/acme/widgets.git')).toBe('acme/widgets');
+  });
+
+  it('rejects non-GitHub and malformed origins', () => {
+    expect(githubRepoFromOrigin('git@gitlab.com:acme/widgets.git')).toBeUndefined();
+    expect(githubRepoFromOrigin('https://github.com/acme')).toBeUndefined();
+  });
+});
+
+describe('loadPickupConfig — github multi-repo mode', () => {
+  const write = (toml: string) => {
+    process.env.LOBSTAH_HOME = dir;
+    process.env.LOBSTAH_TEST_TOKEN = 'tok';
+    fs.writeFileSync(path.join(dir, 'config.toml'), toml);
+  };
+  afterEach(() => {
+    delete process.env.LOBSTAH_HOME;
+  });
+
+  it('derives one source per repo with pickup = true and a GitHub origin', () => {
+    write(`[repos.widgets]
+path = "~/src/widgets"
+trunk = "main"
+origin = "git@github.com:acme/widgets.git"
+pickup = true
+
+[repos.gadgets]
+path = "~/src/gadgets"
+trunk = "main"
+origin = "https://github.com/acme/gadgets"
+pickup = true
+
+[repos.private-notes]
+path = "~/src/notes"
+trunk = "main"
+
+[pickup.github]
+tokenEnv = "LOBSTAH_TEST_TOKEN"
+identity = "acme-bot"
+`);
+    const cfg = loadPickupConfig();
+    expect(cfg.github.map((g) => `${g.repo}→${g.key}`).sort()).toEqual(['acme/gadgets→gadgets', 'acme/widgets→widgets']);
+    expect(cfg.github.every((g) => g.identity === 'acme-bot')).toBe(true);
+  });
+
+  it('applies per-repo overrides on top of the shared merge policy', () => {
+    write(`[repos.widgets]
+path = "~/src/widgets"
+trunk = "main"
+origin = "git@github.com:acme/widgets.git"
+pickup = true
+
+[repos.gadgets]
+path = "~/src/gadgets"
+trunk = "main"
+origin = "git@github.com:acme/gadgets.git"
+pickup = true
+
+[pickup.github]
+tokenEnv = "LOBSTAH_TEST_TOKEN"
+identity = "acme-bot"
+
+[pickup.github.merge]
+enabled = true
+approvers = ["alice"]
+
+[pickup.github.overrides.gadgets]
+startLabel = "bot-work"
+
+[pickup.github.overrides.gadgets.merge]
+enabled = false
+`);
+    const cfg = loadPickupConfig();
+    const widgets = cfg.github.find((g) => g.key === 'widgets')!;
+    const gadgets = cfg.github.find((g) => g.key === 'gadgets')!;
+    expect(widgets.merge.enabled).toBe(true);
+    expect(widgets.startLabel).toBe('lobstah');
+    expect(gadgets.merge.enabled).toBe(false);
+    expect(gadgets.merge.approvers).toEqual(['alice']);
+    expect(gadgets.startLabel).toBe('bot-work');
+  });
+
+  it('explicit repo/key stays single-repo mode and ignores repo opt-ins', () => {
+    write(`[repos.widgets]
+path = "~/src/widgets"
+trunk = "main"
+origin = "git@github.com:acme/widgets.git"
+pickup = true
+
+[pickup.github]
+tokenEnv = "LOBSTAH_TEST_TOKEN"
+identity = "acme-bot"
+repo = "acme/monolith"
+key = "monolith"
+`);
+    const cfg = loadPickupConfig();
+    expect(cfg.github).toHaveLength(1);
+    expect(cfg.github[0]!.repo).toBe('acme/monolith');
+  });
+
+  it('multi-repo mode with no opted-in repos is a startup error', () => {
+    write(`[repos.widgets]
+path = "~/src/widgets"
+trunk = "main"
+origin = "git@github.com:acme/widgets.git"
+
+[pickup.github]
+tokenEnv = "LOBSTAH_TEST_TOKEN"
+identity = "acme-bot"
+`);
+    expect(() => loadPickupConfig()).toThrow(/pickup = true/);
+  });
+
+  it('pickup = true without a usable GitHub origin is a startup error', () => {
+    write(`[repos.widgets]
+path = "~/src/widgets"
+trunk = "main"
+origin = "git@gitlab.com:acme/widgets.git"
+pickup = true
+
+[pickup.github]
+tokenEnv = "LOBSTAH_TEST_TOKEN"
+identity = "acme-bot"
+`);
+    expect(() => loadPickupConfig()).toThrow(/not a GitHub URL/);
   });
 });

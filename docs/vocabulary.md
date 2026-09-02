@@ -105,3 +105,14 @@ Work moves through two **lanes** — `work` (human-originated) and `chore`
 (system-originated maintenance, own concurrency budget, reports to no
 tracker) — and three **buckets** within a lane: `queued`, `active`, `done`.
 Bucket transitions are atomic renames; the directory *is* the state.
+
+## Doctor statuses
+
+`lobstah doctor` grades each check with one of three words. **Owner:**
+`apps/cli/src/doctor.ts`. **Enforcement:** any `fail` row exits 1.
+
+| Status | Meaning |
+| ------ | ------- |
+| `ok`   | Works as configured. |
+| `warn` | Degraded or optional — dispatches may still run (e.g. one harness missing, daemon not running). |
+| `fail` | Broken configuration or missing requirement — fix before relying on lobstah. |
