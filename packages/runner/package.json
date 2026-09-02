@@ -1,0 +1,16 @@
+{
+  "name": "@lobstah/runner",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@lobstah/adapters": "workspace:*",
+    "@lobstah/core": "workspace:*",
+    "@lobstah/worktree": "workspace:*"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Repo-local launcher: resolve symlinks back to the checkout, run the built CLI.
+SOURCE=$0
+while [ -L "$SOURCE" ]; do
+  DIR=$(cd "$(dirname "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  case $SOURCE in /*) ;; *) SOURCE=$DIR/$SOURCE ;; esac
+done
+ROOT=$(cd "$(dirname "$SOURCE")/.." && pwd)
+exec node "$ROOT/apps/cli/dist/main.js" "$@"

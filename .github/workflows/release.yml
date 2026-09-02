@@ -1,0 +1,51 @@
+name: Release
+
+# Cutting a release is pushing a tag:
+#   v0.2.0        → publish lobstah@0.2.0
+#   plugin-v0.2.0 → publish lobstah-openclaw-plugin@0.2.0
+# Publishing uses npm trusted publishing (OIDC) — no token secret, no OTP.
+# One-time setup per package on npmjs.com: package → Settings → Trusted
+# Publisher → GitHub Actions → repo aequitas-labs/lobstah, workflow release.yml.
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'plugin-v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - name: Resolve target from tag
+        id: target
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == plugin-v* ]]; then
+            echo "script=build-plugin.mjs" >> "$GITHUB_OUTPUT"
+            echo "dir=build/plugin" >> "$GITHUB_OUTPUT"
+            echo "version=${TAG#plugin-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "script=build-npm.mjs" >> "$GITHUB_OUTPUT"
+            echo "dir=build/npm" >> "$GITHUB_OUTPUT"
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          fi
+      - run: node scripts/${{ steps.target.outputs.script }} ${{ steps.target.outputs.version }}
+      - run: npm publish --provenance --access public
+        working-directory: ${{ steps.target.outputs.dir }}

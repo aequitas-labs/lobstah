@@ -1,0 +1,10 @@
+{
+  "id": "lobstah",
+  "name": "Lobstah",
+  "description": "Dispatch supervised local coding-agent work through the lobstah daemon on this host.",
+  "activation": { "onStartup": true },
+  "contracts": {
+    "tools": ["lobstah_dispatch", "lobstah_status", "lobstah_send", "lobstah_cancel"]
+  },
+  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+}
