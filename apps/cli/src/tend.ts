@@ -5,10 +5,12 @@ import {
   executorPath,
   laneDirs,
   lastEventAt,
+  listWatches,
   loadConfig,
   pendingIds,
   readEvidence,
   readStatusLog,
+  readWatchEvents,
   reconcile,
   toonKV,
   toonTable,
@@ -41,6 +43,18 @@ export interface TendStory {
   prUrl?: string;
   /** Merge-gate verdict from the pick snapshot, when one matches. */
   gate?: string;
+  /** External source watched by a dispatch in this chain (e.g. a ume review). */
+  watch?: string;
+}
+
+export interface TendWatch {
+  key: string;
+  owner: string;
+  cursor: string;
+  pendingEvents: number;
+  lastSummary?: string;
+  lastAt?: string;
+  error?: string;
 }
 
 export interface TendReport {
@@ -49,6 +63,7 @@ export interface TendReport {
   counts: { queued: number; active: number; choresActive: number; done24h: number; failed24h: number };
   attention: Array<{ id: string; lane: Lane; verb: string; ageSecs: number; note?: string }>;
   stories: TendStory[];
+  watches: TendWatch[];
   merge?: MergeView;
 }
 
@@ -128,6 +143,40 @@ export function buildTendReport(now = Date.now()): TendReport {
     note: ev.entry.note,
   }));
 
+  // Watches join from disk, same observational stance as the merge view: an
+  // unconsumed man-owned event is a standing wake nobody has answered yet.
+  const watches: TendWatch[] = [];
+  const watchByDispatch = new Map<string, string>();
+  for (const w of listWatches()) {
+    const events = readWatchEvents(w.key);
+    const pending = events.slice(w.seen);
+    const last = events.at(-1);
+    watches.push({
+      key: w.key,
+      owner: w.owner,
+      cursor: w.cursor,
+      pendingEvents: pending.length,
+      lastSummary: last?.summary,
+      lastAt: last?.at,
+      error: w.lastError,
+    });
+    if (w.owner.startsWith('dispatch:')) {
+      const label = `${w.key}${pending.length > 0 ? ` (${pending.length} pending)` : ''}`;
+      watchByDispatch.set(w.owner.slice('dispatch:'.length), label);
+      if (w.lastFollowUpId) watchByDispatch.set(w.lastFollowUpId, label);
+    }
+    if (w.owner === 'man' && pending.length > 0) {
+      const oldest = pending[0];
+      attention.push({
+        id: w.key,
+        lane: 'work',
+        verb: 'watch',
+        ageSecs: oldest?.at ? Math.max(0, Math.round((now - Date.parse(oldest.at)) / 1000)) : 0,
+        note: pending.at(-1)?.summary,
+      });
+    }
+  }
+
   // Stalled means claiming is broken, not that the queue is deep: work is
   // waiting, capacity is free, the daemon heartbeats, and nothing claims.
   const oldestQueuedAge = queued.reduce((max, id) => {
@@ -158,12 +207,13 @@ export function buildTendReport(now = Date.now()): TendReport {
     const fresh = chain.some((d) => d.bucket !== 'done' || (d.at !== undefined && now - Date.parse(d.at) < DAY_MS));
     if (!fresh) continue;
     const prUrl = chain.map((d) => d.prUrl).find((u) => u !== undefined);
-    stories.push({ key, dispatches: chain, prUrl, gate: gateFor(entry.uuid, prUrl) });
+    const watch = chain.map((d) => watchByDispatch.get(d.id)).find((w) => w !== undefined);
+    stories.push({ key, dispatches: chain, prUrl, gate: gateFor(entry.uuid, prUrl), watch });
   }
   for (const id of [...active, ...queued]) {
     if (storied.has(id)) continue;
     const d = describeDispatch(id, 'work', bucketOf(id) ?? 'active');
-    stories.push({ key: '(direct)', dispatches: [d], prUrl: d.prUrl, gate: gateFor(id, d.prUrl) });
+    stories.push({ key: '(direct)', dispatches: [d], prUrl: d.prUrl, gate: gateFor(id, d.prUrl), watch: watchByDispatch.get(id) });
   }
 
   const verdict: TendReport['verdict'] = !daemonUp
@@ -182,6 +232,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     counts: { queued: queued.length, active: active.length, choresActive, done24h, failed24h },
     attention,
     stories,
+    watches,
     merge,
   };
 }
@@ -219,8 +270,25 @@ export function renderTend(r: TendReport): string {
           dispatches: s.dispatches.map((d) => `${d.id.slice(0, 8)}:${d.state}`).join(' → '),
           pr: s.prUrl ?? '',
           gate: s.gate ?? '',
+          watch: s.watch ?? '',
         })),
-        ['key', 'dispatches', 'pr', 'gate'],
+        ['key', 'dispatches', 'pr', 'gate', 'watch'],
+      ),
+    );
+  }
+  if (r.watches.length > 0) {
+    lines.push('');
+    lines.push(
+      toonTable(
+        'watches',
+        r.watches.map((w) => ({
+          key: w.key,
+          owner: w.owner,
+          pending: w.pendingEvents,
+          last: w.lastSummary ?? '',
+          error: w.error ?? '',
+        })),
+        ['key', 'owner', 'pending', 'last', 'error'],
       ),
     );
   }
