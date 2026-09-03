@@ -300,17 +300,51 @@ function acquireDaemonLock(): void {
   }
 }
 
+/**
+ * fs.watch on the queue directories, so an enqueue triggers a tick in
+ * milliseconds instead of waiting out the interval. Watch as an optimization,
+ * poll as the guarantee: fs.watch is unreliable across platforms, so the
+ * interval tick stays, and a failed watcher just means cadence-only.
+ */
+export function watchQueues(onChange: () => void): () => void {
+  const watchers: fs.FSWatcher[] = [];
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    try {
+      watchers.push(fs.watch(laneDirs(lane).queue, onChange));
+    } catch {
+      // cadence covers it
+    }
+  }
+  return () => {
+    for (const w of watchers) w.close();
+  };
+}
+
 export async function daemon(intervalMs = 5000, log: (m: string) => void = console.log): Promise<never> {
   ensureLayout();
   acquireDaemonLock();
   log(`lobstah daemon: watching ${laneDirs('work').queue} every ${intervalMs}ms`);
-  // Watch as an optimization, poll as the guarantee.
+  let wake: (() => void) | undefined;
+  watchQueues(() => wake?.());
   while (true) {
     try {
       tick(log);
     } catch (err) {
       log(`tick error: ${err instanceof Error ? err.message : String(err)}`);
     }
-    await new Promise((r) => setTimeout(r, intervalMs));
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        wake = undefined;
+        resolve();
+      }, intervalMs);
+      // One nudge per sleep: the first queue event ends the wait (after a
+      // short settle so a burst of writes lands in one tick); the rest of the
+      // burst is picked up by that tick.
+      wake = () => {
+        wake = undefined;
+        clearTimeout(timer);
+        setTimeout(resolve, 50);
+      };
+    });
   }
 }

@@ -2,17 +2,20 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
+  appendWatchEvents,
   enqueue,
   laneDirs,
   lastEventAt,
   listWatches,
   markFollowUp,
   pendingWatchEvents,
+  readWatch,
   readWatchEvents,
   readStatusLog,
   reconcile,
   removeWatch,
   runWatchCheck,
+  setWatchCursor,
   watchDue,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Watch, WatchEvent } from '@lobstah/core';
@@ -86,6 +89,28 @@ function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => 
   log(`watch ${w.key}: ${pending.length} event(s) → continuation ${id} (forks ${target})`);
 }
 
+function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotification) => void): void {
+  if (fresh.length === 0 || watch.owner !== 'man') return;
+  notify({
+    key: watch.key,
+    uuid: 'watch',
+    verb: 'watch',
+    note: fresh[0]?.summary ?? `${fresh.length} new event(s)`,
+  });
+}
+
+/** Fork continuations for buffered dispatch-owned events, retire spent watches. */
+function deliverDispatchOwned(log: (m: string) => void): void {
+  for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
+    if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // one continuation in flight
+    spawnContinuation(watch, events, log);
+  }
+  // A retired source with nothing left to deliver has spent its purpose.
+  for (const w of listWatches()) {
+    if (w.done && w.owner !== 'man' && readWatchEvents(w.key).length <= w.seen) removeWatch(w.key);
+  }
+}
+
 /**
  * The watch loop: run due checks, then deliver. Man-owned events just land in
  * the events file — `man wait`/`man haul` surface them — plus one notify ping
@@ -100,22 +125,40 @@ export async function watchLoop(
     if (watchDue(w, defaultEverySecs)) {
       const { watch, fresh } = runWatchCheck(w);
       if (watch.lastError) log(`watch ${w.key}: check failed — ${watch.lastError}`);
-      if (fresh.length > 0 && watch.owner === 'man') {
-        notify({
-          key: watch.key,
-          uuid: 'watch',
-          verb: 'watch',
-          note: fresh[0]?.summary ?? `${fresh.length} new event(s)`,
-        });
-      }
+      notifyMan(watch, fresh, notify);
     }
   }
-  for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
-    if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // one continuation in flight
-    spawnContinuation(watch, events, log);
+  deliverDispatchOwned(log);
+}
+
+/**
+ * One NDJSON line from a watch's held stream: either a bare cursor
+ * checkpoint or an event object. Events append seq-deduped (the cadence
+ * check remains the guarantee and may see the same event) and deliver
+ * immediately — this is the whole point of the stream.
+ */
+export function handleStreamLine(key: string, line: string, log: (m: string) => void, notify: (n: ReportNotification) => void): void {
+  const watch = readWatch(key);
+  if (!watch) return; // removed while streaming — the manager reaps the child
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    log(`watch ${key}: unparseable stream line — ${line.slice(0, 120)}`);
+    return;
   }
-  // A retired source with nothing left to deliver has spent its purpose.
-  for (const w of listWatches()) {
-    if (w.done && w.owner !== 'man' && readWatchEvents(w.key).length <= w.seen) removeWatch(w.key);
+  if (parsed.seq === undefined) {
+    if (parsed.cursor !== undefined) setWatchCursor(key, String(parsed.cursor));
+    return;
   }
+  const event: WatchEvent = {
+    seq: parsed.seq as number | string,
+    summary: parsed.summary !== undefined ? String(parsed.summary) : undefined,
+    ...parsed,
+    at: new Date().toISOString(),
+  };
+  const fresh = appendWatchEvents(key, event.seq !== undefined ? [event] : []);
+  setWatchCursor(key, String(parsed.cursor ?? event.seq));
+  notifyMan(watch, fresh, notify);
+  if (fresh.length > 0) deliverDispatchOwned(log);
 }

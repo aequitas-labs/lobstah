@@ -22,6 +22,14 @@ export interface Watch {
   /** Who the events belong to: an interactive session or a dispatch to fork. */
   owner: 'man' | `dispatch:${string}`;
   check: string;
+  /**
+   * Optional held-stream command: a long-running process (spawned with
+   * {cursor} substituted) that emits the same event objects as NDJSON lines,
+   * plus bare {"cursor": "N"} checkpoints. A latency optimization over the
+   * check — the cursor poll remains the guarantee, and seq-deduped appends
+   * make the overlap harmless.
+   */
+  stream?: string;
   cursor: string;
   /** Override the poll cadence for this watch (seconds). */
   everySecs?: number;
@@ -95,7 +103,7 @@ export function listWatches(): Watch[] {
 export function addWatch(
   key: string,
   check: string,
-  opts: { owner?: Watch['owner']; cursor?: string; everySecs?: number; brief?: string } = {},
+  opts: { owner?: Watch['owner']; cursor?: string; everySecs?: number; brief?: string; stream?: string } = {},
 ): Watch {
   if (!key || !check) throw new Error('watch add requires a key and a --check command');
   const existing = readWatch(key);
@@ -103,6 +111,7 @@ export function addWatch(
     key,
     owner: opts.owner ?? existing?.owner ?? 'man',
     check,
+    stream: opts.stream ?? existing?.stream,
     cursor: existing?.cursor ?? opts.cursor ?? '0',
     everySecs: opts.everySecs ?? existing?.everySecs,
     brief: opts.brief ?? existing?.brief,
@@ -133,6 +142,28 @@ export function readWatchEvents(key: string): WatchEvent[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Append events exactly once by seq — the stream and the cadence poll may
+ * both see the same event, and at-least-once delivery upstream must not
+ * become duplicate delivery downstream. Returns what was actually new.
+ */
+export function appendWatchEvents(key: string, events: WatchEvent[]): WatchEvent[] {
+  const seen = new Set(readWatchEvents(key).map((e) => String(e.seq)));
+  const fresh = events.filter((e) => !seen.has(String(e.seq)));
+  if (fresh.length > 0) {
+    fs.appendFileSync(eventsPath(key), fresh.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  }
+  return fresh;
+}
+
+/** Advance a watch's cursor (stream checkpoints; the check writes its own). */
+export function setWatchCursor(key: string, cursor: string): void {
+  const w = readWatch(key);
+  if (!w || w.cursor === cursor) return;
+  w.cursor = cursor;
+  writeWatch(w);
 }
 
 /** A check is due when its cadence has elapsed since the last stamp (by anyone). */
@@ -168,7 +199,7 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
     return { watch: w, fresh: [] };
   }
   w.lastError = undefined;
-  const fresh: WatchEvent[] = Array.isArray(parsed.events)
+  const events: WatchEvent[] = Array.isArray(parsed.events)
     ? (parsed.events as Array<Record<string, unknown>>).map((e) => ({
         seq: (e.seq ?? w.cursor) as number | string,
         summary: e.summary !== undefined ? String(e.summary) : undefined,
@@ -176,9 +207,7 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
         at: now.toISOString(),
       }))
     : [];
-  if (fresh.length > 0) {
-    fs.appendFileSync(eventsPath(w.key), fresh.map((e) => JSON.stringify(e)).join('\n') + '\n');
-  }
+  const fresh = appendWatchEvents(w.key, events);
   if (parsed.cursor !== undefined) w.cursor = String(parsed.cursor);
   if (parsed.done === true) w.done = true;
   writeWatch(w);

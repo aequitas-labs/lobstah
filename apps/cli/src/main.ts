@@ -74,12 +74,15 @@ work (humans and agents):
                                   Dry run by default (14 days).
   cancel <uuid>                   request cancellation
   watch [add <key> --check <cmd> [--for <uuid>] [--cursor <c>] [--every <s>]
-        [--brief <template>] | rm <key>]
+        [--brief <template>] [--stream <cmd>] | rm <key>]
                                   stand watch on something external: the check
                                   command answers "anything since {cursor}?"
                                   in JSON. Events wake man wait/haul (default)
                                   or fork a continuation of --for's dispatch
-                                  chain. Bare \`watch\` lists.
+                                  chain. --stream holds a long-lived NDJSON
+                                  child under pick for ms-latency delivery
+                                  (the check stays the guarantee). Bare
+                                  \`watch\` lists.
 
 host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
@@ -647,6 +650,7 @@ ${progress}`,
           cursor: arg(args, '--cursor'),
           everySecs: every ? Number(every) : undefined,
           brief: arg(args, '--brief'),
+          stream: arg(args, '--stream'),
         });
         console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
         break;

@@ -131,6 +131,7 @@ parse records `lastError` and advances nothing.
 | `cursor` | Opaque progress marker, advanced only from successful check output. The stream of record: a crashed watcher resumes from it losslessly. |
 | `owner` | Who the events belong to: `man` (surface via `man wait`/`man haul` + notify) or `dispatch:<uuid>` (fork a continuation of that chain). Events are never unowned work. |
 | `done` | The source is finished (session closed, run complete); the watch retires after its last events are consumed. |
+| `stream` | Optional long-lived NDJSON command held by pick for ms-latency delivery; a pure optimization — appends dedupe by `seq`, the check remains the guarantee. |
 
 Delivery is level-triggered and at-least-once, like dispatch attention:
 events stand until the owner consumes them. One continuation dispatch in

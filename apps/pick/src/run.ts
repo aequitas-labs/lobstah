@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { ensureLayout, listWatches } from '@lobstah/core';
+import type { ChildProcess } from 'node:child_process';
+import { ensureLayout, listWatches, readWatch } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 import { PickupState } from './state.js';
 import { GithubSource } from './sources/github.js';
@@ -9,7 +10,7 @@ import { reportLoop } from './loops/report.js';
 import type { ReportNotification } from './loops/report.js';
 import { reconcileLoop } from './loops/reconcile.js';
 import { mergeLoop } from './loops/merge.js';
-import { watchLoop } from './loops/watch.js';
+import { handleStreamLine, watchLoop } from './loops/watch.js';
 import type { MergePolicy, MergeSource, Source } from './types.js';
 
 export { readMergeView, readPickupMap } from './merge-view.js';
@@ -41,6 +42,66 @@ function makeNotifier(command: string | undefined, log: (m: string) => void): (n
     child.on('error', (err) => log(`notify: ${err.message}`));
     child.unref();
   };
+}
+
+/**
+ * Serialize work from two feeders — the cadence timer and held streams — so
+ * pick's state stays single-writer without locks. Jobs run one at a time in
+ * arrival order; a failed job never breaks the chain.
+ */
+export class SingleFlight {
+  private chain: Promise<unknown> = Promise.resolve();
+  run<T>(job: () => T | Promise<T>): Promise<T> {
+    const next = this.chain.then(job, job);
+    this.chain = next.then(
+      () => {},
+      () => {},
+    );
+    return next;
+  }
+}
+
+/**
+ * Held streams: one long-lived child per watch that declares a stream
+ * command, emitting NDJSON event lines that deliver the moment they arrive.
+ * A latency optimization over the cadence check — the cursor poll remains
+ * the guarantee, so a dead stream just means cadence-only until the next
+ * sync respawns it (the poll interval doubles as the reconnect backoff).
+ */
+function syncStreams(
+  children: Map<string, ChildProcess>,
+  flight: SingleFlight,
+  log: (m: string) => void,
+  notify: (n: ReportNotification) => void,
+): void {
+  for (const w of listWatches()) {
+    if (!w.stream || children.has(w.key)) continue;
+    const cmd = w.stream.replaceAll('{cursor}', w.cursor);
+    const child = spawn(cmd, { shell: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    children.set(w.key, child);
+    log(`watch ${w.key}: stream attached`);
+    let buffer = '';
+    child.stdout!.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        void flight.run(() => handleStreamLine(w.key, line, log, notify));
+      }
+    });
+    child.on('exit', () => {
+      children.delete(w.key);
+      log(`watch ${w.key}: stream ended — cadence covers until resync`);
+    });
+    child.on('error', () => children.delete(w.key));
+  }
+  for (const [key, child] of children) {
+    if (!readWatch(key)?.stream) {
+      child.kill();
+      children.delete(key);
+    }
+  }
 }
 
 async function cycle(
@@ -102,8 +163,13 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
     return;
   }
   log(`polling every ${cfg.pollSecs}s — no webhooks, no inbound surface`);
+  // Streams and the cadence feed one serialized executor: stream events
+  // deliver in milliseconds, the full cycle stays the reconciling guarantee.
+  const flight = new SingleFlight();
+  const streamChildren = new Map<string, ChildProcess>();
   while (true) {
-    await cycle(sources, merges, state, cfg.pollSecs, log, notify);
+    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify));
+    syncStreams(streamChildren, flight, log, notify);
     await new Promise((r) => setTimeout(r, cfg.pollSecs * 1000));
   }
 }
