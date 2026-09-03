@@ -31,10 +31,18 @@ export interface LimitsConfig {
   choreRetentionDays: number;
 }
 
+export interface SoakConfig {
+  /** How long a fresh park heartbeat holds unaddressed matching bait for a soaking session. */
+  deferSecs: number;
+  /** Heartbeat age past which a registration is a ghost trap and gets swept. */
+  ttlSecs: number;
+}
+
 export interface Config {
   repos: Record<string, RepoConfig>;
   harness: HarnessDefaults;
   limits: LimitsConfig;
+  soak: SoakConfig;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
   notifyCommand?: string;
   /** Verbs that fire notifyCommand. Default: needs-decision, blocked, done, failed. */
@@ -42,6 +50,11 @@ export interface Config {
   /** Re-fire an unanswered attention state every this many seconds (0 disables). Default 900. */
   remindSecs?: number;
 }
+
+export const DEFAULT_SOAK: SoakConfig = {
+  deferSecs: 90,
+  ttlSecs: 1800,
+};
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,
@@ -80,6 +93,7 @@ export function loadConfig(): Config {
     repos,
     harness: (raw.harness as HarnessDefaults) ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
+    soak: { ...DEFAULT_SOAK, ...((raw.soak as Partial<SoakConfig>) ?? {}) },
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,

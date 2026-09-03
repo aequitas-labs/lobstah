@@ -18,6 +18,7 @@ import {
   setWatchCursor,
   watchDue,
 } from '@lobstah/core';
+import { readSessionClaim, readSoak } from '@lobstah/core';
 import type { Descriptor, Lane, Watch, WatchEvent } from '@lobstah/core';
 import type { ReportNotification } from './report.js';
 
@@ -84,9 +85,22 @@ function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => 
   const brief = (w.brief ?? DEFAULT_BRIEF)
     .replaceAll('{key}', w.key)
     .replaceAll('{events}', JSON.stringify(pending, null, 2));
-  enqueue({ id, repo: descriptor.repo, brief, followUp: target }, 'work');
+  // A chain worked by a live soaking session gets its continuation addressed
+  // there — the session picks it up at its next park instead of a headless
+  // fork running beside it. If the trap ghosts, the sweep strips the
+  // registration and the daemon claims the bait as unaddressed.
+  const claim = readSessionClaim(target, targetLane);
+  const claimant = claim?.by.startsWith('session:') ? claim.by.slice('session:'.length) : undefined;
+  const live = claimant !== undefined && readSoak(claimant) !== undefined;
+  enqueue(
+    { id, repo: descriptor.repo, brief, followUp: target, ...(live ? { for: claim!.by } : {}) },
+    'work',
+  );
   markFollowUp(w.key, id, readWatchEvents(w.key).length);
-  log(`watch ${w.key}: ${pending.length} event(s) → continuation ${id} (forks ${target})`);
+  log(
+    `watch ${w.key}: ${pending.length} event(s) → continuation ${id} ` +
+      (live ? `(addressed to soaking ${claimant!.slice(0, 8)})` : `(forks ${target})`),
+  );
 }
 
 function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotification) => void): void {

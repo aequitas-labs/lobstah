@@ -173,11 +173,11 @@ the haul context as the work order for that turn.
 The trade-offs, honestly. While parked, the turn never ends, so the terminal
 shows a running hook. Each wake appends a turn to the context, and long
 shifts eventually compact. Without the gate, the hook parks every session in
-the project. And parking is Claude-specific: it needs a turn-end hook that
-can block and inject a continuation. Claude Code's Stop hook can. Codex's
-fire-and-forget notify hook cannot. The workers can still be any harness —
-only the liaison must be Claude Code. Tier 2 is the right default. Tier 3 is
-for a dedicated, long-lived liaison session.
+the project. And parking needs a turn-end hook that
+can block and inject a continuation. Claude Code's Stop hook can, and so can
+Codex's since its hooks system landed (v0.114+; older Codex only has the
+fire-and-forget notify hook, which cannot). Tier 2 is the right default.
+Tier 3 is for a dedicated, long-lived liaison session.
 
 **Delivery guarantee.** Attention wakes are at-least-once with backoff. An
 unanswered question is reported immediately. While it still stands, it
@@ -200,6 +200,35 @@ done
 Zero tokens between events and works anywhere a shell does; the cost is that
 each event gets a fresh context rather than a continuing liaison
 conversation.
+
+## Soaking: a live session volunteers as a worker
+
+Workers are usually traps lobstah sets itself — fresh headless sessions in
+fresh worktrees. A **soaking** session is the inverse: an interactive thread
+already in the water volunteers to take bait, keeping its warm context, its
+visible terminal, and whatever authenticated tooling a headless spawn can't
+get.
+
+```bash
+lobstah soak --session <id>     # from a worktree — the primary checkout is
+                                # never claimable, so sign on from a linked
+                                # worktree (git worktree add ../side -b side)
+lobstah stow --session <id>     # sign off; an open catch requeues
+```
+
+The session id comes from the plugin's session-start brief (`lobstah man
+brief` announces it into the conversation). Once soaking, the same Stop hook
+that parks a lobsterman parks the worker: at turn end it waits for bait,
+claims it, and wakes with the brief. While it works a catch, the park wakes
+it for `lobstah send` messages and cancels instead.
+
+Routing follows ownership: `dispatch --for session:<id>` targets one trap;
+unaddressed bait for a matching repo prefers a parked trap for
+`[soak].deferSecs` before the daemon spawns headless; a watch continuation
+for a chain a soaking session claimed is addressed back to that session. A
+registration whose heartbeat lapses past `[soak].ttlSecs` is a **ghost
+trap** — swept, its catch requeued. Nobody is conscripted: only a session
+that ran `soak` ever receives work.
 
 ## What the daemon gives your liaison for free
 

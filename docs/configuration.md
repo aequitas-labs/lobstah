@@ -53,6 +53,13 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | `wallClockSecs` | `3600` | Hard per-dispatch ceiling, enforced by the runner. |
 | `choreRetentionDays` | `7` | Completed chores age out of `chores/done/`. |
 
+## `[soak]` — soaking sessions (`lobstah soak`)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `deferSecs` | `90` | A soaking session whose park heartbeat is this fresh holds unaddressed matching bait — the daemon waits instead of spawning. Addressed bait (`--for session:<id>`) waits regardless, until the registration is gone. |
+| `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues its open catch (or finalizes a cancelled one as failed). A fresh `lobstah report` on the catch counts as liveness too. |
+
 ## `[pickup]` — tracker loops (`lobstah pick`)
 
 | Key | Default | Meaning |

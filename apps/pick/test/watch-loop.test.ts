@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, ensureLayout, laneDirs, listWatches, readWatch } from '@lobstah/core';
+import { addWatch, appendStatus, ensureLayout, laneDirs, listWatches, readWatch, signOnSoak } from '@lobstah/core';
 import type { Descriptor } from '@lobstah/core';
 import { watchLoop } from '../src/loops/watch.js';
 import type { ReportNotification } from '../src/loops/report.js';
@@ -98,6 +98,40 @@ describe('watchLoop', () => {
     expect(pings[0]!.verb).toBe('watch');
     expect(pings[0]!.note).toBe('verdict: approved');
     expect(listWatches()).toHaveLength(1); // stays standing for man wait to consume
+  });
+
+  it('addresses the continuation to a live soaking session claiming the chain', async () => {
+    const owner = '44444444-4444-4444-4444-444444444444';
+    makeOwnerDispatch(owner);
+    appendStatus(owner, 'work', 'paused', 'awaiting review');
+    fs.writeFileSync(
+      path.join(laneDirs('work').active, owner, 'claim.json'),
+      JSON.stringify({ by: 'session:sess-1', harness: 'claude', worktree: '/wt', at: new Date().toISOString() }),
+    );
+    signOnSoak({ sessionId: 'sess-1', harness: 'claude', worktree: '/wt', cwd: '/wt' });
+    addWatch('ume:live', eventCheck([{ seq: 1, summary: 'round' }], '1'), { owner: `dispatch:${owner}` });
+
+    await watchLoop(45, () => {});
+    const queued = queuedDescriptors();
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.for).toBe('session:sess-1');
+    expect(queued[0]!.followUp).toBe(owner);
+  });
+
+  it('forks headless when the claiming session is no longer soaking', async () => {
+    const owner = '55555555-5555-5555-5555-555555555555';
+    makeOwnerDispatch(owner);
+    appendStatus(owner, 'work', 'paused', 'awaiting review');
+    fs.writeFileSync(
+      path.join(laneDirs('work').active, owner, 'claim.json'),
+      JSON.stringify({ by: 'session:gone', harness: 'claude', worktree: '/wt', at: new Date().toISOString() }),
+    );
+    addWatch('ume:ghosted', eventCheck([{ seq: 1, summary: 'round' }], '1'), { owner: `dispatch:${owner}` });
+
+    await watchLoop(45, () => {});
+    const queued = queuedDescriptors();
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.for).toBeUndefined();
   });
 
   it('drops a dispatch-owned watch whose owner is gone', async () => {

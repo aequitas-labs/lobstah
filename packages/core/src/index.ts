@@ -10,3 +10,4 @@ export * from './toon.js';
 export * from './version.js';
 export * from './harness.js';
 export * from './watch.js';
+export * from './soak.js';

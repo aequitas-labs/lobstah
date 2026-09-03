@@ -53,6 +53,11 @@ All output is TOON — parse it directly.
   standing.
 - Unanswered questions re-fire on a reminder interval until answered — a
   missed wake is never lost.
+- The session-start brief announces this session's id. To volunteer the
+  session as a *worker* instead of an orchestrator, run
+  `lobstah soak --session <id>` from a linked worktree (never the primary
+  checkout) — it then parks at turn end and takes matching bait; sign off
+  with `lobstah stow --session <id>`.
 
 `lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken
 setup.

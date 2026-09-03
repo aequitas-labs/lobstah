@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { appendStatus, claimNext, enqueue, ensureLayout, laneDirs, readStatusLog, requestCancel } from '@lobstah/core';
 import { reconcileOne } from '../src/daemon.js';
 import type { ActiveState } from '../src/daemon.js';
-import { DEFAULT_LIMITS } from '@lobstah/core';
+import { DEFAULT_LIMITS, DEFAULT_SOAK } from '@lobstah/core';
 
 let home: string;
 beforeEach(() => {
@@ -18,7 +18,7 @@ afterEach(() => {
   delete process.env.LOBSTAH_HOME;
 });
 
-const cfg = { repos: {}, harness: {}, limits: DEFAULT_LIMITS };
+const cfg = { repos: {}, harness: {}, limits: DEFAULT_LIMITS, soak: DEFAULT_SOAK };
 
 /** A pid that cannot exist — well above every OS's pid ceiling. */
 const DEAD_PID = 2 ** 30;
@@ -69,5 +69,39 @@ describe('reconcileOne — cancellation never enters the restart ladder', () => 
 
     expect(fs.existsSync(path.join(laneDirs('work').done, 'c3'))).toBe(true);
     expect(readStatusLog('c3', 'work').at(-1)?.verb).toBe('done');
+  });
+});
+
+describe('reconcileOne — session-claimed catches are not the daemon\'s children', () => {
+  function sessionClaimed(id: string): ActiveState {
+    const st = claimed(id);
+    fs.writeFileSync(
+      path.join(st.dir, 'claim.json'),
+      JSON.stringify({ by: 'session:sess-1', harness: 'claude', worktree: '/wt', at: new Date().toISOString() }),
+    );
+    return st;
+  }
+
+  it('never spawns a runner for a session-claimed dispatch', () => {
+    const st = sessionClaimed('sc1');
+    reconcileOne(st, cfg, () => {});
+    expect(fs.existsSync(path.join(st.dir, 'runner.json'))).toBe(false);
+    expect(fs.existsSync(st.dir)).toBe(true); // still active, untouched
+  });
+
+  it('finalizes a session-claimed dispatch once its verb is terminal', () => {
+    const st = sessionClaimed('sc2');
+    appendStatus('sc2', 'work', 'done', 'the session finished it');
+    reconcileOne(st, cfg, () => {});
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'sc2'))).toBe(true);
+  });
+
+  it('leaves a cancelled, non-terminal session claim for the park notice', () => {
+    const st = sessionClaimed('sc3');
+    appendStatus('sc3', 'work', 'working', 'mid-flight');
+    requestCancel('sc3', 'work');
+    reconcileOne(st, cfg, () => {});
+    expect(fs.existsSync(st.dir)).toBe(true); // the session gets told first
+    expect(readStatusLog('sc3', 'work').at(-1)?.verb).toBe('working');
   });
 });

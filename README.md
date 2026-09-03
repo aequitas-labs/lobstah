@@ -83,6 +83,10 @@ lobstah man tend                      # the whole string: fleet verdict, waiting
 lobstah watch add ci:1234 --check 'my-ci events --since {cursor} --json'
                                       # stand watch on anything external — its
                                       # events wake you like a dispatch would
+lobstah soak --session <id>           # volunteer a live interactive session as
+                                      # a worker: it parks at turn end and takes
+                                      # bait (`dispatch --for session:<id>`
+                                      # targets it) instead of a headless spawn
 ```
 
 Prefer the water? 🌊 `set --bait`, `buoys`, and `buoy` alias `dispatch`,

@@ -16,7 +16,11 @@ import {
   loadConfig,
   lobstahHome,
   lobstahVersion,
+  listSoaking,
+  readSessionClaim,
   readStatusLog,
+  soakSkip,
+  sweepGhostTraps,
 } from '@lobstah/core';
 import type { Config, Lane, RunnerInfo } from '@lobstah/core';
 import { classify, killGroup, pidAlive, processStartTime } from './liveness.js';
@@ -124,6 +128,20 @@ export function reconcileOne(st: ActiveState, cfg: Config, log: (m: string) => v
   const lastVerb = statusLog.at(-1)?.verb;
   const alive = st.runner ? pidAlive(st.runner.pid, st.runner.processStartTime) : undefined;
 
+  // A session-claimed catch has no runner to supervise: an interactive
+  // soaking session works it and proves liveness through its reports. The
+  // ghost-trap sweep owns staleness; this pass only finalizes and cancels.
+  const sessionClaim = readSessionClaim(st.id, st.lane);
+  if (sessionClaim) {
+    if (lastVerb === 'done' || lastVerb === 'failed') {
+      finalize(st);
+      log(`${st.id}: ${lastVerb} (claimed by ${sessionClaim.by}), finalized`);
+    }
+    // A pending cancel reaches the session through its park notice; if the
+    // session never answers, the ghost sweep finalizes the cancelled catch.
+    return;
+  }
+
   if (cancelRequested(st.id, st.lane)) {
     if (st.runner && alive) {
       log(`${st.id}: cancel requested, killing group ${st.runner.pid}`);
@@ -228,6 +246,17 @@ export function tick(log: (m: string) => void = () => {}): void {
   ensureLayout();
   writeHeartbeat(cfg);
 
+  for (const action of sweepGhostTraps(cfg.soak.ttlSecs * 1000)) {
+    log(
+      `ghost trap ${action.sessionId.slice(0, 8)} swept` +
+        (action.requeued ? ` — bait ${action.requeued} back in the queue` : ''),
+    );
+  }
+  // Bait addressed to a registered trap waits for it; unaddressed bait defers
+  // briefly to a trap that is parked right now. Work lane only — soaking
+  // sessions never take chores.
+  const workSkip = soakSkip(listSoaking(), cfg.soak.deferSecs * 1000);
+
   for (const lane of ['chore', 'work'] as Lane[]) {
     const active = listActive(lane);
     for (const st of active) reconcileOne(st, cfg, log);
@@ -235,7 +264,7 @@ export function tick(log: (m: string) => void = () => {}): void {
     const ceiling = lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent;
     let inFlight = listActive(lane).length;
     while (inFlight < ceiling) {
-      const id = claimNext(lane);
+      const id = claimNext(lane, lane === 'work' ? workSkip : undefined);
       if (!id) break;
       log(`${id}: claimed (${lane})`);
       inFlight++;

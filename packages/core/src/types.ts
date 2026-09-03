@@ -21,6 +21,10 @@ export interface Descriptor {
   flags?: string[];
   env?: Record<string, string>;
   followUp?: string;
+  /** Address this bait to a specific claimant (`session:<id>`). A live
+   * soaking session claims it; once its registration is gone the daemon
+   * treats the bait as unaddressed. */
+  for?: string;
 }
 
 export interface StatusEntry {
