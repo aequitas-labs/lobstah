@@ -1,0 +1,17 @@
+{
+  "name": "lobstah",
+  "owner": {
+    "name": "aequitas labs LLC",
+    "url": "https://github.com/aequitas-labs"
+  },
+  "plugins": [
+    {
+      "name": "lobstah",
+      "description": "Run a fleet of supervised coding agents from one session: dispatch work, get woken when something needs you, never watch the water.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      }
+    }
+  ]
+}

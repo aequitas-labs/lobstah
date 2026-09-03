@@ -1,0 +1,40 @@
+{
+  "description": "Park the session while lobstah work is in flight; wake it the moment something needs attention. The Stop hook is inert unless the directory opts in with a .lobstah-man file (or LOBSTAH_MAN=1) or the session is soaking (lobstah soak). SessionStart announces the session id; SessionEnd stows a soaking session cleanly.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lobstah man brief",
+            "statusMessage": "lobstah session brief",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lobstah man haul",
+            "statusMessage": "lobstah park — waiting for the fleet",
+            "timeout": 14400
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lobstah stow --quiet",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
