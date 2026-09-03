@@ -1,5 +1,7 @@
 # lobstah 🦞✨
 
+<img src="docs/assets/lob-star.png" align="right" width="160" alt="lobstah — a lobster waving at a star">
+
 *Nobody stares at the water.*
 
 [![CI](https://github.com/aequitas-labs/lobstah/actions/workflows/ci.yml/badge.svg)](https://github.com/aequitas-labs/lobstah/actions/workflows/ci.yml)
