@@ -1,0 +1,15 @@
+{
+  "name": "lobstah",
+  "description": "Supervision framework for coding agents — dispatch, wake, and tend a fleet from one session.",
+  "owner": {
+    "name": "aequitas labs LLC",
+    "url": "https://github.com/aequitas-labs"
+  },
+  "plugins": [
+    {
+      "name": "lobstah",
+      "source": "./plugins/claude-code",
+      "description": "Run a fleet of supervised coding agents from one session: dispatch work, get woken when something needs you, never watch the water."
+    }
+  ]
+}

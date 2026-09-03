@@ -1,0 +1,16 @@
+{
+  "description": "Park the session while lobstah work is in flight; wake it the moment something needs attention. Inert unless the directory opts in with a .lobstah-man file (or LOBSTAH_MAN=1).",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lobstah man haul",
+            "timeout": 14400
+          }
+        ]
+      }
+    ]
+  }
+}
