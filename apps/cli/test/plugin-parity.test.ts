@@ -18,6 +18,13 @@ describe('plugin parity (claude-code ↔ codex)', () => {
     );
   });
 
+  it('each plugin ships its own README for the registry listing', () => {
+    // Split on purpose: the listings differ per harness (the /lobstah
+    // command, Codex's trust review) — only presence is enforced.
+    expect(read('plugins/codex/README.md')).toContain('lobstah for Codex');
+    expect(read('plugins/claude-code/README.md')).toContain('lobstah for Claude Code');
+  });
+
   it('both plugins wire the same hook commands', () => {
     const commands = (raw: string): Record<string, string[]> => {
       const parsed = JSON.parse(raw) as {

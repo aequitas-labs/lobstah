@@ -120,10 +120,13 @@ continues the turn the moment something needs it.
 - **Claude Code + Codex plugins** — the lobsterman as a one-step install: the
   hook wiring (session brief, Stop-hook park, clean stow), the lobsterman
   skill, and (on Claude Code) a `/lobstah` fleet command, no settings surgery.
-  In either harness: `/plugin marketplace add aequitas-labs/lobstah`, then
+  This repo doubles as the plugin marketplace for both agent registries —
+  in either harness: `/plugin marketplace add aequitas-labs/lobstah`, then
   `/plugin install lobstah@lobstah`. The park stays inert until a directory
   opts in with a `.lobstah-man` file or the session soaks. Codex hooks need
-  Codex v0.114+ and a one-time trust review.
+  Codex v0.114+ and a one-time trust review. Details per harness:
+  [plugins/claude-code](plugins/claude-code/README.md) ·
+  [plugins/codex](plugins/codex/README.md).
 - **OpenClaw plugin** — gives fleet agents `lobstah_dispatch` / `lobstah_status`
   / `lobstah_send` / `lobstah_cancel` tools and operators a `/lobstah` command.
   [docs/openclaw.md](docs/openclaw.md)
