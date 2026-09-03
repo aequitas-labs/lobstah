@@ -43,7 +43,9 @@ describe('inspectSoakSite', () => {
     const site = inspectSoakSite(linked, repos());
     expect(site?.primary).toBe(false);
     expect(site?.repoKey).toBe('myrepo');
-    expect(site?.worktree).toBe(path.resolve(fs.realpathSync.native(linked)));
+    // Mirror the source's canonical form: real path, lowercased on Windows.
+    const real = path.resolve(fs.realpathSync.native(linked));
+    expect(site?.worktree).toBe(process.platform === 'win32' ? real.toLowerCase() : real);
   });
 
   it('an unconfigured repo yields no key; a non-repo yields nothing', () => {
