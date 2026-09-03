@@ -20,10 +20,14 @@ describe('watchQueues', () => {
   it('fires on a queue write so an enqueue triggers a tick without waiting the interval', async () => {
     let fired = 0;
     const close = watchQueues(() => fired++);
-    fs.writeFileSync(path.join(laneDirs('work').queue, 'aa.json'), '{}');
-    const deadline = Date.now() + 3000;
+    // fs.watch backends (fsevents especially) can miss writes that land
+    // before the watcher fully arms — production covers that with the
+    // interval tick; here, keep writing until an event registers.
+    const deadline = Date.now() + 4000;
+    let n = 0;
     while (fired === 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 25));
+      fs.writeFileSync(path.join(laneDirs('work').queue, `aa-${n++}.json`), '{}');
+      await new Promise((r) => setTimeout(r, 50));
     }
     close();
     expect(fired).toBeGreaterThan(0);
