@@ -22,6 +22,11 @@ your working set:
                                                 external (a review session, a
                                                 CI run) — its events wake you
                                                 like any dispatch would
+  lobstah set ... --for session:<id>            drop bait into a soaking trap:
+                                                a live session that volunteered
+                                                (\`lobstah soak\`) works it in
+                                                its own worktree instead of a
+                                                fresh headless spawn
 
 getting woken instead of asking:
   lobstah man wait          block until a dispatch needs attention (arm it as a

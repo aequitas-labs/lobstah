@@ -9,7 +9,17 @@ import {
   acknowledge,
   addWatch,
   appendStatus,
+  baitBrief,
+  cancelRequested,
+  claimBait,
   codexInvocation,
+  hasOpenCatch,
+  heartbeatSoak,
+  listSoaking,
+  readSoak,
+  releaseCatch,
+  signOnSoak,
+  stowSoak,
   listWatches,
   pendingWatchEvents,
   readWatchEvents,
@@ -47,14 +57,17 @@ import { runDoctor } from './doctor.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { parseReportArgs } from './report-args.js';
+import { inspectSoakSite, readHookStdin } from './soak-site.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
 work (humans and agents):
   dispatch --repo <key> (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
-           [--follow-up <uuid>] [--chore] [--id <uuid>]
-                                  queue a supervised dispatch; prints the id
+           [--follow-up <uuid>] [--for session:<id>] [--chore] [--id <uuid>]
+                                  queue a supervised dispatch; prints the id.
+                                  --for addresses the bait to a soaking
+                                  session instead of a fresh headless worker
   ls [--all]                      queue, active, recent done      (alias: buoys)
   status [<uuid>]                 reconciled state                (alias: buoy)
   logs <uuid> [--follow]          the normalized event stream
@@ -124,6 +137,19 @@ workers (dispatched agents; injected into every brief):
                                   the validated status write path
                                   (${VERBS.join(' | ')})
 
+soaking (interactive sessions volunteering as workers):
+  soak --session <id> [--one] [--harness claude|codex]
+                                  put this session in the water: it parks at
+                                  turn end and takes matching bait from the
+                                  work queue. Refused from a primary checkout
+                                  — soak from a worktree. --one stows after
+                                  the first catch. The session id comes from
+                                  the plugin's session-start brief.
+  stow [--session <id>] [--quiet] take the trap out: sign the session off; an
+                                  open catch goes back to the queue. A stale
+                                  registration (ghost trap) is swept
+                                  automatically after [soak].ttlSecs.
+
 setup:
   init [--scan <dir>... [--pickup]]
                                   create ~/.lobstah + example config; --scan
@@ -149,6 +175,48 @@ function arg(args: string[], flag: string): string | undefined {
 // cadence is [pickup].pollSecs. Whoever polls first stamps lastCheckedAt, so
 // the two never double-poll a watch inside one window.
 const WATCH_EVERY_SECS = 45;
+
+/**
+ * The soak side of the Stop-hook park: heartbeat, then wait for something to
+ * act on. An idle trap waits for bait; a trap with an open catch waits for a
+ * cancel or a `lobstah send` message about it. Both wake with hook-decision
+ * JSON; a timeout allows the stop silently — the next turn end re-parks.
+ */
+async function soakPark(sessionId: string, args: string[]): Promise<void> {
+  const timeoutSecs = Number(arg(args, '--timeout') ?? '14000');
+  const deadline = Date.now() + timeoutSecs * 1000;
+  const block = (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
+  while (true) {
+    const reg = heartbeatSoak(sessionId);
+    if (!reg) return; // stowed while parked
+    if (hasOpenCatch(reg)) {
+      const id = reg.claimed!;
+      if (cancelRequested(id, 'work')) {
+        block(
+          `Your catch ${id} was cancelled. Stop working it, leave the worktree as it is, ` +
+            `and run \`lobstah report ${id} failed "cancelled by request"\`.`,
+        );
+        return;
+      }
+      if (unhandled(id, 'work').length > 0) {
+        block(`New instruction for your catch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`);
+        return;
+      }
+    } else {
+      if (reg.one && reg.claimed) {
+        stowSoak(sessionId);
+        return; // one catch was the deal — the trap comes out of the water
+      }
+      const caught = claimBait(reg);
+      if (caught) {
+        block(baitBrief(caught.id, caught.descriptor));
+        return;
+      }
+    }
+    if (Date.now() >= deadline) return;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
 
 function runDueManWatches(): void {
   for (const w of listWatches()) {
@@ -217,6 +285,10 @@ async function mainCli(): Promise<void> {
       if (!repo || (!briefFile && !briefText)) {
         throw new Error('dispatch requires --repo and --brief <file> (or --brief-text)');
       }
+      const address = arg(args, '--for');
+      if (address && !address.startsWith('session:')) {
+        throw new Error('dispatch --for takes a session address: --for session:<id>');
+      }
       const d: Descriptor = {
         id: arg(args, '--id') ?? randomUUID(),
         repo,
@@ -225,6 +297,7 @@ async function mainCli(): Promise<void> {
         model: arg(args, '--model'),
         effort: arg(args, '--effort'),
         followUp: arg(args, '--follow-up'),
+        for: address,
       };
       const lane: Lane = args.includes('--chore') ? 'chore' : 'work';
       enqueue(d, lane);
@@ -539,8 +612,16 @@ ${progress}`,
     }
     case 'man:haul': {
       // Stop-hook entry point: everything non-actionable is a silent exit 0 —
-      // a hook must never break the user's stop with noise.
+      // a hook must never break the user's stop with noise. A session that is
+      // soaking parks as a worker (waits for bait); otherwise the lobsterman
+      // gate applies (marker file or env).
       try {
+        const hook = readHookStdin();
+        const soakReg = hook?.session_id ? readSoak(hook.session_id) : undefined;
+        if (soakReg) {
+          await soakPark(soakReg.sessionId, args);
+          break;
+        }
         if (process.env.LOBSTAH_MAN !== '1' && !fs.existsSync('.lobstah-man')) break;
         const anyActive = (['work', 'chore'] as Lane[]).some((l) =>
           fs.readdirSync(laneDirs(l).active).some((f) => !f.startsWith('.')),
@@ -583,6 +664,87 @@ ${progress}`,
         console.log(JSON.stringify({ decision: 'block', reason }));
       } catch {
         // never break a stop
+      }
+      break;
+    }
+    case 'man:brief': {
+      // SessionStart-hook entry point: hand the session its own id so it can
+      // soak or stow itself. Silent without hook input.
+      const hook = readHookStdin();
+      if (!hook?.session_id) break;
+      const soaking = readSoak(hook.session_id) !== undefined;
+      const context = soaking
+        ? `lobstah: session id ${hook.session_id} — this session is soaking (a volunteered worker); \`lobstah stow --session ${hook.session_id}\` signs it off.`
+        : `lobstah: session id ${hook.session_id} (for \`lobstah soak|stow --session <id>\`).`;
+      console.log(
+        JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }),
+      );
+      break;
+    }
+    case 'soak': {
+      const sessionId = arg(args, '--session');
+      if (!sessionId) {
+        throw new Error(
+          'soak requires --session <id> — the harness session id, announced at session start ' +
+            'by the lobstah plugin (`lobstah man brief`)',
+        );
+      }
+      const cfg = loadConfig();
+      const site = inspectSoakSite(process.cwd(), cfg.repos);
+      if (!site) throw new Error('soak must run inside a git checkout — the trap is the worktree');
+      if (site.primary) {
+        throw new Error(
+          'this is the repo\'s primary checkout — never claimable. Create a worktree ' +
+            '(`git worktree add ../<name> -b <branch>`) and soak from there.',
+        );
+      }
+      const rival = listSoaking().find((r) => r.sessionId !== sessionId && r.worktree === site.worktree);
+      if (rival) {
+        throw new Error(
+          `session ${rival.sessionId.slice(0, 8)} already soaks this worktree — one trap per worktree. ` +
+            `Stow it first (\`lobstah stow --session ${rival.sessionId}\`) or soak from another worktree.`,
+        );
+      }
+      const reg = signOnSoak({
+        sessionId,
+        harness: arg(args, '--harness') ?? 'claude',
+        repo: site.repoKey,
+        worktree: site.worktree,
+        cwd: process.cwd(),
+        one: args.includes('--one') || undefined,
+      });
+      console.log(
+        toonKV({
+          soaking: sessionId,
+          repo: reg.repo ?? '(none configured — addressed bait only)',
+          worktree: reg.worktree,
+          ...(reg.one ? { one: true } : {}),
+          note: 'parks at turn end via the Stop hook (lobstah plugin or `man init --global`); bait arrives as a wake',
+        }),
+      );
+      break;
+    }
+    case 'stow': {
+      const sessionId = arg(args, '--session') ?? readHookStdin()?.session_id;
+      const quiet = args.includes('--quiet');
+      if (!sessionId) {
+        if (quiet) break;
+        throw new Error('stow requires --session <id> (or hook input on stdin)');
+      }
+      const reg = stowSoak(sessionId);
+      if (!reg) {
+        if (!quiet) console.log(toonKV({ session: sessionId, soaking: false }));
+        break;
+      }
+      const released = releaseCatch(reg);
+      if (!quiet) {
+        console.log(
+          toonKV({
+            stowed: sessionId,
+            ...(released.requeued ? { requeued: released.requeued } : {}),
+            ...(released.finalized ? { finalized: released.finalized } : {}),
+          }),
+        );
       }
       break;
     }

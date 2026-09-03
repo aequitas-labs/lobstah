@@ -5,6 +5,7 @@ import {
   executorPath,
   laneDirs,
   lastEventAt,
+  listSoaking,
   listWatches,
   loadConfig,
   pendingIds,
@@ -57,6 +58,14 @@ export interface TendWatch {
   error?: string;
 }
 
+export interface TendSoak {
+  session: string;
+  repo: string;
+  worktree: string;
+  claimed?: string;
+  heartbeatAgeSecs: number;
+}
+
 export interface TendReport {
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
   daemon: { up: boolean; lastHeartbeat?: string };
@@ -64,6 +73,7 @@ export interface TendReport {
   attention: Array<{ id: string; lane: Lane; verb: string; ageSecs: number; note?: string }>;
   stories: TendStory[];
   watches: TendWatch[];
+  soaking: TendSoak[];
   merge?: MergeView;
 }
 
@@ -226,6 +236,14 @@ export function buildTendReport(now = Date.now()): TendReport {
           ? 'working'
           : 'idle';
 
+  const soaking: TendSoak[] = listSoaking().map((r) => ({
+    session: r.sessionId.slice(0, 8),
+    repo: r.repo ?? '(addressed only)',
+    worktree: r.worktree,
+    claimed: r.claimed,
+    heartbeatAgeSecs: Math.max(0, Math.round((now - (Date.parse(r.heartbeatAt) || 0)) / 1000)),
+  }));
+
   return {
     verdict,
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
@@ -233,6 +251,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     attention,
     stories,
     watches,
+    soaking,
     merge,
   };
 }
@@ -289,6 +308,22 @@ export function renderTend(r: TendReport): string {
           error: w.error ?? '',
         })),
         ['key', 'owner', 'pending', 'last', 'error'],
+      ),
+    );
+  }
+  if (r.soaking.length > 0) {
+    lines.push('');
+    lines.push(
+      toonTable(
+        'soaking',
+        r.soaking.map((s) => ({
+          session: s.session,
+          repo: s.repo,
+          claimed: s.claimed ? s.claimed.slice(0, 8) : '',
+          heartbeat: `${s.heartbeatAgeSecs}s ago`,
+          worktree: s.worktree,
+        })),
+        ['session', 'repo', 'claimed', 'heartbeat', 'worktree'],
       ),
     );
   }

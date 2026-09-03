@@ -26,15 +26,31 @@ export function pendingIds(lane: Lane): string[] {
     .map(({ f }) => f.slice(0, -'.json'.length));
 }
 
+/** The still-queued descriptor, or undefined if it was claimed meanwhile. */
+export function queuedDescriptor(id: string, lane: Lane): Descriptor | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(laneDirs(lane).queue, `${id}.json`), 'utf8')) as Descriptor;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Claim the oldest pending descriptor by atomic rename. The mkdir is the
  * lock (EEXIST loses), the rename is the claim (missing source loses).
  * Returns the claimed id, or null when the queue is empty or every
- * candidate was claimed by someone else first.
+ * candidate was claimed by someone else first. `skip` filters candidates
+ * by descriptor — the read races the claim, so a skipped candidate may
+ * already be gone by the next scan, which is fine: skipping is advisory,
+ * the rename is the truth.
  */
-export function claimNext(lane: Lane): string | null {
+export function claimNext(lane: Lane, skip?: (d: Descriptor) => boolean): string | null {
   const dirs = laneDirs(lane);
   for (const id of pendingIds(lane)) {
+    if (skip) {
+      const d = queuedDescriptor(id, lane);
+      if (!d || skip(d)) continue;
+    }
     const activeDir = path.join(dirs.active, id);
     try {
       fs.mkdirSync(activeDir);
@@ -50,6 +66,18 @@ export function claimNext(lane: Lane): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Return an active descriptor to the queue — the inverse of a claim, for
+ * bait whose claimant vanished. State files (status, events, evidence) stay
+ * put; the next claimant continues the same record.
+ */
+export function requeue(id: string, lane: Lane): void {
+  const dirs = laneDirs(lane);
+  const activeDir = path.join(dirs.active, id);
+  fs.renameSync(path.join(activeDir, 'descriptor.json'), path.join(dirs.queue, `${id}.json`));
+  fs.rmSync(activeDir, { recursive: true, force: true });
 }
 
 export function readDescriptor(id: string, lane: Lane): Descriptor {

@@ -36,6 +36,11 @@ export function ensureLayout(): void {
   }
   fs.mkdirSync(path.join(lobstahHome(), 'worktrees'), { recursive: true });
   fs.mkdirSync(path.join(lobstahHome(), 'watches'), { recursive: true });
+  fs.mkdirSync(path.join(lobstahHome(), 'soaking'), { recursive: true });
+}
+
+export function soakingDir(): string {
+  return path.join(lobstahHome(), 'soaking');
 }
 
 export function statusPath(id: string, lane: Lane): string {

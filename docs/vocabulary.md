@@ -137,3 +137,26 @@ Delivery is level-triggered and at-least-once, like dispatch attention:
 events stand until the owner consumes them. One continuation dispatch in
 flight per watch; later events buffer and fork from the latest session in
 the chain.
+
+## Soaking contract
+
+A **soaking trap** is a live interactive session that volunteered as a worker
+through `lobstah soak` — the validated write path; nothing else touches
+`soaking/`. Sub-agent workers are the traps lobstah sets itself; a soaking
+session is a trap already in the water, and dispatch drops bait into it
+before building a new one. **Owner:** `packages/core/src/soak.ts`.
+**Enforcement:** sign-on is refused from a repo's primary checkout (never
+claimable) and when another session already soaks the same worktree.
+
+| Word | Meaning |
+| ---- | ------- |
+| `soak` | Sign a session on: it parks at turn end (Stop hook) and takes matching bait from the work queue. `--one` stows after the first catch. |
+| `stow` | Sign a session off; an open catch goes back to the queue (a cancelled one finalizes as failed). |
+| bait address | `--for session:<id>` on a dispatch targets one soaking session. Addressed bait waits for its trap until the registration is gone; unaddressed bait defers to a parked matching trap for `[soak].deferSecs`, then the daemon spawns headless. |
+| catch | The active dispatch a soaking session claimed (`claim.json` in the active dir). One catch per trap; one active item per worktree. The daemon never spawns or restarts it — the session's reports are its liveness. |
+| ghost trap | A registration whose heartbeat lapsed past `[soak].ttlSecs` — a lost trap that keeps fishing. The sweep hauls it out and requeues its catch. A fresh report on the catch keeps a mid-turn session out of the sweep. |
+
+Delivery routes by ownership, same as watches: a continuation for a chain
+claimed by a live soaking session is addressed back to that session; once it
+ghosts, the same bait forks headless. Sessions are never conscripted — a
+thread works bait only after opting in.
