@@ -1,5 +1,7 @@
 # lobstah 🦞✨
 
+<img src="docs/assets/lob-star.png" align="right" width="160" alt="lobstah — a lobster waving at a star">
+
 *Nobody stares at the water.*
 
 [![CI](https://github.com/aequitas-labs/lobstah/actions/workflows/ci.yml/badge.svg)](https://github.com/aequitas-labs/lobstah/actions/workflows/ci.yml)
@@ -117,11 +119,16 @@ continues the turn the moment something needs it.
   optionally merges approved PRs. GitHub pickup spans every repo you mark
   `pickup = true`; `lobstah pick install` runs it as a service.
   [docs/pickup.md](docs/pickup.md)
-- **Claude Code plugin** — the lobsterman as a one-step install: the Stop-hook
-  park, the lobsterman skill, and a `/lobstah` fleet command, no settings
-  surgery. `/plugin marketplace add aequitas-labs/lobstah`, then
-  `/plugin install lobstah@lobstah`. The hook stays inert until a directory
-  opts in with a `.lobstah-man` file.
+- **Claude Code + Codex plugins** — the lobsterman as a one-step install: the
+  hook wiring (session brief, Stop-hook park, clean stow), the lobsterman
+  skill, and (on Claude Code) a `/lobstah` fleet command, no settings surgery.
+  This repo doubles as the plugin marketplace for both agent registries —
+  in either harness: `/plugin marketplace add aequitas-labs/lobstah`, then
+  `/plugin install lobstah@lobstah`. The park stays inert until a directory
+  opts in with a `.lobstah-man` file or the session soaks. Codex hooks need
+  Codex v0.114+ and a one-time trust review. Details per harness:
+  [plugins/claude-code](plugins/claude-code/README.md) ·
+  [plugins/codex](plugins/codex/README.md).
 - **OpenClaw plugin** — gives fleet agents `lobstah_dispatch` / `lobstah_status`
   / `lobstah_send` / `lobstah_cancel` tools and operators a `/lobstah` command.
   [docs/openclaw.md](docs/openclaw.md)

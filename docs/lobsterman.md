@@ -141,9 +141,10 @@ trapline; every orchestrator-facing command lives under `lobstah man`).
 Install it from the project you'll run the lobsterman in:
 
 ```bash
-# Easiest: the Claude Code plugin ships the hook + the lobsterman skill +
-# /lobstah, no settings edits — /plugin marketplace add aequitas-labs/lobstah,
-# /plugin install lobstah@lobstah. Or wire the hook by hand:
+# Easiest: the plugin ships the hooks + the lobsterman skill, no settings
+# edits — /plugin marketplace add aequitas-labs/lobstah, then
+# /plugin install lobstah@lobstah (Claude Code and Codex v0.114+; Codex asks
+# for a one-time hook trust review). Or wire the Claude hook by hand:
 lobstah man init            # merges the Stop hook into .claude/settings.local.json
 lobstah man init --shared   # …or the committed .claude/settings.json
 lobstah man init --global   # …or once into ~/.claude/settings.json — any
