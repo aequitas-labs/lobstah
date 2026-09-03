@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { ensureLayout } from '@lobstah/core';
+import { ensureLayout, listWatches } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 import { PickupState } from './state.js';
 import { GithubSource } from './sources/github.js';
@@ -9,6 +9,7 @@ import { reportLoop } from './loops/report.js';
 import type { ReportNotification } from './loops/report.js';
 import { reconcileLoop } from './loops/reconcile.js';
 import { mergeLoop } from './loops/merge.js';
+import { watchLoop } from './loops/watch.js';
 import type { MergePolicy, MergeSource, Source } from './types.js';
 
 export { readMergeView, readPickupMap } from './merge-view.js';
@@ -46,6 +47,7 @@ async function cycle(
   sources: Source[],
   merges: Array<{ source: MergeSource; policy: MergePolicy }>,
   state: PickupState,
+  pollSecs: number,
   log: (m: string) => void,
   notify: (n: ReportNotification) => void,
 ): Promise<void> {
@@ -65,6 +67,11 @@ async function cycle(
       log(`${source.name} merge: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+  try {
+    await watchLoop(pollSecs, log, notify);
+  } catch (err) {
+    log(`watches: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<void> {
@@ -82,17 +89,21 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
   }
   if (cfg.linear) sources.push(new LinearSource(cfg.linear));
   if (sources.length === 0) {
-    throw new Error('no [pickup.github] or [pickup.linear] configured — nothing to poll');
+    // Registered watches are also a reason to run — watch-only mode.
+    if (listWatches().length === 0) {
+      throw new Error('no [pickup.github], [pickup.linear], or registered watches — nothing to poll');
+    }
+    log('no tracker sources configured — watch-only mode');
   }
 
   const notify = makeNotifier(cfg.notifyCommand, log);
   if (mode === 'once') {
-    await cycle(sources, merges, state, log, notify);
+    await cycle(sources, merges, state, cfg.pollSecs, log, notify);
     return;
   }
   log(`polling every ${cfg.pollSecs}s — no webhooks, no inbound surface`);
   while (true) {
-    await cycle(sources, merges, state, log, notify);
+    await cycle(sources, merges, state, cfg.pollSecs, log, notify);
     await new Promise((r) => setTimeout(r, cfg.pollSecs * 1000));
   }
 }

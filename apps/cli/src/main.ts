@@ -7,9 +7,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   acknowledge,
+  addWatch,
   appendStatus,
   codexInvocation,
+  listWatches,
+  pendingWatchEvents,
+  readWatchEvents,
   readEvidence,
+  removeWatch,
+  runWatchCheck,
+  watchDue,
   loadConfig,
   lobstahHome,
   lobstahVersion,
@@ -29,7 +36,7 @@ import {
   toonTable,
   VERBS,
 } from '@lobstah/core';
-import type { Descriptor, Lane } from '@lobstah/core';
+import type { Descriptor, Lane, WatchAttention } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
@@ -66,6 +73,13 @@ work (humans and agents):
                                   entries, orphaned worktrees, stale state.
                                   Dry run by default (14 days).
   cancel <uuid>                   request cancellation
+  watch [add <key> --check <cmd> [--for <uuid>] [--cursor <c>] [--every <s>]
+        [--brief <template>] | rm <key>]
+                                  stand watch on something external: the check
+                                  command answers "anything since {cursor}?"
+                                  in JSON. Events wake man wait/haul (default)
+                                  or fork a continuation of --for's dispatch
+                                  chain. Bare \`watch\` lists.
 
 host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
@@ -83,10 +97,12 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   PR, and merge-gate status from pick's last
                                   observation. Pure disk read — no forge calls.
   man wait [--timeout <secs>] [--peek]
-                                  block until a dispatch needs attention, then
-                                  print the event and what to do next; exit 2
-                                  on timeout. Unanswered questions re-fire
-                                  every remindSecs until answered.
+                                  block until a dispatch or watched source
+                                  needs attention, then print the event and
+                                  what to do next; exit 2 on timeout. Runs due
+                                  watch checks itself when no pick process is.
+                                  Unanswered questions re-fire every
+                                  remindSecs until answered.
   man init [--shared|--global] [--marker]
                                   install the haul Stop hook: this project's
                                   .claude/settings.local.json by default,
@@ -123,6 +139,28 @@ Home: $LOBSTAH_HOME (default ~/.lobstah) — one daemon per home, enforced.`;
 function arg(args: string[], flag: string): string | undefined {
   const i = args.indexOf(flag);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+// Inline watch cadence when no pick process is stamping checks; pick's own
+// cadence is [pickup].pollSecs. Whoever polls first stamps lastCheckedAt, so
+// the two never double-poll a watch inside one window.
+const WATCH_EVERY_SECS = 45;
+
+function runDueManWatches(): void {
+  for (const w of listWatches()) {
+    if (w.owner === 'man' && watchDue(w, WATCH_EVERY_SECS)) runWatchCheck(w);
+  }
+}
+
+function emitWatchAttention(attns: WatchAttention[]): void {
+  for (const a of attns) {
+    for (const e of a.events) {
+      console.log(toonKV({ watch: a.watch.key, seq: e.seq, summary: e.summary }));
+    }
+  }
+  console.log(
+    'next: handle the watched update now (a review round, a finished run — `lobstah watch ls` for context), then re-arm a background `lobstah man wait`.',
+  );
 }
 
 function findLane(id: string): Lane {
@@ -436,9 +474,13 @@ ${progress}`,
         );
       };
       const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
-      const standing = attentionNow(!args.includes('--peek'), remindMs);
-      if (standing.length > 0) {
-        emit(standing);
+      const consume = !args.includes('--peek');
+      runDueManWatches();
+      const standing = attentionNow(consume, remindMs);
+      const standingWatches = pendingWatchEvents(consume);
+      if (standing.length > 0 || standingWatches.length > 0) {
+        if (standing.length > 0) emit(standing);
+        if (standingWatches.length > 0) emitWatchAttention(standingWatches);
         break;
       }
       const baseline = captureWaitBaseline();
@@ -447,6 +489,12 @@ ${progress}`,
         const fresh = freshWakeEvents(baseline);
         if (fresh.length > 0) {
           emit(fresh);
+          return;
+        }
+        runDueManWatches(); // no pick running? this loop is the poller
+        const watched = pendingWatchEvents(true);
+        if (watched.length > 0) {
+          emitWatchAttention(watched);
           return;
         }
       }
@@ -495,28 +543,39 @@ ${progress}`,
         const anyActive = (['work', 'chore'] as Lane[]).some((l) =>
           fs.readdirSync(laneDirs(l).active).some((f) => !f.startsWith('.')),
         );
-        if (!anyActive) break; // nothing in flight — conversational turns end free
+        // A registered session-owned watch is in-flight work too — a ume
+        // review can be the only thing standing between this turn and done.
+        const anyWatch = listWatches().some((w) => w.owner === 'man');
+        if (!anyActive && !anyWatch) break; // nothing in flight — conversational turns end free
         const timeoutSecs = Number(arg(args, '--timeout') ?? '14000');
         const deadline = Date.now() + timeoutSecs * 1000;
         const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
+        runDueManWatches();
         let evs = attentionNow(true, remindMs);
-        if (evs.length === 0) {
+        let watched = pendingWatchEvents(true);
+        if (evs.length === 0 && watched.length === 0) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 1500));
             evs = freshWakeEvents(baseline);
             if (evs.length === 0) evs = attentionNow(true, remindMs); // reminders fire mid-park too
-            if (evs.length > 0) break;
+            runDueManWatches();
+            watched = pendingWatchEvents(true);
+            if (evs.length > 0 || watched.length > 0) break;
           }
         }
-        if (evs.length === 0) break; // timeout — allow the stop; tier 1 covers the horizon
-        const lines = evs.map(
-          (ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`,
-        );
+        if (evs.length === 0 && watched.length === 0) break; // timeout — allow the stop; tier 1 covers the horizon
+        const lines = [
+          ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
+          ...watched.flatMap((a) =>
+            a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`),
+          ),
+        ];
         const reason = [
-          'A lobstah dispatch needs attention:',
+          'A lobstah dispatch or watched source needs attention:',
           ...lines,
-          'Check with `lobstah status <id>`; answer a needs-decision with `lobstah send <id> "<answer>"`.',
+          'Check a dispatch with `lobstah status <id>`; answer a needs-decision with `lobstah send <id> "<answer>"`.',
+          'A watch line means an external source updated (e.g. a review round) — handle it directly.',
           'Handle it now. This session re-parks automatically at turn end — do not arm any watcher.',
         ].join('\n');
         console.log(JSON.stringify({ decision: 'block', reason }));
@@ -573,6 +632,40 @@ ${progress}`,
     }
     case 'version': {
       console.log(lobstahVersion());
+      break;
+    }
+    case 'watch': {
+      const sub = args[0];
+      if (sub === 'add') {
+        const key = args[1];
+        const check = arg(args, '--check');
+        if (!key || key.startsWith('--') || !check) throw new Error('watch add requires a key and --check <command>');
+        const forId = arg(args, '--for');
+        const every = arg(args, '--every');
+        const w = addWatch(key, check, {
+          owner: forId ? `dispatch:${forId}` : 'man',
+          cursor: arg(args, '--cursor'),
+          everySecs: every ? Number(every) : undefined,
+          brief: arg(args, '--brief'),
+        });
+        console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
+        break;
+      }
+      if (sub === 'rm') {
+        const key = args[1];
+        if (!key) throw new Error('watch rm requires a key');
+        console.log(toonKV({ key, removed: removeWatch(key) }));
+        break;
+      }
+      const rows = listWatches().map((w) => ({
+        key: w.key,
+        owner: w.owner,
+        cursor: w.cursor,
+        pending: readWatchEvents(w.key).length - w.seen,
+        lastChecked: w.lastCheckedAt ?? '-',
+        error: w.lastError ?? '',
+      }));
+      console.log(toonTable('watches', rows, ['key', 'owner', 'cursor', 'pending', 'lastChecked', 'error']));
       break;
     }
     case 'init': {

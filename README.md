@@ -80,6 +80,9 @@ lobstah cancel <uuid>
 lobstah cull --apply                  # sweep aged results and orphaned worktrees
 lobstah man tend                      # the whole string: fleet verdict, waiting
                                       # questions, each item's chain + PR + gate
+lobstah watch add ci:1234 --check 'my-ci events --since {cursor} --json'
+                                      # stand watch on anything external — its
+                                      # events wake you like a dispatch would
 ```
 
 Prefer the water? 🌊 `set --bait`, `buoys`, and `buoy` alias `dispatch`,

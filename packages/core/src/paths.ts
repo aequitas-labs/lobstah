@@ -35,6 +35,7 @@ export function ensureLayout(): void {
     for (const dir of Object.values(laneDirs(lane))) fs.mkdirSync(dir, { recursive: true });
   }
   fs.mkdirSync(path.join(lobstahHome(), 'worktrees'), { recursive: true });
+  fs.mkdirSync(path.join(lobstahHome(), 'watches'), { recursive: true });
 }
 
 export function statusPath(id: string, lane: Lane): string {
