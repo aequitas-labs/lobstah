@@ -59,7 +59,7 @@ import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { parseReportArgs } from './report-args.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
-import { usageFor } from './usage.js';
+import { UsageError, usageFor, validateArgs } from './usage.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -72,7 +72,8 @@ work (humans and agents):
                                   session instead of a fresh headless worker
   ls [--all]                      queue, active, recent done      (alias: buoys)
   status [<uuid>]                 reconciled state                (alias: buoy)
-  logs <uuid> [--follow]          the normalized event stream
+  logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
+                                  by default; --full for everything)
   send <uuid> <message>           deliver an instruction between agent turns
   inbox <uuid>                    read and acknowledge pending messages
                                   (workers: check at natural checkpoints)
@@ -118,7 +119,7 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man wait [--timeout <secs>] [--peek]
                                   block until a dispatch or watched source
                                   needs attention, then print the event and
-                                  what to do next; exit 2 on timeout. Runs due
+                                  what to do next; exit 3 on timeout. Runs due
                                   watch checks itself when no pick process is.
                                   Unanswered questions re-fire every
                                   remindSecs until answered.
@@ -274,20 +275,22 @@ async function mainCli(): Promise<void> {
   // Lobsterman (orchestrator) commands live under their own namespace;
   // bare `lobstah man` prints the lobsterman's manual.
   if (cmd === 'man') {
-    cmd = args.length > 0 ? `man:${args[0]}` : 'man:manual';
+    cmd = args.length > 0 && args[0] !== '--help' ? `man:${args[0]}` : 'man:manual';
     args = args.slice(1);
   }
   ensureLayout();
 
-  // Per-command help (axi.md P10): `lobstah <cmd> --help` prints just that
-  // command's usage. Only the leading positions count, so a note or message
-  // containing the literal string never triggers it.
-  if (cmd !== undefined && args.slice(0, 2).includes('--help')) {
-    const usage = usageFor(cmd);
-    if (usage) {
-      console.log(usage);
+  // Registry validation (axi.md P6/P10): unknown flags and subverbs fail
+  // loudly with the usage card (exit 2); `--help` prints it. Validation
+  // stops at a command's free-text tail, so a note or message may contain
+  // anything — including the literal strings above.
+  if (cmd !== undefined) {
+    const v = validateArgs(cmd, args);
+    if (v?.help) {
+      console.log(usageFor(cmd)!);
       return;
     }
+    if (v?.error) throw new UsageError(`${v.error}\n\n${usageFor(cmd)!}`);
   }
 
   switch (cmd) {
@@ -360,7 +363,21 @@ async function mainCli(): Promise<void> {
       if (!id) throw new Error('logs requires a dispatch id');
       const lane = findLane(id);
       const file = eventsPath(id, lane);
-      if (fs.existsSync(file)) process.stdout.write(fs.readFileSync(file, 'utf8'));
+      if (fs.existsSync(file)) {
+        // Truncate by default (axi.md P3) — a long-running dispatch's stream
+        // can be huge, and the reader is usually an agent on a token budget.
+        const raw = fs.readFileSync(file, 'utf8');
+        const lines = raw.split('\n').filter((l) => l.length > 0);
+        const LIMIT = 50;
+        if (!args.includes('--full') && lines.length > LIMIT) {
+          console.log(
+            `(truncated: last ${LIMIT} of ${lines.length} events — \`lobstah logs ${id} --full\` for all)`,
+          );
+          for (const l of lines.slice(-LIMIT)) console.log(l);
+        } else {
+          process.stdout.write(raw);
+        }
+      }
       if (args.includes('--follow')) {
         let size = fs.existsSync(file) ? fs.statSync(file).size : 0;
         setInterval(() => {
@@ -604,7 +621,7 @@ ${progress}`,
         }
       }
       console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
-      process.exitCode = 2;
+      process.exitCode = 3; // 2 means a usage mistake; timeout gets its own code
       break;
     }
     case 'man:init': {
@@ -980,13 +997,19 @@ wallClockSecs      = 3600
       console.log(HELP);
       break;
     default:
-      throw new Error(`unknown command "${cmd}" — run \`lobstah help\``);
+      throw new UsageError(`unknown command "${cmd}" — run \`lobstah help\``);
   }
 }
 
 mainCli().catch((err) => {
   // Structured errors on stdout (axi.md P6) — the reader is usually an
   // agent, and stderr interleaves unpredictably in harness transcripts.
-  console.log(toonKV({ error: err instanceof Error ? err.message : String(err) }));
-  process.exit(1);
+  // Exit 2 marks a usage mistake (unknown command, flag, or subverb); 1 is
+  // every other error. A usage message carries its card on the lines below
+  // the error, printed raw so it stays readable.
+  const msg = err instanceof Error ? err.message : String(err);
+  const [first, ...rest] = msg.split('\n');
+  console.log(toonKV({ error: first }));
+  if (rest.length > 0) console.log(rest.join('\n').trimStart());
+  process.exit(err instanceof UsageError ? 2 : 1);
 });
