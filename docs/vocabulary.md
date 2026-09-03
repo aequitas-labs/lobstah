@@ -160,3 +160,16 @@ Delivery routes by ownership, same as watches: a continuation for a chain
 claimed by a live soaking session is addressed back to that session; once it
 ghosts, the same bait forks headless. Sessions are never conscripted — a
 thread works bait only after opting in.
+
+## Exit codes
+
+The CLI's exit-code contract, aligned with axi.md P6. **Owner:**
+`apps/cli/src/main.ts` (`UsageError`) and `apps/cli/src/usage.ts` (the
+registry that decides what parses).
+
+| Code | Meaning |
+| ---- | ------- |
+| `0` | Success — including definitive empty results. |
+| `1` | Error: the command was well-formed but could not do its job. |
+| `2` | Usage mistake: unknown command, flag, or subverb. The error names the offender and prints the command's usage card. Flags in a free-text tail (a `send` message, a `report` note) are never validated — prose may contain anything. |
+| `3` | `man wait --timeout` elapsed with nothing to report. Its own code so `while lobstah man wait` loops still terminate on timeout while `2` stays unambiguous. |
