@@ -156,6 +156,31 @@ with none of the webhook plumbing.
 
 ---
 
+## Watch loop
+
+Pick's third loop family: standing outbound polls on anything external with
+a CLI that can answer "anything new since cursor N?" — a ume review session,
+a CI run. Registration goes through `lobstah watch add <key> --check <cmd>`
+(the validated write path; the check contract and word set live in
+[vocabulary.md](vocabulary.md#watch-contract)):
+
+```bash
+# an interactive session pushes a plan for review, then stops blocking on it
+lobstah watch add ume:9f2c --check 'ume events 9f2c --since {cursor} --json'
+
+# a worker pauses on a review round; events fork a continuation of its chain
+lobstah watch add ume:9f2c --check '...' --for <dispatch-uuid>
+```
+
+Each cycle: run due checks (cadence = `[pickup].pollSecs`, or `--every` per
+watch), append events, deliver by owner. Man-owned events surface through
+`man wait`/`man haul` and fire `notifyCommand` with verb `watch`;
+dispatch-owned events enqueue a continuation that forks the latest session
+in the owning chain — one in flight per watch, later rounds buffer. With no
+tracker sources configured, `lobstah pick` still runs in watch-only mode.
+`man wait` runs due checks itself when no pick process is stamping them, so
+watches work with every service stopped.
+
 ## Merge loop
 
 Opt-in, per repo, off by default. Merging is policy, not mechanics, so it ships

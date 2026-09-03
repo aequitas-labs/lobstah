@@ -30,7 +30,8 @@ export function dispatchLane(uuid: string): Lane | undefined {
 export interface ReportNotification {
   key: string;
   uuid: string;
-  verb: Verb;
+  /** A status verb, or 'watch' for a watched external source producing events. */
+  verb: Verb | 'watch';
   note?: string;
   prUrl?: string;
 }

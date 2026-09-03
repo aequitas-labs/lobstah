@@ -18,6 +18,10 @@ your working set:
   lobstah man tend [--json]                     tend the string: fleet verdict,
                                                 unanswered questions, each work
                                                 item's chain + PR + merge gate
+  lobstah watch add <key> --check <cmd>         stand watch on something
+                                                external (a review session, a
+                                                CI run) — its events wake you
+                                                like any dispatch would
 
 getting woken instead of asking:
   lobstah man wait          block until a dispatch needs attention (arm it as a

@@ -94,11 +94,14 @@ emits the full report for dashboards and scripts to render.
 ## Getting woken instead of asked
 
 Three escalation tiers, least to most invasive. All are built on
-`lobstah man wait`: block until a dispatch needs attention, print the event and
-what to do next, exit. It is **level-triggered for attention states** — if a
-`needs-decision` is already standing when it starts, it returns immediately —
-so a gap between one watcher exiting and the next arming can never lose an
-event.
+`lobstah man wait`: block until a dispatch — or a watched external source
+(`lobstah watch add`, e.g. a ume review session) — needs attention, print the
+event and what to do next, exit. It is **level-triggered for attention
+states** — if a `needs-decision` or an unconsumed watch event is already
+standing when it starts, it returns immediately — so a gap between one
+watcher exiting and the next arming can never lose an event. When no pick
+process is running, `man wait` runs due watch checks itself, so watching
+works with every service stopped.
 
 **Tier 1 — a push for the human.** Set the daemon's hook and forget it:
 

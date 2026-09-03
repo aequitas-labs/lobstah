@@ -116,3 +116,23 @@ Bucket transitions are atomic renames; the directory *is* the state.
 | `ok`   | Works as configured. |
 | `warn` | Degraded or optional — dispatches may still run (e.g. one harness missing, daemon not running). |
 | `fail` | Broken configuration or missing requirement — fix before relying on lobstah. |
+
+## Watch contract
+
+A **watch** is a standing outbound poll on something external (a ume review
+session, a CI run) registered through `lobstah watch add` — the validated
+write path; nothing else touches `watches/`. **Owner:**
+`packages/core/src/watch.ts`. **Enforcement:** check output that doesn't
+parse records `lastError` and advances nothing.
+
+| Word | Meaning |
+| ---- | ------- |
+| `check` | Shell command exec'd with `{cursor}` substituted; prints `{ "cursor", "events"?, "done"? }` JSON. Read-only and idempotent — pick and an inline `man wait` coordinate only by the `lastCheckedAt` stamp. |
+| `cursor` | Opaque progress marker, advanced only from successful check output. The stream of record: a crashed watcher resumes from it losslessly. |
+| `owner` | Who the events belong to: `man` (surface via `man wait`/`man haul` + notify) or `dispatch:<uuid>` (fork a continuation of that chain). Events are never unowned work. |
+| `done` | The source is finished (session closed, run complete); the watch retires after its last events are consumed. |
+
+Delivery is level-triggered and at-least-once, like dispatch attention:
+events stand until the owner consumes them. One continuation dispatch in
+flight per watch; later events buffer and fork from the latest session in
+the chain.
