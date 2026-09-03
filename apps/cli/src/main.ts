@@ -46,6 +46,7 @@ import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
+import { parseReportArgs } from './report-args.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -286,9 +287,7 @@ async function mainCli(): Promise<void> {
       const [id, verb, ...rest] = args;
       if (!id || !verb) throw new Error(`report requires an id and a verb (${VERBS.join('|')})`);
       const lane = findLane(id);
-      const prIndex = rest.indexOf('--pr');
-      const prUrl = prIndex >= 0 ? rest[prIndex + 1] : undefined;
-      const note = rest.filter((_, i) => i !== prIndex && i !== prIndex + 1).join(' ') || undefined;
+      const { note, prUrl } = parseReportArgs(rest);
       const entry = appendStatus(id, lane, verb, note);
       if (prUrl) mergeEvidence(id, lane, { prUrl });
       console.log(toonKV({ id, verb: entry.verb, at: entry.at, ...(prUrl ? { prUrl } : {}) }));

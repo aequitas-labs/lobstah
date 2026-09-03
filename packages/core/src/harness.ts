@@ -21,13 +21,25 @@ export function onPath(bin: string, pathVar: string | undefined = process.env.PA
   return false;
 }
 
-function resolvable(specifier: string): boolean {
+/**
+ * Whether a package is installed and reachable from here. require.resolve
+ * alone is not enough: an ESM-only package whose exports map carries only an
+ * `import` condition (the codex SDK) throws ERR_PACKAGE_PATH_NOT_EXPORTED
+ * from a CJS resolver even though a dynamic import works fine — so fall back
+ * to checking the package directory on disk along the resolution paths.
+ */
+export function packagePresent(specifier: string, fromFile: string = import.meta.url): boolean {
+  const require_ = createRequire(fromFile);
   try {
-    createRequire(import.meta.url).resolve(specifier);
+    require_.resolve(specifier);
     return true;
   } catch {
-    return false;
+    // export-restricted or absent — the disk decides which
   }
+  for (const dir of require_.resolve.paths(specifier) ?? []) {
+    if (fs.existsSync(path.join(dir, specifier, 'package.json'))) return true;
+  }
+  return false;
 }
 
 /**
@@ -37,8 +49,8 @@ function resolvable(specifier: string): boolean {
  */
 export function detectHarnesses(): string[] {
   const out: string[] = [];
-  if (onPath('claude') || resolvable('@anthropic-ai/claude-agent-sdk')) out.push('claude');
-  if (onPath('codex') || resolvable('@openai/codex-sdk')) out.push('codex');
+  if (onPath('claude') || packagePresent('@anthropic-ai/claude-agent-sdk')) out.push('claude');
+  if (onPath('codex') || packagePresent('@openai/codex-sdk')) out.push('codex');
   return out;
 }
 
@@ -49,10 +61,16 @@ export function detectHarnesses(): string[] {
  */
 export function codexInvocation(argv: string[]): { file: string; argv: string[] } | undefined {
   if (onPath('codex')) return { file: 'codex', argv };
+  const require_ = createRequire(import.meta.url);
   try {
-    const cli = createRequire(import.meta.url).resolve('@openai/codex/bin/codex.js');
+    const cli = require_.resolve('@openai/codex/bin/codex.js');
     return { file: process.execPath, argv: [cli, ...argv] };
   } catch {
-    return undefined;
+    // exports-restricted resolution — take the disk route
   }
+  for (const dir of require_.resolve.paths('@openai/codex') ?? []) {
+    const cli = path.join(dir, '@openai', 'codex', 'bin', 'codex.js');
+    if (fs.existsSync(cli)) return { file: process.execPath, argv: [cli, ...argv] };
+  }
+  return undefined;
 }

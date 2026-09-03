@@ -1,8 +1,7 @@
 import * as fs from 'node:fs';
-import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'smol-toml';
-import { configPath, executorPath, loadConfig, lobstahVersion, onPath } from '@lobstah/core';
+import { configPath, executorPath, loadConfig, lobstahVersion, onPath, packagePresent } from '@lobstah/core';
 import { loadPickupConfig } from '@lobstah/pick';
 
 export interface DoctorRow {
@@ -35,13 +34,10 @@ export function runDoctor(now = Date.now()): DoctorRow[] {
   const claude = onPath('claude');
   push('harness claude', claude ? 'ok' : 'warn', claude ? 'on PATH' : 'claude not on PATH — claude dispatches will fail');
   const codexPath = onPath('codex');
-  let codexSdk = false;
-  try {
-    createRequire(import.meta.url).resolve('@openai/codex-sdk');
-    codexSdk = true;
-  } catch {
-    // absent
-  }
+  // The SDK is ESM-only with an import-condition-only exports map, so this
+  // must go through packagePresent — a bare require.resolve throws even when
+  // the package is installed and importable.
+  const codexSdk = packagePresent('@openai/codex-sdk');
   push(
     'harness codex',
     codexPath || codexSdk ? 'ok' : 'warn',
