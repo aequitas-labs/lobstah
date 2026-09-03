@@ -181,6 +181,20 @@ tracker sources configured, `lobstah pick` still runs in watch-only mode.
 `man wait` runs due checks itself when no pick process is stamping them, so
 watches work with every service stopped.
 
+**Streams — the latency optimization.** `--stream <cmd>` names a long-lived
+process (spawned with `{cursor}` substituted) that emits the same event
+objects as NDJSON lines, plus bare `{"cursor": "N"}` checkpoints. Pick holds
+one child per streaming watch and delivers each line the moment it arrives —
+milliseconds instead of the poll interval. The queue contract's rule applies
+one layer up: **watch as an optimization, poll as the guarantee** — appends
+dedupe by `seq`, so the cadence check re-seeing a streamed event is a no-op,
+and a dead stream just means cadence-only until the next cycle respawns it.
+Stream and cadence events feed one serialized executor, so pick's state stays
+single-writer. The daemon completes the fast path: it fs.watches the queue
+directories, so a continuation enqueued by a stream event is claimed in
+milliseconds too — end to end, an external event reaches a spawning session
+in roughly harness start-up time.
+
 ## Merge loop
 
 Opt-in, per repo, off by default. Merging is policy, not mechanics, so it ships
