@@ -41,8 +41,8 @@ export function renderLaunchdPlist(spec: ServiceSpec): string {
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>${xml(path.join(spec.logDir, `${spec.kind}.log`))}</string>
-  <key>StandardErrorPath</key><string>${xml(path.join(spec.logDir, `${spec.kind}.err`))}</string>
+  <key>StandardOutPath</key><string>${xml(path.posix.join(spec.logDir, `${spec.kind}.log`))}</string>
+  <key>StandardErrorPath</key><string>${xml(path.posix.join(spec.logDir, `${spec.kind}.err`))}</string>
 </dict>
 </plist>
 `;
@@ -58,8 +58,8 @@ Restart=always
 RestartSec=5
 Environment=PATH=${spec.pathEnv}
 Environment=LOBSTAH_HOME=${spec.home}
-StandardOutput=append:${path.join(spec.logDir, `${spec.kind}.log`)}
-StandardError=append:${path.join(spec.logDir, `${spec.kind}.err`)}
+StandardOutput=append:${path.posix.join(spec.logDir, `${spec.kind}.log`)}
+StandardError=append:${path.posix.join(spec.logDir, `${spec.kind}.err`)}
 
 [Install]
 WantedBy=default.target
@@ -73,15 +73,17 @@ WantedBy=default.target
  * over instead of being re-guessed on every upgrade.
  */
 export function servicePathEnv(nodePath: string, home = os.homedir()): string {
+  // launchd/systemd units are POSIX targets — build the PATH with POSIX
+  // semantics regardless of where this code happens to run (Windows CI).
   const dirs = [
-    path.dirname(nodePath),
-    path.join(home, '.local', 'bin'),
+    path.posix.dirname(nodePath),
+    path.posix.join(home, '.local', 'bin'),
     '/opt/homebrew/bin',
     '/usr/local/bin',
     '/usr/bin',
     '/bin',
   ];
-  return [...new Set(dirs)].join(path.delimiter);
+  return [...new Set(dirs)].join(':');
 }
 
 export function serviceFile(kind: ServiceKind): string {
@@ -97,6 +99,9 @@ function run(cmd: string, args: string[]): { ok: boolean; out: string } {
 
 /** Write the unit for this platform and load it. Idempotent: reinstalling reloads. */
 export function installService(kind: ServiceKind): { file: string; loaded: boolean; detail: string } {
+  if (process.platform === 'win32') {
+    throw new Error(`no service manager support on Windows — run \`lobstah ${kind}\` under your process manager of choice`);
+  }
   const entry = fs.realpathSync(process.argv[1]!);
   const spec: ServiceSpec = {
     kind,

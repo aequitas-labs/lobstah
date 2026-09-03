@@ -32,9 +32,15 @@ export function detectRepo(dir: string): DetectedRepo | undefined {
   const abs = path.resolve(dir);
   if (git(abs, 'rev-parse', '--is-inside-work-tree') !== 'true') return undefined;
   const top = git(abs, 'rev-parse', '--show-toplevel');
-  // git reports the physical path; realpath both sides so a symlinked tmpdir
-  // or home doesn't make a repo root look nested.
-  if (!top || fs.realpathSync(top) !== fs.realpathSync(abs)) return undefined;
+  // git reports the physical path; canonicalize both sides so a symlinked
+  // tmpdir, an 8.3 short path, or Windows case differences don't make a repo
+  // root look nested. realpathSync.native expands short names; plain
+  // realpathSync does not.
+  const canon = (p: string) => {
+    const real = path.resolve(fs.realpathSync.native(p));
+    return process.platform === 'win32' ? real.toLowerCase() : real;
+  };
+  if (!top || canon(top) !== canon(abs)) return undefined;
   const origin = git(abs, 'remote', 'get-url', 'origin');
   // origin/HEAD names the forge's default branch; a clone that never fetched
   // it falls back to the checked-out branch, then to main.
