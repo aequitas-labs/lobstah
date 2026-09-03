@@ -86,7 +86,11 @@ The verdict distinguishes states that look identical from the outside:
 Below the verdict: counts (queued, active, chores, done/failed last 24h), the
 unanswered questions with how long they have waited, and one row per work
 item — tracker key, its dispatch chain (original → swaps → review follow-ups),
-its PR, and the PR's merge-gate status. Gate status comes from the [merge
+its PR, the PR's merge-gate status, and any external source the chain is
+watching (a ume review session, a CI run). Watches join the same way the
+merge view does — from disk. A man-owned watch with unconsumed events counts
+as `needs-attention` with its age; a dispatch-owned one annotates its story
+(the wake is machinery's job, not the human's). Gate status comes from the [merge
 view](pickup.md#merge-view) pickup persists each tick, so PR state is at most
 one poll interval stale without tend making a single network call. `--json`
 emits the full report for dashboards and scripts to render.

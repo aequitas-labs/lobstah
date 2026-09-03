@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, enqueue, ensureLayout, executorPath } from '@lobstah/core';
+import { addWatch, appendStatus, claimNext, enqueue, ensureLayout, executorPath } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 
 let home: string;
@@ -91,5 +91,44 @@ describe('man tend — the fleet verdict', () => {
     const text = renderTend(r);
     expect(text).toContain('linear:BAS-9');
     expect(text).toContain('waiting-approval');
+  });
+});
+
+describe('man tend — watches join', () => {
+  it('a man-owned watch with pending events is needs-attention with its age', () => {
+    heartbeat();
+    addWatch('ume:plan', 'true');
+    fs.appendFileSync(
+      path.join(home, 'watches', 'ume-plan.events'),
+      `${JSON.stringify({ seq: 1, summary: 'feedback batch', at: new Date(Date.now() - 120_000).toISOString() })}\n`,
+    );
+    const r = buildTendReport();
+    expect(r.verdict).toBe('needs-attention');
+    const row = r.attention.find((a) => a.id === 'ume:plan');
+    expect(row?.verb).toBe('watch');
+    expect(row?.note).toBe('feedback batch');
+    expect(row!.ageSecs).toBeGreaterThanOrEqual(119);
+    expect(r.watches[0]).toMatchObject({ key: 'ume:plan', owner: 'man', pendingEvents: 1 });
+    expect(renderTend(r)).toContain('feedback batch');
+  });
+
+  it('a consumed man-owned watch is listed but raises no attention', () => {
+    heartbeat();
+    addWatch('ume:quiet', 'true');
+    expect(buildTendReport().verdict).toBe('idle');
+    expect(buildTendReport().watches).toHaveLength(1);
+  });
+
+  it('a dispatch-owned watch annotates its story, including continuations', () => {
+    heartbeat();
+    const owner = '66666666-6666-6666-6666-666666666666';
+    enqueue({ id: owner, repo: 'r', brief: 'b' });
+    claimNext('work');
+    appendStatus(owner, 'work', 'paused', 'awaiting review');
+    addWatch('ume:story', 'true', { owner: `dispatch:${owner}` });
+    const r = buildTendReport();
+    const story = r.stories.find((s) => s.dispatches.some((d) => d.id === owner));
+    expect(story?.watch).toBe('ume:story');
+    expect(r.verdict).toBe('working'); // dispatch-owned pending is machinery's job, not the human's
   });
 });
