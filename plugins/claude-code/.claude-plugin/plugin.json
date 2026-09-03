@@ -1,0 +1,12 @@
+{
+  "name": "lobstah",
+  "description": "Run a fleet of supervised coding agents from one session: dispatch work, get woken when something needs you, never watch the water.",
+  "version": "0.1.0",
+  "author": {
+    "name": "aequitas labs LLC"
+  },
+  "homepage": "https://github.com/aequitas-labs/lobstah",
+  "repository": "https://github.com/aequitas-labs/lobstah",
+  "license": "MIT",
+  "keywords": ["agents", "supervisor", "orchestration", "dispatch", "lobsterman"]
+}

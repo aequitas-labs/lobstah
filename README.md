@@ -110,6 +110,11 @@ continues the turn the moment something needs it.
   optionally merges approved PRs. GitHub pickup spans every repo you mark
   `pickup = true`; `lobstah pick install` runs it as a service.
   [docs/pickup.md](docs/pickup.md)
+- **Claude Code plugin** — the lobsterman as a one-step install: the Stop-hook
+  park, the lobsterman skill, and a `/lobstah` fleet command, no settings
+  surgery. `/plugin marketplace add aequitas-labs/lobstah`, then
+  `/plugin install lobstah@lobstah`. The hook stays inert until a directory
+  opts in with a `.lobstah-man` file.
 - **OpenClaw plugin** — gives fleet agents `lobstah_dispatch` / `lobstah_status`
   / `lobstah_send` / `lobstah_cancel` tools and operators a `/lobstah` command.
   [docs/openclaw.md](docs/openclaw.md)
