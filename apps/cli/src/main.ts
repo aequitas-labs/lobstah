@@ -42,6 +42,7 @@ import {
   reconcile,
   requestCancel,
   sendMessage,
+  toonHelp,
   toonKV,
   toonTable,
   VERBS,
@@ -58,6 +59,7 @@ import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { parseReportArgs } from './report-args.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
+import { usageFor } from './usage.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -277,6 +279,17 @@ async function mainCli(): Promise<void> {
   }
   ensureLayout();
 
+  // Per-command help (axi.md P10): `lobstah <cmd> --help` prints just that
+  // command's usage. Only the leading positions count, so a note or message
+  // containing the literal string never triggers it.
+  if (cmd !== undefined && args.slice(0, 2).includes('--help')) {
+    const usage = usageFor(cmd);
+    if (usage) {
+      console.log(usage);
+      return;
+    }
+  }
+
   switch (cmd) {
     case 'dispatch': {
       const repo = arg(args, '--repo');
@@ -302,6 +315,13 @@ async function mainCli(): Promise<void> {
       const lane: Lane = args.includes('--chore') ? 'chore' : 'work';
       enqueue(d, lane);
       console.log(toonKV({ id: d.id, repo, lane, queued: new Date().toISOString() }));
+      console.log(
+        toonHelp([
+          `lobstah status ${d.id}`,
+          `lobstah send ${d.id} "<instruction>"`,
+          'lobstah man wait   (block until something needs you)',
+        ]),
+      );
       break;
     }
     case 'ls': {
@@ -310,6 +330,7 @@ async function mainCli(): Promise<void> {
         (['queue', 'active', 'done'] as const).flatMap((b) => rowsFor(lane, b)),
       );
       console.log(toonTable('dispatches', rows, ['id', 'lane', 'bucket', 'state', 'updated']));
+      console.log(toonHelp(['lobstah status <id>', 'lobstah man tend   (verdict + stories + gates)']));
       break;
     }
     case 'status': {
@@ -323,6 +344,15 @@ async function mainCli(): Promise<void> {
       const log = readStatusLog(id, lane);
       const state = reconcile({ log, lastEventAt: lastEventAt(id, lane) });
       console.log(toonKV({ id, lane, state, lastNote: log.at(-1)?.note, entries: log.length }));
+      console.log(
+        toonHelp(
+          state === 'needs-decision' || state === 'blocked'
+            ? [`lobstah send ${id} "<answer>"`, `lobstah logs ${id} --follow`]
+            : state === 'done' || state === 'failed'
+              ? [`lobstah catch ${id}   (branch, commits, PR)`]
+              : [`lobstah logs ${id} --follow`, `lobstah send ${id} "<instruction>"`],
+        ),
+      );
       break;
     }
     case 'logs': {
@@ -668,14 +698,25 @@ ${progress}`,
       break;
     }
     case 'man:brief': {
-      // SessionStart-hook entry point: hand the session its own id so it can
-      // soak or stow itself. Silent without hook input.
+      // SessionStart-hook entry point: ambient context (axi.md P7) — the
+      // session id plus a one-line fleet state, so every conversation starts
+      // knowing where things stand. Silent without hook input.
       const hook = readHookStdin();
       if (!hook?.session_id) break;
+      let fleet = '';
+      try {
+        const r = buildTendReport();
+        fleet =
+          ` Fleet: ${r.verdict} (${r.counts.queued} queued, ${r.counts.active} active` +
+          (r.attention.length > 0 ? `, ${r.attention.length} awaiting a human` : '') +
+          ') — `lobstah` for the live view.';
+      } catch {
+        // a brief must never fail the session start
+      }
       const soaking = readSoak(hook.session_id) !== undefined;
       const context = soaking
-        ? `lobstah: session id ${hook.session_id} — this session is soaking (a volunteered worker); \`lobstah stow --session ${hook.session_id}\` signs it off.`
-        : `lobstah: session id ${hook.session_id} (for \`lobstah soak|stow --session <id>\`).`;
+        ? `lobstah: session id ${hook.session_id} — this session is soaking (a volunteered worker); \`lobstah stow --session ${hook.session_id}\` signs it off.${fleet}`
+        : `lobstah: session id ${hook.session_id} (for \`lobstah soak|stow --session <id>\`).${fleet}`;
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }),
       );
@@ -722,6 +763,7 @@ ${progress}`,
           note: 'parks at turn end via the Stop hook (lobstah plugin or `man init --global`); bait arrives as a wake',
         }),
       );
+      console.log(toonHelp([`lobstah stow --session ${sessionId}   (sign off)`]));
       break;
     }
     case 'stow': {
@@ -814,6 +856,13 @@ ${progress}`,
           stream: arg(args, '--stream'),
         });
         console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
+        console.log(
+          toonHelp(
+            w.owner === 'man'
+              ? ['lobstah man wait   (its events wake you)', 'lobstah watch   (list watches)']
+              : ['lobstah watch   (list watches; events fork the owning chain)'],
+          ),
+        );
         break;
       }
       if (sub === 'rm') {
@@ -909,17 +958,35 @@ wallClockSecs      = 3600
     case '-v':
       console.log(lobstahVersion());
       break;
-    case undefined:
+    case undefined: {
+      // Content first (axi.md P8): bare `lobstah` shows the live fleet, not
+      // help text. `lobstah help` remains the full reference.
+      console.log(`lobstah ${lobstahVersion()} — supervision for coding agents (home: ${lobstahHome()})`);
+      console.log('');
+      console.log(renderTend(buildTendReport()));
+      console.log('');
+      console.log(
+        toonHelp([
+          'lobstah dispatch --repo <key> --brief-text "<brief>"   queue work',
+          'lobstah status <id>                                    one dispatch',
+          'lobstah man tend                                       full fleet pass',
+          'lobstah help                                           every command',
+        ]),
+      );
+      break;
+    }
     case '--help':
     case 'help':
       console.log(HELP);
       break;
     default:
-      throw new Error(`unknown command "${cmd}" — run lobstah help`);
+      throw new Error(`unknown command "${cmd}" — run \`lobstah help\``);
   }
 }
 
 mainCli().catch((err) => {
-  console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+  // Structured errors on stdout (axi.md P6) — the reader is usually an
+  // agent, and stderr interleaves unpredictably in harness transcripts.
+  console.log(toonKV({ error: err instanceof Error ? err.message : String(err) }));
   process.exit(1);
 });

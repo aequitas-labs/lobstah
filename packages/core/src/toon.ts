@@ -20,3 +20,12 @@ export function toonTable(name: string, rows: Array<Record<string, unknown>>, co
   if (rows.length === 0) return header;
   return [header, ...rows.map((r) => `  ${cols.map((c) => cell(r[c])).join(',')}`)].join('\n');
 }
+
+/**
+ * Contextual next steps (axi.md P9): concrete command templates appended
+ * after a command's output. Fixed flags are carried verbatim; runtime values
+ * stay as `<placeholders>` — never guessed.
+ */
+export function toonHelp(lines: string[]): string {
+  return [`help[${lines.length}]:`, ...lines.map((l) => `  ${l}`)].join('\n');
+}
