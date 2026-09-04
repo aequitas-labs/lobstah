@@ -227,7 +227,7 @@ async function soakPark(sessionId: string, args: string[], plain = false): Promi
   const block = plain
     ? (reason: string) => {
         console.log(reason);
-        console.log(toonHelp([`${rearm}   (when you finish handling this, park again)`]));
+        console.log(toonHelp([`${rearm}   (when you finish handling this, run this to keep listening)`]));
       }
     : (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
   while (true) {
@@ -237,13 +237,13 @@ async function soakPark(sessionId: string, args: string[], plain = false): Promi
       const id = reg.claimed!;
       if (cancelRequested(id, 'work')) {
         block(
-          `Your catch ${id} was cancelled. Stop working it, leave the worktree as it is, ` +
+          `Your assigned dispatch ${id} was cancelled. Stop working on it, leave the worktree as it is, ` +
             `and run \`lobstah report ${id} failed "cancelled by request"\`.`,
         );
         return;
       }
       if (unhandled(id, 'work').length > 0) {
-        block(`New instruction for your catch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`);
+        block(`New instruction for your dispatch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`);
         return;
       }
     } else {
@@ -259,10 +259,10 @@ async function soakPark(sessionId: string, args: string[], plain = false): Promi
     }
     if (Date.now() >= deadline) {
       if (plain) {
-        console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs, stillSoaking: true }));
+        console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs, stillSignedOn: true }));
         console.log(
           toonHelp([
-            `${rearm}   (nothing yet — run this again to keep listening)`,
+            `${rearm}   (no work yet — run this again to keep listening)`,
             `lobstah stow --session ${sessionId}   (sign off instead)`,
           ]),
         );
@@ -929,7 +929,7 @@ ${progress}`,
           `(\`lobstah man relieve --session ${hook.session_id}\` steps down).${fleet}\n\n` +
           charter({ name: helmReg.grounds, repos: helmReg.repos })
         : soaking
-          ? `lobstah: session id ${hook.session_id} — this session is soaking (a volunteered worker); \`lobstah stow --session ${hook.session_id}\` signs it off.${fleet}`
+          ? `lobstah: session id ${hook.session_id} — this session is signed on as a lobstah worker (it takes assigned work at turn end); \`lobstah stow --session ${hook.session_id}\` signs it off.${fleet}`
           : `lobstah: session id ${hook.session_id} (for \`lobstah soak|stow --session <id>\`).${fleet}`;
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }),
@@ -946,18 +946,18 @@ ${progress}`,
       }
       const cfg = loadConfig();
       const site = inspectSoakSite(process.cwd(), cfg.repos);
-      if (!site) throw new Error('soak must run inside a git checkout — the trap is the worktree');
+      if (!site) throw new Error('soak must run from inside a git worktree — your working directory is not one');
       if (site.primary) {
         throw new Error(
-          'this is the repo\'s primary checkout — never claimable. Create a worktree ' +
-            '(`git worktree add ../<name> -b <branch>`) and soak from there.',
+          'this is the repo\'s primary checkout — workers never take work here. Create a worktree ' +
+            '(`git worktree add ../<name> -b <branch>`), cd into it, and run soak again from there.',
         );
       }
       const rival = listSoaking().find((r) => r.sessionId !== sessionId && r.worktree === site.worktree);
       if (rival) {
         throw new Error(
-          `session ${rival.sessionId.slice(0, 8)} already soaks this worktree — one trap per worktree. ` +
-            `Stow it first (\`lobstah stow --session ${rival.sessionId}\`) or soak from another worktree.`,
+          `another session (${rival.sessionId.slice(0, 8)}) is already signed on in this worktree — one worker per worktree. ` +
+            `Sign it off first (\`lobstah stow --session ${rival.sessionId}\`) or use a different worktree.`,
         );
       }
       const reg = signOnSoak({
@@ -975,13 +975,14 @@ ${progress}`,
           worktree: reg.worktree,
           ...(reg.one ? { one: true } : {}),
           note:
-            'parks at turn end via the Stop hook (lobstah plugin or `man init --global`); bait arrives as a wake. ' +
-            'No Stop hook in this session? Soak with --wait to park in the foreground — never `man wait` (that is the lobsterman verb).',
+            'this session now takes assigned work: it waits at turn end via the Stop hook (lobstah plugin or ' +
+            '`man init --global`) and work arrives as a wake. No Stop hook in this session? Use --wait to listen in ' +
+            'the foreground instead — never `man wait` (that is the orchestrator\'s command, not yours).',
         }),
       );
       console.log(
         toonHelp([
-          `lobstah soak --session ${sessionId} --wait --timeout 600   (hookless: park now; bait prints, exit 3 = re-arm)`,
+          `lobstah soak --session ${sessionId} --wait --timeout 600   (no Stop hook: listen now; work prints here, exit 3 = run it again)`,
           `lobstah stow --session ${sessionId}   (sign off)`,
         ]),
       );

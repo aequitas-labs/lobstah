@@ -132,12 +132,13 @@ without --apply (default 14 days).`,
 paused | done | failed.`,
   watch: `Stand watch on something external; bare \`watch\` (or \`watch ls\`) lists.
 The check command answers "anything since {cursor}?" in JSON.`,
-  soak: `Volunteer this session as a worker: it parks at turn end and takes matching
-bait. Refused from a primary checkout — soak from a worktree. --one stows
-after the first catch. --wait parks in the foreground right now (for
-sessions without Stop hooks): bait prints plain, a quiet timeout exits 3 —
-re-run the same command to re-arm.`,
-  stow: `Sign a soaking session off; an open catch goes back to the queue.`,
+  soak: `Volunteer this session as a worker: it waits at turn end and takes matching
+work from the queue. Refused from a primary checkout — run it from a
+worktree. --one signs off after the first completed assignment. --wait
+listens in the foreground right now (for sessions without Stop hooks):
+assigned work prints plain, a quiet timeout exits 3 — run the same command
+again to keep listening.`,
+  stow: `Sign a worker session off; its unfinished assignment goes back to the queue.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit.`,
   pick: `Tracker loops: poll Linear/GitHub, dispatch assigned work, report back,
