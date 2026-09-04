@@ -67,7 +67,15 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
     positionals: '[<key>]',
   },
-  soak: { flags: { '--session': { value: '<id>', required: true }, '--one': {}, '--harness': { value: HARNESS } } },
+  soak: {
+    flags: {
+      '--session': { value: '<id>', required: true },
+      '--one': {},
+      '--harness': { value: HARNESS },
+      '--wait': {},
+      '--timeout': { value: '<secs>' },
+    },
+  },
   stow: { flags: { '--session': { value: '<id>' }, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall'], flags: { '--interval': { value: '<ms>' } } },
   pick: { subverbs: ['once', 'install', 'uninstall'], flags: {} },
@@ -77,12 +85,27 @@ export const COMMANDS: Record<string, CommandSpec> = {
   version: { flags: {} },
   'man:manual': { flags: {} },
   'man:tend': { flags: { '--json': {} } },
-  'man:report': { flags: { '--grounds': { value: '<name>' }, '--cursor': { value: '<name>' }, '--peek': {}, '--json': {} } },
-  'man:wait': { flags: { '--timeout': { value: '<secs>' }, '--peek': {}, '--grounds': { value: '<name>' } } },
+  'man:report': {
+    flags: {
+      '--grounds': { value: '<name>' },
+      '--cursor': { value: '<name>' },
+      '--peek': {},
+      '--json': {},
+      '--session': { value: '<id>' },
+    },
+  },
+  'man:wait': {
+    flags: {
+      '--timeout': { value: '<secs>' },
+      '--peek': {},
+      '--grounds': { value: '<name>' },
+      '--session': { value: '<id>' },
+    },
+  },
   'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--take': {} } },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
-  'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--session': { value: '<id>' } } },
+  'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
   'man:brief': { flags: {} },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
 };
@@ -111,7 +134,9 @@ paused | done | failed.`,
 The check command answers "anything since {cursor}?" in JSON.`,
   soak: `Volunteer this session as a worker: it parks at turn end and takes matching
 bait. Refused from a primary checkout — soak from a worktree. --one stows
-after the first catch.`,
+after the first catch. --wait parks in the foreground right now (for
+sessions without Stop hooks): bait prints plain, a quiet timeout exits 3 —
+re-run the same command to re-arm.`,
   stow: `Sign a soaking session off; an open catch goes back to the queue.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit.`,
@@ -129,7 +154,8 @@ PR, and merge gate. Pure disk read.`,
   'man:report': `The delta since the last report: catches landed, attention arisen, what still
 waits, and the fleet verdict. Advances the "reported through" cursor unless
 --peek; prints "no change" when the delta is empty. --grounds scopes the
-digest (and its cursor) to one helm's territory.`,
+digest (and its cursor) to one helm's territory. With a claimed helm this
+verb is reserved for it — identify with --session <helm-session-id>.`,
   'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
 Prints the charter, arms the Stop-hook park, and gates the periodic digest.
 A live foreign holder refuses without --take; a stale one is claimable.`,
@@ -137,13 +163,14 @@ A live foreign holder refuses without --take; a stale one is claimable.`,
 cleared too.`,
   'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout.
 A timeout carries the man report delta when something changed. --peek
-surfaces standing events without consuming them.`,
+surfaces standing events without consuming them. With a claimed helm this
+verb is reserved for it — identify with --session <helm-session-id>.`,
   'man:init': `Install the haul Stop hook into Claude settings; --marker touches
 .lobstah-man to arm this directory.`,
-  'man:haul': `The park: wait for something that needs this session (lobsterman or soaking
-worker). As the Stop-hook entry point it prints hook-decision JSON on an
-event; with an explicit --session it runs as a plain foreground command for
-hookless sessions — wakes print plain, a timeout exits 3 (re-arm and loop).`,
+  'man:haul': `Stop-hook entry point: park the session while work is in flight (lobsterman
+or soaking worker); prints hook-decision JSON on an event. Hookless sessions
+use the foreground verbs instead: \`soak --wait\` (worker), \`man wait\`
+(lobsterman).`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs

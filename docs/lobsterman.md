@@ -264,6 +264,12 @@ cannot hold two:
   a dead orchestrator holds nothing.
 - `lobstah man relieve` steps down; a relieved session never re-takes on its
   own.
+- The rule is strict: once a helm is claimed, `man wait` and `man report`
+  are reserved for the helm session (identify with `--session`), and no
+  other session parks as a lobsterman — those verbs consume the helm's
+  wakes and cursor. `man tend`/`man brief` stay open to everyone; a stale
+  helm reserves nothing. Workers never run `man` verbs at all — their
+  hookless park is `soak --wait`.
 
 ## Soaking: a live session volunteers as a worker
 

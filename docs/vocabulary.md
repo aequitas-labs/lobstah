@@ -150,7 +150,7 @@ claimable) and when another session already soaks the same worktree.
 
 | Word | Meaning |
 | ---- | ------- |
-| `soak` | Sign a session on: it parks at turn end (Stop hook) and takes matching bait from the work queue. `--one` stows after the first catch. |
+| `soak` | Sign a session on: it parks at turn end (Stop hook) and takes matching bait from the work queue. `--one` stows after the first catch. `--wait` parks in the foreground right away — the hookless path: bait prints plain, a quiet timeout exits 3, re-running the same command re-arms. Workers never run `man` verbs. |
 | `stow` | Sign a session off; an open catch goes back to the queue (a cancelled one finalizes as failed). |
 | bait address | `--for session:<id>` on a dispatch targets one soaking session. Addressed bait waits for its trap until the registration is gone; unaddressed bait defers to a parked matching trap for `[soak].deferSecs`, then the daemon spawns headless. |
 | catch | The active dispatch a soaking session claimed (`claim.json` in the active dir). One catch per trap; one active item per worktree. The daemon never spawns or restarts it — the session's reports are its liveness. |
@@ -168,7 +168,12 @@ the lobsterman for its grounds through `lobstah man helm` — the validated
 write path; nothing else touches `helm/`. Soak enlists workers; helm enlists
 the one who dispatches to them. **Owner:** `packages/core/src/helm.ts`.
 **Enforcement:** one registration file per grounds — the data model cannot
-hold two; a live foreign holder refuses sign-on without `--take`.
+hold two; a live foreign holder refuses sign-on without `--take`. The rule
+is strict: once a helm is claimed, the orchestrator verbs that consume helm
+state (`man wait`, `man report`, the lobsterman park) are reserved for the
+helm session — any other caller is refused with guidance (or, for the hook,
+silently ignored). Read verbs (`man tend`, `man brief`) and the enlistment
+verbs stay open. A stale helm reserves nothing.
 
 | Word | Meaning |
 | ---- | ------- |

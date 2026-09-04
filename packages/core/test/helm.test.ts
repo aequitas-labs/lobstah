@@ -8,7 +8,9 @@ import {
   groundsErrors,
   groundsList,
   heartbeatHelm,
+  helmGate,
   helmOf,
+  liveHelms,
   listHelms,
   readHelm,
   relieveHelm,
@@ -95,6 +97,26 @@ describe('taking and holding the helm', () => {
     const before = readHelm('fleet')!.heartbeatAt;
     const after = heartbeatHelm('s-one')!.heartbeatAt;
     expect(Date.parse(after)).toBeGreaterThan(Date.parse(before));
+  });
+});
+
+describe('the strict helm rule', () => {
+  it('open water: no live helm means everyone may use the verbs', () => {
+    expect(helmGate(liveHelms(TTL_MS))).toBeUndefined();
+  });
+
+  it('a claimed helm reserves the verbs for its session', () => {
+    takeHelm({ sessionId: 's-one', grounds: FLEET, ttlMs: TTL_MS });
+    const live = liveHelms(TTL_MS);
+    expect(helmGate(live, 's-one')).toBeUndefined();
+    expect(helmGate(live, 's-two')).toMatch(/reserved for the helm session/);
+    expect(helmGate(live, undefined)).toMatch(/fleet=s-one/);
+  });
+
+  it('a stale helm reserves nothing — dead orchestrators hold no verbs', () => {
+    takeHelm({ sessionId: 's-one', grounds: FLEET, ttlMs: TTL_MS, now: Date.now() - TTL_MS - 60_000 });
+    expect(liveHelms(TTL_MS)).toEqual([]);
+    expect(helmGate(liveHelms(TTL_MS))).toBeUndefined();
   });
 });
 
