@@ -2,9 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 
-/** Whether an executable with this name is reachable on the current PATH. */
-export function onPath(bin: string, pathVar: string | undefined = process.env.PATH): boolean {
-  if (!pathVar) return false;
+/** Full path of an executable with this name on the given PATH, if any. */
+export function resolveOnPath(bin: string, pathVar: string | undefined = process.env.PATH): string | undefined {
+  if (!pathVar) return undefined;
   const names = process.platform === 'win32' ? [bin, `${bin}.exe`, `${bin}.cmd`, `${bin}.bat`] : [bin];
   for (const dir of pathVar.split(path.delimiter)) {
     if (!dir) continue;
@@ -12,13 +12,18 @@ export function onPath(bin: string, pathVar: string | undefined = process.env.PA
       const candidate = path.join(dir, name);
       try {
         fs.accessSync(candidate, fs.constants.X_OK);
-        if (fs.statSync(candidate).isFile()) return true;
+        if (fs.statSync(candidate).isFile()) return candidate;
       } catch {
         // not here
       }
     }
   }
-  return false;
+  return undefined;
+}
+
+/** Whether an executable with this name is reachable on the current PATH. */
+export function onPath(bin: string, pathVar: string | undefined = process.env.PATH): boolean {
+  return resolveOnPath(bin, pathVar) !== undefined;
 }
 
 /**
