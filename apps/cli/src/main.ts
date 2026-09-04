@@ -971,6 +971,15 @@ wallClockSecs      = 3600
       );
       break;
     }
+    case '__runner': {
+      // Hidden: the compiled binary re-execs itself with this verb to run a
+      // dispatch — the daemon's spawnRunner uses it when there is no
+      // runner.js on disk to point node at.
+      if (!args[0]) throw new Error('__runner requires the active dispatch directory');
+      const { runRunner } = await import('@lobstah/runner');
+      runRunner(args[0], args[1]);
+      break;
+    }
     case '--version':
     case '-v':
       console.log(lobstahVersion());

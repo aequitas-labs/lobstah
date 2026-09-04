@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { lobstahHome, onPath } from '@lobstah/core';
+import { COMPILED_BINARY, lobstahHome, onPath } from '@lobstah/core';
 
 export type ServiceKind = 'daemon' | 'pick';
 
@@ -10,7 +10,7 @@ export interface ServiceSpec {
   kind: ServiceKind;
   /** Absolute node binary — launchd/systemd get no shell environment. */
   nodePath: string;
-  /** Absolute path to lobstah's dist/main.js. */
+  /** Absolute path to lobstah's dist/main.js; empty for the compiled binary, which is its own entry. */
   entry: string;
   /** PATH the service runs with; must reach git and the harness CLIs. */
   pathEnv: string;
@@ -30,9 +30,10 @@ export function renderLaunchdPlist(spec: ServiceSpec): string {
   <key>Label</key><string>lobstah.${spec.kind}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${xml(spec.nodePath)}</string>
-    <string>${xml(spec.entry)}</string>
-    <string>${spec.kind}</string>
+${[spec.nodePath, spec.entry, spec.kind]
+  .filter(Boolean)
+  .map((a) => `    <string>${xml(a)}</string>`)
+  .join('\n')}
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -53,7 +54,7 @@ export function renderSystemdUnit(spec: ServiceSpec): string {
 Description=lobstah ${spec.kind}
 
 [Service]
-ExecStart=${spec.nodePath} ${spec.entry} ${spec.kind}
+ExecStart=${[spec.nodePath, spec.entry, spec.kind].filter(Boolean).join(' ')}
 Restart=always
 RestartSec=5
 Environment=PATH=${spec.pathEnv}
@@ -102,7 +103,9 @@ export function installService(kind: ServiceKind): { file: string; loaded: boole
   if (process.platform === 'win32') {
     throw new Error(`no service manager support on Windows — run \`lobstah ${kind}\` under your process manager of choice`);
   }
-  const entry = fs.realpathSync(process.argv[1]!);
+  // The compiled binary is its own entry; realpath of argv[1] only exists
+  // for the node layout (dist/main.js).
+  const entry = COMPILED_BINARY ? '' : fs.realpathSync(process.argv[1]!);
   const spec: ServiceSpec = {
     kind,
     nodePath: process.execPath,
