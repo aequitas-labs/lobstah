@@ -82,7 +82,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--take': {} } },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
-  'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
+  'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--session': { value: '<id>' } } },
   'man:brief': { flags: {} },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
 };
@@ -140,8 +140,10 @@ A timeout carries the man report delta when something changed. --peek
 surfaces standing events without consuming them.`,
   'man:init': `Install the haul Stop hook into Claude settings; --marker touches
 .lobstah-man to arm this directory.`,
-  'man:haul': `Stop-hook entry point: park the session while work is in flight (lobsterman
-or soaking worker); prints hook-decision JSON on an event.`,
+  'man:haul': `The park: wait for something that needs this session (lobsterman or soaking
+worker). As the Stop-hook entry point it prints hook-decision JSON on an
+event; with an explicit --session it runs as a plain foreground command for
+hookless sessions — wakes print plain, a timeout exits 3 (re-arm and loop).`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
