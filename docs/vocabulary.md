@@ -161,6 +161,23 @@ claimed by a live soaking session is addressed back to that session; once it
 ghosts, the same bait forks headless. Sessions are never conscripted — a
 thread works bait only after opting in.
 
+## Helm contract
+
+The **helm** is the orchestrator seat: one interactive session signed on as
+the lobsterman for its grounds through `lobstah man helm` — the validated
+write path; nothing else touches `helm/`. Soak enlists workers; helm enlists
+the one who dispatches to them. **Owner:** `packages/core/src/helm.ts`.
+**Enforcement:** one registration file per grounds — the data model cannot
+hold two; a live foreign holder refuses sign-on without `--take`.
+
+| Word | Meaning |
+| ---- | ------- |
+| `helm` | Sign a session on as the orchestrator for one grounds. Prints the charter, arms the Stop-hook park without a marker file, and gates the periodic digest. Re-running from the same session is an idempotent re-sign. |
+| `relieve` | Step down. `--take` on another session's `helm` is the only force path: it displaces a live holder deliberately and leaves them a stand-down notice, delivered once at their next park. A holder whose heartbeat lapsed past `[helm].ttlSecs` is stale and claimable without `--take`. |
+| grounds | A named territory: the subset of configured repos one helm oversees, from `[grounds.*]`. A repo belongs to at most one grounds (config error otherwise). No grounds configured means one implicit `fleet` grounds covering every repo. |
+| charter | The helm's persona and scope fences, in Standard Technical English. Printed at sign-on and re-injected by `man brief` at every session start, so it survives restarts and compaction. |
+| digest | The delta since the reported-through cursor: catches landed, attention arisen, still-waiting, fleet verdict. Carried by `man report`, a `man wait` timeout, and — for a helm session, at `[helm].reportSecs` cadence — the park itself. Change-gated: an empty delta is never delivered. |
+
 ## Exit codes
 
 The CLI's exit-code contract, aligned with axi.md P6. **Owner:**

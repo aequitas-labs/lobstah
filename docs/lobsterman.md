@@ -106,11 +106,14 @@ rather than re-dumping state. Standing unanswered questions appear under
 `still-waiting` without counting as change — reminders (`remindSecs`) own
 re-firing those.
 
-Every carrier shares the cursor:
+Every carrier shares the cursor (per grounds, for a helm):
 
 - **The wait loop.** A `man wait` timeout (exit 3) prints the delta when
   something changed, so a looping session gets periodic fleet reports for
   free — see the loop idiom below.
+- **The park.** A helm session's Stop-hook park delivers the digest as a wake
+  at `[helm].reportSecs` cadence — including the landed-then-idle case, where
+  the last catches finish and nothing is left in flight to wake for.
 - **Direct call.** Anything with a clock — a gateway heartbeat, a cron — runs
   `lobstah man report` and forwards the output when it is not `no change`.
   Escalating a report to a human (a phone push) is the gateway layer's job,
@@ -234,6 +237,33 @@ done
 Zero tokens between events and works anywhere a shell does; the cost is that
 each event gets a fresh context rather than a continuing liaison
 conversation.
+
+## The helm: signing on as the orchestrator
+
+Soak enlists workers; `lobstah man helm` enlists the one who dispatches to
+them. Sign-on prints the **charter** — the persona and scope fences, written
+in Standard Technical English: triage and dispatch but never do the work,
+leave running catches to the daemon, judge the catch not the keystrokes, stay
+inside your grounds, report deltas not dumps. `man brief` re-injects the
+charter at every session start, so it survives restarts and compaction
+without anyone re-running anything. A helm registration also arms the
+Stop-hook park by itself — no `.lobstah-man` marker, no env var — and gates
+the park-delivered digest above.
+
+**One helm per grounds, enforced.** A **grounds** is a named territory: the
+subset of configured repos one orchestrator oversees (`[grounds.*]`; with
+none configured, one implicit `fleet` grounds covers every repo). A repo
+belongs to at most one grounds, so two orchestrators can never dispatch into
+the same territory. The registration is one file per grounds — the data model
+cannot hold two:
+
+- Sign-on against a **live** foreign holder refuses with guidance;
+  `--take` is the only force path, and it is deliberate: the displaced
+  session finds a stand-down notice at its next park and stops orchestrating.
+- A **stale** holder (heartbeat past `[helm].ttlSecs`) is claimable outright —
+  a dead orchestrator holds nothing.
+- `lobstah man relieve` steps down; a relieved session never re-takes on its
+  own.
 
 ## Soaking: a live session volunteers as a worker
 

@@ -77,8 +77,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
   version: { flags: {} },
   'man:manual': { flags: {} },
   'man:tend': { flags: { '--json': {} } },
-  'man:report': { flags: { '--cursor': { value: '<name>' }, '--peek': {}, '--json': {} } },
-  'man:wait': { flags: { '--timeout': { value: '<secs>' }, '--peek': {} } },
+  'man:report': { flags: { '--grounds': { value: '<name>' }, '--cursor': { value: '<name>' }, '--peek': {}, '--json': {} } },
+  'man:wait': { flags: { '--timeout': { value: '<secs>' }, '--peek': {}, '--grounds': { value: '<name>' } } },
+  'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--take': {} } },
+  'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
   'man:brief': { flags: {} },
@@ -126,7 +128,13 @@ under the given directories.`,
 PR, and merge gate. Pure disk read.`,
   'man:report': `The delta since the last report: catches landed, attention arisen, what still
 waits, and the fleet verdict. Advances the "reported through" cursor unless
---peek; prints "no change" when the delta is empty.`,
+--peek; prints "no change" when the delta is empty. --grounds scopes the
+digest (and its cursor) to one helm's territory.`,
+  'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
+Prints the charter, arms the Stop-hook park, and gates the periodic digest.
+A live foreign holder refuses without --take; a stale one is claimable.`,
+  'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
+cleared too.`,
   'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout.
 A timeout carries the man report delta when something changed. --peek
 surfaces standing events without consuming them.`,

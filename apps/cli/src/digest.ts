@@ -100,6 +100,8 @@ function repoOf(id: string, lane: Lane): string | undefined {
 export interface DigestOptions {
   /** Cursor name; each grounds keeps its own. Default: the whole fleet. */
   cursor?: string;
+  /** Limit the digest to these repo keys (a helm's grounds). Items whose repo is unknowable stay in. */
+  repos?: Set<string>;
   now?: number;
 }
 
@@ -109,6 +111,8 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
   const cursor = readCursor(name);
   const sinceMs = Math.max(cursor ? Date.parse(cursor) || 0 : 0, now - LOOKBACK_MS);
   const since = new Date(sinceMs).toISOString();
+  const inGrounds = (repo: string | undefined): boolean =>
+    opts.repos === undefined || repo === undefined || opts.repos.has(repo);
 
   const landed: DigestLanding[] = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
@@ -117,12 +121,14 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
       if (!last || !TERMINAL_VERBS.includes(last.verb)) continue;
       const at = Date.parse(last.at) || 0;
       if (at <= sinceMs || at > now) continue;
+      const repo = repoOf(id, lane);
+      if (!inGrounds(repo)) continue;
       landed.push({
         id,
         lane,
         verb: last.verb,
         at: last.at,
-        repo: repoOf(id, lane),
+        repo,
         note: last.note,
         prUrl: readEvidence(id, lane).prUrl,
       });
@@ -131,7 +137,8 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
   landed.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
   const tend = buildTendReport(now);
-  const standing: DigestAttention[] = tend.attention.map((a) => ({
+  const attention = tend.attention.filter((a) => a.verb === 'watch' || inGrounds(repoOf(a.id, a.lane)));
+  const standing: DigestAttention[] = attention.map((a) => ({
     id: a.id,
     verb: a.verb,
     ageSecs: a.ageSecs,
