@@ -86,9 +86,22 @@ export function liveHelms(ttlMs: number, now = Date.now()): HelmRegistration[] {
  * The strict helm rule: once a lobsterman has signed on, the orchestrator
  * verbs that consume helm state are theirs alone. Returns the refusal
  * message for an unidentified or foreign caller, or undefined when the call
- * is allowed (no live helm anywhere, or the caller is one).
+ * is allowed (no live helm anywhere, or the caller is one). A call that
+ * targets a specific grounds is stricter still: when that grounds has a
+ * live helm, only that helm's session may make it — one helm must never
+ * consume another's cursor or wakes.
  */
-export function helmGate(live: HelmRegistration[], sessionId?: string): string | undefined {
+export function helmGate(live: HelmRegistration[], sessionId?: string, grounds?: string): string | undefined {
+  if (grounds !== undefined) {
+    const holder = live.find((h) => h.grounds === grounds);
+    if (holder && holder.sessionId !== sessionId) {
+      return (
+        `grounds "${grounds}" is helmed by session ${holder.sessionId.slice(0, 8)} — its verbs are that ` +
+        'session\'s alone. Run this from that session (--session), or take its helm (`lobstah man helm --take`).'
+      );
+    }
+    if (holder) return undefined;
+  }
   if (live.length === 0) return undefined; // no claimed lobsterman — open water
   if (sessionId !== undefined && live.some((h) => h.sessionId === sessionId)) return undefined;
   const holders = live.map((h) => `${h.grounds}=${h.sessionId.slice(0, 8)}`).join(', ');

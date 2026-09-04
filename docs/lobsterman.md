@@ -98,13 +98,19 @@ emits the full report for dashboards and scripts to render.
 ### The periodic report
 
 `lobstah man tend` is the full picture on demand; `lobstah man report` is the
-**delta** since the last time anyone reported — catches landed (with their
+**delta** since the last acknowledged report — catches landed (with their
 notes and PRs), attention newly arisen, what still waits, and the fleet
-verdict. It advances a "reported through" cursor when it prints, so nothing
-is ever reported twice, and it says `no change` when the delta is empty
-rather than re-dumping state. Standing unanswered questions appear under
-`still-waiting` without counting as change — reminders (`remindSecs`) own
-re-firing those.
+verdict. It advances a "reported through" cursor when it prints — the
+explicit acknowledgment — so nothing is ever reported twice, and it says
+`no change` when the delta is empty rather than re-dumping state. Standing
+unanswered questions appear under `still-waiting` without counting as
+change — reminders (`remindSecs`) own re-firing those.
+
+Delivery is at-least-once by construction: the carriers that might not be
+read (a `man wait` timeout in a background task) only **peek** at the delta,
+so a digest lost with a dead task re-surfaces on the next timeout; only
+`man report` (or a hook-delivered park digest, which lands in-context by
+construction) marks it handled.
 
 Every carrier shares the cursor (per grounds, for a helm):
 
@@ -267,9 +273,17 @@ cannot hold two:
 - The rule is strict: once a helm is claimed, `man wait` and `man report`
   are reserved for the helm session (identify with `--session`), and no
   other session parks as a lobsterman — those verbs consume the helm's
-  wakes and cursor. `man tend`/`man brief` stay open to everyone; a stale
-  helm reserves nothing. Workers never run `man` verbs at all — their
-  hookless park is `soak --wait`.
+  wakes and cursor. A grounds-scoped call is stricter still: it belongs to
+  that grounds' own helm, never a neighboring one. `man tend`/`man brief`
+  stay open to everyone; a stale helm reserves nothing. Workers never run
+  `man` verbs at all — their hookless park is `soak --wait`.
+- An identified `man wait` heartbeats the helm while it waits (waiting is
+  liveness) and defaults its digest to the helm's own grounds.
+- Known caveat with multiple helms: event *consumption* in `man wait`/haul
+  is fleet-global today — grounds scope the digest, not yet which wakes a
+  helm's park eats. Partitioned consumption lands with the addressing
+  redesign; until then, run multiple helms with the understanding that
+  whoever parks first sees fleet-wide wakes.
 
 ## Soaking: a live session volunteers as a worker
 

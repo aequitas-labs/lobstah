@@ -152,20 +152,22 @@ under the given directories.`,
   'man:manual': `The lobsterman's manual.`,
   'man:tend': `The whole-fleet pass: verdict, unanswered questions, each work item's chain,
 PR, and merge gate. Pure disk read.`,
-  'man:report': `The delta since the last report: catches landed, attention arisen, what still
-waits, and the fleet verdict. Advances the "reported through" cursor unless
---peek; prints "no change" when the delta is empty. --grounds scopes the
-digest (and its cursor) to one helm's territory. With a claimed helm this
-verb is reserved for it — identify with --session <helm-session-id>.`,
+  'man:report': `The delta since the last report: landed, arisen, still-waiting, verdict.
+Advances the cursor unless --peek — the acknowledgment man wait's timeout
+digest defers to. --grounds scopes digest and cursor to one helm's territory
+(that helm's alone). Reserved for the claimed helm; identify with --session
+(defaults --grounds to its own).`,
   'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
 Prints the charter, arms the Stop-hook park, and gates the periodic digest.
 A live foreign holder refuses without --take; a stale one is claimable.`,
   'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
 cleared too.`,
   'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout.
-A timeout carries the man report delta when something changed. --peek
-surfaces standing events without consuming them. With a claimed helm this
-verb is reserved for it — identify with --session <helm-session-id>.`,
+A timeout shows the man report delta when something changed — as a peek: the
+delta re-surfaces until \`man report\` acknowledges it. --peek surfaces
+standing events without consuming them. With a claimed helm this verb is
+reserved for it — identify with --session (which also heartbeats the helm
+and defaults --grounds to its own).`,
   'man:init': `Install the haul Stop hook into Claude settings; --marker touches
 .lobstah-man to arm this directory.`,
   'man:haul': `Stop-hook entry point: park the session while work is in flight (lobsterman

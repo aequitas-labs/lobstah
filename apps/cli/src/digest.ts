@@ -159,6 +159,23 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
   };
 }
 
+/**
+ * The park-delivered digest decision for a helm session: due only when the
+ * report cadence has elapsed since the last delivered report AND the grounds
+ * delta is non-empty. Change-gating is what makes it safe to call from a
+ * Stop hook — an empty delta can never loop the hook.
+ */
+export function dueHelmDigest(
+  helm: { grounds: string; repos: string[] },
+  reportSecs: number,
+  now = Date.now(),
+): Digest | undefined {
+  const last = lastReportedAt(helm.grounds);
+  if (last !== undefined && now - last < reportSecs * 1000) return undefined;
+  const d = buildDigest({ cursor: helm.grounds, repos: new Set(helm.repos), now });
+  return d.changed ? d : undefined;
+}
+
 export function renderDigest(d: Digest): string {
   const lines: string[] = [toonKV({ digest: `${d.since} -> ${d.now}` })];
   if (d.landed.length > 0) {
