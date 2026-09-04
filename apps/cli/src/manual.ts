@@ -34,6 +34,10 @@ getting woken instead of asking:
   lobstah man init          install the Stop-hook park, then launch the
                             designated session with: LOBSTAH_MAN=1 claude
   lobstah man wait --peek   at session start — resurface anything standing
+  lobstah man report        the delta since your last report: landed, arisen,
+                            still-waiting, verdict. A man wait timeout carries
+                            it too, so a wait loop doubles as the periodic
+                            fleet report
 
 paste into your liaison instructions:
   For any task that should run in the background, dispatch it with the lobstah

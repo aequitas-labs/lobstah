@@ -70,7 +70,7 @@ export interface TendReport {
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
   daemon: { up: boolean; lastHeartbeat?: string };
   counts: { queued: number; active: number; choresActive: number; done24h: number; failed24h: number };
-  attention: Array<{ id: string; lane: Lane; verb: string; ageSecs: number; note?: string }>;
+  attention: Array<{ id: string; lane: Lane; verb: string; ageSecs: number; at?: string; note?: string }>;
   stories: TendStory[];
   watches: TendWatch[];
   soaking: TendSoak[];
@@ -150,6 +150,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     lane: ev.lane,
     verb: ev.entry.verb as string,
     ageSecs: Math.max(0, Math.round((now - Date.parse(ev.entry.at)) / 1000)),
+    at: ev.entry.at,
     note: ev.entry.note,
   }));
 
@@ -182,6 +183,7 @@ export function buildTendReport(now = Date.now()): TendReport {
         lane: 'work',
         verb: 'watch',
         ageSecs: oldest?.at ? Math.max(0, Math.round((now - Date.parse(oldest.at)) / 1000)) : 0,
+        at: oldest?.at,
         note: pending.at(-1)?.summary,
       });
     }
