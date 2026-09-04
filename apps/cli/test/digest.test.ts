@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence } from '@lobstah/core';
-import { advanceCursor, buildDigest, lastReportedAt, renderDigest } from '../src/digest.js';
+import { advanceCursor, buildDigest, dueHelmDigest, lastReportedAt, renderDigest } from '../src/digest.js';
 
 let home: string;
 beforeEach(() => {
@@ -77,6 +77,36 @@ describe('man report — the delta digest', () => {
     expect(second.arisen).toEqual([]);
     expect(second.standing).toEqual([expect.objectContaining({ verb: 'needs-decision' })]);
     expect(renderDigest(second)).toContain('still-waiting');
+  });
+
+  it('a grounds-scoped digest sees only its own repos', () => {
+    enqueue({ id: 'aaaaaaaa-0000-0000-0000-000000000010', repo: 'mine', brief: 'b' });
+    claimNext('work');
+    appendStatus('aaaaaaaa-0000-0000-0000-000000000010', 'work', 'done');
+    complete('aaaaaaaa-0000-0000-0000-000000000010', 'work');
+    enqueue({ id: 'aaaaaaaa-0000-0000-0000-000000000011', repo: 'theirs', brief: 'b' });
+    claimNext('work');
+    appendStatus('aaaaaaaa-0000-0000-0000-000000000011', 'work', 'needs-decision', 'not yours');
+    const d = buildDigest({ repos: new Set(['mine']) });
+    expect(d.landed).toEqual([expect.objectContaining({ repo: 'mine' })]);
+    expect(d.standing).toEqual([]);
+    const all = buildDigest();
+    expect(all.landed).toHaveLength(1);
+    expect(all.standing).toHaveLength(1);
+  });
+
+  it('the helm park digest is due only past the cadence AND with a non-empty delta', () => {
+    const helm = { grounds: 'fleet', repos: ['r'] };
+    expect(dueHelmDigest(helm, 900)).toBeUndefined(); // no delta — never due
+    land('aaaaaaaa-0000-0000-0000-000000000020', 'done');
+    const due = dueHelmDigest(helm, 900);
+    expect(due?.changed).toBe(true); // never reported — due immediately
+    advanceCursor('fleet', due!.now);
+    land('aaaaaaaa-0000-0000-0000-000000000021', 'done');
+    expect(dueHelmDigest(helm, 900)).toBeUndefined(); // delta exists, cadence not elapsed
+    const old = new Date(Date.now() - 901_000);
+    fs.utimesSync(path.join(home, 'reported', 'fleet.json'), old, old);
+    expect(dueHelmDigest(helm, 900)?.changed).toBe(true); // cadence elapsed + delta
   });
 
   it('never reaches back past 24 hours, cursor or none', () => {

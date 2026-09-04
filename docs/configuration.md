@@ -60,6 +60,28 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | `deferSecs` | `90` | A soaking session whose park heartbeat is this fresh holds unaddressed matching bait — the daemon waits instead of spawning. Addressed bait (`--for session:<id>`) waits regardless, until the registration is gone. |
 | `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues its open catch (or finalizes a cancelled one as failed). A fresh `lobstah report` on the catch counts as liveness too. |
 
+## `[helm]` — the orchestrator seat (`lobstah man helm`)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `ttlSecs` | `1800` | Heartbeat age past which a helm registration is stale: the next `man helm` claims it without `--take`. The park and `man brief` heartbeat it. |
+| `reportSecs` | `900` | Minimum seconds between park-delivered digests for a helm session. The digest is also change-gated — quiet grounds deliver nothing regardless of cadence. |
+
+## `[grounds.*]` — helm territories
+
+One helm per grounds; a repo belongs to at most one grounds (`man helm`
+refuses on overlap or an unknown repo key). With no `[grounds.*]` configured
+there is one implicit `fleet` grounds covering every repo — the partition
+only exists when asked for.
+
+```toml
+[grounds.base]
+repos = ["homebase", "matcha"]
+
+[grounds.aequitas]
+repos = ["lobstah", "lavish"]
+```
+
 ## `[pickup]` — tracker loops (`lobstah pick`)
 
 | Key | Default | Meaning |

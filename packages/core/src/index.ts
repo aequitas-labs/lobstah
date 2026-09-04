@@ -11,4 +11,5 @@ export * from './version.js';
 export * from './harness.js';
 export * from './watch.js';
 export * from './soak.js';
+export * from './helm.js';
 export * from './compiled.js';

@@ -220,14 +220,18 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now()): GhostSweepActi
   return actions;
 }
 
-/** The brief a soaking session receives with its catch — self-contained instructions. */
+/**
+ * The brief a soaking session receives with its claimed work. Deliberately
+ * plain language: the lobsterman's surfaces are on theme, but a worker gets
+ * task instructions, never metaphor to decode.
+ */
 export function baitBrief(id: string, d: Descriptor): string {
   return [
-    `You are a soaking trap and caught bait: dispatch ${id}.`,
+    `You are a lobstah worker session and have been assigned dispatch ${id}.`,
     '',
-    'Work it in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
+    'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
     `Report progress with \`lobstah report ${id} working "<note>"\` at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" [--pr <url>]\` (or \`failed\`).`,
-    'The brief:',
+    'The task:',
     '',
     d.brief,
   ].join('\n');
