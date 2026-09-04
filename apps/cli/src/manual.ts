@@ -38,6 +38,11 @@ getting woken instead of asking:
                             still-waiting, verdict. A man wait timeout carries
                             it too, so a wait loop doubles as the periodic
                             fleet report
+  lobstah man helm          take the helm: sign on as the one lobsterman for
+                            your grounds. The charter prints (and re-injects
+                            at every session start), the Stop-hook park arms
+                            itself, and parks deliver the periodic digest.
+                            \`man relieve\` steps down
 
 paste into your liaison instructions:
   For any task that should run in the background, dispatch it with the lobstah

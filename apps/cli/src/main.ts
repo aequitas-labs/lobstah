@@ -20,6 +20,13 @@ import {
   releaseCatch,
   signOnSoak,
   stowSoak,
+  consumeRelievedNotice,
+  groundsErrors,
+  heartbeatHelm,
+  helmOf,
+  relieveHelm,
+  resolveGrounds,
+  takeHelm,
   listWatches,
   pendingWatchEvents,
   readWatchEvents,
@@ -51,7 +58,8 @@ import type { Descriptor, Lane, WatchAttention } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
-import { advanceCursor, buildDigest, renderDigest } from './digest.js';
+import { advanceCursor, buildDigest, lastReportedAt, renderDigest } from './digest.js';
+import { charter } from './charter.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { applyCull, planCull } from './cull.js';
 import { MANUAL } from './manual.js';
@@ -125,11 +133,19 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   Runs due watch checks itself when no pick
                                   process is. Unanswered questions re-fire
                                   every remindSecs until answered.
-  man report [--cursor <name>] [--peek] [--json]
+  man report [--grounds <name>] [--peek] [--json]
                                   the delta since the last report: catches
                                   landed, attention arisen, still-waiting, and
                                   the fleet verdict; advances the reported-
                                   through cursor. "no change" when quiet.
+  man helm [--session <id>] [--grounds <name>] [--take]
+                                  take the helm: one orchestrator per grounds
+                                  (a named repo set from [grounds.*], or the
+                                  whole fleet). Prints the charter, arms the
+                                  Stop-hook park, and gates the periodic
+                                  digest. A live holder refuses without
+                                  --take; a stale one is claimable.
+  man relieve [--session <id>]    step down from the helm.
   man init [--shared|--global] [--marker]
                                   install the haul Stop hook: this project's
                                   .claude/settings.local.json by default,
@@ -583,12 +599,57 @@ ${progress}`,
       // The delta since the last report, then advance the cursor — every
       // carrier (this verb, man wait's timeout, a gateway heartbeat) shares
       // one "reported through" mark, so nothing is reported twice.
-      const cursor = arg(args, '--cursor') ?? 'fleet';
-      const digest = buildDigest({ cursor });
+      const groundsName = arg(args, '--grounds');
+      const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName) : undefined;
+      const cursor = arg(args, '--cursor') ?? grounds?.name ?? 'fleet';
+      const digest = buildDigest({ cursor, repos: grounds ? new Set(grounds.repos) : undefined });
       if (args.includes('--json')) console.log(JSON.stringify(digest, null, 2));
       else if (digest.changed) console.log(renderDigest(digest));
       else console.log(toonKV({ digest: 'no change', since: digest.since, fleet: digest.verdict }));
       if (digest.changed && !args.includes('--peek')) advanceCursor(cursor, digest.now);
+      break;
+    }
+    case 'man:helm': {
+      // Take the helm: sign this session on as the one lobsterman for its
+      // grounds. The registration arms the Stop-hook park (no marker file
+      // needed) and gates the periodic digest; the charter is the persona.
+      const sessionId = arg(args, '--session') ?? readHookStdin()?.session_id;
+      if (!sessionId) {
+        throw new Error(
+          'helm requires --session <id> — the harness session id, announced at session start ' +
+            'by the lobstah plugin (`lobstah man brief`)',
+        );
+      }
+      const cfg = loadConfig();
+      const errs = groundsErrors(cfg);
+      if (errs.length > 0) throw new Error(`fix [grounds.*] in ${configPath()} first:\n${errs.map((e) => `- ${e}`).join('\n')}`);
+      const grounds = resolveGrounds(cfg, arg(args, '--grounds'));
+      const res = takeHelm({ sessionId, grounds, ttlMs: cfg.helm.ttlSecs * 1000, take: args.includes('--take') });
+      if ('held' in res) {
+        const ageSecs = Math.max(0, Math.round((Date.now() - (Date.parse(res.held.heartbeatAt) || 0)) / 1000));
+        throw new Error(
+          `the helm for grounds "${grounds.name}" is held by session ${res.held.sessionId.slice(0, 8)} ` +
+            `(heartbeat ${ageSecs}s ago). Relieve them deliberately with \`lobstah man helm --take\`, or leave it.`,
+        );
+      }
+      console.log(charter(grounds));
+      console.log('');
+      console.log(
+        toonKV({
+          helm: grounds.name,
+          session: sessionId,
+          ...(res.ok.tookFrom ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` } : {}),
+          note: 'parks at turn end via the Stop hook (lobstah plugin or `man init --global`); digests arrive as wakes',
+        }),
+      );
+      console.log(toonHelp([`lobstah man relieve --session ${sessionId}   (step down)`]));
+      break;
+    }
+    case 'man:relieve': {
+      const sessionId = arg(args, '--session') ?? readHookStdin()?.session_id;
+      if (!sessionId) throw new Error('relieve requires --session <id> (or hook input on stdin)');
+      const relieved = relieveHelm(sessionId);
+      console.log(toonKV({ relieved: sessionId, grounds: relieved.length > 0 ? relieved.join(', ') : '(none held)' }));
       break;
     }
     case 'cancel': {
@@ -642,10 +703,12 @@ ${progress}`,
       // A quiet timeout still reports the delta since the last digest, so a
       // `man wait` loop doubles as the periodic fleet report. Silent when
       // nothing changed — the loop should not train its reader to skim.
-      const digest = buildDigest();
+      const groundsName = arg(args, '--grounds');
+      const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName) : undefined;
+      const digest = buildDigest({ cursor: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
       if (digest.changed) {
         console.log(renderDigest(digest));
-        advanceCursor('fleet', digest.now);
+        advanceCursor(grounds?.name ?? 'fleet', digest.now);
       }
       console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
       process.exitCode = 3; // 2 means a usage mistake; timeout gets its own code
@@ -696,17 +759,64 @@ ${progress}`,
           await soakPark(soakReg.sessionId, args);
           break;
         }
-        if (process.env.LOBSTAH_MAN !== '1' && !fs.existsSync('.lobstah-man')) break;
+        // A displaced helm learns at its next park: deliver the stand-down
+        // notice once, then stop treating the session as an orchestrator.
+        const relievedNotice = hook?.session_id ? consumeRelievedNotice(hook.session_id) : undefined;
+        if (relievedNotice) {
+          console.log(
+            JSON.stringify({
+              decision: 'block',
+              reason:
+                `You were relieved of the helm for grounds "${relievedNotice.grounds}" by session ` +
+                `${relievedNotice.by.slice(0, 8)} at ${relievedNotice.at}. Stand down: stop dispatching, ` +
+                'and do not re-take the helm without the human.',
+            }),
+          );
+          break;
+        }
+        // A helm registration arms the park on its own — no marker file, no
+        // env var. The park heartbeats it, same as a soaking trap.
+        const helm = hook?.session_id ? helmOf(hook.session_id) : undefined;
+        if (helm) heartbeatHelm(helm.sessionId);
+        if (!helm && process.env.LOBSTAH_MAN !== '1' && !fs.existsSync('.lobstah-man')) break;
+        const cfgHaul = loadConfig();
+        // The periodic digest: for a helm session, when the report cadence
+        // has elapsed and the grounds delta is non-empty, a park delivers the
+        // digest as the wake. Change-gated, so it can never loop the hook.
+        const dueDigest = () => {
+          if (!helm) return undefined;
+          const last = lastReportedAt(helm.grounds);
+          if (last !== undefined && Date.now() - last < cfgHaul.helm.reportSecs * 1000) return undefined;
+          const d = buildDigest({ cursor: helm.grounds, repos: new Set(helm.repos) });
+          return d.changed ? d : undefined;
+        };
+        const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
+          advanceCursor(helm!.grounds, d.now);
+          console.log(
+            JSON.stringify({
+              decision: 'block',
+              reason:
+                `Fleet report for grounds "${helm!.grounds}":\n${renderDigest(d)}\n` +
+                'Handle anything actionable; this session re-parks at turn end.',
+            }),
+          );
+        };
         const anyActive = (['work', 'chore'] as Lane[]).some((l) =>
           fs.readdirSync(laneDirs(l).active).some((f) => !f.startsWith('.')),
         );
         // A registered session-owned watch is in-flight work too — a ume
         // review can be the only thing standing between this turn and done.
         const anyWatch = listWatches().some((w) => w.owner === 'man');
-        if (!anyActive && !anyWatch) break; // nothing in flight — conversational turns end free
+        if (!anyActive && !anyWatch) {
+          // Nothing in flight — but a helm's landed-then-idle delta still
+          // deserves one report before the quiet sets in.
+          const d = dueDigest();
+          if (d) blockDigest(d);
+          break; // otherwise conversational turns end free
+        }
         const timeoutSecs = Number(arg(args, '--timeout') ?? '14000');
         const deadline = Date.now() + timeoutSecs * 1000;
-        const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
+        const remindMs = (cfgHaul.remindSecs ?? 900) * 1000;
         runDueManWatches();
         let evs = attentionNow(true, remindMs);
         let watched = pendingWatchEvents(true);
@@ -721,7 +831,11 @@ ${progress}`,
             if (evs.length > 0 || watched.length > 0) break;
           }
         }
-        if (evs.length === 0 && watched.length === 0) break; // timeout — allow the stop; tier 1 covers the horizon
+        if (evs.length === 0 && watched.length === 0) {
+          const d = dueDigest();
+          if (d) blockDigest(d);
+          break; // timeout — allow the stop; tier 1 covers the horizon
+        }
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) =>
@@ -758,9 +872,18 @@ ${progress}`,
         // a brief must never fail the session start
       }
       const soaking = readSoak(hook.session_id) !== undefined;
-      const context = soaking
-        ? `lobstah: session id ${hook.session_id} — this session is soaking (a volunteered worker); \`lobstah stow --session ${hook.session_id}\` signs it off.${fleet}`
-        : `lobstah: session id ${hook.session_id} (for \`lobstah soak|stow --session <id>\`).${fleet}`;
+      // A helm session gets its charter re-injected on every start, so the
+      // persona survives restarts and compaction without anyone re-running
+      // `man helm`. The start also counts as a heartbeat.
+      const helmReg = helmOf(hook.session_id);
+      if (helmReg) heartbeatHelm(helmReg.sessionId);
+      const context = helmReg
+        ? `lobstah: session id ${hook.session_id} — you hold the helm for grounds "${helmReg.grounds}" ` +
+          `(\`lobstah man relieve --session ${hook.session_id}\` steps down).${fleet}\n\n` +
+          charter({ name: helmReg.grounds, repos: helmReg.repos })
+        : soaking
+          ? `lobstah: session id ${hook.session_id} — this session is soaking (a volunteered worker); \`lobstah stow --session ${hook.session_id}\` signs it off.${fleet}`
+          : `lobstah: session id ${hook.session_id} (for \`lobstah soak|stow --session <id>\`).${fleet}`;
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }),
       );

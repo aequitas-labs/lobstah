@@ -79,6 +79,22 @@ describe('man report — the delta digest', () => {
     expect(renderDigest(second)).toContain('still-waiting');
   });
 
+  it('a grounds-scoped digest sees only its own repos', () => {
+    enqueue({ id: 'aaaaaaaa-0000-0000-0000-000000000010', repo: 'mine', brief: 'b' });
+    claimNext('work');
+    appendStatus('aaaaaaaa-0000-0000-0000-000000000010', 'work', 'done');
+    complete('aaaaaaaa-0000-0000-0000-000000000010', 'work');
+    enqueue({ id: 'aaaaaaaa-0000-0000-0000-000000000011', repo: 'theirs', brief: 'b' });
+    claimNext('work');
+    appendStatus('aaaaaaaa-0000-0000-0000-000000000011', 'work', 'needs-decision', 'not yours');
+    const d = buildDigest({ repos: new Set(['mine']) });
+    expect(d.landed).toEqual([expect.objectContaining({ repo: 'mine' })]);
+    expect(d.standing).toEqual([]);
+    const all = buildDigest();
+    expect(all.landed).toHaveLength(1);
+    expect(all.standing).toHaveLength(1);
+  });
+
   it('never reaches back past 24 hours, cursor or none', () => {
     land('aaaaaaaa-0000-0000-0000-000000000005', 'done');
     const old = new Date(Date.now() - 25 * 3600_000).toISOString();
