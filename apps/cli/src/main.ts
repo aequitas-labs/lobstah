@@ -51,6 +51,7 @@ import type { Descriptor, Lane, WatchAttention } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
+import { advanceCursor, buildDigest, renderDigest } from './digest.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { applyCull, planCull } from './cull.js';
 import { MANUAL } from './manual.js';
@@ -119,10 +120,16 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man wait [--timeout <secs>] [--peek]
                                   block until a dispatch or watched source
                                   needs attention, then print the event and
-                                  what to do next; exit 3 on timeout. Runs due
-                                  watch checks itself when no pick process is.
-                                  Unanswered questions re-fire every
-                                  remindSecs until answered.
+                                  what to do next; exit 3 on timeout (with the
+                                  man report delta when something changed).
+                                  Runs due watch checks itself when no pick
+                                  process is. Unanswered questions re-fire
+                                  every remindSecs until answered.
+  man report [--cursor <name>] [--peek] [--json]
+                                  the delta since the last report: catches
+                                  landed, attention arisen, still-waiting, and
+                                  the fleet verdict; advances the reported-
+                                  through cursor. "no change" when quiet.
   man init [--shared|--global] [--marker]
                                   install the haul Stop hook: this project's
                                   .claude/settings.local.json by default,
@@ -572,6 +579,18 @@ ${progress}`,
       console.log(args.includes('--json') ? JSON.stringify(report, null, 2) : renderTend(report));
       break;
     }
+    case 'man:report': {
+      // The delta since the last report, then advance the cursor — every
+      // carrier (this verb, man wait's timeout, a gateway heartbeat) shares
+      // one "reported through" mark, so nothing is reported twice.
+      const cursor = arg(args, '--cursor') ?? 'fleet';
+      const digest = buildDigest({ cursor });
+      if (args.includes('--json')) console.log(JSON.stringify(digest, null, 2));
+      else if (digest.changed) console.log(renderDigest(digest));
+      else console.log(toonKV({ digest: 'no change', since: digest.since, fleet: digest.verdict }));
+      if (digest.changed && !args.includes('--peek')) advanceCursor(cursor, digest.now);
+      break;
+    }
     case 'cancel': {
       const id = args[0];
       if (!id) throw new Error('cancel requires a dispatch id');
@@ -619,6 +638,14 @@ ${progress}`,
           emitWatchAttention(watched);
           return;
         }
+      }
+      // A quiet timeout still reports the delta since the last digest, so a
+      // `man wait` loop doubles as the periodic fleet report. Silent when
+      // nothing changed — the loop should not train its reader to skim.
+      const digest = buildDigest();
+      if (digest.changed) {
+        console.log(renderDigest(digest));
+        advanceCursor('fleet', digest.now);
       }
       console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
       process.exitCode = 3; // 2 means a usage mistake; timeout gets its own code
