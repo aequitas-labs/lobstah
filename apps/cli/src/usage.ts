@@ -81,6 +81,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
   'man:brief': { flags: {} },
+  __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
 };
 
 /** Hand-written prose under each generated synopsis. */
@@ -130,6 +131,8 @@ PR, and merge gate. Pure disk read.`,
 or soaking worker); prints hook-decision JSON on an event.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
+  __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
+itself with this verb). Not for direct use.`,
 };
 
 /** Generated synopsis: command, subverbs, positionals, then flags. */

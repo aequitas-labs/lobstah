@@ -46,6 +46,20 @@ pnpm install && pnpm build
 ln -s "$PWD/bin/lobstah" /usr/local/bin/lobstah   # Windows: add .\bin to PATH
 ```
 
+No Node on the box? Standalone binaries (bun-compiled) ship with every
+[release](https://github.com/aequitas-labs/lobstah/releases) for
+macOS/Linux/Windows:
+
+```bash
+curl -fsSL -o /usr/local/bin/lobstah \
+  https://github.com/aequitas-labs/lobstah/releases/latest/download/lobstah-darwin-arm64
+chmod +x /usr/local/bin/lobstah
+```
+
+The binary drives harnesses through their CLIs instead of the bundled SDKs:
+codex workers run fully Node-free; claude workers still need the (Node-based)
+`claude` CLI on the host.
+
 ## Quick start 🪝
 
 ```bash
