@@ -153,10 +153,15 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   ~/.claude/settings.json with --global (any
                                   directory with a .lobstah-man file then
                                   parks); --marker touches .lobstah-man.
-  man haul [--timeout <secs>]     Stop-hook entry point: park the session while
-                                  work is in flight; prints hook-decision JSON
-                                  on an event, silent exit 0 otherwise. Gate:
-                                  LOBSTAH_MAN=1 or a .lobstah-man file.
+  man haul [--timeout <secs>] [--session <id>]
+                                  the park: as the Stop-hook entry point it
+                                  prints hook-decision JSON on an event and is
+                                  otherwise a silent exit 0 (gate: helm
+                                  registration, LOBSTAH_MAN=1, or a
+                                  .lobstah-man file). With --session it is the
+                                  same park as a plain foreground command for
+                                  hookless sessions: wakes print plain, a
+                                  timeout exits 3 — re-arm and loop.
 
 workers (dispatched agents; injected into every brief):
   report <uuid> <verb> [note] [--pr <url>]
@@ -203,15 +208,19 @@ function arg(args: string[], flag: string): string | undefined {
 const WATCH_EVERY_SECS = 45;
 
 /**
- * The soak side of the Stop-hook park: heartbeat, then wait for something to
- * act on. An idle trap waits for bait; a trap with an open catch waits for a
- * cancel or a `lobstah send` message about it. Both wake with hook-decision
- * JSON; a timeout allows the stop silently — the next turn end re-parks.
+ * The soak side of the park: heartbeat, then wait for something to act on.
+ * An idle trap waits for bait; a trap with an open catch waits for a cancel
+ * or a `lobstah send` message about it. Driven by the Stop hook (wakes are
+ * hook-decision JSON; a timeout allows the stop silently and the next turn
+ * end re-parks) or run directly with `--session` in a hookless session
+ * (wakes print plain; a timeout exits 3 so a loop can re-arm).
  */
-async function soakPark(sessionId: string, args: string[]): Promise<void> {
+async function soakPark(sessionId: string, args: string[], plain = false): Promise<void> {
   const timeoutSecs = Number(arg(args, '--timeout') ?? '14000');
   const deadline = Date.now() + timeoutSecs * 1000;
-  const block = (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
+  const block = plain
+    ? (reason: string) => console.log(reason)
+    : (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
   while (true) {
     const reg = heartbeatSoak(sessionId);
     if (!reg) return; // stowed while parked
@@ -239,7 +248,13 @@ async function soakPark(sessionId: string, args: string[]): Promise<void> {
         return;
       }
     }
-    if (Date.now() >= deadline) return;
+    if (Date.now() >= deadline) {
+      if (plain) {
+        console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
+        process.exitCode = 3;
+      }
+      return;
+    }
     await new Promise((r) => setTimeout(r, 1500));
   }
 }
@@ -748,29 +763,34 @@ ${progress}`,
       break;
     }
     case 'man:haul': {
-      // Stop-hook entry point: everything non-actionable is a silent exit 0 —
-      // a hook must never break the user's stop with noise. A session that is
-      // soaking parks as a worker (waits for bait); otherwise the lobsterman
-      // gate applies (marker file or env).
+      // The park. Usually the Stop-hook entry point: everything
+      // non-actionable is a silent exit 0 — a hook must never break the
+      // user's stop with noise — and wakes are hook-decision JSON. With an
+      // explicit --session it is the same park as a plain foreground
+      // command for hookless sessions: wakes print plain, a timeout exits 3,
+      // and errors surface. A session that is soaking parks as a worker
+      // (waits for bait); otherwise the lobsterman gate applies (helm
+      // registration, marker file, or env).
+      const explicit = arg(args, '--session');
+      const plain = explicit !== undefined;
       try {
-        const hook = readHookStdin();
+        const hook = plain ? { session_id: explicit } : readHookStdin();
         const soakReg = hook?.session_id ? readSoak(hook.session_id) : undefined;
         if (soakReg) {
-          await soakPark(soakReg.sessionId, args);
+          await soakPark(soakReg.sessionId, args, plain);
           break;
         }
+        const emit = plain
+          ? (reason: string) => console.log(reason)
+          : (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
         const relievedNotice = hook?.session_id ? consumeRelievedNotice(hook.session_id) : undefined;
         if (relievedNotice) {
-          console.log(
-            JSON.stringify({
-              decision: 'block',
-              reason:
-                `You were relieved of the helm for grounds "${relievedNotice.grounds}" by session ` +
-                `${relievedNotice.by.slice(0, 8)} at ${relievedNotice.at}. Stand down: stop dispatching, ` +
-                'and do not re-take the helm without the human.',
-            }),
+          emit(
+            `You were relieved of the helm for grounds "${relievedNotice.grounds}" by session ` +
+              `${relievedNotice.by.slice(0, 8)} at ${relievedNotice.at}. Stand down: stop dispatching, ` +
+              'and do not re-take the helm without the human.',
           );
           break;
         }
@@ -792,13 +812,9 @@ ${progress}`,
         };
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
           advanceCursor(helm!.grounds, d.now);
-          console.log(
-            JSON.stringify({
-              decision: 'block',
-              reason:
-                `Fleet report for grounds "${helm!.grounds}":\n${renderDigest(d)}\n` +
-                'Handle anything actionable; this session re-parks at turn end.',
-            }),
+          emit(
+            `Fleet report for grounds "${helm!.grounds}":\n${renderDigest(d)}\n` +
+              'Handle anything actionable; this session re-parks at turn end.',
           );
         };
         const anyActive = (['work', 'chore'] as Lane[]).some((l) =>
@@ -833,7 +849,12 @@ ${progress}`,
         }
         if (evs.length === 0 && watched.length === 0) {
           const d = dueDigest();
-          if (d) blockDigest(d);
+          if (d) {
+            blockDigest(d);
+          } else if (plain) {
+            console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
+            process.exitCode = 3;
+          }
           break; // timeout — allow the stop; tier 1 covers the horizon
         }
         const lines = [
@@ -842,16 +863,19 @@ ${progress}`,
             a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`),
           ),
         ];
-        const reason = [
-          'A lobstah dispatch or watched source needs attention:',
-          ...lines,
-          'Check a dispatch with `lobstah status <id>`; answer a needs-decision with `lobstah send <id> "<answer>"`.',
-          'A watch line means an external source updated (e.g. a review round) — handle it directly.',
-          'Handle it now. This session re-parks automatically at turn end — do not arm any watcher.',
-        ].join('\n');
-        console.log(JSON.stringify({ decision: 'block', reason }));
-      } catch {
-        // never break a stop
+        emit(
+          [
+            'A lobstah dispatch or watched source needs attention:',
+            ...lines,
+            'Check a dispatch with `lobstah status <id>`; answer a needs-decision with `lobstah send <id> "<answer>"`.',
+            'A watch line means an external source updated (e.g. a review round) — handle it directly.',
+            'Handle it now. This session re-parks automatically at turn end — do not arm any watcher.',
+          ].join('\n'),
+        );
+      } catch (err) {
+        // Never break a stop — but a hookless foreground park owns its turn,
+        // so its errors surface like any other command's.
+        if (plain) throw err;
       }
       break;
     }
@@ -927,10 +951,17 @@ ${progress}`,
           repo: reg.repo ?? '(none configured — addressed bait only)',
           worktree: reg.worktree,
           ...(reg.one ? { one: true } : {}),
-          note: 'parks at turn end via the Stop hook (lobstah plugin or `man init --global`); bait arrives as a wake',
+          note:
+            'parks at turn end via the Stop hook (lobstah plugin or `man init --global`); bait arrives as a wake. ' +
+            'No Stop hook in this session? Park in the foreground instead — never `man wait` (that is the lobsterman verb).',
         }),
       );
-      console.log(toonHelp([`lobstah stow --session ${sessionId}   (sign off)`]));
+      console.log(
+        toonHelp([
+          `lobstah man haul --session ${sessionId} --timeout 600   (hookless: park now; bait prints, exit 3 = re-arm)`,
+          `lobstah stow --session ${sessionId}   (sign off)`,
+        ]),
+      );
       break;
     }
     case 'stow': {
