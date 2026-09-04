@@ -77,6 +77,27 @@ export function helmOf(sessionId: string): HelmRegistration | undefined {
   return listHelms().find((h) => h.sessionId === sessionId);
 }
 
+/** Helm registrations whose heartbeat is within ttl — the claimed seats. */
+export function liveHelms(ttlMs: number, now = Date.now()): HelmRegistration[] {
+  return listHelms().filter((h) => now - (Date.parse(h.heartbeatAt) || 0) <= ttlMs);
+}
+
+/**
+ * The strict helm rule: once a lobsterman has signed on, the orchestrator
+ * verbs that consume helm state are theirs alone. Returns the refusal
+ * message for an unidentified or foreign caller, or undefined when the call
+ * is allowed (no live helm anywhere, or the caller is one).
+ */
+export function helmGate(live: HelmRegistration[], sessionId?: string): string | undefined {
+  if (live.length === 0) return undefined; // no claimed lobsterman — open water
+  if (sessionId !== undefined && live.some((h) => h.sessionId === sessionId)) return undefined;
+  const holders = live.map((h) => `${h.grounds}=${h.sessionId.slice(0, 8)}`).join(', ');
+  return (
+    `the helm is claimed (${holders}) — this verb is reserved for the helm session. ` +
+    'Run it there with --session <helm-session-id>, or take the helm (`lobstah man helm --take`).'
+  );
+}
+
 export type TakeHelmResult = { ok: HelmRegistration } | { held: HelmRegistration };
 
 /**

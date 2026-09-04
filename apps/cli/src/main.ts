@@ -23,7 +23,9 @@ import {
   consumeRelievedNotice,
   groundsErrors,
   heartbeatHelm,
+  helmGate,
   helmOf,
+  liveHelms,
   relieveHelm,
   resolveGrounds,
   takeHelm,
@@ -153,15 +155,13 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   ~/.claude/settings.json with --global (any
                                   directory with a .lobstah-man file then
                                   parks); --marker touches .lobstah-man.
-  man haul [--timeout <secs>] [--session <id>]
-                                  the park: as the Stop-hook entry point it
-                                  prints hook-decision JSON on an event and is
-                                  otherwise a silent exit 0 (gate: helm
-                                  registration, LOBSTAH_MAN=1, or a
-                                  .lobstah-man file). With --session it is the
-                                  same park as a plain foreground command for
-                                  hookless sessions: wakes print plain, a
-                                  timeout exits 3 — re-arm and loop.
+  man haul [--timeout <secs>]     Stop-hook entry point: park the session while
+                                  work is in flight; prints hook-decision JSON
+                                  on an event, silent exit 0 otherwise. Gate:
+                                  helm registration, LOBSTAH_MAN=1, or a
+                                  .lobstah-man file. Hookless sessions use the
+                                  foreground verbs: soak --wait (worker),
+                                  man wait (lobsterman).
 
 workers (dispatched agents; injected into every brief):
   report <uuid> <verb> [note] [--pr <url>]
@@ -169,13 +169,16 @@ workers (dispatched agents; injected into every brief):
                                   (${VERBS.join(' | ')})
 
 soaking (interactive sessions volunteering as workers):
-  soak --session <id> [--one] [--harness claude|codex]
+  soak --session <id> [--one] [--harness claude|codex] [--wait [--timeout <s>]]
                                   put this session in the water: it parks at
                                   turn end and takes matching bait from the
                                   work queue. Refused from a primary checkout
                                   — soak from a worktree. --one stows after
                                   the first catch. The session id comes from
-                                  the plugin's session-start brief.
+                                  the plugin's session-start brief. --wait
+                                  parks in the foreground now (for sessions
+                                  without Stop hooks): bait prints plain, a
+                                  quiet timeout exits 3 — re-run to re-arm.
   stow [--session <id>] [--quiet] take the trap out: sign the session off; an
                                   open catch goes back to the queue. A stale
                                   registration (ghost trap) is swept
@@ -613,7 +616,12 @@ ${progress}`,
     case 'man:report': {
       // The delta since the last report, then advance the cursor — every
       // carrier (this verb, man wait's timeout, a gateway heartbeat) shares
-      // one "reported through" mark, so nothing is reported twice.
+      // one "reported through" mark, so nothing is reported twice. Strict
+      // helm rule: advancing the cursor is the helm's alone once claimed.
+      {
+        const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), arg(args, '--session'));
+        if (refusal) throw new Error(refusal);
+      }
       const groundsName = arg(args, '--grounds');
       const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName) : undefined;
       const cursor = arg(args, '--cursor') ?? grounds?.name ?? 'fleet';
@@ -675,6 +683,12 @@ ${progress}`,
       break;
     }
     case 'man:wait': {
+      // Strict helm rule: wait consumes attention events — the helm's wakes.
+      // With a claimed lobsterman anywhere, only that session may run it.
+      {
+        const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), arg(args, '--session'));
+        if (refusal) throw new Error(refusal);
+      }
       const timeoutSecs = Number(arg(args, '--timeout') ?? '0');
       const deadline = timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : Number.POSITIVE_INFINITY;
       const emit = (evs: ReturnType<typeof attentionNow>) => {
@@ -763,26 +777,20 @@ ${progress}`,
       break;
     }
     case 'man:haul': {
-      // The park. Usually the Stop-hook entry point: everything
-      // non-actionable is a silent exit 0 — a hook must never break the
-      // user's stop with noise — and wakes are hook-decision JSON. With an
-      // explicit --session it is the same park as a plain foreground
-      // command for hookless sessions: wakes print plain, a timeout exits 3,
-      // and errors surface. A session that is soaking parks as a worker
-      // (waits for bait); otherwise the lobsterman gate applies (helm
-      // registration, marker file, or env).
-      const explicit = arg(args, '--session');
-      const plain = explicit !== undefined;
+      // Stop-hook entry point: everything non-actionable is a silent exit
+      // 0 — a hook must never break the user's stop with noise. A session
+      // that is soaking parks as a worker (waits for bait); otherwise the
+      // lobsterman gate applies (helm registration, marker file, or env).
+      // Hookless sessions have foreground verbs instead: `soak --wait` for
+      // workers, `man wait` for the lobsterman.
       try {
-        const hook = plain ? { session_id: explicit } : readHookStdin();
+        const hook = readHookStdin();
         const soakReg = hook?.session_id ? readSoak(hook.session_id) : undefined;
         if (soakReg) {
-          await soakPark(soakReg.sessionId, args, plain);
+          await soakPark(soakReg.sessionId, args);
           break;
         }
-        const emit = plain
-          ? (reason: string) => console.log(reason)
-          : (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
+        const emit = (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
         const relievedNotice = hook?.session_id ? consumeRelievedNotice(hook.session_id) : undefined;
@@ -798,8 +806,12 @@ ${progress}`,
         // env var. The park heartbeats it, same as a soaking trap.
         const helm = hook?.session_id ? helmOf(hook.session_id) : undefined;
         if (helm) heartbeatHelm(helm.sessionId);
-        if (!helm && process.env.LOBSTAH_MAN !== '1' && !fs.existsSync('.lobstah-man')) break;
         const cfgHaul = loadConfig();
+        // Strict helm rule: with a claimed lobsterman anywhere, no other
+        // session parks as one — a marker-armed bystander would consume the
+        // helm's wakes. Silent: a hook never breaks a stop with noise.
+        if (!helm && liveHelms(cfgHaul.helm.ttlSecs * 1000).length > 0) break;
+        if (!helm && process.env.LOBSTAH_MAN !== '1' && !fs.existsSync('.lobstah-man')) break;
         // The periodic digest: for a helm session, when the report cadence
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
@@ -849,12 +861,7 @@ ${progress}`,
         }
         if (evs.length === 0 && watched.length === 0) {
           const d = dueDigest();
-          if (d) {
-            blockDigest(d);
-          } else if (plain) {
-            console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
-            process.exitCode = 3;
-          }
+          if (d) blockDigest(d);
           break; // timeout — allow the stop; tier 1 covers the horizon
         }
         const lines = [
@@ -872,10 +879,8 @@ ${progress}`,
             'Handle it now. This session re-parks automatically at turn end — do not arm any watcher.',
           ].join('\n'),
         );
-      } catch (err) {
-        // Never break a stop — but a hookless foreground park owns its turn,
-        // so its errors surface like any other command's.
-        if (plain) throw err;
+      } catch {
+        // never break a stop
       }
       break;
     }
@@ -953,15 +958,20 @@ ${progress}`,
           ...(reg.one ? { one: true } : {}),
           note:
             'parks at turn end via the Stop hook (lobstah plugin or `man init --global`); bait arrives as a wake. ' +
-            'No Stop hook in this session? Park in the foreground instead — never `man wait` (that is the lobsterman verb).',
+            'No Stop hook in this session? Soak with --wait to park in the foreground — never `man wait` (that is the lobsterman verb).',
         }),
       );
       console.log(
         toonHelp([
-          `lobstah man haul --session ${sessionId} --timeout 600   (hookless: park now; bait prints, exit 3 = re-arm)`,
+          `lobstah soak --session ${sessionId} --wait --timeout 600   (hookless: park now; bait prints, exit 3 = re-arm)`,
           `lobstah stow --session ${sessionId}   (sign off)`,
         ]),
       );
+      // The hookless park: same soakPark as the Stop hook drives, as a plain
+      // foreground command — the trap waits in the water right here. Wakes
+      // print plain; a quiet timeout exits 3 so the session re-arms by
+      // re-running the same soak --wait command.
+      if (args.includes('--wait')) await soakPark(sessionId, args, true);
       break;
     }
     case 'stow': {
