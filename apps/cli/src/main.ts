@@ -60,7 +60,7 @@ import type { Descriptor, Lane, WatchAttention } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
-import { advanceCursor, buildDigest, lastReportedAt, renderDigest } from './digest.js';
+import { advanceCursor, buildDigest, dueHelmDigest, renderDigest } from './digest.js';
 import { charter } from './charter.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { applyCull, planCull } from './cull.js';
@@ -280,14 +280,15 @@ function runDueManWatches(): void {
   }
 }
 
-function emitWatchAttention(attns: WatchAttention[]): void {
+function emitWatchAttention(attns: WatchAttention[], sessionId?: string): void {
   for (const a of attns) {
     for (const e of a.events) {
       console.log(toonKV({ watch: a.watch.key, seq: e.seq, summary: e.summary }));
     }
   }
   console.log(
-    'next: handle the watched update now (a review round, a finished run — `lobstah watch ls` for context), then re-arm a background `lobstah man wait`.',
+    'next: handle the watched update now (a review round, a finished run — `lobstah watch ls` for context), ' +
+      `then re-arm a background \`lobstah man wait${sessionId ? ` --session ${sessionId}` : ''}\`.`,
   );
 }
 
@@ -626,16 +627,21 @@ ${progress}`,
       break;
     }
     case 'man:report': {
-      // The delta since the last report, then advance the cursor — every
-      // carrier (this verb, man wait's timeout, a gateway heartbeat) shares
-      // one "reported through" mark, so nothing is reported twice. Strict
-      // helm rule: advancing the cursor is the helm's alone once claimed.
+      // The delta since the last report, then advance the cursor — the
+      // explicit acknowledgment every carrier defers to (man wait's timeout
+      // digest is a peek; this verb is what marks it handled). Strict helm
+      // rule: advancing the cursor is the helm's alone once claimed, and a
+      // grounds-scoped report only its own helm's.
+      const cfgReport = loadConfig();
+      const sid = arg(args, '--session');
+      let groundsName = arg(args, '--grounds');
       {
-        const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), arg(args, '--session'));
+        const refusal = helmGate(liveHelms(cfgReport.helm.ttlSecs * 1000), sid, groundsName);
         if (refusal) throw new Error(refusal);
       }
-      const groundsName = arg(args, '--grounds');
-      const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName) : undefined;
+      // An identified helm defaults to its own grounds.
+      if (groundsName === undefined && sid !== undefined) groundsName = helmOf(sid)?.grounds;
+      const grounds = groundsName !== undefined ? resolveGrounds(cfgReport, groundsName) : undefined;
       const cursor = arg(args, '--cursor') ?? grounds?.name ?? 'fleet';
       const digest = buildDigest({ cursor, repos: grounds ? new Set(grounds.repos) : undefined });
       if (args.includes('--json')) console.log(JSON.stringify(digest, null, 2));
@@ -696,10 +702,21 @@ ${progress}`,
     }
     case 'man:wait': {
       // Strict helm rule: wait consumes attention events — the helm's wakes.
-      // With a claimed lobsterman anywhere, only that session may run it.
+      // With a claimed lobsterman anywhere, only that session may run it, and
+      // a grounds-scoped wait only by that grounds' own helm.
+      const sid = arg(args, '--session');
+      const cfgWait = loadConfig();
+      let groundsName = arg(args, '--grounds');
       {
-        const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), arg(args, '--session'));
+        const refusal = helmGate(liveHelms(cfgWait.helm.ttlSecs * 1000), sid, groundsName);
         if (refusal) throw new Error(refusal);
+      }
+      // An identified helm defaults to its own grounds, and waiting is
+      // liveness: the park heartbeats the registration for it.
+      const callerHelm = sid !== undefined ? helmOf(sid) : undefined;
+      if (callerHelm) {
+        heartbeatHelm(callerHelm.sessionId);
+        groundsName ??= callerHelm.grounds;
       }
       const timeoutSecs = Number(arg(args, '--timeout') ?? '0');
       const deadline = timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : Number.POSITIVE_INFINITY;
@@ -713,7 +730,7 @@ ${progress}`,
             (ev.entry.verb === 'needs-decision' || ev.entry.verb === 'blocked'
               ? `, answer with \`lobstah send ${ev.id} "<answer>"\``
               : ', collect the evidence and report the outcome') +
-            ', then re-arm a background `lobstah man wait`.',
+            `, then re-arm a background \`lobstah man wait${sid ? ` --session ${sid}` : ''}\`.`,
         );
       };
       const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
@@ -723,12 +740,13 @@ ${progress}`,
       const standingWatches = pendingWatchEvents(consume);
       if (standing.length > 0 || standingWatches.length > 0) {
         if (standing.length > 0) emit(standing);
-        if (standingWatches.length > 0) emitWatchAttention(standingWatches);
+        if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
         break;
       }
       const baseline = captureWaitBaseline();
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 1500));
+        if (callerHelm) heartbeatHelm(callerHelm.sessionId); // waiting IS liveness
         const fresh = freshWakeEvents(baseline);
         if (fresh.length > 0) {
           emit(fresh);
@@ -737,25 +755,27 @@ ${progress}`,
         runDueManWatches(); // no pick running? this loop is the poller
         const watched = pendingWatchEvents(true);
         if (watched.length > 0) {
-          emitWatchAttention(watched);
+          emitWatchAttention(watched, sid);
           return;
         }
       }
-      // A quiet timeout still reports the delta since the last digest, so a
-      // `man wait` loop doubles as the periodic fleet report. Silent when
+      // A quiet timeout still shows the delta since the last report, so a
+      // `man wait` loop doubles as the periodic fleet report. It is a PEEK —
+      // the cursor moves only on `man report`, the explicit acknowledgment —
+      // so a digest lost with a dead background task resurfaces on the next
+      // timeout instead of being marked delivered to nobody. Silent when
       // nothing changed — the loop should not train its reader to skim.
-      const groundsName = arg(args, '--grounds');
-      const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName) : undefined;
+      const grounds = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
       const digest = buildDigest({ cursor: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
-      if (digest.changed) {
-        console.log(renderDigest(digest));
-        advanceCursor(grounds?.name ?? 'fleet', digest.now);
-      }
+      if (digest.changed) console.log(renderDigest(digest));
       console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
-      const sid = arg(args, '--session');
+      const flags = `${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${groundsName}` : ''}`;
       console.log(
         toonHelp([
-          `lobstah man wait --timeout ${timeoutSecs}${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${groundsName}` : ''}   (re-arm and keep waiting)`,
+          `lobstah man wait --timeout ${timeoutSecs}${flags}   (re-arm and keep waiting)`,
+          ...(digest.changed
+            ? [`lobstah man report${flags}   (acknowledge the delta above once handled — until then it re-surfaces)`]
+            : []),
         ]),
       );
       process.exitCode = 3; // 2 means a usage mistake; timeout gets its own code
@@ -833,13 +853,7 @@ ${progress}`,
         // The periodic digest: for a helm session, when the report cadence
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
-        const dueDigest = () => {
-          if (!helm) return undefined;
-          const last = lastReportedAt(helm.grounds);
-          if (last !== undefined && Date.now() - last < cfgHaul.helm.reportSecs * 1000) return undefined;
-          const d = buildDigest({ cursor: helm.grounds, repos: new Set(helm.repos) });
-          return d.changed ? d : undefined;
-        };
+        const dueDigest = () => (helm ? dueHelmDigest(helm, cfgHaul.helm.reportSecs) : undefined);
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
           advanceCursor(helm!.grounds, d.now);
           emit(

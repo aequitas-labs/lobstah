@@ -118,6 +118,22 @@ describe('the strict helm rule', () => {
     expect(liveHelms(TTL_MS)).toEqual([]);
     expect(helmGate(liveHelms(TTL_MS))).toBeUndefined();
   });
+
+  it('a grounds-scoped call belongs to that grounds\' helm alone — even against another live helm', () => {
+    takeHelm({ sessionId: 's-a', grounds: { name: 'a', repos: ['web'] }, ttlMs: TTL_MS });
+    takeHelm({ sessionId: 's-b', grounds: { name: 'b', repos: ['api'] }, ttlMs: TTL_MS });
+    const live = liveHelms(TTL_MS);
+    expect(helmGate(live, 's-a', 'a')).toBeUndefined();
+    expect(helmGate(live, 's-b', 'a')).toMatch(/helmed by session s-a/);
+    expect(helmGate(live, undefined, 'b')).toMatch(/helmed by session s-b/);
+  });
+
+  it('a grounds with no live helm falls back to the general rule', () => {
+    takeHelm({ sessionId: 's-a', grounds: { name: 'a', repos: ['web'] }, ttlMs: TTL_MS });
+    const live = liveHelms(TTL_MS);
+    expect(helmGate(live, 's-a', 'b')).toBeUndefined(); // s-a is a live helm — allowed
+    expect(helmGate(live, 's-x', 'b')).toMatch(/reserved for the helm session/);
+  });
 });
 
 describe('grounds resolution', () => {
