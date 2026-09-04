@@ -221,8 +221,14 @@ const WATCH_EVERY_SECS = 45;
 async function soakPark(sessionId: string, args: string[], plain = false): Promise<void> {
   const timeoutSecs = Number(arg(args, '--timeout') ?? '14000');
   const deadline = Date.now() + timeoutSecs * 1000;
+  const rearm = `lobstah soak --session ${sessionId} --wait --timeout ${timeoutSecs}`;
+  // Self-instructive in plain mode (axi.md P9): every exit tells the session
+  // its own next command — a foreground park has no hook to re-arm it.
   const block = plain
-    ? (reason: string) => console.log(reason)
+    ? (reason: string) => {
+        console.log(reason);
+        console.log(toonHelp([`${rearm}   (when you finish handling this, park again)`]));
+      }
     : (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
   while (true) {
     const reg = heartbeatSoak(sessionId);
@@ -253,7 +259,13 @@ async function soakPark(sessionId: string, args: string[], plain = false): Promi
     }
     if (Date.now() >= deadline) {
       if (plain) {
-        console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
+        console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs, stillSoaking: true }));
+        console.log(
+          toonHelp([
+            `${rearm}   (nothing yet — run this again to keep listening)`,
+            `lobstah stow --session ${sessionId}   (sign off instead)`,
+          ]),
+        );
         process.exitCode = 3;
       }
       return;
@@ -740,6 +752,12 @@ ${progress}`,
         advanceCursor(grounds?.name ?? 'fleet', digest.now);
       }
       console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
+      const sid = arg(args, '--session');
+      console.log(
+        toonHelp([
+          `lobstah man wait --timeout ${timeoutSecs}${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${groundsName}` : ''}   (re-arm and keep waiting)`,
+        ]),
+      );
       process.exitCode = 3; // 2 means a usage mistake; timeout gets its own code
       break;
     }
