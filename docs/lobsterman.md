@@ -291,11 +291,10 @@ cannot hold two:
   `man` verbs at all — their hookless park is `soak --wait`.
 - An identified `man wait` heartbeats the helm while it waits (waiting is
   liveness) and defaults its digest to the helm's own grounds.
-- Known caveat with multiple helms: event *consumption* in `man wait`/haul
-  is fleet-global today — grounds scope the digest, not yet which wakes a
-  helm's park eats. Partitioned consumption lands with the addressing
-  redesign; until then, run multiple helms with the understanding that
-  whoever parks first sees fleet-wide wakes.
+- Consumption is grounds-partitioned: a helm's `man wait` and park consume
+  only events and notices for its own grounds' repos (events whose repo is
+  unknowable stay visible to all helms). Two helms never eat each other's
+  wakes.
 
 ## Soaking: a live session volunteers as a worker
 
@@ -309,22 +308,40 @@ get.
 lobstah soak --session <id>     # from a worktree — the primary checkout is
                                 # never claimable, so sign on from a linked
                                 # worktree (git worktree add ../side -b side)
-lobstah stow --session <id>     # sign off; an open catch requeues
+lobstah soak --wait             # hookless sessions: listen in the foreground
+                                # (re-runs need no flags — identity is the
+                                # worktree); exit 3 = quiet, run it again
+lobstah stow                    # sign off; an open catch requeues, unread
+                                # messages bounce back to the helm
 ```
 
-The session id comes from the plugin's session-start brief (`lobstah man
-brief` announces it into the conversation). Once soaking, the same Stop hook
-that parks a lobsterman parks the worker: at turn end it waits for bait,
-claims it, and wakes with the brief. While it works a catch, the park wakes
-it for `lobstah send` messages and cancels instead.
+**Identity is the worktree.** Sign-on anchors a short trap id in
+`.lobstah-trap` and prints the trap's address (`wt:<id>`); the address
+survives session restarts — a new session in the same worktree resumes the
+same trap (a *live* foreign session is refused: the session lock). The
+session id (from the plugin's session-start brief) lives inside the
+registration as the liveness principal. Once soaking, the same Stop hook
+that parks a lobsterman parks the worker: at turn end it delivers messages
+first, then claims bait and wakes with the brief. While it works a catch,
+the park wakes it for `lobstah send` messages and cancels instead.
 
-Routing follows ownership: `dispatch --for session:<id>` targets one trap;
-unaddressed bait for a matching repo prefers a parked trap for
-`[soak].deferSecs` before the daemon spawns headless; a watch continuation
-for a chain a soaking session claimed is addressed back to that session. A
-registration whose heartbeat lapses past `[soak].ttlSecs` is a **ghost
-trap** — swept, its catch requeued. Nobody is conscripted: only a session
-that ran `soak` ever receives work.
+Routing follows ownership, and **addressed work is sticky**:
+`dispatch --for wt:<trap>` waits for that trap and never falls back to a
+headless spawn — if the trap ghosts, the orphan surfaces as a helm notice
+(re-address, release, or cancel; `cancel` finalizes unclaimed queue items
+with an audit record). Delivery stamps a receipt into evidence. Unaddressed
+bait for a matching repo prefers a parked trap for `[soak].deferSecs`, then
+the daemon spawns headless. Conversational steering goes through
+`send wt:<trap> "..."` — a message, not bait: no branch, no catch, sender
+stamped, bounced to the helm when undeliverable.
+
+Liveness has two failure shapes with two remedies: a registration that
+parked before and went quiet past `[soak].ttlSecs` is a **ghost trap** —
+swept, catch requeued, noticed; one that **never parked** is a **defective
+enlistment** — noticed with its diagnosis (usually a missing Stop hook →
+`soak --wait`) and left standing so the address keeps protecting its work.
+Nobody is conscripted: only a worktree whose session ran `soak` ever
+receives work.
 
 ## What the daemon gives your liaison for free
 

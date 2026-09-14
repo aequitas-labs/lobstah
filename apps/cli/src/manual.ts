@@ -22,11 +22,18 @@ your working set:
                                                 external (a review session, a
                                                 CI run) — its events wake you
                                                 like any dispatch would
-  lobstah set ... --for session:<id>            drop bait into a soaking trap:
-                                                a live session that volunteered
-                                                (\`lobstah soak\`) works it in
-                                                its own worktree instead of a
-                                                fresh headless spawn
+  lobstah set ... --for wt:<trap>               address work to a signed-on
+                                                worktree: the live session
+                                                manning it (\`lobstah soak\`)
+                                                works it there. Sticky — it
+                                                waits for that trap and never
+                                                falls back to a headless
+                                                spawn; orphans surface as
+                                                notices for you to decide
+  lobstah send wt:<trap> "<message>"            message that session directly
+                                                (no catch lifecycle; arrives
+                                                at its next park; bounces
+                                                back to you if undeliverable)
 
 getting woken instead of asking:
   lobstah man wait          block until a dispatch needs attention (arm it as a

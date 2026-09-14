@@ -140,26 +140,31 @@ the chain.
 
 ## Soaking contract
 
-A **soaking trap** is a live interactive session that volunteered as a worker
-through `lobstah soak` — the validated write path; nothing else touches
-`soaking/`. Sub-agent workers are the traps lobstah sets itself; a soaking
-session is a trap already in the water, and dispatch drops bait into it
-before building a new one. **Owner:** `packages/core/src/soak.ts`.
-**Enforcement:** sign-on is refused from a repo's primary checkout (never
-claimable) and when another session already soaks the same worktree.
+A **trap** is a worktree that volunteered as a worker seat through
+`lobstah soak` — the validated write path; nothing else touches `soaking/`.
+Identity is **worktree-anchored**: `.lobstah-trap` in the worktree root
+holds a short stable id, the registration keys on it, and the address
+(`wt:<id>`) survives session restarts. The session id inside the
+registration is the liveness principal. **Owner:**
+`packages/core/src/soak.ts`. **Enforcement:** sign-on is refused from a
+repo's primary checkout, and a live foreign session in an owned worktree is
+refused (the session lock); a stale one is adopted.
 
 | Word | Meaning |
 | ---- | ------- |
-| `soak` | Sign a session on: it parks at turn end (Stop hook) and takes matching bait from the work queue. `--one` stows after the first catch. `--wait` parks in the foreground right away — the hookless path: bait prints plain, a quiet timeout exits 3, re-running the same command re-arms. Workers never run `man` verbs. |
-| `stow` | Sign a session off; an open catch goes back to the queue (a cancelled one finalizes as failed). |
-| bait address | `--for session:<id>` on a dispatch targets one soaking session. Addressed bait waits for its trap until the registration is gone; unaddressed bait defers to a parked matching trap for `[soak].deferSecs`, then the daemon spawns headless. |
-| catch | The active dispatch a soaking session claimed (`claim.json` in the active dir). One catch per trap; one active item per worktree. The daemon never spawns or restarts it — the session's reports are its liveness. |
-| ghost trap | A registration whose heartbeat lapsed past `[soak].ttlSecs` — a lost trap that keeps fishing. The sweep hauls it out and requeues its catch. A fresh report on the catch keeps a mid-turn session out of the sweep. |
+| `soak` | Sign the worktree's trap on: it parks at turn end (Stop hook) and takes matching work. `--session` only on first sign-on; re-runs infer everything from the anchor file. `--one` stows after the first catch. `--wait` parks in the foreground — the hookless path: work prints plain, a quiet timeout exits 3, re-running re-arms. Workers never run `man` verbs. |
+| `stow` | Sign the trap off (run it in the worktree); an open catch requeues (a cancelled one finalizes as failed) and unread messages bounce to the helm. |
+| address | `--for wt:<trap>` targets one trap; `session:<id>` is an alias resolved to the trap at dispatch time. **Sticky:** addressed work is never the daemon's — it waits for its trap; an orphan (trap gone) surfaces as a `bait-orphaned` notice for the helm to re-address, release, or cancel. Delivery stamps a receipt (`deliveredTo`/`deliveredAt`) into evidence. Unaddressed work defers to a parked matching trap for `[soak].deferSecs`, then the daemon spawns headless. |
+| message | `send wt:<trap> "<text>"` — a conversational continuation, not work: no branch, no catch, no report obligation. Delivered before bait at the trap's next park, stamped with its sender (`helm` / `session:<id>` / `terminal`); undeliverable messages bounce to the helm as notices. |
+| catch | The active dispatch a trap claimed (`claim.json`, `by: wt:<id>`). One catch per trap; one active item per worktree. The daemon never spawns or restarts it — the session's reports are its liveness. |
+| ghost trap | A registration whose heartbeat lapsed past `[soak].ttlSecs` **after having parked at least once**. The sweep removes it, requeues its catch, and posts a `trap-ghosted` notice; re-soaking the worktree restores the same address. A fresh report on the catch keeps a mid-turn session out of the sweep. |
+| defective enlistment | A stale registration that **never parked** — signed on but never listened (usually no Stop hook). Not swept: the helm gets a `trap-defective` notice with the remedy (`soak --wait`), and the registration stays so the address keeps protecting its work. |
+| notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): sign-ons, first parks, ghosts, defective enlistments, orphaned work, bounced messages. Consumed by `man wait`/the park; tend always shows the recent tail. |
 
 Delivery routes by ownership, same as watches: a continuation for a chain
-claimed by a live soaking session is addressed back to that session; once it
-ghosts, the same bait forks headless. Sessions are never conscripted — a
-thread works bait only after opting in.
+claimed by a live trap is addressed back to that trap and stays sticky.
+Sessions are never conscripted — a thread works bait only after opting in,
+and nothing addressed is ever silently rerouted.
 
 ## Helm contract
 

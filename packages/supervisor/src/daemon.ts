@@ -17,10 +17,11 @@ import {
   loadConfig,
   lobstahHome,
   lobstahVersion,
-  listSoaking,
+  listTraps,
+  noticeOrphanedBait,
   readSessionClaim,
   readStatusLog,
-  soakSkip,
+  daemonSkip,
   sweepGhostTraps,
 } from '@lobstah/core';
 import type { Config, Lane, RunnerInfo } from '@lobstah/core';
@@ -252,14 +253,17 @@ export function tick(log: (m: string) => void = () => {}): void {
 
   for (const action of sweepGhostTraps(cfg.soak.ttlSecs * 1000)) {
     log(
-      `ghost trap ${action.sessionId.slice(0, 8)} swept` +
-        (action.requeued ? ` — bait ${action.requeued} back in the queue` : ''),
+      action.defective
+        ? `trap wt:${action.trapId} never parked — defective enlistment noticed to the helm`
+        : `ghost trap wt:${action.trapId} swept` +
+            (action.requeued ? ` — work ${action.requeued} back in the queue` : ''),
     );
   }
-  // Bait addressed to a registered trap waits for it; unaddressed bait defers
-  // briefly to a trap that is parked right now. Work lane only — soaking
-  // sessions never take chores.
-  const workSkip = soakSkip(listSoaking(), cfg.soak.deferSecs * 1000);
+  // Addressed bait is sticky — never the daemon's; orphans surface as helm
+  // notices instead of headless spawns. Unaddressed bait defers briefly to a
+  // trap that is parked right now. Work lane only — traps never take chores.
+  noticeOrphanedBait();
+  const workSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
 
   for (const lane of ['chore', 'work'] as Lane[]) {
     const active = listActive(lane);

@@ -6,10 +6,12 @@ import {
   laneDirs,
   lastEventAt,
   listHelms,
-  listSoaking,
+  listNotices,
+  listTraps,
   listWatches,
   loadConfig,
   pendingIds,
+  queuedDescriptor,
   readEvidence,
   readStatusLog,
   readWatchEvents,
@@ -59,12 +61,26 @@ export interface TendWatch {
   error?: string;
 }
 
-export interface TendSoak {
+export interface TendTrap {
+  trap: string;
   session: string;
   repo: string;
   worktree: string;
   claimed?: string;
-  heartbeatAgeSecs: number;
+  /** never | now (parked) | <age>s ago */
+  listening: string;
+}
+
+export interface TendAwaiting {
+  id: string;
+  for: string;
+  ageMins: number;
+}
+
+export interface TendNotice {
+  kind: string;
+  ageMins: number;
+  text: string;
 }
 
 export interface TendReport {
@@ -74,7 +90,10 @@ export interface TendReport {
   attention: Array<{ id: string; lane: Lane; verb: string; ageSecs: number; at?: string; note?: string }>;
   stories: TendStory[];
   watches: TendWatch[];
-  soaking: TendSoak[];
+  traps: TendTrap[];
+  /** Addressed bait waiting for its trap — sticky, never the daemon's. */
+  awaiting: TendAwaiting[];
+  notices: TendNotice[];
   helms: Array<{ grounds: string; session: string; heartbeatAgeSecs: number }>;
   merge?: MergeView;
 }
@@ -193,12 +212,26 @@ export function buildTendReport(now = Date.now()): TendReport {
 
   // Stalled means claiming is broken, not that the queue is deep: work is
   // waiting, capacity is free, the daemon heartbeats, and nothing claims.
-  const oldestQueuedAge = queued.reduce((max, id) => {
+  // Addressed (sticky) bait is excluded — it waits for its trap by design
+  // and shows in its own `awaiting` table instead of crying wolf here.
+  const awaiting: TendAwaiting[] = [];
+  const unaddressedQueued: string[] = [];
+  for (const id of queued) {
+    const d = queuedDescriptor(id, 'work');
+    const st = fs.statSync(path.join(laneDirs('work').queue, `${id}.json`), { throwIfNoEntry: false });
+    const ageMins = st ? Math.max(0, Math.round((now - st.mtimeMs) / 60_000)) : 0;
+    if (d?.for) awaiting.push({ id, for: d.for, ageMins });
+    else unaddressedQueued.push(id);
+  }
+  const oldestQueuedAge = unaddressedQueued.reduce((max, id) => {
     const st = fs.statSync(path.join(laneDirs('work').queue, `${id}.json`), { throwIfNoEntry: false });
     return st ? Math.max(max, now - st.mtimeMs) : max;
   }, 0);
   const stalled =
-    daemonUp && queued.length > 0 && active.length < cfg.limits.maxConcurrent && oldestQueuedAge > CLAIM_STALE_MS;
+    daemonUp &&
+    unaddressedQueued.length > 0 &&
+    active.length < cfg.limits.maxConcurrent &&
+    oldestQueuedAge > CLAIM_STALE_MS;
 
   const merge = readMergeView();
   const gateFor = (uuid: string, prUrl?: string): string | undefined => {
@@ -240,12 +273,22 @@ export function buildTendReport(now = Date.now()): TendReport {
           ? 'working'
           : 'idle';
 
-  const soaking: TendSoak[] = listSoaking().map((r) => ({
-    session: r.sessionId.slice(0, 8),
-    repo: r.repo ?? '(addressed only)',
-    worktree: r.worktree,
-    claimed: r.claimed,
-    heartbeatAgeSecs: Math.max(0, Math.round((now - (Date.parse(r.heartbeatAt) || 0)) / 1000)),
+  const traps: TendTrap[] = listTraps().map((r) => {
+    const hbAgeSecs = Math.max(0, Math.round((now - (Date.parse(r.heartbeatAt) || 0)) / 1000));
+    return {
+      trap: `wt:${r.trapId}`,
+      session: r.sessionId.slice(0, 8),
+      repo: r.repo ?? '(addressed only)',
+      worktree: r.worktree,
+      claimed: r.claimed,
+      listening: r.firstParkedAt === undefined ? 'never' : hbAgeSecs <= 10 ? 'now' : `${hbAgeSecs}s ago`,
+    };
+  });
+
+  const notices: TendNotice[] = listNotices(5).map((n) => ({
+    kind: n.kind,
+    ageMins: Math.max(0, Math.round((now - (Date.parse(n.at) || 0)) / 60_000)),
+    text: n.text,
   }));
 
   const helms = listHelms().map((h) => ({
@@ -261,7 +304,9 @@ export function buildTendReport(now = Date.now()): TendReport {
     attention,
     stories,
     watches,
-    soaking,
+    traps,
+    awaiting,
+    notices,
     helms,
     merge,
   };
@@ -322,19 +367,40 @@ export function renderTend(r: TendReport): string {
       ),
     );
   }
-  if (r.soaking.length > 0) {
+  if (r.traps.length > 0) {
     lines.push('');
     lines.push(
       toonTable(
-        'soaking',
-        r.soaking.map((s) => ({
+        'traps',
+        r.traps.map((s) => ({
+          trap: s.trap,
           session: s.session,
           repo: s.repo,
           claimed: s.claimed ? s.claimed.slice(0, 8) : '',
-          heartbeat: `${s.heartbeatAgeSecs}s ago`,
+          listening: s.listening,
           worktree: s.worktree,
         })),
-        ['session', 'repo', 'claimed', 'heartbeat', 'worktree'],
+        ['trap', 'session', 'repo', 'claimed', 'listening', 'worktree'],
+      ),
+    );
+  }
+  if (r.awaiting.length > 0) {
+    lines.push('');
+    lines.push(
+      toonTable(
+        'awaiting-trap (sticky — never claimed headless)',
+        r.awaiting.map((a) => ({ id: a.id.slice(0, 8), for: a.for, waitingMins: a.ageMins })),
+        ['id', 'for', 'waitingMins'],
+      ),
+    );
+  }
+  if (r.notices.length > 0) {
+    lines.push('');
+    lines.push(
+      toonTable(
+        'notices (recent)',
+        r.notices.map((n) => ({ kind: n.kind, ageMins: n.ageMins, text: n.text })),
+        ['kind', 'ageMins', 'text'],
       ),
     );
   }

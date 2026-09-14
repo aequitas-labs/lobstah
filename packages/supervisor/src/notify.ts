@@ -118,10 +118,18 @@ function readAttnCursor(file: string): AttnCursor {
  * ends the reminders. remindMs of 0 disables reminders (pure at-most-once).
  * Pass consume=false to peek without touching cursors.
  */
-export function attentionNow(consume = true, remindMs = 15 * 60_000, now = Date.now()): NotifyEvent[] {
+export function attentionNow(
+  consume = true,
+  remindMs = 15 * 60_000,
+  now = Date.now(),
+  match?: (id: string, lane: Lane) => boolean,
+): NotifyEvent[] {
   const out: NotifyEvent[] = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
     for (const id of activeIds(lane)) {
+      // Per-grounds consumption: a non-matching dispatch is left untouched
+      // (cursor and all) — one helm never eats another's wakes.
+      if (match && !match(id, lane)) continue;
       const log = readStatusLog(id, lane);
       const state = reconcile({ log, lastEventAt: lastEventAt(id, lane) });
       if (state !== 'needs-decision' && state !== 'blocked') continue;
@@ -141,10 +149,15 @@ export function attentionNow(consume = true, remindMs = 15 * 60_000, now = Date.
 }
 
 /** Edge-triggered: entries appended since the baseline, filtered to wake verbs. */
-export function freshWakeEvents(baseline: Record<string, number>, verbs = DEFAULT_NOTIFY_VERBS): NotifyEvent[] {
+export function freshWakeEvents(
+  baseline: Record<string, number>,
+  verbs = DEFAULT_NOTIFY_VERBS,
+  match?: (id: string, lane: Lane) => boolean,
+): NotifyEvent[] {
   const out: NotifyEvent[] = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
     for (const id of notifiableIds(lane, Number.POSITIVE_INFINITY)) {
+      if (match && !match(id, lane)) continue; // baseline untouched — stays fresh for its owner
       const key = `${lane}:${id}`;
       const log = readStatusLog(id, lane);
       const seen = baseline[key] ?? 0;

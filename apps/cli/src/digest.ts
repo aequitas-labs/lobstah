@@ -81,7 +81,7 @@ function doneIds(lane: Lane): string[] {
   }
 }
 
-function repoOf(id: string, lane: Lane): string | undefined {
+export function repoOf(id: string, lane: Lane): string | undefined {
   const dirs = laneDirs(lane);
   for (const file of [
     path.join(dirs.done, id, 'descriptor.json'),
