@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, ensureLayout, pendingIds, readDescriptor } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, pendingIds, readDescriptor } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { PickupState } from '../src/state.js';
 import { dispatchLoop } from '../src/loops/dispatch.js';
@@ -70,16 +70,48 @@ describe('dispatch loop', () => {
     expect(st.get('fake:2')).toBeUndefined();
   });
 
-  it('review items fork via followUp; issues start cold', async () => {
+  it('review items fork the implementation dispatch; issues start cold', async () => {
     const src = new FakeSource();
     const impl = '11111111-1111-1111-1111-111111111111';
-    src.items = [item('fake:pr1', 'review', impl), item('fake:3')];
+    enqueue({ id: impl, repo: 'demo', brief: 'implement it' }, 'work');
+    appendStatus(impl, 'work', 'done');
+    src.items = [{ ...item('fake:pr1@e1', 'review', impl), subject: 'fake:pr1' }, item('fake:3')];
     const st = new PickupState();
     await dispatchLoop(src, st);
-    const ids = pendingIds('work');
-    const descs = ids.map((id) => JSON.parse(fs.readFileSync(path.join(home, 'queue', `${id}.json`), 'utf8')));
+    const descs = pendingIds('work').map((id) => JSON.parse(fs.readFileSync(path.join(home, 'queue', `${id}.json`), 'utf8')));
     expect(descs.find((d) => d.followUp === impl)).toBeDefined();
-    expect(descs.filter((d) => d.followUp === undefined)).toHaveLength(1);
+    expect(descs.filter((d) => d.followUp === undefined && d.id !== impl)).toHaveLength(1);
+  });
+
+  it('a review round holds while the prior round runs, then forks the newest finished round', async () => {
+    const src = new FakeSource();
+    const impl = '11111111-1111-1111-1111-111111111111';
+    enqueue({ id: impl, repo: 'demo', brief: 'implement it' }, 'work');
+    appendStatus(impl, 'work', 'done');
+    const st = new PickupState();
+    src.items = [{ ...item('fake:pr2@e1', 'review', impl), subject: 'fake:pr2' }];
+    await dispatchLoop(src, st);
+    const round1 = st.get('fake:pr2@e1')!.uuid;
+
+    src.items = [{ ...item('fake:pr2@e2', 'review', impl), subject: 'fake:pr2' }];
+    await dispatchLoop(src, st); // round1 not terminal yet — e2 buffers
+    expect(st.get('fake:pr2@e2')).toBeUndefined();
+
+    appendStatus(round1, 'work', 'done');
+    await dispatchLoop(src, st);
+    const round2 = st.get('fake:pr2@e2')!.uuid;
+    const desc = JSON.parse(fs.readFileSync(path.join(home, 'queue', `${round2}.json`), 'utf8'));
+    expect(desc.followUp).toBe(round1); // the latest session in the chain, not the implementation
+  });
+
+  it('a review round whose chain was culled starts cold', async () => {
+    const src = new FakeSource();
+    src.items = [{ ...item('fake:pr3@e1', 'review', '22222222-2222-2222-2222-222222222222'), subject: 'fake:pr3' }];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get('fake:pr3@e1')!.uuid;
+    const desc = JSON.parse(fs.readFileSync(path.join(home, 'queue', `${uuid}.json`), 'utf8'));
+    expect(desc.followUp).toBeUndefined();
   });
 });
 

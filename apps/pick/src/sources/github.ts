@@ -1,6 +1,7 @@
 import type { Evidence, Verb } from '@lobstah/core';
 import { MARKER, marker } from '../types.js';
 import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../types.js';
+import { prEvidenceIndex, prUrlKey } from '../pr-evidence.js';
 
 export interface GithubConfig {
   /** "owner/name" of the forge repo. */
@@ -31,6 +32,14 @@ interface GhReview {
   state: string;
   commit_id: string;
   submitted_at: string;
+  body: string | null;
+}
+
+interface GhComment {
+  id: number;
+  body: string;
+  user: { login: string };
+  created_at: string;
 }
 
 interface GhPull {
@@ -90,29 +99,76 @@ export class GithubSource implements Source, MergeSource {
         brief: `${issue.title}\n\n${issue.body ?? ''}\n\nWhen the change is complete, commit it, push the branch, and open a PR against ${this.cfg.repo} referencing #${issue.number}.`,
       });
     }
-    // Review pickup: open PRs on lobstah/<uuid> branches whose latest human
-    // review is CHANGES_REQUESTED on the current head.
+    // Post-PR feedback pickup: a dispatch is done when its PR opens, so the
+    // reviewer's side of the conversation has to re-enter the queue here.
+    // Any open PR that maps back to a dispatch — by its lobstah/<uuid>
+    // branch, or by the PR URL its worker reported as evidence — produces a
+    // review round whenever a human leaves feedback. The round's key carries
+    // the newest feedback event, so every new event re-keys and the brief
+    // reads the live thread rather than a snapshot; the dispatch loop
+    // serializes rounds per subject.
+    const evidence = prEvidenceIndex();
     const pulls = await this.api<GhPull[]>('GET', `/repos/${this.cfg.repo}/pulls?state=open&per_page=50`);
     for (const pr of pulls) {
       const m = /^lobstah\/([0-9a-f-]{36})$/.exec(pr.head.ref);
-      if (!m) continue;
-      const reviews = await this.latestReviews(pr.number);
-      const changes = reviews.find((r) => r.state === 'CHANGES_REQUESTED' && r.commit_id === pr.head.sha);
-      if (!changes) continue;
+      const uuid = m?.[1] ?? evidence.get(prUrlKey(pr.html_url));
+      if (!uuid) continue;
+      const feedback = await this.latestFeedback(pr.number);
+      if (!feedback) continue;
+      const subject = `gh:${this.cfg.repo}#pr${pr.number}`;
       items.push({
-        key: `gh:${this.cfg.repo}#pr${pr.number}@${pr.head.sha}`,
+        key: `${subject}@${feedback}`,
+        subject,
         kind: 'review',
         repoKey: this.cfg.key,
         title: pr.title,
-        followUp: m[1],
-        brief: `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the review comments with \`gh pr view ${pr.number} --comments\`, implement the requested changes, and push. Reply to review threads where a reply is warranted.`,
+        followUp: uuid,
+        brief: `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. When the feedback is addressed, report status done.`,
       });
     }
     return items;
   }
 
+  /**
+   * The newest human feedback event on a PR, as an opaque round tag —
+   * `rv<id>` for a submitted review, `rc<id>` for an inline review-thread
+   * comment, `ic<id>` for a conversation comment. Feedback means: a
+   * CHANGES_REQUESTED review on any sha (a review of a slightly stale head
+   * still asks for changes), a COMMENTED review with a body, or any comment
+   * — always by someone other than the configured identity, and never a
+   * marker comment. APPROVED reviews are the merge loop's signal, not
+   * feedback. Returns undefined when no human has spoken.
+   */
+  private async latestFeedback(n: number): Promise<string | undefined> {
+    const events: Array<{ at: string; tag: string }> = [];
+    const human = (login: string): boolean => login !== this.cfg.identity;
+    const reviews = await this.paged<GhReview>(`/repos/${this.cfg.repo}/pulls/${n}/reviews`);
+    for (const r of reviews) {
+      if (!human(r.user.login)) continue;
+      const actionable = r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && (r.body ?? '').trim() !== '');
+      if (actionable) events.push({ at: r.submitted_at, tag: `rv${r.id}` });
+    }
+    for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/pulls/${n}/comments`)) {
+      if (human(c.user.login)) events.push({ at: c.created_at, tag: `rc${c.id}` });
+    }
+    for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/issues/${n}/comments`)) {
+      if (human(c.user.login) && !MARKER.test(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}` });
+    }
+    events.sort((a, b) => (a.at === b.at ? a.tag.localeCompare(b.tag) : a.at.localeCompare(b.at)));
+    return events.at(-1)?.tag;
+  }
+
+  private async paged<T>(url: string): Promise<T[]> {
+    const all: T[] = [];
+    for (let page = 1; ; page++) {
+      const batch = await this.api<T[]>('GET', `${url}?per_page=100&page=${page}`);
+      all.push(...batch);
+      if (batch.length < 100) return all;
+    }
+  }
+
   async claim(item: WorkItem): Promise<boolean> {
-    if (item.kind === 'review') return true; // the head-sha key is the dedupe; no label dance
+    if (item.kind === 'review') return true; // the event-keyed round is the dedupe; no label dance
     const n = this.numberOf(item.key);
     const issue = await this.api<GhIssue>('GET', `/repos/${this.cfg.repo}/issues/${n}`);
     if (issue.labels.some((l) => l.name === this.cfg.claimedLabel)) return false;
