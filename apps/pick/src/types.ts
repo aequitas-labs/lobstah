@@ -1,14 +1,21 @@
 import type { Evidence, Verb } from '@lobstah/core';
 
 export interface WorkItem {
-  /** Stable tracker key, e.g. "linear:BAS-12" or "gh:owner/repo#34". */
+  /** Stable tracker key, e.g. "linear:BAS-12" or "gh:owner/repo#pr34@rv567". */
   key: string;
   kind: 'issue' | 'review';
+  /**
+   * For review items: what the rounds are about (e.g. "gh:owner/repo#pr34").
+   * Rounds sharing a subject serialize — the dispatch loop holds a new round
+   * while a prior one is in flight, and forks the newest finished round so
+   * feedback lands on the latest session in the chain.
+   */
+  subject?: string;
   /** Lobstah repo key, resolved by the source from its routing config. */
   repoKey: string;
   title: string;
   brief: string;
-  /** For review items: the implementation dispatch to fork (from the lobstah/<uuid> branch name). */
+  /** For review items: the implementation dispatch to fork (from the branch name or reported evidence). */
   followUp?: string;
 }
 

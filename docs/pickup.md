@@ -92,12 +92,30 @@ The three loops are tracker-agnostic and drive whichever sources are configured.
 | Rule | Trigger | Descriptor |
 |---|---|---|
 | Issue pickup | Assigned to the configured identity, in the configured start state | Implementation brief from the issue |
-| Review pickup | Open PR authored by the configured identity with `CHANGES_REQUESTED`, or a human review newer than HEAD | Address-review brief from the feedback |
+| Feedback pickup | Human feedback on an open PR that maps back to a dispatch | Address-feedback brief; the agent reads the live thread |
 
-A review dispatch sets `followUp` to the implementation dispatch's UUID,
-forking that session so the feedback lands on the context that made the
-choices. A rebase chore starts cold on purpose — the conflict is about commits
-the original session never saw.
+A dispatch reports `done` when its PR opens, so the reviewer's side of the
+conversation has to re-enter the queue as its own work. Feedback pickup
+covers all of it: a `CHANGES_REQUESTED` review on any sha (a review of a
+slightly stale head still asks for changes), a comment review with a body,
+an inline review-thread comment, or a conversation comment — always from
+someone other than the configured identity, never a lobstah marker comment.
+`APPROVED` reviews are the merge loop's signal, not feedback.
+
+The PR maps back to a dispatch two ways: a `lobstah/<uuid>` branch names it
+directly, and any other branch — a soaked session's PR — resolves through
+the PR URL its worker reported as evidence (`report done --pr <url>`). A PR
+that maps to neither is not lobstah's to answer.
+
+Each feedback **round** is keyed by the newest feedback event, so a new
+comment after a round completes opens the next round, while the same standing
+feedback never double-dispatches. Rounds on one PR serialize — a round that
+arrives while the previous one runs buffers until it finishes — and each
+round sets `followUp` to the latest session in the chain (the previous
+round, else the implementation dispatch), so feedback lands on the context
+that made the choices; a fully culled chain starts cold and reads the thread
+like anyone else. A rebase chore starts cold on purpose — the conflict is
+about commits the original session never saw.
 
 ### Claiming
 
@@ -339,7 +357,7 @@ Pickup's three loops and the daemon absorb that whole layer:
 | Fleet-script job | Fate |
 |---|---|
 | Poll tracker, dispatch assigned issues | Dispatch loop, issue rule |
-| Watch PRs for review feedback | Dispatch loop, review rule |
+| Watch PRs for review feedback | Dispatch loop, feedback rule |
 | Per-dispatch outcome checks and cron re-arms | Daemon supervision + `report` |
 | Merge approved PRs | Merge loop |
 | Detect in-progress issues nothing backs | Dead/wedged half → daemon; tracker-drift half → reconciliation loop |
