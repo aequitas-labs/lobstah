@@ -123,7 +123,8 @@ model in the loop. Driving lobstah from an agent session instead? `lobstah
 man` prints the lobsterman's manual. `man wait` blocks until a dispatch needs
 attention, and unanswered questions re-fire until answered. `man helm`
 signs one session on as the orchestrator for its grounds, and `man report`
-prints the delta since the last acknowledged report. `man init`
+prints the delta since the last acknowledged report. `lobstah glass` serves
+it all as a live localhost page — the spyglass. `man init`
 installs a Claude Code Stop hook that parks the session on the fleet and
 continues the turn the moment something needs it.
 

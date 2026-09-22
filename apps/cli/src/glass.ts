@@ -474,10 +474,18 @@ tick();setInterval(()=>tick(false),2000);
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(port: number): http.Server {
   const icon = iconPath();
+  // A compiled binary carries no asset files; the favicon degrades to the
+  // emoji mark instead of a broken tab icon.
+  const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
   const server = http.createServer((req, res) => {
-    if (req.url === '/icon.png' && icon) {
-      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' });
-      res.end(fs.readFileSync(icon));
+    if (req.url === '/icon.png') {
+      if (icon) {
+        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' });
+        res.end(fs.readFileSync(icon));
+      } else {
+        res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'max-age=3600' });
+        res.end(fallbackIcon);
+      }
     } else if (req.url === '/data') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(buildGlassSnapshot()));
