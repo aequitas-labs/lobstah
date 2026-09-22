@@ -30,6 +30,7 @@ import {
   unseenNotices,
   consumeRelievedNotice,
   groundsErrors,
+  captureWindow,
   heartbeatHelm,
   helmGate,
   helmLabel,
@@ -802,7 +803,7 @@ ${progress}`,
         : Object.keys(process.env).some((k) => k.startsWith('CODEX'))
           ? 'codex'
           : undefined;
-      const identity = { harness, cwd: process.cwd(), host: os.hostname(), label: arg(args, '--label') };
+      const identity = { harness, cwd: process.cwd(), host: os.hostname(), label: arg(args, '--label'), window: captureWindow() };
       const res = takeHelm({ sessionId, grounds, ttlMs: cfg.helm.ttlSecs * 1000, take: args.includes('--take'), identity });
       if ('held' in res) {
         const ageSecs = Math.max(0, Math.round((Date.now() - (Date.parse(res.held.heartbeatAt) || 0)) / 1000));
@@ -1193,6 +1194,7 @@ ${progress}`,
         harness: arg(args, '--harness') ?? prior?.harness ?? 'claude',
         sessionId,
         one: args.includes('--one') || undefined,
+        window: captureWindow(),
         ttlMs: cfg.soak.ttlSecs * 1000,
       });
       if ('held' in res) {

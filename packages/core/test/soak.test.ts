@@ -259,3 +259,18 @@ describe('releaseCatch and the ghost-trap sweep', () => {
     expect(readTrap(reg.trapId)).toBeDefined();
   });
 });
+
+describe('window capture', () => {
+  it('maps terminal identity from the environment', async () => {
+    const { captureWindow } = await import('../src/window.js');
+    const ref = captureWindow({
+      __CFBundleIdentifier: 'com.googlecode.iterm2',
+      TERM_PROGRAM: 'iTerm.app',
+      ITERM_SESSION_ID: 'w0t2p0:UUID',
+      TMUX_PANE: '%3',
+    } as NodeJS.ProcessEnv);
+    expect(ref?.bundleId).toBe('com.googlecode.iterm2');
+    expect(ref?.itermSession).toBe('w0t2p0:UUID');
+    expect(ref?.tmuxPane).toBe('%3');
+  });
+});

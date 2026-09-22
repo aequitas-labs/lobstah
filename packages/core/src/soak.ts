@@ -7,6 +7,7 @@ import { cancelRequested, claimNext, complete, queuedDescriptor, pendingIds, req
 import { appendStatus, readStatusLog } from './status.js';
 import { mergeEvidence } from './evidence.js';
 import { postNotice } from './notices.js';
+import type { WindowRef } from './window.js';
 import { TERMINAL_VERBS } from './types.js';
 
 /**
@@ -33,6 +34,8 @@ export interface TrapRegistration {
   heartbeatAt: string;
   /** Set the first time the trap actually parks. Absent = signed on but never listened. */
   firstParkedAt?: string;
+  /** Where the manning session's window lives — a companion's focus target. */
+  window?: WindowRef;
   /** The active dispatch this trap currently works, if any. */
   claimed?: string;
 }
@@ -117,6 +120,7 @@ export function signOnTrap(opts: {
   harness: string;
   sessionId: string;
   one?: boolean;
+  window?: WindowRef;
   ttlMs: number;
   now?: number;
 }): SignOnResult {
@@ -140,6 +144,7 @@ export function signOnTrap(opts: {
     signedOnAt: sameSession ? prior.signedOnAt : iso,
     heartbeatAt: iso,
     firstParkedAt: sameSession ? prior.firstParkedAt : undefined,
+    window: opts.window ?? (sameSession ? prior.window : undefined),
     claimed: prior?.claimed,
   };
   atomicWrite(regPath(trapId), JSON.stringify(reg, null, 2));
