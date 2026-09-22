@@ -300,6 +300,19 @@ An orphan verdict requires a trustworthy mapping — see
 [Pickup state](#pickup-state): a missing table entry is `unknown` and triggers
 a rebuild, never a reset.
 
+Linear reconciliation includes assigned/delegated issues in the claimed state
+and terminal (`completed`/`canceled`) states, following every results page.
+A failure report leaves an already closed Linear issue closed.
+
+After an issue dispatch finalizes as `failed` and its tracker report succeeds,
+pickup releases its key for another claim when the tracker offers it in the
+start state. The ledger retains the last UUID and an attempt count across
+restarts: one initial attempt plus `[limits].maxRestartAttempts` retries
+(default two). Legacy entries count as one attempt. At the cap, the issue stays
+in the start state for human attention; polling does not claim it again.
+Successful dispatches and review-round keys remain deduplicated. A `done`
+report alone is not a failure verdict, regardless of commit count.
+
 **Residual, by honesty:** same-machine reconciliation cannot detect
 whole-machine death — the reconciler dies with the laptop. The stale
 `executor.json` heartbeat covers that case, but only for a remote reader — a

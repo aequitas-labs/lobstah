@@ -195,6 +195,113 @@ describe('reconcile loop', () => {
   });
 });
 
+describe('failed issue retries', () => {
+  function finalize(uuid: string) {
+    fs.renameSync(path.join(home, 'active', uuid), path.join(home, 'done', uuid));
+  }
+
+  it('releases a finalized failure after reporting, then dispatches a fresh attempt', async () => {
+    const src = new FakeSource();
+    src.items = [item('linear:DEMO-1')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const first = st.get('linear:DEMO-1')!.uuid;
+    claimNext('work');
+    appendStatus(first, 'work', 'failed');
+    await reportLoop(src, st);
+    await dispatchLoop(src, st); // failure reported, but the old worker still owns the slot
+    expect(st.get('linear:DEMO-1')!.uuid).toBe(first);
+    expect(st.get('linear:DEMO-1')!.released).not.toBe(true);
+
+    finalize(first);
+    await reportLoop(src, st);
+    expect(st.get('linear:DEMO-1')).toMatchObject({ released: true, attempts: 1 });
+    await reportLoop(src, st); // no duplicate report from the released entry
+    expect(src.reports.map((r) => r.verb)).toEqual(['failed']);
+    const reloaded = new PickupState();
+    await dispatchLoop(src, reloaded);
+    expect(reloaded.get('linear:DEMO-1')).toMatchObject({ attempts: 2 });
+    expect(reloaded.get('linear:DEMO-1')!.uuid).not.toBe(first);
+    expect(reloaded.get('linear:DEMO-1')!.lastReported).toBeUndefined();
+    expect(pendingIds('work')).toHaveLength(1);
+  });
+
+  it('does not release when the tracker report fails; retries the report next tick', async () => {
+    const src = new FakeSource();
+    src.items = [item('linear:DEMO-2')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get('linear:DEMO-2')!.uuid;
+    claimNext('work');
+    appendStatus(uuid, 'work', 'failed');
+    finalize(uuid);
+    const report = src.report.bind(src);
+    src.report = async () => { throw new Error('tracker offline'); };
+    await expect(reportLoop(src, st)).rejects.toThrow('tracker offline');
+    await dispatchLoop(src, st);
+    expect(st.get('linear:DEMO-2')!.uuid).toBe(uuid);
+    expect(st.get('linear:DEMO-2')!.released).not.toBe(true);
+    src.report = report;
+    await reportLoop(src, st);
+    expect(st.get('linear:DEMO-2')!.released).toBe(true);
+  });
+
+  it.each([0, 2])('bounds retries across reloads using maxRestartAttempts = %s', async (retries) => {
+    fs.writeFileSync(path.join(home, 'config.toml'), `[limits]\nmaxRestartAttempts = ${retries}\n`);
+    const src = new FakeSource();
+    src.items = [item('linear:DEMO-3')];
+    for (let attempt = 1; attempt <= retries + 1; attempt++) {
+      const st = new PickupState();
+      await dispatchLoop(src, st);
+      expect(st.get('linear:DEMO-3')!.attempts).toBe(attempt);
+      const uuid = st.get('linear:DEMO-3')!.uuid;
+      claimNext('work');
+      appendStatus(uuid, 'work', 'failed');
+      finalize(uuid);
+      await reportLoop(src, st);
+    }
+    const st = new PickupState();
+    const last = st.get('linear:DEMO-3')!.uuid;
+    await dispatchLoop(src, st);
+    await dispatchLoop(src, st);
+    expect(st.get('linear:DEMO-3')!.uuid).toBe(last);
+    expect(pendingIds('work')).toHaveLength(0);
+    expect(fs.readdirSync(path.join(home, 'done'))).toHaveLength(retries + 1);
+  });
+
+  it('counts a legacy failed entry as the first attempt', async () => {
+    const src = new FakeSource();
+    src.items = [item('linear:DEMO-4')];
+    const st = new PickupState();
+    const uuid = '55555555-5555-5555-5555-555555555555';
+    enqueue({ id: uuid, repo: 'demo', brief: 'legacy' }, 'work');
+    claimNext('work');
+    appendStatus(uuid, 'work', 'failed');
+    finalize(uuid);
+    st.set('linear:DEMO-4', { uuid, kind: 'issue', createdAt: new Date().toISOString(), lastReported: 'failed' });
+    await reportLoop(src, st);
+    await dispatchLoop(src, st);
+    expect(st.get('linear:DEMO-4')!.attempts).toBe(2);
+    expect(st.get('linear:DEMO-4')!.uuid).not.toBe(uuid);
+  });
+
+  it.each([['issue', 'done'], ['review', 'failed']] as const)('keeps %s / %s entries deduplicated', async (kind, verb) => {
+    const src = new FakeSource();
+    src.items = [item('fake:keep', kind)];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get('fake:keep')!.uuid;
+    claimNext('work');
+    appendStatus(uuid, 'work', verb);
+    finalize(uuid);
+    await reportLoop(src, st);
+    await dispatchLoop(src, st);
+    expect(st.get('fake:keep')!.uuid).toBe(uuid);
+    expect(st.get('fake:keep')!.released).not.toBe(true);
+    expect(pendingIds('work')).toHaveLength(0);
+  });
+});
+
 class FakeMergeSource implements MergeSource {
   name = 'fake-merge';
   candidates: PrCandidate[] = [];

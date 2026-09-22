@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { enqueue, lastEventAt, readStatusLog, reconcile } from '@lobstah/core';
+import { enqueue, lastEventAt, loadConfig, readStatusLog, reconcile } from '@lobstah/core';
 import type { Source, WorkItem } from '../types.js';
 import type { MapEntry, PickupState } from '../state.js';
 import { dispatchLane } from './report.js';
@@ -47,8 +47,16 @@ export async function dispatchLoop(
   log: (m: string) => void = () => {},
 ): Promise<void> {
   const items: WorkItem[] = await source.poll();
+  const maxAttempts = 1 + loadConfig().limits.maxRestartAttempts;
   for (const item of items) {
-    if (state.get(item.key)) continue; // already dispatched — dedupe by tracker key
+    const previous = state.get(item.key);
+    if (previous) {
+      if (item.kind !== 'issue' || previous.kind !== 'issue' || !previous.released) continue;
+      if ((previous.attempts ?? 1) >= maxAttempts) {
+        log(`${item.key}: issue attempt limit (${maxAttempts}) reached — holding for a human`);
+        continue;
+      }
+    }
     const plan = item.kind === 'review' ? roundPlan(item, state) : { hold: false, followUp: undefined };
     if (plan.hold) {
       log(`${item.key}: a prior round is still in flight — holding`);
@@ -69,7 +77,12 @@ export async function dispatchLoop(
       },
       'work',
     );
-    state.set(item.key, { uuid: id, kind: item.kind, createdAt: new Date().toISOString() });
+    state.set(item.key, {
+      uuid: id,
+      kind: item.kind,
+      createdAt: new Date().toISOString(),
+      ...(item.kind === 'issue' ? { attempts: previous ? (previous.attempts ?? 1) + 1 : 1 } : {}),
+    });
     log(`${item.key}: dispatched as ${id}`);
   }
 }

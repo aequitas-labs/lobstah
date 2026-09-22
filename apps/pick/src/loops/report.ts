@@ -43,6 +43,7 @@ export async function reportLoop(
   notify: (n: ReportNotification) => void = () => {},
 ): Promise<void> {
   for (const [key, entry] of state.entries()) {
+    if (entry.released) continue; // retain retry history without replaying the old dispatch
     const lane = dispatchLane(entry.uuid);
     if (!lane) continue; // reconcile owns missing dispatches
     const verb = reconcile({
@@ -61,6 +62,13 @@ export async function reportLoop(
         note: readStatusLog(entry.uuid, lane).at(-1)?.note,
         prUrl: evidence.prUrl,
       });
+    }
+    // A terminal verb can precede process exit. Wait for the daemon to move
+    // the dispatch to done before allowing another attempt at the same issue.
+    if (entry.kind === 'issue' && verb === 'failed' && fs.existsSync(path.join(laneDirs(lane).done, entry.uuid))) {
+      state.releaseIssue(key);
+      log(`${key}: finalized failure released for a bounded retry`);
+      continue;
     }
     const msgs = await source.inbound(key, entry.lastInboundAt);
     if (msgs.length > 0) {
