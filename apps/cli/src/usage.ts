@@ -36,7 +36,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--model': { value: '<m>' },
       '--effort': { value: '<e>' },
       '--follow-up': { value: '<uuid>' },
-      '--for': { value: 'session:<id>' },
+      '--for': { value: 'wt:<trap>' },
+      '--session': { value: '<id>' },
       '--chore': {},
       '--id': { value: '<uuid>' },
     },
@@ -44,16 +45,21 @@ export const COMMANDS: Record<string, CommandSpec> = {
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: {}, positionals: '<uuid> <message...>', tailAfter: 1 },
+  send: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>|wt:<trap> <message...>', tailAfter: 1 },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
-    flags: { '--harness': { value: HARNESS }, '--model': { value: '<m>' }, '--effort': { value: '<e>' } },
+    flags: {
+      '--harness': { value: HARNESS },
+      '--model': { value: '<m>' },
+      '--effort': { value: '<e>' },
+      '--session': { value: '<id>' },
+    },
     positionals: '<uuid>',
   },
   catch: { flags: {}, positionals: '<uuid>' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
-  cancel: { flags: {}, positionals: '<uuid>' },
+  cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
   report: { flags: {}, positionals: '<uuid> <verb> [note...] [--pr <url>]', tailAfter: 2 },
   watch: {
     subverbs: ['add', 'rm', 'ls'],
@@ -69,14 +75,14 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   soak: {
     flags: {
-      '--session': { value: '<id>', required: true },
+      '--session': { value: '<id>' },
       '--one': {},
       '--harness': { value: HARNESS },
       '--wait': {},
       '--timeout': { value: '<secs>' },
     },
   },
-  stow: { flags: { '--session': { value: '<id>' }, '--quiet': {} } },
+  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall'], flags: { '--interval': { value: '<ms>' } } },
   pick: { subverbs: ['once', 'install', 'uninstall'], flags: {} },
   doctor: { flags: {} },
@@ -102,7 +108,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--session': { value: '<id>' },
     },
   },
-  'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--take': {} } },
+  'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--label': { value: '<name>' }, '--take': {} } },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
@@ -112,13 +118,19 @@ export const COMMANDS: Record<string, CommandSpec> = {
 
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
-  dispatch: `Queue a supervised dispatch; prints the id. --for addresses the bait to a
-soaking session instead of a fresh headless worker. Alias: set --bait.`,
+  dispatch: `Queue a supervised dispatch; prints the id. --for wt:<trap> addresses the
+work to a signed-on worktree (sticky: it waits for that trap, never falls
+back to a headless worker; session:<id> resolves to its trap). With a
+claimed helm, addressing requires --session <helm-id>. Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. Alias: buoy.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
-  send: `Deliver an instruction to a running dispatch between its turns.`,
+  send: `Deliver an instruction: to a dispatch's inbox (<uuid>), or to the session
+manning a worktree (wt:<trap> — delivered at its next park, no catch
+lifecycle; undeliverable messages bounce to the helm). Messages carry their
+sender. With a claimed helm, sending requires --session <helm-id> (before
+the target).`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -127,18 +139,24 @@ git progress note.`,
   catch: `The evidence: branch, commits, PR, session.`,
   cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
 without --apply (default 14 days).`,
-  cancel: `Request cancellation; the daemon (or the claiming session) winds it down.`,
+  cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
+unclaimed queue items finalize immediately with an audit record. With a
+claimed helm this requires --session <helm-id>.`,
   report: `The validated status write path: working | needs-decision | blocked |
 paused | done | failed.`,
   watch: `Stand watch on something external; bare \`watch\` (or \`watch ls\`) lists.
 The check command answers "anything since {cursor}?" in JSON.`,
-  soak: `Volunteer this session as a worker: it waits at turn end and takes matching
-work from the queue. Refused from a primary checkout — run it from a
-worktree. --one signs off after the first completed assignment. --wait
-listens in the foreground right now (for sessions without Stop hooks):
-assigned work prints plain, a quiet timeout exits 3 — run the same command
-again to keep listening.`,
-  stow: `Sign a worker session off; its unfinished assignment goes back to the queue.`,
+  soak: `Volunteer this session as a worker. Identity is the worktree: sign-on
+anchors a trap id (.lobstah-trap) and prints its wt:<trap> address; re-runs
+here need no flags (--session only on first sign-on). Refused from a
+primary checkout. --one signs off after the first completed assignment.
+--wait listens in the foreground right now (for sessions without Stop
+hooks): work prints plain, a quiet timeout exits 3 — run it again.`,
+  stow: `Sign the worktree's trap off (run it there, or pass --wt/--session); an
+unfinished assignment requeues and unread messages bounce to the helm.
+Stowing another session's trap is steering — with a claimed helm, only the
+helm may (pass its --session). The trap's own worktree or session is always
+free to stow itself.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit.`,
   pick: `Tracker loops: poll Linear/GitHub, dispatch assigned work, report back,
@@ -159,6 +177,7 @@ digest defers to. --grounds scopes digest and cursor to one helm's territory
 (defaults --grounds to its own).`,
   'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
 Prints the charter, arms the Stop-hook park, and gates the periodic digest.
+Sign-on records who the man is (harness, directory, host; --label names it).
 A live foreign holder refuses without --take; a stale one is claimable.`,
   'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
 cleared too.`,

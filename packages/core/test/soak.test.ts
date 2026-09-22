@@ -5,25 +5,29 @@ import * as path from 'node:path';
 import {
   appendStatus,
   claimBait,
+  daemonSkip,
   enqueue,
   ensureLayout,
   hasOpenCatch,
-  heartbeatSoak,
+  heartbeatTrap,
   laneDirs,
-  listSoaking,
+  listNotices,
+  listTraps,
+  noticeOrphanedBait,
   pendingIds,
   readEvidence,
   readSessionClaim,
-  readSoak,
+  readTrap,
   readStatusLog,
   releaseCatch,
   requestCancel,
-  signOnSoak,
-  soakSkip,
-  stowSoak,
+  signOnTrap,
+  stowTrap,
   sweepGhostTraps,
+  trapBySession,
+  trapIdAt,
 } from '../src/index.js';
-import type { SoakRegistration } from '../src/index.js';
+import type { TrapRegistration } from '../src/index.js';
 
 let home: string;
 beforeEach(() => {
@@ -36,43 +40,102 @@ afterEach(() => {
   delete process.env.LOBSTAH_HOME;
 });
 
-function trap(sessionId: string, repo?: string): SoakRegistration {
-  return signOnSoak({ sessionId, harness: 'claude', repo, worktree: `/wt/${sessionId}`, cwd: `/wt/${sessionId}` });
+const TTL_MS = 1800_000;
+
+function trap(sessionId: string, repo?: string): TrapRegistration {
+  const worktree = path.join(home, 'wt', sessionId);
+  fs.mkdirSync(worktree, { recursive: true });
+  const res = signOnTrap({ sessionId, harness: 'claude', repo, worktree, cwd: worktree, ttlMs: TTL_MS });
+  if ('held' in res) throw new Error('unexpected hold');
+  return res.ok;
 }
 
-describe('soak registry', () => {
-  it('signs on, heartbeats, and stows', () => {
+describe('trap registry (worktree-anchored)', () => {
+  it('signs on with a worktree-anchored id, heartbeats, and stows', () => {
     const reg = trap('s1', 'web');
-    expect(readSoak('s1')?.repo).toBe('web');
-    const beat = heartbeatSoak('s1');
+    expect(trapIdAt(reg.worktree)).toBe(reg.trapId);
+    expect(readTrap(reg.trapId)?.repo).toBe('web');
+    const beat = heartbeatTrap(reg.trapId);
     expect(Date.parse(beat!.heartbeatAt)).toBeGreaterThanOrEqual(Date.parse(reg.heartbeatAt));
-    expect(listSoaking()).toHaveLength(1);
-    expect(stowSoak('s1')?.sessionId).toBe('s1');
-    expect(readSoak('s1')).toBeUndefined();
+    expect(listTraps()).toHaveLength(1);
+    expect(stowTrap(reg.trapId)?.sessionId).toBe('s1');
+    expect(readTrap(reg.trapId)).toBeUndefined();
+    const stowed = listNotices().filter((n) => n.kind === 'trap-stowed');
+    expect(stowed).toHaveLength(1);
+    expect(stowed[0]!.refId).toBe(reg.trapId);
+  });
+
+  it('the trap id survives sessions: a new session in the same worktree keeps the address', () => {
+    const first = trap('s1', 'web');
+    stowTrap(first.trapId);
+    const worktree = first.worktree;
+    const res = signOnTrap({ sessionId: 's2', harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: TTL_MS });
+    expect('ok' in res && res.ok.trapId).toBe(first.trapId);
+    expect(trapBySession('s2')?.trapId).toBe(first.trapId);
+  });
+
+  it('re-enlistment notices again, even for the same session', () => {
+    const first = trap('s1', 'web');
+    heartbeatTrap(first.trapId, { parked: true });
+    stowTrap(first.trapId);
+    signOnTrap({ sessionId: 's1', harness: 'claude', repo: 'web', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    heartbeatTrap(first.trapId, { parked: true });
+    const kinds = listNotices(50).map((n) => n.kind);
+    expect(kinds.filter((k) => k === 'trap-signed-on')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'trap-listening')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'trap-stowed')).toHaveLength(1);
+  });
+
+  it('session lock: a live foreign session refuses; a stale one is adopted', () => {
+    const reg = trap('s1', 'web');
+    const res = signOnTrap({ sessionId: 's2', harness: 'claude', repo: 'web', worktree: reg.worktree, cwd: reg.worktree, ttlMs: TTL_MS });
+    expect('held' in res && res.held.sessionId).toBe('s1');
+    const later = signOnTrap({
+      sessionId: 's2',
+      harness: 'claude',
+      repo: 'web',
+      worktree: reg.worktree,
+      cwd: reg.worktree,
+      ttlMs: TTL_MS,
+      now: Date.now() + TTL_MS + 60_000,
+    });
+    expect('ok' in later && later.ok.sessionId).toBe('s2');
   });
 
   it('re-signing keeps the original signedOnAt and any open claim', () => {
     const first = trap('s1', 'web');
-    heartbeatSoak('s1', { claimed: 'abc' });
+    heartbeatTrap(first.trapId, { claimed: 'abc' });
     const again = trap('s1', 'web');
     expect(again.signedOnAt).toBe(first.signedOnAt);
     expect(again.claimed).toBe('abc');
   });
+
+  it('first park is recorded and raises a trap-listening notice', () => {
+    const reg = trap('s1', 'web');
+    expect(reg.firstParkedAt).toBeUndefined();
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(readTrap(reg.trapId)?.firstParkedAt).toBeDefined();
+    expect(listNotices().map((n) => n.kind)).toContain('trap-listening');
+  });
 });
 
 describe('claimBait', () => {
-  it('takes addressed bait before older repo-matching bait', () => {
+  it('takes addressed bait before older repo-matching bait and stamps the delivery receipt', () => {
+    const reg = trap('s1', 'web');
     enqueue({ id: 'older', repo: 'web', brief: 'general work' });
-    enqueue({ id: 'mine', repo: 'other', brief: 'targeted work', for: 'session:s1' });
-    const caught = claimBait(trap('s1', 'web'));
+    enqueue({ id: 'mine', repo: 'other', brief: 'targeted work', for: `wt:${reg.trapId}` });
+    const caught = claimBait(reg);
     expect(caught?.id).toBe('mine');
-    expect(readSessionClaim('mine', 'work')?.by).toBe('session:s1');
-    expect(readEvidence('mine', 'work').sessionId).toBe('s1');
-    expect(readSoak('s1')?.claimed).toBe('mine');
+    expect(readSessionClaim('mine', 'work')?.by).toBe(`wt:${reg.trapId}`);
+    const ev = readEvidence('mine', 'work');
+    expect(ev.sessionId).toBe('s1');
+    expect(ev.deliveredTo).toBe(`wt:${reg.trapId}`);
+    expect(ev.deliveredAt).toBeDefined();
+    expect(readTrap(reg.trapId)?.claimed).toBe('mine');
   });
 
-  it('never takes bait addressed to another session', () => {
-    enqueue({ id: 'theirs', repo: 'web', brief: 'x', for: 'session:s2' });
+  it('never takes bait addressed to another trap', () => {
+    enqueue({ id: 'theirs', repo: 'web', brief: 'x', for: 'wt:deadbeef' });
     expect(claimBait(trap('s1', 'web'))).toBeNull();
     expect(pendingIds('work')).toEqual(['theirs']);
   });
@@ -80,7 +143,7 @@ describe('claimBait', () => {
   it('takes unaddressed bait only on a repo match', () => {
     enqueue({ id: 'w1', repo: 'web', brief: 'x' });
     expect(claimBait(trap('s1', 'other'))).toBeNull();
-    expect(claimBait(trap('s2'))).toBeNull(); // no repo key: addressed bait only
+    expect(claimBait(trap('s2'))).toBeNull(); // no repo key: addressed work only
     expect(claimBait(trap('s3', 'web'))?.id).toBe('w1');
   });
 
@@ -89,42 +152,62 @@ describe('claimBait', () => {
     enqueue({ id: 'w2', repo: 'web', brief: 'y' });
     const reg = trap('s1', 'web');
     expect(claimBait(reg)?.id).toBe('w1');
-    expect(claimBait(readSoak('s1')!)).toBeNull();
+    expect(claimBait(readTrap(reg.trapId)!)).toBeNull();
     appendStatus('w1', 'work', 'done', 'finished');
-    expect(claimBait(readSoak('s1')!)?.id).toBe('w2');
+    expect(claimBait(readTrap(reg.trapId)!)?.id).toBe('w2');
   });
 });
 
-describe('soakSkip (the daemon deference predicate)', () => {
-  it('always skips bait addressed to a registered trap, fresh or stale', () => {
-    const stale = { ...trap('s1', 'web'), heartbeatAt: new Date(Date.now() - 3600_000).toISOString() };
-    const skip = soakSkip([stale], 90_000);
-    expect(skip({ id: 'a', repo: 'x', brief: 'b', for: 'session:s1' })).toBe(true);
-    expect(skip({ id: 'a', repo: 'x', brief: 'b', for: 'session:ghost' })).toBe(false);
+describe('daemonSkip (sticky addressing)', () => {
+  it('addressed bait is NEVER the daemon\'s — registration or no registration', () => {
+    const reg = trap('s1', 'web');
+    const skip = daemonSkip([reg], 90_000);
+    expect(skip({ id: 'a', repo: 'x', brief: 'b', for: `wt:${reg.trapId}` })).toBe(true);
+    expect(skip({ id: 'a', repo: 'x', brief: 'b', for: 'wt:gone' })).toBe(true); // sticky even orphaned
+    expect(daemonSkip([], 90_000)({ id: 'a', repo: 'x', brief: 'b', for: 'wt:gone' })).toBe(true);
   });
 
   it('defers unaddressed matching bait only while the heartbeat is fresh', () => {
     const reg = trap('s1', 'web');
-    expect(soakSkip([reg], 90_000)({ id: 'a', repo: 'web', brief: 'b' })).toBe(true);
-    expect(soakSkip([reg], 90_000)({ id: 'a', repo: 'other', brief: 'b' })).toBe(false);
+    expect(daemonSkip([reg], 90_000)({ id: 'a', repo: 'web', brief: 'b' })).toBe(true);
+    expect(daemonSkip([reg], 90_000)({ id: 'a', repo: 'other', brief: 'b' })).toBe(false);
     const stale = { ...reg, heartbeatAt: new Date(Date.now() - 3600_000).toISOString() };
-    expect(soakSkip([stale], 90_000)({ id: 'a', repo: 'web', brief: 'b' })).toBe(false);
+    expect(daemonSkip([stale], 90_000)({ id: 'a', repo: 'web', brief: 'b' })).toBe(false);
   });
 
-  it('a trap mid-catch defers nothing', () => {
+  it('a trap mid-catch defers nothing unaddressed', () => {
     enqueue({ id: 'w1', repo: 'web', brief: 'x' });
     const reg = trap('s1', 'web');
     claimBait(reg);
-    expect(soakSkip([readSoak('s1')!], 90_000)({ id: 'a', repo: 'web', brief: 'b' })).toBe(false);
+    expect(daemonSkip([readTrap(reg.trapId)!], 90_000)({ id: 'a', repo: 'web', brief: 'b' })).toBe(false);
+  });
+});
+
+describe('orphaned addressed bait', () => {
+  it('surfaces once as a helm notice instead of falling to the daemon', () => {
+    enqueue({ id: 'orphan-1', repo: 'web', brief: 'x', for: 'wt:gone' });
+    noticeOrphanedBait();
+    noticeOrphanedBait(); // deduped
+    const orphans = listNotices().filter((n) => n.kind === 'bait-orphaned');
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0]!.refId).toBe('orphan-1');
+    expect(pendingIds('work')).toEqual(['orphan-1']); // still queued — the helm decides
+  });
+
+  it('bait addressed to a live trap raises nothing', () => {
+    const reg = trap('s1', 'web');
+    enqueue({ id: 'fine-1', repo: 'web', brief: 'x', for: `wt:${reg.trapId}` });
+    noticeOrphanedBait();
+    expect(listNotices().filter((n) => n.kind === 'bait-orphaned')).toEqual([]);
   });
 });
 
 describe('releaseCatch and the ghost-trap sweep', () => {
-  function caughtTrap(sessionId: string, baitId: string): SoakRegistration {
+  function caughtTrap(sessionId: string, baitId: string): TrapRegistration {
     enqueue({ id: baitId, repo: 'web', brief: 'x' });
     const reg = trap(sessionId, 'web');
     claimBait(reg);
-    return readSoak(sessionId)!;
+    return readTrap(reg.trapId)!;
   }
 
   it('releaseCatch requeues an open catch and strips the claim', () => {
@@ -144,23 +227,50 @@ describe('releaseCatch and the ghost-trap sweep', () => {
     expect(readStatusLog('w1', 'work').at(-1)?.verb).toBe('failed');
   });
 
-  it('sweeps a stale idle registration', () => {
-    trap('s1', 'web');
-    expect(sweepGhostTraps(1000, Date.now() + 60_000)).toEqual([{ sessionId: 's1' }]);
-    expect(readSoak('s1')).toBeUndefined();
+  it('sweeps a stale registration that HAS parked before', () => {
+    const reg = trap('s1', 'web');
+    heartbeatTrap(reg.trapId, { parked: true });
+    const actions = sweepGhostTraps(1000, Date.now() + 60_000);
+    expect(actions).toEqual([{ trapId: reg.trapId }]);
+    expect(readTrap(reg.trapId)).toBeUndefined();
+    expect(listNotices().map((n) => n.kind)).toContain('trap-ghosted');
+  });
+
+  it('a never-parked stale trap is a defective enlistment: noticed once, never swept', () => {
+    const reg = trap('s1', 'web');
+    const first = sweepGhostTraps(1000, Date.now() + 60_000);
+    expect(first).toEqual([{ trapId: reg.trapId, defective: true }]);
+    expect(readTrap(reg.trapId)).toBeDefined(); // registration stays — the address keeps protecting its bait
+    expect(sweepGhostTraps(1000, Date.now() + 120_000)).toEqual([]); // deduped
+    expect(listNotices().filter((n) => n.kind === 'trap-defective')).toHaveLength(1);
   });
 
   it('sweeps a stale caught trap and requeues its bait', () => {
-    caughtTrap('s1', 'w1');
+    const reg = caughtTrap('s1', 'w1');
     const actions = sweepGhostTraps(1000, Date.now() + 60_000);
-    expect(actions).toEqual([{ sessionId: 's1', requeued: 'w1' }]);
+    expect(actions).toEqual([{ trapId: reg.trapId, requeued: 'w1' }]);
     expect(pendingIds('work')).toEqual(['w1']);
   });
 
   it('a fresh status report keeps a stale-heartbeat trap out of the sweep', () => {
-    caughtTrap('s1', 'w1');
+    const reg = caughtTrap('s1', 'w1');
     appendStatus('w1', 'work', 'working', 'mid-turn, not parked');
     expect(sweepGhostTraps(120_000, Date.now() + 100_000)).toEqual([]);
-    expect(readSoak('s1')).toBeDefined();
+    expect(readTrap(reg.trapId)).toBeDefined();
+  });
+});
+
+describe('window capture', () => {
+  it('maps terminal identity from the environment', async () => {
+    const { captureWindow } = await import('../src/window.js');
+    const ref = captureWindow({
+      __CFBundleIdentifier: 'com.googlecode.iterm2',
+      TERM_PROGRAM: 'iTerm.app',
+      ITERM_SESSION_ID: 'w0t2p0:UUID',
+      TMUX_PANE: '%3',
+    } as NodeJS.ProcessEnv);
+    expect(ref?.bundleId).toBe('com.googlecode.iterm2');
+    expect(ref?.itermSession).toBe('w0t2p0:UUID');
+    expect(ref?.tmuxPane).toBe('%3');
   });
 });

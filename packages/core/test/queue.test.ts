@@ -2,7 +2,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { activeIds, claimNext, complete, enqueue, ensureLayout, pendingIds, readDescriptor } from '../src/index.js';
+import {
+  activeIds,
+  cancelQueued,
+  claimNext,
+  complete,
+  enqueue,
+  ensureLayout,
+  pendingIds,
+  readDescriptor,
+  readStatusLog,
+} from '../src/index.js';
 
 let home: string;
 beforeEach(() => {
@@ -60,5 +70,28 @@ describe('queue', () => {
     expect(pendingIds('chore')).toEqual(['ch1']);
     expect(claimNext('chore')).toBe('ch1');
     expect(pendingIds('work')).toEqual(['w1']);
+  });
+});
+
+describe('cancelQueued', () => {
+  it('finalizes an unclaimed item with an audit trail, never a silent delete', () => {
+    enqueue(desc('q1'));
+    expect(cancelQueued('q1', 'work')).toBe(true);
+    expect(pendingIds('work')).toEqual([]);
+    expect(fs.existsSync(path.join(home, 'done', 'q1', 'descriptor.json'))).toBe(true);
+    const last = readStatusLog('q1', 'work').at(-1);
+    expect(last?.verb).toBe('failed');
+    expect(last?.note).toBe('cancelled before claim');
+  });
+
+  it('loses the race to a claim and says so', () => {
+    enqueue(desc('q2'));
+    expect(claimNext('work')).toBe('q2');
+    expect(cancelQueued('q2', 'work')).toBe(false);
+    expect(activeIds('work')).toEqual(['q2']); // the claim stands untouched
+  });
+
+  it('an unknown id cancels nothing', () => {
+    expect(cancelQueued('nope', 'work')).toBe(false);
   });
 });

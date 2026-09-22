@@ -9,6 +9,7 @@ import {
   groundsList,
   heartbeatHelm,
   helmGate,
+  helmLabel,
   helmOf,
   liveHelms,
   listHelms,
@@ -51,6 +52,17 @@ describe('taking and holding the helm', () => {
     const again = takeHelm({ sessionId: 's-one', grounds: FLEET, ttlMs: TTL_MS });
     expect('ok' in again && again.ok.signedOnAt).toBe('ok' in first ? first.ok.signedOnAt : '');
     expect(listHelms()).toHaveLength(1);
+  });
+
+  it('sign-on records who the man is, and a re-sign without identity keeps it', () => {
+    const identity = { harness: 'claude', cwd: '/Users/x/base/homebase', host: 'mbp', label: undefined };
+    takeHelm({ sessionId: 's-one', grounds: FLEET, ttlMs: TTL_MS, identity });
+    const reg = readHelm('fleet')!;
+    expect(helmLabel(reg)).toBe('claude @ homebase');
+    takeHelm({ sessionId: 's-one', grounds: FLEET, ttlMs: TTL_MS });
+    expect(readHelm('fleet')?.harness).toBe('claude');
+    takeHelm({ sessionId: 's-one', grounds: FLEET, ttlMs: TTL_MS, identity: { ...identity, label: 'chris · primary' } });
+    expect(helmLabel(readHelm('fleet')!)).toBe('chris · primary');
   });
 
   it('a live foreign holder refuses without --take', () => {

@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from './config.js';
 import { lobstahHome } from './paths.js';
+import type { WindowRef } from './window.js';
 
 /**
  * The helm: one orchestrator session per grounds. `lobstah man helm` writes
@@ -16,6 +17,14 @@ export interface HelmRegistration {
   repos: string[];
   signedOnAt: string;
   heartbeatAt: string;
+  /** Who the man is, captured at sign-on: harness, working directory, host. */
+  harness?: string;
+  cwd?: string;
+  host?: string;
+  /** Human-friendly name; helmLabel() derives one when absent. */
+  label?: string;
+  /** Where the session's window lives — a companion app's focus target. */
+  window?: WindowRef;
   /** Set when this registration displaced a live predecessor via --take. */
   tookFrom?: { sessionId: string; at: string };
 }
@@ -119,12 +128,21 @@ export type TakeHelmResult = { ok: HelmRegistration } | { held: HelmRegistration
  * outright. A displaced holder gets a relieved notice either way — a resumed
  * ghost session deserves to learn it lost the helm.
  */
+/** The human-facing name of a helm: its label, else harness @ directory. */
+export function helmLabel(h: HelmRegistration): string {
+  if (h.label) return h.label;
+  const where = h.cwd ? path.basename(h.cwd) : undefined;
+  if (!h.harness && !where) return `session ${h.sessionId.slice(0, 8)}`;
+  return `${h.harness ?? 'session'}${where ? ` @ ${where}` : ''}`;
+}
+
 export function takeHelm(opts: {
   sessionId: string;
   grounds: Grounds;
   ttlMs: number;
   take?: boolean;
   now?: number;
+  identity?: { harness?: string; cwd?: string; host?: string; label?: string; window?: WindowRef };
 }): TakeHelmResult {
   const now = opts.now ?? Date.now();
   const existing = readHelm(opts.grounds.name);
@@ -146,12 +164,20 @@ export function takeHelm(opts: {
     );
   }
   const iso = new Date(now).toISOString();
+  const same = existing?.sessionId === opts.sessionId;
   const reg: HelmRegistration = {
     sessionId: opts.sessionId,
     grounds: opts.grounds.name,
     repos: opts.grounds.repos,
-    signedOnAt: existing?.sessionId === opts.sessionId ? existing.signedOnAt : iso,
+    signedOnAt: same ? existing.signedOnAt : iso,
     heartbeatAt: iso,
+    // Identity refreshes on every sign-on; a re-sign without one keeps what
+    // the registration already knows.
+    harness: opts.identity?.harness ?? (same ? existing.harness : undefined),
+    cwd: opts.identity?.cwd ?? (same ? existing.cwd : undefined),
+    host: opts.identity?.host ?? (same ? existing.host : undefined),
+    label: opts.identity?.label ?? (same ? existing.label : undefined),
+    window: opts.identity?.window ?? (same ? existing.window : undefined),
     tookFrom:
       existing && existing.sessionId !== opts.sessionId
         ? { sessionId: existing.sessionId, at: iso }

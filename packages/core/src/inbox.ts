@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Lane } from './types.js';
 import { laneDirs } from './paths.js';
+import { postNotice } from './notices.js';
 
 export interface InboxMessage {
   file: string;
@@ -40,4 +41,57 @@ export function acknowledge(id: string, lane: Lane, file: string): void {
   const dir = inboxDir(id, lane);
   fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
   fs.renameSync(path.join(dir, file), path.join(dir, 'handled', file));
+}
+
+/**
+ * Trap messages: conversational continuations for the session manning a
+ * worktree — no catch lifecycle, no branch, no report obligation. Each
+ * message carries provenance so the receiver can tell steering (from the
+ * helm) from information (anyone else). Stored under the work-lane inbox
+ * keyed by the trap id, same files, same validated write path.
+ */
+export interface TrapMessage {
+  file: string;
+  from: string;
+  at: string;
+  text: string;
+}
+
+const trapKey = (trapId: string): string => `trap-${trapId}`;
+
+export function sendTrapMessage(trapId: string, from: string, text: string): string {
+  return sendMessage(trapKey(trapId), 'work', JSON.stringify({ from, at: new Date().toISOString(), text }));
+}
+
+export function unhandledTrapMessages(trapId: string): TrapMessage[] {
+  return unhandled(trapKey(trapId), 'work').flatMap((m) => {
+    try {
+      const parsed = JSON.parse(m.text) as { from?: string; at?: string; text?: string };
+      return [{ file: m.file, from: parsed.from ?? 'unknown', at: parsed.at ?? '', text: parsed.text ?? '' }];
+    } catch {
+      return [{ file: m.file, from: 'unknown', at: '', text: m.text }];
+    }
+  });
+}
+
+export function acknowledgeTrapMessage(trapId: string, file: string): void {
+  acknowledge(trapKey(trapId), 'work', file);
+}
+
+/**
+ * Bounce undelivered messages to the helm as notices — used when a trap is
+ * stowed or ghost-swept with unread mail. Never delivered to whoever holds
+ * the address next, never silently dropped.
+ */
+export function bounceTrapMessages(trapId: string): number {
+  const msgs = unhandledTrapMessages(trapId);
+  for (const m of msgs) {
+    postNotice({
+      kind: 'message-bounced',
+      text: `message to wt:${trapId} never delivered (from ${m.from}): ${m.text}`,
+      refId: trapId,
+    });
+    acknowledgeTrapMessage(trapId, m.file);
+  }
+  return msgs.length;
 }

@@ -40,6 +40,9 @@ export interface Evidence {
   prUrl?: string;
   transcriptPath?: string;
   note?: string;
+  /** Delivery receipt: the trap address that actually claimed this dispatch. */
+  deliveredTo?: string;
+  deliveredAt?: string;
 }
 
 export type EventType =

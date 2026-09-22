@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Descriptor, Lane } from './types.js';
 import { laneDirs } from './paths.js';
+import { appendStatus } from './status.js';
 
 function atomicWrite(file: string, content: string): void {
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
@@ -96,6 +97,31 @@ export function complete(id: string, lane: Lane): void {
 
 export function requestCancel(id: string, lane: Lane): void {
   fs.writeFileSync(path.join(laneDirs(lane).active, id, 'cancel'), new Date().toISOString());
+}
+
+/**
+ * Cancel a dispatch nobody has claimed yet: finalize with an audit trail
+ * (never a silent delete) — the descriptor moves to done/ and the status
+ * log records the cancellation. Returns false when the item is not in the
+ * queue (already claimed, or unknown) so the caller can fall through to
+ * the active-cancel path; the rename losing the race IS that signal.
+ */
+export function cancelQueued(id: string, lane: Lane): boolean {
+  const dirs = laneDirs(lane);
+  const doneDir = path.join(dirs.done, id);
+  try {
+    fs.mkdirSync(doneDir);
+  } catch {
+    return false; // finished record already exists — nothing queued to cancel
+  }
+  try {
+    fs.renameSync(path.join(dirs.queue, `${id}.json`), path.join(doneDir, 'descriptor.json'));
+  } catch {
+    fs.rmdirSync(doneDir, { recursive: true });
+    return false; // claimed meanwhile — the claim won
+  }
+  appendStatus(id, lane, 'failed', 'cancelled before claim');
+  return true;
 }
 
 export function cancelRequested(id: string, lane: Lane): boolean {

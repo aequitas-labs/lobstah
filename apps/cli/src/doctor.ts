@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'smol-toml';
-import { configPath, executorPath, loadConfig, lobstahVersion, onPath, packagePresent } from '@lobstah/core';
+import { configPath, executorPath, loadConfig, lobstahHome, lobstahVersion, onPath, packagePresent } from '@lobstah/core';
 import { loadPickupConfig } from '@lobstah/pick';
 
 export interface DoctorRow {
@@ -109,6 +110,31 @@ export function runDoctor(now = Date.now()): DoctorRow[] {
     } catch {
       push('daemon', 'warn', 'heartbeat unreadable');
     }
+  }
+
+  // Registrations from before worktree-anchored traps have no trapId and
+  // can never claim work again — surface them instead of ignoring quietly.
+  try {
+    const soaking = path.join(lobstahHome(), 'soaking');
+    const stale = fs
+      .readdirSync(soaking)
+      .filter((f) => f.endsWith('.json'))
+      .filter((f) => {
+        try {
+          return typeof (JSON.parse(fs.readFileSync(path.join(soaking, f), 'utf8')) as { trapId?: unknown }).trapId !== 'string';
+        } catch {
+          return true;
+        }
+      });
+    if (stale.length > 0) {
+      push(
+        'soaking registry',
+        'warn',
+        `${stale.length} pre-0.5 registration(s) without a trap id — inert; delete them and re-soak from each worktree`,
+      );
+    }
+  } catch {
+    // no soaking dir — nothing to check
   }
 
   push('lobstah', 'ok', `v${lobstahVersion()} at ${process.argv[1] ?? '?'}`);
