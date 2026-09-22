@@ -495,17 +495,17 @@ export function serveGlass(port: number): http.Server {
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
   const server = http.createServer((req, res) => {
     if (req.url === '/lob.png' && lob) {
-      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' });
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
       res.end(fs.readFileSync(lob));
     } else if (req.url === '/lob-sprite.png' && sprite) {
-      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' });
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
       res.end(fs.readFileSync(sprite));
     } else if (req.url === '/icon.png') {
       if (icon) {
-        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' });
+        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
         res.end(fs.readFileSync(icon));
       } else {
-        res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'max-age=3600' });
+        res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-cache' });
         res.end(fallbackIcon);
       }
     } else if (req.url === '/data') {
