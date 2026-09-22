@@ -293,7 +293,7 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 .lob .bub{display:none;position:absolute;bottom:58px;right:-8px;z-index:2;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:6px 9px 5px;font-size:11px;line-height:1.35;color:var(--fg);width:max-content;max-width:150px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 .lob:hover .bub{display:block}
 .lob .bub span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word}
-.lob .star{position:absolute;left:56px;top:-9px;height:14px;image-rendering:pixelated}
+.lob .star{position:absolute;left:56px;top:-9px;height:14px;image-rendering:pixelated;z-index:3}
 .lob:hover{animation-play-state:paused}
 @keyframes crawl{0%{transform:translateX(-90px)}100%{transform:translateX(100vw)}}
 @keyframes step{to{background-position-x:-288px}}
