@@ -172,6 +172,23 @@ func focusHelm() {
 
 final class PetView: NSView {
   override func mouseDown(with event: NSEvent) { focusHelm() }
+  override func rightMouseDown(with event: NSEvent) {
+    let menu = NSMenu()
+    let glass = NSMenuItem(title: "Open spyglass", action: #selector(NSApplication.petOpenGlass), keyEquivalent: "")
+    glass.target = NSApp
+    menu.addItem(glass)
+    menu.addItem(.separator())
+    let quit = NSMenuItem(title: "Quit Lobstah Pet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+    quit.target = NSApp
+    menu.addItem(quit)
+    NSMenu.popUpContextMenu(menu, with: event, for: self)
+  }
+}
+
+extension NSApplication {
+  @objc func petOpenGlass() {
+    NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
+  }
 }
 
 final class Pet {
@@ -183,21 +200,24 @@ final class Pet {
   var x: CGFloat
   let speed: CGFloat
   var frame = 0
-  let screen: NSScreen
+  /** All displays, left to right; the pet crosses each in turn. */
+  let screens: [NSScreen]
+  var screenIndex = 0
 
-  init(text: String, index: Int, screen: NSScreen) {
-    self.screen = screen
-    self.speed = 70 + CGFloat(index) * 18
-    self.x = screen.frame.minX - 220 - CGFloat(index) * 240
+  init(text: String, index: Int) {
+    self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
+    self.speed = 60 + CGFloat(index) * 16
+    let first = screens.first?.frame ?? .zero
+    self.x = first.minX - 200 - CGFloat(index) * 220
 
-    let panelW: CGFloat = 224
-    let panelH: CGFloat = 196
+    let panelW: CGFloat = 176
+    let panelH: CGFloat = 152
     panel = NSPanel(
-      contentRect: NSRect(x: x, y: screen.frame.minY + 4, width: panelW, height: panelH),
+      contentRect: NSRect(x: x, y: 0, width: panelW, height: panelH),
       styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered, defer: false
     )
-    panel.level = .statusBar
+    panel.level = .floating
     panel.backgroundColor = .clear
     panel.isOpaque = false
     panel.hasShadow = false
@@ -208,8 +228,8 @@ final class Pet {
     root.wantsLayer = true
     panel.contentView = root
 
-    // sprite: one frame of the 4-frame sheet, pixel-crisp at 2x
-    let spriteW: CGFloat = 144, spriteH: CGFloat = 112
+    // sprite: one frame of the 4-frame sheet, pixel-crisp at 1.5x
+    let spriteW: CGFloat = 108, spriteH: CGFloat = 84
     spriteLayer.frame = CGRect(x: 8, y: 0, width: spriteW, height: spriteH)
     if let sheet = Pet.spriteSheet {
       var rect = CGRect(origin: .zero, size: sheet.size)
@@ -220,20 +240,20 @@ final class Pet {
     root.layer?.addSublayer(spriteLayer)
 
     // speech bubble with the star and the question
-    let bubble = NSView(frame: NSRect(x: 20, y: spriteH + 8, width: panelW - 28, height: 66))
+    let bubble = NSView(frame: NSRect(x: 16, y: spriteH + 6, width: panelW - 22, height: 56))
     bubble.wantsLayer = true
     bubble.layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.106, blue: 0.133, alpha: 0.96).cgColor
     bubble.layer?.borderColor = NSColor(calibratedWhite: 0.35, alpha: 1).cgColor
     bubble.layer?.borderWidth = 1
     bubble.layer?.cornerRadius = 10
 
-    let star = NSImageView(frame: NSRect(x: 8, y: 22, width: 22, height: 22))
+    let star = NSImageView(frame: NSRect(x: 6, y: 19, width: 18, height: 18))
     star.image = Pet.starImage
     bubble.addSubview(star)
 
-    let label = NSTextField(wrappingLabelWithString: text.count > 90 ? String(text.prefix(87)) + "…" : text)
-    label.frame = NSRect(x: 36, y: 6, width: bubble.frame.width - 44, height: 54)
-    label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    let label = NSTextField(wrappingLabelWithString: text.count > 72 ? String(text.prefix(69)) + "…" : text)
+    label.frame = NSRect(x: 29, y: 5, width: bubble.frame.width - 36, height: 46)
+    label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
     label.textColor = NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.92, alpha: 1)
     label.maximumNumberOfLines = 3
     label.cell?.truncatesLastVisibleLine = true
@@ -245,8 +265,13 @@ final class Pet {
 
   func tick(_ dt: CGFloat) {
     x += speed * dt
-    if x > screen.frame.maxX { x = screen.frame.minX - 240 }
-    panel.setFrameOrigin(NSPoint(x: x, y: screen.frame.minY + 4))
+    let current = screens[screenIndex]
+    if x > current.frame.maxX {
+      screenIndex = (screenIndex + 1) % screens.count
+      x = screens[screenIndex].frame.minX - panel.frame.width
+    }
+    // visibleFrame keeps the walk above the Dock
+    panel.setFrameOrigin(NSPoint(x: x, y: screens[screenIndex].visibleFrame.minY + 2))
   }
 
   func step() {
@@ -265,21 +290,25 @@ final class Pet {
 final class AppDelegate: NSObject, NSApplicationDelegate {
   var pets: [Pet] = []
   var lastKey = ""
-  var statusItem: NSStatusItem!
+  var statusItem: NSStatusItem?
   var preview = ProcessInfo.processInfo.environment["LOBSTAH_PET_PREVIEW"] != nil
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
 
-    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    statusItem.button?.title = "🦞"
-    let menu = NSMenu()
-    menu.addItem(NSMenuItem(title: "Preview pet", action: #selector(togglePreview), keyEquivalent: "p"))
-    menu.addItem(NSMenuItem(title: "Open spyglass", action: #selector(openGlass), keyEquivalent: "g"))
-    menu.addItem(.separator())
-    menu.addItem(NSMenuItem(title: "Quit Lobstah Pet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-    for item in menu.items { item.target = self }
-    statusItem.menu = menu
+    // No menu-bar presence by default: the pet IS the UI (right-click it
+    // for spyglass/quit). LOBSTAH_PET_MENUBAR=1 restores the status item.
+    if ProcessInfo.processInfo.environment["LOBSTAH_PET_MENUBAR"] != nil {
+      statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+      statusItem?.button?.title = "🦞"
+      let menu = NSMenu()
+      menu.addItem(NSMenuItem(title: "Preview pet", action: #selector(togglePreview), keyEquivalent: "p"))
+      menu.addItem(NSMenuItem(title: "Open spyglass", action: #selector(openGlass), keyEquivalent: "g"))
+      menu.addItem(.separator())
+      menu.addItem(NSMenuItem(title: "Quit Lobstah Pet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+      for item in menu.items { item.target = self }
+      statusItem?.menu = menu
+    }
 
     // walk + frame-step + poll timers
     Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
@@ -319,9 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard key != self.lastKey else { return }
         self.lastKey = key
         for pet in self.pets { pet.close() }
-        guard let screen = NSScreen.main else { return }
         self.pets = shown.enumerated().map { i, item in
-          Pet(text: item.note ?? item.verb, index: i, screen: screen)
+          Pet(text: item.note ?? item.verb, index: i)
         }
       }
     }
