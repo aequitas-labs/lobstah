@@ -487,7 +487,7 @@ tick();setInterval(()=>tick(false),2000);
 
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(port: number): http.Server {
-  const icon = assetPath('lob-star.png');
+  const icon = assetPath('favicon.png') ?? assetPath('lob-star.png');
   const lob = assetPath('lob.png');
   const sprite = assetPath('lob-sprite.png');
   // A compiled binary carries no asset files; the favicon degrades to the
