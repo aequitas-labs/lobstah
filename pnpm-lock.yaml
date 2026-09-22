@@ -29,6 +29,9 @@ importers:
       '@lobstah/pick':
         specifier: workspace:*
         version: link:../pick
+      '@lobstah/runner':
+        specifier: workspace:*
+        version: link:../../packages/runner
       '@lobstah/supervisor':
         specifier: workspace:*
         version: link:../../packages/supervisor

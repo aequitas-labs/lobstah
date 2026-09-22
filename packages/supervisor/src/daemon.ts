@@ -8,6 +8,7 @@ import {
   appendStatus,
   cancelRequested,
   claimNext,
+  COMPILED_BINARY,
   detectHarnesses,
   ensureLayout,
   executorPath,
@@ -83,7 +84,10 @@ export function spawnRunner(st: ActiveState, opts: { attempts: number; resume?: 
   }
   const logPath = path.join(laneDirs(st.lane).state, `${st.id}.runner.log`);
   const log = fs.openSync(logPath, 'a');
-  const child = spawn(process.execPath, [runnerEntry(), st.dir, st.lane], {
+  // A compiled binary carries the runner inside itself: re-exec with the
+  // hidden __runner verb instead of pointing node at a runner.js on disk.
+  const runnerArgv = COMPILED_BINARY ? ['__runner', st.dir, st.lane] : [runnerEntry(), st.dir, st.lane];
+  const child = spawn(process.execPath, runnerArgv, {
     detached: true,
     stdio: ['ignore', log, log],
     env: {

@@ -52,3 +52,31 @@ jobs:
       - run: node scripts/${{ steps.target.outputs.script }} ${{ steps.target.outputs.version }}
       - run: npm publish --provenance --access public
         working-directory: ${{ steps.target.outputs.dir }}
+
+  # Standalone binaries for the no-Node channel — attached to the GitHub
+  # release for every v* tag. See scripts/build-binaries.mjs for what they
+  # can and cannot drive.
+  binaries:
+    if: startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/build-binaries.mjs "${GITHUB_REF_NAME#v}"
+      - name: Attach to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" build/bin/* --clobber
