@@ -456,7 +456,7 @@ function render(d){
   'no watches');
  document.getElementById('foot').innerHTML=
   '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>';
- document.getElementById('lob').style.display=att.length>0?'block':'none';
+ document.getElementById('lob').style.display=(att.length>0||new URLSearchParams(location.search).has('lob'))?'block':'none';
  renderModal(d);
 }
 window.lobClick=()=>{if(last&&last.helms.length)showModal('helm',last.helms[0].grounds);else document.getElementById('attention').scrollIntoView({behavior:'smooth'})};
