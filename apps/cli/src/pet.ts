@@ -86,6 +86,15 @@ export function installPet(binaryArg?: string): { file: string; binary: string; 
     fs.rmSync(binary, { force: true }); // never write into a mapped executable
     fs.copyFileSync(source, binary);
     fs.chmodSync(binary, 0o755);
+    // SwiftPM resolves Bundle.module next to the executable, falling back to
+    // an absolute path into the BUILD tree — copy the resource bundle too,
+    // or the installed pet silently depends on the repo checkout existing.
+    const bundle = path.join(path.dirname(source), 'LobstahPet_LobstahPet.bundle');
+    if (fs.existsSync(bundle)) {
+      const dest = path.join(path.dirname(binary), 'LobstahPet_LobstahPet.bundle');
+      fs.rmSync(dest, { recursive: true, force: true });
+      fs.cpSync(bundle, dest, { recursive: true });
+    }
   }
   const logDir = path.join(lobstahHome(), 'logs');
   fs.mkdirSync(logDir, { recursive: true });
