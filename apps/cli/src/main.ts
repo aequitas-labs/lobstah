@@ -285,7 +285,7 @@ async function soakPark(trapId: string, args: string[], plain = false): Promise<
       }
     } else {
       if (reg.one && reg.claimed) {
-        stowTrap(trapId, 'signed off after its one catch');
+        stowTrap(trapId, 'signed off after its one catch', reg.sessionId);
         return; // one catch was the deal — the trap comes out of the water
       }
       const caught = claimBait(reg);
@@ -912,7 +912,9 @@ ${progress}`,
       runDueManWatches();
       const standing = attentionNow(consume, remindMs, Date.now(), matchGrounds);
       const standingWatches = pendingWatchEvents(consume);
-      const standingNotices = unseenNotices(consume, noticeFilter);
+      // Consumed as usual, but a session is never woken by its own action's
+      // notice — the echo carries no news for its author.
+      const standingNotices = unseenNotices(consume, noticeFilter).filter((n) => n.by === undefined || n.by !== sid);
       if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0) {
         if (standing.length > 0) emit(standing);
         if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
@@ -934,7 +936,7 @@ ${progress}`,
           emitWatchAttention(watched, sid);
           return;
         }
-        const freshNotices = unseenNotices(consume, noticeFilter);
+        const freshNotices = unseenNotices(consume, noticeFilter).filter((n) => n.by === undefined || n.by !== sid);
         if (freshNotices.length > 0) {
           emitNotices(freshNotices, sid);
           return;
@@ -1055,7 +1057,7 @@ ${progress}`,
           const idleNotices = unseenNotices(
             true,
             helm ? (n: Notice) => n.repo === undefined || helm.repos.includes(n.repo) : undefined,
-          );
+          ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
             emit(
               [
@@ -1087,7 +1089,8 @@ ${progress}`,
         runDueManWatches();
         let evs = attentionNow(true, remindMs, Date.now(), matchHelm);
         let watched = pendingWatchEvents(true);
-        let fleetNotices = unseenNotices(true, helmNoticeFilter);
+        const notEcho = (n: Notice) => n.by === undefined || n.by !== hook?.session_id;
+        let fleetNotices = unseenNotices(true, helmNoticeFilter).filter(notEcho);
         if (evs.length === 0 && watched.length === 0 && fleetNotices.length === 0) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
@@ -1096,7 +1099,7 @@ ${progress}`,
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
             runDueManWatches();
             watched = pendingWatchEvents(true);
-            fleetNotices = unseenNotices(true, helmNoticeFilter);
+            fleetNotices = unseenNotices(true, helmNoticeFilter).filter(notEcho);
             if (evs.length > 0 || watched.length > 0 || fleetNotices.length > 0) break;
           }
         }
@@ -1250,7 +1253,7 @@ ${progress}`,
         const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), sessionId);
         if (refusal) throw new Error(refusal);
       }
-      const reg = stowTrap(trapId, own ? 'signed off' : 'stowed by the helm');
+      const reg = stowTrap(trapId, own ? 'signed off' : 'stowed by the helm', sessionId);
       if (!reg) {
         if (!quiet) console.log(toonKV({ trap: `wt:${trapId}`, soaking: false }));
         break;

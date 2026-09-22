@@ -149,6 +149,7 @@ export function signOnTrap(opts: {
       text: `trap wt:${trapId} signed on (${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for wt:${trapId}\``,
       refId: trapId,
       repo: opts.repo,
+      by: opts.sessionId,
     });
   }
   return { ok: reg };
@@ -159,7 +160,7 @@ export function signOnTrap(opts: {
  * end-state explicit: a trap that leaves the registry without either a
  * trap-stowed or a trap-ghosted notice never leaves cleanly.
  */
-export function stowTrap(trapId: string, reason = 'signed off'): TrapRegistration | undefined {
+export function stowTrap(trapId: string, reason = 'signed off', by?: string): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
   fs.rmSync(regPath(trapId), { force: true });
@@ -168,6 +169,7 @@ export function stowTrap(trapId: string, reason = 'signed off'): TrapRegistratio
     text: `trap wt:${trapId} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
     refId: trapId,
     repo: reg.repo,
+    by,
   });
   return reg;
 }
@@ -197,6 +199,7 @@ export function heartbeatTrap(
       text: `trap wt:${trapId} is listening — addressed work now delivers within seconds`,
       refId: trapId,
       repo: reg.repo,
+      by: reg.sessionId,
     });
   }
   return next;

@@ -22,6 +22,11 @@ describe('helm notices', () => {
     expect(listNotices().map((n) => n.text)).toEqual(['one', 'two']);
   });
 
+  it('records who caused it, so wake paths can skip the author echo', () => {
+    postNotice({ kind: 'trap-stowed', text: 'helm stow', by: 'helm-session' });
+    expect(listNotices().at(-1)?.by).toBe('helm-session');
+  });
+
   it('a dedupeKey posts once, ever', () => {
     expect(postNotice({ kind: 'bait-orphaned', text: 'x', dedupeKey: 'orphan-a' })).toBeDefined();
     expect(postNotice({ kind: 'bait-orphaned', text: 'x again', dedupeKey: 'orphan-a' })).toBeUndefined();

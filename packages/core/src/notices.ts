@@ -30,6 +30,10 @@ export interface Notice {
   refId?: string;
   /** Repo key, so a helm can scope notices to its grounds. */
   repo?: string;
+  /** The session whose action caused it — consumed as usual, but never
+   *  woken back at its own author (a helm's stow should not wake the helm
+   *  to announce itself). */
+  by?: string;
 }
 
 export function noticesDir(): string {
@@ -56,6 +60,8 @@ export function postNotice(n: {
   text: string;
   refId?: string;
   repo?: string;
+  /** The session whose action caused this — its own wakes skip the echo. */
+  by?: string;
   dedupeKey?: string;
 }): Notice | undefined {
   const dir = noticesDir();
@@ -76,6 +82,7 @@ export function postNotice(n: {
     text: n.text,
     refId: n.refId,
     repo: n.repo,
+    by: n.by,
   };
   const file = path.join(dir, `${seq}.json`);
   const tmp = `${file}.tmp`;
