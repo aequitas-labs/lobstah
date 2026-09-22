@@ -17,6 +17,7 @@ import {
   heartbeatTrap,
   listTraps,
   readTrap,
+  readSessionClaim,
   releaseCatch,
   signOnTrap,
   stowTrap,
@@ -590,6 +591,26 @@ async function mainCli(): Promise<void> {
       const entry = appendStatus(id, lane, verb, note);
       if (prUrl) mergeEvidence(id, lane, { prUrl });
       console.log(toonKV({ id, verb: entry.verb, at: entry.at, ...(prUrl ? { prUrl } : {}) }));
+      // Self-instructive next step, right where the reporter reads it: an
+      // instruction that lives only in session memory decays over a long
+      // thread; the one the command prints cannot.
+      const soaked = readSessionClaim(id, lane)?.by.startsWith('wt:') ?? false;
+      const next =
+        verb === 'needs-decision' || verb === 'blocked'
+          ? soaked
+            ? [
+                `lobstah soak --wait   (the answer arrives in this dispatch's inbox at your next park — run this now)`,
+                `lobstah inbox ${id}   (check for it any time)`,
+              ]
+            : [`lobstah inbox ${id}   (the answer arrives here — check at checkpoints)`]
+          : verb === 'done' || verb === 'failed'
+            ? soaked
+              ? [`lobstah soak --wait   (next assignment, or a quiet timeout)`, `lobstah stow   (sign off instead)`]
+              : []
+            : soaked
+              ? [`lobstah soak --wait   (re-park after reporting so answers and messages reach you)`]
+              : [];
+      if (next.length > 0) console.log(toonHelp(next));
       break;
     }
     case 'inbox': {

@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/master.swiftdeps"
+  },
+  "/Users/chris/lobstah/apps/pet/Sources/LobstahPet/main.swift": {
+    "dependencies": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/main.d",
+    "object": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/main.swift.o",
+    "swiftmodule": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/main.swiftdeps",
+    "diagnostics": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/main.dia"
+  },
+  "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/DerivedSources/resource_bundle_accessor.swift": {
+    "dependencies": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/resource_bundle_accessor.d",
+    "object": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/resource_bundle_accessor.swift.o",
+    "swiftmodule": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/resource_bundle_accessor~partial.swiftmodule",
+    "swift-dependencies": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/resource_bundle_accessor.swiftdeps",
+    "diagnostics": "/Users/chris/lobstah/apps/pet/.build/arm64-apple-macosx/debug/LobstahPet.build/resource_bundle_accessor.dia"
+  }
+}
