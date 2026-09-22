@@ -5,6 +5,7 @@ import {
   executorPath,
   laneDirs,
   lastEventAt,
+  listHelms,
   listSoaking,
   listWatches,
   loadConfig,
@@ -74,6 +75,7 @@ export interface TendReport {
   stories: TendStory[];
   watches: TendWatch[];
   soaking: TendSoak[];
+  helms: Array<{ grounds: string; session: string; heartbeatAgeSecs: number }>;
   merge?: MergeView;
 }
 
@@ -246,6 +248,12 @@ export function buildTendReport(now = Date.now()): TendReport {
     heartbeatAgeSecs: Math.max(0, Math.round((now - (Date.parse(r.heartbeatAt) || 0)) / 1000)),
   }));
 
+  const helms = listHelms().map((h) => ({
+    grounds: h.grounds,
+    session: h.sessionId.slice(0, 8),
+    heartbeatAgeSecs: Math.max(0, Math.round((now - (Date.parse(h.heartbeatAt) || 0)) / 1000)),
+  }));
+
   return {
     verdict,
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
@@ -254,6 +262,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     stories,
     watches,
     soaking,
+    helms,
     merge,
   };
 }
@@ -327,6 +336,14 @@ export function renderTend(r: TendReport): string {
         })),
         ['session', 'repo', 'claimed', 'heartbeat', 'worktree'],
       ),
+    );
+  }
+  if (r.helms.length > 0) {
+    lines.push('');
+    lines.push(
+      toonKV({
+        helm: r.helms.map((h) => `${h.grounds}=${h.session} (${h.heartbeatAgeSecs}s ago)`).join(', '),
+      }),
     );
   }
   if (r.merge && (r.merge.open.length > 0 || r.merge.recent.length > 0)) {

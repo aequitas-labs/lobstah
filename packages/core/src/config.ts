@@ -38,11 +38,25 @@ export interface SoakConfig {
   ttlSecs: number;
 }
 
+export interface HelmConfig {
+  /** Heartbeat age past which a helm registration is stale and claimable without --take. */
+  ttlSecs: number;
+  /** Minimum seconds between haul-delivered digests for a helm session. */
+  reportSecs: number;
+}
+
+/** A named territory: the subset of configured repos one helm oversees. */
+export interface GroundsConfig {
+  repos: string[];
+}
+
 export interface Config {
   repos: Record<string, RepoConfig>;
   harness: HarnessDefaults;
   limits: LimitsConfig;
   soak: SoakConfig;
+  helm: HelmConfig;
+  grounds: Record<string, GroundsConfig>;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
   notifyCommand?: string;
   /** Verbs that fire notifyCommand. Default: needs-decision, blocked, done, failed. */
@@ -54,6 +68,11 @@ export interface Config {
 export const DEFAULT_SOAK: SoakConfig = {
   deferSecs: 90,
   ttlSecs: 1800,
+};
+
+export const DEFAULT_HELM: HelmConfig = {
+  ttlSecs: 1800,
+  reportSecs: 900,
 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
@@ -89,11 +108,18 @@ export function loadConfig(): Config {
       pickup: r.pickup === undefined ? undefined : Boolean(r.pickup),
     };
   }
+  const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;
+  const grounds: Record<string, GroundsConfig> = {};
+  for (const [key, g] of Object.entries(groundsRaw)) {
+    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [] };
+  }
   return {
     repos,
     harness: (raw.harness as HarnessDefaults) ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
     soak: { ...DEFAULT_SOAK, ...((raw.soak as Partial<SoakConfig>) ?? {}) },
+    helm: { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) },
+    grounds,
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,

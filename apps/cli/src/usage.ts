@@ -67,7 +67,15 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
     positionals: '[<key>]',
   },
-  soak: { flags: { '--session': { value: '<id>', required: true }, '--one': {}, '--harness': { value: HARNESS } } },
+  soak: {
+    flags: {
+      '--session': { value: '<id>', required: true },
+      '--one': {},
+      '--harness': { value: HARNESS },
+      '--wait': {},
+      '--timeout': { value: '<secs>' },
+    },
+  },
   stow: { flags: { '--session': { value: '<id>' }, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall'], flags: { '--interval': { value: '<ms>' } } },
   pick: { subverbs: ['once', 'install', 'uninstall'], flags: {} },
@@ -77,8 +85,25 @@ export const COMMANDS: Record<string, CommandSpec> = {
   version: { flags: {} },
   'man:manual': { flags: {} },
   'man:tend': { flags: { '--json': {} } },
-  'man:report': { flags: { '--cursor': { value: '<name>' }, '--peek': {}, '--json': {} } },
-  'man:wait': { flags: { '--timeout': { value: '<secs>' }, '--peek': {} } },
+  'man:report': {
+    flags: {
+      '--grounds': { value: '<name>' },
+      '--cursor': { value: '<name>' },
+      '--peek': {},
+      '--json': {},
+      '--session': { value: '<id>' },
+    },
+  },
+  'man:wait': {
+    flags: {
+      '--timeout': { value: '<secs>' },
+      '--peek': {},
+      '--grounds': { value: '<name>' },
+      '--session': { value: '<id>' },
+    },
+  },
+  'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--take': {} } },
+  'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
   'man:brief': { flags: {} },
@@ -107,10 +132,13 @@ without --apply (default 14 days).`,
 paused | done | failed.`,
   watch: `Stand watch on something external; bare \`watch\` (or \`watch ls\`) lists.
 The check command answers "anything since {cursor}?" in JSON.`,
-  soak: `Volunteer this session as a worker: it parks at turn end and takes matching
-bait. Refused from a primary checkout — soak from a worktree. --one stows
-after the first catch.`,
-  stow: `Sign a soaking session off; an open catch goes back to the queue.`,
+  soak: `Volunteer this session as a worker: it waits at turn end and takes matching
+work from the queue. Refused from a primary checkout — run it from a
+worktree. --one signs off after the first completed assignment. --wait
+listens in the foreground right now (for sessions without Stop hooks):
+assigned work prints plain, a quiet timeout exits 3 — run the same command
+again to keep listening.`,
+  stow: `Sign a worker session off; its unfinished assignment goes back to the queue.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit.`,
   pick: `Tracker loops: poll Linear/GitHub, dispatch assigned work, report back,
@@ -124,16 +152,28 @@ under the given directories.`,
   'man:manual': `The lobsterman's manual.`,
   'man:tend': `The whole-fleet pass: verdict, unanswered questions, each work item's chain,
 PR, and merge gate. Pure disk read.`,
-  'man:report': `The delta since the last report: catches landed, attention arisen, what still
-waits, and the fleet verdict. Advances the "reported through" cursor unless
---peek; prints "no change" when the delta is empty.`,
+  'man:report': `The delta since the last report: landed, arisen, still-waiting, verdict.
+Advances the cursor unless --peek — the acknowledgment man wait's timeout
+digest defers to. --grounds scopes digest and cursor to one helm's territory
+(that helm's alone). Reserved for the claimed helm; identify with --session
+(defaults --grounds to its own).`,
+  'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
+Prints the charter, arms the Stop-hook park, and gates the periodic digest.
+A live foreign holder refuses without --take; a stale one is claimable.`,
+  'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
+cleared too.`,
   'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout.
-A timeout carries the man report delta when something changed. --peek
-surfaces standing events without consuming them.`,
+A timeout shows the man report delta when something changed — as a peek: the
+delta re-surfaces until \`man report\` acknowledges it. --peek surfaces
+standing events without consuming them. With a claimed helm this verb is
+reserved for it — identify with --session (which also heartbeats the helm
+and defaults --grounds to its own).`,
   'man:init': `Install the haul Stop hook into Claude settings; --marker touches
 .lobstah-man to arm this directory.`,
   'man:haul': `Stop-hook entry point: park the session while work is in flight (lobsterman
-or soaking worker); prints hook-decision JSON on an event.`,
+or soaking worker); prints hook-decision JSON on an event. Hookless sessions
+use the foreground verbs instead: \`soak --wait\` (worker), \`man wait\`
+(lobsterman).`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
