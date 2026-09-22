@@ -87,6 +87,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   pick: { subverbs: ['once', 'install', 'uninstall'], flags: {} },
   doctor: { flags: {} },
   glass: { flags: { '--port': { value: '<n>' } } },
+  pet: { subverbs: ['install', 'uninstall'], flags: { '--binary': { value: '<path>' } } },
   repos: { subverbs: ['add'], flags: { '--pickup': {}, '--key': { value: '<k>' } }, positionals: '[<path>]' },
   init: { flags: { '--scan': {}, '--pickup': {} }, positionals: '[<dir>...]' },
   version: { flags: {} },
@@ -164,6 +165,11 @@ writes + loads a launchd agent / systemd user unit.`,
 reconcile, merge.`,
   doctor: `Check binaries, config, repos, harnesses, and the daemon heartbeat; exit 1
 on failures.`,
+  pet: `The desktop pet (macOS): attention questions crawl across the screen as
+the lobster, each with its question in a speech bubble; clicking one opens
+the helm. install copies the built binary under ~/.lobstah/bin and writes a
+login LaunchAgent (build it first: cd apps/pet && swift build -c release).
+Quitting the pet sticks until next login; uninstall removes the agent.`,
   glass: `The spyglass: tend as a live localhost web page — attention, dispatches,
 traps with lifecycle and mail, notices, merge view; filters and a
 table/cards toggle. Read-only and binds 127.0.0.1 only: looking through it

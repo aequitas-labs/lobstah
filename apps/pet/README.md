@@ -19,22 +19,34 @@ The pet only ever reads lobstah state — `lobstah man tend --json` every few
 seconds plus the helm registration files. It steers nothing and consumes no
 cursor; quieting a pet means answering its question.
 
-## Run
+## Install
 
 ```bash
-cd apps/pet
-swift build -c release
-.build/release/LobstahPet            # menu-bar 🦞: preview toggle, spyglass, quit
-LOBSTAH_PET_PREVIEW=1 .build/release/LobstahPet   # show a pet immediately
+cd apps/pet && swift build -c release && cd ../..
+lobstah pet install        # copies the binary under ~/.lobstah/bin and writes
+                           # a login LaunchAgent (RunAtLoad; quitting sticks
+                           # until next login). `lobstah pet uninstall` removes it.
 ```
 
-Needs `lobstah` on PATH and macOS 13+. Focusing Terminal or iTerm windows
-triggers the one-time macOS Automation permission prompt the first time a
-pet is clicked.
+A locally built binary needs no signing or notarization — Gatekeeper only
+gates quarantined downloads. Distributing prebuilt pets through GitHub
+releases is what would need a Developer ID signature + notarization.
+
+## Run by hand
+
+```bash
+LOBSTAH_PET_PREVIEW=1 apps/pet/.build/release/LobstahPet   # show a pet immediately
+LOBSTAH_PET_MENUBAR=1 apps/pet/.build/release/LobstahPet   # with the menu-bar 🦞
+```
+
+Right-click the walking lobster for spyglass/quit. Needs `lobstah` on PATH
+(the LaunchAgent bakes a resolved PATH in) and macOS 13+. Focusing Terminal
+or iTerm windows triggers the one-time macOS Automation permission prompt
+the first time a pet is clicked.
 
 ## Not yet
 
-Codesigned/notarized distribution through the release binary channel, a
-`lobstah pet install` LaunchAgent, per-question focus (all pets currently
+Codesigned/notarized distribution through the release binary channel,
+per-question focus (all pets currently
 lead to the helm), and the `lobstah://` protocol handler that would give
 the spyglass real deep links. This is the dogfood cut.

@@ -205,12 +205,15 @@ final class Pet {
   var screenIndex = 0
   /** Between displays the pet is simply gone for a beat, then re-enters. */
   var hiddenUntil: Date?
+  /** Where the current entrance began — drives the fade-in. */
+  var entryX: CGFloat = -10_000
 
   init(text: String, index: Int) {
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
     self.speed = 60 + CGFloat(index) * 16
     let first = screens.first?.frame ?? .zero
     self.x = first.minX - 200 - CGFloat(index) * 220
+    self.entryX = self.x
 
     let panelW: CGFloat = 176
     let panelH: CGFloat = 152
@@ -273,15 +276,21 @@ final class Pet {
     }
     x += speed * dt
     let current = screens[screenIndex]
-    // Leaving a display: vanish before leaking onto the neighbor, pause a
-    // beat offstage, then re-enter at the next display's edge.
-    if x > current.frame.maxX - 40 {
+    // Leaving a display: fade over the last stretch, vanish before leaking
+    // onto the neighbor, pause a beat offstage, then fade in at the next
+    // display's edge.
+    let cutoff = current.frame.maxX - 40
+    if x > cutoff {
       panel.orderOut(nil)
       screenIndex = (screenIndex + 1) % screens.count
       x = screens[screenIndex].frame.minX - 24
+      entryX = x
       hiddenUntil = Date().addingTimeInterval(2.5)
       return
     }
+    let fadeOut = max(0, min(1, (cutoff - x) / 110))
+    let fadeIn = max(0, min(1, (x - entryX) / 110))
+    panel.alphaValue = min(fadeOut, fadeIn)
     // visibleFrame keeps the walk above the Dock
     panel.setFrameOrigin(NSPoint(x: x, y: screens[screenIndex].visibleFrame.minY + 2))
   }

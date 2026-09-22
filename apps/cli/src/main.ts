@@ -78,6 +78,7 @@ import { applyCull, planCull } from './cull.js';
 import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
+import { installPet, uninstallPet } from './pet.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { parseReportArgs } from './report-args.js';
@@ -137,6 +138,8 @@ host processes:
   daemon install|uninstall        write + load the launchd agent / systemd user
   pick install|uninstall          unit for this host, with resolved node and
                                   lobstah paths (launchd gets no shell env)
+  pet install|uninstall           the desktop pet (macOS): a login LaunchAgent
+                                  walks attention questions across the screen
 
 lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man tend [--json]               tend the whole string: fleet verdict (daemon
@@ -1316,6 +1319,19 @@ ${progress}`,
       if (kind === 'daemon') await daemon(Number(arg(args, '--interval') ?? '5000'));
       else await runPickup(args[0] === 'once' ? 'once' : 'daemon');
       break;
+    }
+    case 'pet': {
+      if (args[0] === 'install') {
+        const res = installPet(arg(args, '--binary'));
+        console.log(toonKV({ pet: 'installed', binary: res.binary, file: res.file, loaded: res.loaded, detail: res.detail }));
+        break;
+      }
+      if (args[0] === 'uninstall') {
+        const res = uninstallPet();
+        console.log(toonKV({ pet: 'uninstalled', file: res.file, removed: res.removed }));
+        break;
+      }
+      throw new UsageError(`pet requires a subverb: install | uninstall\n\n${usageFor('pet')!}`);
     }
     case 'glass': {
       const port = Number(arg(args, '--port') ?? '4949');
