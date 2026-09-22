@@ -10,6 +10,10 @@ export interface MapEntry {
   lastReported?: Verb;
   lastInboundAt?: string;
   recovered?: boolean;
+  /** Issue dispatches started for this key; legacy entries count as one. */
+  attempts?: number;
+  /** A finalized failure was reported; the tracker may offer this issue again. */
+  released?: boolean;
 }
 
 interface StateFile {
@@ -60,6 +64,12 @@ export class PickupState {
     if (!cur) return;
     this.data.map[key] = { ...cur, ...patch };
     this.save();
+  }
+
+  releaseIssue(key: string): void {
+    const entry = this.get(key);
+    if (entry?.kind !== 'issue' || entry.lastReported !== 'failed') return;
+    this.update(key, { released: true, attempts: entry.attempts ?? 1 });
   }
 
   approvalConsumed(dedupKey: string): boolean {

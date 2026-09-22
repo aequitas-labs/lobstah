@@ -27,6 +27,7 @@ export interface LinearConfig {
 }
 
 const API = 'https://api.linear.app/graphql';
+const CLOSED_TYPES = ['completed', 'canceled'];
 
 interface LinearIssue {
   id: string;
@@ -35,6 +36,10 @@ interface LinearIssue {
   description: string | null;
   state: { name: string; type: string };
   team: { key: string; id: string };
+}
+
+interface IssuePage {
+  issues: { nodes: LinearIssue[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
 }
 
 /** Verb → Linear state-name mapping; anything unlisted keeps the claimed state. */
@@ -63,18 +68,24 @@ export class LinearSource implements Source {
     return json.data as T;
   }
 
-  private async assigned(stateName: string, byTypes?: string[]): Promise<LinearIssue[]> {
+  private async assigned(filter: Record<string, unknown>): Promise<LinearIssue[]> {
     const field = this.cfg.assignField ?? 'assignee';
-    const stateFilter = byTypes?.length ? { type: { in: byTypes } } : { name: { eq: stateName } };
-    const data = await this.gql<{ issues: { nodes: LinearIssue[] } }>(
-      `query($filter: IssueFilter!) {
-        issues(filter: $filter, first: 50) {
-          nodes { id identifier title description state { name type } team { key id } }
-        }
-      }`,
-      { filter: { [field]: { isMe: { eq: true } }, state: stateFilter } },
-    );
-    return data.issues.nodes;
+    const issues: LinearIssue[] = [];
+    let after: string | null = null;
+    for (;;) {
+      const data: IssuePage = await this.gql<IssuePage>(
+        `query($filter: IssueFilter!, $after: String) {
+          issues(filter: $filter, first: 50, after: $after) {
+            nodes { id identifier title description state { name type } team { key id } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }`,
+        { filter: { [field]: { isMe: { eq: true } }, ...filter }, after },
+      );
+      issues.push(...data.issues.nodes);
+      if (!data.issues.pageInfo.hasNextPage) return issues;
+      after = data.issues.pageInfo.endCursor;
+    }
   }
 
   private async stateId(teamId: string, name: string): Promise<string> {
@@ -116,7 +127,10 @@ export class LinearSource implements Source {
   }
 
   async poll(): Promise<WorkItem[]> {
-    const issues = await this.assigned(this.cfg.startState, this.cfg.startStateTypes);
+    const state = this.cfg.startStateTypes?.length
+      ? { type: { in: this.cfg.startStateTypes } }
+      : { name: { eq: this.cfg.startState } };
+    const issues = await this.assigned({ state });
     return issues.flatMap((issue) => {
       const repoKey = this.cfg.route[issue.team.key];
       if (!repoKey) return [];
@@ -150,7 +164,8 @@ export class LinearSource implements Source {
     if (evidence.note) lines.push(evidence.note);
     await this.commentOn(issue, lines.join('\n'));
     const target = stateFor(this.cfg, verb);
-    if (target) await this.moveTo(issue, target);
+    // Cancellation reports must not reopen an issue the human already closed.
+    if (target && !CLOSED_TYPES.includes(issue.state.type)) await this.moveTo(issue, target);
   }
 
   async inbound(key: string, since?: string): Promise<string[]> {
@@ -168,8 +183,11 @@ export class LinearSource implements Source {
   }
 
   async inProgress(): Promise<TrackedItem[]> {
-    const issues = await this.assigned(this.cfg.claimedState);
-    return issues.map((i) => ({ key: `linear:${i.identifier}`, open: true }));
+    // A closed item has left the claimed state, but can still back live work.
+    const issues = await this.assigned({
+      or: [{ state: { name: { eq: this.cfg.claimedState } } }, { state: { type: { in: CLOSED_TYPES } } }],
+    });
+    return issues.map((i) => ({ key: `linear:${i.identifier}`, open: !CLOSED_TYPES.includes(i.state.type) }));
   }
 
   async recoverUuid(key: string): Promise<string | undefined> {
