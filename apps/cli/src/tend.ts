@@ -20,7 +20,6 @@ import {
   toonTable,
 } from '@lobstah/core';
 import type { Descriptor, Lane } from '@lobstah/core';
-import { attentionNow } from '@lobstah/supervisor';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import type { MergeView } from '@lobstah/pick';
 
@@ -165,15 +164,25 @@ export function buildTendReport(now = Date.now()): TendReport {
     }
   }
 
-  const remindMs = (cfg.remindSecs ?? 900) * 1000;
-  const attention = attentionNow(false, remindMs, now).map((ev) => ({
-    id: ev.id,
-    lane: ev.lane,
-    verb: ev.entry.verb as string,
-    ageSecs: Math.max(0, Math.round((now - Date.parse(ev.entry.at)) / 1000)),
-    at: ev.entry.at,
-    note: ev.entry.note,
-  }));
+  // Attention is standing state, read straight from the status logs — not
+  // the wake cursor. Consuming a wake (a park, a wait) must not make an
+  // unanswered question drop out of the status view; remindSecs paces
+  // re-WAKES, never visibility.
+  const attention: TendReport['attention'] = [];
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    for (const id of [...pendingIds(lane), ...activeIds(lane)]) {
+      const last = readStatusLog(id, lane).at(-1);
+      if (!last || (last.verb !== 'needs-decision' && last.verb !== 'blocked')) continue;
+      attention.push({
+        id,
+        lane,
+        verb: last.verb,
+        ageSecs: Math.max(0, Math.round((now - Date.parse(last.at)) / 1000)),
+        at: last.at,
+        note: last.note,
+      });
+    }
+  }
 
   // Watches join from disk, same observational stance as the merge view: an
   // unconsumed man-owned event is a standing wake nobody has answered yet.
