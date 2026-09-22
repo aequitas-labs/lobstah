@@ -18,6 +18,17 @@ The liaison never watches the workers — the daemon does that with no model in
 the loop. The liaison reads `lobstah status` when you ask, which is the
 token-efficiency point: supervision is a filesystem read, not a conversation.
 
+**The helm is harness-agnostic: drive the fleet from whichever session you
+prefer.** The contract is the CLI, not the harness — a Claude Code session,
+a Codex session (hooks since v0.114), or anything with a terminal via the
+foreground loop (`man wait` for the lobsterman, `soak --wait` for workers)
+holds the same seat with the same verbs. Workers are equally mixed:
+dispatches pick their harness per item (`--harness claude|codex`), so a
+Codex helm can run Claude workers and the reverse. Sign-on records which
+harness took the helm, and `swap` moves an in-flight dispatch across
+harnesses mid-stream — the worktree, not the conversation, is the durable
+layer.
+
 ## Set it up
 
 1. Install lobstah, configure your repos, start the daemon

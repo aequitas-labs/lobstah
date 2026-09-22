@@ -151,7 +151,9 @@ continues the turn the moment something needs it.
   [docs/openclaw.md](docs/openclaw.md)
 - **The lobsterman** — one interactive agent session that dispatches,
   supervises, and hands you outcomes, woken by the `lobstah man` commands.
-  [docs/lobsterman.md](docs/lobsterman.md)
+  Harness-agnostic: hold the helm from Claude Code, Codex, or anything with
+  a terminal — the CLI is the contract, and workers mix harnesses per
+  dispatch. [docs/lobsterman.md](docs/lobsterman.md)
 
 ## How it holds together 🧭
 

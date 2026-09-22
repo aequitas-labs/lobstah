@@ -287,6 +287,11 @@ a{color:var(--link);text-decoration:none}
 .cmd button:hover{color:var(--fg)}
 .chip.click{cursor:pointer}.chip.click:hover{border-color:#3a455a}
 footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
+#lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;display:none;font-size:34px;line-height:1;user-select:none;animation:crawl 16s linear infinite}
+#lob span{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
+#lob:hover,#lob:hover span{animation-play-state:paused}
+@keyframes crawl{0%{transform:translateX(-60px)}100%{transform:translateX(100vw)}}
+@keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
 </style></head><body>
 <h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1>
 <div class="chips" id="chips"></div>
@@ -304,6 +309,7 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 <h2>merge view</h2><div id="merge"></div>
 <h2>watches</h2><div id="watches"></div>
 <footer id="foot"></footer>
+<div id="lob" title="attention needed — click to open the helm" onclick="lobClick()"><span>🦞</span></div>
 <div id="overlay"><div class="modal" id="modalbox"></div></div>
 <script>
 const esc=(s)=>String(s??'').replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -450,8 +456,10 @@ function render(d){
   'no watches');
  document.getElementById('foot').innerHTML=
   '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>';
+ document.getElementById('lob').style.display=att.length>0?'block':'none';
  renderModal(d);
 }
+window.lobClick=()=>{if(last&&last.helms.length)showModal('helm',last.helms[0].grounds);else document.getElementById('attention').scrollIntoView({behavior:'smooth'})};
 window.tog=(k)=>{open.has(k)?open.delete(k):open.add(k);tick(true)};
 window.showModal=(type,key)=>{modal={type,key};tick(true)};
 window.closeModal=()=>{modal=null;document.getElementById('overlay').classList.remove('open')};
