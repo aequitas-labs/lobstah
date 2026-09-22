@@ -284,7 +284,7 @@ async function soakPark(trapId: string, args: string[], plain = false): Promise<
       }
     } else {
       if (reg.one && reg.claimed) {
-        stowTrap(trapId);
+        stowTrap(trapId, 'signed off after its one catch');
         return; // one catch was the deal — the trap comes out of the water
       }
       const caught = claimBait(reg);

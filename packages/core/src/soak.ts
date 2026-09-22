@@ -155,10 +155,21 @@ export function signOnTrap(opts: {
   return { ok: reg };
 }
 
-export function stowTrap(trapId: string): TrapRegistration | undefined {
+/**
+ * Deliberate sign-off, as opposed to being ghost-swept. The notice makes the
+ * end-state explicit: a trap that leaves the registry without either a
+ * trap-stowed or a trap-ghosted notice never leaves cleanly.
+ */
+export function stowTrap(trapId: string, reason = 'signed off'): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
   fs.rmSync(regPath(trapId), { force: true });
+  postNotice({
+    kind: 'trap-stowed',
+    text: `trap wt:${trapId} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
+    refId: trapId,
+    repo: reg.repo,
+  });
   return reg;
 }
 

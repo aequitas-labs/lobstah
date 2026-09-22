@@ -14,6 +14,7 @@ import { lobstahHome } from './paths.js';
 export type NoticeKind =
   | 'trap-signed-on'
   | 'trap-listening'
+  | 'trap-stowed'
   | 'trap-defective'
   | 'trap-ghosted'
   | 'bait-orphaned'

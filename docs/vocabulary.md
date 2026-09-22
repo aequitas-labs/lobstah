@@ -159,7 +159,7 @@ refused (the session lock); a stale one is adopted.
 | catch | The active dispatch a trap claimed (`claim.json`, `by: wt:<id>`). One catch per trap; one active item per worktree. The daemon never spawns or restarts it — the session's reports are its liveness. |
 | ghost trap | A registration whose heartbeat lapsed past `[soak].ttlSecs` **after having parked at least once**. The sweep removes it, requeues its catch, and posts a `trap-ghosted` notice; re-soaking the worktree restores the same address. A fresh report on the catch keeps a mid-turn session out of the sweep. |
 | defective enlistment | A stale registration that **never parked** — signed on but never listened (usually no Stop hook). Not swept: the helm gets a `trap-defective` notice with the remedy (`soak --wait`), and the registration stays so the address keeps protecting its work. |
-| notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): sign-ons, first parks, ghosts, defective enlistments, orphaned work, bounced messages. Consumed by `man wait`/the park; tend always shows the recent tail. |
+| notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): sign-ons, first parks, sign-offs, ghosts, defective enlistments, orphaned work, bounced messages. A trap leaves the registry only through a `trap-stowed` or `trap-ghosted` notice — the end-state is always explicit. Consumed by `man wait`/the park; tend always shows the recent tail. |
 
 Delivery routes by ownership, same as watches: a continuation for a chain
 claimed by a live trap is addressed back to that trap and stays sticky.

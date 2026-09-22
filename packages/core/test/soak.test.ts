@@ -60,6 +60,9 @@ describe('trap registry (worktree-anchored)', () => {
     expect(listTraps()).toHaveLength(1);
     expect(stowTrap(reg.trapId)?.sessionId).toBe('s1');
     expect(readTrap(reg.trapId)).toBeUndefined();
+    const stowed = listNotices().filter((n) => n.kind === 'trap-stowed');
+    expect(stowed).toHaveLength(1);
+    expect(stowed[0]!.refId).toBe(reg.trapId);
   });
 
   it('the trap id survives sessions: a new session in the same worktree keeps the address', () => {
