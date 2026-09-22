@@ -171,7 +171,16 @@ func focusHelm() {
 // MARK: - pet window
 
 final class PetView: NSView {
+  weak var pet: Pet?
   override func mouseDown(with event: NSEvent) { focusHelm() }
+  override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+  override func updateTrackingAreas() {
+    trackingAreas.forEach(removeTrackingArea)
+    addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil))
+    super.updateTrackingAreas()
+  }
+  override func mouseEntered(with event: NSEvent) { pet?.hovered = true }
+  override func mouseExited(with event: NSEvent) { pet?.hovered = false }
   override func rightMouseDown(with event: NSEvent) {
     let menu = NSMenu()
     let glass = NSMenuItem(title: "Open spyglass", action: #selector(NSApplication.petOpenGlass), keyEquivalent: "")
@@ -207,6 +216,8 @@ final class Pet {
   var hiddenUntil: Date?
   /** Where the current entrance began — drives the fade-in. */
   var entryX: CGFloat = -10_000
+  /** Hovered: the walk pauses; the arms keep waving. */
+  var hovered = false
 
   init(text: String, index: Int) {
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
@@ -252,18 +263,19 @@ final class Pet {
     bubble.layer?.borderWidth = 1
     bubble.layer?.cornerRadius = 10
 
-    let star = NSImageView(frame: NSRect(x: 9, y: 21, width: 18, height: 18))
+    let star = NSImageView(frame: NSRect(x: bubble.frame.minX + 9, y: bubble.frame.maxY - 9, width: 18, height: 18))
     star.image = Pet.starImage
-    bubble.addSubview(star)
 
     let label = NSTextField(wrappingLabelWithString: text.count > 66 ? String(text.prefix(63)) + "…" : text)
-    label.frame = NSRect(x: 33, y: 8, width: bubble.frame.width - 43, height: 44)
+    label.frame = NSRect(x: 10, y: 6, width: bubble.frame.width - 20, height: 46)
     label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
     label.textColor = NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.92, alpha: 1)
     label.maximumNumberOfLines = 3
     label.cell?.truncatesLastVisibleLine = true
     bubble.addSubview(label)
     root.addSubview(bubble)
+    root.addSubview(star)
+    root.pet = self
 
     panel.orderFrontRegardless()
   }
@@ -274,7 +286,7 @@ final class Pet {
       hiddenUntil = nil
       panel.orderFrontRegardless()
     }
-    x += speed * dt
+    if !hovered { x += speed * dt }
     let current = screens[screenIndex]
     // Leaving a display: fade over the last stretch, vanish before leaking
     // onto the neighbor, pause a beat offstage, then fade in at the next
@@ -314,8 +326,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var statusItem: NSStatusItem?
   var preview = ProcessInfo.processInfo.environment["LOBSTAH_PET_PREVIEW"] != nil
 
+  var activity: NSObjectProtocol?
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
+    // Accessory apps get App-Napped and their timers throttled — which
+    // reads as the pet walking in slow motion. Hold an activity assertion.
+    activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "pet animation")
 
     // No menu-bar presence by default: the pet IS the UI (right-click it
     // for spyglass/quit). LOBSTAH_PET_MENUBAR=1 restores the status item.
@@ -337,7 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var lastTick = CACurrentMediaTime()
     let walker = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in
       let now = CACurrentMediaTime()
-      let dt = CGFloat(min(0.1, now - lastTick))
+      let dt = CGFloat(min(0.35, now - lastTick))
       lastTick = now
       for pet in self.pets { pet.tick(dt) }
     }
