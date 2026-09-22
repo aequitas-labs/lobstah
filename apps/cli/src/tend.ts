@@ -5,6 +5,7 @@ import {
   executorPath,
   laneDirs,
   lastEventAt,
+  helmLabel,
   listHelms,
   listNotices,
   listTraps,
@@ -93,7 +94,7 @@ export interface TendReport {
   /** Addressed bait waiting for its trap — sticky, never the daemon's. */
   awaiting: TendAwaiting[];
   notices: TendNotice[];
-  helms: Array<{ grounds: string; session: string; heartbeatAgeSecs: number }>;
+  helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number }>;
   merge?: MergeView;
 }
 
@@ -302,6 +303,7 @@ export function buildTendReport(now = Date.now()): TendReport {
 
   const helms = listHelms().map((h) => ({
     grounds: h.grounds,
+    man: helmLabel(h),
     session: h.sessionId.slice(0, 8),
     heartbeatAgeSecs: Math.max(0, Math.round((now - (Date.parse(h.heartbeatAt) || 0)) / 1000)),
   }));
@@ -417,7 +419,7 @@ export function renderTend(r: TendReport): string {
     lines.push('');
     lines.push(
       toonKV({
-        helm: r.helms.map((h) => `${h.grounds}=${h.session} (${h.heartbeatAgeSecs}s ago)`).join(', '),
+        helm: r.helms.map((h) => `${h.grounds}=${h.man} [${h.session}] (${h.heartbeatAgeSecs}s ago)`).join(', '),
       }),
     );
   }

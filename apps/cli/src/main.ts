@@ -32,6 +32,7 @@ import {
   groundsErrors,
   heartbeatHelm,
   helmGate,
+  helmLabel,
   helmOf,
   liveHelms,
   relieveHelm,
@@ -793,12 +794,21 @@ ${progress}`,
       const errs = groundsErrors(cfg);
       if (errs.length > 0) throw new Error(`fix [grounds.*] in ${configPath()} first:\n${errs.map((e) => `- ${e}`).join('\n')}`);
       const grounds = resolveGrounds(cfg, arg(args, '--grounds'));
-      const res = takeHelm({ sessionId, grounds, ttlMs: cfg.helm.ttlSecs * 1000, take: args.includes('--take') });
+      // Who the man is: harness from the invoking environment, place from
+      // cwd/host, plus an optional human label. Every status surface renders
+      // this instead of a bare session id.
+      const harness = Object.keys(process.env).some((k) => k.startsWith('CLAUDE'))
+        ? 'claude'
+        : Object.keys(process.env).some((k) => k.startsWith('CODEX'))
+          ? 'codex'
+          : undefined;
+      const identity = { harness, cwd: process.cwd(), host: os.hostname(), label: arg(args, '--label') };
+      const res = takeHelm({ sessionId, grounds, ttlMs: cfg.helm.ttlSecs * 1000, take: args.includes('--take'), identity });
       if ('held' in res) {
         const ageSecs = Math.max(0, Math.round((Date.now() - (Date.parse(res.held.heartbeatAt) || 0)) / 1000));
         throw new Error(
-          `the helm for grounds "${grounds.name}" is held by session ${res.held.sessionId.slice(0, 8)} ` +
-            `(heartbeat ${ageSecs}s ago). Relieve them deliberately with \`lobstah man helm --take\`, or leave it.`,
+          `the helm for grounds "${grounds.name}" is held by ${helmLabel(res.held)} (session ${res.held.sessionId.slice(0, 8)}, ` +
+            `heartbeat ${ageSecs}s ago). Relieve them deliberately with \`lobstah man helm --take\`, or leave it.`,
         );
       }
       console.log(charter(grounds));
@@ -806,6 +816,7 @@ ${progress}`,
       console.log(
         toonKV({
           helm: grounds.name,
+          man: helmLabel(res.ok),
           session: sessionId,
           ...(res.ok.tookFrom ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` } : {}),
           note: 'parks at turn end via the Stop hook (lobstah plugin or `man init --global`); digests arrive as wakes',
@@ -1229,7 +1240,17 @@ ${progress}`,
         if (quiet) break;
         throw new Error('nothing to stow here — run from the trap\'s worktree, or pass --wt <trap-id> / --session <id>');
       }
-      const reg = stowTrap(trapId);
+      // A trap always signs itself off from its own worktree (or its own
+      // session id). Stowing someone ELSE's trap is steering — with a
+      // claimed helm, that force path is the helm's alone.
+      const own =
+        (site && !site.primary && trapIdAt(site.worktree) === trapId) ||
+        (sessionId !== undefined && trapBySession(sessionId)?.trapId === trapId);
+      if (!own) {
+        const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), sessionId);
+        if (refusal) throw new Error(refusal);
+      }
+      const reg = stowTrap(trapId, own ? 'signed off' : 'stowed by the helm');
       if (!reg) {
         if (!quiet) console.log(toonKV({ trap: `wt:${trapId}`, soaking: false }));
         break;

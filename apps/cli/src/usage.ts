@@ -108,7 +108,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--session': { value: '<id>' },
     },
   },
-  'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--take': {} } },
+  'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--label': { value: '<name>' }, '--take': {} } },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
@@ -153,7 +153,10 @@ primary checkout. --one signs off after the first completed assignment.
 --wait listens in the foreground right now (for sessions without Stop
 hooks): work prints plain, a quiet timeout exits 3 — run it again.`,
   stow: `Sign the worktree's trap off (run it there, or pass --wt/--session); an
-unfinished assignment requeues and unread messages bounce to the helm.`,
+unfinished assignment requeues and unread messages bounce to the helm.
+Stowing another session's trap is steering — with a claimed helm, only the
+helm may (pass its --session). The trap's own worktree or session is always
+free to stow itself.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit.`,
   pick: `Tracker loops: poll Linear/GitHub, dispatch assigned work, report back,
@@ -174,6 +177,7 @@ digest defers to. --grounds scopes digest and cursor to one helm's territory
 (defaults --grounds to its own).`,
   'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
 Prints the charter, arms the Stop-hook park, and gates the periodic digest.
+Sign-on records who the man is (harness, directory, host; --label names it).
 A live foreign holder refuses without --take; a stale one is claimable.`,
   'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
 cleared too.`,
