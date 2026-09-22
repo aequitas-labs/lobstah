@@ -125,6 +125,18 @@ After dispatching work, run `lobstah man wait` as a background task. When it
 completes, follow its `next:` instruction, then re-arm it.
 ```
 
+**Arm it long-lived.** The default (`--timeout 0`) waits forever and returns
+only when something happens — that is the right idiom, not a compromise.
+Every wake costs the session a turn, so a short timeout used as a "check in
+periodically" mechanism buys nothing but noise: attention is level-triggered
+and stands on disk until consumed, so a wait that dies mid-shift drops zero
+events — the next wait delivers everything that accumulated. There is no
+report to miss either; a quiet fleet has nothing to say. Pass `--timeout`
+only as a dead-man's check on the channel itself (an hour, not minutes): a
+quiet timeout prints one line, exits 3, and the re-arm proves the line was
+alive. Liveness reassurance for the human belongs on a status surface
+(`lobstah man tend`), never in the transcript.
+
 **Tier 3 — park the session on a Stop hook (Claude Code only).** A Stop hook
 that blocks on `lobstah man wait`, so the session never
 really idles — it parks for free and continues the moment something needs it.
