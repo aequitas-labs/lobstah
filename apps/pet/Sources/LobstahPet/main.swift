@@ -210,7 +210,7 @@ final class Pet {
 
   init(text: String, index: Int) {
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
-    self.speed = 60 + CGFloat(index) * 16
+    self.speed = 88 + CGFloat(index) * 18
     let first = screens.first?.frame ?? .zero
     self.x = first.minX - 200 - CGFloat(index) * 220
     self.entryX = self.x
