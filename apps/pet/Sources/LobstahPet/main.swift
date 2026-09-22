@@ -203,6 +203,8 @@ final class Pet {
   /** All displays, left to right; the pet crosses each in turn. */
   let screens: [NSScreen]
   var screenIndex = 0
+  /** Between displays the pet is simply gone for a beat, then re-enters. */
+  var hiddenUntil: Date?
 
   init(text: String, index: Int) {
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
@@ -240,19 +242,19 @@ final class Pet {
     root.layer?.addSublayer(spriteLayer)
 
     // speech bubble with the star and the question
-    let bubble = NSView(frame: NSRect(x: 16, y: spriteH + 6, width: panelW - 22, height: 56))
+    let bubble = NSView(frame: NSRect(x: 16, y: spriteH + 6, width: panelW - 22, height: 60))
     bubble.wantsLayer = true
     bubble.layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.106, blue: 0.133, alpha: 0.96).cgColor
     bubble.layer?.borderColor = NSColor(calibratedWhite: 0.35, alpha: 1).cgColor
     bubble.layer?.borderWidth = 1
     bubble.layer?.cornerRadius = 10
 
-    let star = NSImageView(frame: NSRect(x: 6, y: 19, width: 18, height: 18))
+    let star = NSImageView(frame: NSRect(x: 9, y: 21, width: 18, height: 18))
     star.image = Pet.starImage
     bubble.addSubview(star)
 
-    let label = NSTextField(wrappingLabelWithString: text.count > 72 ? String(text.prefix(69)) + "…" : text)
-    label.frame = NSRect(x: 29, y: 5, width: bubble.frame.width - 36, height: 46)
+    let label = NSTextField(wrappingLabelWithString: text.count > 66 ? String(text.prefix(63)) + "…" : text)
+    label.frame = NSRect(x: 33, y: 8, width: bubble.frame.width - 43, height: 44)
     label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
     label.textColor = NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.92, alpha: 1)
     label.maximumNumberOfLines = 3
@@ -264,11 +266,21 @@ final class Pet {
   }
 
   func tick(_ dt: CGFloat) {
+    if let until = hiddenUntil {
+      if Date() < until { return }
+      hiddenUntil = nil
+      panel.orderFrontRegardless()
+    }
     x += speed * dt
     let current = screens[screenIndex]
-    if x > current.frame.maxX {
+    // Leaving a display: vanish before leaking onto the neighbor, pause a
+    // beat offstage, then re-enter at the next display's edge.
+    if x > current.frame.maxX - 40 {
+      panel.orderOut(nil)
       screenIndex = (screenIndex + 1) % screens.count
-      x = screens[screenIndex].frame.minX - panel.frame.width
+      x = screens[screenIndex].frame.minX - 24
+      hiddenUntil = Date().addingTimeInterval(2.5)
+      return
     }
     // visibleFrame keeps the walk above the Dock
     panel.setFrameOrigin(NSPoint(x: x, y: screens[screenIndex].visibleFrame.minY + 2))
