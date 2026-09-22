@@ -173,6 +173,12 @@ func focusHelm() {
 final class PetView: NSView {
   weak var pet: Pet?
   override func mouseDown(with event: NSEvent) { focusHelm() }
+  override func updateTrackingAreas() {
+    trackingAreas.forEach(removeTrackingArea)
+    addTrackingArea(NSTrackingArea(rect: bounds, options: [.cursorUpdate, .mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil))
+    super.updateTrackingAreas()
+  }
+  override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
 
   override func rightMouseDown(with event: NSEvent) {
     let menu = NSMenu()
@@ -233,6 +239,7 @@ final class Pet {
     panel.hasShadow = false
     panel.ignoresMouseEvents = false
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    panel.acceptsMouseMovedEvents = true
 
     let root = PetView(frame: NSRect(x: 0, y: 0, width: panelW, height: panelH))
     root.wantsLayer = true
@@ -249,7 +256,7 @@ final class Pet {
     spriteLayer.magnificationFilter = .nearest
     root.layer?.addSublayer(spriteLayer)
 
-    // the question is a hover reveal, fully above the lobster
+    // the question is a hover reveal, fully above the lobster, sized to fit
     let bubble = NSView(frame: NSRect(x: 40, y: 88, width: 236, height: 58))
     bubble.isHidden = true
     bubble.wantsLayer = true
@@ -258,15 +265,18 @@ final class Pet {
     bubble.layer?.borderWidth = 1
     bubble.layer?.cornerRadius = 10
 
-    // the star rides above the claw, top-right, sized like the mark
-    let star = NSImageView(frame: NSRect(x: 168 + spriteW - 36, y: spriteH - 8, width: 30, height: 30))
+    // the star rides above the claw — the glass's geometry scaled 1.5x
+    let star = NSImageView(frame: NSRect(x: 168 + 84, y: spriteH - 9, width: 22, height: 22))
     star.image = Pet.starImage
     star.wantsLayer = true
     star.layer?.magnificationFilter = .nearest
 
     let label = NSTextField(wrappingLabelWithString: text.count > 66 ? String(text.prefix(63)) + "…" : text)
-    label.frame = NSRect(x: 10, y: 6, width: bubble.frame.width - 20, height: 46)
     label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+    let fitted = label.sizeThatFits(NSSize(width: 216, height: 120))
+    bubble.setFrameSize(NSSize(width: min(236, fitted.width + 20), height: fitted.height + 12))
+    bubble.setFrameOrigin(NSPoint(x: 276 - bubble.frame.width, y: 88))
+    label.frame = NSRect(x: 10, y: 6, width: fitted.width, height: fitted.height)
     label.textColor = NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.92, alpha: 1)
     label.maximumNumberOfLines = 3
     label.cell?.truncatesLastVisibleLine = true
