@@ -123,7 +123,8 @@ model in the loop. Driving lobstah from an agent session instead? `lobstah
 man` prints the lobsterman's manual. `man wait` blocks until a dispatch needs
 attention, and unanswered questions re-fire until answered. `man helm`
 signs one session on as the orchestrator for its grounds, and `man report`
-prints the delta since the last acknowledged report. `man init`
+prints the delta since the last acknowledged report. `lobstah glass` serves
+it all as a live localhost page — the spyglass. `man init`
 installs a Claude Code Stop hook that parks the session on the fleet and
 continues the turn the moment something needs it.
 
@@ -150,7 +151,9 @@ continues the turn the moment something needs it.
   [docs/openclaw.md](docs/openclaw.md)
 - **The lobsterman** — one interactive agent session that dispatches,
   supervises, and hands you outcomes, woken by the `lobstah man` commands.
-  [docs/lobsterman.md](docs/lobsterman.md)
+  Harness-agnostic: hold the helm from Claude Code, Codex, or anything with
+  a terminal — the CLI is the contract, and workers mix harnesses per
+  dispatch. [docs/lobsterman.md](docs/lobsterman.md)
 
 ## How it holds together 🧭
 
