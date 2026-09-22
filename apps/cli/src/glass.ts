@@ -288,7 +288,7 @@ a{color:var(--link);text-decoration:none}
 .chip.click{cursor:pointer}.chip.click:hover{border-color:#3a455a}
 footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
 </style></head><body>
-<h1>🦞✨ spyglass <span class="dim">— read-only</span> <span class="dim" id="ver"></span><span id="stale"> · STALE FEED</span></h1>
+<h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1>
 <div class="chips" id="chips"></div>
 <div class="controls">
  <span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span>
@@ -417,7 +417,6 @@ function renderModal(d){
  box.innerHTML=html;ov.classList.add('open');
 }
 function render(d){
- document.getElementById('ver').textContent='v'+d.version;
  const hb=d.daemon?age(d.daemon.heartbeat):null;
  const hbOld=d.daemon&&(Date.now()-Date.parse(d.daemon.heartbeat)>90000);
  document.getElementById('chips').innerHTML=
@@ -450,7 +449,7 @@ function render(d){
   d.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td class="dim">'+esc(String(w.cursor??''))+'</td><td class="bad">'+esc(w.lastError??'')+'</td></tr>'),
   'no watches');
  document.getElementById('foot').innerHTML=
-  '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a> · read-only — looking consumes nothing';
+  '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>';
  renderModal(d);
 }
 window.tog=(k)=>{open.has(k)?open.delete(k):open.add(k);tick(true)};
