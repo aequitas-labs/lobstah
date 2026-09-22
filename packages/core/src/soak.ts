@@ -149,7 +149,6 @@ export function signOnTrap(opts: {
       text: `trap wt:${trapId} signed on (${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for wt:${trapId}\``,
       refId: trapId,
       repo: opts.repo,
-      dedupeKey: `signed-on-${trapId}-${opts.sessionId}`,
     });
   }
   return { ok: reg };
@@ -198,7 +197,6 @@ export function heartbeatTrap(
       text: `trap wt:${trapId} is listening — addressed work now delivers within seconds`,
       refId: trapId,
       repo: reg.repo,
-      dedupeKey: `listening-${trapId}-${reg.sessionId}`,
     });
   }
   return next;
@@ -334,7 +332,11 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now()): GhostSweepActi
           `likely no Stop hook. Have its session run \`lobstah soak --wait\`; its addressed bait waits meanwhile.`,
         refId: reg.trapId,
         repo: reg.repo,
-        dedupeKey: `defective-${reg.trapId}-${reg.sessionId}`,
+        // Keyed by enlistment epoch, not session: the sweep re-scans every
+        // tick and must not re-post within one enlistment, but a fresh
+        // sign-on of the same worktree (even by the same session) is a new
+        // enlistment and may go defective again.
+        dedupeKey: `defective-${reg.trapId}-${reg.signedOnAt}`,
       });
       if (posted) actions.push({ trapId: reg.trapId, defective: true });
       continue;
@@ -353,7 +355,6 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now()): GhostSweepActi
       text: `trap wt:${reg.trapId} ghosted (went quiet mid-watch) — registration removed; re-soaking the worktree restores the same address`,
       refId: reg.trapId,
       repo: reg.repo,
-      dedupeKey: `ghosted-${reg.trapId}-${reg.sessionId}`,
     });
   }
   return actions;

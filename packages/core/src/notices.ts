@@ -45,7 +45,11 @@ let counter = 0;
 /**
  * Post a notice. A `dedupeKey` makes it once-ever: the same key never posts
  * twice (a standing condition should nag through tend's tail, not by
- * re-posting). Returns undefined when deduped.
+ * re-posting). Returns undefined when deduped. Only standing conditions that
+ * are re-observed on a scan loop take a key — and the key must name the
+ * condition's epoch (e.g. an enlistment's signedOnAt), or a recurrence is
+ * silently swallowed. A transition event (sign-on, first park, sign-off,
+ * ghosting) is gated by the state change itself and takes no key.
  */
 export function postNotice(n: {
   kind: NoticeKind;

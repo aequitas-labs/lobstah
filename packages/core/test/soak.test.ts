@@ -74,6 +74,18 @@ describe('trap registry (worktree-anchored)', () => {
     expect(trapBySession('s2')?.trapId).toBe(first.trapId);
   });
 
+  it('re-enlistment notices again, even for the same session', () => {
+    const first = trap('s1', 'web');
+    heartbeatTrap(first.trapId, { parked: true });
+    stowTrap(first.trapId);
+    signOnTrap({ sessionId: 's1', harness: 'claude', repo: 'web', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    heartbeatTrap(first.trapId, { parked: true });
+    const kinds = listNotices(50).map((n) => n.kind);
+    expect(kinds.filter((k) => k === 'trap-signed-on')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'trap-listening')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'trap-stowed')).toHaveLength(1);
+  });
+
   it('session lock: a live foreign session refuses; a stale one is adopted', () => {
     const reg = trap('s1', 'web');
     const res = signOnTrap({ sessionId: 's2', harness: 'claude', repo: 'web', worktree: reg.worktree, cwd: reg.worktree, ttlMs: TTL_MS });
