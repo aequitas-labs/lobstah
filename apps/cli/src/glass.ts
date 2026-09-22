@@ -290,11 +290,11 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 .lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;font-size:34px;line-height:1;user-select:none;animation:crawl 18s linear infinite}
 .lob .sprite{width:72px;height:56px;background:url(/lob-sprite.png) 0 0 no-repeat;background-size:400% 100%;image-rendering:pixelated;animation:step .5s steps(4) infinite}
 .lob .fallback{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
-.lob .bub{position:absolute;bottom:60px;left:14px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:3px 9px;font-size:11px;line-height:1.35;color:var(--fg);width:max-content;max-width:130px;display:flex;gap:6px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.lob .bub{position:absolute;bottom:62px;left:14px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:6px 9px 5px;font-size:11px;line-height:1.35;color:var(--fg);width:max-content;max-width:130px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 .lob .bub span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word}
-.lob .bub img{height:14px;flex:none}
+.lob .bub img{position:absolute;top:-9px;left:9px;height:16px}
 .lob .bub:after{content:'';position:absolute;left:16px;bottom:-5px;width:8px;height:8px;background:var(--card);border-right:1px solid var(--line);border-bottom:1px solid var(--line);transform:rotate(45deg)}
-.lob:hover,.lob:hover .sprite,.lob:hover .fallback{animation-play-state:paused}
+.lob:hover{animation-play-state:paused}
 @keyframes crawl{0%{transform:translateX(-90px)}100%{transform:translateX(100vw)}}
 @keyframes step{to{background-position-x:-288px}}
 @keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
