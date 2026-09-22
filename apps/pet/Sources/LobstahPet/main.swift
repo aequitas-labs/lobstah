@@ -221,7 +221,7 @@ final class Pet {
     self.entryX = self.x
 
     let panelW: CGFloat = 300
-    let panelH: CGFloat = 102
+    let panelH: CGFloat = 150
     panel = NSPanel(
       contentRect: NSRect(x: x, y: 0, width: panelW, height: panelH),
       styleMask: [.borderless, .nonactivatingPanel],
@@ -249,8 +249,8 @@ final class Pet {
     spriteLayer.magnificationFilter = .nearest
     root.layer?.addSublayer(spriteLayer)
 
-    // the question is a hover reveal, opening leftward over the lobster
-    let bubble = NSView(frame: NSRect(x: 14, y: 22, width: 216, height: 60))
+    // the question is a hover reveal, fully above the lobster
+    let bubble = NSView(frame: NSRect(x: 40, y: 88, width: 236, height: 58))
     bubble.isHidden = true
     bubble.wantsLayer = true
     bubble.layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.106, blue: 0.133, alpha: 0.96).cgColor
@@ -258,8 +258,8 @@ final class Pet {
     bubble.layer?.borderWidth = 1
     bubble.layer?.cornerRadius = 10
 
-    // the star rides above the claw, top-right, like the mark
-    let star = NSImageView(frame: NSRect(x: 168 + spriteW - 26, y: spriteH - 6, width: 20, height: 20))
+    // the star rides above the claw, top-right, sized like the mark
+    let star = NSImageView(frame: NSRect(x: 168 + spriteW - 36, y: spriteH - 8, width: 30, height: 30))
     star.image = Pet.starImage
     star.wantsLayer = true
     star.layer?.magnificationFilter = .nearest
@@ -285,8 +285,9 @@ final class Pet {
     let inside = panel.frame.contains(NSEvent.mouseLocation) && panel.isVisible
     if inside != hovered {
       hovered = inside
-      if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+      if !inside { NSCursor.arrow.set() }
     }
+    if inside { NSCursor.pointingHand.set() }
     if let until = hiddenUntil {
       if Date() < until { return }
       hiddenUntil = nil
@@ -307,7 +308,7 @@ final class Pet {
       return
     }
     let fadeOut = max(0, min(1, (cutoff - x) / 110))
-    let fadeIn = max(0, min(1, (x - entryX) / 110))
+    let fadeIn = max(0, min(1, (x - entryX) / 40))
     panel.alphaValue = min(fadeOut, fadeIn)
     // visibleFrame keeps the walk above the Dock
     panel.setFrameOrigin(NSPoint(x: x, y: screens[screenIndex].visibleFrame.minY + 2))
