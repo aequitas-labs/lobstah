@@ -76,8 +76,12 @@ export function installPet(binaryArg?: string): { file: string; binary: string; 
     );
   }
   const binary = petBinaryHome();
+  const file0 = petPlistFile();
+  if (fs.existsSync(file0)) run('launchctl', ['unload', file0]);
+  run('pkill', ['-f', 'LobstahPet']);
   if (path.resolve(source) !== path.resolve(binary)) {
     fs.mkdirSync(path.dirname(binary), { recursive: true });
+    fs.rmSync(binary, { force: true }); // never write into a mapped executable
     fs.copyFileSync(source, binary);
     fs.chmodSync(binary, 0o755);
   }
@@ -85,7 +89,6 @@ export function installPet(binaryArg?: string): { file: string; binary: string; 
   fs.mkdirSync(logDir, { recursive: true });
   const file = petPlistFile();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (fs.existsSync(file)) run('launchctl', ['unload', file]);
   fs.writeFileSync(file, renderPetPlist(binary, servicePathEnv(process.execPath), lobstahHome(), logDir));
   const load = run('launchctl', ['load', file]);
   return { file, binary, loaded: load.ok, detail: load.ok ? 'label lobstah.pet — starts at login' : load.out };

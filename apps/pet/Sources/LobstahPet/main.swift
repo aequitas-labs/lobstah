@@ -210,7 +210,7 @@ final class Pet {
 
   init(text: String, index: Int) {
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
-    self.speed = 110 + CGFloat(index) * 12
+    self.speed = 100 + CGFloat(index) * 12
     let first = screens.first?.frame ?? .zero
     self.x = first.minX - 200 - CGFloat(index) * 220
     self.entryX = self.x
@@ -331,10 +331,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       statusItem?.menu = menu
     }
 
-    // walk + frame-step + poll timers
-    Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
-      for pet in self.pets { pet.tick(1.0 / 30) }
+    // walk + frame-step + poll timers. The walk uses measured elapsed
+    // time: runloop timers drift, and a fixed nominal dt turns every
+    // dropped tick into lost distance.
+    var lastTick = CACurrentMediaTime()
+    let walker = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in
+      let now = CACurrentMediaTime()
+      let dt = CGFloat(min(0.1, now - lastTick))
+      lastTick = now
+      for pet in self.pets { pet.tick(dt) }
     }
+    walker.tolerance = 0.002
     Timer.scheduledTimer(withTimeInterval: 0.14, repeats: true) { _ in
       for pet in self.pets { pet.step() }
     }
