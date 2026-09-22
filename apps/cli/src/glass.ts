@@ -287,11 +287,14 @@ a{color:var(--link);text-decoration:none}
 .cmd button:hover{color:var(--fg)}
 .chip.click{cursor:pointer}.chip.click:hover{border-color:#3a455a}
 footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
-#lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;display:none;font-size:34px;line-height:1;user-select:none;animation:crawl 18s linear infinite}
-#lob .sprite{width:72px;height:56px;background:url(/lob-sprite.png) 0 0 no-repeat;background-size:400% 100%;image-rendering:pixelated;animation:step .5s steps(4) infinite}
-#lob span{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
-#lob:hover,#lob:hover .sprite,#lob:hover span{animation-play-state:paused}
-@keyframes crawl{0%{transform:translateX(-80px)}100%{transform:translateX(100vw)}}
+.lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;font-size:34px;line-height:1;user-select:none;animation:crawl 18s linear infinite}
+.lob .sprite{width:72px;height:56px;background:url(/lob-sprite.png) 0 0 no-repeat;background-size:400% 100%;image-rendering:pixelated;animation:step .5s steps(4) infinite}
+.lob .fallback{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
+.lob .bub{position:absolute;bottom:60px;left:14px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:3px 9px;font-size:11px;color:var(--fg);white-space:nowrap;max-width:250px;overflow:hidden;text-overflow:ellipsis;display:flex;gap:6px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.lob .bub img{height:14px;flex:none}
+.lob .bub:after{content:'';position:absolute;left:16px;bottom:-5px;width:8px;height:8px;background:var(--card);border-right:1px solid var(--line);border-bottom:1px solid var(--line);transform:rotate(45deg)}
+.lob:hover,.lob:hover .sprite,.lob:hover .fallback{animation-play-state:paused}
+@keyframes crawl{0%{transform:translateX(-90px)}100%{transform:translateX(100vw)}}
 @keyframes step{to{background-position-x:-288px}}
 @keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
 </style></head><body>
@@ -311,7 +314,7 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 <h2>merge view</h2><div id="merge"></div>
 <h2>watches</h2><div id="watches"></div>
 <footer id="foot"></footer>
-<div id="lob" title="attention needed — click to open the helm" onclick="lobClick()"><div class="sprite" style="display:none"></div><span style="display:none">🦞</span></div>
+<div id="lobs"></div>
 <div id="overlay"><div class="modal" id="modalbox"></div></div>
 <script>
 const esc=(s)=>String(s??'').replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -458,14 +461,31 @@ function render(d){
   'no watches');
  document.getElementById('foot').innerHTML=
   '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>';
- document.getElementById('lob').style.display=(att.length>0||new URLSearchParams(location.search).has('lob'))?'block':'none';
+ renderLobs(att);
  renderModal(d);
 }
+let spriteOk=null;
 (()=>{const i=new Image();
- i.onload=()=>{document.querySelector('#lob .sprite').style.display='block'};
- i.onerror=()=>{document.querySelector('#lob span').style.display='inline-block'};
+ i.onload=()=>{spriteOk=true;lobKey='';tick(true)};
+ i.onerror=()=>{spriteOk=false;lobKey='';tick(true)};
  i.src='/lob-sprite.png'})();
-window.lobClick=()=>{if(last&&last.helms.length)showModal('helm',last.helms[0].grounds);else document.getElementById('attention').scrollIntoView({behavior:'smooth'})};
+let lobKey='';
+function renderLobs(att){
+ const preview=new URLSearchParams(location.search).has('lob');
+ let items=att.map(x=>({key:x.lane+':'+x.id,text:x.note||x.verb,click:"showModal('dispatch','"+x.lane+':'+x.id+"')"}));
+ if(!items.length&&preview)items=[{key:'preview',text:'attention questions crawl in here',click:last&&last.helms.length?"showModal('helm','"+last.helms[0].grounds+"')":''}];
+ const extra=items.length>4?items.length-4:0;
+ items=items.slice(0,4);
+ if(extra)items[3].text='…and '+extra+' more — see attention';
+ const key=items.map(i=>i.key).join('|')+(spriteOk===null?'?':spriteOk?'s':'e');
+ if(key===lobKey)return;
+ lobKey=key;
+ document.getElementById('lobs').innerHTML=items.map((it,i)=>
+  '<div class="lob" style="animation-duration:'+(16+i*5)+'s;animation-delay:-'+((i*9)%14)+'s" title="click to open" onclick="'+it.click+'">'
+  +'<div class="bub"><img src="/star.png" alt="" onerror="this.replaceWith(\'✨\')"><span>'+esc(it.text.length>60?it.text.slice(0,57)+'…':it.text)+'</span></div>'
+  +(spriteOk===false?'<span class="fallback">🦞</span>':'<div class="sprite"></div>')
+  +'</div>').join('');
+}
 window.tog=(k)=>{open.has(k)?open.delete(k):open.add(k);tick(true)};
 window.showModal=(type,key)=>{modal={type,key};tick(true)};
 window.closeModal=()=>{modal=null;document.getElementById('overlay').classList.remove('open')};
@@ -490,6 +510,7 @@ export function serveGlass(port: number): http.Server {
   const icon = assetPath('favicon.png') ?? assetPath('lob-star.png');
   const lob = assetPath('lob.png');
   const sprite = assetPath('lob-sprite.png');
+  const star = assetPath('star.png');
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
@@ -497,6 +518,9 @@ export function serveGlass(port: number): http.Server {
     if (req.url === '/lob.png' && lob) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
       res.end(fs.readFileSync(lob));
+    } else if (req.url === '/star.png' && star) {
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
+      res.end(fs.readFileSync(star));
     } else if (req.url === '/lob-sprite.png' && sprite) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
       res.end(fs.readFileSync(sprite));
