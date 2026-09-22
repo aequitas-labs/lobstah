@@ -77,6 +77,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   version: { flags: {} },
   'man:manual': { flags: {} },
   'man:tend': { flags: { '--json': {} } },
+  'man:report': { flags: { '--cursor': { value: '<name>' }, '--peek': {}, '--json': {} } },
   'man:wait': { flags: { '--timeout': { value: '<secs>' }, '--peek': {} } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
@@ -123,8 +124,12 @@ under the given directories.`,
   'man:manual': `The lobsterman's manual.`,
   'man:tend': `The whole-fleet pass: verdict, unanswered questions, each work item's chain,
 PR, and merge gate. Pure disk read.`,
+  'man:report': `The delta since the last report: catches landed, attention arisen, what still
+waits, and the fleet verdict. Advances the "reported through" cursor unless
+--peek; prints "no change" when the delta is empty.`,
   'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout.
---peek surfaces standing events without consuming them.`,
+A timeout carries the man report delta when something changed. --peek
+surfaces standing events without consuming them.`,
   'man:init': `Install the haul Stop hook into Claude settings; --marker touches
 .lobstah-man to arm this directory.`,
   'man:haul': `Stop-hook entry point: park the session while work is in flight (lobsterman

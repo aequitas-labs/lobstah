@@ -95,6 +95,39 @@ view](pickup.md#merge-view) pickup persists each tick, so PR state is at most
 one poll interval stale without tend making a single network call. `--json`
 emits the full report for dashboards and scripts to render.
 
+### The periodic report
+
+`lobstah man tend` is the full picture on demand; `lobstah man report` is the
+**delta** since the last time anyone reported — catches landed (with their
+notes and PRs), attention newly arisen, what still waits, and the fleet
+verdict. It advances a "reported through" cursor when it prints, so nothing
+is ever reported twice, and it says `no change` when the delta is empty
+rather than re-dumping state. Standing unanswered questions appear under
+`still-waiting` without counting as change — reminders (`remindSecs`) own
+re-firing those.
+
+Every carrier shares the cursor:
+
+- **The wait loop.** A `man wait` timeout (exit 3) prints the delta when
+  something changed, so a looping session gets periodic fleet reports for
+  free — see the loop idiom below.
+- **Direct call.** Anything with a clock — a gateway heartbeat, a cron — runs
+  `lobstah man report` and forwards the output when it is not `no change`.
+  Escalating a report to a human (a phone push) is the gateway layer's job,
+  not lobstah's.
+
+The loop idiom needs no harness scheduler, because the timer is lobstah's own
+blocking wait:
+
+```
+lobstah man wait --timeout 900
+# exit 0 → an event printed; handle it, then loop
+# exit 3 → timeout; the delta digest printed above it when something changed
+```
+
+A session running this loop reports into its own transcript whether or not a
+human is watching — come back later and the transcript is the report.
+
 ## Getting woken instead of asked
 
 Three escalation tiers, least to most invasive. All are built on
