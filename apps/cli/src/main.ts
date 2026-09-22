@@ -77,6 +77,7 @@ import { buildTendReport, renderTend } from './tend.js';
 import { applyCull, planCull } from './cull.js';
 import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
+import { serveGlass } from './glass.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { parseReportArgs } from './report-args.js';
@@ -143,6 +144,10 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   with ages, each work item's dispatch chain,
                                   PR, and merge-gate status from pick's last
                                   observation. Pure disk read — no forge calls.
+  glass [--port <n>]              the spyglass: tend as a live localhost web
+                                  page — attention, dispatches, traps with
+                                  their lifecycle and mail, notices, merge
+                                  view. Read-only; consumes no cursor.
   man wait [--timeout <secs>] [--peek]
                                   block until a dispatch or watched source
                                   needs attention, then print the event and
@@ -1311,6 +1316,18 @@ ${progress}`,
       if (kind === 'daemon') await daemon(Number(arg(args, '--interval') ?? '5000'));
       else await runPickup(args[0] === 'once' ? 'once' : 'daemon');
       break;
+    }
+    case 'glass': {
+      const port = Number(arg(args, '--port') ?? '4949');
+      serveGlass(port);
+      console.log(
+        toonKV({
+          glass: `http://127.0.0.1:${port}`,
+          mode: 'read-only — looking consumes nothing',
+          stop: 'ctrl-c',
+        }),
+      );
+      return; // the open server keeps the process alive
     }
     case 'doctor': {
       const rows = runDoctor();

@@ -95,6 +95,22 @@ view](pickup.md#merge-view) pickup persists each tick, so PR state is at most
 one poll interval stale without tend making a single network call. `--json`
 emits the full report for dashboards and scripts to render.
 
+### The spyglass
+
+`lobstah glass [--port <n>]` serves tend as a live web page on 127.0.0.1
+(default port 4949): the fleet verdict and attention questions, every
+dispatch with its full brief, status log, inbox, and evidence, each trap
+with its lifecycle notices, message history, and catches, the notices
+tail, the merge view, and watches — with filters, a table/cards toggle,
+and the helm identified by name. It is strictly read-only and consumes no
+cursor: looking through the glass changes nothing, so it needs no helm and
+threatens nothing. Links out are copyable commands (`lobstah attach`,
+`claude --resume`), never click-to-exec — localhost HTTP is reachable by
+any webpage, so the glass exposes no endpoint that acts.
+
+This is where "is the agent alive?" belongs: the helm's heartbeat age on a
+page, not periodic proof-of-life turns in a transcript.
+
 ### The periodic report
 
 `lobstah man tend` is the full picture on demand; `lobstah man report` is the

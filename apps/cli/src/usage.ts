@@ -86,6 +86,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   daemon: { subverbs: ['install', 'uninstall'], flags: { '--interval': { value: '<ms>' } } },
   pick: { subverbs: ['once', 'install', 'uninstall'], flags: {} },
   doctor: { flags: {} },
+  glass: { flags: { '--port': { value: '<n>' } } },
   repos: { subverbs: ['add'], flags: { '--pickup': {}, '--key': { value: '<k>' } }, positionals: '[<path>]' },
   init: { flags: { '--scan': {}, '--pickup': {} }, positionals: '[<dir>...]' },
   version: { flags: {} },
@@ -163,6 +164,10 @@ writes + loads a launchd agent / systemd user unit.`,
 reconcile, merge.`,
   doctor: `Check binaries, config, repos, harnesses, and the daemon heartbeat; exit 1
 on failures.`,
+  glass: `The spyglass: tend as a live localhost web page — attention, dispatches,
+traps with lifecycle and mail, notices, merge view; filters and a
+table/cards toggle. Read-only and binds 127.0.0.1 only: looking through it
+consumes no cursor and steers nothing.`,
   repos: `List configured repos, or detect one and append its [repos.*] block.`,
   init: `Create ~/.lobstah + config; --scan appends a [repos.*] block per repo found
 under the given directories.`,
