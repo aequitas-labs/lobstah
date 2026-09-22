@@ -54,9 +54,9 @@ const mtime = (f: string): number => {
   }
 };
 
-/** The lob✻ mark, for the favicon: installed package layout first, repo second. */
-function iconPath(): string | undefined {
-  for (const rel of ['../docs/assets/lob-star.png', '../../../../docs/assets/lob-star.png']) {
+/** A docs/assets file: installed package layout first, repo second. */
+function assetPath(name: string): string | undefined {
+  for (const rel of [`../docs/assets/${name}`, `../../../../docs/assets/${name}`]) {
     try {
       const p = fileURLToPath(new URL(rel, import.meta.url));
       if (fs.existsSync(p)) return p;
@@ -288,8 +288,9 @@ a{color:var(--link);text-decoration:none}
 .chip.click{cursor:pointer}.chip.click:hover{border-color:#3a455a}
 footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
 #lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;display:none;font-size:34px;line-height:1;user-select:none;animation:crawl 16s linear infinite}
-#lob span{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
-#lob:hover,#lob:hover span{animation-play-state:paused}
+#lob img,#lob span{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
+#lob img{height:56px;display:block;transform-origin:50% 90%}
+#lob:hover,#lob:hover img,#lob:hover span{animation-play-state:paused}
 @keyframes crawl{0%{transform:translateX(-60px)}100%{transform:translateX(100vw)}}
 @keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
 </style></head><body>
@@ -309,7 +310,7 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 <h2>merge view</h2><div id="merge"></div>
 <h2>watches</h2><div id="watches"></div>
 <footer id="foot"></footer>
-<div id="lob" title="attention needed — click to open the helm" onclick="lobClick()"><span>🦞</span></div>
+<div id="lob" title="attention needed — click to open the helm" onclick="lobClick()"><img src="/lob.png" alt="" onerror="this.remove();document.querySelector('#lob span').style.display='inline-block'"><span style="display:none">🦞</span></div>
 <div id="overlay"><div class="modal" id="modalbox"></div></div>
 <script>
 const esc=(s)=>String(s??'').replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -481,12 +482,16 @@ tick();setInterval(()=>tick(false),2000);
 
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(port: number): http.Server {
-  const icon = iconPath();
+  const icon = assetPath('lob-star.png');
+  const lob = assetPath('lob.png');
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
   const server = http.createServer((req, res) => {
-    if (req.url === '/icon.png') {
+    if (req.url === '/lob.png' && lob) {
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' });
+      res.end(fs.readFileSync(lob));
+    } else if (req.url === '/icon.png') {
       if (icon) {
         res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' });
         res.end(fs.readFileSync(icon));
