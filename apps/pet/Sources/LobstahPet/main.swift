@@ -266,7 +266,7 @@ final class Pet {
     bubble.layer?.cornerRadius = 10
 
     // the star rides above the claw — the glass's geometry scaled 1.5x
-    let star = NSImageView(frame: NSRect(x: 168 + 84, y: spriteH - 9, width: 22, height: 22))
+    let star = NSImageView(frame: NSRect(x: 168 + 82, y: spriteH - 11, width: 27, height: 27))
     star.image = Pet.starImage
     star.wantsLayer = true
     star.layer?.magnificationFilter = .nearest
