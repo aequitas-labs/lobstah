@@ -173,14 +173,19 @@ func focusHelm() {
 final class PetView: NSView {
   weak var pet: Pet?
   override func mouseDown(with event: NSEvent) { focusHelm() }
-  override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
   override func updateTrackingAreas() {
     trackingAreas.forEach(removeTrackingArea)
     addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil))
     super.updateTrackingAreas()
   }
-  override func mouseEntered(with event: NSEvent) { pet?.hovered = true }
-  override func mouseExited(with event: NSEvent) { pet?.hovered = false }
+  override func mouseEntered(with event: NSEvent) {
+    pet?.hovered = true
+    NSCursor.pointingHand.push()
+  }
+  override func mouseExited(with event: NSEvent) {
+    pet?.hovered = false
+    NSCursor.pop()
+  }
   override func rightMouseDown(with event: NSEvent) {
     let menu = NSMenu()
     let glass = NSMenuItem(title: "Open spyglass", action: #selector(NSApplication.petOpenGlass), keyEquivalent: "")
@@ -216,8 +221,9 @@ final class Pet {
   var hiddenUntil: Date?
   /** Where the current entrance began — drives the fade-in. */
   var entryX: CGFloat = -10_000
-  /** Hovered: the walk pauses; the arms keep waving. */
-  var hovered = false
+  /** Hovered: the walk pauses, the bubble reveals; the arms keep waving. */
+  var hovered = false { didSet { bubble?.isHidden = !hovered } }
+  weak var bubble: NSView?
 
   init(text: String, index: Int) {
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
@@ -226,8 +232,8 @@ final class Pet {
     self.x = first.minX - 200 - CGFloat(index) * 220
     self.entryX = self.x
 
-    let panelW: CGFloat = 176
-    let panelH: CGFloat = 152
+    let panelW: CGFloat = 300
+    let panelH: CGFloat = 96
     panel = NSPanel(
       contentRect: NSRect(x: x, y: 0, width: panelW, height: panelH),
       styleMask: [.borderless, .nonactivatingPanel],
@@ -246,7 +252,7 @@ final class Pet {
 
     // sprite: one frame of the 4-frame sheet, pixel-crisp at 1.5x
     let spriteW: CGFloat = 108, spriteH: CGFloat = 84
-    spriteLayer.frame = CGRect(x: 8, y: 0, width: spriteW, height: spriteH)
+    spriteLayer.frame = CGRect(x: 168, y: 0, width: spriteW, height: spriteH)
     if let sheet = Pet.spriteSheet {
       var rect = CGRect(origin: .zero, size: sheet.size)
       spriteLayer.contents = sheet.cgImage(forProposedRect: &rect, context: nil, hints: nil)
@@ -255,15 +261,17 @@ final class Pet {
     spriteLayer.magnificationFilter = .nearest
     root.layer?.addSublayer(spriteLayer)
 
-    // speech bubble with the star and the question
-    let bubble = NSView(frame: NSRect(x: 16, y: spriteH + 6, width: panelW - 22, height: 60))
+    // the question is a hover reveal, opening to the lobster's left
+    let bubble = NSView(frame: NSRect(x: 0, y: 16, width: 160, height: 60))
+    bubble.isHidden = true
     bubble.wantsLayer = true
     bubble.layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.106, blue: 0.133, alpha: 0.96).cgColor
     bubble.layer?.borderColor = NSColor(calibratedWhite: 0.35, alpha: 1).cgColor
     bubble.layer?.borderWidth = 1
     bubble.layer?.cornerRadius = 10
 
-    let star = NSImageView(frame: NSRect(x: bubble.frame.minX + 9, y: bubble.frame.maxY - 9, width: 18, height: 18))
+    // the star chases at the lobster's heel
+    let star = NSImageView(frame: NSRect(x: 168 + spriteW - 8, y: 26, width: 18, height: 18))
     star.image = Pet.starImage
 
     let label = NSTextField(wrappingLabelWithString: text.count > 66 ? String(text.prefix(63)) + "…" : text)
@@ -276,6 +284,7 @@ final class Pet {
     root.addSubview(bubble)
     root.addSubview(star)
     root.pet = self
+    self.bubble = bubble
 
     panel.orderFrontRegardless()
   }
@@ -291,11 +300,11 @@ final class Pet {
     // Leaving a display: fade over the last stretch, vanish before leaking
     // onto the neighbor, pause a beat offstage, then fade in at the next
     // display's edge.
-    let cutoff = current.frame.maxX - 40
+    let cutoff = current.frame.maxX - panel.frame.width
     if x > cutoff {
       panel.orderOut(nil)
       screenIndex = (screenIndex + 1) % screens.count
-      x = screens[screenIndex].frame.minX - 24
+      x = screens[screenIndex].frame.minX + 2
       entryX = x
       hiddenUntil = Date().addingTimeInterval(2.5)
       return
