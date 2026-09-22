@@ -290,9 +290,10 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 .lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;font-size:34px;line-height:1;user-select:none;animation:crawl 18s linear infinite}
 .lob .sprite{width:72px;height:56px;background:url(/lob-sprite.png) 0 0 no-repeat;background-size:400% 100%;image-rendering:pixelated;animation:step .5s steps(4) infinite}
 .lob .fallback{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
-.lob .bub{position:absolute;bottom:62px;left:14px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:6px 9px 5px;font-size:11px;line-height:1.35;color:var(--fg);width:max-content;max-width:130px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.lob .bub{display:none;position:absolute;bottom:8px;right:calc(100% + 6px);background:var(--card);border:1px solid var(--line);border-radius:9px;padding:6px 9px 5px;font-size:11px;line-height:1.35;color:var(--fg);width:max-content;max-width:130px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.lob:hover .bub{display:block}
 .lob .bub span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word}
-.lob .bub img{position:absolute;top:-9px;left:9px;height:16px}
+.lob .star{position:absolute;left:76px;bottom:16px;height:15px;animation:waddle .5s ease-in-out infinite alternate}
 .lob .bub:after{content:'';position:absolute;left:16px;bottom:-5px;width:8px;height:8px;background:var(--card);border-right:1px solid var(--line);border-bottom:1px solid var(--line);transform:rotate(45deg)}
 .lob:hover{animation-play-state:paused}
 @keyframes crawl{0%{transform:translateX(-90px)}100%{transform:translateX(100vw)}}
@@ -483,8 +484,9 @@ function renderLobs(att){
  lobKey=key;
  document.getElementById('lobs').innerHTML=items.map((it,i)=>
   '<div class="lob" style="animation-duration:'+(((innerWidth+180)/(100+i*12)).toFixed(1))+'s;animation-delay:-'+((i*9)%14)+'s" title="click to open" onclick="'+it.click+'">'
-  +'<div class="bub"><img src="/star.png" alt="" onerror="this.replaceWith(String.fromCharCode(0x2728))"><span>'+esc(it.text.length>48?it.text.slice(0,47)+'…':it.text)+'</span></div>'
+  +'<div class="bub"><span>'+esc(it.text.length>48?it.text.slice(0,47)+'…':it.text)+'</span></div>'
   +(spriteOk===false?'<span class="fallback">🦞</span>':'<div class="sprite"></div>')
+  +'<img class="star" src="/star.png" alt="" onerror="this.remove()">'
   +'</div>').join('');
 }
 window.tog=(k)=>{open.has(k)?open.delete(k):open.add(k);tick(true)};
