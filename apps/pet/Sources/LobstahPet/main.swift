@@ -1,0 +1,334 @@
+// The lobstah pet: attention questions crawl across the desktop.
+//
+// One small transparent always-on-top window per standing question (capped),
+// each walking the pixel lobster with a star speech bubble. Clicking a pet
+// runs the focus ladder against the helm registration lobstah already
+// keeps: exact iTerm pane -> Terminal tab by tty -> VS Code window by cwd ->
+// app by bundle id -> resume-if-stale -> the spyglass. The pet only ever
+// reads lobstah state (`man tend --json` + helm files); it steers nothing.
+
+import AppKit
+
+// MARK: - lobstah state
+
+struct AttentionItem: Decodable, Equatable {
+  let id: String
+  let verb: String
+  let note: String?
+}
+
+struct TendReport: Decodable {
+  let attention: [AttentionItem]
+}
+
+struct WindowRef: Decodable {
+  let bundleId: String?
+  let termProgram: String?
+  let tty: String?
+  let itermSession: String?
+  let tmuxPane: String?
+}
+
+struct HelmRegistration: Decodable {
+  let sessionId: String
+  let harness: String?
+  let cwd: String?
+  let heartbeatAt: String
+  let window: WindowRef?
+}
+
+func lobstahHome() -> URL {
+  if let home = ProcessInfo.processInfo.environment["LOBSTAH_HOME"] {
+    return URL(fileURLWithPath: home)
+  }
+  return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".lobstah")
+}
+
+func runCommand(_ launch: String, _ args: [String], timeout: TimeInterval = 10) -> String? {
+  let p = Process()
+  p.executableURL = URL(fileURLWithPath: launch)
+  p.arguments = args
+  let out = Pipe()
+  p.standardOutput = out
+  p.standardError = Pipe()
+  do { try p.run() } catch { return nil }
+  let deadline = Date().addingTimeInterval(timeout)
+  while p.isRunning && Date() < deadline { usleep(50_000) }
+  if p.isRunning { p.terminate(); return nil }
+  let data = out.fileHandleForReading.readDataToEndOfFile()
+  return String(data: data, encoding: .utf8)
+}
+
+func tendAttention() -> [AttentionItem] {
+  guard let json = runCommand("/usr/bin/env", ["lobstah", "man", "tend", "--json"]),
+        let data = json.data(using: .utf8),
+        let report = try? JSONDecoder().decode(TendReport.self, from: data)
+  else { return [] }
+  return report.attention
+}
+
+func readHelm() -> HelmRegistration? {
+  let dir = lobstahHome().appendingPathComponent("helm")
+  guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return nil }
+  for f in files where f.pathExtension == "json" {
+    if let data = try? Data(contentsOf: f),
+       let helm = try? JSONDecoder().decode(HelmRegistration.self, from: data) {
+      return helm
+    }
+  }
+  return nil
+}
+
+// MARK: - focus ladder
+
+func osascript(_ source: String) -> Bool {
+  var error: NSDictionary?
+  let script = NSAppleScript(source: source)
+  script?.executeAndReturnError(&error)
+  return error == nil
+}
+
+func focusHelm() {
+  guard let helm = readHelm() else {
+    NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
+    return
+  }
+  let iso = ISO8601DateFormatter()
+  iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+  let beat = iso.date(from: helm.heartbeatAt)
+    ?? ISO8601DateFormatter().date(from: helm.heartbeatAt)
+  let live = beat.map { Date().timeIntervalSince($0) < 1800 } ?? false
+  let win = helm.window
+
+  if live {
+    // exact iTerm pane
+    if let sess = win?.itermSession, let uuid = sess.split(separator: ":").last {
+      let ok = osascript("""
+        tell application "iTerm2"
+          repeat with w in windows
+            repeat with t in tabs of w
+              repeat with s in sessions of t
+                if id of s contains "\(uuid)" then
+                  select t
+                  select w
+                  activate
+                  return
+                end if
+              end repeat
+            end repeat
+          end repeat
+        end tell
+        """)
+      if ok { return }
+    }
+    // exact Terminal.app tab by tty
+    if let tty = win?.tty, win?.termProgram == "Apple_Terminal" {
+      let ok = osascript("""
+        tell application "Terminal"
+          repeat with w in windows
+            repeat with t in tabs of w
+              if (tty of t as string) ends with "\(tty)" then
+                set selected of t to true
+                set frontmost of w to true
+                activate
+                return
+              end if
+            end repeat
+          end repeat
+        end tell
+        """)
+      if ok { return }
+    }
+    // VS Code family: one window per folder, cwd is the window
+    if let bundle = win?.bundleId, let cwd = helm.cwd,
+       bundle.contains("VSCode") || bundle.contains("Cursor") || bundle.contains("windsurf") {
+      let p = Process()
+      p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+      p.arguments = ["-b", bundle, cwd]
+      try? p.run()
+      return
+    }
+    // any recorded app
+    if let bundle = win?.bundleId,
+       let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first {
+      app.activate()
+      return
+    }
+  } else if let cwd = helm.cwd {
+    // stale helm: revive it in a fresh Terminal window
+    let resume = helm.harness == "codex" ? "codex resume" : "claude --resume"
+    _ = osascript("""
+      tell application "Terminal"
+        do script "cd \(cwd) && \(resume) \(helm.sessionId)"
+        activate
+      end tell
+      """)
+    return
+  }
+  NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
+}
+
+// MARK: - pet window
+
+final class PetView: NSView {
+  override func mouseDown(with event: NSEvent) { focusHelm() }
+}
+
+final class Pet {
+  static let spriteSheet: NSImage? = Bundle.module.url(forResource: "lob-sprite", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+  static let starImage: NSImage? = Bundle.module.url(forResource: "star", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+
+  let panel: NSPanel
+  let spriteLayer = CALayer()
+  var x: CGFloat
+  let speed: CGFloat
+  var frame = 0
+  let screen: NSScreen
+
+  init(text: String, index: Int, screen: NSScreen) {
+    self.screen = screen
+    self.speed = 70 + CGFloat(index) * 18
+    self.x = screen.frame.minX - 220 - CGFloat(index) * 240
+
+    let panelW: CGFloat = 224
+    let panelH: CGFloat = 196
+    panel = NSPanel(
+      contentRect: NSRect(x: x, y: screen.frame.minY + 4, width: panelW, height: panelH),
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered, defer: false
+    )
+    panel.level = .statusBar
+    panel.backgroundColor = .clear
+    panel.isOpaque = false
+    panel.hasShadow = false
+    panel.ignoresMouseEvents = false
+    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+    let root = PetView(frame: NSRect(x: 0, y: 0, width: panelW, height: panelH))
+    root.wantsLayer = true
+    panel.contentView = root
+
+    // sprite: one frame of the 4-frame sheet, pixel-crisp at 2x
+    let spriteW: CGFloat = 144, spriteH: CGFloat = 112
+    spriteLayer.frame = CGRect(x: 8, y: 0, width: spriteW, height: spriteH)
+    if let sheet = Pet.spriteSheet {
+      var rect = CGRect(origin: .zero, size: sheet.size)
+      spriteLayer.contents = sheet.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+    }
+    spriteLayer.contentsRect = CGRect(x: 0, y: 0, width: 0.25, height: 1)
+    spriteLayer.magnificationFilter = .nearest
+    root.layer?.addSublayer(spriteLayer)
+
+    // speech bubble with the star and the question
+    let bubble = NSView(frame: NSRect(x: 20, y: spriteH + 8, width: panelW - 28, height: 66))
+    bubble.wantsLayer = true
+    bubble.layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.106, blue: 0.133, alpha: 0.96).cgColor
+    bubble.layer?.borderColor = NSColor(calibratedWhite: 0.35, alpha: 1).cgColor
+    bubble.layer?.borderWidth = 1
+    bubble.layer?.cornerRadius = 10
+
+    let star = NSImageView(frame: NSRect(x: 8, y: 22, width: 22, height: 22))
+    star.image = Pet.starImage
+    bubble.addSubview(star)
+
+    let label = NSTextField(wrappingLabelWithString: text.count > 90 ? String(text.prefix(87)) + "…" : text)
+    label.frame = NSRect(x: 36, y: 6, width: bubble.frame.width - 44, height: 54)
+    label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    label.textColor = NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.92, alpha: 1)
+    label.maximumNumberOfLines = 3
+    label.cell?.truncatesLastVisibleLine = true
+    bubble.addSubview(label)
+    root.addSubview(bubble)
+
+    panel.orderFrontRegardless()
+  }
+
+  func tick(_ dt: CGFloat) {
+    x += speed * dt
+    if x > screen.frame.maxX { x = screen.frame.minX - 240 }
+    panel.setFrameOrigin(NSPoint(x: x, y: screen.frame.minY + 4))
+  }
+
+  func step() {
+    frame = (frame + 1) % 4
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    spriteLayer.contentsRect = CGRect(x: CGFloat(frame) / 4, y: 0, width: 0.25, height: 1)
+    CATransaction.commit()
+  }
+
+  func close() { panel.orderOut(nil) }
+}
+
+// MARK: - app
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+  var pets: [Pet] = []
+  var lastKey = ""
+  var statusItem: NSStatusItem!
+  var preview = ProcessInfo.processInfo.environment["LOBSTAH_PET_PREVIEW"] != nil
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    NSApp.setActivationPolicy(.accessory)
+
+    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    statusItem.button?.title = "🦞"
+    let menu = NSMenu()
+    menu.addItem(NSMenuItem(title: "Preview pet", action: #selector(togglePreview), keyEquivalent: "p"))
+    menu.addItem(NSMenuItem(title: "Open spyglass", action: #selector(openGlass), keyEquivalent: "g"))
+    menu.addItem(.separator())
+    menu.addItem(NSMenuItem(title: "Quit Lobstah Pet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    for item in menu.items { item.target = self }
+    statusItem.menu = menu
+
+    // walk + frame-step + poll timers
+    Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
+      for pet in self.pets { pet.tick(1.0 / 30) }
+    }
+    Timer.scheduledTimer(withTimeInterval: 0.14, repeats: true) { _ in
+      for pet in self.pets { pet.step() }
+    }
+    Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { _ in self.poll() }
+    poll()
+  }
+
+  @objc func togglePreview() {
+    preview.toggle()
+    lastKey = "-"
+    poll()
+  }
+
+  @objc func openGlass() {
+    NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
+  }
+
+  func poll() {
+    DispatchQueue.global().async {
+      var items = tendAttention()
+      DispatchQueue.main.async {
+        if items.isEmpty && self.preview {
+          items = [AttentionItem(id: "preview", verb: "needs-decision", note: "the lobster preview — questions crawl in here")]
+        }
+        let extra = items.count > 4 ? items.count - 4 : 0
+        var shown = Array(items.prefix(4))
+        if extra > 0 {
+          let last = shown.removeLast()
+          shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)"))
+        }
+        let key = shown.map(\.id).joined(separator: "|")
+        guard key != self.lastKey else { return }
+        self.lastKey = key
+        for pet in self.pets { pet.close() }
+        guard let screen = NSScreen.main else { return }
+        self.pets = shown.enumerated().map { i, item in
+          Pet(text: item.note ?? item.verb, index: i, screen: screen)
+        }
+      }
+    }
+  }
+}
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
