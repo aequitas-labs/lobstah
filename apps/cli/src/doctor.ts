@@ -130,7 +130,7 @@ export function runDoctor(now = Date.now()): DoctorRow[] {
       push(
         'soaking registry',
         'warn',
-        `${stale.length} pre-0.4 registration(s) without a trap id — inert; delete them and re-soak from each worktree`,
+        `${stale.length} pre-0.5 registration(s) without a trap id — inert; delete them and re-soak from each worktree`,
       );
     }
   } catch {

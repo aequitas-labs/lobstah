@@ -99,10 +99,10 @@ lobstah man tend                      # the whole string: fleet verdict, waiting
 lobstah watch add ci:1234 --check 'my-ci events --since {cursor} --json'
                                       # stand watch on anything external — its
                                       # events wake you like a dispatch would
-lobstah soak --session <id>           # volunteer a live interactive session as
-                                      # a worker: it parks at turn end and takes
-                                      # bait (`dispatch --for session:<id>`
-                                      # targets it) instead of a headless spawn
+lobstah soak                          # volunteer this worktree's session as a
+                                      # worker: sign-on anchors its wt:<trap>
+                                      # address; `dispatch --for wt:<trap>` bait
+                                      # waits for it, never a headless spawn
 ```
 
 Prefer the water? 🌊 `set --bait`, `buoys`, and `buoy` alias `dispatch`,
@@ -121,7 +121,9 @@ Set one config line — `notifyCommand = "ntfy pub my-topic ..."` — and the
 daemon pings you on `needs-decision`, `blocked`, `done`, and `failed`. No
 model in the loop. Driving lobstah from an agent session instead? `lobstah
 man` prints the lobsterman's manual. `man wait` blocks until a dispatch needs
-attention, and unanswered questions re-fire until answered. `man init`
+attention, and unanswered questions re-fire until answered. `man helm`
+signs one session on as the orchestrator for its grounds, and `man report`
+prints the delta since the last acknowledged report. `man init`
 installs a Claude Code Stop hook that parks the session on the fleet and
 continues the turn the moment something needs it.
 
