@@ -72,6 +72,9 @@ jobs:
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile
+      # The workspace packages resolve through their dist entries — bun
+      # cannot bundle them unbuilt.
+      - run: pnpm build
       - run: node scripts/build-binaries.mjs "${GITHUB_REF_NAME#v}"
       - name: Attach to the GitHub release
         env:
