@@ -482,7 +482,7 @@ function renderLobs(att){
  if(key===lobKey)return;
  lobKey=key;
  document.getElementById('lobs').innerHTML=items.map((it,i)=>
-  '<div class="lob" style="animation-duration:'+(16+i*5)+'s;animation-delay:-'+((i*9)%14)+'s" title="click to open" onclick="'+it.click+'">'
+  '<div class="lob" style="animation-duration:'+(((innerWidth+180)/(110+i*12)).toFixed(1))+'s;animation-delay:-'+((i*9)%14)+'s" title="click to open" onclick="'+it.click+'">'
   +'<div class="bub"><img src="/star.png" alt="" onerror="this.replaceWith(String.fromCharCode(0x2728))"><span>'+esc(it.text.length>48?it.text.slice(0,47)+'…':it.text)+'</span></div>'
   +(spriteOk===false?'<span class="fallback">🦞</span>':'<div class="sprite"></div>')
   +'</div>').join('');
