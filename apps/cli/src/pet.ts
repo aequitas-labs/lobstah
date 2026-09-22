@@ -60,13 +60,15 @@ export function installPet(binaryArg?: string): { file: string; binary: string; 
   if (process.platform !== 'darwin') {
     throw new Error('the pet is macOS-only for now — transparent overlay windows need a per-platform build');
   }
+  // Fresh builds outrank the installed copy — otherwise a reinstall finds
+  // the old binary "already in place" and silently ships nothing new.
   const candidates = [
     binaryArg,
-    petBinaryHome(),
     path.join(process.cwd(), 'apps', 'pet', '.build', 'release', 'LobstahPet'),
     path.join(process.cwd(), '.build', 'release', 'LobstahPet'),
     path.join(process.cwd(), 'apps', 'pet', '.build', 'debug', 'LobstahPet'),
     path.join(process.cwd(), '.build', 'debug', 'LobstahPet'),
+    petBinaryHome(),
   ].filter((c): c is string => c !== undefined);
   const source = candidates.find((c) => fs.existsSync(c));
   if (!source) {
