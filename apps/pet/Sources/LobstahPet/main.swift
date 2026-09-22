@@ -173,19 +173,7 @@ func focusHelm() {
 final class PetView: NSView {
   weak var pet: Pet?
   override func mouseDown(with event: NSEvent) { focusHelm() }
-  override func updateTrackingAreas() {
-    trackingAreas.forEach(removeTrackingArea)
-    addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil))
-    super.updateTrackingAreas()
-  }
-  override func mouseEntered(with event: NSEvent) {
-    pet?.hovered = true
-    NSCursor.pointingHand.push()
-  }
-  override func mouseExited(with event: NSEvent) {
-    pet?.hovered = false
-    NSCursor.pop()
-  }
+
   override func rightMouseDown(with event: NSEvent) {
     let menu = NSMenu()
     let glass = NSMenuItem(title: "Open spyglass", action: #selector(NSApplication.petOpenGlass), keyEquivalent: "")
@@ -233,7 +221,7 @@ final class Pet {
     self.entryX = self.x
 
     let panelW: CGFloat = 300
-    let panelH: CGFloat = 96
+    let panelH: CGFloat = 102
     panel = NSPanel(
       contentRect: NSRect(x: x, y: 0, width: panelW, height: panelH),
       styleMask: [.borderless, .nonactivatingPanel],
@@ -261,8 +249,8 @@ final class Pet {
     spriteLayer.magnificationFilter = .nearest
     root.layer?.addSublayer(spriteLayer)
 
-    // the question is a hover reveal, opening to the lobster's left
-    let bubble = NSView(frame: NSRect(x: 0, y: 16, width: 160, height: 60))
+    // the question is a hover reveal, opening leftward over the lobster
+    let bubble = NSView(frame: NSRect(x: 14, y: 22, width: 216, height: 60))
     bubble.isHidden = true
     bubble.wantsLayer = true
     bubble.layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.106, blue: 0.133, alpha: 0.96).cgColor
@@ -270,9 +258,11 @@ final class Pet {
     bubble.layer?.borderWidth = 1
     bubble.layer?.cornerRadius = 10
 
-    // the star chases at the lobster's heel
-    let star = NSImageView(frame: NSRect(x: 168 + spriteW - 8, y: 26, width: 18, height: 18))
+    // the star rides above the claw, top-right, like the mark
+    let star = NSImageView(frame: NSRect(x: 168 + spriteW - 26, y: spriteH - 6, width: 20, height: 20))
     star.image = Pet.starImage
+    star.wantsLayer = true
+    star.layer?.magnificationFilter = .nearest
 
     let label = NSTextField(wrappingLabelWithString: text.count > 66 ? String(text.prefix(63)) + "…" : text)
     label.frame = NSRect(x: 10, y: 6, width: bubble.frame.width - 20, height: 46)
@@ -290,6 +280,13 @@ final class Pet {
   }
 
   func tick(_ dt: CGFloat) {
+    // Tracking areas miss a window that walks under a stationary cursor, in
+    // both directions — poll instead.
+    let inside = panel.frame.contains(NSEvent.mouseLocation) && panel.isVisible
+    if inside != hovered {
+      hovered = inside
+      if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+    }
     if let until = hiddenUntil {
       if Date() < until { return }
       hiddenUntil = nil
