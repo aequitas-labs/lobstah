@@ -383,6 +383,16 @@ function findLane(id: string): Lane {
   throw new Error(`unknown dispatch ${id}`);
 }
 
+/** Queued bait can still wake the helm when a trap or daemon claims it. */
+function anythingInFlight(): boolean {
+  const dispatches = (['work', 'chore'] as Lane[]).some((lane) => {
+    const dirs = laneDirs(lane);
+    return [dirs.queue, dirs.active].some((dir) => fs.readdirSync(dir).some((file) => !file.startsWith('.')));
+  });
+  // A session-owned watch can be the only work left to wake the helm.
+  return dispatches || listWatches().some((watch) => watch.owner === 'man');
+}
+
 function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<string, unknown>> {
   const dir = laneDirs(lane)[bucket];
   const entries = fs
@@ -1104,13 +1114,7 @@ ${progress}`,
               'Handle anything actionable; this session re-parks at turn end.',
           );
         };
-        const anyActive = (['work', 'chore'] as Lane[]).some((l) =>
-          fs.readdirSync(laneDirs(l).active).some((f) => !f.startsWith('.')),
-        );
-        // A registered session-owned watch is in-flight work too — a ume
-        // review can be the only thing standing between this turn and done.
-        const anyWatch = listWatches().some((w) => w.owner === 'man');
-        if (!anyActive && !anyWatch) {
+        if (!anythingInFlight()) {
           // Nothing in flight — but standing notices (a bounced message, an
           // orphaned dispatch) and a helm's landed-then-idle delta still
           // deserve one wake before the quiet sets in.
@@ -1155,6 +1159,7 @@ ${progress}`,
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 1500));
+            if (helm) heartbeatHelm(helm.sessionId); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
             runDueManWatches();

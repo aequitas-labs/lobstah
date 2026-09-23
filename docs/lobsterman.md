@@ -244,10 +244,10 @@ are preserved verbatim. What it writes:
 
 `haul` gates itself twice: only a designated session parks (launch it with
 `LOBSTAH_MAN=1 claude`, or `touch .lobstah-man` for a per-directory gate), and
-only while dispatches are in flight — conversational turns end free. On an
-event it blocks the stop with the event as context and tells the agent the
-session re-parks automatically; on timeout or any error it silently allows
-the stop, leaving tier 1 as the backstop past the horizon.
+only while dispatches are in flight — queued dispatches count. Conversational
+turns end free. On an event it blocks the stop with the event as context and
+tells the agent the session re-parks automatically; on timeout or any error
+it silently allows the stop, leaving tier 1 as the backstop past the horizon.
 
 Two habits worth adding to a lobsterman session's instructions: run
 `lobstah man wait --peek` at session start (a wake consumed by a session that
