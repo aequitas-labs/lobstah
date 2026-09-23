@@ -14,7 +14,7 @@ anything else. The status log is append-only; the last entry wins.
 | Verb | Meaning | Who acts next |
 | --- | --- | --- |
 | `working` | Making progress; nothing needed. | Nobody. |
-| `needs-decision` | Blocked on a judgment call only a human (or the orchestrator) can make. The note carries the question. | Human — re-fires every `remindSecs` until answered. |
+| `needs-decision` | Blocked on a judgment call only a human (or the orchestrator) can make. The note carries the question. A headless worker waiting on a question stays alive until answered (`lobstah send`), cancelled, or the wall clock. | Human — re-fires every `remindSecs` until answered. |
 | `blocked` | Cannot proceed for an external reason (missing access, broken dependency). | Human. |
 | `paused` | Intentionally idle; resume is expected. | Whoever paused it. |
 | `done` | The brief is fulfilled. Terminal. Merging is never the dispatch's job. | Merge loop / reviewer. |

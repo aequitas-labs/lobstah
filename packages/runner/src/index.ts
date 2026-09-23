@@ -4,22 +4,19 @@ import { fileURLToPath } from 'node:url';
 import {
   appendEvent,
   appendStatus,
-  cancelRequested,
   complete,
   laneDirs,
   loadConfig,
   lobstahHome,
   mergeEvidence,
   readEvidence,
-  readStatusLog,
   resolveDispatch,
-  TERMINAL_VERBS,
 } from '@lobstah/core';
 import type { Descriptor, Lane, RunnerInfo, Verb } from '@lobstah/core';
 import { loadAdapter } from '@lobstah/adapters';
 import { allocate, collectEvidence, worktreePath } from '@lobstah/worktree';
 import { buildPrompt } from './contract.js';
-import { acknowledge, unhandled } from '@lobstah/core';
+import { drive, settle } from './drive.js';
 
 /** Look up the harness session of an earlier dispatch, for followUp forking. */
 function followUpSession(followUp: string): string | undefined {
@@ -105,29 +102,7 @@ export async function main(activeDir: string, lane: Lane): Promise<void> {
       }, resolved.limits.wallClockSecs * 1000)
     : undefined;
 
-  let cancelled = false;
-  for await (const ev of run.events) {
-    appendEvent(id, lane, ev);
-    if (ev.type === 'session' && ev.data?.sessionId) {
-      mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId) });
-    }
-    if (ev.type === 'turn-end') {
-      if (cancelRequested(id, lane)) {
-        cancelled = true;
-        run.kill();
-        continue;
-      }
-      const msgs = unhandled(id, lane);
-      if (msgs.length > 0) {
-        for (const m of msgs) {
-          run.send(m.text);
-          acknowledge(id, lane, m.file);
-        }
-      } else {
-        run.end();
-      }
-    }
-  }
+  const { cancelled } = await drive(run, { id, lane, stopped: () => wallClockHit });
 
   const result = await run.done;
   if (wallTimer) clearTimeout(wallTimer);
@@ -144,16 +119,7 @@ export async function main(activeDir: string, lane: Lane): Promise<void> {
     });
   }
 
-  const lastVerb = readStatusLog(id, lane).at(-1)?.verb;
-  if (cancelled) {
-    status('failed', 'cancelled by operator');
-  } else if (wallClockHit) {
-    status('failed', 'wall-clock limit exceeded');
-  } else if (result.error) {
-    status('failed', result.error.slice(0, 500));
-  } else if (!lastVerb || !TERMINAL_VERBS.includes(lastVerb)) {
-    status('done');
-  }
+  settle(id, lane, { cancelled, wallClockHit, error: result.error });
 
   complete(id, lane);
 }

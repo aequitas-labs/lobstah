@@ -26,3 +26,18 @@ export function readEvents(id: string, lane: Lane): NormalizedEvent[] {
     return [];
   }
 }
+
+/**
+ * Refresh the event stream's mtime without appending — the activity signal
+ * `lastEventAt` reads. A runner waiting on the inbox calls this so a live
+ * wait is visible to the wedge detector without bloating the stream.
+ */
+export function touchEvents(id: string, lane: Lane, at = new Date()): void {
+  const file = eventsPath(id, lane);
+  try {
+    fs.utimesSync(file, at, at);
+  } catch {
+    fs.appendFileSync(file, '');
+    fs.utimesSync(file, at, at);
+  }
+}
