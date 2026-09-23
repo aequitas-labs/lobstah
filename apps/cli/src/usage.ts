@@ -11,6 +11,8 @@ interface FlagSpec {
   value?: string;
   /** Required flags print without brackets. */
   required?: boolean;
+  /** Preserve every occurrence in order (for file attachments). */
+  repeatable?: boolean;
 }
 
 export interface CommandSpec {
@@ -34,6 +36,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--model': { value: '<m>' },
       '--effort': { value: '<e>' },
       '--follow-up': { value: '<uuid>' },
+      '--attach': { value: '<file>', repeatable: true },
       '--for': { value: 'wt:<trap>' },
       '--session': { value: '<id>' },
       '--chore': {},
@@ -43,7 +46,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>|wt:<trap> <message...>' },
+  send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true } }, positionals: '<uuid>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -120,10 +123,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
 
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
-  dispatch: `Queue a supervised dispatch; prints the id. --for wt:<trap> addresses the
-work to a signed-on worktree (sticky: it waits for that trap, never falls
-back to a headless worker; session:<id> resolves to its trap). With a
-claimed helm, addressing requires --session <helm-id>. Alias: set --bait.`,
+  dispatch: `Queue supervised work; prints id. --for wt:<trap> targets a signed-on trap
+(sticky; session:<id> resolves to it). A claimed helm requires --session
+<helm-id> to address work. Repeat --attach to copy files into owned state.
+Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. Alias: buoy.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
@@ -132,7 +135,8 @@ claimed helm, addressing requires --session <helm-id>. Alias: set --bait.`,
 manning a worktree (wt:<trap> — delivered at its next park, no catch
 lifecycle; undeliverable messages bounce to the helm). Messages carry their
 sender. With a claimed helm, sending requires --session <helm-id>. Flags go
-anywhere; after \`--\` every word is message text, even "--session".`,
+anywhere; repeat --attach to copy files with the message. After \`--\` every
+word is message text, even "--session".`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -249,10 +253,10 @@ export function usageFor(cmd: string): string | undefined {
 export class UsageError extends Error {}
 
 /** A flag's parsed value: its value token, or `true` for a boolean flag. */
-export type FlagValue = string | true;
+export type FlagValue = string | string[] | true;
 
 export interface ParsedArgs {
-  /** Registered flags found anywhere in argv; the first occurrence wins. */
+  /** Registered flags found anywhere in argv; repeatable flags collect values. */
   flags: Map<string, FlagValue>;
   /** Everything that is not a flag or a flag's value, in order. */
   positionals: string[];
@@ -298,7 +302,12 @@ export function parseArgs(cmd: string, args: string[]): ParsedArgs | undefined {
       if (i + 1 >= args.length) return fail(`flag ${tok} needs a value (${tok} ${f.value})`);
       value = args[++i]!; // the value is consumed, never validated
     }
-    if (!flags.has(tok)) flags.set(tok, value);
+    if (f.repeatable) {
+      const previous = flags.get(tok);
+      flags.set(tok, [...(Array.isArray(previous) ? previous : []), value as string]);
+    } else if (!flags.has(tok)) {
+      flags.set(tok, value);
+    }
   }
   return { flags, positionals };
 }

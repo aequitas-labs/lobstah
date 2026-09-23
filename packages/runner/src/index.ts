@@ -68,7 +68,7 @@ export async function main(activeDir: string, lane: Lane): Promise<void> {
     process.env.LOBSTAH_RESUME ?? (descriptor.followUp ? followUpSession(descriptor.followUp) : undefined);
 
   const adapter = loadAdapter(resolved.harness);
-  const prompt = buildPrompt(brief, { id, nudge: process.env.LOBSTAH_NUDGE });
+  const prompt = buildPrompt(brief, { id, nudge: process.env.LOBSTAH_NUDGE, attachments: descriptor.attachments });
 
   // Workers report through the CLI; guarantee it resolves. In the repo layout
   // bin/ sits three levels above the runner's dist — when absent (bundled

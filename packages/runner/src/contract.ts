@@ -1,11 +1,12 @@
-import { VERBS } from '@lobstah/core';
+import { attachmentBlock, VERBS } from '@lobstah/core';
+import type { Attachment } from '@lobstah/core';
 
 /**
  * The status/inbox contract every dispatch learns. Injected by the runner
  * into the prompt it composes — nothing is installed repo-side, and the
  * contract versions with the daemon instead of drifting per repo.
  */
-export function buildPrompt(brief: string, opts: { id: string; nudge?: string }): string {
+export function buildPrompt(brief: string, opts: { id: string; nudge?: string; attachments?: Attachment[] }): string {
   const reporting =
     `Report status by running \`lobstah report ${opts.id} <verb> [note]\` (verbs: ${VERBS.join(', ')}). ` +
     `Attach a PR URL to your final report with \`--pr <url>\`. ` +
@@ -22,6 +23,7 @@ export function buildPrompt(brief: string, opts: { id: string; nudge?: string })
     `--- BRIEF ---`,
     brief,
   ];
+  if (opts.attachments?.length) parts.push(attachmentBlock(opts.attachments));
   if (opts.nudge) parts.push(`--- SUPERVISOR NOTE ---`, opts.nudge);
   return parts.join('\n\n');
 }

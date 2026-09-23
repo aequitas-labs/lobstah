@@ -9,6 +9,7 @@ import { mergeEvidence } from './evidence.js';
 import { postNotice } from './notices.js';
 import type { WindowRef } from './window.js';
 import { TERMINAL_VERBS } from './types.js';
+import { attachmentBlock } from './attachments.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -407,5 +408,6 @@ export function baitBrief(id: string, d: Descriptor): string {
     'The task:',
     '',
     d.brief,
+    ...(d.attachments?.length ? ['', attachmentBlock(d.attachments)] : []),
   ].join('\n');
 }

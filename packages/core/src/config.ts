@@ -29,6 +29,7 @@ export interface LimitsConfig {
   maxRestartAttempts: number;
   wallClockSecs: number;
   choreRetentionDays: number;
+  attachmentMaxBytes: number;
 }
 
 export interface SoakConfig {
@@ -82,6 +83,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   maxRestartAttempts: 2,
   wallClockSecs: 3600,
   choreRetentionDays: 7,
+  attachmentMaxBytes: 25 * 1024 * 1024,
 };
 
 export function configPath(): string {

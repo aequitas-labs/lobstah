@@ -8,6 +8,7 @@ import {
   bounceTrapMessages,
   ensureLayout,
   listNotices,
+  readMessageMeta,
   sendMessage,
   sendTrapMessage,
   unhandled,
@@ -44,6 +45,15 @@ describe('inbox', () => {
     acknowledge('i3', 'work', a);
     const b = sendMessage('i3', 'work', 'two');
     expect(b > a).toBe(true);
+  });
+
+  it('moves the attachment sidecar with its message', () => {
+    const attachment = { name: 'a.txt', path: '/tmp/owned/a.txt', bytes: 1, type: 'text/plain' };
+    const name = sendMessage('i4', 'work', 'see file', 'helm', [attachment]);
+    expect(readMessageMeta('i4', 'work', name)?.attachments).toEqual([attachment]);
+    acknowledge('i4', 'work', name);
+    expect(readMessageMeta('i4', 'work', name)).toBeUndefined();
+    expect(readMessageMeta('i4', 'work', name, true)?.attachments).toEqual([attachment]);
   });
 });
 

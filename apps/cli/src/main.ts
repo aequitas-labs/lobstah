@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   acknowledge,
+  attachmentBlock,
+  AttachmentError,
   addWatch,
   appendStatus,
   baitBrief,
@@ -53,6 +55,8 @@ import {
   mergeEvidence,
   unhandled,
   configPath,
+  copyAttachments,
+  dispatchAttachmentsDir,
   enqueue,
   ensureLayout,
   eventsPath,
@@ -62,6 +66,8 @@ import {
   reconcile,
   requestCancel,
   sendMessage,
+  storedDescriptor,
+  trapAttachmentsDir,
   toonHelp,
   toonKV,
   toonTable,
@@ -93,7 +99,7 @@ const HELP = `lobstah — supervision framework for coding agents
 work (humans and agents):
   dispatch --repo <key> (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
-           [--follow-up <uuid>] [--for wt:<trap>] [--chore] [--id <uuid>]
+           [--follow-up <uuid>] [--attach <file> ...] [--for wt:<trap>] [--chore] [--id <uuid>]
                                   queue a supervised dispatch; prints the id.
                                   --for addresses the work to a signed-on
                                   worktree (sticky: waits for that trap,
@@ -103,7 +109,7 @@ work (humans and agents):
   status [<uuid>]                 reconciled state                (alias: buoy)
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|wt:<trap> [--] <message>
+  send <uuid>|wt:<trap> [--attach <file> ...] [--] <message>
                                   deliver an instruction: to a dispatch's
                                   inbox, or to the session manning a worktree
                                   (arrives at its next park; undeliverable
@@ -393,6 +399,15 @@ function anythingInFlight(): boolean {
   return dispatches || listWatches().some((watch) => watch.owner === 'man');
 }
 
+function inheritedAttachments(id: string | undefined): Descriptor['attachments'] {
+  if (!id) return undefined;
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    const descriptor = storedDescriptor(id, lane);
+    if (descriptor) return descriptor.attachments;
+  }
+  return undefined;
+}
+
 function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<string, unknown>> {
   const dir = laneDirs(lane)[bucket];
   const entries = fs
@@ -442,6 +457,19 @@ async function mainCli(): Promise<void> {
     return typeof v === 'string' ? v : undefined;
   };
   const has = (flag: string): boolean => flags.has(flag);
+  const values = (flag: string): string[] => {
+    const value = flags.get(flag);
+    return Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+  };
+  const copyFiles = (files: string[], dir: string): Descriptor['attachments'] => {
+    if (files.length === 0) return [];
+    try {
+      return copyAttachments(files, dir, loadConfig().limits.attachmentMaxBytes);
+    } catch (err) {
+      if (err instanceof AttachmentError) throw new UsageError(err.message);
+      throw err;
+    }
+  };
 
   switch (cmd) {
     case 'dispatch': {
@@ -502,6 +530,11 @@ async function mainCli(): Promise<void> {
         for: address,
       };
       const lane: Lane = has('--chore') ? 'chore' : 'work';
+      const attachments = [
+        ...(inheritedAttachments(d.followUp) ?? []),
+        ...(copyFiles(values('--attach'), dispatchAttachmentsDir(d.id, lane)) ?? []),
+      ];
+      if (attachments.length > 0) d.attachments = attachments;
       enqueue(d, lane);
       console.log(toonKV({ id: d.id, repo, lane, ...(address ? { for: address } : {}), queued: new Date().toISOString() }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
@@ -533,7 +566,7 @@ async function mainCli(): Promise<void> {
       const lane = findLane(id);
       const log = readStatusLog(id, lane);
       const state = reconcile({ log, lastEventAt: lastEventAt(id, lane) });
-      console.log(toonKV({ id, lane, state, lastNote: log.at(-1)?.note, entries: log.length }));
+      console.log(toonKV({ id, lane, state, lastNote: log.at(-1)?.note, entries: log.length, attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0 }));
       console.log(
         toonHelp(
           state === 'needs-decision' || state === 'blocked'
@@ -587,7 +620,7 @@ async function mainCli(): Promise<void> {
       // --session (anywhere) identifies the sender; the positionals after the
       // target are the message.
       const [target, ...rest] = pos;
-      if (!target || rest.length === 0) throw new Error('send requires a target (dispatch id, wt:<trap>, or session:<id>) and a message');
+      if (!target || (rest.length === 0 && !has('--attach'))) throw new Error('send requires a target (dispatch id, wt:<trap>, or session:<id>) and a message or --attach <file>');
       // Sending is steering: with a helm claimed, only the helm steers — a
       // worker processing untrusted content must not be able to instruct a
       // sibling through our own delivery machinery.
@@ -606,7 +639,9 @@ async function mainCli(): Promise<void> {
         }
         const reg = readTrap(trapId);
         if (!reg) throw new Error(`no trap wt:${trapId} is signed on — \`lobstah man tend\` lists live traps`);
-        const name = sendTrapMessage(trapId, from, text);
+        const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
+        const block = attachmentBlock(attachments);
+        const name = sendTrapMessage(trapId, from, [text, block].filter(Boolean).join('\n\n'), attachments);
         const hbAgeSecs = Math.round((Date.now() - (Date.parse(reg.heartbeatAt) || 0)) / 1000);
         console.log(toonKV({ to: `wt:${trapId}`, from, queued: name }));
         if (reg.firstParkedAt === undefined || hbAgeSecs > cfgSend.soak.deferSecs) {
@@ -618,7 +653,10 @@ async function mainCli(): Promise<void> {
         }
         break;
       }
-      const name = sendMessage(target, findLane(target), `[from ${from}]\n${text}`);
+      const lane = findLane(target);
+      const attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(target, lane)) ?? [];
+      const block = attachmentBlock(attachments);
+      const name = sendMessage(target, lane, `[from ${from}]\n${[text, block].filter(Boolean).join('\n\n')}`, from, attachments);
       console.log(toonKV({ id: target, from, queued: name }));
       break;
     }
@@ -786,6 +824,8 @@ ${progress}`,
         console.log(`commits[${ev.commits.length}]:`);
         for (const c of ev.commits) console.log(`  ${c}`);
       }
+      const attachments = storedDescriptor(id, lane)?.attachments ?? [];
+      if (attachments.length > 0) console.log(toonTable('attachments', attachments.map((a) => ({ ...a })), ['name', 'type', 'bytes', 'path']));
       break;
     }
     case 'cull': {
@@ -794,10 +834,11 @@ ${progress}`,
       console.log(
         toonTable(
           'cull',
-          plan.map((i) => ({ kind: i.kind, id: i.id, ageDays: i.ageDays })),
-          ['kind', 'id', 'ageDays'],
+          plan.map((i) => ({ kind: i.kind, id: i.id, ageDays: i.ageDays, bytes: i.bytes })),
+          ['kind', 'id', 'ageDays', 'bytes'],
         ),
       );
+      console.log(toonKV({ totalBytes: plan.reduce((sum, item) => sum + item.bytes, 0) }));
       if (plan.length === 0) break;
       if (has('--apply')) {
         applyCull(plan);

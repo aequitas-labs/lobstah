@@ -14,7 +14,13 @@ export function enqueue(d: Descriptor, lane: Lane = 'work'): void {
   if (!d.id || !d.repo || !d.brief) {
     throw new Error('descriptor requires id, repo, and brief');
   }
-  atomicWrite(path.join(laneDirs(lane).queue, `${d.id}.json`), JSON.stringify(d, null, 2));
+  // Every descriptor-producing path (CLI, node, pickup, watch continuation)
+  // inherits origin references unless it already chose an attachment list.
+  const inherited = d.followUp && d.attachments === undefined
+    ? storedDescriptor(d.followUp, 'work')?.attachments ?? storedDescriptor(d.followUp, 'chore')?.attachments
+    : undefined;
+  const descriptor = inherited?.length ? { ...d, attachments: inherited } : d;
+  atomicWrite(path.join(laneDirs(lane).queue, `${d.id}.json`), JSON.stringify(descriptor, null, 2));
 }
 
 export function pendingIds(lane: Lane): string[] {
@@ -84,6 +90,23 @@ export function requeue(id: string, lane: Lane): void {
 export function readDescriptor(id: string, lane: Lane): Descriptor {
   const file = path.join(laneDirs(lane).active, id, 'descriptor.json');
   return JSON.parse(fs.readFileSync(file, 'utf8')) as Descriptor;
+}
+
+/** The descriptor of an origin dispatch, whichever bucket currently owns it. */
+export function storedDescriptor(id: string, lane: Lane): Descriptor | undefined {
+  const dirs = laneDirs(lane);
+  for (const file of [
+    path.join(dirs.queue, `${id}.json`),
+    path.join(dirs.active, id, 'descriptor.json'),
+    path.join(dirs.done, id, 'descriptor.json'),
+  ]) {
+    try {
+      return JSON.parse(fs.readFileSync(file, 'utf8')) as Descriptor;
+    } catch {
+      // Try the next bucket.
+    }
+  }
+  return undefined;
 }
 
 export function activeIds(lane: Lane): string[] {
