@@ -32,7 +32,7 @@ export function parsePrRef(s: string): PrRef | undefined {
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
-  'state,isDraft,headRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
+  'state,isDraft,headRefOid,baseRefName,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
 
 export interface GhRollupItem {
   __typename?: string;
@@ -58,6 +58,8 @@ export interface GhPrView {
   state: string;
   isDraft: boolean;
   headRefOid: string;
+  baseRefName?: string;
+  headRefName?: string;
   mergeStateStatus?: string;
   reviewDecision?: string | null;
   statusCheckRollup?: GhRollupItem[] | null;
@@ -108,11 +110,16 @@ function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
 export interface PrEvidence {
   url: string;
   number: number;
+  /** Optional in externally stamped evidence; the shipped check does not fetch it. */
+  title?: string;
   state: string;
   draft: boolean;
   reviewDecision: string;
   mergeStateStatus: string;
   headSha: string;
+  /** Current GitHub branch relation; the base may retarget after a lower PR merges. */
+  baseRefName?: string;
+  headRefName?: string;
   checks: { total: number; passed: number; failed: number; pending: number };
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
@@ -160,6 +167,8 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
     reviewDecision: view.reviewDecision ?? '',
     mergeStateStatus: view.mergeStateStatus ?? '',
     headSha: view.headRefOid,
+    ...(view.baseRefName ? { baseRefName: view.baseRefName } : {}),
+    ...(view.headRefName ? { headRefName: view.headRefName } : {}),
     checks: { total: checks.length, passed: count('passed'), failed: count('failed'), pending: count('pending') },
     review: prReview(view),
     observedAt,
