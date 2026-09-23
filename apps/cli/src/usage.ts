@@ -108,7 +108,9 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--session': { value: '<id>' },
     },
   },
-  'man:helm': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--label': { value: '<name>' }, '--take': {} } },
+  'man:helm': {
+    flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--label': { value: '<name>' }, '--take': {}, '--harness': { value: HARNESS } },
+  },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' } } },

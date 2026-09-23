@@ -23,6 +23,8 @@ lobstah stow                  # sign off
 - No flag is needed inside Claude Code: the CLI reads
   `$CLAUDE_CODE_SESSION_ID`. If it refuses, pass `--session <id>` from the
   session-start brief. Re-runs in the same worktree need no flags.
+- The harness (claude or codex) is inferred from the environment and the
+  session id; `--harness claude|codex` overrides.
 - Your address is `wt:<trap>`. It belongs to the worktree and survives
   session restarts. Tell the helm this address; it dispatches with
   `--for wt:<trap>`.

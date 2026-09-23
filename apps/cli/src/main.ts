@@ -86,6 +86,7 @@ import { inspectSoakSite, readHookStdin } from './soak-site.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
+import { detectHarness } from './harness-detect.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -167,7 +168,7 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   landed, attention arisen, still-waiting, and
                                   the fleet verdict; advances the reported-
                                   through cursor. "no change" when quiet.
-  man helm [--session <id>] [--grounds <name>] [--take]
+  man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
                                   take the helm: one orchestrator per grounds
                                   (a named repo set from [grounds.*], or the
                                   whole fleet). Prints the charter, arms the
@@ -845,11 +846,8 @@ ${progress}`,
       // Who the man is: harness from the invoking environment, place from
       // cwd/host, plus an optional human label. Every status surface renders
       // this instead of a bare session id.
-      const harness = Object.keys(process.env).some((k) => k.startsWith('CLAUDE'))
-        ? 'claude'
-        : Object.keys(process.env).some((k) => k.startsWith('CODEX'))
-          ? 'codex'
-          : undefined;
+      // Undecidable leaves the helm's harness unrecorded, as before.
+      const { harness } = detectHarness({ flag: opt('--harness'), sessionId });
       const identity = { harness, cwd: process.cwd(), host: os.hostname(), label: opt('--label'), window: captureWindow() };
       const res = takeHelm({ sessionId, grounds, ttlMs: cfg.helm.ttlSecs * 1000, take: has('--take'), identity });
       if ('held' in res) {
@@ -1228,11 +1226,20 @@ ${progress}`,
             'by the lobstah plugin (`lobstah man brief`). Re-runs in this worktree need no flags.',
         );
       }
+      // The harness: --harness, else what this same session signed on with,
+      // else the environment (session id format breaks a CLAUDE*/CODEX* tie).
+      // Undecidable refuses — a wrong label makes attach resume the wrong CLI.
+      const sameSession = prior?.sessionId === sessionId;
+      const resolved = detectHarness({ flag: opt('--harness'), prior: sameSession ? prior?.harness : undefined, sessionId });
+      if (!resolved.harness) {
+        throw new UsageError(`cannot tell which harness this session is: ${resolved.reason}. Pass --harness claude|codex.\n\n${usageFor('soak')!}`);
+      }
+      const harnessChanged = prior && prior.harness !== resolved.harness ? prior.harness : undefined;
       const res = signOnTrap({
         worktree: site.worktree,
         cwd: process.cwd(),
         repo: site.repoKey,
-        harness: opt('--harness') ?? prior?.harness ?? 'claude',
+        harness: resolved.harness,
         sessionId,
         one: has('--one') || undefined,
         window: captureWindow(),
@@ -1249,6 +1256,8 @@ ${progress}`,
         toonKV({
           trap: `wt:${reg.trapId}`,
           session: sessionId,
+          harness: `${reg.harness} (${resolved.source === 'flag' ? '--harness' : resolved.source === 'prior' ? 'as signed on' : resolved.source === 'env' ? 'from the environment' : 'from the session id format'})`,
+          ...(harnessChanged ? { harnessChanged: `${harnessChanged} → ${reg.harness} (registration updated)` } : {}),
           repo: reg.repo ?? '(none configured — addressed work only)',
           worktree: reg.worktree,
           ...(reg.one ? { one: true } : {}),
