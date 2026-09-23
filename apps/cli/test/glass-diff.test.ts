@@ -6,7 +6,8 @@ import type { AddressInfo } from 'node:net';
 // Evaluate exactly the source the page inlines — no jsdom, no DOM at all.
 type Hashes = Record<string, string>;
 type Ui = { st: Record<string, string>; open: Set<string>; modal: { type: string; key: string } | null };
-const diff = new Function(`${GLASS_DIFF_JS}; return { sectionHashes, dirtySections, stableStringify, tabFromHash, visibleSections };`)() as {
+const diff = new Function(`${GLASS_DIFF_JS}; return { sectionInputs, sectionHashes, dirtySections, stableStringify, tabFromHash, visibleSections };`)() as {
+  sectionInputs: (d: unknown, ui: Ui, now: number) => Record<string, any>;
   sectionHashes: (d: unknown, ui: Ui, now: number) => Hashes;
   dirtySections: (prev: Hashes | null, next: Hashes) => string[];
   stableStringify: (v: unknown) => string;
@@ -88,6 +89,59 @@ describe('glass change detector', () => {
     const rendered = Object.fromEntries(diff.visibleSections('deck').map((k) => [k, all[k]]));
     expect(rendered.prs).toBeUndefined();
     expect(diff.dirtySections(rendered, all)).toContain('prs');
+  });
+
+  it('keeps PR standing out of On deck attention and hashes it with the PR section', () => {
+    const d = {
+      ...snapshot(),
+      attention: [
+        { kind: 'question', key: 'work:d1', id: 'd1', lane: 'work', verb: 'needs-decision', at: iso(10_000), note: 'answer me' },
+        { kind: 'landed', key: 'work:d2', id: 'd2', lane: 'work', verb: 'done', at: iso(10_000), note: 'landed' },
+        { kind: 'pr:checks', key: 'owner/repo#27', id: 'd2', lane: 'work', verb: 'pr:checks', at: iso(10_000), note: 'checks failed' },
+        { kind: 'watch', key: 'watch:ci', id: 'd2', lane: 'work', verb: 'watch', at: iso(10_000), note: 'watch event' },
+      ],
+      stacks: [{ id: 'owner/repo#27', repo: 'web', numbers: [27], open: true, nextNumber: 27, behind: 0 }],
+      prs: [{ key: 'owner/repo#27', number: 27, stackId: 'owner/repo#27', state: 'OPEN', position: 0, badge: { text: 'checks 1/2 failed', tone: 'bad' } }],
+    };
+    const deck = diff.sectionInputs(d, ui(), NOW).deck;
+    expect(deck.attention.map((a: { kind: string }) => a.kind)).toEqual(['question', 'landed']);
+    expect(deck.prAttention.map((a: { kind: string }) => a.kind)).toEqual(['pr:checks']);
+    const before = diff.sectionHashes(d, ui(), NOW);
+    const after = diff.sectionHashes({ ...d, prs: [{ ...d.prs[0], badge: { text: 'green', tone: 'ok' } }] }, ui(), NOW);
+    expect(diff.dirtySections(before, after)).toContain('deck');
+  });
+
+  it('renders both notices surfaces as tables in cards mode and PR cards with kind badges', async () => {
+    const server = serveGlass(0);
+    await new Promise((r) => server.once('listening', r));
+    const port = (server.address() as AddressInfo).port;
+    const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    server.close();
+    const table = (_headers: string[], rows: string[]) => `<table>${rows.join('')}</table>`;
+    const esc = (v: unknown) => String(v ?? '');
+    const ageEl = () => '1m';
+    const deckSource = page.slice(page.indexOf('const KIND_LABEL='), page.indexOf('const watchCell='));
+    const renderDeck = new Function('esc', 'ageEl', 'table', 'prOpen', `${deckSource}; return renderDeck;`)(
+      esc, ageEl, table, (p: { key: string }) => `showPr(${p.key})`,
+    ) as (d: unknown, inp: unknown) => string;
+    const noticeSource = page.slice(page.indexOf('function noticeTable('), page.indexOf('function trapRow('));
+    const noticeTable = new Function('esc', 'ageEl', 'table', `${noticeSource}; return noticeTable;`)(esc, ageEl, table) as
+      (list: unknown[]) => string;
+    const p = { key: 'owner/repo#27', number: 27, stackId: 'owner/repo#27', position: 0, state: 'OPEN', repo: 'web', title: 'Fix checks', badge: { text: 'checks 1/2 failed', tone: 'bad' } };
+    const inp = {
+      view: 'cards', attention: [{ kind: 'question', id: 'd1', lane: 'work', verb: 'needs-decision', note: 'answer me', repo: 'web', at: iso(10_000) }],
+      prAttention: [{ kind: 'pr:checks', key: p.key, acked: { at: iso(10_000), by: 'helm' } }],
+      inflight: [], landed: [], traps: [], stacks: [{ id: p.stackId, numbers: [27], nextNumber: 27 }], prs: [p],
+    };
+    const html = renderDeck({}, inp);
+    expect(html.slice(html.indexOf('attention →'), html.indexOf('in flight →'))).toContain('<table>');
+    expect(html.slice(html.indexOf('attention →'), html.indexOf('in flight →'))).not.toContain('pr:checks');
+    expect(html).toContain('class="card acked"');
+    expect(html).toContain('class="badge bad">checks</span>');
+    expect(noticeTable([{ kind: 'caught', text: 'one', repo: 'web', at: iso(10_000) }])).toContain('<table>');
+    expect(page).toContain("setHTML('notices',noticeTable(inp.notices.list))");
+    const stackLine = renderDeck({}, { ...inp, view: 'table' });
+    expect(stackLine).toContain('#27 checks 1/2 failed');
   });
 
   it('the served page inlines the detector', async () => {

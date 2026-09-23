@@ -49,16 +49,18 @@ function sectionInputs(d,ui,now){
   (n.kind==='trap-stowed'||n.kind==='trap-ghosted')&&recent(n.at,3600000)))&&hasQuery(t.trapId,t.repo,t.worktree));
  return {
   chips:{daemon:d.daemon,daemonStale:!!d.daemon&&isStale(d.daemon.heartbeat,STALE_DAEMON_MS,now),helms:d.helms.map(seat)},
-  deck:{view:st.view,attention:(d.attention||[]).filter(a=>recent(a.at,86400000)&&hasQuery(a.kind,a.repo,a.note,a.id)).map(({ageSecs,...a})=>a),
+  deck:{view:st.view,attention:(d.attention||[]).filter(a=>(a.kind==='question'||a.kind==='landed')&&recent(a.at,86400000)&&hasQuery(a.kind,a.repo,a.note,a.id)).map(({ageSecs,...a})=>a),
+   prAttention:(d.attention||[]).filter(a=>a.kind&&a.kind.startsWith('pr:')).map(({ageSecs,...a})=>a),
    landed:(d.landed||[]).filter(a=>recent(a.at,86400000)&&hasQuery(a.repo,a.note,a.id)).map(({ageSecs,...a})=>a),
    inflight:d.dispatches.filter(x=>x.bucket!=='done'&&matches(x,{...st,lane:'',repo:'',verb:''})),traps:deckTraps.map(seat),
-   stacks:(d.stacks||[]).filter(s=>s.open&&hasQuery(s.repo,s.numbers.join(' '))),error:d.attentionError},
+   stacks:(d.stacks||[]).filter(s=>s.open&&hasQuery(s.repo,s.numbers.join(' '))),
+   prs:(d.prs||[]).filter(p=>p.state==='OPEN'),error:d.attentionError},
   dispatches:{view:st.view,chain:st.chain,list:d.dispatches.filter(x=>matches(x,st))},
   traps:{view:st.view,list:d.traps.filter(t=>(!st.repo||t.repo===st.repo)&&hasQuery(t.trapId,t.repo,t.worktree,t.harness)).map(seat)},
   prs:{view:st.view,stacks:(d.stacks||[]).filter(s=>!st.repo||s.repo===st.repo),
    prs:(d.prs||[]).filter(p=>(!st.repo||p.repo===st.repo)&&hasQuery(p.number,p.title,p.url,p.state,p.baseRefName,p.headRefName)),
    watches:(d.watches||[]).filter(w=>!String(w.key).startsWith('pr:'))},
-  notices:{view:st.view,list:(d.notices||[]).filter(n=>(!st.repo||!n.repo||n.repo===st.repo)&&(!st.noticeKind||n.kind===st.noticeKind)&&hasQuery(n.kind,n.text,n.repo))},
+  notices:{list:(d.notices||[]).filter(n=>(!st.repo||!n.repo||n.repo===st.repo)&&(!st.noticeKind||n.kind===st.noticeKind)&&hasQuery(n.kind,n.text,n.repo))},
   foot:{version:d.version,repoUrl:d.repoUrl},
   // The settings modal re-renders when a preference it shows changes.
   modal:{modal:ui.modal,item:item&&seat(item),prefs:ui.modal&&ui.modal.type==='settings'?{view:st.view,lobs:st.lobs}:undefined}}}
