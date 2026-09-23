@@ -108,7 +108,7 @@ Bucket transitions are atomic renames; the directory *is* the state.
 
 ## Doctor statuses
 
-`lobstah doctor` grades each check with one of three words. **Owner:**
+`lobstah doctor` grades each check with one of four words. **Owner:**
 `apps/cli/src/doctor.ts`. **Enforcement:** any `fail` row exits 1.
 
 | Status | Meaning |
@@ -116,6 +116,7 @@ Bucket transitions are atomic renames; the directory *is* the state.
 | `ok`   | Works as configured. |
 | `warn` | Degraded or optional — dispatches may still run (e.g. one harness missing, daemon not running). |
 | `fail` | Broken configuration or missing requirement — fix before relying on lobstah. |
+| `skip` | The check does not apply on this host (e.g. no harness plugin installed). Never fails the run. |
 
 ## Watch contract
 

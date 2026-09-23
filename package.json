@@ -10,7 +10,9 @@
     "test": "vitest run",
     "typecheck": "pnpm -r run build --noEmit",
     "build:npm": "node scripts/build-npm.mjs",
-    "build:plugin": "node scripts/build-plugin.mjs"
+    "build:plugin": "node scripts/build-plugin.mjs",
+    "version:set": "node scripts/sync-versions.mjs",
+    "version:check": "node scripts/sync-versions.mjs --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
