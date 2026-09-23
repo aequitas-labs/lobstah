@@ -15,7 +15,7 @@ import {
   mergeEvidence,
 } from '@lobstah/core';
 import type { PrEvidence } from '@lobstah/core';
-import { buildTendReport, onTheHook, prKinds, renderTend } from '../src/tend.js';
+import { buildTendReport, onTheHook, prKinds, readyBlockedByStack, renderTend } from '../src/tend.js';
 import { advanceCursor } from '../src/reported.js';
 
 let home: string;
@@ -104,6 +104,21 @@ describe('attention kinds — stand and clear', () => {
     expect(kinds()).toEqual(['pr:review']);
     restamp({ checks: { total: 1, passed: 1, failed: 0, pending: 0 }, review: { unresolvedThreads: 0, changesRequested: false } });
     expect(kinds()).toEqual(['pr:ready']);
+  });
+
+  it('suppresses pr:ready while its tracked base PR remains open', () => {
+    const lower = pr({ number: 8, url: 'https://github.com/acme/web/pull/8', baseRefName: 'main', headRefName: 'lower' });
+    const upper = pr({ baseRefName: 'lower', headRefName: 'upper', checks: { total: 1, passed: 1, failed: 0, pending: 0 } });
+    expect(readyBlockedByStack(upper, [lower, upper])).toBe(true);
+    expect(readyBlockedByStack(upper, [{ ...lower, state: 'MERGED' }, upper])).toBe(false);
+    expect(readyBlockedByStack(upper, [{ ...lower, url: 'https://github.com/elsewhere/other/pull/8' }, upper])).toBe(false);
+    prDispatch(upper);
+    enqueue({ id: Q, repo: 'web', brief: 'lower PR' }, 'work');
+    mergeEvidence(Q, 'work', { pr: lower });
+    expect(kinds()).not.toContain('pr:ready');
+    expect(renderTend(buildTendReport())).toContain('stack #8 → #9: next #8');
+    mergeEvidence(Q, 'work', { pr: { ...lower, state: 'MERGED' } });
+    expect(kinds()).toContain('pr:ready');
   });
 
   it('pr:checks stands on a failed check at the head; clears on green or merge', () => {
