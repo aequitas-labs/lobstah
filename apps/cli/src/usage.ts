@@ -61,9 +61,9 @@ export const COMMANDS: Record<string, CommandSpec> = {
   catch: { flags: {}, positionals: '<uuid>' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
-  report: { flags: { '--pr': { value: '<url>' } }, positionals: '<uuid> <verb> [note...]' },
+  report: { flags: { '--pr': { value: '<url>' }, '--no-watch': {} }, positionals: '<uuid> <verb> [note...]' },
   watch: {
-    subverbs: ['add', 'rm', 'ls'],
+    subverbs: ['add', 'rm', 'ls', 'check-pr'],
     flags: {
       '--check': { value: '<cmd>' },
       '--for': { value: '<uuid>' },
@@ -149,9 +149,15 @@ without --apply (default 14 days).`,
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `The validated status write path: working | needs-decision | blocked |
-paused | done | failed. --pr goes anywhere; after \`--\` every word is note.`,
+paused | done | failed. --pr goes anywhere; after \`--\` every word is note.
+\`done --pr <github PR url>\` also registers the PR's pr: watch, owned by this
+dispatch (idempotent; --no-watch opts out).`,
   watch: `Stand watch on something external; bare \`watch\` (or \`watch ls\`) lists.
-The check command answers "anything since {cursor}?" in JSON.`,
+The check command answers "anything since {cursor}?" in JSON.
+\`watch add pr:<owner>/<repo>#<n>\` (or a PR URL) with no --check installs the
+shipped PR check (\`watch check-pr\`, one \`gh pr view\` per cycle). With --for,
+failing checks fork a CI-fix continuation (pick only) and the dispatch's
+evidence carries a \`pr\` state object.`,
   soak: `Volunteer this session as a worker. Identity is the worktree: sign-on
 anchors a trap id (.lobstah-trap) and prints its wt:<trap> address; re-runs
 here need no flags (--session only on first sign-on). Refused from a

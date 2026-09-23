@@ -84,6 +84,7 @@ function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => 
   const id = randomUUID();
   const brief = (w.brief ?? DEFAULT_BRIEF)
     .replaceAll('{key}', w.key)
+    .replaceAll('{summaries}', pending.map((e) => `- ${e.summary ?? `event ${String(e.seq)}`}`).join('\n'))
     .replaceAll('{events}', JSON.stringify(pending, null, 2));
   // A chain worked by a live trap gets its continuation addressed there —
   // the trap picks it up at its next park instead of a headless fork

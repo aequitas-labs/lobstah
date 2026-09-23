@@ -33,7 +33,7 @@ export interface Watch {
   cursor: string;
   /** Override the poll cadence for this watch (seconds). */
   everySecs?: number;
-  /** Continuation brief template for dispatch-owned watches; {events} substituted. */
+  /** Continuation brief template for dispatch-owned watches; {key}, {summaries} (one line per event), and {events} (JSON) substituted. */
   brief?: string;
   createdAt: string;
   lastCheckedAt?: string;

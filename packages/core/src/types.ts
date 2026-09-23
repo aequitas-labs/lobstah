@@ -1,3 +1,4 @@
+import type { PrEvidence } from './pr.js';
 export const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed'] as const;
 export type Verb = (typeof VERBS)[number];
 export const TERMINAL_VERBS: readonly Verb[] = ['done', 'failed'];
@@ -51,6 +52,8 @@ export interface Evidence {
   /** Delivery receipt: the trap address that actually claimed this dispatch. */
   deliveredTo?: string;
   deliveredAt?: string;
+  /** The PR's state as last observed by its `pr:` watch (see pr.ts). */
+  pr?: PrEvidence;
 }
 
 export type EventType =

@@ -12,6 +12,7 @@ import {
   listWatches,
   loadConfig,
   pendingIds,
+  prBadge,
   queuedDescriptor,
   readEvidence,
   readStatusLog,
@@ -20,7 +21,7 @@ import {
   toonKV,
   toonTable,
 } from '@lobstah/core';
-import type { Descriptor, Lane } from '@lobstah/core';
+import type { Descriptor, Lane, PrEvidence } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import type { MergeView } from '@lobstah/pick';
 
@@ -38,6 +39,8 @@ export interface TendDispatch {
   note?: string;
   at?: string;
   prUrl?: string;
+  /** PR state as last observed by the chain's pr: watch. */
+  pr?: PrEvidence;
 }
 
 export interface TendStory {
@@ -45,6 +48,8 @@ export interface TendStory {
   key: string;
   dispatches: TendDispatch[];
   prUrl?: string;
+  /** Short PR state (prBadge) from evidence, when the chain's pr: watch observed it. */
+  prState?: string;
   /** Merge-gate verdict from the pick snapshot, when one matches. */
   gate?: string;
   /** External source watched by a dispatch in this chain (e.g. a ume review). */
@@ -119,7 +124,16 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
   const last = log.at(-1);
   const state = bucket === 'queued' ? 'queued' : reconcile({ log, lastEventAt: lastEventAt(id, lane) });
   const evidence = readEvidence(id, lane);
-  return { id, lane, bucket, state, note: last?.note, at: last?.at, prUrl: evidence.prUrl };
+  return { id, lane, bucket, state, note: last?.note, at: last?.at, prUrl: evidence.prUrl, pr: evidence.pr };
+}
+
+/** The chain's newest observed PR state as a badge — the one derivation tend, catch, and glass share. */
+function prStateOf(chain: TendDispatch[]): string | undefined {
+  const observed = chain
+    .map((d) => d.pr)
+    .filter((p): p is PrEvidence => p !== undefined)
+    .sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
+  return observed ? prBadge(observed).text : undefined;
 }
 
 /** followUp chains: every dispatch whose descriptor points back at `uuid`. */
@@ -265,12 +279,26 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (!fresh) continue;
     const prUrl = chain.map((d) => d.prUrl).find((u) => u !== undefined);
     const watch = chain.map((d) => watchByDispatch.get(d.id)).find((w) => w !== undefined);
-    stories.push({ key, dispatches: chain, prUrl, gate: gateFor(entry.uuid, prUrl), watch });
+    stories.push({ key, dispatches: chain, prUrl, prState: prStateOf(chain), gate: gateFor(entry.uuid, prUrl), watch });
   }
+  const direct = (d: TendDispatch): TendStory => ({
+    key: '(direct)',
+    dispatches: [d],
+    prUrl: d.prUrl,
+    prState: prStateOf([d]),
+    gate: gateFor(d.id, d.prUrl),
+    watch: watchByDispatch.get(d.id),
+  });
   for (const id of [...active, ...queued]) {
     if (storied.has(id)) continue;
-    const d = describeDispatch(id, 'work', bucketOf(id) ?? 'active');
-    stories.push({ key: '(direct)', dispatches: [d], prUrl: d.prUrl, gate: gateFor(id, d.prUrl), watch: watchByDispatch.get(id) });
+    stories.push(direct(describeDispatch(id, 'work', bucketOf(id) ?? 'active')));
+  }
+  // A direct dispatch that landed a PR in the last day stays a story: its PR
+  // is still moving (CI, review, merge) after the dispatch reported done.
+  for (const id of doneIds('work')) {
+    if (storied.has(id)) continue;
+    const d = describeDispatch(id, 'work', 'done');
+    if (d.prUrl && d.at !== undefined && now - Date.parse(d.at) < DAY_MS) stories.push(direct(d));
   }
 
   const verdict: TendReport['verdict'] = !daemonUp
@@ -354,7 +382,7 @@ export function renderTend(r: TendReport): string {
         r.stories.map((s) => ({
           key: s.key,
           dispatches: s.dispatches.map((d) => `${d.id.slice(0, 8)}:${d.state}`).join(' → '),
-          pr: s.prUrl ?? '',
+          pr: s.prState ? `${s.prState} ${s.prUrl ?? ''}`.trim() : (s.prUrl ?? ''),
           gate: s.gate ?? '',
           watch: s.watch ?? '',
         })),

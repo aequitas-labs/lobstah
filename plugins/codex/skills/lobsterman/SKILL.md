@@ -55,6 +55,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
 - `done` means the brief is fulfilled — report the catch. Never merge.
+- `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.
 
 ## Getting woken instead of polling

@@ -72,6 +72,8 @@ import {
   toonKV,
   toonTable,
   VERBS,
+  parsePrRef,
+  prBadge,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice, WatchAttention } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
@@ -88,6 +90,7 @@ import { serveGlass } from './glass.js';
 import { installPet, uninstallPet } from './pet.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
+import { addPrWatch, autoRegisterPrWatch, observeDispatchPrWatches, pollSecs, runPrCheck } from './pr-watch.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
@@ -139,6 +142,13 @@ work (humans and agents):
                                   child under pick for ms-latency delivery
                                   (the check stays the guarantee). Bare
                                   \`watch\` lists.
+  watch add pr:<owner>/<repo>#<n>|<pr-url> [--for <uuid>] [--every <s>]
+                                  the PR preset: installs the shipped check
+                                  (\`watch check-pr\`, one gh pr view per
+                                  cycle). --for stamps a pr state object into
+                                  that dispatch's evidence; failing checks
+                                  fork a CI-fix continuation (pick only);
+                                  merged/closed post a helm notice.
 
 host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
@@ -198,9 +208,11 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   man wait (lobsterman).
 
 workers (dispatched agents; injected into every brief):
-  report <uuid> <verb> [--pr <url>] [--] [note]
+  report <uuid> <verb> [--pr <url>] [--no-watch] [--] [note]
                                   the validated status write path
-                                  (${VERBS.join(' | ')})
+                                  (${VERBS.join(' | ')}). done --pr
+                                  registers the PR's pr: watch for this
+                                  chain; --no-watch opts out.
 
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
@@ -252,10 +264,9 @@ function gateHelm(who: ResolvedSession | undefined, grounds?: string): void {
   if (refusal) throw new Error(explainRefusal(refusal, who));
 }
 
-// Inline watch cadence when no pick process is stamping checks; pick's own
-// cadence is [pickup].pollSecs. Whoever polls first stamps lastCheckedAt, so
-// the two never double-poll a watch inside one window.
-const WATCH_EVERY_SECS = 45;
+// Inline watch cadence when no pick process is stamping checks is
+// [pickup].pollSecs, the same as pick's (pollSecs()). Whoever polls first
+// stamps lastCheckedAt, so the two never double-poll a watch inside one window.
 
 /**
  * The trap side of the park: heartbeat, then wait for something to act on.
@@ -346,9 +357,13 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
 }
 
 function runDueManWatches(): void {
+  const every = pollSecs();
   for (const w of listWatches()) {
-    if (w.owner === 'man' && watchDue(w, WATCH_EVERY_SECS)) runWatchCheck(w);
+    if (w.owner === 'man' && watchDue(w, every)) runWatchCheck(w);
   }
+  // Dispatch-owned PR watches: observe only (evidence + merged notices);
+  // their events stay pick's to fork.
+  observeDispatchPrWatches(every);
 }
 
 function emitNotices(notices: Notice[], sessionId?: string): void {
@@ -666,9 +681,15 @@ async function mainCli(): Promise<void> {
       const lane = findLane(id);
       const note = rest.join(' ') || undefined;
       const prUrl = opt('--pr');
+      const noWatch = has('--no-watch');
       const entry = appendStatus(id, lane, verb, note);
       if (prUrl) mergeEvidence(id, lane, { prUrl });
-      console.log(toonKV({ id, verb: entry.verb, at: entry.at, ...(prUrl ? { prUrl } : {}) }));
+      // A done PR stays observed: CI, review, and merge flow back through its
+      // pr: watch instead of lobstah going blind at "PR open".
+      const prWatch = verb === 'done' && prUrl && !noWatch ? autoRegisterPrWatch(id, prUrl) : undefined;
+      console.log(
+        toonKV({ id, verb: entry.verb, at: entry.at, ...(prUrl ? { prUrl } : {}), ...(prWatch ? { watch: prWatch.key } : {}) }),
+      );
       // Self-instructive next step, right where the reporter reads it: an
       // instruction that lives only in session memory decays over a long
       // thread; the one the command prints cannot.
@@ -820,6 +841,21 @@ ${progress}`,
           note: log.at(-1)?.note,
         }),
       );
+      if (ev.pr) {
+        const c = ev.pr.checks;
+        console.log(
+          toonKV({
+            pr: prBadge(ev.pr).text,
+            prState: ev.pr.state,
+            prDraft: ev.pr.draft,
+            prReview: ev.pr.reviewDecision || 'none',
+            prMergeState: ev.pr.mergeStateStatus,
+            prHead: ev.pr.headSha,
+            prChecks: `${c.passed}/${c.total} passed, ${c.failed} failed, ${c.pending} pending`,
+            prObservedAt: ev.pr.observedAt,
+          }),
+        );
+      }
       if (ev.commits?.length) {
         console.log(`commits[${ev.commits.length}]:`);
         for (const c of ev.commits) console.log(`  ${c}`);
@@ -1447,12 +1483,34 @@ ${progress}`,
     }
     case 'watch': {
       const sub = pos[0];
+      if (sub === 'check-pr') {
+        // The shipped check behind pr: watches — contract JSON, not TOON.
+        const ref = pos[1];
+        if (!ref) throw new Error('watch check-pr requires pr:<owner>/<repo>#<n>');
+        console.log(runPrCheck(ref, opt('--cursor'), opt('--for')));
+        break;
+      }
       if (sub === 'add') {
         const key = pos[1];
         const check = opt('--check');
-        if (!key || key.startsWith('--') || !check) throw new Error('watch add requires a key and --check <command>');
         const forId = opt('--for');
         const every = opt('--every');
+        // Preset: a PR key or URL with no --check installs the shipped check.
+        const prRef = !check && key ? parsePrRef(key) : undefined;
+        if (prRef) {
+          const w = addPrWatch(prRef, { forId, everySecs: every ? Number(every) : undefined });
+          console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
+          console.log(
+            toonHelp([
+              w.owner === 'man'
+                ? 'lobstah man wait   (its events wake you)'
+                : 'lobstah catch ' + forId + '   (the pr object once observed; CI-fix continuations need `lobstah pick`)',
+              'lobstah watch   (list watches)',
+            ]),
+          );
+          break;
+        }
+        if (!key || !check) throw new Error('watch add requires a key and --check <command>');
         const w = addWatch(key, check, {
           owner: forId ? `dispatch:${forId}` : 'man',
           cursor: opt('--cursor'),

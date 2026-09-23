@@ -38,6 +38,7 @@ naming a dispatch id. Then:
 - Report with `lobstah report <id> <verb> "<note>"`. Six verbs exist:
   working, needs-decision, blocked, paused, done, failed. Nothing else.
 - Finish with `lobstah report <id> done "<note>" --pr <url>` (or `failed`).
+  `done --pr` registers the PR's `pr:` watch for your chain; `--no-watch` opts out.
 - A `needs-decision` or `blocked` report queues your question to the human.
   The answer arrives in the dispatch's inbox: `lobstah inbox <id>`.
 - Check `lobstah inbox <id>` at natural checkpoints.
