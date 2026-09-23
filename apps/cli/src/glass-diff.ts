@@ -62,6 +62,23 @@ function sectionInputs(d,ui,now){
   foot:{version:d.version,repoUrl:d.repoUrl},
   // The settings modal re-renders when a preference it shows changes.
   modal:{modal:ui.modal,item:item&&seat(item),prefs:ui.modal&&ui.modal.type==='settings'?{view:st.view,lobs:st.lobs}:undefined}}}
+// The PR modal's data: the PR, where it sits in its stack, the dispatch
+// chain (linked to their modals when still on disk), and the watch, whose
+// cursor is shown only here, never in the PRs table.
+function prModalView(d,key){
+ const p=(d.prs||[]).find(x=>x.key===key);if(!p)return null;
+ const s=(d.stacks||[]).find(x=>x.id===p.stackId);
+ const byId=new Map((d.dispatches||[]).map(x=>[x.id,x]));
+ const chain=(p.dispatchIds||[]).map(id=>{const x=byId.get(id);
+  return x?{id,verb:x.verb,modalKey:x.lane+':'+x.id}:{id,culled:true}});
+ const w=p.watch;
+ return {pr:p,
+  stack:s?{numbers:s.numbers,position:p.position+1,size:s.numbers.length,floor:s.floor,nextNumber:s.nextNumber,
+   nextMergeable:!!p.nextMergeable,blockedBy:p.blockedBy}:null,
+  chain,
+  watch:w?{key:w.key,owner:w.owner||'',lastCheckedAt:w.lastCheckedAt||null,lastError:w.lastError||null,cursor:w.cursor}:null}}
+// What the PRs table says about a watch: a short state, never the cursor.
+function watchState(w){return w?{text:'watching',at:w.lastCheckedAt||null}:{text:'no watch',at:null}}
 function hashInputs(inputs){const out={};
  for(const k of Object.keys(inputs))out[k]=hashStr(stableStringify(inputs[k]));
  return out}

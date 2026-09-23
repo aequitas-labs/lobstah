@@ -488,19 +488,30 @@ function renderDeck(d,inp){const att=inp.attention;
   return deckLine(s.numbers.map(n=>'#'+n).join(' → ')+' · next: '+(p?'<a href="'+esc(p.url)+'" target="_blank" rel="noopener">#'+p.number+'</a> <span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>':'—')+' · '+s.behind+' behind')});
  return '<div class="deckgrid">'+deckBlock('attention',attention,'notices',4)+deckBlock('in flight',flight,'dispatches',4)
   +deckBlock('landed since report',landed,'dispatches',3)+deckBlock('traps',traps,'traps',3)+deckBlock('stacks',stacks,'prs',3)+'</div>'}
-function prTable(d,inp){const byStack=new Map();for(const p of inp.prs){const a=byStack.get(p.stackId)||[];a.push(p);byStack.set(p.stackId,a)}
- const rows=[];for(const s of inp.stacks){const prs=byStack.get(s.id)||[];if(!prs.length)continue;
-  rows.push('<tr><th colspan="9">'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?' · open':' · history')+'</th></tr>');
-  for(const p of prs){const review=p.review||{};const w=p.watch;
-   rows.push('<tr><td><a href="'+esc(p.url)+'" target="_blank" rel="noopener">#'+p.number+'</a></td><td class="grow">'+esc(p.title||'')+'</td>'
-    +'<td>'+esc(p.state)+(p.draft?' · draft':'')+'</td><td>'+esc(p.checks.passed)+'/'+esc(p.checks.total)+' passed'+(p.checks.failed?' · '+p.checks.failed+' failed':'')+(p.checks.pending?' · '+p.checks.pending+' pending':'')+'</td>'
-    +'<td>'+esc(p.reviewDecision||'')+(review.unresolvedThreads?' · '+review.unresolvedThreads+' unresolved':'')+(review.changesRequested?' · changes requested':'')+'</td>'
-    +'<td>'+esc(p.mergeStateStatus)+' · '+(p.nextMergeable?'<span class="ok">next mergeable</span>':p.blockedBy?'blocked by #'+p.blockedBy:'')+'</td>'
-    +'<td class="grow">'+p.dispatchIds.map(id=>esc(id.slice(0,8))).join(' → ')+'</td>'
-    +'<td class="grow">'+(w?esc(w.cursor)+' · '+(w.lastCheckedAt?ageEl(w.lastCheckedAt)+' ago':'never checked'):'')+'</td><td>'+esc(p.gate||'')+'</td></tr>')}
- }
- const other=table(['key','owner','cursor','last check','error'],inp.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td>'+esc(w.cursor)+'</td><td>'+(w.lastCheckedAt?ageEl(w.lastCheckedAt):'')+'</td><td>'+esc(w.lastError||'')+'</td></tr>'),'no other watches');
- return table(['PR','title','state','checks','review','merge','dispatch chain','watch','gate'],rows,'no PR evidence')+'<h2>other watches</h2>'+other}
+const watchCell=(w)=>{const ws=watchState(w);return ws.at?ws.text+' · '+ageEl(ws.at)+' ago':'<span class="dim">'+ws.text+'</span>'};
+const prOpen=(p)=>"showModal(\\'pr\\',\\'"+esc(p.key)+"\\')";
+const prLink=(p)=>'<a href="'+esc(p.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">#'+p.number+'</a>';
+function prChecks(p){return esc(p.checks.passed)+'/'+esc(p.checks.total)+' passed'+(p.checks.failed?' · '+p.checks.failed+' failed':'')+(p.checks.pending?' · '+p.checks.pending+' pending':'')}
+function prReview(p){const r=p.review||{};return esc(p.reviewDecision||'')+(r.unresolvedThreads?' · '+r.unresolvedThreads+' unresolved':'')+(r.changesRequested?' · changes requested':'')}
+function prMerge(p){return esc(p.mergeStateStatus)+(p.nextMergeable?' · <span class="ok">next mergeable</span>':p.blockedBy?' · blocked by #'+p.blockedBy:'')}
+function prGroups(inp){const byStack=new Map();for(const p of inp.prs){const a=byStack.get(p.stackId)||[];a.push(p);byStack.set(p.stackId,a)}
+ return inp.stacks.map(s=>({s,prs:byStack.get(s.id)||[]})).filter(g=>g.prs.length)}
+function prTable(d,inp){const rows=[];
+ for(const {s,prs} of prGroups(inp)){
+  rows.push('<tr><th colspan="8">'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?' · open':' · history')+'</th></tr>');
+  for(const p of prs)rows.push('<tr class="rowhead" onclick="'+prOpen(p)+'"><td>'+prLink(p)+'</td><td class="grow">'+esc(p.title||'')+'</td>'
+   +'<td>'+esc(p.state)+(p.draft?' · draft':'')+'</td><td>'+prChecks(p)+'</td><td>'+prReview(p)+'</td><td>'+prMerge(p)+'</td>'
+   +'<td>'+watchCell(p.watch)+'</td><td>'+esc(p.gate||'')+'</td></tr>')}
+ return table(['PR','title','state','checks','review','merge','watch','gate'],rows,'no PR evidence')+otherWatches(inp)}
+function prCards(d,inp){const groups=prGroups(inp);
+ const body=groups.length?groups.map(({s,prs})=>'<h2>'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?'':' · history')+'</h2><div class="cards">'
+  +prs.map(p=>'<div class="card" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b><span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span></div>'
+   +'<div class="meta">'+esc(p.repo)+' · '+esc(p.state)+(p.draft?' · draft':'')+' · '+prMerge(p)+'</div>'
+   +'<div class="foot"><span>'+prChecks(p)+'</span><span>'+watchCell(p.watch)+'</span>'+(p.gate?'<span>gate '+esc(p.gate)+'</span>':'')+'</div></div>').join('')+'</div>').join('')
+  :'<div class="empty">no PR evidence</div>';
+ return body+otherWatches(inp)}
+function otherWatches(inp){const short=(c)=>{c=String(c??'');return c.length>24?c.slice(0,23)+'…':c};
+ return '<h2>other watches</h2>'+table(['key','owner','cursor','last check','error'],inp.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td title="'+esc(w.cursor)+'">'+esc(short(w.cursor))+'</td><td>'+(w.lastCheckedAt?ageEl(w.lastCheckedAt):'')+'</td><td>'+esc(w.lastError||'')+'</td></tr>'),'no other watches')}
 function noticeCards(list){if(!list.length)return '<div class="empty">no notices</div>';
  return '<div class="cards">'+list.map(n=>'<div class="card" style="cursor:default"><div class="top"><b>'+esc(n.kind)+'</b><span class="badge dim">'+ageEl(n.at)+' ago</span></div>'
   +(n.repo?'<div class="meta">'+esc(n.repo)+'</div>':'')+'<div class="note">'+esc(n.text)+'</div></div>').join('')+'</div>'}
@@ -537,6 +548,22 @@ function renderModal(d){
    +'<div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span>'+seg('setLobs',[['on','on'],['off','off']],st.lobs?'on':'off')+'</div>'
    +'<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">'
    +esc(item.attentionError?item.attentionError:(item.attentionKinds||[]).join(' · '))+'</span></div></div>';
+ }else if(modal.type==='pr'){
+  const v=prModalView(d,modal.key),p=v.pr,s=v.stack,w=v.watch;
+  html='<span class="x" onclick="closeModal()">×</span><h3>'+prLink(p)+' '+esc(p.title||'')+' <span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>'
+    +(p.draft?' <span class="badge dim">draft</span>':'')+'</h3>'
+   +'<div class="sub">'+esc(p.repo)+' · '+esc(p.state)+' · observed '+ageEl(p.observedAt)+' ago'+(p.gate?' · gate '+esc(p.gate):'')+'</div>'
+   +'<div class="sec">checks</div><div>'+prChecks(p)+'</div>'
+   +'<div class="sec">review</div><div>'+(prReview(p)||'<span class="dim">no review yet</span>')+'</div>'
+   +'<div class="sec">merge</div><div>'+prMerge(p)+'</div>'
+   +'<div class="sec">refs</div><div>'+esc(p.headRefName||'?')+' → '+esc(p.baseRefName||'?')+'</div>'
+   +'<div class="sec">stack</div><div>'+(s?s.numbers.map(n=>n===p.number?'<b>#'+n+'</b>':'#'+n).join(' → ')+' · '+s.position+' of '+s.size+' · floor '+esc(s.floor)
+     +(s.nextMergeable?' · <span class="ok">next mergeable</span>':s.blockedBy?' · blocked by #'+s.blockedBy:s.nextNumber?' · next is #'+s.nextNumber:''):'<span class="dim">not stacked</span>')+'</div>'
+   +'<div class="sec">dispatch chain</div><div>'+(v.chain.length?v.chain.map(c=>c.culled?'<span class="dim">'+esc(c.id.slice(0,8))+' (culled)</span>'
+     :'<a href="#" onclick="event.preventDefault();showModal(\\'dispatch\\',\\''+esc(c.modalKey)+'\\')">'+esc(c.id.slice(0,8))+'</a> <span class="dim">'+esc(c.verb)+'</span>').join(' → '):'<span class="dim">none</span>')+'</div>'
+   +'<div class="sec">watch</div>'+(w?'<div>'+esc(w.key)+' · owner '+esc(w.owner||'?')+' · '+(w.lastCheckedAt?'checked '+ageEl(w.lastCheckedAt)+' ago':'never checked')+'</div>'
+     +(w.lastError?'<div class="bad">'+esc(w.lastError)+'</div>':'')+'<div class="dim" style="font-size:11px;margin-top:4px">cursor</div>'+cmdRow(w.cursor)
+     :'<div class="dim">no watch — <code>lobstah watch add '+esc(p.url)+'</code> registers one</div>');
  }else if(modal.type==='helm'){
   const h=item;
   const stale=Date.now()-Date.parse(h.heartbeatAt)>1800000;
@@ -626,7 +653,7 @@ function render(d){
   setHTML('notices',st.view==='cards'?noticeCards(list):table(['at','kind','text','repo'],
   list.map(n=>'<tr><td class="dim">'+ageEl(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
   'no notices'))}
- if(tab==='prs'&&dirty.has('prs'))setHTML('prs',prTable(d,inp.prs));
+ if(tab==='prs'&&dirty.has('prs'))setHTML('prs',st.view==='cards'?prCards(d,inp.prs):prTable(d,inp.prs));
  if(dirty.has('foot'))setHTML('foot',
   '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>');
  renderLobs(d.attention||[]);
