@@ -20,6 +20,15 @@ import {
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice } from '@lobstah/core';
 import { readMergeView } from '@lobstah/pick';
+import {
+  handleSettingsRequest,
+  newGlassToken,
+  SETTINGS_CSS,
+  SETTINGS_HEAD,
+  SETTINGS_MARKUP,
+  SETTINGS_SCRIPT,
+  SETTINGS_TOKEN_PLACEHOLDER,
+} from './glass-settings.js';
 
 /**
  * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
@@ -27,7 +36,9 @@ import { readMergeView } from '@lobstah/pick';
  * can't afford. It binds 127.0.0.1 only, never writes lobstah state, and
  * never advances any cursor: looking through the glass consumes nothing.
  * Look freely, steer only from the helm — links out are copyable commands,
- * never exec endpoints (localhost HTTP is reachable by any webpage).
+ * never exec endpoints (localhost HTTP is reachable by any webpage). The one
+ * write surface is POST /settings (glass.view, pet.enabled), token-guarded
+ * in glass-settings.ts.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
@@ -226,6 +237,7 @@ export function buildGlassSnapshot() {
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>spyglass</title>
 <link rel="icon" type="image/png" href="/icon.png">
+<!-- settings: head -->${SETTINGS_HEAD}<!-- /settings -->
 <style>
 :root{--bg:#0e1116;--card:#161b22;--line:#2b3240;--fg:#dbe2ea;--dim:#8b96a5;--ok:#4fc17c;--warn:#e2b93d;--bad:#e26d5c;--link:#6cb2e2}
 *{box-sizing:border-box}
@@ -298,11 +310,12 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 @keyframes crawl{0%{transform:translateX(-90px)}100%{transform:translateX(100vw)}}
 @keyframes step{to{background-position-x:-288px}}
 @keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
+/* settings: css */${SETTINGS_CSS}/* /settings */
 </style></head><body>
-<h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1>
+<h1>🦞✨ spyglass<button id="gearbtn" title="settings" aria-label="settings">⚙</button><span id="stale"> · STALE FEED</span></h1>
+<!-- settings: popover -->${SETTINGS_MARKUP}<!-- /settings -->
 <div class="chips" id="chips"></div>
 <div class="controls">
- <span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span>
  <select id="f-lane"><option value="">all lanes</option><option value="work">work</option><option value="chore">chore</option></select>
  <select id="f-repo"><option value="">all repos</option></select>
  <select id="f-verb"><option value="">all verbs</option><option>working</option><option>needs-decision</option><option>blocked</option><option>paused</option><option>done</option><option>failed</option><option>unknown</option></select>
@@ -493,7 +506,7 @@ window.showModal=(type,key)=>{modal={type,key};tick(true)};
 window.closeModal=()=>{modal=null;document.getElementById('overlay').classList.remove('open')};
 document.getElementById('overlay').addEventListener('click',(e)=>{if(e.target.id==='overlay')closeModal()});
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeModal()});
-document.getElementById('viewseg').addEventListener('click',(e)=>{const v=e.target.dataset&&e.target.dataset.v;if(v){st.view=v;save();tick(true)}});
+document.getElementById('viewseg').addEventListener('click',(e)=>{const v=e.target.dataset&&e.target.dataset.v;if(v)setGlassView(v)});
 for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb']]){
  const el=document.getElementById(id);el.value=st[key];
  el.addEventListener('change',()=>{st[key]=el.value;save();tick(true)})}
@@ -505,7 +518,9 @@ async function tick(rerender){try{
   render(last);document.getElementById('stale').style.display='none';
  }catch(e){document.getElementById('stale').style.display='inline'}}
 tick();setInterval(()=>tick(false),2000);
-</script></body></html>`;
+</script>
+<!-- settings: script -->${SETTINGS_SCRIPT}<!-- /settings -->
+</body></html>`;
 
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(port: number): http.Server {
@@ -516,7 +531,13 @@ export function serveGlass(port: number): http.Server {
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
+  // Per-launch token for the one write surface (POST /settings).
+  const token = newGlassToken();
+  const page = PAGE.replace(SETTINGS_TOKEN_PLACEHOLDER, token);
   const server = http.createServer((req, res) => {
+    const addr = server.address();
+    const boundPort = addr && typeof addr === 'object' ? addr.port : port;
+    if (handleSettingsRequest(req, res, token, boundPort)) return;
     if (req.url === '/lob.png' && lob) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
       res.end(fs.readFileSync(lob));
@@ -538,8 +559,8 @@ export function serveGlass(port: number): http.Server {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(buildGlassSnapshot()));
     } else {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end(PAGE);
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(page);
     }
   });
   server.listen(port, '127.0.0.1');

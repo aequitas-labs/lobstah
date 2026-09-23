@@ -66,8 +66,12 @@ import {
   toonKV,
   toonTable,
   VERBS,
+  parseSettingsAssignment,
+  readSettings,
+  SETTINGS_KEYS,
+  writeSettings,
 } from '@lobstah/core';
-import type { Descriptor, Lane, Notice, WatchAttention } from '@lobstah/core';
+import type { Descriptor, Lane, Notice, Settings, WatchAttention } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
@@ -152,7 +156,12 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
   glass [--port <n>]              the spyglass: tend as a live localhost web
                                   page — attention, dispatches, traps with
                                   their lifecycle and mail, notices, merge
-                                  view. Read-only; consumes no cursor.
+                                  view. Read-only but for a settings popover
+                                  (POST /settings, token-guarded).
+  settings [get [<key>] | set <key> <value>]
+                                  runtime settings (~/.lobstah/settings.json):
+                                  glass.view table|cards, pet.enabled
+                                  true|false
   man wait [--timeout <secs>] [--peek]
                                   block until a dispatch or watched source
                                   needs attention, then print the event and
@@ -1341,13 +1350,39 @@ ${progress}`,
       }
       throw new UsageError(`pet requires a subverb: install | uninstall\n\n${usageFor('pet')!}`);
     }
+    case 'settings': {
+      const sub = args[0];
+      const show = (s: Settings) => toonKV({ 'glass.view': s.glass.view, 'pet.enabled': s.pet.enabled });
+      if (sub === undefined || sub === 'get') {
+        const s = readSettings();
+        const key = args[1];
+        if (key === undefined) {
+          console.log(show(s));
+        } else if (key === 'glass.view') {
+          console.log(s.glass.view);
+        } else if (key === 'pet.enabled') {
+          console.log(String(s.pet.enabled));
+        } else {
+          throw new UsageError(`unknown settings key "${key}" (one of ${SETTINGS_KEYS.join(', ')})\n\n${usageFor('settings')!}`);
+        }
+        break;
+      }
+      const [key, value] = [args[1], args[2]];
+      if (key === undefined || value === undefined || args.length > 3) {
+        throw new UsageError(`settings set requires <key> <value>\n\n${usageFor('settings')!}`);
+      }
+      const parsed = parseSettingsAssignment(key, value);
+      if (!parsed.ok) throw new UsageError(`${parsed.error}\n\n${usageFor('settings')!}`);
+      console.log(show(writeSettings(parsed.patch)));
+      break;
+    }
     case 'glass': {
       const port = Number(arg(args, '--port') ?? '4949');
       serveGlass(port);
       console.log(
         toonKV({
           glass: `http://127.0.0.1:${port}`,
-          mode: 'read-only — looking consumes nothing',
+          mode: 'read-only — looking consumes nothing; the one write is POST /settings (token-guarded)',
           stop: 'ctrl-c',
         }),
       );

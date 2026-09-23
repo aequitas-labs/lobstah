@@ -143,6 +143,23 @@ key reused as the routing key. Opt-in is per repo, never implied.
 
 See [pickup.md](pickup.md) for the loop semantics these keys drive.
 
+## Runtime settings (not config.toml)
+
+`$LOBSTAH_HOME/settings.json` holds settings flipped at runtime rather than
+configured: by the spyglass's ⚙ popover, `lobstah settings set <key>
+<value>`, and the pet's menu (which calls the CLI). Written atomically by
+one function (`writeSettings` in `packages/core/src/settings.ts`); a missing
+or malformed file reads as the defaults. Exactly two keys:
+
+```json
+{ "glass": { "view": "table" }, "pet": { "enabled": true } }
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `glass.view` | `table` | The spyglass dispatch/trap layout, `table` or `cards`, shared by every viewer and browser (localStorage is only a fallback until the file exists). |
+| `pet.enabled` | `true` | `false` makes the desktop pet order its windows out and stop walking, read on its poll; `true` brings them back. Never touches launchd. |
+
 ## Environment
 
 | Variable | Meaning |
