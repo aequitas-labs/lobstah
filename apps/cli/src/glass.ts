@@ -289,7 +289,9 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 <style>
 :root{--bg:#0e1116;--card:#161b22;--line:#2b3240;--fg:#dbe2ea;--dim:#8b96a5;--ok:#4fc17c;--warn:#e2b93d;--bad:#e26d5c;--link:#6cb2e2}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;padding-block:14px;padding-inline:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;padding-block:14px;padding-inline:16px;
+ /* sticky footer: a full-height column whose active tab grows, so the footer sits at the viewport bottom on short pages */
+ display:flex;flex-direction:column;min-height:100vh}
 h1{font-size:15px;margin:0 0 10px}h1 .dim{color:var(--dim);font-weight:normal}
 h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 6px}
 .chips,.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -300,7 +302,7 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:8px 0 10px}
 .tabs a{color:var(--dim);padding:6px 11px;border-bottom:2px solid transparent}
 .tabs a.on{color:var(--fg);border-color:var(--link)}
-.tabpage{display:none}.tabpage.on{display:block}
+.tabpage{display:none}.tabpage.on{display:block;flex:1 0 auto}
 .headerline{display:flex;align-items:center;gap:8px}.headerline h1{flex:1}
 #settings-slot{min-width:34px;text-align:right;color:var(--dim)}
 #settings-slot #gearbtn{margin-left:0}
