@@ -4,7 +4,7 @@ import { readSettings, settingsStored, validateSettingsPatch, writeSettings } fr
 
 /**
  * The spyglass's one write surface: GET/POST /settings over the two runtime
- * settings in ~/.lobstah/settings.json (glass.view, pet.enabled). Everything
+ * settings in ~/.lobstah/settings.json (glass.view, glass.pet). Everything
  * else the glass serves stays read-only.
  *
  * localhost HTTP is reachable by any webpage, so a write is accepted only
@@ -112,19 +112,21 @@ export const SETTINGS_CSS = `
 #settingspop.open{display:block}
 #settingspop .row{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:6px 0}
 #settingspop .lbl{color:var(--dim);font-size:12px}
+#settingspop .hint{display:block;font-size:10px;opacity:.75}
 #settingspop .err{color:var(--bad);font-size:11px;min-height:1em}
 `;
 
 export const SETTINGS_MARKUP = `<div id="settingspop" role="dialog" aria-label="settings">
  <div class="row"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
- <div class="row"><span class="lbl">desktop pet</span><span class="seg" id="petseg"><button data-p="on">on</button><button data-p="off">off</button></span></div>
+ <div class="row"><span class="lbl">Pet<span class="hint">crawling lobsters in this page</span></span><span class="seg" id="petseg"><button data-p="on">on</button><button data-p="off">off</button></span></div>
  <div class="err" id="settingserr"></div>
 </div>`;
 
 /**
  * The popover's script. Runs after the main glass script (it uses st, save,
  * tick). The server's document wins; localStorage's view is only a fallback
- * while no settings.json exists yet.
+ * while no settings.json exists yet. window.glassPet gates the page's lobs:
+ * undefined (no lobs) until the first answer, so an off setting never flashes.
  */
 export const SETTINGS_SCRIPT = `<script>
 (()=>{
@@ -132,18 +134,21 @@ const token=(document.querySelector('meta[name="glass-token"]')||{}).content||''
 const pop=document.getElementById('settingspop'),gear=document.getElementById('gearbtn'),err=document.getElementById('settingserr');
 let settings=null;
 function paint(){if(!settings)return;
- for(const b of document.querySelectorAll('#petseg button'))b.classList.toggle('on',(b.dataset.p==='on')===settings.pet.enabled)}
-function adopt(s,stored){settings=s;
- if(stored&&st.view!==s.glass.view){st.view=s.glass.view;save();tick(true)}
+ for(const b of document.querySelectorAll('#petseg button'))b.classList.toggle('on',(b.dataset.p==='on')===settings.glass.pet)}
+function adopt(s,stored){settings=s;let again=false;
+ if(stored&&st.view!==s.glass.view){st.view=s.glass.view;save();again=true}
+ if(window.glassPet!==s.glass.pet){window.glassPet=s.glass.pet;again=true}
+ if(again)tick(true);
  paint()}
 async function load(){try{const r=await fetch('/settings',{cache:'no-store'});
- adopt(await r.json(),r.headers.get('x-settings-stored')==='1')}catch(e){}}
+ adopt(await r.json(),r.headers.get('x-settings-stored')==='1')}
+ catch(e){if(window.glassPet===undefined){window.glassPet=true;tick(true)}}}
 window.postSettings=async(patch)=>{err.textContent='';
  try{const r=await fetch('/settings',{method:'POST',headers:{'content-type':'application/json','x-glass-token':token},body:JSON.stringify(patch)});
   const j=await r.json();if(!r.ok){err.textContent=j.error||('error '+r.status);return}
   adopt(j,true)}catch(e){err.textContent='settings write failed'}};
 window.setGlassView=(v)=>postSettings({glass:{view:v}});
-document.getElementById('petseg').addEventListener('click',(e)=>{const p=e.target.dataset&&e.target.dataset.p;if(p)postSettings({pet:{enabled:p==='on'}})});
+document.getElementById('petseg').addEventListener('click',(e)=>{const p=e.target.dataset&&e.target.dataset.p;if(p)postSettings({glass:{pet:p==='on'}})});
 gear.addEventListener('click',(e)=>{e.stopPropagation();const o=pop.classList.toggle('open');gear.classList.toggle('on',o);if(o)load()});
 document.addEventListener('click',(e)=>{if(!pop.contains(e.target)&&e.target!==gear){pop.classList.remove('open');gear.classList.remove('on')}});
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'){pop.classList.remove('open');gear.classList.remove('on')}});

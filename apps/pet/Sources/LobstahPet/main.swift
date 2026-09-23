@@ -5,9 +5,7 @@
 // runs the focus ladder against the helm registration lobstah already
 // keeps: exact iTerm pane -> Terminal tab by tty -> VS Code window by cwd ->
 // app by bundle id -> resume-if-stale -> the spyglass. The pet only ever
-// reads lobstah state (`man tend --json`, helm files, settings.json); it
-// steers nothing. Its one write — the on/off menu item — goes through the
-// validated CLI path (`lobstah settings set pet.enabled …`), never the file.
+// reads lobstah state (`man tend --json` + helm files); it steers nothing.
 
 import AppKit
 
@@ -67,22 +65,6 @@ func tendAttention() -> [AttentionItem] {
         let report = try? JSONDecoder().decode(TendReport.self, from: data)
   else { return [] }
   return report.attention
-}
-
-/// `pet.enabled` from ~/.lobstah/settings.json; absent or malformed means on.
-func petEnabledSetting() -> Bool {
-  let file = lobstahHome().appendingPathComponent("settings.json")
-  guard let data = try? Data(contentsOf: file),
-        let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        let pet = doc["pet"] as? [String: Any],
-        let enabled = pet["enabled"] as? Bool
-  else { return true }
-  return enabled
-}
-
-/// Flip the setting through the CLI's validated write path.
-func writePetEnabled(_ enabled: Bool) {
-  _ = runCommand("/usr/bin/env", ["lobstah", "settings", "set", "pet.enabled", enabled ? "true" : "false"])
 }
 
 func readHelm() -> HelmRegistration? {
@@ -203,9 +185,6 @@ final class PetView: NSView {
     let glass = NSMenuItem(title: "Open spyglass", action: #selector(NSApplication.petOpenGlass), keyEquivalent: "")
     glass.target = NSApp
     menu.addItem(glass)
-    let off = NSMenuItem(title: "Turn pet off", action: #selector(NSApplication.petTurnOff), keyEquivalent: "")
-    off.target = NSApp
-    menu.addItem(off)
     menu.addItem(.separator())
     let quit = NSMenuItem(title: "Quit Lobstah Pet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
     quit.target = NSApp
@@ -217,9 +196,6 @@ final class PetView: NSView {
 extension NSApplication {
   @objc func petOpenGlass() {
     NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
-  }
-  @objc func petTurnOff() {
-    (delegate as? AppDelegate)?.setPetEnabled(false)
   }
 }
 
@@ -367,10 +343,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var lastKey = ""
   var statusItem: NSStatusItem?
   var preview = ProcessInfo.processInfo.environment["LOBSTAH_PET_PREVIEW"] != nil
-  /// settings.json `pet.enabled`, re-read every poll. Off: windows ordered
-  /// out, no walking; on again: the next poll rebuilds them. No relaunch.
-  var enabled = true
-  var toggleItem: NSMenuItem?
 
   var activity: NSObjectProtocol?
 
@@ -388,9 +360,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       let menu = NSMenu()
       menu.addItem(NSMenuItem(title: "Preview pet", action: #selector(togglePreview), keyEquivalent: "p"))
       menu.addItem(NSMenuItem(title: "Open spyglass", action: #selector(openGlass), keyEquivalent: "g"))
-      let toggle = NSMenuItem(title: "Pet on/off", action: #selector(togglePetEnabled), keyEquivalent: "o")
-      menu.addItem(toggle)
-      toggleItem = toggle
       menu.addItem(.separator())
       menu.addItem(NSMenuItem(title: "Quit Lobstah Pet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
       for item in menu.items { item.target = self }
@@ -405,12 +374,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       let now = CACurrentMediaTime()
       let dt = CGFloat(min(0.35, now - lastTick))
       lastTick = now
-      guard self.enabled else { return }
       for pet in self.pets { pet.tick(dt) }
     }
     walker.tolerance = 0.002
     Timer.scheduledTimer(withTimeInterval: 0.14, repeats: true) { _ in
-      guard self.enabled else { return }
       for pet in self.pets { pet.step() }
     }
     Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { _ in self.poll() }
@@ -427,35 +394,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
   }
 
-  @objc func togglePetEnabled() {
-    setPetEnabled(!enabled)
-  }
-
-  func setPetEnabled(_ on: Bool) {
-    DispatchQueue.global().async {
-      writePetEnabled(on)
-      DispatchQueue.main.async { self.poll() }
-    }
-  }
-
-  func applyEnabled(_ on: Bool) {
-    toggleItem?.state = on ? .on : .off
-    guard on != enabled else { return }
-    enabled = on
-    if !on {
-      for pet in pets { pet.close() }
-      pets = []
-      lastKey = "-"
-    }
-  }
-
   func poll() {
     DispatchQueue.global().async {
-      let on = petEnabledSetting()
-      var items = on ? tendAttention() : []
+      var items = tendAttention()
       DispatchQueue.main.async {
-        self.applyEnabled(on)
-        guard on else { return }
         if items.isEmpty && self.preview {
           items = [AttentionItem(id: "preview", verb: "needs-decision", note: "the lobster preview — questions crawl in here")]
         }

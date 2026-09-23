@@ -29,6 +29,7 @@ import {
   SETTINGS_SCRIPT,
   SETTINGS_TOKEN_PLACEHOLDER,
 } from './glass-settings.js';
+import { lobItems } from './glass-lobs.js';
 
 /**
  * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
@@ -37,7 +38,7 @@ import {
  * never advances any cursor: looking through the glass consumes nothing.
  * Look freely, steer only from the helm — links out are copyable commands,
  * never exec endpoints (localhost HTTP is reachable by any webpage). The one
- * write surface is POST /settings (glass.view, pet.enabled), token-guarded
+ * write surface is POST /settings (glass.view, glass.pet), token-guarded
  * in glass-settings.ts.
  */
 
@@ -484,13 +485,11 @@ let spriteOk=null;
  i.onerror=()=>{spriteOk=false;lobKey='';tick(true)};
  i.src='/lob-sprite.png'})();
 let lobKey='';
+${lobItems.toString()}
 function renderLobs(att){
- const preview=new URLSearchParams(location.search).has('lob');
- let items=att.map(x=>({key:x.lane+':'+x.id,text:x.note||x.verb,click:"showModal('dispatch','"+x.lane+':'+x.id+"')"}));
- if(!items.length&&preview)items=[{key:'preview',text:'attention questions crawl in here',click:last&&last.helms.length?"showModal('helm','"+last.helms[0].grounds+"')":''}];
- const extra=items.length>4?items.length-4:0;
- items=items.slice(0,4);
- if(extra)items[3].text='…and '+extra+' more — see attention';
+ // settings: glass.pet gates the lobs (lobItems from glass-lobs.ts; unknown until /settings answers)
+ const items=lobItems(att,{pet:window.glassPet===true,preview:new URLSearchParams(location.search).has('lob'),
+  previewClick:last&&last.helms.length?"showModal('helm','"+last.helms[0].grounds+"')":''});
  const key=items.map(i=>i.key).join('|')+(spriteOk===null?'?':spriteOk?'s':'e');
  if(key===lobKey)return;
  lobKey=key;

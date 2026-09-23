@@ -4,8 +4,8 @@ import { lobstahHome } from './paths.js';
 
 /**
  * Runtime settings: `~/.lobstah/settings.json`. Not config.toml — these are
- * flipped at runtime by the spyglass popover, `lobstah settings set`, and
- * the pet's menu (through the CLI). Exactly two keys; the set is closed and
+ * flipped at runtime by the spyglass popover and `lobstah settings set`.
+ * Exactly two keys, both about the spyglass page; the set is closed and
  * every write path validates against it.
  */
 
@@ -13,22 +13,21 @@ export const GLASS_VIEWS = ['table', 'cards'] as const;
 export type GlassView = (typeof GLASS_VIEWS)[number];
 
 export interface Settings {
-  glass: { view: GlassView };
-  pet: { enabled: boolean };
+  /** view: the dispatch/trap layout; pet: the lobsters crawling the page. */
+  glass: { view: GlassView; pet: boolean };
 }
 
 /** A partial document — what POST /settings and `settings set` carry. */
 export interface SettingsPatch {
-  glass?: { view?: GlassView };
-  pet?: { enabled?: boolean };
+  glass?: { view?: GlassView; pet?: boolean };
 }
 
 /** The closed key set, dotted, as `lobstah settings set` names them. */
-export const SETTINGS_KEYS = ['glass.view', 'pet.enabled'] as const;
+export const SETTINGS_KEYS = ['glass.view', 'glass.pet'] as const;
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
 
 export function defaultSettings(): Settings {
-  return { glass: { view: 'table' }, pet: { enabled: true } };
+  return { glass: { view: 'table', pet: true } };
 }
 
 export function settingsPath(): string {
@@ -36,6 +35,7 @@ export function settingsPath(): string {
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isView = (v: unknown): v is GlassView => (GLASS_VIEWS as readonly unknown[]).includes(v);
 
 /**
  * The document on disk, with defaults for anything absent or malformed. A
@@ -49,11 +49,9 @@ export function readSettings(): Settings {
   } catch {
     return s;
   }
-  if (!isObj(raw)) return s;
-  if (isObj(raw.glass) && (GLASS_VIEWS as readonly unknown[]).includes(raw.glass.view)) {
-    s.glass.view = raw.glass.view as GlassView;
-  }
-  if (isObj(raw.pet) && typeof raw.pet.enabled === 'boolean') s.pet.enabled = raw.pet.enabled;
+  if (!isObj(raw) || !isObj(raw.glass)) return s;
+  if (isView(raw.glass.view)) s.glass.view = raw.glass.view;
+  if (typeof raw.glass.pet === 'boolean') s.glass.pet = raw.glass.pet;
   return s;
 }
 
@@ -66,21 +64,21 @@ export function validateSettingsPatch(input: unknown): { ok: true; patch: Settin
   if (!isObj(input)) return { ok: false, error: 'settings must be a JSON object' };
   const patch: SettingsPatch = {};
   for (const [section, body] of Object.entries(input)) {
-    if (section !== 'glass' && section !== 'pet') return { ok: false, error: `unknown settings key: ${section}` };
-    if (!isObj(body)) return { ok: false, error: `${section} must be an object` };
+    if (section !== 'glass') return { ok: false, error: `unknown settings key: ${section}` };
+    if (!isObj(body)) return { ok: false, error: 'glass must be an object' };
+    const glass: NonNullable<SettingsPatch['glass']> = {};
     for (const [k, v] of Object.entries(body)) {
-      if (section === 'glass' && k === 'view') {
-        if (!(GLASS_VIEWS as readonly unknown[]).includes(v)) {
-          return { ok: false, error: `glass.view must be one of ${GLASS_VIEWS.join(' | ')}` };
-        }
-        patch.glass = { view: v as GlassView };
-      } else if (section === 'pet' && k === 'enabled') {
-        if (typeof v !== 'boolean') return { ok: false, error: 'pet.enabled must be true or false' };
-        patch.pet = { enabled: v };
+      if (k === 'view') {
+        if (!isView(v)) return { ok: false, error: `glass.view must be one of ${GLASS_VIEWS.join(' | ')}` };
+        glass.view = v;
+      } else if (k === 'pet') {
+        if (typeof v !== 'boolean') return { ok: false, error: 'glass.pet must be true or false' };
+        glass.pet = v;
       } else {
-        return { ok: false, error: `unknown settings key: ${section}.${k}` };
+        return { ok: false, error: `unknown settings key: glass.${k}` };
       }
     }
+    patch.glass = glass;
   }
   return { ok: true, patch };
 }
@@ -88,9 +86,9 @@ export function validateSettingsPatch(input: unknown): { ok: true; patch: Settin
 /** Parse a CLI `settings set <key> <value>` pair into a validated patch. */
 export function parseSettingsAssignment(key: string, value: string): { ok: true; patch: SettingsPatch } | { ok: false; error: string } {
   if (key === 'glass.view') return validateSettingsPatch({ glass: { view: value } });
-  if (key === 'pet.enabled') {
+  if (key === 'glass.pet') {
     const b = value === 'true' || value === 'on' ? true : value === 'false' || value === 'off' ? false : value;
-    return validateSettingsPatch({ pet: { enabled: b } });
+    return validateSettingsPatch({ glass: { pet: b } });
   }
   return { ok: false, error: `unknown settings key: ${key} (one of ${SETTINGS_KEYS.join(', ')})` };
 }
@@ -102,8 +100,7 @@ export function parseSettingsAssignment(key: string, value: string): { ok: true;
 export function writeSettings(patch: SettingsPatch): Settings {
   const cur = readSettings();
   const next: Settings = {
-    glass: { view: patch.glass?.view ?? cur.glass.view },
-    pet: { enabled: patch.pet?.enabled ?? cur.pet.enabled },
+    glass: { view: patch.glass?.view ?? cur.glass.view, pet: patch.glass?.pet ?? cur.glass.pet },
   };
   const file = settingsPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });

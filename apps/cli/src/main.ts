@@ -160,8 +160,8 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   (POST /settings, token-guarded).
   settings [get [<key>] | set <key> <value>]
                                   runtime settings (~/.lobstah/settings.json):
-                                  glass.view table|cards, pet.enabled
-                                  true|false
+                                  glass.view table|cards, glass.pet
+                                  true|false (the page's crawling lobs)
   man wait [--timeout <secs>] [--peek]
                                   block until a dispatch or watched source
                                   needs attention, then print the event and
@@ -1352,7 +1352,7 @@ ${progress}`,
     }
     case 'settings': {
       const sub = args[0];
-      const show = (s: Settings) => toonKV({ 'glass.view': s.glass.view, 'pet.enabled': s.pet.enabled });
+      const show = (s: Settings) => toonKV({ 'glass.view': s.glass.view, 'glass.pet': s.glass.pet });
       if (sub === undefined || sub === 'get') {
         const s = readSettings();
         const key = args[1];
@@ -1360,8 +1360,8 @@ ${progress}`,
           console.log(show(s));
         } else if (key === 'glass.view') {
           console.log(s.glass.view);
-        } else if (key === 'pet.enabled') {
-          console.log(String(s.pet.enabled));
+        } else if (key === 'glass.pet') {
+          console.log(String(s.glass.pet));
         } else {
           throw new UsageError(`unknown settings key "${key}" (one of ${SETTINGS_KEYS.join(', ')})\n\n${usageFor('settings')!}`);
         }

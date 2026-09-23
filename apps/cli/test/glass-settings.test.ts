@@ -58,16 +58,16 @@ describe('glass settings endpoint', () => {
     expect(r.status).toBe(200);
     expect(r.headers.get('x-settings-stored')).toBe('0');
     expect(r.headers.get('access-control-allow-origin')).toBeNull();
-    expect(await r.json()).toEqual({ glass: { view: 'table' }, pet: { enabled: true } });
+    expect(await r.json()).toEqual({ glass: { view: 'table', pet: true } });
   });
 
   it('accepts a good request, writes, and returns the new document', async () => {
     const r = await post({ glass: { view: 'cards' } }, good());
     expect(r.status).toBe(200);
-    expect(r.json).toEqual({ glass: { view: 'cards' }, pet: { enabled: true } });
-    const r2 = await post({ pet: { enabled: false } }, good());
-    expect(r2.json).toEqual({ glass: { view: 'cards' }, pet: { enabled: false } });
-    expect(readSettings()).toEqual({ glass: { view: 'cards' }, pet: { enabled: false } });
+    expect(r.json).toEqual({ glass: { view: 'cards', pet: true } });
+    const r2 = await post({ glass: { pet: false } }, good());
+    expect(r2.json).toEqual({ glass: { view: 'cards', pet: false } });
+    expect(readSettings()).toEqual({ glass: { view: 'cards', pet: false } });
   });
 
   it('rejects a request without the token (403, nothing written)', async () => {
@@ -99,7 +99,7 @@ describe('glass settings endpoint', () => {
   });
 
   it('rejects unknown keys and bad values with 400', async () => {
-    for (const bad of [{ theme: 'dark' }, { glass: { view: 'grid' } }, { pet: { enabled: 'no' } }, { pet: { enabled: true, extra: 1 } }]) {
+    for (const bad of [{ theme: 'dark' }, { glass: { view: 'grid' } }, { glass: { pet: 'no' } }, { glass: { pet: true, extra: 1 } }, { pet: { enabled: false } }]) {
       const r = await post(bad, good());
       expect(r.status, JSON.stringify(bad)).toBe(400);
     }

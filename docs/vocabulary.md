@@ -197,7 +197,7 @@ exit 2 from the CLI), never ignored.
 
 | File | Keys and values |
 | ---- | --------------- |
-| `~/.lobstah/settings.json` | `glass.view`: `table` \| `cards` (default `table`) · `pet.enabled`: `true` \| `false` (default `true`). Written by `POST /settings` (token-guarded) and `lobstah settings set`; read by the glass and the pet. |
+| `~/.lobstah/settings.json` | `glass.view`: `table` \| `cards` (default `table`) · `glass.pet`: `true` \| `false` (default `true`; the page's crawling lobs). Written by `POST /settings` (token-guarded) and `lobstah settings set`; read only by the glass. |
 
 ## Exit codes
 
