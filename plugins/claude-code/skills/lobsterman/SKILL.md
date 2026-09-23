@@ -56,6 +56,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   once, then `lobstah send <id> "<answer>"`.
 - `done` means the brief is fulfilled — report the catch. Never merge.
 - `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
+- Attention kinds (`attentionKinds` in config.toml) decide what walks; a PR a worker already owns stays off.
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.
 
 ## Getting woken instead of polling

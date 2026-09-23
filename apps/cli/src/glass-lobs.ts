@@ -10,10 +10,9 @@ export interface LobAttention {
   lane: string;
   verb: string;
   note?: string;
-  /** tend's attention kind; a `pr` item walks as a link to its PR. */
+  /** tend's attention kind; a `pr:*` item walks as a link to its PR. */
   kind?: string;
   prUrl?: string;
-  draft?: boolean;
 }
 
 export interface LobItem {
@@ -23,8 +22,8 @@ export interface LobItem {
   click?: string;
   /** A PR lob is a plain link out — the glass opens, never acts. */
   href?: string;
-  /** Show the small draft badge in the bubble. */
-  draft?: boolean;
+  /** The short kind label shown before the text (draft, review, checks, ready, landed, watch). */
+  label?: string;
 }
 
 export interface LobOptions {
@@ -38,16 +37,31 @@ export interface LobOptions {
 
 export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
   if (!opts.lobs) return [];
-  let items: LobItem[] = att.map((x) =>
-    x.kind === 'pr' && x.prUrl
-      ? { key: 'pr:' + x.prUrl, text: x.note || 'draft PR', href: x.prUrl, draft: !!x.draft }
-      : { key: x.lane + ':' + x.id, text: x.note || x.verb, click: "showModal('dispatch','" + x.lane + ':' + x.id + "')" },
-  );
+  // The same labels the attention table and the desktop pet use.
+  const labels: Record<string, string> = {
+    'pr:draft': 'draft',
+    'pr:review': 'review',
+    'pr:checks': 'checks',
+    'pr:ready': 'ready',
+    landed: 'landed',
+    watch: 'watch',
+  };
+  let items: LobItem[] = att.map((x) => {
+    const label = labels[x.kind ?? ''] ?? '';
+    return typeof x.kind === 'string' && x.kind.startsWith('pr:') && x.prUrl
+      ? { key: x.kind + ':' + x.prUrl, text: x.note || x.kind, href: x.prUrl, label }
+      : {
+          key: (x.kind ?? 'question') + ':' + x.lane + ':' + x.id,
+          text: x.note || x.verb,
+          label,
+          click: x.kind === 'watch' ? '' : "showModal('dispatch','" + x.lane + ':' + x.id + "')",
+        };
+  });
   if (!items.length && opts.preview) {
     items = [{ key: 'preview', text: 'attention questions crawl in here', click: opts.previewClick }];
   }
   const extra = items.length > 4 ? items.length - 4 : 0;
   items = items.slice(0, 4);
-  if (extra) items[3] = { ...items[3]!, text: '…and ' + extra + ' more — see attention', draft: false };
+  if (extra) items[3] = { ...items[3]!, text: '…and ' + extra + ' more — see attention', label: '' };
   return items;
 }

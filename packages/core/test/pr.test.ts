@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { derivePrEvents, parsePrRef, prBadge, prEvidence } from '../src/pr.js';
+import { derivePrEvents, parsePrRef, parseUnresolvedThreads, PR_VIEW_FIELDS, prBadge, prEvidence, prReview } from '../src/pr.js';
 import type { GhPrView, PrEvidence } from '../src/pr.js';
 
 const ref = parsePrRef('pr:acme/web#26')!;
@@ -109,6 +109,8 @@ describe('prBadge — one derivation for tend, catch, and glass', () => {
     ['failed checks', ev(failedAndReviewed), 'checks 1/2 failed', 'bad'],
     ['changes requested', ev({ ...green, reviewDecision: 'CHANGES_REQUESTED' }), 'changes requested', 'bad'],
     ['pending checks', ev({}), 'checks 1/2', 'warn'],
+    ['unresolved threads', { ...ev({ ...green }), review: { unresolvedThreads: 2, changesRequested: false } }, '2 unresolved', 'warn'],
+    ['changes requested by a reviewer', { ...ev({ ...green }), review: { changesRequested: true } }, 'changes requested', 'bad'],
     ['conflicts', ev({ ...green, mergeStateStatus: 'DIRTY' }), 'conflicts', 'bad'],
     ['review required', ev({ ...green, reviewDecision: 'REVIEW_REQUIRED' }), 'review', 'warn'],
     ['green', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'CLEAN' }), 'green', 'ok'],
@@ -119,5 +121,41 @@ describe('prBadge — one derivation for tend, catch, and glass', () => {
   it('counts checks, with a StatusContext judged by its state', () => {
     const pr = ev({ statusCheckRollup: [run('a', 'SUCCESS'), { __typename: 'StatusContext', context: 'ci/legacy', state: 'PENDING' }, run('c', 'TIMED_OUT')] });
     expect(pr.checks).toEqual({ total: 3, passed: 1, failed: 1, pending: 1 });
+  });
+});
+
+describe('review fields (gh pr view reviews + the reviewThreads GraphQL count)', () => {
+  // Fixture shapes as gh 2.83 returns them (bodies present in the real output, never read).
+  const reviews = [
+    { author: { login: 'ana' }, state: 'COMMENTED', submittedAt: '2026-09-23T10:00:00Z', body: 'nit' },
+    { author: { login: 'bo' }, state: 'CHANGES_REQUESTED', submittedAt: '2026-09-23T11:00:00Z', body: 'please fix' },
+    { author: { login: 'ana' }, state: 'APPROVED', submittedAt: '2026-09-23T12:00:00Z', body: '' },
+  ];
+  const graphql = JSON.stringify({
+    data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: true }, { isResolved: false }, { isResolved: true }] } } } },
+  });
+
+  it('counts one unresolved thread and stamps it with changesRequested and lastReviewAt — no bodies', () => {
+    expect(parseUnresolvedThreads(graphql)).toBe(1);
+    const view: GhPrView = { ...open, reviews, unresolvedThreads: parseUnresolvedThreads(graphql) };
+    const pr = prEvidence(ref, view, '2026-09-23T13:00:00Z');
+    expect(pr.review).toEqual({ unresolvedThreads: 1, changesRequested: true, lastReviewAt: '2026-09-23T12:00:00Z' });
+    expect(JSON.stringify(pr)).not.toContain('please fix');
+  });
+
+  it("a reviewer's later approval clears their changes request; reviewDecision alone also counts", () => {
+    const later = [...reviews, { author: { login: 'bo' }, state: 'APPROVED', submittedAt: '2026-09-23T14:00:00Z' }];
+    expect(prReview({ ...open, reviews: later }).changesRequested).toBe(false);
+    expect(prReview({ ...open, reviews: [], reviewDecision: 'CHANGES_REQUESTED' }).changesRequested).toBe(true);
+  });
+
+  it('a failed or odd GraphQL answer omits unresolvedThreads rather than guessing', () => {
+    expect(parseUnresolvedThreads('not json')).toBeUndefined();
+    expect(parseUnresolvedThreads(JSON.stringify({ errors: [{ message: 'nope' }] }))).toBeUndefined();
+    expect(prReview({ ...open, reviews })).toEqual({ changesRequested: true, lastReviewAt: '2026-09-23T12:00:00Z' });
+  });
+
+  it('gh pr view requests reviews in the same call', () => {
+    expect(PR_VIEW_FIELDS.split(',')).toContain('reviews');
   });
 });

@@ -16,12 +16,32 @@ struct AttentionItem: Decodable, Equatable {
   let id: String
   let verb: String
   let note: String?
-  /** question | watch | pr — absent from an older lobstah, which only sent questions. */
+  /** question | landed | watch | pr:draft | pr:review | pr:checks | pr:ready — absent from an older lobstah. */
   var kind: String? = nil
-  /** kind pr: the draft PR this pet walks for. */
+  /** pr:* kinds: the PR this pet walks for. */
   var prUrl: String? = nil
 
-  var prLink: URL? { kind == "pr" ? prUrl.flatMap(URL.init(string:)) : nil }
+  /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
+  var prLink: URL? { (kind?.hasPrefix("pr:") ?? false) ? prUrl.flatMap(URL.init(string:)) : nil }
+
+  /** The short kind label shown before the note; nothing for a question. */
+  var kindLabel: String? {
+    switch kind {
+    case "pr:draft": return "draft"
+    case "pr:review": return "review"
+    case "pr:checks": return "checks"
+    case "pr:ready": return "ready"
+    case "landed": return "landed"
+    case "watch": return "watch"
+    default: return nil
+    }
+  }
+
+  /** Bubble text: the label, then the note. */
+  var bubbleText: String {
+    let body = note ?? verb
+    return kindLabel.map { "\($0) · \(body)" } ?? body
+  }
 }
 
 struct TendReport: Decodable {
@@ -246,7 +266,7 @@ final class Pet {
 
   init(item: AttentionItem, index: Int) {
     self.item = item
-    let text = item.note ?? item.verb
+    let text = item.bubbleText
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
     self.speed = 100 + CGFloat(index) * 12
     let first = screens.first?.frame ?? .zero

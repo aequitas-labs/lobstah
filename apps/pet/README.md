@@ -16,10 +16,12 @@ to the helm through the focus ladder:
 6. no helm at all → the spyglass (`http://127.0.0.1:4949`, or the port in
    `$LOBSTAH_GLASS_PORT`, which `lobstah glass` honors too)
 
-A dispatch's PR that its `pr:` watch observed open and still in draft
-walks too, its bubble naming the PR (`#27 draft`). Clicking a PR pet opens
-the PR in your browser instead of the helm; right-click adds **Open PR**.
-It stops walking once the PR leaves draft, merges, or closes.
+Every attention kind walks (`attentionKinds` in `config.toml` picks them),
+its bubble led by a short label: `draft`, `review`, `checks`, `ready`,
+`landed`, or nothing for a question. Clicking a PR pet (`pr:*`) opens the
+PR in your browser instead of the helm; right-click adds **Open PR**. Each
+stops walking once its clear condition holds (docs/vocabulary.md,
+"Attention contract").
 
 The pet only ever reads lobstah state — `lobstah man tend --json` every few
 seconds plus the helm registration files. It steers nothing and consumes no

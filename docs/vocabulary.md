@@ -148,7 +148,9 @@ the chain.
 `lobstah watch add pr:<owner>/<repo>#<n>` (or a github.com PR URL,
 normalized to that key) installs the shipped check, `lobstah watch
 check-pr`: one read-only `gh pr view` per cycle, diffed against the
-previous observation that the cursor carries. `report <id> done --pr
+previous observation that the cursor carries, plus — while the PR is open —
+one read-only `gh api graphql` query for `reviewThreads { isResolved }`,
+which `gh pr view --json` cannot return (no bodies are requested). `report <id> done --pr
 <url>` registers the same watch owned by `dispatch:<id>` (idempotent;
 `--no-watch` opts out). **Owner:** `packages/core/src/pr.ts` (derivation,
 badge) and `apps/cli/src/pr-watch.ts` (check, registration, evidence).
@@ -162,7 +164,7 @@ badge) and `apps/cli/src/pr-watch.ts` (check, registration, evidence).
 | `merge-state` | `mergeStateStatus` changed (`value`). Evidence only. |
 | `draft` | Draft flipped (`value`). Evidence only. |
 | `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. |
-| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending }, observedAt }`, merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show. |
+| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. `review.changesRequested` comes from `reviewDecision` or any reviewer's latest decisive review; `unresolvedThreads` from the GraphQL query, omitted for an observation where that query failed. Comment bodies are never stored. The object is merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show. |
 
 Every event carries `headSha`. A dispatch-owned PR watch emits only work
 events (a failing check; a review decision pickup doesn't own), so the
@@ -226,6 +228,39 @@ verbs stay open. A stale helm reserves nothing.
 | grounds | A named territory: the subset of configured repos one helm oversees, from `[grounds.*]`. A repo belongs to at most one grounds (config error otherwise). No grounds configured means one implicit `fleet` grounds covering every repo. |
 | charter | The helm's persona and scope fences, in Standard Technical English. Printed at sign-on and re-injected by `man brief` at every session start, so it survives restarts and compaction. |
 | digest | The delta since the reported-through cursor: catches landed, attention arisen, still-waiting, fleet verdict. Carried by `man report`, a `man wait` timeout, and — for a helm session, at `[helm].reportSecs` cadence — the park itself. Change-gated: an empty delta is never delivered. |
+
+## Attention contract
+
+**Attention** is what stands waiting for a human to look: `man tend`'s
+`attention` list, which the desktop pet and the glass walk across the
+screen. It is derived in one place (`apps/cli/src/tend.ts`) and nowhere
+else. **Owner:** `apps/cli/src/tend.ts`. **Enforcement:** `attentionKinds`
+in `config.toml` selects the kinds (an unknown kind is a config error);
+every kind is level-triggered — it stands until its own clear condition,
+never until someone acknowledges it.
+
+| Kind | Stands while | Clears when |
+| ---- | ------------ | ----------- |
+| `question` | The dispatch's last status is `needs-decision` or `blocked`. | Any newer status entry. |
+| `landed` | The dispatch is `done` or `failed` after its grounds' reported-through cursor (the grounds listing the repo, else `fleet`; at most 24 h back). Opt-in. | `man report` (or the helm park's digest) advances the cursor. |
+| `pr:draft` | Evidence `pr` is open and draft. | Ready for review, merged, or closed. |
+| `pr:review` | Evidence `pr` is open with `review.unresolvedThreads > 0` or `review.changesRequested`. | Every thread resolved and no changes requested, or merged / closed. |
+| `pr:checks` | Evidence `pr` is open with a failed check on the observed head. | Green on the head, or merged / closed. |
+| `pr:ready` | Evidence `pr` is open, not draft, no `pr:review` condition holds, and it is approved — or every check passed with none pending. | Merged or closed (or a review condition arises). |
+
+`pr:*` kinds read only the `pr:` watch's evidence — never a forge call —
+and carry `prUrl`, `number`, and the fields they derive from. Unconsumed
+man-owned watch events also list, as `watch`: machinery wakes, always on.
+Only `question` and `watch` make the verdict `needs-attention` or arise in
+the digest; the rest are things to look at, not stalls.
+
+**The on-the-hook rule.** A `pr:review` or `pr:checks` item is suppressed
+while a worker owns the problem: a queued or active dispatch in the PR's
+chain (the evidence owner and its `followUp` descendants) that is a pickup
+feedback round — pickup's map records it with kind `review` — or the `pr:`
+watch's fix continuation — the watch records it as `lastFollowUpId`. It
+reappears when that dispatch finishes without clearing the condition.
+`question`, `landed`, `pr:draft`, and `pr:ready` are never suppressed.
 
 ## Exit codes
 

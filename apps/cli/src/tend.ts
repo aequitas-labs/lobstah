@@ -11,18 +11,21 @@ import {
   listTraps,
   listWatches,
   loadConfig,
+  parsePrRef,
   pendingIds,
   prBadge,
   queuedDescriptor,
   readEvidence,
   readStatusLog,
+  readWatch,
   readWatchEvents,
   reconcile,
   toonKV,
   toonTable,
 } from '@lobstah/core';
-import type { Descriptor, Lane, PrEvidence } from '@lobstah/core';
+import type { AttentionKind, Config, Descriptor, Lane, PrEvidence } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
+import { reportedThroughMs } from './reported.js';
 import type { MergeView } from '@lobstah/pick';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
@@ -89,34 +92,119 @@ export interface TendNotice {
 }
 
 /**
- * One thing awaiting a human. `question` is a standing needs-decision /
- * blocked; `watch` an unconsumed man-owned watch event; `pr` a dispatch's
- * PR that its pr: watch observed open and still in draft — it walks until
- * the PR leaves draft, merges, or closes. Only questions and watch events
- * drive the verdict: a draft PR is something to look at, not a stall.
+ * One thing awaiting a human (docs/vocabulary.md, "Attention contract").
+ * Each kind stands while its condition holds and clears on its own:
+ * - `question`: the dispatch's last status is needs-decision / blocked.
+ * - `landed`: the dispatch is done / failed after the grounds' reported-through cursor.
+ * - `pr:draft`: evidence pr open and draft.
+ * - `pr:review`: open, with unresolved review threads or changes requested.
+ * - `pr:checks`: open, with failed checks on the observed head.
+ * - `pr:ready`: open, not draft, no pr:review standing, approved or all checks passed with none pending.
+ * - `watch`: an unconsumed man-owned watch event — machinery, always on.
+ * Only `question` and `watch` drive the verdict; the rest are things to look at.
  */
+export type TendAttentionKind = AttentionKind | 'watch';
+
 export interface TendAttention {
-  kind: 'question' | 'watch' | 'pr';
+  kind: TendAttentionKind;
   id: string;
   lane: Lane;
+  /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
   verb: string;
   ageSecs: number;
   at?: string;
   note?: string;
-  /** kind pr only */
+  repo?: string;
+  /** pr:* kinds: the evidence fields the kind derives from. */
   prUrl?: string;
+  number?: number;
+  state?: string;
   draft?: boolean;
+  reviewDecision?: string;
+  headSha?: string;
   checks?: PrEvidence['checks'];
+  review?: PrEvidence['review'];
+}
+
+export interface ChainMember {
+  id: string;
+  bucket: TendDispatch['bucket'];
 }
 
 /**
- * Draft PRs from evidence — the pr: watch's observation, never a forge call.
- * One item per PR URL (a chain may carry the same PR on several members;
- * the newest observation wins). Evidence carries no PR title, so the note
- * is `#<n> draft`.
+ * The on-the-hook rule, pure: a pr:review or pr:checks item is suppressed
+ * while a worker owns the problem — a queued or active dispatch in the PR's
+ * chain that is a pickup feedback round (pickup's own map records it as
+ * kind `review`) or the pr: watch's fix continuation (the watch records it
+ * as lastFollowUpId). Returns the owning dispatch id, or undefined. When
+ * that dispatch finishes without clearing the condition, the item stands
+ * again. Every other kind is never suppressed.
  */
-export function draftPrAttention(now = Date.now()): TendAttention[] {
-  const byUrl = new Map<string, { item: TendAttention; observedAt: string }>();
+export function onTheHook(
+  kind: TendAttentionKind,
+  chain: ChainMember[],
+  owners: { reviewRounds: ReadonlySet<string>; watchFollowUp?: string },
+): string | undefined {
+  if (kind !== 'pr:review' && kind !== 'pr:checks') return undefined;
+  return chain.find(
+    (m) => m.bucket !== 'done' && (owners.reviewRounds.has(m.id) || m.id === owners.watchFollowUp),
+  )?.id;
+}
+
+/** Which pr:* kinds a PR's evidence stands on right now. Pure. */
+export function prKinds(pr: PrEvidence): AttentionKind[] {
+  if (pr.state !== 'OPEN') return [];
+  const out: AttentionKind[] = [];
+  const { failed, pending, total } = pr.checks;
+  if (pr.draft) out.push('pr:draft');
+  const review = (pr.review?.unresolvedThreads ?? 0) > 0 || pr.review?.changesRequested === true;
+  if (review) out.push('pr:review');
+  if (failed > 0) out.push('pr:checks');
+  // Ready never contradicts review: outstanding threads or a changes request mean not ready yet.
+  if (!pr.draft && !review && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
+  return out;
+}
+
+const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
+  'pr:draft': (pr) => `#${pr.number} draft`,
+  'pr:review': (pr) =>
+    `#${pr.number} review: ${[
+      pr.review?.unresolvedThreads ? `${pr.review.unresolvedThreads} unresolved` : '',
+      pr.review?.changesRequested ? 'changes requested' : '',
+    ]
+      .filter(Boolean)
+      .join(', ')}`,
+  'pr:checks': (pr) => `#${pr.number} checks ${pr.checks.failed}/${pr.checks.total} failed`,
+  'pr:ready': (pr) => `#${pr.number} ready to merge`,
+};
+
+/** A dispatch and every follow-up descending from it (work lane), with buckets. */
+function chainOf(root: string): ChainMember[] {
+  const out: ChainMember[] = [];
+  const seen = new Set<string>();
+  const walk = (id: string, bucket: TendDispatch['bucket']) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    out.push({ id, bucket });
+    for (const f of followUps(id)) walk(f.id, f.bucket);
+  };
+  walk(root, bucketOf(root) ?? 'done');
+  return out;
+}
+
+/** The grounds whose cursor covers a repo: the one listing it, else the implicit `fleet`. */
+function groundsCursorFor(cfg: Config, repo: string | undefined): string {
+  if (repo === undefined) return 'fleet';
+  return Object.entries(cfg.grounds).find(([, g]) => g.repos.includes(repo))?.[0] ?? 'fleet';
+}
+
+/**
+ * PR attention from evidence — the pr: watch's observations, never a forge
+ * call. One item per (PR, kind), the newest observation winning when several
+ * chain members carry the same PR.
+ */
+function prAttention(now: number): TendAttention[] {
+  const newest = new Map<string, { id: string; lane: Lane; pr: PrEvidence }>();
   for (const lane of ['work', 'chore'] as Lane[]) {
     let files: string[];
     try {
@@ -127,28 +215,88 @@ export function draftPrAttention(now = Date.now()): TendAttention[] {
     for (const f of files) {
       const id = f.slice(0, -'.evidence'.length);
       const pr = readEvidence(id, lane).pr;
-      if (!pr || pr.state !== 'OPEN' || !pr.draft) continue;
-      const prev = byUrl.get(pr.url);
-      if (prev && prev.observedAt >= pr.observedAt) continue;
-      const since = readStatusLog(id, lane).at(-1)?.at ?? pr.observedAt;
-      byUrl.set(pr.url, {
-        observedAt: pr.observedAt,
-        item: {
-          kind: 'pr',
-          id,
-          lane,
-          verb: 'pr',
-          ageSecs: Math.max(0, Math.round((now - Date.parse(since)) / 1000)),
-          at: since,
-          note: `#${pr.number} draft`,
-          prUrl: pr.url,
-          draft: true,
-          checks: pr.checks,
-        },
+      if (!pr) continue;
+      const prev = newest.get(pr.url);
+      if (!prev || prev.pr.observedAt < pr.observedAt) newest.set(pr.url, { id, lane, pr });
+    }
+  }
+  const reviewRounds = new Set(
+    Object.values(readPickupMap())
+      .filter((e) => e.kind === 'review')
+      .map((e) => e.uuid),
+  );
+  const out: TendAttention[] = [];
+  for (const { id, lane, pr } of newest.values()) {
+    const kinds = prKinds(pr);
+    if (kinds.length === 0) continue;
+    const ref = parsePrRef(pr.url);
+    const watchFollowUp = ref ? readWatch(ref.key)?.lastFollowUpId : undefined;
+    const chain = chainOf(id);
+    const since = readStatusLog(id, lane).at(-1)?.at ?? pr.observedAt;
+    for (const kind of kinds) {
+      if (onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
+      out.push({
+        kind,
+        id,
+        lane,
+        verb: kind,
+        ageSecs: Math.max(0, Math.round((now - Date.parse(since)) / 1000)),
+        at: since,
+        note: PR_KIND_NOTE[kind]!(pr),
+        repo: repoOf(id, lane),
+        prUrl: pr.url,
+        number: pr.number,
+        state: pr.state,
+        draft: pr.draft,
+        reviewDecision: pr.reviewDecision,
+        headSha: pr.headSha,
+        checks: pr.checks,
+        ...(pr.review ? { review: pr.review } : {}),
       });
     }
   }
-  return [...byUrl.values()].map((v) => v.item).sort((a, b) => b.ageSecs - a.ageSecs);
+  return out.sort((a, b) => b.ageSecs - a.ageSecs);
+}
+
+/** Terminal catches the helm hasn't been reported yet: past its grounds' cursor. */
+function landedAttention(cfg: Config, now: number): TendAttention[] {
+  const out: TendAttention[] = [];
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    for (const id of doneIds(lane)) {
+      const last = readStatusLog(id, lane).at(-1);
+      if (!last || (last.verb !== 'done' && last.verb !== 'failed')) continue;
+      const at = Date.parse(last.at) || 0;
+      const repo = repoOf(id, lane);
+      if (at <= reportedThroughMs(groundsCursorFor(cfg, repo), now) || at > now) continue;
+      const ev = readEvidence(id, lane);
+      out.push({
+        kind: 'landed',
+        id,
+        lane,
+        verb: last.verb,
+        ageSecs: Math.max(0, Math.round((now - at) / 1000)),
+        at: last.at,
+        note: last.note,
+        repo,
+        ...(ev.prUrl ? { prUrl: ev.prUrl } : {}),
+      });
+    }
+  }
+  return out.sort((a, b) => b.ageSecs - a.ageSecs);
+}
+
+/** The repo key a dispatch belongs to, from whichever bucket holds its descriptor. */
+export function repoOf(id: string, lane: Lane): string | undefined {
+  const dirs = laneDirs(lane);
+  for (const file of [
+    path.join(dirs.done, id, 'descriptor.json'),
+    path.join(dirs.active, id, 'descriptor.json'),
+    path.join(dirs.queue, `${id}.json`),
+  ]) {
+    const d = readJson<Descriptor>(file);
+    if (d) return d.repo;
+  }
+  return undefined;
 }
 
 export interface TendReport {
@@ -366,13 +514,19 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (d.prUrl && d.at !== undefined && now - Date.parse(d.at) < DAY_MS) stories.push(direct(d));
   }
 
-  attention.push(...draftPrAttention(now));
+  attention.push(...landedAttention(cfg, now), ...prAttention(now));
+  // attentionKinds (config.toml) picks what walks; watch events are
+  // machinery wakes and always stand.
+  const enabled = new Set<string>(cfg.attentionKinds);
+  const shown = attention.filter((a) => a.kind === 'watch' || enabled.has(a.kind));
+  attention.length = 0;
+  attention.push(...shown);
 
   const verdict: TendReport['verdict'] = !daemonUp
     ? 'daemon-down'
     : stalled
       ? 'stalled'
-      : attention.some((a) => a.kind !== 'pr')
+      : attention.some((a) => a.kind === 'question' || a.kind === 'watch')
         ? 'needs-attention'
         : active.length + queued.length > 0
           ? 'working'
@@ -438,9 +592,9 @@ export function renderTend(r: TendReport): string {
         'attention',
         r.attention.map((a) => ({
           id: a.id,
-          verb: a.verb,
+          verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : a.kind,
           waitingMins: Math.round(a.ageSecs / 60),
-          note: a.kind === 'pr' ? `${a.note ?? ''} ${a.prUrl ?? ''}`.trim() : (a.note ?? ''),
+          note: a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? ''),
         })),
         ['id', 'verb', 'waitingMins', 'note'],
       ),

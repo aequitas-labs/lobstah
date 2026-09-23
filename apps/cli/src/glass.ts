@@ -11,6 +11,7 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  loadConfig,
   lobstahHome,
   lobstahVersion,
   pendingIds,
@@ -20,10 +21,10 @@ import {
   readStatusLog,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, Lane, Notice } from '@lobstah/core';
+import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { lobItems } from './glass-lobs.js';
-import { draftPrAttention } from './tend.js';
-import { repoOf } from './digest.js';
+import { buildTendReport } from './tend.js';
 import { GLASS_DIFF_JS } from './glass-diff.js';
 
 /**
@@ -184,6 +185,19 @@ function dispatchRows() {
     .sort((a, b) => b.sort - a.sort);
 }
 
+/**
+ * Attention exactly as `man tend` derives it (the one place kinds are
+ * decided), plus the active attentionKinds for the read-only line under the
+ * heading. A config error surfaces on the page instead of failing /data.
+ */
+function attentionSnapshot(): { attention: TendAttention[]; attentionKinds: string[]; attentionError?: string } {
+  try {
+    return { attention: buildTendReport().attention, attentionKinds: loadConfig().attentionKinds };
+  } catch (err) {
+    return { attention: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** One disk pass, everything the page renders. Pure read. */
 export function buildGlassSnapshot() {
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
@@ -250,12 +264,7 @@ export function buildGlassSnapshot() {
       .map((f) => readJson<Record<string, unknown>>(path.join(lobstahHome(), 'watches', f)))
       .filter(Boolean),
     dispatches,
-    // Draft PRs awaiting a look — tend's derivation, badged with the shared
-    // prBadge. Walks as a lob whose click opens the PR.
-    prAttention: draftPrAttention().map((a) => {
-      const pr = readEvidence(a.id, a.lane).pr;
-      return { ...a, repo: repoOf(a.id, a.lane), badge: pr ? prBadge(pr) : undefined };
-    }),
+    ...attentionSnapshot(),
     mergeView,
   };
 }
@@ -326,7 +335,7 @@ a{color:var(--link);text-decoration:none}
 footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
 .lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;font-size:34px;line-height:1;user-select:none;animation:crawl 18s linear infinite}
 a.lob{color:inherit}
-.lob .bub .badge{display:inline-block;margin:3px 0 0 5px}
+.lob .bub .badge{display:inline-block;margin:0 0 3px}
 .lob .sprite{width:72px;height:56px;background:url(/lob-sprite.png) 0 0 no-repeat;background-size:400% 100%;image-rendering:pixelated;animation:step .5s steps(4) infinite}
 .lob .fallback{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
 .lob .bub{display:none;position:absolute;bottom:58px;right:-8px;z-index:2;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:6px 9px 5px;font-size:11px;line-height:1.35;color:var(--fg);width:max-content;max-width:150px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
@@ -349,6 +358,7 @@ a.lob{color:inherit}
 <div id="settingspop" role="dialog" aria-label="settings (this browser only)">
  <div class="row"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
  <div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span><span class="seg" id="lobseg"><button data-l="on">on</button><button data-l="off">off</button></span></div>
+ <div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml</span></span><span id="attnkinds" class="dim" style="font-size:11px;text-align:right;max-width:190px"></span></div>
 </div>
 <div class="chips"><span id="chips" style="display:contents"></span><span class="chip dim" id="clock"></span></div>
 <div class="controls">
@@ -420,6 +430,15 @@ function dispatchCards(list){if(!list.length)return '<div class="empty">no dispa
   +'<div class="meta">'+esc(x.repo)+' · '+x.lane+' '+x.bucket+' · '+ageEl(x.verbAt)+'</div>'
   +(x.note?'<div class="note">'+esc(x.note)+'</div>':'')
   +'<div class="foot">'+addrCell(x)+' '+prCell(x)+'</div></div>'}).join('')+'</div>'}
+// Attention kinds (tend's contract): the short label shown in lobs, the pet, and the table.
+const KIND_LABEL={'pr:draft':'draft','pr:review':'review','pr:checks':'checks','pr:ready':'ready',landed:'landed',watch:'watch'};
+const KIND_TONE={'pr:review':'bad','pr:checks':'bad','pr:ready':'ok','pr:draft':'dim',watch:'warn'};
+const kindLabel=(k)=>KIND_LABEL[k]||'';
+const isPrKind=(k)=>typeof k==='string'&&k.startsWith('pr:');
+function kindCell(x){
+ if(x.kind==='question')return '<span class="v-'+x.verb+'">'+x.verb+'</span>';
+ const tone=x.kind==='landed'?(x.verb==='failed'?'bad':'ok'):(KIND_TONE[x.kind]||'dim');
+ return '<span class="badge '+tone+'">'+esc(kindLabel(x.kind)||x.kind)+'</span>'+(x.kind==='landed'?' <span class="dim">'+esc(x.verb)+'</span>':'')}
 function trapRow(t){
  if(!t.live)return {stale:false,listen:'<span class="dot"></span><span class="dim">signed off</span>',hb:'<span class="dim">—</span>'};
  const stale=Date.now()-Date.parse(t.heartbeatAt)>1800000;
@@ -513,12 +532,15 @@ function render(d){
    '<span class="chip">daemon '+(d.daemon?('<span class="'+(hbOld?'bad':'ok')+'">'+(hbOld?'stale ':'')+ageEl(d.daemon.heartbeat)+' ago</span> <span class="dim">v'+esc(d.daemon.version)+'</span>'):'<span class="bad">down</span>')+'</span>'
    +inp.chips.helms.map(({x:h,stale})=>
      '<span class="chip click" onclick="showModal(\\'helm\\',\\''+esc(h.grounds)+'\\')">⛵ <b>'+esc(h.man)+'</b> <span class="dim">helm '+esc(h.grounds)+'</span> <span class="'+(stale?'warn':'ok')+'">'+(stale?'stale ':'')+ageEl(h.heartbeatAt)+' ago</span></span>').join(''))}
- const att=inp.attention;
- if(dirty.has('attention'))setHTML('attention',table(['id','repo','verb','question','age'],
-  att.map(x=>x.kind==='pr'
-   ?'<tr><td>'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.repo??'')+'</td><td>pr'+(x.badge?' <span class="badge '+esc(x.badge.tone)+'">'+esc(x.badge.text)+'</span>':'')+'</td><td class="grow"><a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">'+esc(x.note??'')+'</a></td><td>'+ageEl(x.at)+'</td></tr>'
-   :'<tr><td>'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc(x.note??'')+'</td><td>'+ageEl(x.verbAt)+'</td></tr>'),
-  'nothing needs a human'));
+ const att=inp.attention.items;
+ if(dirty.has('attention')){
+  // Read-only: the kinds come from config.toml (attentionKinds); the glass never toggles them.
+  setHTML('attnkinds',inp.attention.error?'<span class="bad">'+esc(inp.attention.error)+'</span>'
+   :'showing: '+(inp.attention.kinds||[]).map(esc).join(' · ')+' <span title="set attentionKinds in config.toml">(config.toml)</span>');
+  setHTML('attention',table(['id','repo','kind','note','age'],
+  att.map(x=>'<tr><td>'+esc(String(x.id).slice(0,8))+'</td><td>'+esc(x.repo??'')+'</td><td>'+kindCell(x)+'</td><td class="grow">'
+   +(x.prUrl&&isPrKind(x.kind)?'<a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">'+esc(x.note??'')+'</a>':esc(x.note??''))+'</td><td>'+ageEl(x.at)+'</td></tr>'),
+  'nothing needs a human'))}
  if(dirty.has('dispatches')){const list=inp.dispatches.list;
   setHTML('dispatches',st.view==='cards'?dispatchCards(list):dispatchTable(list))}
  if(dirty.has('traps')){const traps=inp.traps.list.map(t=>t.x);
@@ -558,7 +580,7 @@ function renderLobs(att){
  // a question lob opens its dispatch modal.
  document.getElementById('lobs').innerHTML=items.map((it,i)=>{
   const style='animation-duration:'+(((innerWidth+180)/(100+i*12)).toFixed(1))+'s;animation-delay:-'+((i*9)%14)+'s';
-  const body='<div class="bub"><span>'+esc(it.text.length>48?it.text.slice(0,47)+'…':it.text)+'</span>'+(it.draft?'<span class="badge dim">draft</span>':'')+'</div>'
+  const body='<div class="bub">'+(it.label?'<span class="badge dim">'+esc(it.label)+'</span> ':'')+'<span>'+esc(it.text.length>48?it.text.slice(0,47)+'…':it.text)+'</span></div>'
    +(spriteOk===false?'<span class="fallback">🦞</span>':'<div class="sprite"></div>')
    +'<img class="star" src="/star.png" alt="" onerror="this.remove()">';
   return it.href

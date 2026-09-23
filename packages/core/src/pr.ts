@@ -32,7 +32,7 @@ export function parsePrRef(s: string): PrRef | undefined {
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
-  'state,isDraft,headRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt';
+  'state,isDraft,headRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
 
 export interface GhRollupItem {
   __typename?: string;
@@ -47,6 +47,13 @@ export interface GhRollupItem {
   targetUrl?: string;
 }
 
+/** One entry of `gh pr view --json reviews` — only the fields the check reads (never the body). */
+export interface GhReview {
+  author?: { login?: string };
+  state?: string;
+  submittedAt?: string;
+}
+
 export interface GhPrView {
   state: string;
   isDraft: boolean;
@@ -57,6 +64,14 @@ export interface GhPrView {
   mergedAt?: string | null;
   closedAt?: string | null;
   updatedAt?: string;
+  reviews?: GhReview[] | null;
+  /**
+   * Unresolved review threads, from the one GraphQL query the check makes
+   * while the PR is open (`gh pr view --json` has no reviewThreads field).
+   * Absent when that query failed or was skipped — the observation then
+   * carries no unresolvedThreads.
+   */
+  unresolvedThreads?: number;
 }
 
 type Outcome = 'passed' | 'failed' | 'pending';
@@ -99,7 +114,39 @@ export interface PrEvidence {
   mergeStateStatus: string;
   headSha: string;
   checks: { total: number; passed: number; failed: number; pending: number };
+  /** Review state; comment bodies are never stored. */
+  review?: PrReview;
   observedAt: string;
+}
+
+export interface PrReview {
+  /** Absent when the reviewThreads query failed for this observation. */
+  unresolvedThreads?: number;
+  changesRequested: boolean;
+  lastReviewAt?: string;
+}
+
+/**
+ * Review state from the reviews list: changes are requested when the PR's
+ * reviewDecision says so (branch protection) or when any reviewer's latest
+ * decisive review (APPROVED / CHANGES_REQUESTED / DISMISSED) requests them —
+ * reviewDecision is empty on repos that don't require reviews.
+ */
+export function prReview(view: GhPrView): PrReview {
+  const latest = new Map<string, string>();
+  let lastReviewAt: string | undefined;
+  const reviews = [...(view.reviews ?? [])].sort((a, b) => (a.submittedAt ?? '').localeCompare(b.submittedAt ?? ''));
+  for (const r of reviews) {
+    if (r.submittedAt && (!lastReviewAt || r.submittedAt > lastReviewAt)) lastReviewAt = r.submittedAt;
+    const state = (r.state ?? '').toUpperCase();
+    if (state === 'APPROVED' || state === 'CHANGES_REQUESTED' || state === 'DISMISSED') latest.set(r.author?.login ?? '?', state);
+  }
+  const changesRequested = view.reviewDecision === 'CHANGES_REQUESTED' || [...latest.values()].includes('CHANGES_REQUESTED');
+  return {
+    ...(view.unresolvedThreads !== undefined ? { unresolvedThreads: view.unresolvedThreads } : {}),
+    changesRequested,
+    ...(lastReviewAt ? { lastReviewAt } : {}),
+  };
 }
 
 export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEvidence {
@@ -114,6 +161,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
     mergeStateStatus: view.mergeStateStatus ?? '',
     headSha: view.headRefOid,
     checks: { total: checks.length, passed: count('passed'), failed: count('failed'), pending: count('pending') },
+    review: prReview(view),
     observedAt,
   };
 }
@@ -242,7 +290,45 @@ export function ghPrView(ref: PrRef): GhPrView {
   );
   if (res.error) throw new Error(`gh: ${res.error.message}`);
   if (res.status !== 0) throw new Error(res.stderr.trim() || `gh exited ${res.status}`);
-  return JSON.parse(res.stdout) as GhPrView;
+  const view = JSON.parse(res.stdout) as GhPrView;
+  if (view.state === 'OPEN') {
+    const threads = ghUnresolvedThreads(ref);
+    if (threads !== undefined) view.unresolvedThreads = threads;
+  }
+  return view;
+}
+
+const THREADS_QUERY =
+  'query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved}}}}}';
+
+/**
+ * The one extra read-only call: unresolved review threads over GraphQL,
+ * which `gh pr view --json` cannot return. Only isResolved is requested —
+ * no bodies. A failure yields undefined, never an error: the observation
+ * still stamps changesRequested and lastReviewAt from gh pr view.
+ */
+export function ghUnresolvedThreads(ref: PrRef): number | undefined {
+  const res = spawnSync(
+    'gh',
+    ['api', 'graphql', '-f', `query=${THREADS_QUERY}`, '-f', `owner=${ref.owner}`, '-f', `repo=${ref.repo}`, '-F', `n=${ref.number}`],
+    { encoding: 'utf8', timeout: 60_000 },
+  );
+  if (res.error || res.status !== 0) return undefined;
+  return parseUnresolvedThreads(res.stdout);
+}
+
+/** Count unresolved threads in the GraphQL response; undefined when it isn't the expected shape. */
+export function parseUnresolvedThreads(stdout: string): number | undefined {
+  try {
+    const nodes = (
+      JSON.parse(stdout) as {
+        data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: Array<{ isResolved?: boolean }> } } } };
+      }
+    ).data?.repository?.pullRequest?.reviewThreads?.nodes;
+    return Array.isArray(nodes) ? nodes.filter((t) => t.isResolved === false).length : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface PrBadge {
@@ -261,7 +347,9 @@ export function prBadge(pr: PrEvidence): PrBadge {
   if (pr.state === 'CLOSED') return { text: 'closed', tone: 'dim' };
   if (pr.draft) return { text: 'draft', tone: 'dim' };
   if (failed > 0) return { text: `checks ${failed}/${total} failed`, tone: 'bad' };
-  if (pr.reviewDecision === 'CHANGES_REQUESTED') return { text: 'changes requested', tone: 'bad' };
+  if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested) return { text: 'changes requested', tone: 'bad' };
+  const threads = pr.review?.unresolvedThreads ?? 0;
+  if (threads > 0) return { text: `${threads} unresolved`, tone: 'warn' };
   if (pending > 0) return { text: `checks ${passed}/${total}`, tone: 'warn' };
   if (pr.mergeStateStatus === 'DIRTY') return { text: 'conflicts', tone: 'bad' };
   if (pr.reviewDecision === 'REVIEW_REQUIRED') return { text: 'review', tone: 'warn' };
