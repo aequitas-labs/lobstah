@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { laneDirs, loadConfig, lobstahHome } from '@lobstah/core';
+import { laneDirs, loadConfig, lobstahHome, storedDescriptor } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 
 export interface CullItem {
@@ -9,9 +9,16 @@ export interface CullItem {
   id: string;
   target: string;
   ageDays: number;
+  bytes: number;
 }
 
 const DAY = 86_400_000;
+
+function bytesAt(target: string): number {
+  const stat = fs.lstatSync(target);
+  if (stat.isDirectory()) return fs.readdirSync(target).reduce((sum, name) => sum + bytesAt(path.join(target, name)), 0);
+  return stat.isFile() ? stat.size : 0;
+}
 
 function idsIn(dir: string): Set<string> {
   try {
@@ -31,16 +38,24 @@ export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
   const items: CullItem[] = [];
   const live = new Set<string>();
   const doneMtimes = new Map<string, number>();
+  const referencedAttachmentState = new Set<string>();
+
+  const retainReferences = (id: string, lane: Lane) => {
+    for (const attachment of storedDescriptor(id, lane)?.attachments ?? []) {
+      referencedAttachmentState.add(path.dirname(path.dirname(attachment.path)));
+    }
+  };
 
   for (const lane of ['work', 'chore'] as Lane[]) {
     const d = laneDirs(lane);
-    for (const id of idsIn(d.queue)) live.add(id);
-    for (const id of idsIn(d.active)) live.add(id);
+    for (const id of idsIn(d.queue)) { live.add(id); retainReferences(id, lane); }
+    for (const id of idsIn(d.active)) { live.add(id); retainReferences(id, lane); }
     for (const id of idsIn(d.done)) {
       const p = path.join(d.done, id);
       const m = fs.statSync(p).mtimeMs;
       doneMtimes.set(id, m);
-      if (m < cutoff) items.push({ kind: 'done', id, target: p, ageDays: Math.floor((now - m) / DAY) });
+      if (m >= cutoff) retainReferences(id, lane);
+      if (m < cutoff) items.push({ kind: 'done', id, target: p, ageDays: Math.floor((now - m) / DAY), bytes: bytesAt(p) });
     }
   }
 
@@ -50,19 +65,29 @@ export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
     const doneAt = doneMtimes.get(id);
     if (doneAt !== undefined && doneAt >= cutoff) continue; // recent catch — keep for attach/swap
     const p = path.join(wtRoot, id);
-    items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - fs.statSync(p).mtimeMs) / DAY) });
+    items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - fs.statSync(p).mtimeMs) / DAY), bytes: bytesAt(p) });
   }
 
   for (const lane of ['work', 'chore'] as Lane[]) {
     const d = laneDirs(lane);
-    const seen = new Set<string>();
+    const groups = new Map<string, { mtime: number; bytes: number }>();
     for (const f of fs.readdirSync(d.state)) {
-      const id = f.replace(/\.(status|events|evidence|attn|notified|runner\.log)$/, '');
-      if (id === f || seen.has(id) || live.has(id) || doneMtimes.has(id)) continue;
-      const m = fs.statSync(path.join(d.state, f)).mtimeMs;
-      if (m >= cutoff) continue;
-      seen.add(id);
-      items.push({ kind: 'state', id, target: path.join(d.state, `${id}.*`), ageDays: Math.floor((now - m) / DAY) });
+      const target = path.join(d.state, f);
+      const directory = fs.statSync(target).isDirectory();
+      if (directory && !fs.existsSync(path.join(target, 'attachments'))) continue;
+      const id = directory ? f : f.replace(/\.(status|events|evidence|attn|notified|runner\.log)$/, '');
+      if (id === f && !directory) continue;
+      if (live.has(id) || (doneMtimes.get(id) ?? 0) >= cutoff || referencedAttachmentState.has(path.join(d.state, id))) continue;
+      const previous = groups.get(id);
+      groups.set(id, {
+        mtime: Math.max(previous?.mtime ?? 0, fs.statSync(target).mtimeMs),
+        bytes: (previous?.bytes ?? 0) + bytesAt(target),
+      });
+    }
+    for (const [id, group] of groups) {
+      const ageFrom = doneMtimes.get(id) ?? group.mtime;
+      if (ageFrom >= cutoff) continue;
+      items.push({ kind: 'state', id, target: path.join(d.state, `${id}.*`), ageDays: Math.floor((now - ageFrom) / DAY), bytes: group.bytes });
     }
   }
   return items;
@@ -93,7 +118,7 @@ export function applyCull(items: CullItem[]): void {
   for (const item of items.filter((i) => i.kind === 'state')) {
     const dir = path.dirname(item.target);
     for (const f of fs.readdirSync(dir)) {
-      if (f.startsWith(`${item.id}.`)) fs.rmSync(path.join(dir, f), { force: true });
+      if (f === item.id || f.startsWith(`${item.id}.`)) fs.rmSync(path.join(dir, f), { recursive: true, force: true });
     }
   }
 }

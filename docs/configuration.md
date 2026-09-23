@@ -52,6 +52,7 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
 | `wallClockSecs` | `3600` | Hard per-dispatch ceiling, enforced by the runner. |
 | `choreRetentionDays` | `7` | Completed chores age out of `chores/done/`. |
+| `attachmentMaxBytes` | `26214400` (25 MiB) | Maximum size of each file supplied with repeatable `dispatch --attach` or `send --attach`. |
 
 ## `[soak]` — soaking sessions (`lobstah soak`)
 

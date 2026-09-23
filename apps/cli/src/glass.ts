@@ -18,7 +18,7 @@ import {
   readSessionClaim,
   readStatusLog,
 } from '@lobstah/core';
-import type { Descriptor, Lane, Notice } from '@lobstah/core';
+import type { Attachment, Descriptor, Lane, Notice } from '@lobstah/core';
 import { readMergeView } from '@lobstah/pick';
 import { lobItems } from './glass-lobs.js';
 
@@ -83,6 +83,15 @@ interface GlassMessage {
   from: string;
   at: string;
   text: string;
+  attachments?: Attachment[];
+}
+
+function messageAttachments(dir: string): Attachment[] {
+  return [dir, path.join(dir, 'handled')].flatMap((folder) =>
+    listDir(folder)
+      .filter((file) => file.endsWith('.meta.json'))
+      .flatMap((file) => readJson<{ attachments?: Attachment[] }>(path.join(folder, file))?.attachments ?? []),
+  );
 }
 
 /**
@@ -99,11 +108,12 @@ function trapMessages(trapId: string): GlassMessage[] {
     } catch {
       return undefined;
     }
+    const attachments = readJson<{ attachments?: Attachment[] }>(file.replace(/\.msg$/, '.meta.json'))?.attachments;
     try {
       const p = JSON.parse(raw) as { from?: string; at?: string; text?: string };
-      return { file: path.basename(file), state, from: p.from ?? 'unknown', at: p.at ?? '', text: p.text ?? '' };
+      return { file: path.basename(file), state, from: p.from ?? 'unknown', at: p.at ?? '', text: p.text ?? '', attachments };
     } catch {
-      return { file: path.basename(file), state, from: 'unknown', at: '', text: raw };
+      return { file: path.basename(file), state, from: 'unknown', at: '', text: raw, attachments };
     }
   };
   const rows = [
@@ -151,6 +161,8 @@ function dispatchRows() {
         for: r.d.for,
         followUp: r.d.followUp,
         brief: r.d.brief,
+        attachments: r.d.attachments ?? [],
+        messageAttachments: messageAttachments(inboxDir),
         verb: last?.verb ?? 'unknown',
         note: last?.note,
         verbAt: last?.at,
@@ -349,12 +361,17 @@ window.copyCmd=async(el,text)=>{try{await navigator.clipboard.writeText(text)}ca
  else{el.classList.add('copied');setTimeout(()=>el.classList.remove('copied'),1000)}};
 function cmdRow(text){const j=JSON.stringify(text).replace(/"/g,'&quot;');
  return '<div class="cmd"><code title="click to copy" onclick="copyCmd(this,'+j+')">'+esc(text)+'</code><button title="copy" onclick="copyCmd(this,'+j+')">⧉</button></div>'}
+function attachmentRows(items){return items.map(a=>'<div class="sub">'+esc(a.name)+' · '+esc(a.type)+' · '+esc(a.bytes)+' bytes</div>'+cmdRow(a.path)).join('')}
 function detailBody(x){return '<div class="sec">brief</div><pre>'+esc(x.brief)+'</pre>'
+ +(x.attachments.length?'<div class="sec">attachments ('+x.attachments.length+')</div>'+attachmentRows(x.attachments):'')
+ +(x.messageAttachments.length?'<div class="sec">message attachments ('+x.messageAttachments.length+')</div>'+attachmentRows(x.messageAttachments):'')
  +(x.followUp?'<div class="sec">forks</div><pre>'+esc(x.followUp)+'</pre>':'')
  +'<div class="sec">log</div><div class="loglines">'+(x.log.length?x.log.map(e=>esc(e.at)+'  '+esc(e.verb)+(e.note?'  '+esc(e.note):'')).join('\\n'):'no entries yet')+'</div>'
  +(x.inbox.length?'<div class="sec">inbox</div><div class="loglines">'+x.inbox.map(esc).join('\\n---\\n')+'</div>':'')
  +(x.evidence?'<div class="sec">evidence</div><div class="loglines">'+esc(JSON.stringify(x.evidence))+'</div>':'')}
 function tableDetail(x){return '<b>brief</b>\\n'+esc(x.brief)
+ +(x.attachments.length?'<div class="sec">attachments ('+x.attachments.length+')</div>'+attachmentRows(x.attachments):'')
+ +(x.messageAttachments.length?'<div class="sec">message attachments ('+x.messageAttachments.length+')</div>'+attachmentRows(x.messageAttachments):'')
  +(x.followUp?'\\n<b>forks</b> '+esc(x.followUp):'')
  +'\\n<b>log</b>\\n'+x.log.map(e=>esc(e.at)+'  '+esc(e.verb)+(e.note?'  '+esc(e.note):'')).join('\\n')
  +(x.inbox.length?'\\n<b>inbox</b>\\n'+x.inbox.map(esc).join('\\n---\\n'):'')
@@ -437,7 +454,7 @@ function renderModal(d){
    +'<div class="sec">lifecycle ('+t.notices.length+')</div>'
    +(t.notices.length?t.notices.map(n=>'<div class="loglines">'+age(n.at)+' ago · <b>'+esc(n.kind)+'</b> — '+esc(n.text)+'</div>').join(''):'<div class="empty">none recorded</div>')
    +'<div class="sec">messages ('+t.messages.length+')</div>'
-   +(t.messages.length?t.messages.map(m=>'<div class="msg'+(m.from==='helm'?' from-helm':'')+'"><div class="hdr">from '+esc(m.from)+' · '+(m.at?age(m.at)+' ago':'')+' · '+(m.state==='pending'?'<span class="warn">pending</span>':'<span class="ok">delivered</span>')+'</div>'+esc(m.text)+'</div>').join(''):'<div class="empty">none</div>')
+   +(t.messages.length?t.messages.map(m=>'<div class="msg'+(m.from==='helm'?' from-helm':'')+'"><div class="hdr">from '+esc(m.from)+' · '+(m.at?age(m.at)+' ago':'')+' · '+(m.state==='pending'?'<span class="warn">pending</span>':'<span class="ok">delivered</span>')+'</div>'+esc(m.text)+(m.attachments?.length?attachmentRows(m.attachments):'')+'</div>').join(''):'<div class="empty">none</div>')
    +'<div class="sec">catches ('+t.catches.length+')</div>'
    +(t.catches.length?t.catches.map(c=>'<div class="catch"><div class="hdr"><b>'+esc(c.id.slice(0,8))+'</b><span class="badge v-'+c.verb+'">'+c.verb+'</span><span class="dim">'+age(c.verbAt)+'</span>'+prCell(c)+'</div>'
      +'<div class="loglines">'+c.log.map(e=>esc(e.at)+'  '+esc(e.verb)+(e.note?'  '+esc(e.note):'')).join('\\n')+'</div></div>').join(''):'<div class="empty">none yet</div>');

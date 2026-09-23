@@ -106,6 +106,10 @@ Work moves through two **lanes** — `work` (human-originated) and `chore`
 tracker) — and three **buckets** within a lane: `queued`, `active`, `done`.
 Bucket transitions are atomic renames; the directory *is* the state.
 
+An **attachment** is a dispatch descriptor entry `{ name, path, bytes, type }`
+pointing to a copied, dispatch-owned file under `state/<id>/attachments/`;
+follow-ups reuse those paths, and messages may carry their own attachments.
+
 ## Doctor statuses
 
 `lobstah doctor` grades each check with one of four words. **Owner:**

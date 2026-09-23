@@ -44,6 +44,7 @@ lobstah man wait --peek                           # standing events, not consume
 
 Repo keys come from `~/.lobstah/config.toml`; `lobstah repos` lists them.
 All output is TOON — parse it directly.
+Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 
 ## Rules
 
