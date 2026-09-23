@@ -355,7 +355,12 @@ lobstah stow                    # sign off; an open catch requeues, unread
 survives session restarts — a new session in the same worktree resumes the
 same trap (a *live* foreign session is refused: the session lock). The
 session id (from the plugin's session-start brief) lives inside the
-registration as the liveness principal. Once soaking, the same Stop hook
+registration as the liveness principal. The harness (claude or codex) is
+inferred — from `CLAUDE*` / `CODEX*` in the environment, and when both are
+set (one harness launched inside the other) from the session id's format:
+Codex thread ids are UUIDv7, Claude Code session ids UUIDv4 — and
+`--harness` overrides; an undecidable case refuses rather than guessing.
+Once soaking, the same Stop hook
 that parks a lobsterman parks the worker: at turn end it delivers messages
 first, then claims bait and wakes with the brief. While it works a catch,
 the park wakes it for `lobstah send` messages and cancels instead.

@@ -151,7 +151,7 @@ export function signOnTrap(opts: {
   if (!prior) {
     postNotice({
       kind: 'trap-signed-on',
-      text: `trap wt:${trapId} signed on (${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for wt:${trapId}\``,
+      text: `trap wt:${trapId} signed on (${opts.harness}, ${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for wt:${trapId}\``,
       refId: trapId,
       repo: opts.repo,
       by: opts.sessionId,
