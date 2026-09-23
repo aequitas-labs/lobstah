@@ -505,7 +505,7 @@ function renderDeck(d,inp){const view=inp.view;
    meta:(p?'next #'+p.number+(p.title?' '+esc(p.title):''):'nothing mergeable')+' · '+s.behind+' behind',open:p?"showModal(\\'pr\\',\\'"+esc(p.key)+"\\')":''}});
  return '<div class="deckgrid">'+deckBlock('attention',attention,'notices',4,view)+deckBlock('in flight',flight,'dispatches',4,view)
   +deckBlock('landed since report',landed,'dispatches',3,view)+deckBlock('traps',traps,'traps',3,view)+deckBlock('PRs',prs,'prs',3,view)+'</div>'}
-const watchCell=(w)=>{const ws=watchState(w);return ws.at?ws.text+' · '+ageEl(ws.at)+' ago':'<span class="dim">'+ws.text+'</span>'};
+const watchCell=(w)=>{const ws=watchState(w);return w?ws.text+' · '+(ws.at?ageEl(ws.at)+' ago':'never checked'):'<span class="dim">'+ws.text+'</span>'};
 const prOpen=(p)=>"showModal(\\'pr\\',\\'"+esc(p.key)+"\\')";
 const prLink=(p)=>'<a href="'+esc(p.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">#'+p.number+'</a>';
 function prChecks(p){return esc(p.checks.passed)+'/'+esc(p.checks.total)+' passed'+(p.checks.failed?' · '+p.checks.failed+' failed':'')+(p.checks.pending?' · '+p.checks.pending+' pending':'')}
@@ -568,7 +568,7 @@ function renderModal(d){
  }else if(modal.type==='pr'){
   const v=prModalView(d,modal.key),p=v.pr,s=v.stack,w=v.watch;
   html='<span class="x" onclick="closeModal()">×</span><h3>'+prLink(p)+' '+esc(p.title||'')+' <span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>'
-    +(p.draft?' <span class="badge dim">draft</span>':'')+'</h3>'
+    +(p.draft&&p.badge.text!=='draft'?' <span class="badge dim">draft</span>':'')+'</h3>'
    +'<div class="sub">'+esc(p.repo)+' · '+esc(p.state)+' · observed '+ageEl(p.observedAt)+' ago'+(p.gate?' · gate '+esc(p.gate):'')+'</div>'
    +'<div class="sec">checks</div><div>'+prChecks(p)+'</div>'
    +'<div class="sec">review</div><div>'+(prReview(p)||'<span class="dim">no review yet</span>')+'</div>'
