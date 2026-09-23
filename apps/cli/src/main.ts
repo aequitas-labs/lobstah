@@ -905,6 +905,10 @@ ${progress}`,
       throw new Error(`${id} is neither queued nor active — already finished (\`lobstah catch ${id}\`)`);
     }
     case 'man:wait': {
+      // --peek never parks, so a deadline has nothing to bound.
+      if (args.includes('--peek') && arg(args, '--timeout') !== undefined) {
+        throw new UsageError(`--peek never blocks — drop --timeout\n\n${usageFor('man:wait')!}`);
+      }
       // Strict helm rule: wait consumes attention events — the helm's wakes.
       // With a claimed lobsterman anywhere, only that session may run it, and
       // a grounds-scoped wait only by that grounds' own helm.
@@ -964,6 +968,21 @@ ${progress}`,
         if (standingNotices.length > 0) emitNotices(standingNotices, sid);
         break;
       }
+      // The periodic report as a peek — the cursor moves only on `man
+      // report`. Silent when nothing changed.
+      const peekDigest = () => {
+        const grounds = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
+        const digest = buildDigest({ cursor: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
+        if (digest.changed) console.log(renderDigest(digest));
+        return digest;
+      };
+      if (!consume) {
+        // --peek is a session-start check, not a park: nothing standing
+        // means return now (exit 0 — nothing timed out).
+        console.log(toonKV({ standing: 'none' }));
+        peekDigest();
+        break;
+      }
       const baseline = captureWaitBaseline();
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 1500));
@@ -991,9 +1010,7 @@ ${progress}`,
       // so a digest lost with a dead background task resurfaces on the next
       // timeout instead of being marked delivered to nobody. Silent when
       // nothing changed — the loop should not train its reader to skim.
-      const grounds = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
-      const digest = buildDigest({ cursor: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
-      if (digest.changed) console.log(renderDigest(digest));
+      const digest = peekDigest();
       console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
       const flags = `${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${groundsName}` : ''}`;
       console.log(

@@ -249,7 +249,9 @@ the stop, leaving tier 1 as the backstop past the horizon.
 
 Two habits worth adding to a lobsterman session's instructions: run
 `lobstah man wait --peek` at session start (a wake consumed by a session that
-died mid-handling is still standing state — peek resurfaces it), and treat
+died mid-handling is still standing state — peek resurfaces it without
+consuming it, and returns at once with `standing: none` and exit 0 when
+nothing is; it never blocks, so it takes no `--timeout`), and treat
 the haul context as the work order for that turn.
 
 The trade-offs, honestly. While parked, the turn never ends, so the terminal

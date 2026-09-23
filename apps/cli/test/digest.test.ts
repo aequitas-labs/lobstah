@@ -102,6 +102,12 @@ describe('man report — the delta digest', () => {
     const due = dueHelmDigest(helm, 900);
     expect(due?.changed).toBe(true); // never reported — due immediately
     advanceCursor('fleet', due!.now);
+    // The delta is strictly after the cursor (ms resolution): a status
+    // stamped in the cursor's own millisecond reads as already reported, so
+    // let the clock tick before landing the next one.
+    while (Date.now() <= Date.parse(due!.now)) {
+      /* spin to the next millisecond */
+    }
     land('aaaaaaaa-0000-0000-0000-000000000021', 'done');
     expect(dueHelmDigest(helm, 900)).toBeUndefined(); // delta exists, cadence not elapsed
     const old = new Date(Date.now() - 901_000);
