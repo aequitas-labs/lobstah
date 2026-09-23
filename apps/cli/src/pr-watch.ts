@@ -7,6 +7,7 @@ import {
   derivePrEvents,
   evidencePath,
   ghPrView,
+  isFailingConclusion,
   listWatches,
   loadConfig,
   mergeEvidence,
@@ -15,10 +16,12 @@ import {
   prEvidence,
   prFixBrief,
   readEvidence,
+  readPr,
   readStatusLog,
   readWatch,
+  upsertPr,
 } from '@lobstah/core';
-import type { GhPrView, Lane, PrEvent, PrRef, Watch } from '@lobstah/core';
+import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch } from '@lobstah/core';
 import { githubRepoFromOrigin } from '@lobstah/pick';
 import { repoOf } from './digest.js';
 
@@ -78,28 +81,44 @@ function laneOf(id: string): Lane | undefined {
 }
 
 /**
- * Stamp the owner's evidence `pr` object (merge, never clobber), and on the
- * open → merged/closed transition post the helm notice once. The notice
- * comes from the evidence transition, not from watch events, so whoever
- * observes first — pick's check or the inline poller — announces it, and
- * the previous evidence state plus a dedupe key keep it once-only.
+ * One observation of a PR, written everywhere it belongs: the PR record
+ * (always — man-owned or dispatch-owned, see core prs.ts), and the owning
+ * dispatch's evidence when a dispatch owns the watch (its per-dispatch
+ * view, merged, never clobbered). The open → merged/closed notice comes
+ * from the record's transition — the one carrier for those two events
+ * (docs/vocabulary.md) — so whoever observes first, pick's check or the
+ * inline poller, announces it, and the previous state plus a dedupe key
+ * keep it once-only. A PR with no record yet (observed before records
+ * existed) falls back to the dispatch's previous evidence for that state.
  */
-export function stampPrEvidence(id: string, ref: PrRef, view: GhPrView, now = new Date()): void {
-  const lane = laneOf(id);
-  if (!lane) return; // culled owner — nothing to stamp
-  const before = readEvidence(id, lane).pr;
+export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: string; now?: Date } = {}): PrRecord {
+  const now = opts.now ?? new Date();
   const pr = prEvidence(ref, view, now.toISOString());
-  mergeEvidence(id, lane, { pr });
-  if (before?.state === 'OPEN' && (pr.state === 'MERGED' || pr.state === 'CLOSED')) {
+  const id = opts.dispatchId;
+  const lane = id ? laneOf(id) : undefined;
+  const legacyBefore = id && lane ? readEvidence(id, lane).pr : undefined;
+  const { before, after } = upsertPr(pr, lane ? id : undefined);
+  if (id && lane) mergeEvidence(id, lane, { pr });
+  const was = before?.state ?? legacyBefore?.state;
+  if (was === 'OPEN' && (pr.state === 'MERGED' || pr.state === 'CLOSED')) {
     const merged = pr.state === 'MERGED';
+    const owner = after.dispatches.at(-1);
+    const ownerLane = owner ? laneOf(owner) : undefined;
     postNotice({
       kind: merged ? 'pr-merged' : 'pr-closed',
-      text: `${ref.key} ${merged ? 'merged' : 'closed without merge'} — dispatch ${id.slice(0, 8)} (${ref.url})`,
-      refId: id,
-      repo: repoOf(id, lane),
+      text: `${ref.key} ${merged ? 'merged' : 'closed without merge'} — ${owner ? `dispatch ${owner.slice(0, 8)}` : 'no dispatch (watched by the helm)'} (${ref.url})`,
+      refId: owner ?? ref.key,
+      ...(owner && ownerLane ? { repo: repoOf(owner, ownerLane) } : {}),
       dedupeKey: `${merged ? 'pr-merged' : 'pr-closed'}-${ref.key}-${view.mergedAt ?? view.closedAt ?? ''}`,
     });
   }
+  return after;
+}
+
+/** The dispatch-owned observation, as #27 named it: record + that dispatch's evidence. */
+export function stampPrEvidence(id: string, ref: PrRef, view: GhPrView, now = new Date()): void {
+  if (!laneOf(id)) return; // culled owner — nothing to stamp (the record still comes from observePr callers)
+  observePr(ref, view, { dispatchId: id, now });
 }
 
 function rawConfig(): Record<string, unknown> {
@@ -137,17 +156,35 @@ export function workEvents(ref: PrRef, events: PrEvent[], pickupOwnsReview = pic
 }
 
 /**
+ * Which derived events a man-owned watch delivers as attention — the
+ * counterpart of workEvents (dispatch-owned) above: only what needs a
+ * human. A failing check, and a review decision turning to changes
+ * requested. Green checks, draft toggles, merge-state changes, and
+ * approvals go to the PR record only; merged and closed reach the helm as
+ * a notice from the record's transition (observePr), never also as a watch
+ * event — one carrier per event kind.
+ */
+export function manEvents(events: PrEvent[]): PrEvent[] {
+  return events.filter(
+    (e) =>
+      (e.kind === 'check-completed' && isFailingConclusion(e.conclusion)) ||
+      (e.kind === 'review-decision' && e.value === 'CHANGES_REQUESTED'),
+  );
+}
+
+/**
  * `lobstah watch check-pr <ref> [--for <uuid>] [--cursor <c>]`: one gh call,
- * the watch-contract JSON on stdout. With --for it stamps the owner's
- * evidence and emits only work events; man-owned, it emits every event.
+ * the watch-contract JSON on stdout. Every run writes the PR record; with
+ * --for it also stamps the owner's evidence and emits only work events
+ * (workEvents); man-owned, only what needs a human (manEvents).
  */
 export function runPrCheck(refArg: string, cursor: string | undefined, forId: string | undefined): string {
   const ref = parsePrRef(refArg);
   if (!ref) throw new Error(`not a PR reference: ${refArg} (want pr:<owner>/<repo>#<n> or a github.com PR URL)`);
   const view = ghPrView(ref);
   const out = derivePrEvents(ref, view, cursor);
-  if (forId) stampPrEvidence(forId, ref, view);
-  const events = forId ? workEvents(ref, out.events) : out.events;
+  observePr(ref, view, { dispatchId: forId });
+  const events = forId ? workEvents(ref, out.events) : manEvents(out.events);
   return JSON.stringify({ cursor: out.cursor, events, ...(out.done ? { done: true } : {}) });
 }
 
@@ -173,12 +210,12 @@ export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Da
     const ref = parsePrRef(w.key);
     const lane = laneOf(id);
     if (!ref || !lane) continue;
-    const seen = readEvidence(id, lane).pr;
+    const seen = readPr(ref.key) ?? readEvidence(id, lane).pr;
     // A terminal PR has nothing left to observe; its watch retires when pick delivers.
     if (seen && (seen.state === 'MERGED' || seen.state === 'CLOSED')) continue;
     if (seen && now - Date.parse(seen.observedAt) < (w.everySecs ?? defaultEverySecs) * 1000) continue;
     try {
-      stampPrEvidence(id, ref, ghPrView(ref), new Date(now));
+      observePr(ref, ghPrView(ref), { dispatchId: id, now: new Date(now) });
     } catch {
       // gh missing or unauthenticated: pick's real check records lastError
     }

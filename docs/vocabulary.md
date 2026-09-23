@@ -165,18 +165,35 @@ badge) and `apps/cli/src/pr-watch.ts` (check, registration, evidence).
 | `draft` | Draft flipped (`value`). Evidence only. |
 | `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. |
 | evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. `review.changesRequested` comes from `reviewDecision` or any reviewer's latest decisive review; `unresolvedThreads` from the GraphQL query, omitted for an observation where that query failed. Comment bodies are never stored. The object is merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show. |
+| PR record | `~/.lobstah/prs/<owner>__<repo>__<n>.json` — the PR's latest observation keyed by the PR, not by a dispatch: the evidence `pr` object plus `key`, `repo` (`<owner>/<repo>`), and `dispatches` (the ids whose watch observed it; empty for a human's or a culled PR). **Owner:** `packages/core/src/prs.ts` (`upsertPr`, `readPrs`); the one writer is the preset's observation path (`observePr`), on every observation, man-owned or dispatch-owned — a dispatch-owned one also stamps that dispatch's evidence, which stays the per-dispatch view. Tend's `pr:*` kinds and `pr:ready` stack suppression, the glass PRs tab and stacks, the merged/closed notice, and PR acks read records first and fall back to dispatch evidence only for a PR with no record yet. `cull` removes records merged or closed longer than its window, never open ones. |
 
 Every event carries `headSha`. A dispatch-owned PR watch emits only work
 events (a failing check; a review decision pickup doesn't own), so the
 `owner` row is unchanged: its events always fork. The rest is evidence.
 Merged and closed reach the helm as a `pr-merged` / `pr-closed` notice,
-posted once by whichever process first stamps the open → terminal evidence
-transition — not by event routing. A man-owned PR watch emits every kind.
+posted once by whichever process first records the open → terminal
+transition on the **PR record** — not by event routing.
+
+A man-owned PR watch (no `--for`) delivers as attention only what needs a
+human (`manEvents`, beside `workEvents` in `apps/cli/src/pr-watch.ts`): a
+failing `check-completed`, and a `review-decision` turning to
+`CHANGES_REQUESTED`. Green checks, draft toggles, merge-state changes, and
+approvals go to the PR record only — they show as `pr:*` kinds and in the
+glass, never as `watch` attention.
+
+One carrier per event kind:
+
+| Event | Carrier |
+| ----- | ------- |
+| `check-completed`, failing | dispatch-owned: a continuation (pick); man-owned: a `watch` attention event |
+| `review-decision` | dispatch-owned: a continuation unless pickup owns review feedback; man-owned: a `watch` event only for `CHANGES_REQUESTED` |
+| `check-completed` green, `draft`, `merge-state`, approvals | the PR record (and the owner's evidence) only |
+| `merged`, `closed` | a `pr-merged` / `pr-closed` notice from the record transition only |
 
 Pick stays the single writer of watch progress. The inline poller (`man
 wait`, the helm park) runs PR checks for man-owned watches as usual, and
-only **observes** dispatch-owned ones: it stamps the evidence `pr` object
-(and so the merged notice) and never advances their cursor or consumes
+only **observes** dispatch-owned ones: it writes the PR record and the
+evidence `pr` object (and so the merged notice) and never advances their cursor or consumes
 their events, so pick still sees and forks every one.
 
 ## Soaking contract

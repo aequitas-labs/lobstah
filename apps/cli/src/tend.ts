@@ -17,6 +17,7 @@ import {
   prBadge,
   queuedDescriptor,
   readEvidence,
+  readPrs,
   readStatusLog,
   readWatch,
   readWatchEvents,
@@ -221,12 +222,8 @@ function groundsCursorFor(cfg: Config, repo: string | undefined): string {
   return Object.entries(cfg.grounds).find(([, g]) => g.repos.includes(repo))?.[0] ?? 'fleet';
 }
 
-/**
- * PR attention from evidence — the pr: watch's observations, never a forge
- * call. One item per (PR, kind), the newest observation winning when several
- * chain members carry the same PR.
- */
-function observedPrs(): Array<{ id: string; lane: Lane; pr: PrEvidence }> {
+/** Dispatch evidence `pr` objects, newest per PR url — the legacy source. */
+function evidencePrs(): Array<{ id: string; lane: Lane; pr: PrEvidence }> {
   const newest = new Map<string, { id: string; lane: Lane; pr: PrEvidence }>();
   for (const lane of ['work', 'chore'] as Lane[]) {
     let files: string[];
@@ -246,6 +243,29 @@ function observedPrs(): Array<{ id: string; lane: Lane; pr: PrEvidence }> {
   return [...newest.values()];
 }
 
+const dispatchLane = (id: string): Lane | undefined =>
+  (['work', 'chore'] as Lane[]).find((l) => fs.existsSync(path.join(laneDirs(l).state, `${id}.status`)));
+
+/**
+ * Observed PRs — the pr: watch's observations, never a forge call. Read
+ * order: PR records first (core prs.ts: every observation, man-owned or
+ * dispatch-owned), then dispatch evidence for a PR with no record yet. A
+ * record attaches to its newest dispatch still on disk; one with none (a
+ * human's PR, or a culled chain) is keyed by the PR itself: no chain, so
+ * nothing puts it on the hook.
+ */
+function observedPrs(records = readPrs(), legacy = evidencePrs()): Array<{ id: string; lane: Lane; pr: PrEvidence; dispatch: boolean }> {
+  const out: Array<{ id: string; lane: Lane; pr: PrEvidence; dispatch: boolean }> = [];
+  const seen = new Set<string>();
+  for (const r of records) {
+    seen.add(r.url);
+    const owner = [...r.dispatches].reverse().find((id) => dispatchLane(id) !== undefined);
+    out.push(owner ? { id: owner, lane: dispatchLane(owner)!, pr: r, dispatch: true } : { id: r.key, lane: 'work', pr: r, dispatch: false });
+  }
+  for (const e of legacy) if (!seen.has(e.pr.url)) out.push({ ...e, dispatch: true });
+  return out;
+}
+
 function prAttention(now: number, observed = observedPrs()): TendAttention[] {
   const reviewRounds = new Set(
     Object.values(readPickupMap())
@@ -253,13 +273,13 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
       .map((e) => e.uuid),
   );
   const out: TendAttention[] = [];
-  for (const { id, lane, pr } of observed) {
+  for (const { id, lane, pr, dispatch } of observed) {
     const kinds = prKinds(pr).filter((kind) => kind !== 'pr:ready' || !readyBlockedByStack(pr, observed.map((x) => x.pr)));
     if (kinds.length === 0) continue;
     const ref = parsePrRef(pr.url);
     const watchFollowUp = ref ? readWatch(ref.key)?.lastFollowUpId : undefined;
-    const chain = chainOf(id);
-    const since = readStatusLog(id, lane).at(-1)?.at ?? pr.observedAt;
+    const chain = dispatch ? chainOf(id) : [];
+    const since = (dispatch ? readStatusLog(id, lane).at(-1)?.at : undefined) ?? pr.observedAt;
     for (const kind of kinds) {
       if (onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
       out.push({
@@ -272,7 +292,7 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
         ageSecs: Math.max(0, Math.round((now - Date.parse(since)) / 1000)),
         at: since,
         note: PR_KIND_NOTE[kind]!(pr),
-        repo: repoOf(id, lane),
+        repo: dispatch ? repoOf(id, lane) : (ref ? `${ref.owner}/${ref.repo}` : undefined),
         prUrl: pr.url,
         number: pr.number,
         state: pr.state,
@@ -566,8 +586,10 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (d.prUrl && d.at !== undefined && now - Date.parse(d.at) < DAY_MS) stories.push(direct(d));
   }
 
-  const observed = observedPrs();
-  const stacks = deriveGlassPrs(observed.map(({ id, pr }) => ({ id, pr }))).stacks.filter((s) => s.open);
+  const records = readPrs();
+  const legacy = evidencePrs();
+  const observed = observedPrs(records, legacy);
+  const stacks = deriveGlassPrs(legacy.map(({ id, pr }) => ({ id, pr })), [], records).stacks.filter((s) => s.open);
   attention.push(...landedAttention(cfg, now), ...prAttention(now, observed));
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
