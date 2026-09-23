@@ -10,10 +10,11 @@ Codex with no settings surgery.
 
 | Piece | What it does |
 | ----- | ------------ |
-| SessionStart hook (`lobstah man brief`) | Announces the session's id and a one-line fleet state into the conversation, so every session starts oriented. |
-| Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the directory opts in with a `.lobstah-man` file (or `LOBSTAH_MAN=1`), or the session is soaking. |
+| SessionStart hook (`lobstah man brief`) | Announces the session's id and a one-line fleet state into the conversation, so every session starts oriented. A session that is neither helm nor trap gets the two copy-paste sign-on commands. |
+| Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends. |
-| `lobsterman` skill | The orchestrator's working knowledge: dispatching, tending, getting woken, soaking. |
+| `lobsterman` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
+| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, inbox, stowing. |
 
 ## Requirements
 
@@ -31,14 +32,20 @@ Codex with no settings surgery.
 
 ## Opting in
 
-The park never conscripts a session. Three gates, any one suffices:
+The park never conscripts a session. A session opts in as one of two roles:
 
-- `touch .lobstah-man` in a project — every session there acts as the
-  lobsterman (orchestrator).
-- `LOBSTAH_MAN=1` in the environment — this launch only.
-- `lobstah soak --session <id>` — this session volunteers as a *worker* and
-  takes dispatched bait (run it from a worktree; the id comes from the
-  session-start brief).
+| Role | How | What it does |
+| ---- | --- | ------------ |
+| Helm (orchestrator) | `lobstah man helm` | Signs on as the one lobsterman for its grounds: prints the charter, parks at turn end, and receives wakes and digests. `lobstah man relieve` steps down. |
+| Trap (worker) | `lobstah soak` from a linked worktree | Takes work the helm addresses to its `wt:<trap>` address. Never from the primary checkout. `lobstah stow` signs off. |
+
+Codex documents no session-id environment variable, so pass the id the
+session-start brief prints: `lobstah man helm --session <id>` or
+`lobstah soak --session <id>`. Codex ships the two skills, not slash
+commands — its plugin layout has no commands directory.
+
+Manual fallbacks without the helm: `touch .lobstah-man` in a project (every
+session there parks as the lobsterman), or `LOBSTAH_MAN=1` for one launch.
 
 Everything else — the manual, the pattern, the trade-offs — lives in
 [docs/lobsterman.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/lobsterman.md).

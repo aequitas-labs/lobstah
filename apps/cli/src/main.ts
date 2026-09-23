@@ -73,6 +73,7 @@ import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { charter } from './charter.js';
+import { buildBriefContext } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { applyCull, planCull } from './cull.js';
 import { MANUAL } from './manual.js';
@@ -83,6 +84,7 @@ import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { parseReportArgs } from './report-args.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
+import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, usageFor, validateArgs } from './usage.js';
 
 const HELP = `lobstah — supervision framework for coding agents
@@ -221,11 +223,28 @@ setup:
 
 Everything except daemon and pick works with both stopped: writes are files,
 reads are files. Output is TOON; agents can drive this CLI directly.
-Home: $LOBSTAH_HOME (default ~/.lobstah) — one daemon per home, enforced.`;
+Home: $LOBSTAH_HOME (default ~/.lobstah) — one daemon per home, enforced.
+Session id (--session verbs): the flag wins, then hook stdin, then
+$CLAUDE_CODE_SESSION_ID — inside Claude Code no flag is needed.`;
 
 function arg(args: string[], flag: string): string | undefined {
   const i = args.indexOf(flag);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+/**
+ * The calling session: `--session`, else hook stdin (only for verbs that
+ * are also hook entry points — `withStdin`), else the harness env. See
+ * resolveSessionId for the precedence contract.
+ */
+function callerSession(flag: string | undefined, withStdin = false): ResolvedSession | undefined {
+  return resolveSessionId({ flag, stdin: withStdin ? () => readHookStdin()?.session_id : undefined });
+}
+
+/** The strict helm rule, with the caller's discovered identity in the refusal. */
+function gateHelm(who: ResolvedSession | undefined, grounds?: string): void {
+  const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), who?.id, grounds);
+  if (refusal) throw new Error(explainRefusal(refusal, who));
 }
 
 // Inline watch cadence when no pick process is stamping checks; pick's own
@@ -418,8 +437,7 @@ async function mainCli(): Promise<void> {
       if (address) {
         const cfgDispatch = loadConfig();
         // Addressing a specific trap is steering — the claimed helm's alone.
-        const refusal = helmGate(liveHelms(cfgDispatch.helm.ttlSecs * 1000), arg(args, '--session'));
-        if (refusal) throw new Error(refusal);
+        gateHelm(callerSession(arg(args, '--session')));
         // `session:` is an alias resolved to the trap at dispatch time, so
         // the queued address survives session restarts.
         if (address.startsWith('session:')) {
@@ -562,8 +580,9 @@ async function mainCli(): Promise<void> {
       // worker processing untrusted content must not be able to instruct a
       // sibling through our own delivery machinery.
       const cfgSend = loadConfig();
-      const refusal = helmGate(liveHelms(cfgSend.helm.ttlSecs * 1000), sid);
-      if (refusal) throw new Error(refusal);
+      const sender = callerSession(sid);
+      sid = sender?.id;
+      gateHelm(sender);
       const from = sid !== undefined && helmOf(sid) !== undefined ? 'helm' : sid !== undefined ? `session:${sid.slice(0, 8)}` : 'terminal';
       const text = rest.join(' ');
       if (target.startsWith('wt:') || target.startsWith('session:')) {
@@ -684,8 +703,7 @@ async function mainCli(): Promise<void> {
       if (!id) throw new Error('swap requires a dispatch id');
       // Swapping is steering — the claimed helm's alone.
       {
-        const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), arg(args, '--session'));
-        if (refusal) throw new Error(refusal);
+        gateHelm(callerSession(arg(args, '--session')));
       }
       const lane = findLane(id);
       const activeDir = path.join(laneDirs(lane).active, id);
@@ -792,12 +810,10 @@ ${progress}`,
       // rule: advancing the cursor is the helm's alone once claimed, and a
       // grounds-scoped report only its own helm's.
       const cfgReport = loadConfig();
-      const sid = arg(args, '--session');
+      const caller = callerSession(arg(args, '--session'));
+      const sid = caller?.id;
       let groundsName = arg(args, '--grounds');
-      {
-        const refusal = helmGate(liveHelms(cfgReport.helm.ttlSecs * 1000), sid, groundsName);
-        if (refusal) throw new Error(refusal);
-      }
+      gateHelm(caller, groundsName);
       // An identified helm defaults to its own grounds.
       if (groundsName === undefined && sid !== undefined) groundsName = helmOf(sid)?.grounds;
       const grounds = groundsName !== undefined ? resolveGrounds(cfgReport, groundsName) : undefined;
@@ -813,11 +829,11 @@ ${progress}`,
       // Take the helm: sign this session on as the one lobsterman for its
       // grounds. The registration arms the Stop-hook park (no marker file
       // needed) and gates the periodic digest; the charter is the persona.
-      const sessionId = arg(args, '--session') ?? readHookStdin()?.session_id;
+      const sessionId = callerSession(arg(args, '--session'), true)?.id;
       if (!sessionId) {
         throw new Error(
           'helm requires --session <id> — the harness session id, announced at session start ' +
-            'by the lobstah plugin (`lobstah man brief`)',
+            'by the lobstah plugin (`lobstah man brief`); Claude Code exports it as $CLAUDE_CODE_SESSION_ID',
         );
       }
       const cfg = loadConfig();
@@ -856,8 +872,8 @@ ${progress}`,
       break;
     }
     case 'man:relieve': {
-      const sessionId = arg(args, '--session') ?? readHookStdin()?.session_id;
-      if (!sessionId) throw new Error('relieve requires --session <id> (or hook input on stdin)');
+      const sessionId = callerSession(arg(args, '--session'), true)?.id;
+      if (!sessionId) throw new Error('relieve requires --session <id> (or hook input on stdin, or $CLAUDE_CODE_SESSION_ID)');
       const relieved = relieveHelm(sessionId);
       console.log(toonKV({ relieved: sessionId, grounds: relieved.length > 0 ? relieved.join(', ') : '(none held)' }));
       break;
@@ -867,8 +883,7 @@ ${progress}`,
       if (!id) throw new Error('cancel requires a dispatch id');
       // Cancelling is steering — the claimed helm's alone.
       {
-        const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), arg(args, '--session'));
-        if (refusal) throw new Error(refusal);
+        gateHelm(callerSession(arg(args, '--session')));
       }
       const lane = findLane(id);
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
@@ -893,13 +908,11 @@ ${progress}`,
       // Strict helm rule: wait consumes attention events — the helm's wakes.
       // With a claimed lobsterman anywhere, only that session may run it, and
       // a grounds-scoped wait only by that grounds' own helm.
-      const sid = arg(args, '--session');
+      const caller = callerSession(arg(args, '--session'));
+      const sid = caller?.id;
       const cfgWait = loadConfig();
       let groundsName = arg(args, '--grounds');
-      {
-        const refusal = helmGate(liveHelms(cfgWait.helm.ttlSecs * 1000), sid, groundsName);
-        if (refusal) throw new Error(refusal);
-      }
+      gateHelm(caller, groundsName);
       // An identified helm defaults to its own grounds, and waiting is
       // liveness: the park heartbeats the registration for it.
       const callerHelm = sid !== undefined ? helmOf(sid) : undefined;
@@ -1166,29 +1179,7 @@ ${progress}`,
       // knowing where things stand. Silent without hook input.
       const hook = readHookStdin();
       if (!hook?.session_id) break;
-      let fleet = '';
-      try {
-        const r = buildTendReport();
-        fleet =
-          ` Fleet: ${r.verdict} (${r.counts.queued} queued, ${r.counts.active} active` +
-          (r.attention.length > 0 ? `, ${r.attention.length} awaiting a human` : '') +
-          ') — `lobstah` for the live view.';
-      } catch {
-        // a brief must never fail the session start
-      }
-      const workerTrap = trapBySession(hook.session_id);
-      // A helm session gets its charter re-injected on every start, so the
-      // persona survives restarts and compaction without anyone re-running
-      // `man helm`. The start also counts as a heartbeat.
-      const helmReg = helmOf(hook.session_id);
-      if (helmReg) heartbeatHelm(helmReg.sessionId);
-      const context = helmReg
-        ? `lobstah: session id ${hook.session_id} — you hold the helm for grounds "${helmReg.grounds}" ` +
-          `(\`lobstah man relieve --session ${hook.session_id}\` steps down).${fleet}\n\n` +
-          charter({ name: helmReg.grounds, repos: helmReg.repos })
-        : workerTrap
-          ? `lobstah: session id ${hook.session_id} — this session mans trap wt:${workerTrap.trapId} (it takes assigned work at turn end); \`lobstah stow\` in the worktree signs it off.${fleet}`
-          : `lobstah: session id ${hook.session_id} (for \`lobstah soak --session <id>\` from a worktree).${fleet}`;
+      const context = buildBriefContext(hook.session_id, hook.cwd ?? process.cwd());
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }),
       );
@@ -1209,7 +1200,7 @@ ${progress}`,
       // the same worktree infers everything from the anchor file.
       const priorId = trapIdAt(site.worktree);
       const prior = priorId !== undefined ? readTrap(priorId) : undefined;
-      const sessionId = arg(args, '--session') ?? readHookStdin()?.session_id ?? prior?.sessionId;
+      const sessionId = callerSession(arg(args, '--session'), true)?.id ?? prior?.sessionId;
       if (!sessionId) {
         throw new Error(
           'first sign-on needs --session <id> — the harness session id, announced at session start ' +
@@ -1264,7 +1255,8 @@ ${progress}`,
       // Resolve the trap from where we stand, from the session (flag or
       // hook stdin), or from an explicit wt: id.
       const wtFlag = arg(args, '--wt');
-      const sessionId = arg(args, '--session') ?? readHookStdin()?.session_id;
+      const caller = callerSession(arg(args, '--session'), true);
+      const sessionId = caller?.id;
       const site = inspectSoakSite(process.cwd(), loadConfig().repos);
       const trapId =
         wtFlag ??
@@ -1281,8 +1273,7 @@ ${progress}`,
         (site && !site.primary && trapIdAt(site.worktree) === trapId) ||
         (sessionId !== undefined && trapBySession(sessionId)?.trapId === trapId);
       if (!own) {
-        const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), sessionId);
-        if (refusal) throw new Error(refusal);
+        gateHelm(caller);
       }
       const reg = stowTrap(trapId, own ? 'signed off' : 'stowed by the helm', sessionId);
       if (!reg) {

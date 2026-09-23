@@ -189,7 +189,9 @@ digest defers to. --grounds scopes digest and cursor to one helm's territory
   'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
 Prints the charter, arms the Stop-hook park, and gates the periodic digest.
 Sign-on records who the man is (harness, directory, host; --label names it).
-A live foreign holder refuses without --take; a stale one is claimable.`,
+A live foreign holder refuses without --take; a stale one is claimable.
+The session id resolves --session, then hook stdin, then
+$CLAUDE_CODE_SESSION_ID — so inside Claude Code no flag is needed.`,
   'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
 cleared too.`,
   'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout.

@@ -12,10 +12,14 @@ const read = (p: string) => fs.readFileSync(`${root}/${p}`, 'utf8');
  * other side matches.
  */
 describe('plugin parity (claude-code ↔ codex)', () => {
-  it('the lobsterman skill is byte-identical in both plugins', () => {
-    expect(read('plugins/codex/skills/lobsterman/SKILL.md')).toBe(
-      read('plugins/claude-code/skills/lobsterman/SKILL.md'),
-    );
+  it.each(['lobsterman', 'trap'])('the %s skill is byte-identical in both plugins', (skill) => {
+    expect(read(`plugins/codex/skills/${skill}/SKILL.md`)).toBe(read(`plugins/claude-code/skills/${skill}/SKILL.md`));
+  });
+
+  it('each skill stays under 80 lines', () => {
+    for (const skill of ['lobsterman', 'trap']) {
+      expect(read(`plugins/claude-code/skills/${skill}/SKILL.md`).trimEnd().split('\n').length).toBeLessThan(80);
+    }
   });
 
   it('each plugin ships its own README for the registry listing', () => {
