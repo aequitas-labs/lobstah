@@ -138,7 +138,8 @@ continues the turn the moment something needs it.
   [docs/pickup.md](docs/pickup.md)
 - **Claude Code + Codex plugins** — the lobsterman as a one-step install: the
   hook wiring (session brief, Stop-hook park, clean stow), the lobsterman
-  skill, and (on Claude Code) a `/lobstah` fleet command, no settings surgery.
+  and trap skills, and (on Claude Code) `/lobstah`, `/helm`, `/relieve`,
+  `/soak`, and `/stow` commands, no settings surgery.
   This repo doubles as the plugin marketplace for both agent registries —
   in either harness: `/plugin marketplace add aequitas-labs/lobstah`, then
   `/plugin install lobstah@lobstah`. The park stays inert until a directory

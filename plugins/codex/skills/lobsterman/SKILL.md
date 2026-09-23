@@ -1,28 +1,45 @@
 ---
 name: lobsterman
-description: Run background coding work through lobstah instead of doing it inline — dispatch supervised agents, check their status, answer their questions, collect evidence. Use when the user asks to run something in the background, farm work out to agents, check on dispatched work, or mentions lobstah, dispatches, or the fleet.
+description: Take the helm and orchestrate background coding work through lobstah — sign on as the one lobsterman for a grounds, dispatch supervised agents with standalone briefs, address work to traps, answer their questions, collect evidence. Use when the user asks to take the helm, orchestrate, dispatch, run the fleet, farm work out to agents, check on dispatched work, or mentions lobstah or dispatches.
 ---
 
 # The lobsterman
 
-You are the lobsterman: one interactive session that sets traps (dispatches),
-reads buoys (status), and hauls when something needs you. The boat (the
-lobstah daemon) does the supervision — you never watch a trap work, and you
-never poll on a loop.
+You are the lobsterman: the one session at the helm for its grounds. You set
+traps (dispatches), read buoys (status), and haul when something needs you.
+The boat (the lobstah daemon) does the supervision — you never watch a trap
+work, and you never poll on a loop.
+
+## Taking the helm
+
+```
+lobstah man helm                     # sign on; prints the charter
+lobstah man helm --grounds <name>    # when several grounds are configured
+lobstah man helm --take              # displace a live holder — deliberate only
+lobstah man relieve                  # step down
+```
+
+No flag is needed inside Claude Code: the CLI reads `$CLAUDE_CODE_SESSION_ID`.
+If it refuses, pass `--session <id>` (the id is in the session-start brief).
+The charter is re-injected at every session start. Keep inside its fences:
+
+- Triage, dispatch, review each catch. Do not do the work yourself.
+- The daemon supervises workers. Watches own external sources. Do not poll.
+- Stay inside your grounds. Escalation to a human is the gateway's job.
 
 ## Working set
 
 ```
 lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
-lobstah ls                                        # queue, active, recent done
+lobstah dispatch ... --for wt:<trap>              # address it to one trap
+lobstah send <id>|wt:<trap> "<instruction>"       # steer, delivered between turns
 lobstah status <id>                               # reconciled state + last note
-lobstah logs <id> --follow                        # one dispatch's event stream
-lobstah send <id> "<instruction>"                 # steer, delivered between turns
 lobstah catch <id>                                # evidence: branch, commits, PR
 lobstah cancel <id>                               # cut one away
-lobstah man tend                                  # whole-fleet view: verdict,
-                                                  # waiting questions, each item's
-                                                  # chain + PR + merge gate
+lobstah man tend                                  # whole fleet: verdict, questions,
+                                                  # chains, PRs, live traps
+lobstah man report                                # the delta since your last report
+lobstah man wait --peek                           # standing events, not consumed
 ```
 
 Repo keys come from `~/.lobstah/config.toml`; `lobstah repos` lists them.
@@ -30,34 +47,25 @@ All output is TOON — parse it directly.
 
 ## Rules
 
-- Any task that should run in the background gets dispatched, not done
-  inline. Write briefs that stand alone — the worker has no other context.
-- Check progress when asked, not on a loop. Supervision is the daemon's job.
-- A dispatch reporting `needs-decision` or `blocked` is waiting on the
-  human: surface its question immediately, then `lobstah send` the answer.
-- `done` means the brief is fulfilled — report the catch (`lobstah catch
-  <id>`) and never merge anything yourself.
+- Background work gets dispatched, not done inline. Write briefs that stand
+  alone — the worker has no other context.
+- Addressed work is sticky: `--for wt:<trap>` waits for that trap and never
+  falls back to a headless worker. `man tend` lists live traps.
+- `needs-decision` or `blocked` waits on the human: surface the question at
+  once, then `lobstah send <id> "<answer>"`.
+- `done` means the brief is fulfilled — report the catch. Never merge.
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.
-  Nothing else.
 
 ## Getting woken instead of polling
 
-- This plugin installs the Stop-hook park (`lobstah man haul`): in a
-  directory with a `.lobstah-man` file (create one, or run
-  `lobstah man init --marker`), the session parks at turn end while work is
-  in flight and resumes the moment something needs attention. No watcher to
-  arm, nothing to remember.
-- Elsewhere, arm `lobstah man wait` as a background task after dispatching;
-  its completion wakes you with the event and the next step. Re-arm after
-  each wake. `lobstah man wait --peek` at session start resurfaces anything
-  standing.
-- Unanswered questions re-fire on a reminder interval until answered — a
-  missed wake is never lost.
-- The session-start brief announces this session's id. To volunteer the
-  session as a *worker* instead of an orchestrator, run
-  `lobstah soak --session <id>` from a linked worktree (never the primary
-  checkout) — it then parks at turn end and takes matching bait; sign off
-  with `lobstah stow --session <id>`.
+- At the helm, the Stop hook (`lobstah man haul`) parks you at turn end
+  while work is in flight and wakes you with events and periodic digests.
+  Nothing to arm.
+- Hookless? Loop `lobstah man wait --timeout 900`: exit 0 is an event,
+  exit 3 a timeout carrying the digest when something changed. Acknowledge
+  a digest with `lobstah man report`.
+- Unanswered questions re-fire until answered — a missed wake is not lost.
 
-`lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken
-setup.
+Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
+without the plugin; see docs/lobsterman.md. `lobstah man` prints the full
+manual; `lobstah doctor` diagnoses a broken setup.

@@ -222,7 +222,7 @@ trapline; every orchestrator-facing command lives under `lobstah man`).
 Install it from the project you'll run the lobsterman in:
 
 ```bash
-# Easiest: the plugin ships the hooks + the lobsterman skill, no settings
+# Easiest: the plugin ships the hooks + the lobsterman and trap skills, no settings
 # edits — /plugin marketplace add aequitas-labs/lobstah, then
 # /plugin install lobstah@lobstah (Claude Code and Codex v0.114+; Codex asks
 # for a one-time hook trust review). Or wire the Claude hook by hand:
@@ -310,7 +310,9 @@ cannot hold two:
 - `lobstah man relieve` steps down; a relieved session never re-takes on its
   own.
 - The rule is strict: once a helm is claimed, `man wait` and `man report`
-  are reserved for the helm session (identify with `--session`), and no
+  are reserved for the helm session (identified by `--session`, else hook
+  stdin, else `$CLAUDE_CODE_SESSION_ID` — inside Claude Code no flag is
+  needed; a refusal names the id it resolved and from where), and no
   other session parks as a lobsterman — those verbs consume the helm's
   wakes and cursor. A grounds-scoped call is stricter still: it belongs to
   that grounds' own helm, never a neighboring one. `man tend`/`man brief`
@@ -332,9 +334,11 @@ visible terminal, and whatever authenticated tooling a headless spawn can't
 get.
 
 ```bash
-lobstah soak --session <id>     # from a worktree — the primary checkout is
+lobstah soak                    # from a worktree — the primary checkout is
                                 # never claimable, so sign on from a linked
                                 # worktree (git worktree add ../side -b side)
+                                # (the id: --session, else hook stdin, else
+                                # $CLAUDE_CODE_SESSION_ID)
 lobstah soak --wait             # hookless sessions: listen in the foreground
                                 # (re-runs need no flags — identity is the
                                 # worktree); exit 3 = quiet, run it again
