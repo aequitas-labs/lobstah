@@ -36,8 +36,8 @@ import { deriveGlassPrs } from './glass-prs.js';
  * never advances any cursor: looking through the glass consumes nothing.
  * Look freely, steer only from the helm — links out are copyable commands,
  * never exec endpoints (localhost HTTP is reachable by any webpage). The
- * ⚙ popover's two preferences (view, lobs) are the viewing browser's own,
- * kept in its localStorage — the server has nothing to write.
+ * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
+ * own, kept in its localStorage — the server has nothing to write.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
@@ -307,7 +307,6 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em
 .headerline{display:flex;align-items:center;gap:8px}.headerline h1{flex:1}
 #settings-slot{min-width:34px;text-align:right;color:var(--dim)}
 #settings-slot #gearbtn{margin-left:0}
-#settingspop{left:auto;right:16px}
 .deckgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
 .deckgrid h2{margin:5px 0}.deckgrid section{min-width:0}
 .deckline{padding:2px 0;border-top:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -381,18 +380,11 @@ a.lob{color:inherit}
 @keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
 #gearbtn{background:none;border:1px solid var(--line);border-radius:6px;color:var(--dim);font:inherit;font-size:13px;padding:1px 7px;margin-left:8px;cursor:pointer;vertical-align:1px}
 #gearbtn:hover,#gearbtn.on{color:var(--fg);border-color:#3a455a}
-#settingspop{display:none;position:absolute;top:40px;left:16px;z-index:8;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 4px 16px rgba(0,0,0,.5);min-width:230px}
-#settingspop.open{display:block}
-#settingspop .row{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:6px 0}
-#settingspop .lbl{color:var(--dim);font-size:12px}
-#settingspop .hint{display:block;font-size:10px;opacity:.75}
+.settings .row{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:12px 0}
+.settings .lbl{color:var(--fg);font-size:12px}
+.settings .hint{display:block;color:var(--dim);font-size:11px;margin-top:2px}
 </style></head><body>
 <div class="headerline"><h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings">⚙</button></span></div>
-<div id="settingspop" role="dialog" aria-label="settings (this browser only)">
- <div class="row" id="viewrow"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
- <div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span><span class="seg" id="lobseg"><button data-l="on">on</button><button data-l="off">off</button></span></div>
- <div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml</span></span><span id="attnkinds" class="dim" style="font-size:11px;text-align:right;max-width:190px"></span></div>
-</div>
 <div class="chips"><span id="chips" style="display:contents"></span><span class="chip dim" id="clock"></span></div>
 <nav class="tabs" id="tabs" aria-label="Spyglass views"><a href="#deck" data-tab="deck">On deck</a><a href="#dispatches" data-tab="dispatches">Dispatches</a><a href="#traps" data-tab="traps">Traps</a><a href="#prs" data-tab="prs">PRs</a><a href="#notices" data-tab="notices">Notices</a></nav>
 <div class="controls">
@@ -509,6 +501,9 @@ function prTable(d,inp){const byStack=new Map();for(const p of inp.prs){const a=
  }
  const other=table(['key','owner','cursor','last check','error'],inp.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td>'+esc(w.cursor)+'</td><td>'+(w.lastCheckedAt?ageEl(w.lastCheckedAt):'')+'</td><td>'+esc(w.lastError||'')+'</td></tr>'),'no other watches');
  return table(['PR','title','state','checks','review','merge','dispatch chain','watch','gate'],rows,'no PR evidence')+'<h2>other watches</h2>'+other}
+function noticeCards(list){if(!list.length)return '<div class="empty">no notices</div>';
+ return '<div class="cards">'+list.map(n=>'<div class="card" style="cursor:default"><div class="top"><b>'+esc(n.kind)+'</b><span class="badge dim">'+ageEl(n.at)+' ago</span></div>'
+  +(n.repo?'<div class="meta">'+esc(n.repo)+'</div>':'')+'<div class="note">'+esc(n.text)+'</div></div>').join('')+'</div>'}
 function trapRow(t){
  if(!t.live)return {stale:false,listen:'<span class="dot"></span><span class="dim">signed off</span>',hb:'<span class="dim">—</span>'};
  const stale=Date.now()-Date.parse(t.heartbeatAt)>1800000;
@@ -533,7 +528,16 @@ function renderModal(d){
  const item=modalItem(d,modal);
  if(!item){modal=null;ov.classList.remove('open');return}
  let html='';
- if(modal.type==='helm'){
+ if(modal.type==='settings'){
+  // Per-browser preferences (localStorage, save()); the kinds line is read-only config.
+  const seg=(name,opts,cur)=>'<span class="seg">'+opts.map(([v,l])=>'<button class="'+(v===cur?'on':'')+'" onclick="'+name+'(\\''+v+'\\')">'+l+'</button>').join('')+'</span>';
+  html='<span class="x" onclick="closeModal()">×</span><h3>⚙ settings <span class="dim" style="font-weight:normal">· this browser only</span></h3>'
+   +'<div class="settings">'
+   +'<div class="row"><span class="lbl">view<span class="hint">cards or table on every tab</span></span>'+seg('setView',[['table','table'],['cards','cards']],st.view)+'</div>'
+   +'<div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span>'+seg('setLobs',[['on','on'],['off','off']],st.lobs?'on':'off')+'</div>'
+   +'<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">'
+   +esc(item.attentionError?item.attentionError:(item.attentionKinds||[]).join(' · '))+'</span></div></div>';
+ }else if(modal.type==='helm'){
   const h=item;
   const stale=Date.now()-Date.parse(h.heartbeatAt)>1800000;
   html='<span class="x" onclick="closeModal()">×</span><h3>⛵ '+esc(h.man)+'</h3>'
@@ -600,9 +604,6 @@ function render(d){
  document.getElementById('f-verb').style.display=tab==='dispatches'?'':'none';
  document.getElementById('chain-control').style.display=tab==='dispatches'?'':'none';
  document.getElementById('f-kind').style.display=tab==='notices'?'':'none';
- document.getElementById('viewrow').style.display=tab==='dispatches'||tab==='traps'?'':'none';
- // The popover's read-only line: the kinds config.toml selects (#32).
- setText(document.getElementById('attnkinds'),d.attentionError?d.attentionError:(d.attentionKinds||[]).join(' · '));
  setText(document.getElementById('clock'),new Date(d.now).toLocaleTimeString('en-GB'));
  const repos=[...new Set([...d.dispatches.map(x=>x.repo),...d.notices.map(x=>x.repo),...d.prs.map(x=>x.repo)].filter(Boolean))].sort();
  const rsel=document.getElementById('f-repo');
@@ -610,7 +611,6 @@ function render(d){
   rsel.innerHTML='<option value="">all repos</option>'+repos.map(r=>'<option'+(r===cur?' selected':'')+'>'+esc(r)+'</option>').join('')}
  const kinds=[...new Set(d.notices.map(n=>n.kind))].sort(),ksel=document.getElementById('f-kind');
  if(ksel.options.length!==kinds.length+1)ksel.innerHTML='<option value="">all notice kinds</option>'+kinds.map(k=>'<option'+(k===st.noticeKind?' selected':'')+'>'+esc(k)+'</option>').join('');
- for(const b of document.querySelectorAll('#viewseg button')){const on=b.dataset.v===st.view;if(b.classList.contains('on')!==on)b.classList.toggle('on',on)}
  if(dirty.has('chips')){
   const hbOld=inp.chips.daemonStale;
   setHTML('chips',
@@ -622,9 +622,10 @@ function render(d){
   setHTML('dispatches',st.view==='cards'?dispatchCards(list):dispatchTable(list))}
  if(tab==='traps'&&dirty.has('traps')){const traps=inp.traps.list.map(t=>t.x);
   setHTML('traps',st.view==='cards'?trapCards(traps):trapTable(traps))}
- if(tab==='notices'&&dirty.has('notices'))setHTML('notices',table(['at','kind','text','repo'],
-  inp.notices.map(n=>'<tr><td class="dim">'+ageEl(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
-  'no notices'));
+ if(tab==='notices'&&dirty.has('notices')){const list=inp.notices.list;
+  setHTML('notices',st.view==='cards'?noticeCards(list):table(['at','kind','text','repo'],
+  list.map(n=>'<tr><td class="dim">'+ageEl(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
+  'no notices'))}
  if(tab==='prs'&&dirty.has('prs'))setHTML('prs',prTable(d,inp.prs));
  if(dirty.has('foot'))setHTML('foot',
   '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>');
@@ -671,15 +672,12 @@ window.showModal=(type,key)=>{modal={type,key};tick(true)};
 window.closeModal=()=>{modal=null;if(hashes)hashes.modal=null;document.getElementById('overlay').classList.remove('open')};
 document.getElementById('overlay').addEventListener('click',(e)=>{if(e.target.id==='overlay')closeModal()});
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeModal()});
-document.getElementById('viewseg').addEventListener('click',(e)=>{const v=e.target.dataset&&e.target.dataset.v;if(v){st.view=v;save();tick(true)}});
-// The ⚙ popover: per-browser preferences, localStorage only (save()).
-const pop=document.getElementById('settingspop'),gear=document.getElementById('gearbtn');
-const paintLobs=()=>{for(const b of document.querySelectorAll('#lobseg button'))b.classList.toggle('on',(b.dataset.l==='on')===st.lobs)};
-document.getElementById('lobseg').addEventListener('click',(e)=>{const l=e.target.dataset&&e.target.dataset.l;if(l){st.lobs=l==='on';save();paintLobs();tick(true)}});
-const closePop=()=>{pop.classList.remove('open');gear.classList.remove('on')};
-gear.addEventListener('click',(e)=>{e.stopPropagation();const o=pop.classList.toggle('open');gear.classList.toggle('on',o);paintLobs()});
-document.addEventListener('click',(e)=>{if(!pop.contains(e.target)&&e.target!==gear)closePop()});
-document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closePop()});
+// ⚙ opens the settings modal — the same overlay as every other modal (Escape
+// and click-outside close it). Its two preferences are this browser's own:
+// localStorage via save(); view applies to every tab.
+document.getElementById('gearbtn').addEventListener('click',()=>showModal('settings','browser'));
+window.setView=(v)=>{if(v!=='table'&&v!=='cards')return;st.view=v;save();tick(true)};
+window.setLobs=(v)=>{st.lobs=v==='on';save();lobKey='';tick(true)};
 for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb'],['f-kind','noticeKind']]){
  const el=document.getElementById(id);el.value=st[key];
  el.addEventListener('change',()=>{st[key]=el.value;save();tick(true)})}
