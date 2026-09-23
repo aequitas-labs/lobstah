@@ -18,7 +18,9 @@ export type NoticeKind =
   | 'trap-defective'
   | 'trap-ghosted'
   | 'bait-orphaned'
-  | 'message-bounced';
+  | 'message-bounced'
+  | 'pr-merged'
+  | 'pr-closed';
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */

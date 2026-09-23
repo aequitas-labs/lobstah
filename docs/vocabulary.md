@@ -143,6 +143,40 @@ events stand until the owner consumes them. One continuation dispatch in
 flight per watch; later events buffer and fork from the latest session in
 the chain.
 
+### The PR preset
+
+`lobstah watch add pr:<owner>/<repo>#<n>` (or a github.com PR URL,
+normalized to that key) installs the shipped check, `lobstah watch
+check-pr`: one read-only `gh pr view` per cycle, diffed against the
+previous observation that the cursor carries. `report <id> done --pr
+<url>` registers the same watch owned by `dispatch:<id>` (idempotent;
+`--no-watch` opts out). **Owner:** `packages/core/src/pr.ts` (derivation,
+badge) and `apps/cli/src/pr-watch.ts` (check, registration, evidence).
+
+| Word | Meaning |
+| ---- | ------- |
+| `pr:` key | `pr:<owner>/<repo>#<n>` — one watch per PR. |
+| cursor | The last observation (head sha, per-check conclusions, review decision, merge state, draft, state), base64url-encoded. An unchanged PR re-emits nothing and returns the same cursor. A new head sha resets check memory. |
+| `check-completed` | A check reached a conclusion on the current head (`name`, `conclusion`, `detailsUrl`). Failing → work; passing → evidence only. |
+| `review-decision` | The review decision changed (`value`). Work, unless `[pickup.github]` covers the repo — then pickup's feedback rule owns it ([pickup.md](pickup.md), "Feedback pickup"). |
+| `merge-state` | `mergeStateStatus` changed (`value`). Evidence only. |
+| `draft` | Draft flipped (`value`). Evidence only. |
+| `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. |
+| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending }, observedAt }`, merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show. |
+
+Every event carries `headSha`. A dispatch-owned PR watch emits only work
+events (a failing check; a review decision pickup doesn't own), so the
+`owner` row is unchanged: its events always fork. The rest is evidence.
+Merged and closed reach the helm as a `pr-merged` / `pr-closed` notice,
+posted once by whichever process first stamps the open → terminal evidence
+transition — not by event routing. A man-owned PR watch emits every kind.
+
+Pick stays the single writer of watch progress. The inline poller (`man
+wait`, the helm park) runs PR checks for man-owned watches as usual, and
+only **observes** dispatch-owned ones: it stamps the evidence `pr` object
+(and so the merged notice) and never advances their cursor or consumes
+their events, so pick still sees and forks every one.
+
 ## Soaking contract
 
 A **trap** is a worktree that volunteered as a worker seat through

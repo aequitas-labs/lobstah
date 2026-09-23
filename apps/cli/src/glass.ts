@@ -14,6 +14,7 @@ import {
   lobstahHome,
   lobstahVersion,
   pendingIds,
+  prBadge,
   readEvidence,
   readSessionClaim,
   readStatusLog,
@@ -190,7 +191,19 @@ export function buildGlassSnapshot() {
     man: helmLabel(h),
     transcript: transcriptPath(h.harness, h.cwd, h.sessionId),
   }));
-  const dispatches = dispatchRows();
+  const mergeView = readMergeView();
+  // PR state per dispatch: the evidence badge (the shared derivation tend and
+  // catch use) plus the merge view's gate verdict where pick has one.
+  const dispatches = dispatchRows().map((x) => {
+    const pr = x.evidence?.pr;
+    const url = x.evidence?.prUrl;
+    const open = mergeView?.open.find((p) => p.uuid === x.id || (url !== undefined && p.url === url));
+    return {
+      ...x,
+      prBadge: pr ? { ...prBadge(pr), observedAt: pr.observedAt } : undefined,
+      prGate: open?.gate,
+    };
+  });
   const allNotices = listNotices(300);
   const live = listTraps();
   // Historical traps: a stowed or ghosted registration is gone, but its mail
@@ -235,7 +248,7 @@ export function buildGlassSnapshot() {
       .map((f) => readJson<Record<string, unknown>>(path.join(lobstahHome(), 'watches', f)))
       .filter(Boolean),
     dispatches,
-    mergeView: readMergeView(),
+    mergeView,
   };
 }
 
@@ -381,7 +394,11 @@ function tableDetail(x){return '<b>brief</b>\\n'+esc(x.brief)
  +(x.inbox.length?'\\n<b>inbox</b>\\n'+x.inbox.map(esc).join('\\n---\\n'):'')
  +(x.evidence?'\\n<b>evidence</b> '+esc(JSON.stringify(x.evidence)):'')}
 function addrCell(x){return x.for?esc(x.for)+(x.evidence&&x.evidence.deliveredTo?' <span class="ok">✓delivered</span>':' <span class="warn">waiting</span>'):(x.claimedBy?esc(x.claimedBy):'')}
-function prCell(x){return x.evidence&&x.evidence.prUrl?'<a href="'+esc(x.evidence.prUrl)+'" target="_blank" onclick="event.stopPropagation()">PR</a>':''}
+function prCell(x){if(!(x.evidence&&x.evidence.prUrl))return '';
+ const b=x.prBadge;
+ return '<a href="'+esc(x.evidence.prUrl)+'" target="_blank" onclick="event.stopPropagation()">PR</a>'
+  +(b?' <span class="badge '+esc(b.tone)+'" title="observed '+esc(b.observedAt)+'">'+esc(b.text)+'</span>':'')
+  +(x.prGate?' <span class="badge dim" title="merge gate (pick)">'+esc(x.prGate)+'</span>':'')}
 function dispatchTable(list){return table(['','id','lane','repo','verb','note','age','addressed','pr'],
  list.map(x=>{const k=x.lane+':'+x.id;const isOpen=open.has(k);
   return '<tr class="rowhead" onclick="tog(\\''+k+'\\')"><td>'+(isOpen?'▾':'▸')+'</td><td>'+esc(x.id.slice(0,8))+'</td><td>'+x.lane+' '+x.bucket+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc((x.note??'').slice(0,90))+'</td><td>'+ageEl(x.verbAt)+'</td><td>'+addrCell(x)+'</td><td>'+prCell(x)+'</td></tr>'

@@ -106,6 +106,27 @@ view](pickup.md#merge-view) pickup persists each tick, so PR state is at most
 one poll interval stale without tend making a single network call. `--json`
 emits the full report for dashboards and scripts to render.
 
+### PR state after done
+
+A dispatch reports `done` when its PR opens; `report done --pr <url>`
+registers a `pr:` watch for the chain so the PR stays observed (see the
+PR preset in [vocabulary.md](vocabulary.md#the-pr-preset); `--no-watch`
+opts out). What you get depends on what runs:
+
+- **Only the helm park or `man wait`** (no service): PR state badges in
+  `man tend`, `lobstah catch`, and the glass (`merged`, `draft`, `review`,
+  `checks 1/2 failed`, `green`), and a `pr-merged` / `pr-closed` notice
+  when the PR lands. The inline poller observes at `[pickup].pollSecs`
+  (default 45 s), one `gh pr view` per PR per cycle, and forks nothing.
+- **With `lobstah pick`** (watch-only mode needs no tracker; `lobstah pick
+  install` runs it as a service for a steady cadence): all of the above,
+  plus CI-fix continuations — a failing check forks the chain with a brief
+  naming the PR, the check, its details URL, and the head sha — and
+  review-decision continuations for repos `[pickup.github]` doesn't cover.
+
+`gh` must be on PATH and authenticated; if it isn't, the done report still
+succeeds and the watch's check records `lastError`.
+
 ### The spyglass
 
 `lobstah glass [--port <n>]` serves tend as a live web page on 127.0.0.1
