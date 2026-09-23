@@ -11,8 +11,8 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  listWatches,
   loadConfig,
-  lobstahHome,
   lobstahVersion,
   pendingIds,
   prBadge,
@@ -24,8 +24,9 @@ import type { Attachment, Descriptor, Lane, Notice } from '@lobstah/core';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { lobItems } from './glass-lobs.js';
-import { buildTendReport } from './tend.js';
+import { buildTendReport, landedAttention } from './tend.js';
 import { GLASS_DIFF_JS } from './glass-diff.js';
+import { deriveGlassPrs } from './glass-prs.js';
 
 /**
  * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
@@ -143,8 +144,7 @@ function dispatchRows() {
     const done = listDir(dirs.done)
       .filter((f) => !f.startsWith('.'))
       .map((id) => ({ id, at: mtime(path.join(dirs.done, id)) }))
-      .sort((a, b) => b.at - a.at)
-      .slice(0, 25);
+      .sort((a, b) => b.at - a.at);
     for (const { id, at } of done) {
       const d = readJson<Descriptor>(path.join(dirs.done, id, 'descriptor.json'));
       if (d) rows.push({ lane, bucket: 'done', d, sort: at });
@@ -190,11 +190,12 @@ function dispatchRows() {
  * decided), plus the active attentionKinds for the read-only line under the
  * heading. A config error surfaces on the page instead of failing /data.
  */
-function attentionSnapshot(): { attention: TendAttention[]; attentionKinds: string[]; attentionError?: string } {
+function attentionSnapshot(): { attention: TendAttention[]; landed: TendAttention[]; attentionKinds: string[]; attentionError?: string } {
   try {
-    return { attention: buildTendReport().attention, attentionKinds: loadConfig().attentionKinds };
+    const cfg = loadConfig();
+    return { attention: buildTendReport().attention, landed: landedAttention(cfg, Date.now()), attentionKinds: cfg.attentionKinds };
   } catch (err) {
-    return { attention: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
+    return { attention: [], landed: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -212,7 +213,7 @@ export function buildGlassSnapshot() {
   // catch use) plus the merge view's gate verdict where pick has one.
   const dispatches = dispatchRows().map((x) => {
     const pr = x.evidence?.pr;
-    const url = x.evidence?.prUrl;
+    const url = x.evidence?.prUrl ?? pr?.url;
     const open = mergeView?.open.find((p) => p.uuid === x.id || (url !== undefined && p.url === url));
     return {
       ...x,
@@ -220,7 +221,12 @@ export function buildGlassSnapshot() {
       prGate: open?.gate,
     };
   });
-  const allNotices = listNotices(300);
+  const watches = listWatches();
+  const { prs, stacks } = deriveGlassPrs(
+    dispatches.map((d) => ({ id: d.id, followUp: d.followUp, repoKey: d.repo, pr: d.evidence?.pr, prGate: d.prGate })),
+    watches,
+  );
+  const allNotices = listNotices(Number.MAX_SAFE_INTEGER);
   const live = listTraps();
   // Historical traps: a stowed or ghosted registration is gone, but its mail
   // dir, notices, and delivery receipts survive — list those ids too so a
@@ -258,12 +264,11 @@ export function buildGlassSnapshot() {
       ...live.map((t) => attach(t, true)),
       ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id }, false)),
     ],
-    notices: allNotices.slice(-30).reverse(),
-    watches: listDir(path.join(lobstahHome(), 'watches'))
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => readJson<Record<string, unknown>>(path.join(lobstahHome(), 'watches', f)))
-      .filter(Boolean),
+    notices: allNotices.slice().reverse(),
+    watches,
     dispatches,
+    prs,
+    stacks,
     ...attentionSnapshot(),
     mergeView,
   };
@@ -283,6 +288,19 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em
 .chip{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
 .controls select,.controls input{background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--fg);font:inherit;padding:4px 8px}
 .controls input{flex:1 1 140px;min-width:120px;max-width:340px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:8px 0 10px}
+.tabs a{color:var(--dim);padding:6px 11px;border-bottom:2px solid transparent}
+.tabs a.on{color:var(--fg);border-color:var(--link)}
+.tabpage{display:none}.tabpage.on{display:block}
+.headerline{display:flex;align-items:center;gap:8px}.headerline h1{flex:1}
+#settings-slot{min-width:34px;text-align:right;color:var(--dim)}
+#settings-slot #gearbtn{margin-left:0}
+#settingspop{left:auto;right:16px}
+.deckgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
+.deckgrid h2{margin:5px 0}.deckgrid section{min-width:0}
+.deckline{padding:2px 0;border-top:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.deckline.acked{opacity:.55}.deckmore{color:var(--dim);font-size:11px}
+@media(max-width:700px){.deckgrid{grid-template-columns:1fr}}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{background:var(--card);border:none;color:var(--dim);font:inherit;padding:4px 11px;cursor:pointer}
 .seg button.on{background:#26436b;color:var(--fg)}
@@ -354,25 +372,27 @@ a.lob{color:inherit}
 #settingspop .lbl{color:var(--dim);font-size:12px}
 #settingspop .hint{display:block;font-size:10px;opacity:.75}
 </style></head><body>
-<h1>🦞✨ spyglass<button id="gearbtn" title="settings" aria-label="settings">⚙</button><span id="stale"> · STALE FEED</span></h1>
+<div class="headerline"><h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings">⚙</button></span></div>
 <div id="settingspop" role="dialog" aria-label="settings (this browser only)">
- <div class="row"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
+ <div class="row" id="viewrow"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
  <div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span><span class="seg" id="lobseg"><button data-l="on">on</button><button data-l="off">off</button></span></div>
  <div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml</span></span><span id="attnkinds" class="dim" style="font-size:11px;text-align:right;max-width:190px"></span></div>
 </div>
 <div class="chips"><span id="chips" style="display:contents"></span><span class="chip dim" id="clock"></span></div>
+<nav class="tabs" id="tabs" aria-label="Spyglass views"><a href="#deck" data-tab="deck">On deck</a><a href="#dispatches" data-tab="dispatches">Dispatches</a><a href="#traps" data-tab="traps">Traps</a><a href="#prs" data-tab="prs">PRs</a><a href="#notices" data-tab="notices">Notices</a></nav>
 <div class="controls">
  <select id="f-lane"><option value="">all lanes</option><option value="work">work</option><option value="chore">chore</option></select>
  <select id="f-repo"><option value="">all repos</option></select>
  <select id="f-verb"><option value="">all verbs</option><option>working</option><option>needs-decision</option><option>blocked</option><option>paused</option><option>done</option><option>failed</option><option>unknown</option></select>
+ <label id="chain-control"><input id="f-chain" type="checkbox"> group by chain</label>
+ <select id="f-kind"><option value="">all notice kinds</option></select>
  <input id="f-q" type="search" placeholder="search id · note · brief">
 </div>
-<h2>attention</h2><div id="attention"></div>
-<h2>dispatches</h2><div id="dispatches"></div>
-<h2>traps</h2><div id="traps"></div>
-<h2>notices</h2><div id="notices"></div>
-<h2>merge view</h2><div id="merge"></div>
-<h2>watches</h2><div id="watches"></div>
+<main id="page-deck" class="tabpage"><div id="deck"></div></main>
+<main id="page-dispatches" class="tabpage"><div id="dispatches"></div></main>
+<main id="page-traps" class="tabpage"><div id="traps"></div></main>
+<main id="page-prs" class="tabpage"><div id="prs"></div></main>
+<main id="page-notices" class="tabpage"><div id="notices"></div></main>
 <footer id="foot"></footer>
 <div id="lobs"></div>
 <div id="overlay"><div class="modal" id="modalbox"></div></div>
@@ -385,7 +405,7 @@ const ageEl=(iso)=>'<span data-age="'+esc(iso)+'">'+age(iso)+'</span>';
 function refreshAges(){for(const el of document.querySelectorAll('[data-age]')){const t=age(el.dataset.age);if(el.textContent!==t)el.textContent=t}}
 ${GLASS_DIFF_JS}const open=new Set();
 let modal=null;
-let st={view:'table',lane:'',repo:'',verb:'',q:'',lobs:true};
+let st={view:'table',lane:'',repo:'',verb:'',q:'',lobs:true,chain:false,noticeKind:''};
 try{Object.assign(st,JSON.parse(localStorage.getItem('spyglass')||'{}'))}catch(e){}
 // A stored value this page doesn't understand falls back to the default.
 if(st.view!=='table'&&st.view!=='cards')st.view='table';
@@ -414,15 +434,19 @@ function tableDetail(x){return '<b>brief</b>\\n'+esc(x.brief)
  +(x.inbox.length?'\\n<b>inbox</b>\\n'+x.inbox.map(esc).join('\\n---\\n'):'')
  +(x.evidence?'\\n<b>evidence</b> '+esc(JSON.stringify(x.evidence)):'')}
 function addrCell(x){return x.for?esc(x.for)+(x.evidence&&x.evidence.deliveredTo?' <span class="ok">✓delivered</span>':' <span class="warn">waiting</span>'):(x.claimedBy?esc(x.claimedBy):'')}
-function prCell(x){if(!(x.evidence&&x.evidence.prUrl))return '';
+function prCell(x){const url=x.evidence&&(x.evidence.prUrl||x.evidence.pr&&x.evidence.pr.url);if(!url)return '';
  const b=x.prBadge;
- return '<a href="'+esc(x.evidence.prUrl)+'" target="_blank" onclick="event.stopPropagation()">PR</a>'
+ return '<a href="'+esc(url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">PR</a>'
   +(b?' <span class="badge '+esc(b.tone)+'" title="observed '+esc(b.observedAt)+'">'+esc(b.text)+'</span>':'')
   +(x.prGate?' <span class="badge dim" title="merge gate (pick)">'+esc(x.prGate)+'</span>':'')}
-function dispatchTable(list){return table(['','id','lane','repo','verb','note','age','addressed','pr'],
- list.map(x=>{const k=x.lane+':'+x.id;const isOpen=open.has(k);
-  return '<tr class="rowhead" onclick="tog(\\''+k+'\\')"><td>'+(isOpen?'▾':'▸')+'</td><td>'+esc(x.id.slice(0,8))+'</td><td>'+x.lane+' '+x.bucket+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc((x.note??'').slice(0,90))+'</td><td>'+ageEl(x.verbAt)+'</td><td>'+addrCell(x)+'</td><td>'+prCell(x)+'</td></tr>'
-   +'<tr class="detail'+(isOpen?' open':'')+'"><td></td><td colspan="8">'+tableDetail(x)+'</td></tr>'}),
+function chainRows(list){if(!st.chain)return list;
+ const byId=new Map(list.map(x=>[x.id,x]));
+ const root=(x)=>{let at=x,seen=new Set();while(at.followUp&&byId.has(at.followUp)&&!seen.has(at.id)){seen.add(at.id);at=byId.get(at.followUp)}return at.id};
+ const groups=new Map();for(const x of list){const k=root(x),g=groups.get(k)||[];g.push(x);groups.set(k,g)}
+ return [...groups.values()].sort((a,b)=>b[0].sort-a[0].sort).flatMap(g=>g.sort((a,b)=>a.id===root(a)?-1:b.id===root(b)?1:a.sort-b.sort))}
+function dispatchTable(list){return table(['id','lane / bucket','repo','verb','note','age','addressed','pr'],
+ chainRows(list).map(x=>{const k=x.lane+':'+x.id;
+  return '<tr class="rowhead" onclick="showModal(\\'dispatch\\',\\''+k+'\\')"><td>'+(st.chain&&x.followUp?'<span class="dim">↳ </span>':'')+esc(x.id.slice(0,8))+'</td><td>'+x.lane+' / '+x.bucket+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc((x.note??'').slice(0,90))+'</td><td>'+ageEl(x.verbAt)+'</td><td>'+addrCell(x)+'</td><td>'+prCell(x)+'</td></tr>'}),
  'no dispatches match')}
 function dispatchCards(list){if(!list.length)return '<div class="empty">no dispatches match</div>';
  return '<div class="cards">'+list.map(x=>{const k=x.lane+':'+x.id;
@@ -439,6 +463,37 @@ function kindCell(x){
  if(x.kind==='question')return '<span class="v-'+x.verb+'">'+x.verb+'</span>';
  const tone=x.kind==='landed'?(x.verb==='failed'?'bad':'ok'):(KIND_TONE[x.kind]||'dim');
  return '<span class="badge '+tone+'">'+esc(kindLabel(x.kind)||x.kind)+'</span>'+(x.kind==='landed'?' <span class="dim">'+esc(x.verb)+'</span>':'')}
+function deckBlock(title,rows,tab,max){const shown=rows.slice(0,max),more=rows.length-shown.length;
+ return '<section><h2>'+title+'</h2>'+(shown.length?shown.join(''):'<div class="empty">none</div>')
+ +(more?'<a class="deckmore" href="#'+tab+'">+'+more+' more →</a>':'')+'</section>'}
+function deckLine(body,extra){return '<div class="deckline'+(extra||'')+'">'+body+'</div>'}
+function renderDeck(d,inp){const att=inp.attention;
+ const byKind=new Map();for(const x of att){const a=byKind.get(x.kind)||[];a.push(x);byKind.set(x.kind,a)}
+ const attention=[...byKind].flatMap(([kind,items])=>items.map((x,i)=>deckLine(
+  (i===0?'<span class="badge dim">'+esc(kindLabel(kind)||kind)+'</span> ':'')+
+  esc(x.repo||'')+' '+esc(x.note||x.verb)+' · '+ageEl(x.at)+
+  (x.acked?' · acked '+ageEl(x.acked.at)+' ago':''),x.acked?' acked':'')));
+ const flight=inp.inflight.map(x=>deckLine('<b>'+esc(x.id.slice(0,8))+'</b> '+esc(x.repo||'')+' · '+esc(x.note||x.verb)+' · '+ageEl(x.verbAt)+' · '+esc(x.for||x.claimedBy||'')+' '+prCell(x)));
+ const landed=inp.landed.map(x=>deckLine('<b>'+esc(x.id.slice(0,8))+'</b> '+esc(x.repo||'')+' · '+esc(x.verb)+' · '+ageEl(x.at)+' '+
+  (x.prUrl?'<a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">PR</a>':'')));
+ const traps=inp.traps.map(({x:t})=>deckLine('wt:'+esc(t.trapId)+' · '+esc(t.repo||'')+' · '+(t.live?trapRow(t).listen:'stowed / ghosted')));
+ const stacks=inp.stacks.map(s=>{const p=d.prs.find(x=>x.number===s.nextNumber&&x.stackId===s.id);
+  return deckLine(s.numbers.map(n=>'#'+n).join(' → ')+' · next: '+(p?'<a href="'+esc(p.url)+'" target="_blank" rel="noopener">#'+p.number+'</a> <span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>':'—')+' · '+s.behind+' behind')});
+ return '<div class="deckgrid">'+deckBlock('attention',attention,'notices',4)+deckBlock('in flight',flight,'dispatches',4)
+  +deckBlock('landed since report',landed,'dispatches',3)+deckBlock('traps',traps,'traps',3)+deckBlock('stacks',stacks,'prs',3)+'</div>'}
+function prTable(d,inp){const byStack=new Map();for(const p of inp.prs){const a=byStack.get(p.stackId)||[];a.push(p);byStack.set(p.stackId,a)}
+ const rows=[];for(const s of inp.stacks){const prs=byStack.get(s.id)||[];if(!prs.length)continue;
+  rows.push('<tr><th colspan="9">'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?' · open':' · history')+'</th></tr>');
+  for(const p of prs){const review=p.review||{};const w=p.watch;
+   rows.push('<tr><td><a href="'+esc(p.url)+'" target="_blank" rel="noopener">#'+p.number+'</a></td><td class="grow">'+esc(p.title||'')+'</td>'
+    +'<td>'+esc(p.state)+(p.draft?' · draft':'')+'</td><td>'+esc(p.checks.passed)+'/'+esc(p.checks.total)+' passed'+(p.checks.failed?' · '+p.checks.failed+' failed':'')+(p.checks.pending?' · '+p.checks.pending+' pending':'')+'</td>'
+    +'<td>'+esc(p.reviewDecision||'')+(review.unresolvedThreads?' · '+review.unresolvedThreads+' unresolved':'')+(review.changesRequested?' · changes requested':'')+'</td>'
+    +'<td>'+esc(p.mergeStateStatus)+' · '+(p.nextMergeable?'<span class="ok">next mergeable</span>':p.blockedBy?'blocked by #'+p.blockedBy:'')+'</td>'
+    +'<td class="grow">'+p.dispatchIds.map(id=>esc(id.slice(0,8))).join(' → ')+'</td>'
+    +'<td class="grow">'+(w?esc(w.cursor)+' · '+(w.lastCheckedAt?ageEl(w.lastCheckedAt)+' ago':'never checked'):'')+'</td><td>'+esc(p.gate||'')+'</td></tr>')}
+ }
+ const other=table(['key','owner','cursor','last check','error'],inp.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td>'+esc(w.cursor)+'</td><td>'+(w.lastCheckedAt?ageEl(w.lastCheckedAt):'')+'</td><td>'+esc(w.lastError||'')+'</td></tr>'),'no other watches');
+ return table(['PR','title','state','checks','review','merge','dispatch chain','watch','gate'],rows,'no PR evidence')+'<h2>other watches</h2>'+other}
 function trapRow(t){
  if(!t.live)return {stale:false,listen:'<span class="dot"></span><span class="dim">signed off</span>',hb:'<span class="dim">—</span>'};
  const stale=Date.now()-Date.parse(t.heartbeatAt)>1800000;
@@ -512,19 +567,34 @@ function setHTML(id,html){const el=document.getElementById(id);
  el.innerHTML=html;
  el.querySelectorAll('.wrap').forEach((w,i)=>{if(sc[i]){w.scrollLeft=sc[i][0];w.scrollTop=sc[i][1]}})}
 const setText=(el,t)=>{if(el.textContent!==t)el.textContent=t};
-let hashes=null;
+const TABS=GLASS_TABS;
+const activeTab=()=>tabFromHash(location.hash);
+let hashes={};
 // Render only what changed: each section is keyed on a hash of its inputs,
 // so a quiet tick touches nothing but ticking ages and the clock.
 function render(d){
  const inp=sectionInputs(d,{st,open,modal},Date.now());
  const next=hashInputs(inp);
  const dirty=new Set(dirtySections(hashes,next));
- hashes=next;
+ const tab=activeTab();
+ const visible=new Set(visibleSections(tab));
+ for(const k of visible)hashes[k]=next[k];
+ for(const name of TABS)document.getElementById('page-'+name).classList.toggle('on',name===tab);
+ for(const a of document.querySelectorAll('#tabs a'))a.classList.toggle('on',a.dataset.tab===tab);
+ document.getElementById('f-lane').style.display=tab==='dispatches'?'':'none';
+ document.getElementById('f-verb').style.display=tab==='dispatches'?'':'none';
+ document.getElementById('chain-control').style.display=tab==='dispatches'?'':'none';
+ document.getElementById('f-kind').style.display=tab==='notices'?'':'none';
+ document.getElementById('viewrow').style.display=tab==='dispatches'||tab==='traps'?'':'none';
+ // The popover's read-only line: the kinds config.toml selects (#32).
+ setText(document.getElementById('attnkinds'),d.attentionError?d.attentionError:(d.attentionKinds||[]).join(' · '));
  setText(document.getElementById('clock'),new Date(d.now).toLocaleTimeString('en-GB'));
- const repos=[...new Set(d.dispatches.map(x=>x.repo).filter(Boolean))].sort();
+ const repos=[...new Set([...d.dispatches.map(x=>x.repo),...d.notices.map(x=>x.repo),...d.prs.map(x=>x.repo)].filter(Boolean))].sort();
  const rsel=document.getElementById('f-repo');
  if(rsel.options.length!==repos.length+1){const cur=st.repo;
   rsel.innerHTML='<option value="">all repos</option>'+repos.map(r=>'<option'+(r===cur?' selected':'')+'>'+esc(r)+'</option>').join('')}
+ const kinds=[...new Set(d.notices.map(n=>n.kind))].sort(),ksel=document.getElementById('f-kind');
+ if(ksel.options.length!==kinds.length+1)ksel.innerHTML='<option value="">all notice kinds</option>'+kinds.map(k=>'<option'+(k===st.noticeKind?' selected':'')+'>'+esc(k)+'</option>').join('');
  for(const b of document.querySelectorAll('#viewseg button')){const on=b.dataset.v===st.view;if(b.classList.contains('on')!==on)b.classList.toggle('on',on)}
  if(dirty.has('chips')){
   const hbOld=inp.chips.daemonStale;
@@ -532,33 +602,18 @@ function render(d){
    '<span class="chip">daemon '+(d.daemon?('<span class="'+(hbOld?'bad':'ok')+'">'+(hbOld?'stale ':'')+ageEl(d.daemon.heartbeat)+' ago</span> <span class="dim">v'+esc(d.daemon.version)+'</span>'):'<span class="bad">down</span>')+'</span>'
    +inp.chips.helms.map(({x:h,stale})=>
      '<span class="chip click" onclick="showModal(\\'helm\\',\\''+esc(h.grounds)+'\\')">⛵ <b>'+esc(h.man)+'</b> <span class="dim">helm '+esc(h.grounds)+'</span> <span class="'+(stale?'warn':'ok')+'">'+(stale?'stale ':'')+ageEl(h.heartbeatAt)+' ago</span></span>').join(''))}
- const att=inp.attention.items;
- if(dirty.has('attention')){
-  // Read-only: the kinds come from config.toml (attentionKinds); the glass never toggles them.
-  setHTML('attnkinds',inp.attention.error?'<span class="bad">'+esc(inp.attention.error)+'</span>'
-   :'showing: '+(inp.attention.kinds||[]).map(esc).join(' · ')+' <span title="set attentionKinds in config.toml">(config.toml)</span>');
-  setHTML('attention',table(['id','repo','kind','note','age'],
-  att.map(x=>'<tr'+(x.acked?' class="dim" title="acknowledged by '+esc(x.acked.by)+' — hidden from the pet and lobs until it changes"':'')+'><td>'+esc(String(x.id).slice(0,8))+'</td><td>'+esc(x.repo??'')+'</td><td>'+kindCell(x)+'</td><td class="grow">'
-   +(x.prUrl&&isPrKind(x.kind)?'<a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">'+esc(x.note??'')+'</a>':esc(x.note??''))
-   +(x.acked?' <span class="dim">· acked '+ageEl(x.acked.at)+' ago by '+esc(x.acked.by)+'</span>':'')+'</td><td>'+ageEl(x.at)+'</td></tr>'),
-  'nothing needs a human'))}
- if(dirty.has('dispatches')){const list=inp.dispatches.list;
+ if(tab==='deck'&&dirty.has('deck'))setHTML('deck',renderDeck(d,inp.deck));
+ if(tab==='dispatches'&&dirty.has('dispatches')){const list=inp.dispatches.list;
   setHTML('dispatches',st.view==='cards'?dispatchCards(list):dispatchTable(list))}
- if(dirty.has('traps')){const traps=inp.traps.list.map(t=>t.x);
+ if(tab==='traps'&&dirty.has('traps')){const traps=inp.traps.list.map(t=>t.x);
   setHTML('traps',st.view==='cards'?trapCards(traps):trapTable(traps))}
- if(dirty.has('notices'))setHTML('notices',table(['at','kind','text','repo'],
+ if(tab==='notices'&&dirty.has('notices'))setHTML('notices',table(['at','kind','text','repo'],
   inp.notices.map(n=>'<tr><td class="dim">'+ageEl(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
   'no notices'));
- const mv=d.mergeView;
- if(dirty.has('merge'))setHTML('merge',!mv?'<div class="empty">no merge view (pickup not running)</div>':
-  table(['pr','gate','head','uuid'],(mv.open??[]).map(p=>'<tr><td><a href="'+esc(p.url)+'" target="_blank">#'+p.number+'</a></td><td>'+esc(p.gate)+'</td><td class="dim">'+esc(p.headRef)+'</td><td class="dim">'+esc((p.uuid??'').slice(0,8))+'</td></tr>'),'no open PRs')
-  +((mv.recent??[]).length?'<div class="dim" style="margin-top:4px">recent: '+mv.recent.map(r=>'#'+r.number+' '+r.disposition).join(' · ')+'</div>':''));
- if(dirty.has('watches'))setHTML('watches',table(['key','owner','cursor','last error'],
-  d.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td class="dim">'+esc(String(w.cursor??''))+'</td><td class="bad">'+esc(w.lastError??'')+'</td></tr>'),
-  'no watches'));
+ if(tab==='prs'&&dirty.has('prs'))setHTML('prs',prTable(d,inp.prs));
  if(dirty.has('foot'))setHTML('foot',
   '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>');
- renderLobs(att);
+ renderLobs(d.attention||[]);
  // The open modal is rebuilt only when its own item (or which one) changed.
  if(dirty.has('modal'))renderModal(d);
  refreshAges();
@@ -610,11 +665,14 @@ const closePop=()=>{pop.classList.remove('open');gear.classList.remove('on')};
 gear.addEventListener('click',(e)=>{e.stopPropagation();const o=pop.classList.toggle('open');gear.classList.toggle('on',o);paintLobs()});
 document.addEventListener('click',(e)=>{if(!pop.contains(e.target)&&e.target!==gear)closePop()});
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closePop()});
-for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb']]){
+for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb'],['f-kind','noticeKind']]){
  const el=document.getElementById(id);el.value=st[key];
  el.addEventListener('change',()=>{st[key]=el.value;save();tick(true)})}
+const chain=document.getElementById('f-chain');chain.checked=!!st.chain;
+chain.addEventListener('change',()=>{st.chain=chain.checked;save();tick(true)});
 const q=document.getElementById('f-q');q.value=st.q;
 q.addEventListener('input',()=>{st.q=q.value;save();tick(true)});
+window.addEventListener('hashchange',()=>tick(true));
 let last,inflight=false,timer=null;
 const setStale=(on)=>{const el=document.getElementById('stale');const v=on?'inline':'none';if(el.style.display!==v)el.style.display=v};
 // User-driven ticks render synchronously from last; polls fetch one at a time.

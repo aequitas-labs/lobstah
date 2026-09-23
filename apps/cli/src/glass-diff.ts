@@ -13,6 +13,9 @@
  */
 export const GLASS_DIFF_JS = `
 const STALE_DAEMON_MS=90000,STALE_SEAT_MS=1800000;
+const GLASS_TABS=['deck','dispatches','traps','prs','notices'];
+function tabFromHash(hash){const tab=String(hash||'').replace(/^#/,'');return GLASS_TABS.includes(tab)?tab:'deck'}
+function visibleSections(tab){return ['chips','foot','modal',tabFromHash('#'+tab)]}
 function stableStringify(v){
  if(v===null||typeof v!=='object')return v===undefined?'null':JSON.stringify(v);
  if(Array.isArray(v))return '['+v.map(stableStringify).join(',')+']';
@@ -35,16 +38,25 @@ function modalItem(d,modal){
  return d.traps.find(v=>v.trapId===modal.key)||null}
 function sectionInputs(d,ui,now){
  const st=ui.st;
+ const query=String(st.q||'').toLowerCase();
+ const hasQuery=(...parts)=>!query||parts.join(' ').toLowerCase().includes(query);
  const seat=(x)=>({x,stale:isStale(x.heartbeatAt,STALE_SEAT_MS,now)});
  const item=modalItem(d,ui.modal);
+ const recent=(iso,ms)=>!!iso&&now-Date.parse(iso)<=ms;
+ const deckTraps=(d.traps||[]).filter(t=>(t.live||(t.notices||[]).some(n=>
+  (n.kind==='trap-stowed'||n.kind==='trap-ghosted')&&recent(n.at,3600000)))&&hasQuery(t.trapId,t.repo,t.worktree));
  return {
   chips:{daemon:d.daemon,daemonStale:!!d.daemon&&isStale(d.daemon.heartbeat,STALE_DAEMON_MS,now),helms:d.helms.map(seat)},
-  attention:{kinds:d.attentionKinds,error:d.attentionError,items:(d.attention||[]).map(({ageSecs,...a})=>a)},
-  dispatches:{view:st.view,open:[...ui.open].sort(),list:d.dispatches.filter(x=>matches(x,st))},
-  traps:{view:st.view,list:(st.repo?d.traps.filter(t=>t.repo===st.repo):d.traps).map(seat)},
-  notices:st.repo?d.notices.filter(n=>!n.repo||n.repo===st.repo):d.notices,
-  merge:d.mergeView,
-  watches:d.watches,
+  deck:{attention:(d.attention||[]).filter(a=>recent(a.at,86400000)&&hasQuery(a.kind,a.repo,a.note,a.id)).map(({ageSecs,...a})=>a),
+   landed:(d.landed||[]).filter(a=>recent(a.at,86400000)&&hasQuery(a.repo,a.note,a.id)).map(({ageSecs,...a})=>a),
+   inflight:d.dispatches.filter(x=>x.bucket!=='done'&&matches(x,{...st,lane:'',repo:'',verb:''})),traps:deckTraps.map(seat),
+   stacks:(d.stacks||[]).filter(s=>s.open&&hasQuery(s.repo,s.numbers.join(' '))),error:d.attentionError},
+  dispatches:{view:st.view,chain:st.chain,list:d.dispatches.filter(x=>matches(x,st))},
+  traps:{view:st.view,list:d.traps.filter(t=>(!st.repo||t.repo===st.repo)&&hasQuery(t.trapId,t.repo,t.worktree,t.harness)).map(seat)},
+  prs:{stacks:(d.stacks||[]).filter(s=>!st.repo||s.repo===st.repo),
+   prs:(d.prs||[]).filter(p=>(!st.repo||p.repo===st.repo)&&hasQuery(p.number,p.title,p.url,p.state,p.baseRefName,p.headRefName)),
+   watches:(d.watches||[]).filter(w=>!String(w.key).startsWith('pr:'))},
+  notices:(d.notices||[]).filter(n=>(!st.repo||!n.repo||n.repo===st.repo)&&(!st.noticeKind||n.kind===st.noticeKind)&&hasQuery(n.kind,n.text,n.repo)),
   foot:{version:d.version,repoUrl:d.repoUrl},
   modal:{modal:ui.modal,item:item&&seat(item)}}}
 function hashInputs(inputs){const out={};
