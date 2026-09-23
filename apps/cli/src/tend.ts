@@ -29,6 +29,8 @@ import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import type { MergeView } from '@lobstah/pick';
+import { deriveGlassPrs } from './glass-prs.js';
+import type { GlassStack } from './glass-prs.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
 const HEARTBEAT_STALE_MS = 90_000;
@@ -175,6 +177,17 @@ export function prKinds(pr: PrEvidence): AttentionKind[] {
   return out;
 }
 
+/** Ready is a merge invitation only when no tracked open PR is its base. */
+export function readyBlockedByStack(pr: PrEvidence, tracked: readonly PrEvidence[]): boolean {
+  if (pr.state !== 'OPEN' || !pr.baseRefName) return false;
+  const ref = parsePrRef(pr.url);
+  return tracked.some((other) => {
+    const parent = parsePrRef(other.url);
+    return other.url !== pr.url && other.state === 'OPEN' && other.headRefName === pr.baseRefName &&
+      ref?.owner === parent?.owner && ref?.repo === parent?.repo;
+  });
+}
+
 const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
   'pr:draft': (pr) => `#${pr.number} draft`,
   'pr:review': (pr) =>
@@ -213,7 +226,7 @@ function groundsCursorFor(cfg: Config, repo: string | undefined): string {
  * call. One item per (PR, kind), the newest observation winning when several
  * chain members carry the same PR.
  */
-function prAttention(now: number): TendAttention[] {
+function observedPrs(): Array<{ id: string; lane: Lane; pr: PrEvidence }> {
   const newest = new Map<string, { id: string; lane: Lane; pr: PrEvidence }>();
   for (const lane of ['work', 'chore'] as Lane[]) {
     let files: string[];
@@ -230,14 +243,18 @@ function prAttention(now: number): TendAttention[] {
       if (!prev || prev.pr.observedAt < pr.observedAt) newest.set(pr.url, { id, lane, pr });
     }
   }
+  return [...newest.values()];
+}
+
+function prAttention(now: number, observed = observedPrs()): TendAttention[] {
   const reviewRounds = new Set(
     Object.values(readPickupMap())
       .filter((e) => e.kind === 'review')
       .map((e) => e.uuid),
   );
   const out: TendAttention[] = [];
-  for (const { id, lane, pr } of newest.values()) {
-    const kinds = prKinds(pr);
+  for (const { id, lane, pr } of observed) {
+    const kinds = prKinds(pr).filter((kind) => kind !== 'pr:ready' || !readyBlockedByStack(pr, observed.map((x) => x.pr)));
     if (kinds.length === 0) continue;
     const ref = parsePrRef(pr.url);
     const watchFollowUp = ref ? readWatch(ref.key)?.lastFollowUpId : undefined;
@@ -271,7 +288,7 @@ function prAttention(now: number): TendAttention[] {
 }
 
 /** Terminal catches the helm hasn't been reported yet: past its grounds' cursor. */
-function landedAttention(cfg: Config, now: number): TendAttention[] {
+export function landedAttention(cfg: Config, now: number): TendAttention[] {
   const out: TendAttention[] = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
     for (const id of doneIds(lane)) {
@@ -326,6 +343,7 @@ export interface TendReport {
   notices: TendNotice[];
   helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number }>;
   merge?: MergeView;
+  stacks: GlassStack[];
 }
 
 function readJson<T>(file: string): T | undefined {
@@ -548,7 +566,9 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (d.prUrl && d.at !== undefined && now - Date.parse(d.at) < DAY_MS) stories.push(direct(d));
   }
 
-  attention.push(...landedAttention(cfg, now), ...prAttention(now));
+  const observed = observedPrs();
+  const stacks = deriveGlassPrs(observed.map(({ id, pr }) => ({ id, pr }))).stacks.filter((s) => s.open);
+  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed));
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
@@ -610,6 +630,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     notices,
     helms,
     merge,
+    stacks,
   };
 }
 
@@ -626,6 +647,9 @@ export function renderTend(r: TendReport): string {
       failed24h: r.counts.failed24h,
     }),
   );
+  for (const stack of r.stacks) {
+    lines.push(`stack ${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
+  }
   if (r.attention.length > 0) {
     lines.push('');
     lines.push(

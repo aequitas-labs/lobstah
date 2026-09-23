@@ -37,6 +37,14 @@ describe('parsePrRef', () => {
   });
 });
 
+describe('PR stack branch evidence', () => {
+  it('reads both branch names in the existing view call and stamps them', () => {
+    expect(PR_VIEW_FIELDS.split(',')).toEqual(expect.arrayContaining(['baseRefName', 'headRefName']));
+    const pr = prEvidence(ref, { ...open, baseRefName: 'main', headRefName: 'glass' }, '2026-09-23T13:00:00Z');
+    expect(pr).toMatchObject({ baseRefName: 'main', headRefName: 'glass' });
+  });
+});
+
 describe('derivePrEvents', () => {
   it('first observation: completed checks only; merge state and draft are baseline', () => {
     const r = derivePrEvents(ref, open, '0');
