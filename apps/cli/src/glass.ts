@@ -20,6 +20,7 @@ import {
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice } from '@lobstah/core';
 import { readMergeView } from '@lobstah/pick';
+import { lobItems } from './glass-lobs.js';
 
 /**
  * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
@@ -27,7 +28,9 @@ import { readMergeView } from '@lobstah/pick';
  * can't afford. It binds 127.0.0.1 only, never writes lobstah state, and
  * never advances any cursor: looking through the glass consumes nothing.
  * Look freely, steer only from the helm — links out are copyable commands,
- * never exec endpoints (localhost HTTP is reachable by any webpage).
+ * never exec endpoints (localhost HTTP is reachable by any webpage). The
+ * ⚙ popover's two preferences (view, lobs) are the viewing browser's own,
+ * kept in its localStorage — the server has nothing to write.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
@@ -298,11 +301,21 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 @keyframes crawl{0%{transform:translateX(-90px)}100%{transform:translateX(100vw)}}
 @keyframes step{to{background-position-x:-288px}}
 @keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
+#gearbtn{background:none;border:1px solid var(--line);border-radius:6px;color:var(--dim);font:inherit;font-size:13px;padding:1px 7px;margin-left:8px;cursor:pointer;vertical-align:1px}
+#gearbtn:hover,#gearbtn.on{color:var(--fg);border-color:#3a455a}
+#settingspop{display:none;position:absolute;top:40px;left:16px;z-index:8;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 4px 16px rgba(0,0,0,.5);min-width:230px}
+#settingspop.open{display:block}
+#settingspop .row{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:6px 0}
+#settingspop .lbl{color:var(--dim);font-size:12px}
+#settingspop .hint{display:block;font-size:10px;opacity:.75}
 </style></head><body>
-<h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1>
+<h1>🦞✨ spyglass<button id="gearbtn" title="settings" aria-label="settings">⚙</button><span id="stale"> · STALE FEED</span></h1>
+<div id="settingspop" role="dialog" aria-label="settings (this browser only)">
+ <div class="row"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
+ <div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span><span class="seg" id="lobseg"><button data-l="on">on</button><button data-l="off">off</button></span></div>
+</div>
 <div class="chips" id="chips"></div>
 <div class="controls">
- <span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span>
  <select id="f-lane"><option value="">all lanes</option><option value="work">work</option><option value="chore">chore</option></select>
  <select id="f-repo"><option value="">all repos</option></select>
  <select id="f-verb"><option value="">all verbs</option><option>working</option><option>needs-decision</option><option>blocked</option><option>paused</option><option>done</option><option>failed</option><option>unknown</option></select>
@@ -323,8 +336,11 @@ const age=(iso)=>{if(!iso)return '';const s=Math.max(0,(Date.now()-Date.parse(is
  if(s<90)return Math.round(s)+'s';if(s<5400)return Math.round(s/60)+'m';if(s<172800)return (s/3600).toFixed(1)+'h';return Math.round(s/86400)+'d'};
 const open=new Set();
 let modal=null;
-let st={view:'table',lane:'',repo:'',verb:'',q:''};
+let st={view:'table',lane:'',repo:'',verb:'',q:'',lobs:true};
 try{Object.assign(st,JSON.parse(localStorage.getItem('spyglass')||'{}'))}catch(e){}
+// A stored value this page doesn't understand falls back to the default.
+if(st.view!=='table'&&st.view!=='cards')st.view='table';
+st.lobs=st.lobs!==false;
 const save=()=>{try{localStorage.setItem('spyglass',JSON.stringify(st))}catch(e){}};
 function table(headers,rows,empty){if(!rows.length)return '<div class="empty">'+empty+'</div>';
  return '<div class="wrap"><table><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr>'+rows.join('')+'</table></div>'}
@@ -471,13 +487,11 @@ let spriteOk=null;
  i.onerror=()=>{spriteOk=false;lobKey='';tick(true)};
  i.src='/lob-sprite.png'})();
 let lobKey='';
+${lobItems.toString()}
 function renderLobs(att){
- const preview=new URLSearchParams(location.search).has('lob');
- let items=att.map(x=>({key:x.lane+':'+x.id,text:x.note||x.verb,click:"showModal('dispatch','"+x.lane+':'+x.id+"')"}));
- if(!items.length&&preview)items=[{key:'preview',text:'attention questions crawl in here',click:last&&last.helms.length?"showModal('helm','"+last.helms[0].grounds+"')":''}];
- const extra=items.length>4?items.length-4:0;
- items=items.slice(0,4);
- if(extra)items[3].text='…and '+extra+' more — see attention';
+ // st.lobs (this browser's preference) gates the lobs; lobItems is glass-lobs.ts
+ const items=lobItems(att,{lobs:st.lobs,preview:new URLSearchParams(location.search).has('lob'),
+  previewClick:last&&last.helms.length?"showModal('helm','"+last.helms[0].grounds+"')":''});
  const key=items.map(i=>i.key).join('|')+(spriteOk===null?'?':spriteOk?'s':'e');
  if(key===lobKey)return;
  lobKey=key;
@@ -494,6 +508,14 @@ window.closeModal=()=>{modal=null;document.getElementById('overlay').classList.r
 document.getElementById('overlay').addEventListener('click',(e)=>{if(e.target.id==='overlay')closeModal()});
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeModal()});
 document.getElementById('viewseg').addEventListener('click',(e)=>{const v=e.target.dataset&&e.target.dataset.v;if(v){st.view=v;save();tick(true)}});
+// The ⚙ popover: per-browser preferences, localStorage only (save()).
+const pop=document.getElementById('settingspop'),gear=document.getElementById('gearbtn');
+const paintLobs=()=>{for(const b of document.querySelectorAll('#lobseg button'))b.classList.toggle('on',(b.dataset.l==='on')===st.lobs)};
+document.getElementById('lobseg').addEventListener('click',(e)=>{const l=e.target.dataset&&e.target.dataset.l;if(l){st.lobs=l==='on';save();paintLobs();tick(true)}});
+const closePop=()=>{pop.classList.remove('open');gear.classList.remove('on')};
+gear.addEventListener('click',(e)=>{e.stopPropagation();const o=pop.classList.toggle('open');gear.classList.toggle('on',o);paintLobs()});
+document.addEventListener('click',(e)=>{if(!pop.contains(e.target)&&e.target!==gear)closePop()});
+document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closePop()});
 for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb']]){
  const el=document.getElementById(id);el.value=st[key];
  el.addEventListener('change',()=>{st[key]=el.value;save();tick(true)})}

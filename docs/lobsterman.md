@@ -117,7 +117,9 @@ and the helm identified by name. It is strictly read-only and consumes no
 cursor: looking through the glass changes nothing, so it needs no helm and
 threatens nothing. Links out are copyable commands (`lobstah attach`,
 `claude --resume`), never click-to-exec — localhost HTTP is reachable by
-any webpage, so the glass exposes no endpoint that acts.
+any webpage, so the glass exposes no endpoint that acts. The ⚙ popover's two
+preferences — table or cards, and whether lobsters crawl the page — are
+per-browser, kept in that browser's localStorage and never on disk.
 
 This is where "is the agent alive?" belongs: the helm's heartbeat age on a
 page, not periodic proof-of-life turns in a transcript.
