@@ -137,7 +137,11 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
   landed.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
   const tend = buildTendReport(now);
-  const attention = tend.attention.filter((a) => a.verb === 'watch' || inGrounds(repoOf(a.id, a.lane)));
+  // Draft PRs are something to look at, not something arisen that blocks
+  // work — they walk in tend and the pet, but stay out of the digest.
+  const attention = tend.attention.filter(
+    (a) => a.kind !== 'pr' && (a.verb === 'watch' || inGrounds(repoOf(a.id, a.lane))),
+  );
   const standing: DigestAttention[] = attention.map((a) => ({
     id: a.id,
     verb: a.verb,

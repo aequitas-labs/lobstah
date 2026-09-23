@@ -13,7 +13,13 @@ to the helm through the focus ladder:
 4. the recorded app, by bundle id
 5. a stale helm revives instead: fresh Terminal window running
    `claude --resume <session>` (or `codex resume`) in the helm's cwd
-6. no helm at all → the spyglass (`http://127.0.0.1:4949`)
+6. no helm at all → the spyglass (`http://127.0.0.1:4949`, or the port in
+   `$LOBSTAH_GLASS_PORT`, which `lobstah glass` honors too)
+
+A dispatch's PR that its `pr:` watch observed open and still in draft
+walks too, its bubble naming the PR (`#27 draft`). Clicking a PR pet opens
+the PR in your browser instead of the helm; right-click adds **Open PR**.
+It stops walking once the PR leaves draft, merges, or closes.
 
 The pet only ever reads lobstah state — `lobstah man tend --json` every few
 seconds plus the helm registration files. It steers nothing and consumes no
@@ -39,7 +45,7 @@ LOBSTAH_PET_PREVIEW=1 apps/pet/.build/release/LobstahPet   # show a pet immediat
 LOBSTAH_PET_MENUBAR=1 apps/pet/.build/release/LobstahPet   # with the menu-bar 🦞
 ```
 
-Right-click the walking lobster for spyglass/quit. Needs `lobstah` on PATH
+Right-click the walking lobster for spyglass/quit (and Open PR on a PR pet). Needs `lobstah` on PATH
 (the LaunchAgent bakes a resolved PATH in) and macOS 13+. Focusing Terminal
 or iTerm windows triggers the one-time macOS Automation permission prompt
 the first time a pet is clicked.

@@ -25,6 +25,15 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
     expect(lobItems([], { lobs: true, preview: false, previewClick: '' })).toEqual([]);
   });
 
+  it('a pr item walks as a link to its PR with the draft badge, not the modal', () => {
+    const items = lobItems(
+      [{ id: 'cccc3333', lane: 'work', verb: 'pr', kind: 'pr', note: '#9 draft', prUrl: 'https://github.com/a/b/pull/9', draft: true }],
+      { lobs: true, preview: false, previewClick: '' },
+    );
+    expect(items).toEqual([{ key: 'pr:https://github.com/a/b/pull/9', text: '#9 draft', href: 'https://github.com/a/b/pull/9', draft: true }]);
+    expect(lobItems([{ id: 'c', lane: 'work', verb: 'pr', kind: 'pr', prUrl: 'x' }], { lobs: false, preview: false, previewClick: '' })).toEqual([]);
+  });
+
   it('caps at four, the last one counting the rest', () => {
     const many = Array.from({ length: 6 }, (_, i) => ({ id: `id${i}`, lane: 'work', verb: 'blocked' }));
     const items = lobItems(many, { lobs: true, preview: false, previewClick: '' });

@@ -10,12 +10,21 @@ export interface LobAttention {
   lane: string;
   verb: string;
   note?: string;
+  /** tend's attention kind; a `pr` item walks as a link to its PR. */
+  kind?: string;
+  prUrl?: string;
+  draft?: boolean;
 }
 
 export interface LobItem {
   key: string;
   text: string;
-  click: string;
+  /** onclick for a lob that opens something in the page (a modal). */
+  click?: string;
+  /** A PR lob is a plain link out — the glass opens, never acts. */
+  href?: string;
+  /** Show the small draft badge in the bubble. */
+  draft?: boolean;
 }
 
 export interface LobOptions {
@@ -29,16 +38,16 @@ export interface LobOptions {
 
 export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
   if (!opts.lobs) return [];
-  let items: LobItem[] = att.map((x) => ({
-    key: x.lane + ':' + x.id,
-    text: x.note || x.verb,
-    click: "showModal('dispatch','" + x.lane + ':' + x.id + "')",
-  }));
+  let items: LobItem[] = att.map((x) =>
+    x.kind === 'pr' && x.prUrl
+      ? { key: 'pr:' + x.prUrl, text: x.note || 'draft PR', href: x.prUrl, draft: !!x.draft }
+      : { key: x.lane + ':' + x.id, text: x.note || x.verb, click: "showModal('dispatch','" + x.lane + ':' + x.id + "')" },
+  );
   if (!items.length && opts.preview) {
     items = [{ key: 'preview', text: 'attention questions crawl in here', click: opts.previewClick }];
   }
   const extra = items.length > 4 ? items.length - 4 : 0;
   items = items.slice(0, 4);
-  if (extra) items[3] = { ...items[3]!, text: '…and ' + extra + ' more — see attention' };
+  if (extra) items[3] = { ...items[3]!, text: '…and ' + extra + ' more — see attention', draft: false };
   return items;
 }

@@ -39,7 +39,8 @@ function sectionInputs(d,ui,now){
  const item=modalItem(d,ui.modal);
  return {
   chips:{daemon:d.daemon,daemonStale:!!d.daemon&&isStale(d.daemon.heartbeat,STALE_DAEMON_MS,now),helms:d.helms.map(seat)},
-  attention:d.dispatches.filter(x=>x.verb==='needs-decision'||x.verb==='blocked'),
+  attention:[...d.dispatches.filter(x=>x.verb==='needs-decision'||x.verb==='blocked').map(x=>({kind:'question',...x})),
+   ...(d.prAttention||[]).map(({ageSecs,...a})=>a)],
   dispatches:{view:st.view,open:[...ui.open].sort(),list:d.dispatches.filter(x=>matches(x,st))},
   traps:{view:st.view,list:(st.repo?d.traps.filter(t=>t.repo===st.repo):d.traps).map(seat)},
   notices:st.repo?d.notices.filter(n=>!n.repo||n.repo===st.repo):d.notices,
