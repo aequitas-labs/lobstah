@@ -82,10 +82,9 @@ import { serveGlass } from './glass.js';
 import { installPet, uninstallPet } from './pet.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
-import { parseReportArgs } from './report-args.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
-import { UsageError, usageFor, validateArgs } from './usage.js';
+import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -102,7 +101,8 @@ work (humans and agents):
   status [<uuid>]                 reconciled state                (alias: buoy)
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|wt:<trap> <message> deliver an instruction: to a dispatch's
+  send <uuid>|wt:<trap> [--] <message>
+                                  deliver an instruction: to a dispatch's
                                   inbox, or to the session manning a worktree
                                   (arrives at its next park; undeliverable
                                   messages bounce to the helm)
@@ -190,7 +190,7 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   man wait (lobsterman).
 
 workers (dispatched agents; injected into every brief):
-  report <uuid> <verb> [note] [--pr <url>]
+  report <uuid> <verb> [--pr <url>] [--] [note]
                                   the validated status write path
                                   (${VERBS.join(' | ')})
 
@@ -224,13 +224,10 @@ setup:
 Everything except daemon and pick works with both stopped: writes are files,
 reads are files. Output is TOON; agents can drive this CLI directly.
 Home: $LOBSTAH_HOME (default ~/.lobstah) — one daemon per home, enforced.
+Flags go anywhere on the line; after \`--\` every word is positional (message
+or note text), so a literal "--session" can still be sent.
 Session id (--session verbs): the flag wins, then hook stdin, then
 $CLAUDE_CODE_SESSION_ID — inside Claude Code no flag is needed.`;
-
-function arg(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 ? args[i + 1] : undefined;
-}
 
 /**
  * The calling session: `--session`, else hook stdin (only for verbs that
@@ -261,8 +258,8 @@ const WATCH_EVERY_SECS = 45;
  * as `soak --wait` in a hookless session (wakes print plain; a timeout
  * exits 3 so re-running the same command re-arms).
  */
-async function soakPark(trapId: string, args: string[], plain = false): Promise<void> {
-  const timeoutSecs = Number(arg(args, '--timeout') ?? '14000');
+async function soakPark(trapId: string, timeout: string | undefined, plain = false): Promise<void> {
+  const timeoutSecs = Number(timeout ?? '14000');
   const deadline = Date.now() + timeoutSecs * 1000;
   const rearm = `lobstah soak --wait --timeout ${timeoutSecs}`;
   // Self-instructive in plain mode (axi.md P9): every exit tells the session
@@ -411,33 +408,43 @@ async function mainCli(): Promise<void> {
   }
   ensureLayout();
 
-  // Registry validation (axi.md P6/P10): unknown flags and subverbs fail
-  // loudly with the usage card (exit 2); `--help` prints it. Validation
-  // stops at a command's free-text tail, so a note or message may contain
-  // anything — including the literal strings above.
+  // The one parsing step (axi.md P6/P10): registered flags are honored in
+  // any position, unknown flags and subverbs fail loudly with the usage card
+  // (exit 2), and `--help` prints it. What remains are the positionals; after
+  // a `--` terminator every token is positional, so message and note text can
+  // still carry a literal flag.
+  let pos: string[] = args;
+  let flags = new Map<string, FlagValue>();
   if (cmd !== undefined) {
-    const v = validateArgs(cmd, args);
-    if (v?.help) {
+    const parsed = parseArgs(cmd, args);
+    if (parsed?.help) {
       console.log(usageFor(cmd)!);
       return;
     }
-    if (v?.error) throw new UsageError(`${v.error}\n\n${usageFor(cmd)!}`);
+    if (parsed?.error) throw new UsageError(`${parsed.error}\n\n${usageFor(cmd)!}`);
+    if (parsed) ({ positionals: pos, flags } = parsed);
   }
+  /** A value flag's value, wherever it appeared. */
+  const opt = (flag: string): string | undefined => {
+    const v = flags.get(flag);
+    return typeof v === 'string' ? v : undefined;
+  };
+  const has = (flag: string): boolean => flags.has(flag);
 
   switch (cmd) {
     case 'dispatch': {
-      const repo = arg(args, '--repo');
-      const briefFile = arg(args, '--brief') ?? arg(args, '--bait');
-      const briefText = arg(args, '--brief-text');
+      const repo = opt('--repo');
+      const briefFile = opt('--brief') ?? opt('--bait');
+      const briefText = opt('--brief-text');
       if (!repo || (!briefFile && !briefText)) {
         throw new Error('dispatch requires --repo and --brief <file> (or --brief-text)');
       }
-      let address = arg(args, '--for');
+      let address = opt('--for');
       const warnings: string[] = [];
       if (address) {
         const cfgDispatch = loadConfig();
         // Addressing a specific trap is steering — the claimed helm's alone.
-        gateHelm(callerSession(arg(args, '--session')));
+        gateHelm(callerSession(opt('--session')));
         // `session:` is an alias resolved to the trap at dispatch time, so
         // the queued address survives session restarts.
         if (address.startsWith('session:')) {
@@ -473,16 +480,16 @@ async function mainCli(): Promise<void> {
         }
       }
       const d: Descriptor = {
-        id: arg(args, '--id') ?? randomUUID(),
+        id: opt('--id') ?? randomUUID(),
         repo,
         brief: briefText ?? fs.readFileSync(briefFile!, 'utf8'),
-        harness: arg(args, '--harness'),
-        model: arg(args, '--model'),
-        effort: arg(args, '--effort'),
-        followUp: arg(args, '--follow-up'),
+        harness: opt('--harness'),
+        model: opt('--model'),
+        effort: opt('--effort'),
+        followUp: opt('--follow-up'),
         for: address,
       };
-      const lane: Lane = args.includes('--chore') ? 'chore' : 'work';
+      const lane: Lane = has('--chore') ? 'chore' : 'work';
       enqueue(d, lane);
       console.log(toonKV({ id: d.id, repo, lane, ...(address ? { for: address } : {}), queued: new Date().toISOString() }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
@@ -496,7 +503,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'ls': {
-      const lanes: Lane[] = args.includes('--all') ? ['work', 'chore'] : ['work'];
+      const lanes: Lane[] = has('--all') ? ['work', 'chore'] : ['work'];
       const rows = lanes.flatMap((lane) =>
         (['queue', 'active', 'done'] as const).flatMap((b) => rowsFor(lane, b)),
       );
@@ -505,7 +512,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'status': {
-      const id = args[0];
+      const id = pos[0];
       if (!id) {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
         console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated']));
@@ -527,7 +534,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'logs': {
-      const id = args[0];
+      const id = pos[0];
       if (!id) throw new Error('logs requires a dispatch id');
       const lane = findLane(id);
       const file = eventsPath(id, lane);
@@ -537,7 +544,7 @@ async function mainCli(): Promise<void> {
         const raw = fs.readFileSync(file, 'utf8');
         const lines = raw.split('\n').filter((l) => l.length > 0);
         const LIMIT = 50;
-        if (!args.includes('--full') && lines.length > LIMIT) {
+        if (!has('--full') && lines.length > LIMIT) {
           console.log(
             `(truncated: last ${LIMIT} of ${lines.length} events — \`lobstah logs ${id} --full\` for all)`,
           );
@@ -546,7 +553,7 @@ async function mainCli(): Promise<void> {
           process.stdout.write(raw);
         }
       }
-      if (args.includes('--follow')) {
+      if (has('--follow')) {
         let size = fs.existsSync(file) ? fs.statSync(file).size : 0;
         setInterval(() => {
           if (!fs.existsSync(file)) return;
@@ -565,23 +572,16 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'send': {
-      // --session identifies the sender; it must precede the target so it is
-      // never mistaken for message text. Everything after the target is the
-      // message, verbatim.
-      let sid: string | undefined;
-      let i = 0;
-      while (i < args.length && args[i]!.startsWith('--')) {
-        if (args[i] === '--session') sid = args[i + 1];
-        i += 2;
-      }
-      const [target, ...rest] = args.slice(i);
+      // --session (anywhere) identifies the sender; the positionals after the
+      // target are the message.
+      const [target, ...rest] = pos;
       if (!target || rest.length === 0) throw new Error('send requires a target (dispatch id, wt:<trap>, or session:<id>) and a message');
       // Sending is steering: with a helm claimed, only the helm steers — a
       // worker processing untrusted content must not be able to instruct a
       // sibling through our own delivery machinery.
       const cfgSend = loadConfig();
-      const sender = callerSession(sid);
-      sid = sender?.id;
+      const sender = callerSession(opt('--session'));
+      const sid = sender?.id;
       gateHelm(sender);
       const from = sid !== undefined && helmOf(sid) !== undefined ? 'helm' : sid !== undefined ? `session:${sid.slice(0, 8)}` : 'terminal';
       const text = rest.join(' ');
@@ -611,10 +611,11 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'report': {
-      const [id, verb, ...rest] = args;
+      const [id, verb, ...rest] = pos;
       if (!id || !verb) throw new Error(`report requires an id and a verb (${VERBS.join('|')})`);
       const lane = findLane(id);
-      const { note, prUrl } = parseReportArgs(rest);
+      const note = rest.join(' ') || undefined;
+      const prUrl = opt('--pr');
       const entry = appendStatus(id, lane, verb, note);
       if (prUrl) mergeEvidence(id, lane, { prUrl });
       console.log(toonKV({ id, verb: entry.verb, at: entry.at, ...(prUrl ? { prUrl } : {}) }));
@@ -641,7 +642,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'inbox': {
-      const id = args[0];
+      const id = pos[0];
       if (!id) throw new Error('inbox requires a dispatch id');
       const lane = findLane(id);
       const msgs = unhandled(id, lane);
@@ -657,11 +658,11 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'attach': {
-      const id = args[0];
+      const id = pos[0];
       if (!id) throw new Error('attach requires a dispatch id');
       const lane = findLane(id);
       const state = reconcile({ log: readStatusLog(id, lane), lastEventAt: lastEventAt(id, lane) });
-      if (state === 'working' && !args.includes('--force')) {
+      if (state === 'working' && !has('--force')) {
         throw new Error(
           `${id} is still working — attaching would put two writers on one session. ` +
             `Follow it with \`lobstah logs ${id} --follow\`, steer it with \`lobstah send\`, ` +
@@ -690,7 +691,7 @@ async function mainCli(): Promise<void> {
       const invocation =
         harness === 'codex' ? codexInvocation(['resume', sessionId]) : { file: 'claude', argv: ['--resume', sessionId] };
       if (!invocation) throw new Error('no codex CLI found — neither on PATH nor vendored by @openai/codex-sdk');
-      if (args.includes('--print')) {
+      if (has('--print')) {
         console.log(toonKV({ id, harness, sessionId, cwd, command: `${invocation.file} ${invocation.argv.join(' ')}` }));
         break;
       }
@@ -699,11 +700,11 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'swap': {
-      const id = args[0];
+      const id = pos[0];
       if (!id) throw new Error('swap requires a dispatch id');
       // Swapping is steering — the claimed helm's alone.
       {
-        gateHelm(callerSession(arg(args, '--session')));
+        gateHelm(callerSession(opt('--session')));
       }
       const lane = findLane(id);
       const activeDir = path.join(laneDirs(lane).active, id);
@@ -713,7 +714,7 @@ async function mainCli(): Promise<void> {
       const descriptor = JSON.parse(fs.readFileSync(descFile, 'utf8')) as Descriptor;
       const fromHarness = descriptor.harness ?? 'default';
       for (const key of ['harness', 'model', 'effort'] as const) {
-        const v = arg(args, `--${key}`);
+        const v = opt(`--${key}`);
         if (v) descriptor[key] = v;
       }
       fs.writeFileSync(descFile, JSON.stringify(descriptor, null, 2));
@@ -754,7 +755,7 @@ ${progress}`,
       break;
     }
     case 'catch': {
-      const id = args[0];
+      const id = pos[0];
       if (!id) throw new Error('catch requires a dispatch id');
       const lane = findLane(id);
       const log = readStatusLog(id, lane);
@@ -776,7 +777,7 @@ ${progress}`,
       break;
     }
     case 'cull': {
-      const days = Number(arg(args, '--older-than') ?? '14');
+      const days = Number(opt('--older-than') ?? '14');
       const plan = planCull(days);
       console.log(
         toonTable(
@@ -786,7 +787,7 @@ ${progress}`,
         ),
       );
       if (plan.length === 0) break;
-      if (args.includes('--apply')) {
+      if (has('--apply')) {
         applyCull(plan);
         console.log(`applied: ${plan.length} removed`);
       } else {
@@ -800,7 +801,7 @@ ${progress}`,
     }
     case 'man:tend': {
       const report = buildTendReport();
-      console.log(args.includes('--json') ? JSON.stringify(report, null, 2) : renderTend(report));
+      console.log(has('--json') ? JSON.stringify(report, null, 2) : renderTend(report));
       break;
     }
     case 'man:report': {
@@ -810,26 +811,26 @@ ${progress}`,
       // rule: advancing the cursor is the helm's alone once claimed, and a
       // grounds-scoped report only its own helm's.
       const cfgReport = loadConfig();
-      const caller = callerSession(arg(args, '--session'));
+      const caller = callerSession(opt('--session'));
       const sid = caller?.id;
-      let groundsName = arg(args, '--grounds');
+      let groundsName = opt('--grounds');
       gateHelm(caller, groundsName);
       // An identified helm defaults to its own grounds.
       if (groundsName === undefined && sid !== undefined) groundsName = helmOf(sid)?.grounds;
       const grounds = groundsName !== undefined ? resolveGrounds(cfgReport, groundsName) : undefined;
-      const cursor = arg(args, '--cursor') ?? grounds?.name ?? 'fleet';
+      const cursor = opt('--cursor') ?? grounds?.name ?? 'fleet';
       const digest = buildDigest({ cursor, repos: grounds ? new Set(grounds.repos) : undefined });
-      if (args.includes('--json')) console.log(JSON.stringify(digest, null, 2));
+      if (has('--json')) console.log(JSON.stringify(digest, null, 2));
       else if (digest.changed) console.log(renderDigest(digest));
       else console.log(toonKV({ digest: 'no change', since: digest.since, fleet: digest.verdict }));
-      if (digest.changed && !args.includes('--peek')) advanceCursor(cursor, digest.now);
+      if (digest.changed && !has('--peek')) advanceCursor(cursor, digest.now);
       break;
     }
     case 'man:helm': {
       // Take the helm: sign this session on as the one lobsterman for its
       // grounds. The registration arms the Stop-hook park (no marker file
       // needed) and gates the periodic digest; the charter is the persona.
-      const sessionId = callerSession(arg(args, '--session'), true)?.id;
+      const sessionId = callerSession(opt('--session'), true)?.id;
       if (!sessionId) {
         throw new Error(
           'helm requires --session <id> — the harness session id, announced at session start ' +
@@ -839,7 +840,7 @@ ${progress}`,
       const cfg = loadConfig();
       const errs = groundsErrors(cfg);
       if (errs.length > 0) throw new Error(`fix [grounds.*] in ${configPath()} first:\n${errs.map((e) => `- ${e}`).join('\n')}`);
-      const grounds = resolveGrounds(cfg, arg(args, '--grounds'));
+      const grounds = resolveGrounds(cfg, opt('--grounds'));
       // Who the man is: harness from the invoking environment, place from
       // cwd/host, plus an optional human label. Every status surface renders
       // this instead of a bare session id.
@@ -848,8 +849,8 @@ ${progress}`,
         : Object.keys(process.env).some((k) => k.startsWith('CODEX'))
           ? 'codex'
           : undefined;
-      const identity = { harness, cwd: process.cwd(), host: os.hostname(), label: arg(args, '--label'), window: captureWindow() };
-      const res = takeHelm({ sessionId, grounds, ttlMs: cfg.helm.ttlSecs * 1000, take: args.includes('--take'), identity });
+      const identity = { harness, cwd: process.cwd(), host: os.hostname(), label: opt('--label'), window: captureWindow() };
+      const res = takeHelm({ sessionId, grounds, ttlMs: cfg.helm.ttlSecs * 1000, take: has('--take'), identity });
       if ('held' in res) {
         const ageSecs = Math.max(0, Math.round((Date.now() - (Date.parse(res.held.heartbeatAt) || 0)) / 1000));
         throw new Error(
@@ -872,18 +873,18 @@ ${progress}`,
       break;
     }
     case 'man:relieve': {
-      const sessionId = callerSession(arg(args, '--session'), true)?.id;
+      const sessionId = callerSession(opt('--session'), true)?.id;
       if (!sessionId) throw new Error('relieve requires --session <id> (or hook input on stdin, or $CLAUDE_CODE_SESSION_ID)');
       const relieved = relieveHelm(sessionId);
       console.log(toonKV({ relieved: sessionId, grounds: relieved.length > 0 ? relieved.join(', ') : '(none held)' }));
       break;
     }
     case 'cancel': {
-      const id = args[0];
+      const id = pos[0];
       if (!id) throw new Error('cancel requires a dispatch id');
       // Cancelling is steering — the claimed helm's alone.
       {
-        gateHelm(callerSession(arg(args, '--session')));
+        gateHelm(callerSession(opt('--session')));
       }
       const lane = findLane(id);
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
@@ -906,16 +907,16 @@ ${progress}`,
     }
     case 'man:wait': {
       // --peek never parks, so a deadline has nothing to bound.
-      if (args.includes('--peek') && arg(args, '--timeout') !== undefined) {
+      if (has('--peek') && opt('--timeout') !== undefined) {
         throw new UsageError(`--peek never blocks — drop --timeout\n\n${usageFor('man:wait')!}`);
       }
       // Strict helm rule: wait consumes attention events — the helm's wakes.
       // With a claimed lobsterman anywhere, only that session may run it, and
       // a grounds-scoped wait only by that grounds' own helm.
-      const caller = callerSession(arg(args, '--session'));
+      const caller = callerSession(opt('--session'));
       const sid = caller?.id;
       const cfgWait = loadConfig();
-      let groundsName = arg(args, '--grounds');
+      let groundsName = opt('--grounds');
       gateHelm(caller, groundsName);
       // An identified helm defaults to its own grounds, and waiting is
       // liveness: the park heartbeats the registration for it.
@@ -924,7 +925,7 @@ ${progress}`,
         heartbeatHelm(callerHelm.sessionId);
         groundsName ??= callerHelm.grounds;
       }
-      const timeoutSecs = Number(arg(args, '--timeout') ?? '0');
+      const timeoutSecs = Number(opt('--timeout') ?? '0');
       const deadline = timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : Number.POSITIVE_INFINITY;
       const emit = (evs: ReturnType<typeof attentionNow>) => {
         for (const e of evs) {
@@ -940,7 +941,7 @@ ${progress}`,
         );
       };
       const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
-      const consume = !args.includes('--peek');
+      const consume = !has('--peek');
       // Grounds-scoped consumption: a helm's wait touches only its own
       // repos' events and notices — the rest stand for their owner.
       const groundsScope = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
@@ -1028,9 +1029,9 @@ ${progress}`,
       // --global installs once into the user's Claude settings; the haul hook
       // still gates per directory (marker file or LOBSTAH_MAN=1), so a global
       // install parks nothing until a project opts in.
-      const file = args.includes('--global')
+      const file = has('--global')
         ? path.join(os.homedir(), '.claude', 'settings.json')
-        : path.join('.claude', args.includes('--shared') ? 'settings.json' : 'settings.local.json');
+        : path.join('.claude', has('--shared') ? 'settings.json' : 'settings.local.json');
       let existing: unknown;
       try {
         existing = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -1042,15 +1043,15 @@ ${progress}`,
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
       }
-      if (args.includes('--marker')) fs.writeFileSync('.lobstah-man', '');
+      if (has('--marker')) fs.writeFileSync('.lobstah-man', '');
       console.log(
         toonKV({
           hook: 'lobstah man haul',
           file,
           installed: changed || 'already present',
-          gate: args.includes('--marker')
+          gate: has('--marker')
             ? '.lobstah-man (this directory)'
-            : args.includes('--global')
+            : has('--global')
               ? 'touch .lobstah-man in a project (or LOBSTAH_MAN=1) to arm it there'
               : 'launch with LOBSTAH_MAN=1 claude',
         }),
@@ -1068,7 +1069,7 @@ ${progress}`,
         const hook = readHookStdin();
         const trapReg = hook?.session_id ? trapBySession(hook.session_id) : undefined;
         if (trapReg) {
-          await soakPark(trapReg.trapId, args);
+          await soakPark(trapReg.trapId, opt('--timeout'));
           break;
         }
         const emit = (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
@@ -1132,7 +1133,7 @@ ${progress}`,
           if (d) blockDigest(d);
           break; // otherwise conversational turns end free
         }
-        const timeoutSecs = Number(arg(args, '--timeout') ?? '14000');
+        const timeoutSecs = Number(opt('--timeout') ?? '14000');
         const deadline = Date.now() + timeoutSecs * 1000;
         const remindMs = (cfgHaul.remindSecs ?? 900) * 1000;
         // A helm's park consumes only its own grounds' events and notices.
@@ -1217,7 +1218,7 @@ ${progress}`,
       // the same worktree infers everything from the anchor file.
       const priorId = trapIdAt(site.worktree);
       const prior = priorId !== undefined ? readTrap(priorId) : undefined;
-      const sessionId = callerSession(arg(args, '--session'), true)?.id ?? prior?.sessionId;
+      const sessionId = callerSession(opt('--session'), true)?.id ?? prior?.sessionId;
       if (!sessionId) {
         throw new Error(
           'first sign-on needs --session <id> — the harness session id, announced at session start ' +
@@ -1228,9 +1229,9 @@ ${progress}`,
         worktree: site.worktree,
         cwd: process.cwd(),
         repo: site.repoKey,
-        harness: arg(args, '--harness') ?? prior?.harness ?? 'claude',
+        harness: opt('--harness') ?? prior?.harness ?? 'claude',
         sessionId,
-        one: args.includes('--one') || undefined,
+        one: has('--one') || undefined,
         window: captureWindow(),
         ttlMs: cfg.soak.ttlSecs * 1000,
       });
@@ -1264,15 +1265,15 @@ ${progress}`,
       // foreground command — the trap waits in the water right here. Wakes
       // print plain; a quiet timeout exits 3 so the session re-arms by
       // re-running the same soak --wait command.
-      if (args.includes('--wait')) await soakPark(reg.trapId, args, true);
+      if (has('--wait')) await soakPark(reg.trapId, opt('--timeout'), true);
       break;
     }
     case 'stow': {
-      const quiet = args.includes('--quiet');
+      const quiet = has('--quiet');
       // Resolve the trap from where we stand, from the session (flag or
       // hook stdin), or from an explicit wt: id.
-      const wtFlag = arg(args, '--wt');
-      const caller = callerSession(arg(args, '--session'), true);
+      const wtFlag = opt('--wt');
+      const caller = callerSession(opt('--session'), true);
       const sessionId = caller?.id;
       const site = inspectSoakSite(process.cwd(), loadConfig().repos);
       const trapId =
@@ -1314,27 +1315,27 @@ ${progress}`,
     case 'daemon':
     case 'pick': {
       const kind = cmd as 'daemon' | 'pick';
-      if (args[0] === 'install') {
+      if (pos[0] === 'install') {
         const res = installService(kind);
         console.log(toonKV({ service: kind, file: res.file, loaded: res.loaded, detail: res.detail }));
         break;
       }
-      if (args[0] === 'uninstall') {
+      if (pos[0] === 'uninstall') {
         const res = uninstallService(kind);
         console.log(toonKV({ service: kind, file: res.file, removed: res.removed }));
         break;
       }
-      if (kind === 'daemon') await daemon(Number(arg(args, '--interval') ?? '5000'));
-      else await runPickup(args[0] === 'once' ? 'once' : 'daemon');
+      if (kind === 'daemon') await daemon(Number(opt('--interval') ?? '5000'));
+      else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;
     }
     case 'pet': {
-      if (args[0] === 'install') {
-        const res = installPet(arg(args, '--binary'));
+      if (pos[0] === 'install') {
+        const res = installPet(opt('--binary'));
         console.log(toonKV({ pet: 'installed', binary: res.binary, file: res.file, loaded: res.loaded, detail: res.detail }));
         break;
       }
-      if (args[0] === 'uninstall') {
+      if (pos[0] === 'uninstall') {
         const res = uninstallPet();
         console.log(toonKV({ pet: 'uninstalled', file: res.file, removed: res.removed }));
         break;
@@ -1342,7 +1343,7 @@ ${progress}`,
       throw new UsageError(`pet requires a subverb: install | uninstall\n\n${usageFor('pet')!}`);
     }
     case 'glass': {
-      const port = Number(arg(args, '--port') ?? '4949');
+      const port = Number(opt('--port') ?? '4949');
       serveGlass(port);
       console.log(
         toonKV({
@@ -1360,15 +1361,15 @@ ${progress}`,
       break;
     }
     case 'repos': {
-      if (args[0] === 'add') {
-        const target = args[1];
+      if (pos[0] === 'add') {
+        const target = pos[1];
         if (!target) throw new Error('repos add requires a path');
         const detected = detectRepo(target);
         if (!detected) throw new Error(`${target} is not the root of a git repository`);
-        const key = arg(args, '--key') ?? detected.key;
+        const key = opt('--key') ?? detected.key;
         if (configuredRepoKeys().has(key)) throw new Error(`repos.${key} already configured — edit ${configPath()} directly`);
-        appendRepoBlock({ ...detected, key }, { pickup: args.includes('--pickup') });
-        console.log(toonKV({ key, path: detected.path, trunk: detected.trunk, origin: detected.origin, pickup: args.includes('--pickup') }));
+        appendRepoBlock({ ...detected, key }, { pickup: has('--pickup') });
+        console.log(toonKV({ key, path: detected.path, trunk: detected.trunk, origin: detected.origin, pickup: has('--pickup') }));
         break;
       }
       const repos = loadConfig().repos;
@@ -1387,19 +1388,19 @@ ${progress}`,
       break;
     }
     case 'watch': {
-      const sub = args[0];
+      const sub = pos[0];
       if (sub === 'add') {
-        const key = args[1];
-        const check = arg(args, '--check');
+        const key = pos[1];
+        const check = opt('--check');
         if (!key || key.startsWith('--') || !check) throw new Error('watch add requires a key and --check <command>');
-        const forId = arg(args, '--for');
-        const every = arg(args, '--every');
+        const forId = opt('--for');
+        const every = opt('--every');
         const w = addWatch(key, check, {
           owner: forId ? `dispatch:${forId}` : 'man',
-          cursor: arg(args, '--cursor'),
+          cursor: opt('--cursor'),
           everySecs: every ? Number(every) : undefined,
-          brief: arg(args, '--brief'),
-          stream: arg(args, '--stream'),
+          brief: opt('--brief'),
+          stream: opt('--stream'),
         });
         console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
         console.log(
@@ -1412,7 +1413,7 @@ ${progress}`,
         break;
       }
       if (sub === 'rm') {
-        const key = args[1];
+        const key = pos[1];
         if (!key) throw new Error('watch rm requires a key');
         console.log(toonKV({ key, removed: removeWatch(key) }));
         break;
@@ -1432,7 +1433,7 @@ ${progress}`,
       if (!fs.existsSync(configPath())) {
         // --scan fills [repos.*] with real repos; only a bare init needs the
         // placeholder to show the shape (doctor would flag its fake path).
-        const exampleRepo = args.includes('--scan')
+        const exampleRepo = has('--scan')
           ? ''
           : `[repos.example]
 path  = "~/src/example"
@@ -1461,14 +1462,14 @@ wallClockSecs      = 3600
 `,
         );
       }
-      const scanIdx = args.indexOf('--scan');
+
       const added: string[] = [];
       const unmarked: string[] = [];
-      if (scanIdx >= 0) {
-        const roots = args.slice(scanIdx + 1).filter((a) => !a.startsWith('--'));
+      if (has('--scan')) {
+        const roots = pos;
         if (roots.length === 0) throw new Error('--scan requires at least one directory');
         const known = configuredRepoKeys();
-        const pickup = args.includes('--pickup');
+        const pickup = has('--pickup');
         for (const repo of scanForRepos(roots)) {
           if (known.has(repo.key)) continue;
           known.add(repo.key);
@@ -1504,9 +1505,9 @@ wallClockSecs      = 3600
       // Hidden: the compiled binary re-execs itself with this verb to run a
       // dispatch — the daemon's spawnRunner uses it when there is no
       // runner.js on disk to point node at.
-      if (!args[0]) throw new Error('__runner requires the active dispatch directory');
+      if (!pos[0]) throw new Error('__runner requires the active dispatch directory');
       const { runRunner } = await import('@lobstah/runner');
-      runRunner(args[0], args[1]);
+      runRunner(pos[0], pos[1]);
       break;
     }
     case '--version':

@@ -19,8 +19,6 @@ export interface CommandSpec {
   subverbs?: string[];
   /** Positional synopsis text, verbatim. */
   positionals?: string;
-  /** Flag validation stops after this many positionals — the rest is prose. */
-  tailAfter?: number;
 }
 
 const HARNESS = 'claude|codex';
@@ -45,7 +43,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>|wt:<trap> <message...>', tailAfter: 1 },
+  send: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>|wt:<trap> <message...>' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -60,7 +58,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   catch: { flags: {}, positionals: '<uuid>' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
-  report: { flags: {}, positionals: '<uuid> <verb> [note...] [--pr <url>]', tailAfter: 2 },
+  report: { flags: { '--pr': { value: '<url>' } }, positionals: '<uuid> <verb> [note...]' },
   watch: {
     subverbs: ['add', 'rm', 'ls'],
     flags: {
@@ -131,8 +129,8 @@ claimed helm, addressing requires --session <helm-id>. Alias: set --bait.`,
   send: `Deliver an instruction: to a dispatch's inbox (<uuid>), or to the session
 manning a worktree (wt:<trap> — delivered at its next park, no catch
 lifecycle; undeliverable messages bounce to the helm). Messages carry their
-sender. With a claimed helm, sending requires --session <helm-id> (before
-the target).`,
+sender. With a claimed helm, sending requires --session <helm-id>. Flags go
+anywhere; after \`--\` every word is message text, even "--session".`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -145,7 +143,7 @@ without --apply (default 14 days).`,
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `The validated status write path: working | needs-decision | blocked |
-paused | done | failed.`,
+paused | done | failed. --pr goes anywhere; after \`--\` every word is note.`,
   watch: `Stand watch on something external; bare \`watch\` (or \`watch ls\`) lists.
 The check command answers "anything since {cursor}?" in JSON.`,
   soak: `Volunteer this session as a worker. Identity is the worktree: sign-on
@@ -248,36 +246,57 @@ export function usageFor(cmd: string): string | undefined {
 /** A usage mistake — exits 2 (axi.md P6) instead of 1. */
 export class UsageError extends Error {}
 
-export interface Validation {
+/** A flag's parsed value: its value token, or `true` for a boolean flag. */
+export type FlagValue = string | true;
+
+export interface ParsedArgs {
+  /** Registered flags found anywhere in argv; the first occurrence wins. */
+  flags: Map<string, FlagValue>;
+  /** Everything that is not a flag or a flag's value, in order. */
+  positionals: string[];
   help?: boolean;
   error?: string;
 }
 
 /**
- * Validate argv against the registry. Unknown flags and unknown subverbs are
- * errors; a value-flag consumes the next token unexamined; validation stops
- * at a command's free-text tail so a note or message may contain anything.
- * `--help` anywhere in the validated region asks for the usage card.
+ * The one flag-extraction step every verb goes through. A registered flag is
+ * honored wherever it appears — before, between, or after the positionals —
+ * and a value-flag consumes the next token unexamined. `--` ends flag
+ * parsing: every later token is a positional, so message and note text can
+ * still carry a literal flag. An unregistered `--flag` outside that tail is
+ * a usage error (axi.md P6), never silently absorbed into prose; `--help`
+ * before any `--` asks for the usage card. Returns undefined for a command
+ * outside the registry.
  */
-export function validateArgs(cmd: string, args: string[]): Validation | undefined {
+export function parseArgs(cmd: string, args: string[]): ParsedArgs | undefined {
   const spec = COMMANDS[cmd];
   if (!spec) return undefined;
-  let positionals = 0;
+  const flags = new Map<string, FlagValue>();
+  const positionals: string[] = [];
+  const fail = (error: string): ParsedArgs => ({ flags, positionals, error });
   for (let i = 0; i < args.length; i++) {
     const tok = args[i]!;
-    if (spec.tailAfter !== undefined && positionals >= spec.tailAfter) break;
+    if (tok === '--') {
+      positionals.push(...args.slice(i + 1));
+      break;
+    }
     if (!tok.startsWith('--')) {
       // Where subverbs exist, further positionals only ever follow one.
-      if (positionals === 0 && spec.subverbs && !spec.subverbs.includes(tok)) {
-        return { error: `unknown ${cmd} subcommand "${tok}" (expected ${spec.subverbs.join(' | ')})` };
+      if (positionals.length === 0 && spec.subverbs && !spec.subverbs.includes(tok)) {
+        return fail(`unknown ${cmd} subcommand "${tok}" (expected ${spec.subverbs.join(' | ')})`);
       }
-      positionals++;
+      positionals.push(tok);
       continue;
     }
-    if (tok === '--help') return { help: true };
+    if (tok === '--help') return { flags, positionals, help: true };
     const f = spec.flags[tok];
-    if (!f) return { error: `unknown flag ${tok} for ${cmd.replace(':', ' ')}` };
-    if (f.value) i++; // the value is consumed, never validated
+    if (!f) return fail(`unknown flag ${tok} for ${cmd.replace(':', ' ')}`);
+    let value: FlagValue = true;
+    if (f.value) {
+      if (i + 1 >= args.length) return fail(`flag ${tok} needs a value (${tok} ${f.value})`);
+      value = args[++i]!; // the value is consumed, never validated
+    }
+    if (!flags.has(tok)) flags.set(tok, value);
   }
-  return {};
+  return { flags, positionals };
 }
