@@ -151,12 +151,27 @@ describe('man brief: the one-line drift warning', () => {
   it('end to end through the SessionStart hook: appended to the brief for drift, absent for a match', () => {
     const run = (home: string) => {
       const lobstahHome = path.join(tmp, 'lobstah');
+      const nowhere = path.join(tmp, 'no-home');
       fs.mkdirSync(lobstahHome, { recursive: true });
+      fs.mkdirSync(nowhere, { recursive: true });
       const res = spawnSync(process.execPath, [cli, 'man', 'brief'], {
         input: JSON.stringify({ session_id: 'x' }),
         encoding: 'utf8',
-        // The version a release stamps (as build-binaries does); a workspace build is 0.0.0-dev by design.
-        env: { PATH: process.env.PATH, HOME: home, LOBSTAH_HOME: lobstahHome, LOBSTAH_BUILD_VERSION: cliVersion(repo) },
+        env: {
+          PATH: process.env.PATH,
+          // Point the child at the fixture through Claude Code's own
+          // override. HOME alone is POSIX-only: on Windows os.homedir()
+          // reads USERPROFILE, so a HOME-only fixture silently looked up the
+          // runner's real profile. Both home variables aim at an empty dir,
+          // so the lookup can only succeed through CLAUDE_CONFIG_DIR.
+          CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
+          HOME: nowhere,
+          USERPROFILE: nowhere,
+          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+          LOBSTAH_HOME: lobstahHome,
+          // The version a release stamps (as build-binaries does); a workspace build is 0.0.0-dev by design.
+          LOBSTAH_BUILD_VERSION: cliVersion(repo),
+        },
         timeout: 10_000,
       });
       expect(res.status).toBe(0);
@@ -164,7 +179,7 @@ describe('man brief: the one-line drift warning', () => {
     };
     const cliV = cliVersion(repo);
     const drift = run(claudeHome('0.1.0'));
-    expect(drift.trimEnd().split('\n').at(-1)).toBe(`lobstah: plugin 0.1.0 is behind CLI ${cliV} — /plugin update lobstah@lobstah`);
+    expect(drift.trimEnd().split(/\r?\n/).at(-1)).toBe(`lobstah: plugin 0.1.0 is behind CLI ${cliV} — /plugin update lobstah@lobstah`);
     expect(run(claudeHome(cliV))).not.toContain('is behind CLI');
   });
 });
