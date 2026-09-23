@@ -127,6 +127,13 @@ opts out). What you get depends on what runs:
 `gh` must be on PATH and authenticated; if it isn't, the done report still
 succeeds and the watch's check records `lastError`.
 
+An observed PR that is open and still in **draft** joins tend's attention
+list as `kind: "pr"` (questions are `kind: "question"`, man-owned watch
+events `kind: "watch"`), so it crawls in the glass and the desktop pet
+until it leaves draft, merges, or closes; clicking it opens the PR. A draft
+PR is something to look at, not a stall: it never flips the verdict to
+`needs-attention` and stays out of the digest.
+
 ### The spyglass
 
 `lobstah glass [--port <n>]` serves tend as a live web page on 127.0.0.1

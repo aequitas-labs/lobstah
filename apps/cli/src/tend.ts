@@ -88,11 +88,74 @@ export interface TendNotice {
   text: string;
 }
 
+/**
+ * One thing awaiting a human. `question` is a standing needs-decision /
+ * blocked; `watch` an unconsumed man-owned watch event; `pr` a dispatch's
+ * PR that its pr: watch observed open and still in draft — it walks until
+ * the PR leaves draft, merges, or closes. Only questions and watch events
+ * drive the verdict: a draft PR is something to look at, not a stall.
+ */
+export interface TendAttention {
+  kind: 'question' | 'watch' | 'pr';
+  id: string;
+  lane: Lane;
+  verb: string;
+  ageSecs: number;
+  at?: string;
+  note?: string;
+  /** kind pr only */
+  prUrl?: string;
+  draft?: boolean;
+  checks?: PrEvidence['checks'];
+}
+
+/**
+ * Draft PRs from evidence — the pr: watch's observation, never a forge call.
+ * One item per PR URL (a chain may carry the same PR on several members;
+ * the newest observation wins). Evidence carries no PR title, so the note
+ * is `#<n> draft`.
+ */
+export function draftPrAttention(now = Date.now()): TendAttention[] {
+  const byUrl = new Map<string, { item: TendAttention; observedAt: string }>();
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(laneDirs(lane).state).filter((f) => f.endsWith('.evidence'));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      const id = f.slice(0, -'.evidence'.length);
+      const pr = readEvidence(id, lane).pr;
+      if (!pr || pr.state !== 'OPEN' || !pr.draft) continue;
+      const prev = byUrl.get(pr.url);
+      if (prev && prev.observedAt >= pr.observedAt) continue;
+      const since = readStatusLog(id, lane).at(-1)?.at ?? pr.observedAt;
+      byUrl.set(pr.url, {
+        observedAt: pr.observedAt,
+        item: {
+          kind: 'pr',
+          id,
+          lane,
+          verb: 'pr',
+          ageSecs: Math.max(0, Math.round((now - Date.parse(since)) / 1000)),
+          at: since,
+          note: `#${pr.number} draft`,
+          prUrl: pr.url,
+          draft: true,
+          checks: pr.checks,
+        },
+      });
+    }
+  }
+  return [...byUrl.values()].map((v) => v.item).sort((a, b) => b.ageSecs - a.ageSecs);
+}
+
 export interface TendReport {
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
   daemon: { up: boolean; lastHeartbeat?: string };
   counts: { queued: number; active: number; choresActive: number; done24h: number; failed24h: number };
-  attention: Array<{ id: string; lane: Lane; verb: string; ageSecs: number; at?: string; note?: string }>;
+  attention: TendAttention[];
   stories: TendStory[];
   watches: TendWatch[];
   traps: TendTrap[];
@@ -189,6 +252,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       const last = readStatusLog(id, lane).at(-1);
       if (!last || (last.verb !== 'needs-decision' && last.verb !== 'blocked')) continue;
       attention.push({
+        kind: 'question',
         id,
         lane,
         verb: last.verb,
@@ -224,6 +288,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (w.owner === 'man' && pending.length > 0) {
       const oldest = pending[0];
       attention.push({
+        kind: 'watch',
         id: w.key,
         lane: 'work',
         verb: 'watch',
@@ -301,11 +366,13 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (d.prUrl && d.at !== undefined && now - Date.parse(d.at) < DAY_MS) stories.push(direct(d));
   }
 
+  attention.push(...draftPrAttention(now));
+
   const verdict: TendReport['verdict'] = !daemonUp
     ? 'daemon-down'
     : stalled
       ? 'stalled'
-      : attention.length > 0
+      : attention.some((a) => a.kind !== 'pr')
         ? 'needs-attention'
         : active.length + queued.length > 0
           ? 'working'
@@ -369,7 +436,12 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'attention',
-        r.attention.map((a) => ({ id: a.id, verb: a.verb, waitingMins: Math.round(a.ageSecs / 60), note: a.note ?? '' })),
+        r.attention.map((a) => ({
+          id: a.id,
+          verb: a.verb,
+          waitingMins: Math.round(a.ageSecs / 60),
+          note: a.kind === 'pr' ? `${a.note ?? ''} ${a.prUrl ?? ''}`.trim() : (a.note ?? ''),
+        })),
         ['id', 'verb', 'waitingMins', 'note'],
       ),
     );

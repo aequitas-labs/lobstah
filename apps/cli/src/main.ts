@@ -171,6 +171,8 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   page — attention, dispatches, traps with
                                   their lifecycle and mail, notices, merge
                                   view. Read-only; consumes no cursor.
+                                  Port: --port, else $LOBSTAH_GLASS_PORT,
+                                  else 4949 (the pet reads the same var).
   man wait [--timeout <secs>] [--peek]
                                   block until a dispatch or watched source
                                   needs attention, then print the event and
@@ -1437,7 +1439,8 @@ ${progress}`,
       throw new UsageError(`pet requires a subverb: install | uninstall\n\n${usageFor('pet')!}`);
     }
     case 'glass': {
-      const port = Number(opt('--port') ?? '4949');
+      // $LOBSTAH_GLASS_PORT is shared with the desktop pet, so both agree on where the glass lives.
+      const port = Number(opt('--port') ?? process.env.LOBSTAH_GLASS_PORT ?? '4949');
       serveGlass(port);
       console.log(
         toonKV({

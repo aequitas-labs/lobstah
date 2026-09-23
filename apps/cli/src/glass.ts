@@ -22,6 +22,8 @@ import {
 import type { Attachment, Descriptor, Lane, Notice } from '@lobstah/core';
 import { readMergeView } from '@lobstah/pick';
 import { lobItems } from './glass-lobs.js';
+import { draftPrAttention } from './tend.js';
+import { repoOf } from './digest.js';
 import { GLASS_DIFF_JS } from './glass-diff.js';
 
 /**
@@ -248,6 +250,12 @@ export function buildGlassSnapshot() {
       .map((f) => readJson<Record<string, unknown>>(path.join(lobstahHome(), 'watches', f)))
       .filter(Boolean),
     dispatches,
+    // Draft PRs awaiting a look — tend's derivation, badged with the shared
+    // prBadge. Walks as a lob whose click opens the PR.
+    prAttention: draftPrAttention().map((a) => {
+      const pr = readEvidence(a.id, a.lane).pr;
+      return { ...a, repo: repoOf(a.id, a.lane), badge: pr ? prBadge(pr) : undefined };
+    }),
     mergeView,
   };
 }
@@ -317,6 +325,8 @@ a{color:var(--link);text-decoration:none}
 .chip.click{cursor:pointer}.chip.click:hover{border-color:#3a455a}
 footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
 .lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;font-size:34px;line-height:1;user-select:none;animation:crawl 18s linear infinite}
+a.lob{color:inherit}
+.lob .bub .badge{display:inline-block;margin:3px 0 0 5px}
 .lob .sprite{width:72px;height:56px;background:url(/lob-sprite.png) 0 0 no-repeat;background-size:400% 100%;image-rendering:pixelated;animation:step .5s steps(4) infinite}
 .lob .fallback{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
 .lob .bub{display:none;position:absolute;bottom:58px;right:-8px;z-index:2;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:6px 9px 5px;font-size:11px;line-height:1.35;color:var(--fg);width:max-content;max-width:150px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
@@ -505,7 +515,9 @@ function render(d){
      '<span class="chip click" onclick="showModal(\\'helm\\',\\''+esc(h.grounds)+'\\')">⛵ <b>'+esc(h.man)+'</b> <span class="dim">helm '+esc(h.grounds)+'</span> <span class="'+(stale?'warn':'ok')+'">'+(stale?'stale ':'')+ageEl(h.heartbeatAt)+' ago</span></span>').join(''))}
  const att=inp.attention;
  if(dirty.has('attention'))setHTML('attention',table(['id','repo','verb','question','age'],
-  att.map(x=>'<tr><td>'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc(x.note??'')+'</td><td>'+ageEl(x.verbAt)+'</td></tr>'),
+  att.map(x=>x.kind==='pr'
+   ?'<tr><td>'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.repo??'')+'</td><td>pr'+(x.badge?' <span class="badge '+esc(x.badge.tone)+'">'+esc(x.badge.text)+'</span>':'')+'</td><td class="grow"><a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">'+esc(x.note??'')+'</a></td><td>'+ageEl(x.at)+'</td></tr>'
+   :'<tr><td>'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc(x.note??'')+'</td><td>'+ageEl(x.verbAt)+'</td></tr>'),
   'nothing needs a human'));
  if(dirty.has('dispatches')){const list=inp.dispatches.list;
   setHTML('dispatches',st.view==='cards'?dispatchCards(list):dispatchTable(list))}
@@ -542,12 +554,16 @@ function renderLobs(att){
  const key=items.map(i=>i.key).join('|')+(spriteOk===null?'?':spriteOk?'s':'e');
  if(key===lobKey)return;
  lobKey=key;
- document.getElementById('lobs').innerHTML=items.map((it,i)=>
-  '<div class="lob" style="animation-duration:'+(((innerWidth+180)/(100+i*12)).toFixed(1))+'s;animation-delay:-'+((i*9)%14)+'s" title="click to open" onclick="'+it.click+'">'
-  +'<div class="bub"><span>'+esc(it.text.length>48?it.text.slice(0,47)+'…':it.text)+'</span></div>'
-  +(spriteOk===false?'<span class="fallback">🦞</span>':'<div class="sprite"></div>')
-  +'<img class="star" src="/star.png" alt="" onerror="this.remove()">'
-  +'</div>').join('');
+ // A PR lob is a plain link out (read-only: the glass opens, never acts);
+ // a question lob opens its dispatch modal.
+ document.getElementById('lobs').innerHTML=items.map((it,i)=>{
+  const style='animation-duration:'+(((innerWidth+180)/(100+i*12)).toFixed(1))+'s;animation-delay:-'+((i*9)%14)+'s';
+  const body='<div class="bub"><span>'+esc(it.text.length>48?it.text.slice(0,47)+'…':it.text)+'</span>'+(it.draft?'<span class="badge dim">draft</span>':'')+'</div>'
+   +(spriteOk===false?'<span class="fallback">🦞</span>':'<div class="sprite"></div>')
+   +'<img class="star" src="/star.png" alt="" onerror="this.remove()">';
+  return it.href
+   ?'<a class="lob" style="'+style+'" title="open the PR" href="'+esc(it.href)+'" target="_blank" rel="noopener">'+body+'</a>'
+   :'<div class="lob" style="'+style+'" title="click to open" onclick="'+it.click+'">'+body+'</div>'}).join('');
 }
 window.tog=(k)=>{open.has(k)?open.delete(k):open.add(k);tick(true)};
 window.showModal=(type,key)=>{modal={type,key};tick(true)};

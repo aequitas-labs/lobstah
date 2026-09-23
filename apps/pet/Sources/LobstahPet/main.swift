@@ -1,11 +1,12 @@
 // The lobstah pet: attention questions crawl across the desktop.
 //
-// One small transparent always-on-top window per standing question (capped),
-// each walking the pixel lobster with a star speech bubble. Clicking a pet
-// runs the focus ladder against the helm registration lobstah already
-// keeps: exact iTerm pane -> Terminal tab by tty -> VS Code window by cwd ->
-// app by bundle id -> resume-if-stale -> the spyglass. The pet only ever
-// reads lobstah state (`man tend --json` + helm files); it steers nothing.
+// One small transparent always-on-top window per attention item (capped),
+// each walking the pixel lobster with a star speech bubble. Clicking a
+// question pet runs the focus ladder against the helm registration lobstah
+// already keeps: exact iTerm pane -> Terminal tab by tty -> VS Code window
+// by cwd -> app by bundle id -> resume-if-stale -> the spyglass. Clicking a
+// draft-PR pet opens the PR. The pet only ever reads lobstah state
+// (`man tend --json` + helm files); it steers nothing.
 
 import AppKit
 
@@ -15,6 +16,12 @@ struct AttentionItem: Decodable, Equatable {
   let id: String
   let verb: String
   let note: String?
+  /** question | watch | pr — absent from an older lobstah, which only sent questions. */
+  var kind: String? = nil
+  /** kind pr: the draft PR this pet walks for. */
+  var prUrl: String? = nil
+
+  var prLink: URL? { kind == "pr" ? prUrl.flatMap(URL.init(string:)) : nil }
 }
 
 struct TendReport: Decodable {
@@ -36,6 +43,12 @@ struct HelmRegistration: Decodable {
   let heartbeatAt: String
   let window: WindowRef?
 }
+
+/** The spyglass: $LOBSTAH_GLASS_PORT (shared with `lobstah glass`), else 4949. */
+let glassURL: URL = {
+  let port = ProcessInfo.processInfo.environment["LOBSTAH_GLASS_PORT"].flatMap { Int($0) } ?? 4949
+  return URL(string: "http://127.0.0.1:\(port)")!
+}()
 
 func lobstahHome() -> URL {
   if let home = ProcessInfo.processInfo.environment["LOBSTAH_HOME"] {
@@ -90,7 +103,7 @@ func osascript(_ source: String) -> Bool {
 
 func focusHelm() {
   guard let helm = readHelm() else {
-    NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
+    NSWorkspace.shared.open(glassURL)
     return
   }
   let iso = ISO8601DateFormatter()
@@ -165,14 +178,16 @@ func focusHelm() {
       """)
     return
   }
-  NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
+  NSWorkspace.shared.open(glassURL)
 }
 
 // MARK: - pet window
 
 final class PetView: NSView {
   weak var pet: Pet?
-  override func mouseDown(with event: NSEvent) { focusHelm() }
+  override func mouseDown(with event: NSEvent) {
+    if let url = pet?.item.prLink { NSWorkspace.shared.open(url) } else { focusHelm() }
+  }
   override func updateTrackingAreas() {
     trackingAreas.forEach(removeTrackingArea)
     addTrackingArea(NSTrackingArea(rect: bounds, options: [.cursorUpdate, .mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil))
@@ -182,6 +197,12 @@ final class PetView: NSView {
 
   override func rightMouseDown(with event: NSEvent) {
     let menu = NSMenu()
+    if let url = pet?.item.prLink {
+      let open = NSMenuItem(title: "Open PR", action: #selector(NSApplication.petOpenURL(_:)), keyEquivalent: "")
+      open.target = NSApp
+      open.representedObject = url
+      menu.addItem(open)
+    }
     let glass = NSMenuItem(title: "Open spyglass", action: #selector(NSApplication.petOpenGlass), keyEquivalent: "")
     glass.target = NSApp
     menu.addItem(glass)
@@ -195,7 +216,10 @@ final class PetView: NSView {
 
 extension NSApplication {
   @objc func petOpenGlass() {
-    NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
+    NSWorkspace.shared.open(glassURL)
+  }
+  @objc func petOpenURL(_ sender: NSMenuItem) {
+    if let url = sender.representedObject as? URL { NSWorkspace.shared.open(url) }
   }
 }
 
@@ -203,6 +227,7 @@ final class Pet {
   static let spriteSheet: NSImage? = Bundle.module.url(forResource: "lob-sprite", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
   static let starImage: NSImage? = Bundle.module.url(forResource: "star", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
 
+  let item: AttentionItem
   let panel: NSPanel
   let spriteLayer = CALayer()
   var x: CGFloat
@@ -219,7 +244,9 @@ final class Pet {
   var hovered = false { didSet { bubble?.isHidden = !hovered } }
   weak var bubble: NSView?
 
-  init(text: String, index: Int) {
+  init(item: AttentionItem, index: Int) {
+    self.item = item
+    let text = item.note ?? item.verb
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
     self.speed = 100 + CGFloat(index) * 12
     let first = screens.first?.frame ?? .zero
@@ -391,7 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   @objc func openGlass() {
-    NSWorkspace.shared.open(URL(string: "http://127.0.0.1:4949")!)
+    NSWorkspace.shared.open(glassURL)
   }
 
   func poll() {
@@ -405,14 +432,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var shown = Array(items.prefix(4))
         if extra > 0 {
           let last = shown.removeLast()
-          shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)"))
+          shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", kind: last.kind, prUrl: last.prUrl))
         }
-        let key = shown.map(\.id).joined(separator: "|")
+        let key = shown.map { "\($0.kind ?? "question"):\($0.id)" }.joined(separator: "|")
         guard key != self.lastKey else { return }
         self.lastKey = key
         for pet in self.pets { pet.close() }
         self.pets = shown.enumerated().map { i, item in
-          Pet(text: item.note ?? item.verb, index: i)
+          Pet(item: item, index: i)
         }
       }
     }
