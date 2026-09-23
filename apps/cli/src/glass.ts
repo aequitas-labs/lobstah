@@ -538,8 +538,9 @@ function render(d){
   setHTML('attnkinds',inp.attention.error?'<span class="bad">'+esc(inp.attention.error)+'</span>'
    :'showing: '+(inp.attention.kinds||[]).map(esc).join(' · ')+' <span title="set attentionKinds in config.toml">(config.toml)</span>');
   setHTML('attention',table(['id','repo','kind','note','age'],
-  att.map(x=>'<tr><td>'+esc(String(x.id).slice(0,8))+'</td><td>'+esc(x.repo??'')+'</td><td>'+kindCell(x)+'</td><td class="grow">'
-   +(x.prUrl&&isPrKind(x.kind)?'<a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">'+esc(x.note??'')+'</a>':esc(x.note??''))+'</td><td>'+ageEl(x.at)+'</td></tr>'),
+  att.map(x=>'<tr'+(x.acked?' class="dim" title="acknowledged by '+esc(x.acked.by)+' — hidden from the pet and lobs until it changes"':'')+'><td>'+esc(String(x.id).slice(0,8))+'</td><td>'+esc(x.repo??'')+'</td><td>'+kindCell(x)+'</td><td class="grow">'
+   +(x.prUrl&&isPrKind(x.kind)?'<a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">'+esc(x.note??'')+'</a>':esc(x.note??''))
+   +(x.acked?' <span class="dim">· acked '+ageEl(x.acked.at)+' ago by '+esc(x.acked.by)+'</span>':'')+'</td><td>'+ageEl(x.at)+'</td></tr>'),
   'nothing needs a human'))}
  if(dirty.has('dispatches')){const list=inp.dispatches.list;
   setHTML('dispatches',st.view==='cards'?dispatchCards(list):dispatchTable(list))}
@@ -569,9 +570,17 @@ let spriteOk=null;
  i.src='/lob-sprite.png'})();
 let lobKey='';
 ${lobItems.toString()}
+// Per-browser lob hides: {itemKey: stateHash}. localStorage only, guarded like st.
+let lobHidden={};
+try{lobHidden=JSON.parse(localStorage.getItem('spyglass-lob-hidden')||'{}')||{}}catch(e){lobHidden={}}
+window.hideLob=(key,hash)=>{lobHidden[key]=hash;try{localStorage.setItem('spyglass-lob-hidden',JSON.stringify(lobHidden))}catch(e){}lobKey='';setTimeout(()=>tick(true),0)};
+const hideCall=(it)=>it.hideKey?"hideLob("+esc(JSON.stringify(it.hideKey)).replace(/'/g,'&#39;')+","+esc(JSON.stringify(it.hideHash))+");":'';
 function renderLobs(att){
- // st.lobs (this browser's preference) gates the lobs; lobItems is glass-lobs.ts
- const items=lobItems(att,{lobs:st.lobs,preview:new URLSearchParams(location.search).has('lob'),
+ // st.lobs gates the lobs; acked items (the pet's shared ack) and lobs this
+ // browser already clicked (hidden by item key + state hash) don't walk; a
+ // new state re-shows them. lobItems (glass-lobs.ts) makes that decision;
+ // the glass writes nothing to lobstah — the hide is localStorage.
+ const items=lobItems(att,{lobs:st.lobs,hidden:lobHidden,preview:new URLSearchParams(location.search).has('lob'),
   previewClick:last&&last.helms.length?"showModal('helm','"+last.helms[0].grounds+"')":''});
  const key=items.map(i=>i.key).join('|')+(spriteOk===null?'?':spriteOk?'s':'e');
  if(key===lobKey)return;
@@ -584,8 +593,8 @@ function renderLobs(att){
    +(spriteOk===false?'<span class="fallback">🦞</span>':'<div class="sprite"></div>')
    +'<img class="star" src="/star.png" alt="" onerror="this.remove()">';
   return it.href
-   ?'<a class="lob" style="'+style+'" title="open the PR" href="'+esc(it.href)+'" target="_blank" rel="noopener">'+body+'</a>'
-   :'<div class="lob" style="'+style+'" title="click to open" onclick="'+it.click+'">'+body+'</div>'}).join('');
+   ?'<a class="lob" style="'+style+'" title="open the PR" href="'+esc(it.href)+'" target="_blank" rel="noopener" onclick="'+hideCall(it)+'">'+body+'</a>'
+   :'<div class="lob" style="'+style+'" title="click to open" onclick="'+hideCall(it)+(it.click||'')+'">'+body+'</div>'}).join('');
 }
 window.tog=(k)=>{open.has(k)?open.delete(k):open.add(k);tick(true)};
 window.showModal=(type,key)=>{modal={type,key};tick(true)};

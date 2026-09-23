@@ -301,8 +301,23 @@ Tier 3 is for a dedicated, long-lived liaison session.
 unanswered question is reported immediately. While it still stands, it
 re-fires as a reminder every `remindSecs` (top-level config, default 900). So
 a wake consumed by a session that died mid-handling resurfaces on its own.
-Answering ends the reminders naturally, because the answer produces a new
-status entry. Set `remindSecs = 0` for pure at-most-once.
+Answering ends the reminders: a message to the dispatch newer than its
+question — `lobstah send`, a forwarded tracker comment, anything written
+through the inbox with provenance — means the question no longer stands, even
+before the worker reads it; `man tend` then shows the dispatch as
+`needs-decision (answered <n>m ago)` instead of listing it under attention.
+A newer `needs-decision` from the worker stands again. Set `remindSecs = 0`
+for pure at-most-once.
+
+**Acknowledging, display-only.** Clicking a desktop pet opens its target and
+runs `lobstah attention ack <item-key> --by pet`, so that pet stops walking
+the item until its state changes (a new status entry, head, failed check, or
+thread count). The ack changes only what the pet and the glass lobs display:
+`man tend --json` still lists the item (marked `acked`), and `man wait`, the
+park, and reminders ignore acks entirely — a human having seen a question
+must never hide it from the orchestrator that has to answer it. The glass,
+which has no write endpoint, hides a clicked lob per browser in localStorage
+instead.
 
 **Any-harness fallback — the wrapper loop.** Tiers 2 and 3 lean on Claude
 Code features (background-task notifications, the Stop hook). For any other

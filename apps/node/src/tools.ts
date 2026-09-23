@@ -130,7 +130,7 @@ export function sendTool(): AnyAgentTool {
       const id = param(params, 'id');
       const message = param(params, 'message');
       if (!id || !message) throw new Error('lobstah_send requires id and message');
-      const name = sendMessage(id, findLane(id), message);
+      const name = sendMessage(id, findLane(id), message, 'node');
       return text(toonKV({ id, queued: name }), { id });
     },
   };

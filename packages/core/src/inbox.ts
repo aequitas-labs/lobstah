@@ -9,7 +9,7 @@ export interface InboxMessage {
   text: string;
 }
 
-/** The NNN.meta.json sidecar used by answer provenance (#33). */
+/** The shared NNN.meta.json sidecar: sender, timestamp, and optional attachments. */
 export interface MessageMeta {
   from: string;
   at: string;
@@ -22,7 +22,7 @@ function inboxDir(id: string, lane: Lane): string {
   return path.join(laneDirs(lane).inbox, id);
 }
 
-/** Queue a message. Sequenced records written by atomic rename. */
+/** Queue a message. The sidecar lands before its sequenced message. */
 export function sendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = []): string {
   const dir = inboxDir(id, lane);
   fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
@@ -48,6 +48,45 @@ export function readMessageMeta(id: string, lane: Lane, file: string, handled = 
   } catch {
     return undefined;
   }
+}
+
+/** Every message sidecar for a dispatch, pending and handled. */
+export function messageMetas(id: string, lane: Lane): MessageMeta[] {
+  const dir = inboxDir(id, lane);
+  const out: MessageMeta[] = [];
+  for (const d of [dir, path.join(dir, 'handled')]) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(d).filter((f) => f.endsWith('.meta.json'));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      try {
+        const m = JSON.parse(fs.readFileSync(path.join(d, f), 'utf8')) as Partial<MessageMeta>;
+        if (typeof m.from === 'string' && m.from !== '' && typeof m.at === 'string') out.push({ from: m.from, at: m.at });
+      } catch {
+        // unreadable sidecar: no provenance, never counts
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * When a question standing since `since` (its status entry's at) was
+ * answered: the newest message with provenance sent after it, else
+ * undefined. Any sender counts — every inbound message to a dispatch is an
+ * instruction from someone acting for the human; a record without a
+ * sidecar never does. Uses the sidecar's at, never file mtime.
+ */
+export function answeredAt(id: string, lane: Lane, since: string): string | undefined {
+  const t = Date.parse(since) || 0;
+  return messageMetas(id, lane)
+    .filter((m) => (Date.parse(m.at) || 0) > t)
+    .map((m) => m.at)
+    .sort()
+    .at(-1);
 }
 
 export function unhandled(id: string, lane: Lane): InboxMessage[] {

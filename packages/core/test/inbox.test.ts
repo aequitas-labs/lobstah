@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   acknowledge,
   acknowledgeTrapMessage,
+  answeredAt,
   bounceTrapMessages,
   ensureLayout,
   listNotices,
@@ -54,6 +55,17 @@ describe('inbox', () => {
     acknowledge('i4', 'work', name);
     expect(readMessageMeta('i4', 'work', name)).toBeUndefined();
     expect(readMessageMeta('i4', 'work', name, true)?.attachments).toEqual([attachment]);
+  });
+
+  it('uses the attachment sidecar as the answer provenance without a second writer', () => {
+    const since = new Date(Date.now() - 1_000).toISOString();
+    const attachment = { name: 'answer.txt', path: '/tmp/owned/answer.txt', bytes: 2, type: 'text/plain' };
+    const name = sendMessage('i5', 'work', 'see answer', 'helm', [attachment]);
+    const meta = readMessageMeta('i5', 'work', name)!;
+    expect(meta).toMatchObject({ from: 'helm', attachments: [attachment] });
+    expect(answeredAt('i5', 'work', since)).toBe(meta.at);
+    acknowledge('i5', 'work', name);
+    expect(answeredAt('i5', 'work', since)).toBe(meta.at);
   });
 });
 

@@ -12,10 +12,19 @@ import AppKit
 
 // MARK: - lobstah state
 
+struct AckInfo: Decodable, Equatable {
+  let at: String
+  let by: String
+}
+
 struct AttentionItem: Decodable, Equatable {
   let id: String
   let verb: String
   let note: String?
+  /** The stable item key `lobstah attention ack` takes — absent from an older lobstah. */
+  var key: String? = nil
+  /** Acknowledged for display: the pet skips it (the helm's wakes never do). */
+  var acked: AckInfo? = nil
   /** question | landed | watch | pr:draft | pr:review | pr:checks | pr:ready — absent from an older lobstah. */
   var kind: String? = nil
   /** pr:* kinds: the PR this pet walks for. */
@@ -97,7 +106,23 @@ func tendAttention() -> [AttentionItem] {
         let data = json.data(using: .utf8),
         let report = try? JSONDecoder().decode(TendReport.self, from: data)
   else { return [] }
-  return report.attention
+  // Acks are display-only: an acked item stays in tend's attention (the helm
+  // still needs it) but no longer walks.
+  return report.attention.filter { $0.acked == nil }
+}
+
+/**
+ * Acknowledge through lobstah's own write path — the pet never writes
+ * ~/.lobstah itself. Off the main thread; a failure is logged, never shown
+ * as a blocker (the click still opened its target).
+ */
+func ackItem(_ item: AttentionItem) {
+  guard let key = item.key else { return }
+  DispatchQueue.global().async {
+    if runCommand("/usr/bin/env", ["lobstah", "attention", "ack", key, "--by", "pet"]) == nil {
+      NSLog("lobstah pet: ack failed for %@", key)
+    }
+  }
 }
 
 func readHelm() -> HelmRegistration? {
@@ -206,7 +231,11 @@ func focusHelm() {
 final class PetView: NSView {
   weak var pet: Pet?
   override func mouseDown(with event: NSEvent) {
-    if let url = pet?.item.prLink { NSWorkspace.shared.open(url) } else { focusHelm() }
+    guard let item = pet?.item else { focusHelm(); return }
+    // A click is the human taking it: open the target, and ack so the pet
+    // stops walking this state on the next poll.
+    if let url = item.prLink { NSWorkspace.shared.open(url) } else { focusHelm() }
+    ackItem(item)
   }
   override func updateTrackingAreas() {
     trackingAreas.forEach(removeTrackingArea)
@@ -214,6 +243,8 @@ final class PetView: NSView {
     super.updateTrackingAreas()
   }
   override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+  /** Ack without opening anything. */
+  @objc func acknowledge() { if let item = pet?.item { ackItem(item) } }
 
   override func rightMouseDown(with event: NSEvent) {
     let menu = NSMenu()
@@ -222,6 +253,11 @@ final class PetView: NSView {
       open.target = NSApp
       open.representedObject = url
       menu.addItem(open)
+    }
+    if pet?.item.key != nil {
+      let ack = NSMenuItem(title: "Acknowledge", action: #selector(PetView.acknowledge), keyEquivalent: "")
+      ack.target = self
+      menu.addItem(ack)
     }
     let glass = NSMenuItem(title: "Open spyglass", action: #selector(NSApplication.petOpenGlass), keyEquivalent: "")
     glass.target = NSApp
@@ -452,9 +488,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var shown = Array(items.prefix(4))
         if extra > 0 {
           let last = shown.removeLast()
-          shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", kind: last.kind, prUrl: last.prUrl))
+          shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", key: last.key, kind: last.kind, prUrl: last.prUrl))
         }
-        let key = shown.map { "\($0.kind ?? "question"):\($0.id)" }.joined(separator: "|")
+        let key = shown.map { "\($0.kind ?? "question"):\($0.key ?? $0.id)" }.joined(separator: "|")
         guard key != self.lastKey else { return }
         self.lastKey = key
         for pet in self.pets { pet.close() }

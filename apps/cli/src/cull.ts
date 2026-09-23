@@ -3,9 +3,10 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { laneDirs, loadConfig, lobstahHome, storedDescriptor } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
+import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
 
 export interface CullItem {
-  kind: 'done' | 'worktree' | 'state';
+  kind: 'done' | 'worktree' | 'state' | 'ack';
   id: string;
   target: string;
   ageDays: number;
@@ -90,6 +91,15 @@ export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
       items.push({ kind: 'state', id, target: path.join(d.state, `${id}.*`), ageDays: Math.floor((now - ageFrom) / DAY), bytes: group.bytes });
     }
   }
+
+  // Orphaned acks: the item is gone (dispatch culled — including by this
+  // very sweep — PR merged or closed, watch removed). Acks never age out
+  // on their own, so no cutoff applies here.
+  const culling = new Set(items.filter((i) => i.kind === 'done' || i.kind === 'state').map((i) => i.id));
+  for (const a of listAcks()) {
+    if (ackItemExists(a.key, culling)) continue;
+    items.push({ kind: 'ack', id: a.key, target: a.key, ageDays: Math.floor((now - (Date.parse(a.at) || now)) / DAY), bytes: bytesAt(ackFile(a.key)) });
+  }
   return items;
 }
 
@@ -115,6 +125,7 @@ export function applyCull(items: CullItem[]): void {
   // Worktrees first: their done/ descriptors are needed to find the owning repo.
   for (const item of items.filter((i) => i.kind === 'worktree')) removeWorktree(item.id, item.target);
   for (const item of items.filter((i) => i.kind === 'done')) fs.rmSync(item.target, { recursive: true, force: true });
+  for (const item of items.filter((i) => i.kind === 'ack')) removeAck(item.target);
   for (const item of items.filter((i) => i.kind === 'state')) {
     const dir = path.dirname(item.target);
     for (const f of fs.readdirSync(dir)) {

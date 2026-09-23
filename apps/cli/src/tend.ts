@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   activeIds,
+  answeredAt,
   executorPath,
   laneDirs,
   lastEventAt,
@@ -26,6 +27,7 @@ import {
 import type { AttentionKind, Config, Descriptor, Lane, PrEvidence } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { reportedThroughMs } from './reported.js';
+import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import type { MergeView } from '@lobstah/pick';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
@@ -41,6 +43,8 @@ export interface TendDispatch {
   state: string;
   note?: string;
   at?: string;
+  /** A needs-decision / blocked the helm (or anyone) has answered but the worker hasn't acted on yet. */
+  answeredAt?: string;
   prUrl?: string;
   /** PR state as last observed by the chain's pr: watch. */
   pr?: PrEvidence;
@@ -107,6 +111,12 @@ export type TendAttentionKind = AttentionKind | 'watch';
 
 export interface TendAttention {
   kind: TendAttentionKind;
+  /** Stable item key: `<lane>:<id>` for question/landed, the PR key for pr:*, `watch:<key>` for watch. */
+  key: string;
+  /** Hash of the fields the kind stands on — an ack holds only while it matches (acks.ts). */
+  stateHash: string;
+  /** A human acknowledged this state (display-only: the pet and glass lobs skip it; nothing else does). */
+  acked?: { at: string; by: string };
   id: string;
   lane: Lane;
   /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
@@ -237,6 +247,8 @@ function prAttention(now: number): TendAttention[] {
       if (onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
       out.push({
         kind,
+        key: ref?.key ?? pr.url,
+        stateHash: prStateHash(pr),
         id,
         lane,
         verb: kind,
@@ -271,6 +283,8 @@ function landedAttention(cfg: Config, now: number): TendAttention[] {
       const ev = readEvidence(id, lane);
       out.push({
         kind: 'landed',
+        key: `${lane}:${id}`,
+        stateHash: statusStateHash(last.verb, last.at),
         id,
         lane,
         verb: last.verb,
@@ -335,7 +349,19 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
   const last = log.at(-1);
   const state = bucket === 'queued' ? 'queued' : reconcile({ log, lastEventAt: lastEventAt(id, lane) });
   const evidence = readEvidence(id, lane);
-  return { id, lane, bucket, state, note: last?.note, at: last?.at, prUrl: evidence.prUrl, pr: evidence.pr };
+  const answered =
+    last && (last.verb === 'needs-decision' || last.verb === 'blocked') ? answeredAt(id, lane, last.at) : undefined;
+  return {
+    id,
+    lane,
+    bucket,
+    state,
+    note: last?.note,
+    at: last?.at,
+    ...(answered ? { answeredAt: answered } : {}),
+    prUrl: evidence.prUrl,
+    pr: evidence.pr,
+  };
 }
 
 /** The chain's newest observed PR state as a badge — the one derivation tend, catch, and glass share. */
@@ -399,8 +425,14 @@ export function buildTendReport(now = Date.now()): TendReport {
     for (const id of [...pendingIds(lane), ...activeIds(lane)]) {
       const last = readStatusLog(id, lane).at(-1);
       if (!last || (last.verb !== 'needs-decision' && last.verb !== 'blocked')) continue;
+      // Answered (a message newer than the question) is not standing, even
+      // before the worker reads it and reports; the dispatch row carries
+      // the marker instead.
+      if (answeredAt(id, lane, last.at) !== undefined) continue;
       attention.push({
         kind: 'question',
+        key: `${lane}:${id}`,
+        stateHash: statusStateHash(last.verb, last.at),
         id,
         lane,
         verb: last.verb,
@@ -437,6 +469,8 @@ export function buildTendReport(now = Date.now()): TendReport {
       const oldest = pending[0];
       attention.push({
         kind: 'watch',
+        key: `watch:${w.key}`,
+        stateHash: statusStateHash('watch', String(pending.at(-1)?.seq ?? '')),
         id: w.key,
         lane: 'work',
         verb: 'watch',
@@ -520,7 +554,14 @@ export function buildTendReport(now = Date.now()): TendReport {
   const enabled = new Set<string>(cfg.attentionKinds);
   const shown = attention.filter((a) => a.kind === 'watch' || enabled.has(a.kind));
   attention.length = 0;
-  attention.push(...shown);
+  // Acks are display-only: they annotate, never remove. The verdict below
+  // and every wake path ignore them.
+  attention.push(
+    ...shown.map((a) => {
+      const ack = currentAck(a.key, a.stateHash);
+      return ack ? { ...a, acked: { at: ack.at, by: ack.by } } : a;
+    }),
+  );
 
   const verdict: TendReport['verdict'] = !daemonUp
     ? 'daemon-down'
@@ -607,7 +648,13 @@ export function renderTend(r: TendReport): string {
         'work',
         r.stories.map((s) => ({
           key: s.key,
-          dispatches: s.dispatches.map((d) => `${d.id.slice(0, 8)}:${d.state}`).join(' → '),
+          dispatches: s.dispatches
+            .map(
+              (d) =>
+                `${d.id.slice(0, 8)}:${d.state}` +
+                (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : ''),
+            )
+            .join(' → '),
           pr: s.prState ? `${s.prState} ${s.prUrl ?? ''}`.trim() : (s.prUrl ?? ''),
           gate: s.gate ?? '',
           watch: s.watch ?? '',
