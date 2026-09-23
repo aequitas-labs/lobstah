@@ -21,6 +21,7 @@ import {
 import type { Attachment, Descriptor, Lane, Notice } from '@lobstah/core';
 import { readMergeView } from '@lobstah/pick';
 import { lobItems } from './glass-lobs.js';
+import { GLASS_DIFF_JS } from './glass-diff.js';
 
 /**
  * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
@@ -326,7 +327,7 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
  <div class="row"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
  <div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span><span class="seg" id="lobseg"><button data-l="on">on</button><button data-l="off">off</button></span></div>
 </div>
-<div class="chips" id="chips"></div>
+<div class="chips"><span id="chips" style="display:contents"></span><span class="chip dim" id="clock"></span></div>
 <div class="controls">
  <select id="f-lane"><option value="">all lanes</option><option value="work">work</option><option value="chore">chore</option></select>
  <select id="f-repo"><option value="">all repos</option></select>
@@ -346,7 +347,10 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 const esc=(s)=>String(s??'').replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const age=(iso)=>{if(!iso)return '';const s=Math.max(0,(Date.now()-Date.parse(iso))/1000);
  if(s<90)return Math.round(s)+'s';if(s<5400)return Math.round(s/60)+'m';if(s<172800)return (s/3600).toFixed(1)+'h';return Math.round(s/86400)+'d'};
-const open=new Set();
+// Ages tick in place (refreshAges) so a quiet section never needs a rewrite.
+const ageEl=(iso)=>'<span data-age="'+esc(iso)+'">'+age(iso)+'</span>';
+function refreshAges(){for(const el of document.querySelectorAll('[data-age]')){const t=age(el.dataset.age);if(el.textContent!==t)el.textContent=t}}
+${GLASS_DIFF_JS}const open=new Set();
 let modal=null;
 let st={view:'table',lane:'',repo:'',verb:'',q:'',lobs:true};
 try{Object.assign(st,JSON.parse(localStorage.getItem('spyglass')||'{}'))}catch(e){}
@@ -376,31 +380,24 @@ function tableDetail(x){return '<b>brief</b>\\n'+esc(x.brief)
  +'\\n<b>log</b>\\n'+x.log.map(e=>esc(e.at)+'  '+esc(e.verb)+(e.note?'  '+esc(e.note):'')).join('\\n')
  +(x.inbox.length?'\\n<b>inbox</b>\\n'+x.inbox.map(esc).join('\\n---\\n'):'')
  +(x.evidence?'\\n<b>evidence</b> '+esc(JSON.stringify(x.evidence)):'')}
-function matches(x){
- if(st.lane&&x.lane!==st.lane)return false;
- if(st.repo&&x.repo!==st.repo)return false;
- if(st.verb&&x.verb!==st.verb)return false;
- if(st.q){const q=st.q.toLowerCase();
-  if(!((x.id+' '+(x.note||'')+' '+(x.brief||'')+' '+(x.repo||'')+' '+(x.for||'')).toLowerCase().includes(q)))return false}
- return true}
 function addrCell(x){return x.for?esc(x.for)+(x.evidence&&x.evidence.deliveredTo?' <span class="ok">✓delivered</span>':' <span class="warn">waiting</span>'):(x.claimedBy?esc(x.claimedBy):'')}
 function prCell(x){return x.evidence&&x.evidence.prUrl?'<a href="'+esc(x.evidence.prUrl)+'" target="_blank" onclick="event.stopPropagation()">PR</a>':''}
 function dispatchTable(list){return table(['','id','lane','repo','verb','note','age','addressed','pr'],
  list.map(x=>{const k=x.lane+':'+x.id;const isOpen=open.has(k);
-  return '<tr class="rowhead" onclick="tog(\\''+k+'\\')"><td>'+(isOpen?'▾':'▸')+'</td><td>'+esc(x.id.slice(0,8))+'</td><td>'+x.lane+' '+x.bucket+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc((x.note??'').slice(0,90))+'</td><td>'+age(x.verbAt)+'</td><td>'+addrCell(x)+'</td><td>'+prCell(x)+'</td></tr>'
+  return '<tr class="rowhead" onclick="tog(\\''+k+'\\')"><td>'+(isOpen?'▾':'▸')+'</td><td>'+esc(x.id.slice(0,8))+'</td><td>'+x.lane+' '+x.bucket+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc((x.note??'').slice(0,90))+'</td><td>'+ageEl(x.verbAt)+'</td><td>'+addrCell(x)+'</td><td>'+prCell(x)+'</td></tr>'
    +'<tr class="detail'+(isOpen?' open':'')+'"><td></td><td colspan="8">'+tableDetail(x)+'</td></tr>'}),
  'no dispatches match')}
 function dispatchCards(list){if(!list.length)return '<div class="empty">no dispatches match</div>';
  return '<div class="cards">'+list.map(x=>{const k=x.lane+':'+x.id;
   return '<div class="card" onclick="showModal(\\'dispatch\\',\\''+k+'\\')"><div class="top"><b>'+esc(x.id.slice(0,8))+'</b><span class="badge v-'+x.verb+'">'+x.verb+'</span></div>'
-  +'<div class="meta">'+esc(x.repo)+' · '+x.lane+' '+x.bucket+' · '+age(x.verbAt)+'</div>'
+  +'<div class="meta">'+esc(x.repo)+' · '+x.lane+' '+x.bucket+' · '+ageEl(x.verbAt)+'</div>'
   +(x.note?'<div class="note">'+esc(x.note)+'</div>':'')
   +'<div class="foot">'+addrCell(x)+' '+prCell(x)+'</div></div>'}).join('')+'</div>'}
 function trapRow(t){
  if(!t.live)return {stale:false,listen:'<span class="dot"></span><span class="dim">signed off</span>',hb:'<span class="dim">—</span>'};
  const stale=Date.now()-Date.parse(t.heartbeatAt)>1800000;
  return {stale,listen:t.firstParkedAt?'<span class="dot ok"></span>listening':'<span class="dot warn"></span>never parked',
-  hb:'<span class="'+(stale?'bad':'ok')+'">'+(stale?'stale ':'')+age(t.heartbeatAt)+' ago</span>'}}
+  hb:'<span class="'+(stale?'bad':'ok')+'">'+(stale?'stale ':'')+ageEl(t.heartbeatAt)+' ago</span>'}}
 function mailCell(t){const p=t.messages.filter(m=>m.state==='pending').length;
  return t.messages.length?('✉ '+t.messages.length+(p?' <span class="warn">('+p+' pending)</span>':'')):''}
 function trapTable(list){return table(['address','repo','worktree','harness','session','listening','heartbeat','mail','catches'],
@@ -417,22 +414,22 @@ function renderModal(d){
  const box=document.getElementById('modalbox');
  const ov=document.getElementById('overlay');
  if(!modal){ov.classList.remove('open');return}
+ const item=modalItem(d,modal);
+ if(!item){modal=null;ov.classList.remove('open');return}
  let html='';
  if(modal.type==='helm'){
-  const h=d.helms.find(v=>v.grounds===modal.key);
-  if(!h){modal=null;ov.classList.remove('open');return}
+  const h=item;
   const stale=Date.now()-Date.parse(h.heartbeatAt)>1800000;
   html='<span class="x" onclick="closeModal()">×</span><h3>⛵ '+esc(h.man)+'</h3>'
    +'<div class="sub">helm of <b>'+esc(h.grounds)+'</b> ('+(h.repos||[]).map(esc).join(', ')+')</div>'
    +'<div class="sub">'+esc(h.harness??'?')+' · '+esc(h.cwd??'?')+(h.host?' · '+esc(h.host):'')+'</div>'
-   +'<div class="sub">session '+esc(h.sessionId??'')+' · signed on '+age(h.signedOnAt)+' ago · heartbeat <span class="'+(stale?'warn':'ok')+'">'+age(h.heartbeatAt)+' ago</span></div>'
+   +'<div class="sub">session '+esc(h.sessionId??'')+' · signed on '+ageEl(h.signedOnAt)+' ago · heartbeat <span class="'+(stale?'warn':'ok')+'">'+ageEl(h.heartbeatAt)+' ago</span></div>'
    +(h.sessionId?'<div class="sec">open this session</div>'+cmdRow((h.harness==='codex'?'codex resume ':'claude --resume ')+h.sessionId):'')
    +(h.transcript?'<div class="sec">transcript</div>'+cmdRow(h.transcript):'');
  }else if(modal.type==='dispatch'){
-  const x=d.dispatches.find(v=>v.lane+':'+v.id===modal.key);
-  if(!x){modal=null;ov.classList.remove('open');return}
+  const x=item;
   html='<span class="x" onclick="closeModal()">×</span><h3>'+esc(x.id.slice(0,8))+' <span class="badge v-'+x.verb+'">'+x.verb+'</span></h3>'
-   +'<div class="sub">'+esc(x.repo)+' · '+x.lane+' '+x.bucket+' · '+age(x.verbAt)+(x.for?' · '+addrCell(x):'')+' '+prCell(x)+'</div>'
+   +'<div class="sub">'+esc(x.repo)+' · '+x.lane+' '+x.bucket+' · '+ageEl(x.verbAt)+(x.for?' · '+addrCell(x):'')+' '+prCell(x)+'</div>'
    +(x.claimedBy&&x.claimedBy.startsWith('wt:')
      ?'<div class="sec">worked by trap</div>'+cmdRow(x.claimedBy)
       +'<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone\\'s live thread. Message it instead: lobstah send '+esc(x.claimedBy)+' "…"</div>'
@@ -440,63 +437,79 @@ function renderModal(d){
    +(x.transcript?'<div class="sec">transcript</div>'+cmdRow(x.transcript):'')
    +detailBody(x);
  }else{
-  const t=d.traps.find(v=>v.trapId===modal.key);
-  if(!t){modal=null;ov.classList.remove('open');return}
+  const t=item;
   const r=trapRow(t);
   html='<span class="x" onclick="closeModal()">×</span><h3>🪤 wt:'+esc(t.trapId)+' <span class="badge">'+esc(t.harness??'signed off')+'</span></h3>'
    +(t.worktree?'<div class="sub">'+esc(t.worktree)+'</div>':'')
    +'<div class="sub">'+(t.live
-     ?esc(t.repo??'addressed bait only')+' · session '+esc(t.sessionId??'')+' · signed on '+age(t.signedOnAt)+' ago · '+r.listen+' · heartbeat '+r.hb
+     ?esc(t.repo??'addressed bait only')+' · session '+esc(t.sessionId??'')+' · signed on '+ageEl(t.signedOnAt)+' ago · '+r.listen+' · heartbeat '+r.hb
      :'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.')+'</div>'
    +(t.live&&t.sessionId?'<div class="sec">open this session</div>'
      +cmdRow((t.harness==='codex'?'codex resume ':'claude --resume ')+t.sessionId)
      +'<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>':'')
    +'<div class="sec">lifecycle ('+t.notices.length+')</div>'
-   +(t.notices.length?t.notices.map(n=>'<div class="loglines">'+age(n.at)+' ago · <b>'+esc(n.kind)+'</b> — '+esc(n.text)+'</div>').join(''):'<div class="empty">none recorded</div>')
+   +(t.notices.length?t.notices.map(n=>'<div class="loglines">'+ageEl(n.at)+' ago · <b>'+esc(n.kind)+'</b> — '+esc(n.text)+'</div>').join(''):'<div class="empty">none recorded</div>')
    +'<div class="sec">messages ('+t.messages.length+')</div>'
-   +(t.messages.length?t.messages.map(m=>'<div class="msg'+(m.from==='helm'?' from-helm':'')+'"><div class="hdr">from '+esc(m.from)+' · '+(m.at?age(m.at)+' ago':'')+' · '+(m.state==='pending'?'<span class="warn">pending</span>':'<span class="ok">delivered</span>')+'</div>'+esc(m.text)+(m.attachments?.length?attachmentRows(m.attachments):'')+'</div>').join(''):'<div class="empty">none</div>')
+   +(t.messages.length?t.messages.map(m=>'<div class="msg'+(m.from==='helm'?' from-helm':'')+'"><div class="hdr">from '+esc(m.from)+' · '+(m.at?ageEl(m.at)+' ago':'')+' · '+(m.state==='pending'?'<span class="warn">pending</span>':'<span class="ok">delivered</span>')+'</div>'+esc(m.text)+(m.attachments?.length?attachmentRows(m.attachments):'')+'</div>').join(''):'<div class="empty">none</div>')
    +'<div class="sec">catches ('+t.catches.length+')</div>'
-   +(t.catches.length?t.catches.map(c=>'<div class="catch"><div class="hdr"><b>'+esc(c.id.slice(0,8))+'</b><span class="badge v-'+c.verb+'">'+c.verb+'</span><span class="dim">'+age(c.verbAt)+'</span>'+prCell(c)+'</div>'
+   +(t.catches.length?t.catches.map(c=>'<div class="catch"><div class="hdr"><b>'+esc(c.id.slice(0,8))+'</b><span class="badge v-'+c.verb+'">'+c.verb+'</span><span class="dim">'+ageEl(c.verbAt)+'</span>'+prCell(c)+'</div>'
      +'<div class="loglines">'+c.log.map(e=>esc(e.at)+'  '+esc(e.verb)+(e.note?'  '+esc(e.note):'')).join('\\n')+'</div></div>').join(''):'<div class="empty">none yet</div>');
  }
+ // The overlay is the scroll container; keep the reader's place across a rebuild.
+ const top=ov.scrollTop,boxTop=box.scrollTop;
  box.innerHTML=html;ov.classList.add('open');
+ ov.scrollTop=top;box.scrollTop=boxTop;
 }
+// Rewrite one section, keeping any horizontal/vertical scroll inside it.
+function setHTML(id,html){const el=document.getElementById(id);
+ const sc=[...el.querySelectorAll('.wrap')].map(w=>[w.scrollLeft,w.scrollTop]);
+ el.innerHTML=html;
+ el.querySelectorAll('.wrap').forEach((w,i)=>{if(sc[i]){w.scrollLeft=sc[i][0];w.scrollTop=sc[i][1]}})}
+const setText=(el,t)=>{if(el.textContent!==t)el.textContent=t};
+let hashes=null;
+// Render only what changed: each section is keyed on a hash of its inputs,
+// so a quiet tick touches nothing but ticking ages and the clock.
 function render(d){
- const hb=d.daemon?age(d.daemon.heartbeat):null;
- const hbOld=d.daemon&&(Date.now()-Date.parse(d.daemon.heartbeat)>90000);
- document.getElementById('chips').innerHTML=
-  '<span class="chip">daemon '+(d.daemon?('<span class="'+(hbOld?'bad':'ok')+'">'+(hbOld?'stale ':'')+hb+' ago</span> <span class="dim">v'+esc(d.daemon.version)+'</span>'):'<span class="bad">down</span>')+'</span>'
-  +d.helms.map(h=>{const stale=Date.now()-Date.parse(h.heartbeatAt)>1800000;
-    return '<span class="chip click" onclick="showModal(\\'helm\\',\\''+esc(h.grounds)+'\\')">⛵ <b>'+esc(h.man)+'</b> <span class="dim">helm '+esc(h.grounds)+'</span> <span class="'+(stale?'warn':'ok')+'">'+(stale?'stale ':'')+age(h.heartbeatAt)+' ago</span></span>'}).join('')
-  +'<span class="chip dim">'+new Date(d.now).toLocaleTimeString('en-GB')+'</span>';
+ const inp=sectionInputs(d,{st,open,modal},Date.now());
+ const next=hashInputs(inp);
+ const dirty=new Set(dirtySections(hashes,next));
+ hashes=next;
+ setText(document.getElementById('clock'),new Date(d.now).toLocaleTimeString('en-GB'));
  const repos=[...new Set(d.dispatches.map(x=>x.repo).filter(Boolean))].sort();
  const rsel=document.getElementById('f-repo');
  if(rsel.options.length!==repos.length+1){const cur=st.repo;
   rsel.innerHTML='<option value="">all repos</option>'+repos.map(r=>'<option'+(r===cur?' selected':'')+'>'+esc(r)+'</option>').join('')}
- for(const b of document.querySelectorAll('#viewseg button'))b.classList.toggle('on',b.dataset.v===st.view);
- const att=d.dispatches.filter(x=>x.verb==='needs-decision'||x.verb==='blocked');
- document.getElementById('attention').innerHTML=table(['id','repo','verb','question','age'],
-  att.map(x=>'<tr><td>'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc(x.note??'')+'</td><td>'+age(x.verbAt)+'</td></tr>'),
-  'nothing needs a human');
- const list=d.dispatches.filter(matches);
- document.getElementById('dispatches').innerHTML=st.view==='cards'?dispatchCards(list):dispatchTable(list);
- const traps=st.repo?d.traps.filter(t=>t.repo===st.repo):d.traps;
- document.getElementById('traps').innerHTML=st.view==='cards'?trapCards(traps):trapTable(traps);
- const notices=st.repo?d.notices.filter(n=>!n.repo||n.repo===st.repo):d.notices;
- document.getElementById('notices').innerHTML=table(['at','kind','text','repo'],
-  notices.map(n=>'<tr><td class="dim">'+age(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
-  'no notices');
+ for(const b of document.querySelectorAll('#viewseg button')){const on=b.dataset.v===st.view;if(b.classList.contains('on')!==on)b.classList.toggle('on',on)}
+ if(dirty.has('chips')){
+  const hbOld=inp.chips.daemonStale;
+  setHTML('chips',
+   '<span class="chip">daemon '+(d.daemon?('<span class="'+(hbOld?'bad':'ok')+'">'+(hbOld?'stale ':'')+ageEl(d.daemon.heartbeat)+' ago</span> <span class="dim">v'+esc(d.daemon.version)+'</span>'):'<span class="bad">down</span>')+'</span>'
+   +inp.chips.helms.map(({x:h,stale})=>
+     '<span class="chip click" onclick="showModal(\\'helm\\',\\''+esc(h.grounds)+'\\')">⛵ <b>'+esc(h.man)+'</b> <span class="dim">helm '+esc(h.grounds)+'</span> <span class="'+(stale?'warn':'ok')+'">'+(stale?'stale ':'')+ageEl(h.heartbeatAt)+' ago</span></span>').join(''))}
+ const att=inp.attention;
+ if(dirty.has('attention'))setHTML('attention',table(['id','repo','verb','question','age'],
+  att.map(x=>'<tr><td>'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc(x.note??'')+'</td><td>'+ageEl(x.verbAt)+'</td></tr>'),
+  'nothing needs a human'));
+ if(dirty.has('dispatches')){const list=inp.dispatches.list;
+  setHTML('dispatches',st.view==='cards'?dispatchCards(list):dispatchTable(list))}
+ if(dirty.has('traps')){const traps=inp.traps.list.map(t=>t.x);
+  setHTML('traps',st.view==='cards'?trapCards(traps):trapTable(traps))}
+ if(dirty.has('notices'))setHTML('notices',table(['at','kind','text','repo'],
+  inp.notices.map(n=>'<tr><td class="dim">'+ageEl(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
+  'no notices'));
  const mv=d.mergeView;
- document.getElementById('merge').innerHTML=!mv?'<div class="empty">no merge view (pickup not running)</div>':
+ if(dirty.has('merge'))setHTML('merge',!mv?'<div class="empty">no merge view (pickup not running)</div>':
   table(['pr','gate','head','uuid'],(mv.open??[]).map(p=>'<tr><td><a href="'+esc(p.url)+'" target="_blank">#'+p.number+'</a></td><td>'+esc(p.gate)+'</td><td class="dim">'+esc(p.headRef)+'</td><td class="dim">'+esc((p.uuid??'').slice(0,8))+'</td></tr>'),'no open PRs')
-  +((mv.recent??[]).length?'<div class="dim" style="margin-top:4px">recent: '+mv.recent.map(r=>'#'+r.number+' '+r.disposition).join(' · ')+'</div>':'');
- document.getElementById('watches').innerHTML=table(['key','owner','cursor','last error'],
+  +((mv.recent??[]).length?'<div class="dim" style="margin-top:4px">recent: '+mv.recent.map(r=>'#'+r.number+' '+r.disposition).join(' · ')+'</div>':''));
+ if(dirty.has('watches'))setHTML('watches',table(['key','owner','cursor','last error'],
   d.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td class="dim">'+esc(String(w.cursor??''))+'</td><td class="bad">'+esc(w.lastError??'')+'</td></tr>'),
-  'no watches');
- document.getElementById('foot').innerHTML=
-  '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>';
+  'no watches'));
+ if(dirty.has('foot'))setHTML('foot',
+  '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>');
  renderLobs(att);
- renderModal(d);
+ // The open modal is rebuilt only when its own item (or which one) changed.
+ if(dirty.has('modal'))renderModal(d);
+ refreshAges();
 }
 let spriteOk=null;
 (()=>{const i=new Image();
@@ -521,7 +534,7 @@ function renderLobs(att){
 }
 window.tog=(k)=>{open.has(k)?open.delete(k):open.add(k);tick(true)};
 window.showModal=(type,key)=>{modal={type,key};tick(true)};
-window.closeModal=()=>{modal=null;document.getElementById('overlay').classList.remove('open')};
+window.closeModal=()=>{modal=null;if(hashes)hashes.modal=null;document.getElementById('overlay').classList.remove('open')};
 document.getElementById('overlay').addEventListener('click',(e)=>{if(e.target.id==='overlay')closeModal()});
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeModal()});
 document.getElementById('viewseg').addEventListener('click',(e)=>{const v=e.target.dataset&&e.target.dataset.v;if(v){st.view=v;save();tick(true)}});
@@ -538,12 +551,20 @@ for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb']]){
  el.addEventListener('change',()=>{st[key]=el.value;save();tick(true)})}
 const q=document.getElementById('f-q');q.value=st.q;
 q.addEventListener('input',()=>{st.q=q.value;save();tick(true)});
-let last;
-async function tick(rerender){try{
-  if(!rerender||!last){const r=await fetch('/data');last=await r.json()}
-  render(last);document.getElementById('stale').style.display='none';
- }catch(e){document.getElementById('stale').style.display='inline'}}
-tick();setInterval(()=>tick(false),2000);
+let last,inflight=false,timer=null;
+const setStale=(on)=>{const el=document.getElementById('stale');const v=on?'inline':'none';if(el.style.display!==v)el.style.display=v};
+// User-driven ticks render synchronously from last; polls fetch one at a time.
+async function tick(rerender){
+ if(rerender&&last){render(last);return}
+ if(inflight)return;
+ inflight=true;
+ try{const r=await fetch('/data');last=await r.json();render(last);setStale(false)}
+ catch(e){setStale(true)}
+ finally{inflight=false}}
+const startPoll=()=>{if(!timer)timer=setInterval(()=>tick(false),2000)};
+const stopPoll=()=>{clearInterval(timer);timer=null};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopPoll();else{tick(false);startPoll()}});
+tick();if(!document.hidden)startPoll();
 </script></body></html>`;
 
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
