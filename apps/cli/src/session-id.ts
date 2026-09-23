@@ -47,11 +47,12 @@ export function resolveSessionId(opts: {
 }
 
 /**
- * Append the caller's resolved identity to a helm-gate refusal when it was
- * discovered rather than passed — "reserved for the helm session" is only
- * actionable if the caller can see which id it was judged as.
+ * Append how the caller was identified to a helm-gate refusal — "reserved
+ * for the helm session" is only actionable if the caller can see which id it
+ * was judged as, and where that id came from (or that there was none).
  */
 export function explainRefusal(refusal: string, who: ResolvedSession | undefined): string {
-  if (!who || who.source === 'flag') return refusal;
-  return `${refusal} (this caller resolved as session ${who.id} from ${who.from}; pass --session to override.)`;
+  if (!who) return `${refusal} (no --session given and none resolved from the environment)`;
+  const override = who.source === 'flag' ? '' : '; pass --session to override';
+  return `${refusal} (resolved session ${who.id} from ${who.from}${override})`;
 }

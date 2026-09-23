@@ -49,8 +49,11 @@ describe('explainRefusal', () => {
     expect(msg).toContain('$CLAUDE_CODE_SESSION_ID');
   });
 
-  it('leaves an explicit --session refusal unchanged', () => {
-    expect(explainRefusal('nope', { id: 'x', source: 'flag', from: '--session' })).toBe('nope');
-    expect(explainRefusal('nope', undefined)).toBe('nope');
+  it('names an explicit --session as the source', () => {
+    expect(explainRefusal('nope', { id: 'x', source: 'flag', from: '--session' })).toBe('nope (resolved session x from --session)');
+  });
+
+  it('says so when no session was given or resolved', () => {
+    expect(explainRefusal('nope', undefined)).toBe('nope (no --session given and none resolved from the environment)');
   });
 });
