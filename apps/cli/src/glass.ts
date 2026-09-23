@@ -295,6 +295,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,S
 h1{font-size:15px;margin:0 0 10px}h1 .dim{color:var(--dim);font-weight:normal}
 h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 6px}
 .chips,.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.controls{margin:0 0 14px}
 .chips{margin-bottom:8px}
 .chip{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
 .controls select,.controls input{background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--fg);font:inherit;padding:4px 8px}
@@ -321,14 +322,17 @@ th,td{text-align:left;padding:4px 9px;border-top:1px solid var(--line);vertical-
 td.grow{white-space:normal;word-break:break-word;min-width:140px}
 th{color:var(--dim);font-weight:normal;border-top:none;font-size:11px}
 tr.rowhead{cursor:pointer}tr.rowhead:hover{background:#1c2330}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:10px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:12px}
+/* One card style for every tab: even inner padding, and a top row whose badge never touches the id or the edge. */
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;cursor:pointer;min-width:0}
 .card:hover{border-color:#3a455a}
-.card .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.card .top{display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:22px}
+.card .top>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .top .badge{flex-shrink:0}
 .card .meta{color:var(--dim);font-size:12px;margin-top:2px}
 .card .note{margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card .foot{margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;color:var(--dim);font-size:12px}
-.badge{border-radius:5px;padding:1px 7px;font-size:11px;border:1px solid var(--line)}
+.badge{border-radius:5px;padding:1px 7px;font-size:11px;line-height:1.5;border:1px solid var(--line);white-space:nowrap;display:inline-block}
 .v-done{color:var(--ok)}.v-working{color:var(--fg)}.v-needs-decision,.v-blocked{color:var(--bad);font-weight:bold}
 .v-failed{color:var(--bad)}.v-paused,.v-unknown{color:var(--dim)}
 .dim{color:var(--dim)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
