@@ -192,12 +192,11 @@ Sign-on records who the man is (harness, directory, host; --label names it).
 A live foreign holder refuses without --take; a stale one is claimable.`,
   'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
 cleared too.`,
-  'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout.
-A timeout shows the man report delta when something changed — as a peek: the
-delta re-surfaces until \`man report\` acknowledges it. --peek surfaces
-standing events without consuming them. With a claimed helm this verb is
-reserved for it — identify with --session (which also heartbeats the helm
-and defaults --grounds to its own).`,
+  'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout,
+showing the man report delta (a peek) when something changed. --peek never
+blocks: it shows standing events unconsumed, else \`standing: none\`, exit 0
+(no --timeout). A claimed helm reserves this verb — identify with --session
+(heartbeats the helm, defaults --grounds to its own).`,
   'man:init': `Install the haul Stop hook into Claude settings; --marker touches
 .lobstah-man to arm this directory.`,
   'man:haul': `Stop-hook entry point: park the session while work is in flight (lobsterman

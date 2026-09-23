@@ -46,6 +46,8 @@ getting woken instead of asking:
   lobstah man init          install the Stop-hook park, then launch the
                             designated session with: LOBSTAH_MAN=1 claude
   lobstah man wait --peek   at session start — resurface anything standing
+                            without consuming it; never blocks (standing:
+                            none and exit 0 when nothing is)
   lobstah man report        the delta since your last report: landed, arisen,
                             still-waiting, verdict. A man wait timeout carries
                             it too, so a wait loop doubles as the periodic
