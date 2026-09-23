@@ -88,7 +88,6 @@ export const COMMANDS: Record<string, CommandSpec> = {
   doctor: { flags: {} },
   glass: { flags: { '--port': { value: '<n>' } } },
   pet: { subverbs: ['install', 'uninstall'], flags: { '--binary': { value: '<path>' } } },
-  settings: { subverbs: ['get', 'set'], flags: {}, positionals: '[<key> [<value>]]' },
   repos: { subverbs: ['add'], flags: { '--pickup': {}, '--key': { value: '<k>' } }, positionals: '[<path>]' },
   init: { flags: { '--scan': {}, '--pickup': {} }, positionals: '[<dir>...]' },
   version: { flags: {} },
@@ -173,13 +172,8 @@ login LaunchAgent (build it first: cd apps/pet && swift build -c release).
 Quitting the pet sticks until next login; uninstall removes the agent.`,
   glass: `The spyglass: tend as a live localhost web page — attention, dispatches,
 traps with lifecycle and mail, notices, merge view; filters and a
-settings popover (table/cards, lobs on/off). Binds 127.0.0.1 only and
-consumes no cursor; its one write is POST /settings, token-guarded.`,
-  settings: `Runtime settings in ~/.lobstah/settings.json (not config.toml), exactly
-two keys: glass.view (table | cards) and glass.pet (true | false — the
-lobsters crawling the spyglass page). Bare or \`get\` prints both; \`get
-<key>\` prints one value; \`set <key> <value>\` validates, writes
-atomically, and prints the new document.`,
+table/cards toggle. Read-only and binds 127.0.0.1 only: looking through it
+consumes no cursor and steers nothing.`,
   repos: `List configured repos, or detect one and append its [repos.*] block.`,
   init: `Create ~/.lobstah + config; --scan appends a [repos.*] block per repo found
 under the given directories.`,

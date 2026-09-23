@@ -188,17 +188,6 @@ verbs stay open. A stale helm reserves nothing.
 | charter | The helm's persona and scope fences, in Standard Technical English. Printed at sign-on and re-injected by `man brief` at every session start, so it survives restarts and compaction. |
 | digest | The delta since the reported-through cursor: catches landed, attention arisen, still-waiting, fleet verdict. Carried by `man report`, a `man wait` timeout, and — for a helm session, at `[helm].reportSecs` cadence — the park itself. Change-gated: an empty delta is never delivered. |
 
-## Runtime settings
-
-The one document the spyglass may write. **Owner:**
-`packages/core/src/settings.ts` (`validateSettingsPatch`, `writeSettings`).
-**Enforcement:** unknown keys and values are rejected (400 from the glass,
-exit 2 from the CLI), never ignored.
-
-| File | Keys and values |
-| ---- | --------------- |
-| `~/.lobstah/settings.json` | `glass.view`: `table` \| `cards` (default `table`) · `glass.pet`: `true` \| `false` (default `true`; the page's crawling lobs). Written by `POST /settings` (token-guarded) and `lobstah settings set`; read only by the glass. |
-
 ## Exit codes
 
 The CLI's exit-code contract, aligned with axi.md P6. **Owner:**

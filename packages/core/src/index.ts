@@ -15,4 +15,3 @@ export * from './notices.js';
 export * from './window.js';
 export * from './helm.js';
 export * from './compiled.js';
-export * from './settings.js';

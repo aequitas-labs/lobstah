@@ -20,15 +20,6 @@ import {
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice } from '@lobstah/core';
 import { readMergeView } from '@lobstah/pick';
-import {
-  handleSettingsRequest,
-  newGlassToken,
-  SETTINGS_CSS,
-  SETTINGS_HEAD,
-  SETTINGS_MARKUP,
-  SETTINGS_SCRIPT,
-  SETTINGS_TOKEN_PLACEHOLDER,
-} from './glass-settings.js';
 import { lobItems } from './glass-lobs.js';
 
 /**
@@ -37,9 +28,9 @@ import { lobItems } from './glass-lobs.js';
  * can't afford. It binds 127.0.0.1 only, never writes lobstah state, and
  * never advances any cursor: looking through the glass consumes nothing.
  * Look freely, steer only from the helm — links out are copyable commands,
- * never exec endpoints (localhost HTTP is reachable by any webpage). The one
- * write surface is POST /settings (glass.view, glass.pet), token-guarded
- * in glass-settings.ts.
+ * never exec endpoints (localhost HTTP is reachable by any webpage). The
+ * ⚙ popover's two preferences (view, lobs) are the viewing browser's own,
+ * kept in its localStorage — the server has nothing to write.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
@@ -238,7 +229,6 @@ export function buildGlassSnapshot() {
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>spyglass</title>
 <link rel="icon" type="image/png" href="/icon.png">
-<!-- settings: head -->${SETTINGS_HEAD}<!-- /settings -->
 <style>
 :root{--bg:#0e1116;--card:#161b22;--line:#2b3240;--fg:#dbe2ea;--dim:#8b96a5;--ok:#4fc17c;--warn:#e2b93d;--bad:#e26d5c;--link:#6cb2e2}
 *{box-sizing:border-box}
@@ -311,10 +301,19 @@ footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:v
 @keyframes crawl{0%{transform:translateX(-90px)}100%{transform:translateX(100vw)}}
 @keyframes step{to{background-position-x:-288px}}
 @keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
-/* settings: css */${SETTINGS_CSS}/* /settings */
+#gearbtn{background:none;border:1px solid var(--line);border-radius:6px;color:var(--dim);font:inherit;font-size:13px;padding:1px 7px;margin-left:8px;cursor:pointer;vertical-align:1px}
+#gearbtn:hover,#gearbtn.on{color:var(--fg);border-color:#3a455a}
+#settingspop{display:none;position:absolute;top:40px;left:16px;z-index:8;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 4px 16px rgba(0,0,0,.5);min-width:230px}
+#settingspop.open{display:block}
+#settingspop .row{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:6px 0}
+#settingspop .lbl{color:var(--dim);font-size:12px}
+#settingspop .hint{display:block;font-size:10px;opacity:.75}
 </style></head><body>
 <h1>🦞✨ spyglass<button id="gearbtn" title="settings" aria-label="settings">⚙</button><span id="stale"> · STALE FEED</span></h1>
-<!-- settings: popover -->${SETTINGS_MARKUP}<!-- /settings -->
+<div id="settingspop" role="dialog" aria-label="settings (this browser only)">
+ <div class="row"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
+ <div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span><span class="seg" id="lobseg"><button data-l="on">on</button><button data-l="off">off</button></span></div>
+</div>
 <div class="chips" id="chips"></div>
 <div class="controls">
  <select id="f-lane"><option value="">all lanes</option><option value="work">work</option><option value="chore">chore</option></select>
@@ -337,8 +336,11 @@ const age=(iso)=>{if(!iso)return '';const s=Math.max(0,(Date.now()-Date.parse(is
  if(s<90)return Math.round(s)+'s';if(s<5400)return Math.round(s/60)+'m';if(s<172800)return (s/3600).toFixed(1)+'h';return Math.round(s/86400)+'d'};
 const open=new Set();
 let modal=null;
-let st={view:'table',lane:'',repo:'',verb:'',q:''};
+let st={view:'table',lane:'',repo:'',verb:'',q:'',lobs:true};
 try{Object.assign(st,JSON.parse(localStorage.getItem('spyglass')||'{}'))}catch(e){}
+// A stored value this page doesn't understand falls back to the default.
+if(st.view!=='table'&&st.view!=='cards')st.view='table';
+st.lobs=st.lobs!==false;
 const save=()=>{try{localStorage.setItem('spyglass',JSON.stringify(st))}catch(e){}};
 function table(headers,rows,empty){if(!rows.length)return '<div class="empty">'+empty+'</div>';
  return '<div class="wrap"><table><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr>'+rows.join('')+'</table></div>'}
@@ -487,8 +489,8 @@ let spriteOk=null;
 let lobKey='';
 ${lobItems.toString()}
 function renderLobs(att){
- // settings: glass.pet gates the lobs (lobItems from glass-lobs.ts; unknown until /settings answers)
- const items=lobItems(att,{pet:window.glassPet===true,preview:new URLSearchParams(location.search).has('lob'),
+ // st.lobs (this browser's preference) gates the lobs; lobItems is glass-lobs.ts
+ const items=lobItems(att,{lobs:st.lobs,preview:new URLSearchParams(location.search).has('lob'),
   previewClick:last&&last.helms.length?"showModal('helm','"+last.helms[0].grounds+"')":''});
  const key=items.map(i=>i.key).join('|')+(spriteOk===null?'?':spriteOk?'s':'e');
  if(key===lobKey)return;
@@ -505,7 +507,15 @@ window.showModal=(type,key)=>{modal={type,key};tick(true)};
 window.closeModal=()=>{modal=null;document.getElementById('overlay').classList.remove('open')};
 document.getElementById('overlay').addEventListener('click',(e)=>{if(e.target.id==='overlay')closeModal()});
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeModal()});
-document.getElementById('viewseg').addEventListener('click',(e)=>{const v=e.target.dataset&&e.target.dataset.v;if(v)setGlassView(v)});
+document.getElementById('viewseg').addEventListener('click',(e)=>{const v=e.target.dataset&&e.target.dataset.v;if(v){st.view=v;save();tick(true)}});
+// The ⚙ popover: per-browser preferences, localStorage only (save()).
+const pop=document.getElementById('settingspop'),gear=document.getElementById('gearbtn');
+const paintLobs=()=>{for(const b of document.querySelectorAll('#lobseg button'))b.classList.toggle('on',(b.dataset.l==='on')===st.lobs)};
+document.getElementById('lobseg').addEventListener('click',(e)=>{const l=e.target.dataset&&e.target.dataset.l;if(l){st.lobs=l==='on';save();paintLobs();tick(true)}});
+const closePop=()=>{pop.classList.remove('open');gear.classList.remove('on')};
+gear.addEventListener('click',(e)=>{e.stopPropagation();const o=pop.classList.toggle('open');gear.classList.toggle('on',o);paintLobs()});
+document.addEventListener('click',(e)=>{if(!pop.contains(e.target)&&e.target!==gear)closePop()});
+document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closePop()});
 for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb']]){
  const el=document.getElementById(id);el.value=st[key];
  el.addEventListener('change',()=>{st[key]=el.value;save();tick(true)})}
@@ -517,9 +527,7 @@ async function tick(rerender){try{
   render(last);document.getElementById('stale').style.display='none';
  }catch(e){document.getElementById('stale').style.display='inline'}}
 tick();setInterval(()=>tick(false),2000);
-</script>
-<!-- settings: script -->${SETTINGS_SCRIPT}<!-- /settings -->
-</body></html>`;
+</script></body></html>`;
 
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(port: number): http.Server {
@@ -530,13 +538,7 @@ export function serveGlass(port: number): http.Server {
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
-  // Per-launch token for the one write surface (POST /settings).
-  const token = newGlassToken();
-  const page = PAGE.replace(SETTINGS_TOKEN_PLACEHOLDER, token);
   const server = http.createServer((req, res) => {
-    const addr = server.address();
-    const boundPort = addr && typeof addr === 'object' ? addr.port : port;
-    if (handleSettingsRequest(req, res, token, boundPort)) return;
     if (req.url === '/lob.png' && lob) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
       res.end(fs.readFileSync(lob));
@@ -558,8 +560,8 @@ export function serveGlass(port: number): http.Server {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(buildGlassSnapshot()));
     } else {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(page);
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(PAGE);
     }
   });
   server.listen(port, '127.0.0.1');

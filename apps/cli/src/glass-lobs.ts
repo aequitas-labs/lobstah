@@ -19,8 +19,8 @@ export interface LobItem {
 }
 
 export interface LobOptions {
-  /** settings.json glass.pet — off means no lobs at all, preview included. */
-  pet: boolean;
+  /** This browser's st.lobs preference — off means no lobs at all, preview included. */
+  lobs: boolean;
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */
   preview: boolean;
   /** onclick for the preview lob (opens the helm when there is one). */
@@ -28,7 +28,7 @@ export interface LobOptions {
 }
 
 export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
-  if (!opts.pet) return [];
+  if (!opts.lobs) return [];
   let items: LobItem[] = att.map((x) => ({
     key: x.lane + ':' + x.id,
     text: x.note || x.verb,

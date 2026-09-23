@@ -112,25 +112,14 @@ emits the full report for dashboards and scripts to render.
 (default port 4949): the fleet verdict and attention questions, every
 dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
-tail, the merge view, and watches — with filters and the helm identified
-by name. It consumes no cursor and steers nothing: looking through the glass
-changes no lobstah state, so it needs no helm and threatens nothing. Links
-out are copyable commands (`lobstah attach`, `claude --resume`), never
-click-to-exec — localhost HTTP is reachable by any webpage, so the glass
-exposes no endpoint that acts on the fleet.
-
-Its one write surface is `POST /settings`, behind the ⚙ popover: it changes
-`~/.lobstah/settings.json` and nothing else, and it accepts exactly two
-keys — `glass.view` (`table` | `cards`, shared by every viewer) and
-`glass.pet` (`true` | `false`; off, no lobsters crawl the page — the
-desktop pet is separate and unaffected). Anything else is a 400. A write
-needs the per-launch random token the server embeds in the page it serves
-(`<meta name="glass-token">`, sent back as `X-Glass-Token`), which a
-foreign page cannot read; when the browser sends `Sec-Fetch-Site` it must
-be `same-origin` or `none`, and an `Origin` or `Host` must name the glass
-itself on loopback. Any failure is a 403. No cookies, no CORS headers. The
-same two keys have a terminal path: `lobstah settings [get [<key>] | set
-<key> <value>]`.
+tail, the merge view, and watches — with filters, a table/cards toggle,
+and the helm identified by name. It is strictly read-only and consumes no
+cursor: looking through the glass changes nothing, so it needs no helm and
+threatens nothing. Links out are copyable commands (`lobstah attach`,
+`claude --resume`), never click-to-exec — localhost HTTP is reachable by
+any webpage, so the glass exposes no endpoint that acts. The ⚙ popover's two
+preferences — table or cards, and whether lobsters crawl the page — are
+per-browser, kept in that browser's localStorage and never on disk.
 
 This is where "is the agent alive?" belongs: the helm's heartbeat age on a
 page, not periodic proof-of-life turns in a transcript.

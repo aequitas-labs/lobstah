@@ -9,25 +9,25 @@ const att = [
 ];
 
 describe('lobItems (the crawling lobs on the spyglass page)', () => {
-  it('walks one lob per attention item when glass.pet is on', () => {
-    const items = lobItems(att, { pet: true, preview: false, previewClick: '' });
+  it('walks one lob per attention item when lobs are on', () => {
+    const items = lobItems(att, { lobs: true, preview: false, previewClick: '' });
     expect(items.map((i) => i.key)).toEqual(['work:aaaa1111', 'chore:bbbb2222']);
     expect(items.map((i) => i.text)).toEqual(['which color?', 'blocked']);
   });
 
-  it('is empty when glass.pet is false', () => {
-    expect(lobItems(att, { pet: false, preview: false, previewClick: '' })).toEqual([]);
+  it('is empty when lobs are off', () => {
+    expect(lobItems(att, { lobs: false, preview: false, previewClick: '' })).toEqual([]);
   });
 
-  it('the ?lob preview works only while the setting is on', () => {
-    expect(lobItems([], { pet: true, preview: true, previewClick: '' }).map((i) => i.key)).toEqual(['preview']);
-    expect(lobItems([], { pet: false, preview: true, previewClick: '' })).toEqual([]);
-    expect(lobItems([], { pet: true, preview: false, previewClick: '' })).toEqual([]);
+  it('the ?lob preview works only while lobs are on', () => {
+    expect(lobItems([], { lobs: true, preview: true, previewClick: '' }).map((i) => i.key)).toEqual(['preview']);
+    expect(lobItems([], { lobs: false, preview: true, previewClick: '' })).toEqual([]);
+    expect(lobItems([], { lobs: true, preview: false, previewClick: '' })).toEqual([]);
   });
 
   it('caps at four, the last one counting the rest', () => {
     const many = Array.from({ length: 6 }, (_, i) => ({ id: `id${i}`, lane: 'work', verb: 'blocked' }));
-    const items = lobItems(many, { pet: true, preview: false, previewClick: '' });
+    const items = lobItems(many, { lobs: true, preview: false, previewClick: '' });
     expect(items).toHaveLength(4);
     expect(items[3]?.text).toBe('…and 2 more — see attention');
   });
@@ -39,6 +39,20 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
     const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
     server.close();
     expect(page).toContain(lobItems.toString());
-    expect(page).toContain('lobItems(att,{pet:window.glassPet===true');
+    expect(page).toContain('lobItems(att,{lobs:st.lobs');
+  });
+
+  it('serves no settings endpoint: POST /settings gets the page like any unknown path', async () => {
+    const server = serveGlass(0);
+    await new Promise((r) => server.once('listening', r));
+    const port = (server.address() as AddressInfo).port;
+    const post = await fetch(`http://127.0.0.1:${port}/settings`, { method: 'POST', body: '{}' });
+    const other = await fetch(`http://127.0.0.1:${port}/no-such-path`);
+    server.close();
+    expect(post.status).toBe(200);
+    expect(post.headers.get('content-type')).toBe(other.headers.get('content-type'));
+    const [a, b] = [await post.text(), await other.text()];
+    expect(a).toBe(b);
+    expect(a).not.toContain('glass-token');
   });
 });
