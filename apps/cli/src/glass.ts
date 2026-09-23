@@ -307,15 +307,14 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em
 .headerline{display:flex;align-items:center;gap:8px}.headerline h1{flex:1}
 #settings-slot{min-width:34px;text-align:right;color:var(--dim)}
 #settings-slot #gearbtn{margin-left:0}
-.deckgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
-.deckgrid h2{margin:5px 0}.deckgrid section{min-width:0}
+.deckgrid{display:flex;flex-direction:column;gap:12px}
+.deckgrid h2{margin:5px 0}.deckgrid section{width:100%;min-width:0}
 .deckline{padding:2px 0;border-top:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .deckline.acked,.card.acked,.rowhead.acked,.badge.acked{opacity:.55}.deckmore{color:var(--dim);font-size:11px;display:inline-block;margin-top:4px}
 .deckline.click{cursor:pointer}.deckline.click:hover{background:#1c2330}
 .deckgrid h2 a{color:inherit}.deckgrid h2 a:hover{color:var(--fg)}
 .deckgrid .cards{grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:10px}
 .deckstack{margin-bottom:9px}.deckstack>.dim{font-size:11px;margin:3px 0 5px}
-@media(max-width:700px){.deckgrid{grid-template-columns:1fr}}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{background:var(--card);border:none;color:var(--dim);font:inherit;padding:4px 11px;cursor:pointer}
 .seg button.on{background:#26436b;color:var(--fg)}

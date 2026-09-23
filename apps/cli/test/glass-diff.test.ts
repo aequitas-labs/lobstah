@@ -111,7 +111,7 @@ describe('glass change detector', () => {
     expect(diff.dirtySections(before, after)).toContain('deck');
   });
 
-  it('renders both notices surfaces as tables in cards mode and PR cards with kind badges', async () => {
+  it('renders notices tables, PR cards, and full-width sibling sections on deck', async () => {
     const server = serveGlass(0);
     await new Promise((r) => server.once('listening', r));
     const port = (server.address() as AddressInfo).port;
@@ -134,6 +134,12 @@ describe('glass change detector', () => {
       inflight: [], landed: [], traps: [], stacks: [{ id: p.stackId, numbers: [27], nextNumber: 27 }], prs: [p],
     };
     const html = renderDeck({}, inp);
+    expect(page).toContain('.deckgrid{display:flex;flex-direction:column;gap:12px}');
+    expect(page).toContain('.deckgrid h2{margin:5px 0}.deckgrid section{width:100%;min-width:0}');
+    expect(html).toMatch(/^<div class="deckgrid"><section>/);
+    expect(html).toMatch(/<\/section><section>/);
+    expect(html.match(/<\/section><section>/g)).toHaveLength(4);
+    expect(html).toMatch(/<\/section><\/div>$/);
     expect(html.slice(html.indexOf('attention →'), html.indexOf('in flight →'))).toContain('<table>');
     expect(html.slice(html.indexOf('attention →'), html.indexOf('in flight →'))).not.toContain('pr:checks');
     expect(html).toContain('class="card acked"');
