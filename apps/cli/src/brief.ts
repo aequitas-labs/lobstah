@@ -59,12 +59,12 @@ export function buildBriefContext(sessionId: string, cwd?: string): string {
   let fleet = '';
   try {
     const r = buildTendReport();
-    const waiting = r.attention.filter((a) => a.kind !== 'pr').length;
-    const drafts = r.attention.length - waiting;
+    const waiting = r.attention.filter((a) => a.kind === 'question' || a.kind === 'watch').length;
+    const toLook = r.attention.length - waiting;
     fleet =
       ` Fleet: ${r.verdict} (${r.counts.queued} queued, ${r.counts.active} active` +
       (waiting > 0 ? `, ${waiting} awaiting a human` : '') +
-      (drafts > 0 ? `, ${drafts} draft PR${drafts === 1 ? '' : 's'}` : '') +
+      (toLook > 0 ? `, ${toLook} to look at` : '') +
       ') — `lobstah` for the live view.';
   } catch {
     // a brief must never fail the session start

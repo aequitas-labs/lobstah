@@ -11,7 +11,7 @@ const att = [
 describe('lobItems (the crawling lobs on the spyglass page)', () => {
   it('walks one lob per attention item when lobs are on', () => {
     const items = lobItems(att, { lobs: true, preview: false, previewClick: '' });
-    expect(items.map((i) => i.key)).toEqual(['work:aaaa1111', 'chore:bbbb2222']);
+    expect(items.map((i) => i.key)).toEqual(['question:work:aaaa1111', 'question:chore:bbbb2222']);
     expect(items.map((i) => i.text)).toEqual(['which color?', 'blocked']);
   });
 
@@ -25,13 +25,31 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
     expect(lobItems([], { lobs: true, preview: false, previewClick: '' })).toEqual([]);
   });
 
-  it('a pr item walks as a link to its PR with the draft badge, not the modal', () => {
+  it('a pr:* item walks as a link to its PR with its kind label, not the modal', () => {
     const items = lobItems(
-      [{ id: 'cccc3333', lane: 'work', verb: 'pr', kind: 'pr', note: '#9 draft', prUrl: 'https://github.com/a/b/pull/9', draft: true }],
+      [{ id: 'cccc3333', lane: 'work', verb: 'pr:draft', kind: 'pr:draft', note: '#9 draft', prUrl: 'https://github.com/a/b/pull/9' }],
       { lobs: true, preview: false, previewClick: '' },
     );
-    expect(items).toEqual([{ key: 'pr:https://github.com/a/b/pull/9', text: '#9 draft', href: 'https://github.com/a/b/pull/9', draft: true }]);
-    expect(lobItems([{ id: 'c', lane: 'work', verb: 'pr', kind: 'pr', prUrl: 'x' }], { lobs: false, preview: false, previewClick: '' })).toEqual([]);
+    expect(items).toEqual([{ key: 'pr:draft:https://github.com/a/b/pull/9', text: '#9 draft', href: 'https://github.com/a/b/pull/9', label: 'draft' }]);
+    expect(lobItems([{ id: 'c', lane: 'work', verb: 'pr:ready', kind: 'pr:ready', prUrl: 'x' }], { lobs: false, preview: false, previewClick: '' })).toEqual([]);
+  });
+
+  it('labels every kind the way the table and the pet do; a question has none', () => {
+    const items = lobItems(
+      [
+        { id: 'q1', lane: 'work', verb: 'needs-decision', kind: 'question', note: 'which?' },
+        { id: 'l1', lane: 'work', verb: 'done', kind: 'landed' },
+        { id: 'w1', lane: 'work', verb: 'watch', kind: 'watch' },
+      ],
+      { lobs: true, preview: false, previewClick: '' },
+    );
+    expect(items.map((i) => [i.key, i.label])).toEqual([
+      ['question:work:q1', ''],
+      ['landed:work:l1', 'landed'],
+      ['watch:work:w1', 'watch'],
+    ]);
+    expect(items[0]!.click).toBe("showModal('dispatch','work:q1')");
+    expect(items[2]!.click).toBe('');
   });
 
   it('caps at four, the last one counting the rest', () => {

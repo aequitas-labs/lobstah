@@ -851,6 +851,13 @@ ${progress}`,
             prState: ev.pr.state,
             prDraft: ev.pr.draft,
             prReview: ev.pr.reviewDecision || 'none',
+            ...(ev.pr.review
+              ? {
+                  prChangesRequested: ev.pr.review.changesRequested,
+                  ...(ev.pr.review.unresolvedThreads !== undefined ? { prUnresolvedThreads: ev.pr.review.unresolvedThreads } : {}),
+                  ...(ev.pr.review.lastReviewAt ? { prLastReviewAt: ev.pr.review.lastReviewAt } : {}),
+                }
+              : {}),
             prMergeState: ev.pr.mergeStateStatus,
             prHead: ev.pr.headSha,
             prChecks: `${c.passed}/${c.total} passed, ${c.failed} failed, ${c.pending} pending`,

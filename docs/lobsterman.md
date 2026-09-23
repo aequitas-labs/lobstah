@@ -127,11 +127,15 @@ opts out). What you get depends on what runs:
 `gh` must be on PATH and authenticated; if it isn't, the done report still
 succeeds and the watch's check records `lastError`.
 
-An observed PR that is open and still in **draft** joins tend's attention
-list as `kind: "pr"` (questions are `kind: "question"`, man-owned watch
-events `kind: "watch"`), so it crawls in the glass and the desktop pet
-until it leaves draft, merges, or closes; clicking it opens the PR. A draft
-PR is something to look at, not a stall: it never flips the verdict to
+An observed PR joins tend's attention list by kind — `pr:draft`,
+`pr:review` (unresolved threads or changes requested), `pr:checks` (a red
+head), `pr:ready` (approved or all green) — so it crawls in the glass and
+the desktop pet until its clear condition holds; clicking it opens the PR.
+`pr:review` and `pr:checks` stay off the screen while a worker already owns
+them (a pickup feedback round or the watch's fix continuation in flight).
+`attentionKinds` in `config.toml` picks the kinds; `landed` is opt-in. See
+the [attention contract](vocabulary.md#attention-contract). A PR is
+something to look at, not a stall: it never flips the verdict to
 `needs-attention` and stays out of the digest.
 
 ### The spyglass

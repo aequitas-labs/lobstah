@@ -64,6 +64,31 @@ export interface Config {
   notifyVerbs?: string[];
   /** Re-fire an unanswered attention state every this many seconds (0 disables). Default 900. */
   remindSecs?: number;
+  /** Which attention kinds tend (and so the pet and the glass) walk. Default DEFAULT_ATTENTION_KINDS. */
+  attentionKinds: AttentionKind[];
+}
+
+/**
+ * The configurable attention kinds (docs/vocabulary.md, "Attention contract").
+ * Level-triggered: each stands until its clear condition, unlike notifyVerbs,
+ * which fire once per transition.
+ */
+export const ATTENTION_KINDS = ['question', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:ready'] as const;
+export type AttentionKind = (typeof ATTENTION_KINDS)[number];
+/** Everything but landed, which is opt-in: the digest already carries landings. */
+export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'pr:draft', 'pr:review', 'pr:checks', 'pr:ready'];
+
+function parseAttentionKinds(raw: unknown): AttentionKind[] {
+  if (raw === undefined) return [...DEFAULT_ATTENTION_KINDS];
+  if (!Array.isArray(raw)) {
+    throw new Error(`attentionKinds must be an array of kinds (${ATTENTION_KINDS.join(', ')}) in ${configPath()}`);
+  }
+  for (const k of raw) {
+    if (!(ATTENTION_KINDS as readonly unknown[]).includes(k)) {
+      throw new Error(`attentionKinds: unknown kind "${String(k)}" in ${configPath()} — valid kinds: ${ATTENTION_KINDS.join(', ')}`);
+    }
+  }
+  return [...new Set(raw as AttentionKind[])];
 }
 
 export const DEFAULT_SOAK: SoakConfig = {
@@ -125,6 +150,7 @@ export function loadConfig(): Config {
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
+    attentionKinds: parseAttentionKinds(raw.attentionKinds),
   };
 }
 

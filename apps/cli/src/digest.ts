@@ -1,12 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { laneDirs, lobstahHome, readEvidence, readStatusLog, toonKV, toonTable, TERMINAL_VERBS } from '@lobstah/core';
+import { laneDirs, readEvidence, readStatusLog, toonKV, toonTable, TERMINAL_VERBS } from '@lobstah/core';
 import type { Descriptor, Lane } from '@lobstah/core';
-import { buildTendReport } from './tend.js';
+import { buildTendReport, repoOf } from './tend.js';
 import type { TendReport } from './tend.js';
-
-/** Never report further back than this, cursor or no cursor. */
-const LOOKBACK_MS = 24 * 3600_000;
+import { lastReportedAt, reportedThroughMs } from './reported.js';
 
 export interface DigestLanding {
   id: string;
@@ -44,34 +42,7 @@ export interface Digest {
   counts: TendReport['counts'];
 }
 
-function cursorFile(name: string): string {
-  return path.join(lobstahHome(), 'reported', `${name}.json`);
-}
-
-function readCursor(name: string): string | undefined {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(cursorFile(name), 'utf8')) as { through?: string };
-    return typeof parsed.through === 'string' ? parsed.through : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Mark everything through `through` as reported. */
-export function advanceCursor(name: string, through: string): void {
-  const file = cursorFile(name);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify({ through })}\n`);
-}
-
-/** When the last digest was delivered (cursor mtime), for throttle cadence. */
-export function lastReportedAt(name: string): number | undefined {
-  try {
-    return fs.statSync(cursorFile(name)).mtimeMs;
-  } catch {
-    return undefined;
-  }
-}
+export { advanceCursor, lastReportedAt } from './reported.js';
 
 function doneIds(lane: Lane): string[] {
   try {
@@ -81,21 +52,7 @@ function doneIds(lane: Lane): string[] {
   }
 }
 
-export function repoOf(id: string, lane: Lane): string | undefined {
-  const dirs = laneDirs(lane);
-  for (const file of [
-    path.join(dirs.done, id, 'descriptor.json'),
-    path.join(dirs.active, id, 'descriptor.json'),
-    path.join(dirs.queue, `${id}.json`),
-  ]) {
-    try {
-      return (JSON.parse(fs.readFileSync(file, 'utf8')) as Descriptor).repo;
-    } catch {
-      // keep looking
-    }
-  }
-  return undefined;
-}
+export { repoOf } from './tend.js';
 
 export interface DigestOptions {
   /** Cursor name; each grounds keeps its own. Default: the whole fleet. */
@@ -108,8 +65,7 @@ export interface DigestOptions {
 export function buildDigest(opts: DigestOptions = {}): Digest {
   const now = opts.now ?? Date.now();
   const name = opts.cursor ?? 'fleet';
-  const cursor = readCursor(name);
-  const sinceMs = Math.max(cursor ? Date.parse(cursor) || 0 : 0, now - LOOKBACK_MS);
+  const sinceMs = reportedThroughMs(name, now);
   const since = new Date(sinceMs).toISOString();
   const inGrounds = (repo: string | undefined): boolean =>
     opts.repos === undefined || repo === undefined || opts.repos.has(repo);
@@ -137,10 +93,11 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
   landed.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
   const tend = buildTendReport(now);
-  // Draft PRs are something to look at, not something arisen that blocks
-  // work — they walk in tend and the pet, but stay out of the digest.
+  // Only questions and watch events arise: landed items are the landings
+  // above, and PR kinds are something to look at, not something that
+  // blocks work — they walk in tend and the pet, but stay out of the digest.
   const attention = tend.attention.filter(
-    (a) => a.kind !== 'pr' && (a.verb === 'watch' || inGrounds(repoOf(a.id, a.lane))),
+    (a) => (a.kind === 'question' || a.kind === 'watch') && (a.verb === 'watch' || inGrounds(repoOf(a.id, a.lane))),
   );
   const standing: DigestAttention[] = attention.map((a) => ({
     id: a.id,
