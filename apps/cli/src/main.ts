@@ -85,6 +85,7 @@ import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from '.
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
+import { pluginBehindLine } from './plugin-version.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -1197,7 +1198,9 @@ ${progress}`,
       // knowing where things stand. Silent without hook input.
       const hook = readHookStdin();
       if (!hook?.session_id) break;
-      const context = buildBriefContext(hook.session_id, hook.cwd ?? process.cwd());
+      // One extra line when the loaded plugin lags the CLI; silent otherwise.
+      const behind = pluginBehindLine(lobstahVersion());
+      const context = buildBriefContext(hook.session_id, hook.cwd ?? process.cwd()) + (behind ? `\n${behind}` : '');
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }),
       );

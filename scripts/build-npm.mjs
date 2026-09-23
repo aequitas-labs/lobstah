@@ -18,7 +18,8 @@ const common = [
 execFileSync('npx', ['esbuild', 'apps/cli/src/main.ts', ...common, `--outfile=${out}/dist/main.js`], { cwd: root, stdio: 'inherit' });
 execFileSync('npx', ['esbuild', 'packages/runner/src/index.ts', ...common, `--outfile=${out}/dist/runner.js`], { cwd: root, stdio: 'inherit' });
 
-const version = process.argv[2] ?? '0.1.0';
+// Default to the CLI's version: every published artifact carries one version.
+const version = process.argv[2] ?? JSON.parse(fs.readFileSync(path.join(root, 'apps/cli/package.json'), 'utf8')).version;
 fs.writeFileSync(
   path.join(out, 'package.json'),
   JSON.stringify(

@@ -3,6 +3,15 @@ name: Release
 # Cutting a release is pushing a tag:
 #   v0.2.0        → publish lobstah@0.2.0
 #   plugin-v0.2.0 → publish lobstah-openclaw-plugin@0.2.0
+#
+# One version everywhere — the CLI's; every plugin manifest tracks it. The
+# maintainer's sequence, on an up-to-date main:
+#   pnpm version:set 0.6.0             # bumps apps/cli/package.json and stamps every plugin manifest
+#   git commit -am "lobstah 0.6.0"
+#   git tag v0.6.0 && git tag plugin-v0.6.0
+#   git push origin main v0.6.0 plugin-v0.6.0
+# The job below refuses a tag whose version is not the CLI's, and CI's
+# version-agreement test refuses a manifest that disagrees.
 # Publishing uses npm trusted publishing (OIDC) — no token secret, no OTP.
 # One-time setup per package on npmjs.com: package → Settings → Trusted
 # Publisher → GitHub Actions → repo aequitas-labs/lobstah, workflow release.yml.
@@ -49,6 +58,14 @@ jobs:
             echo "dir=build/npm" >> "$GITHUB_OUTPUT"
             echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           fi
+      - name: The tag, the CLI, and every plugin manifest agree
+        run: |
+          CLI="$(node -p "require('./apps/cli/package.json').version")"
+          if [ "$CLI" != "${{ steps.target.outputs.version }}" ]; then
+            echo "tag ${GITHUB_REF_NAME} is ${{ steps.target.outputs.version }} but apps/cli/package.json is $CLI — run pnpm version:set first" >&2
+            exit 1
+          fi
+          node scripts/sync-versions.mjs --check
       - run: node scripts/${{ steps.target.outputs.script }} ${{ steps.target.outputs.version }}
       - run: npm publish --provenance --access public
         working-directory: ${{ steps.target.outputs.dir }}

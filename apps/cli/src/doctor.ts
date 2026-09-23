@@ -4,10 +4,12 @@ import { spawnSync } from 'node:child_process';
 import { parse } from 'smol-toml';
 import { configPath, executorPath, loadConfig, lobstahHome, lobstahVersion, onPath, packagePresent } from '@lobstah/core';
 import { loadPickupConfig } from '@lobstah/pick';
+import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND } from './plugin-version.js';
 
 export interface DoctorRow {
   check: string;
-  status: 'ok' | 'warn' | 'fail';
+  /** skip: the check does not apply here (e.g. no plugin installed); never fails the run. */
+  status: 'ok' | 'warn' | 'fail' | 'skip';
   detail: string;
 }
 
@@ -24,6 +26,42 @@ function git(repoPath: string, ...args: string[]): { ok: boolean; out: string } 
  * Read-only except tokenCommand execution (verifying a token source mints
  * is the point of checking it).
  */
+/**
+ * One row per harness plugin: the version the harness actually loads versus
+ * the CLI's, compared on major.minor (plugin versions track the CLI).
+ */
+export function pluginRows(cliVersion: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): DoctorRow[] {
+  const rows: DoctorRow[] = [];
+  // A workspace/dev build reports 0.0.0-dev by design: nothing to compare against.
+  const devCli = cliVersion.startsWith('0.0.0');
+  for (const [harness, find] of [
+    ['claude', installedClaudePlugin],
+    ['codex', installedCodexPlugin],
+  ] as const) {
+    const check = `plugin ${harness}`;
+    const p = find(opts);
+    if (!p) {
+      rows.push({ check, status: 'skip', detail: 'not installed' });
+      continue;
+    }
+    if (devCli) {
+      rows.push({ check, status: 'skip', detail: `v${p.version} installed; this CLI is a dev build (v${cliVersion}) — nothing to compare` });
+      continue;
+    }
+    const drift = pluginDrift(p.version, cliVersion);
+    rows.push(
+      drift === 'match'
+        ? { check, status: 'ok', detail: `v${p.version} matches CLI v${cliVersion} (${p.root})` }
+        : {
+            check,
+            status: 'warn',
+            detail: `plugin v${p.version} is ${drift} CLI v${cliVersion} — ${drift === 'behind' ? UPDATE_COMMAND[harness] : 'update the CLI: npm i -g lobstah'} (${p.root})`,
+          },
+    );
+  }
+  return rows;
+}
+
 export function runDoctor(now = Date.now()): DoctorRow[] {
   const rows: DoctorRow[] = [];
   const push = (check: string, status: DoctorRow['status'], detail: string) => rows.push({ check, status, detail });
@@ -138,5 +176,6 @@ export function runDoctor(now = Date.now()): DoctorRow[] {
   }
 
   push('lobstah', 'ok', `v${lobstahVersion()} at ${process.argv[1] ?? '?'}`);
+  for (const row of pluginRows(lobstahVersion())) push(row.check, row.status, row.detail);
   return rows;
 }

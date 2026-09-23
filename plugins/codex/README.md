@@ -30,6 +30,13 @@ Codex with no settings surgery.
 /plugin install lobstah@lobstah
 ```
 
+The plugin's version tracks the CLI's: plugin 0.5.x is written for
+`lobstah` 0.5.x, since its skills describe CLI verbs. After `npm i -g
+lobstah` moves to a new minor version, update the plugin too with `codex
+plugin marketplace upgrade lobstah && codex plugin add lobstah@lobstah`.
+`lobstah doctor` shows a `plugin codex` row, and the session-start brief
+adds one line when the installed plugin is behind.
+
 ## Opting in
 
 The park never conscripts a session. A session opts in as one of two roles:

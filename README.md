@@ -144,7 +144,9 @@ continues the turn the moment something needs it.
   in either harness: `/plugin marketplace add aequitas-labs/lobstah`, then
   `/plugin install lobstah@lobstah`. The park stays inert until a directory
   opts in with a `.lobstah-man` file or the session soaks. Codex hooks need
-  Codex v0.114+ and a one-time trust review. Details per harness:
+  Codex v0.114+ and a one-time trust review. Plugin versions track the CLI
+  (plugin 0.5.x goes with `lobstah` 0.5.x); `lobstah doctor` and the session
+  brief say when the installed plugin is behind. Details per harness:
   [plugins/claude-code](plugins/claude-code/README.md) ·
   [plugins/codex](plugins/codex/README.md).
 - **OpenClaw plugin** — gives fleet agents `lobstah_dispatch` / `lobstah_status`
