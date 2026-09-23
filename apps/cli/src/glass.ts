@@ -310,7 +310,10 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em
 .deckgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
 .deckgrid h2{margin:5px 0}.deckgrid section{min-width:0}
 .deckline{padding:2px 0;border-top:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.deckline.acked{opacity:.55}.deckmore{color:var(--dim);font-size:11px}
+.deckline.acked,.card.acked{opacity:.55}.deckmore{color:var(--dim);font-size:11px;display:inline-block;margin-top:4px}
+.deckline.click{cursor:pointer}.deckline.click:hover{background:#1c2330}
+.deckgrid h2 a{color:inherit}.deckgrid h2 a:hover{color:var(--fg)}
+.deckgrid .cards{grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:10px}
 @media(max-width:700px){.deckgrid{grid-template-columns:1fr}}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{background:var(--card);border:none;color:var(--dim);font:inherit;padding:4px 11px;cursor:pointer}
@@ -470,24 +473,38 @@ function kindCell(x){
  if(x.kind==='question')return '<span class="v-'+x.verb+'">'+x.verb+'</span>';
  const tone=x.kind==='landed'?(x.verb==='failed'?'bad':'ok'):(KIND_TONE[x.kind]||'dim');
  return '<span class="badge '+tone+'">'+esc(kindLabel(x.kind)||x.kind)+'</span>'+(x.kind==='landed'?' <span class="dim">'+esc(x.verb)+'</span>':'')}
-function deckBlock(title,rows,tab,max){const shown=rows.slice(0,max),more=rows.length-shown.length;
- return '<section><h2>'+title+'</h2>'+(shown.length?shown.join(''):'<div class="empty">none</div>')
- +(more?'<a class="deckmore" href="#'+tab+'">+'+more+' more →</a>':'')+'</section>'}
-function deckLine(body,extra){return '<div class="deckline'+(extra||'')+'">'+body+'</div>'}
-function renderDeck(d,inp){const att=inp.attention;
- const byKind=new Map();for(const x of att){const a=byKind.get(x.kind)||[];a.push(x);byKind.set(x.kind,a)}
- const attention=[...byKind].flatMap(([kind,items])=>items.map((x,i)=>deckLine(
-  (i===0?'<span class="badge dim">'+esc(kindLabel(kind)||kind)+'</span> ':'')+
-  esc(x.repo||'')+' '+esc(x.note||x.verb)+' · '+ageEl(x.at)+
-  (x.acked?' · acked '+ageEl(x.acked.at)+' ago':''),x.acked?' acked':'')));
- const flight=inp.inflight.map(x=>deckLine('<b>'+esc(x.id.slice(0,8))+'</b> '+esc(x.repo||'')+' · '+esc(x.note||x.verb)+' · '+ageEl(x.verbAt)+' · '+esc(x.for||x.claimedBy||'')+' '+prCell(x)));
- const landed=inp.landed.map(x=>deckLine('<b>'+esc(x.id.slice(0,8))+'</b> '+esc(x.repo||'')+' · '+esc(x.verb)+' · '+ageEl(x.at)+' '+
-  (x.prUrl?'<a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">PR</a>':'')));
- const traps=inp.traps.map(({x:t})=>deckLine('wt:'+esc(t.trapId)+' · '+esc(t.repo||'')+' · '+(t.live?trapRow(t).listen:'stowed / ghosted')));
- const stacks=inp.stacks.map(s=>{const p=d.prs.find(x=>x.number===s.nextNumber&&x.stackId===s.id);
-  return deckLine(s.numbers.map(n=>'#'+n).join(' → ')+' · next: '+(p?'<a href="'+esc(p.url)+'" target="_blank" rel="noopener">#'+p.number+'</a> <span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>':'—')+' · '+s.behind+' behind')});
- return '<div class="deckgrid">'+deckBlock('attention',attention,'notices',4)+deckBlock('in flight',flight,'dispatches',4)
-  +deckBlock('landed since report',landed,'dispatches',3)+deckBlock('traps',traps,'traps',3)+deckBlock('stacks',stacks,'prs',3)+'</div>'}
+// On deck: every section's items are cards (cards mode) or rows (table
+// mode), and every item opens its modal. {title, badge, meta, open, acked}
+// is the one shape all five sections produce.
+function deckItem(it,view){
+ const badge=it.badge?'<span class="badge '+esc(it.badge.tone||'dim')+'">'+esc(it.badge.text)+'</span>':'';
+ const click=it.open?' onclick="'+it.open+'"':'';
+ if(view==='cards')return '<div class="card'+(it.acked?' acked':'')+'"'+click+(it.open?'':' style="cursor:default"')+'><div class="top"><b>'+it.title+'</b>'+badge+'</div>'
+  +(it.meta?'<div class="meta">'+it.meta+'</div>':'')+'</div>';
+ return '<div class="deckline'+(it.open?' click':'')+(it.acked?' acked':'')+'"'+click+'>'+(badge?badge+' ':'')+'<b>'+it.title+'</b>'+(it.meta?' <span class="dim">· '+it.meta+'</span>':'')+'</div>'}
+function deckBlock(title,items,tab,max,view){const shown=items.slice(0,max),more=items.length-shown.length;
+ const body=shown.length?(view==='cards'?'<div class="cards">'+shown.map(i=>deckItem(i,view)).join('')+'</div>':shown.map(i=>deckItem(i,view)).join('')):'<div class="empty">none</div>';
+ return '<section><h2><a href="#'+tab+'">'+title+' →</a></h2>'+body+(more?'<a class="deckmore" href="#'+tab+'">+'+more+' more →</a>':'')+'</section>'}
+const openDispatch=(lane,id)=>"showModal(\\'dispatch\\',\\'"+esc(lane+':'+id)+"\\')";
+function renderDeck(d,inp){const view=inp.view;
+ const attention=inp.attention.map(x=>({
+  title:esc(x.note||x.verb),
+  badge:{text:kindLabel(x.kind)||x.verb,tone:x.kind==='question'?'bad':KIND_TONE[x.kind]||'dim'},
+  meta:esc(x.repo||'')+' · '+ageEl(x.at)+' ago'+(x.acked?' · acked '+ageEl(x.acked.at)+' ago':''),
+  acked:!!x.acked,
+  open:isPrKind(x.kind)&&x.key?"showModal(\\'pr\\',\\'"+esc(x.key)+"\\')":x.kind==='watch'?'':openDispatch(x.lane,x.id)}));
+ const flight=inp.inflight.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||''),badge:{text:x.verb,tone:x.verb==='needs-decision'||x.verb==='blocked'?'bad':'dim'},
+  meta:esc((x.note||'').slice(0,90))+' · '+ageEl(x.verbAt)+' ago'+(x.for||x.claimedBy?' · '+esc(x.for||x.claimedBy):''),open:openDispatch(x.lane,x.id)}));
+ const landed=inp.landed.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||''),badge:{text:x.verb,tone:x.verb==='failed'?'bad':'ok'},
+  meta:esc((x.note||'').slice(0,90))+' · '+ageEl(x.at)+' ago',open:openDispatch(x.lane,x.id)}));
+ const traps=inp.traps.map(({x:t})=>({title:'🪤 wt:'+esc(t.trapId),badge:{text:t.live?(t.harness||'live'):'signed off',tone:t.live?'ok':'dim'},
+  meta:esc(t.repo||'')+' · '+(t.live?trapRow(t).listen:'stowed / ghosted'),open:"showModal(\\'trap\\',\\'"+esc(t.trapId)+"\\')"}));
+ // PRs: one line per stack, the next mergeable PR first; it opens that PR's modal.
+ const prs=inp.stacks.map(s=>{const p=d.prs.find(x=>x.number===s.nextNumber&&x.stackId===s.id)||d.prs.find(x=>x.stackId===s.id&&x.state==='OPEN');
+  return {title:esc(s.numbers.map(n=>'#'+n).join(' → ')),badge:p?{text:p.badge.text,tone:p.badge.tone}:null,
+   meta:(p?'next #'+p.number+(p.title?' '+esc(p.title):''):'nothing mergeable')+' · '+s.behind+' behind',open:p?"showModal(\\'pr\\',\\'"+esc(p.key)+"\\')":''}});
+ return '<div class="deckgrid">'+deckBlock('attention',attention,'notices',4,view)+deckBlock('in flight',flight,'dispatches',4,view)
+  +deckBlock('landed since report',landed,'dispatches',3,view)+deckBlock('traps',traps,'traps',3,view)+deckBlock('PRs',prs,'prs',3,view)+'</div>'}
 const watchCell=(w)=>{const ws=watchState(w);return ws.at?ws.text+' · '+ageEl(ws.at)+' ago':'<span class="dim">'+ws.text+'</span>'};
 const prOpen=(p)=>"showModal(\\'pr\\',\\'"+esc(p.key)+"\\')";
 const prLink=(p)=>'<a href="'+esc(p.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">#'+p.number+'</a>';
