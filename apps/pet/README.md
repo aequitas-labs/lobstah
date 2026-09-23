@@ -19,7 +19,11 @@ to the helm through the focus ladder:
 Every attention kind walks (`attentionKinds` in `config.toml` picks them),
 its bubble led by a short label: `draft`, `review`, `checks`, `ready`,
 `landed`, or nothing for a question. Clicking a PR pet (`pr:*`) opens the
-PR in your browser instead of the helm; right-click adds **Open PR**. Each
+PR in your browser instead of the helm; right-click adds **Open PR**. Any
+click also acknowledges the item (`lobstah attention ack <key> --by pet`),
+so that pet stops walking until the item's state changes; right-click
+**Acknowledge** does only that. Acks are display-only — the helm is still
+woken for every standing question. Each
 stops walking once its clear condition holds (docs/vocabulary.md,
 "Attention contract").
 

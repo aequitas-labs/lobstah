@@ -72,7 +72,7 @@ export async function reportLoop(
     }
     const msgs = await source.inbound(key, entry.lastInboundAt);
     if (msgs.length > 0) {
-      for (const m of msgs) sendMessage(entry.uuid, lane, m);
+      for (const m of msgs) sendMessage(entry.uuid, lane, m, `tracker:${source.name.startsWith('gh:') ? 'github' : source.name}`);
       state.update(key, { lastInboundAt: new Date().toISOString() });
       log(`${key}: forwarded ${msgs.length} comment(s) to inbox`);
     }

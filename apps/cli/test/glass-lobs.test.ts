@@ -52,6 +52,17 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
     expect(items[2]!.click).toBe('');
   });
 
+  it('acked items and this browser\'s hidden lobs do not walk; a new state hash re-shows a hidden one', () => {
+    const att = [
+      { id: 'a', lane: 'work', verb: 'pr:draft', kind: 'pr:draft', prUrl: 'u', key: 'pr:o/r#1', stateHash: 'h1' },
+      { id: 'b', lane: 'work', verb: 'needs-decision', kind: 'question', key: 'work:b', stateHash: 'q1', acked: { at: 'x', by: 'pet' } },
+    ];
+    const shown = lobItems(att, { lobs: true, preview: false, previewClick: '' });
+    expect(shown.map((i) => [i.key, i.hideKey, i.hideHash])).toEqual([['pr:draft:pr:o/r#1', 'pr:o/r#1', 'h1']]);
+    expect(lobItems(att, { lobs: true, hidden: { 'pr:o/r#1': 'h1' }, preview: false, previewClick: '' })).toEqual([]);
+    expect(lobItems(att, { lobs: true, hidden: { 'pr:o/r#1': 'h0' }, preview: false, previewClick: '' })).toHaveLength(1);
+  });
+
   it('caps at four, the last one counting the rest', () => {
     const many = Array.from({ length: 6 }, (_, i) => ({ id: `id${i}`, lane: 'work', verb: 'blocked' }));
     const items = lobItems(many, { lobs: true, preview: false, previewClick: '' });

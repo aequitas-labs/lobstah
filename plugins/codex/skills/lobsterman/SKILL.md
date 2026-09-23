@@ -67,7 +67,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 - Hookless? Loop `lobstah man wait --timeout 900`: exit 0 is an event,
   exit 3 a timeout carrying the digest when something changed. Acknowledge
   a digest with `lobstah man report`.
-- Unanswered questions re-fire until answered — a missed wake is not lost.
+- Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
 without the plugin; see docs/lobsterman.md. `lobstah man` prints the full

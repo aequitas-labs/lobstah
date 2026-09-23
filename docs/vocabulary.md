@@ -262,6 +262,20 @@ watch's fix continuation — the watch records it as `lastFollowUpId`. It
 reappears when that dispatch finishes without clearing the condition.
 `question`, `landed`, `pr:draft`, and `pr:ready` are never suppressed.
 
+**Answered questions.** A `question` stands only while no message to the
+dispatch is newer than its latest `needs-decision` / `blocked` entry. A
+message counts when it carries provenance: `sendMessage` writes a
+`NNN.meta.json` sidecar `{ from, at }` beside each `NNN.msg` (`from` is
+`helm`, `session:<8>`, `terminal`, `tracker:<source>`, or `node`), and
+`acknowledge` moves it into `handled/` with its message. Any sender counts;
+a record without a sidecar (written before provenance existed) never does;
+the sidecar's `at` decides, never file mtime. `man wait`, the park, and the
+reminder loop apply the same predicate.
+
+| Word | Meaning |
+| ---- | ------- |
+| ack | `~/.lobstah/acks/<item-key>.json` — `{ key, kind, stateHash, at, by }`, written only by `lobstah attention ack` (removed by `unack`, by the CLI's `man tend` / `attention` when its `stateHash` goes stale, and by `cull` when the item is gone). **Display-only**: it hides the item from the desktop pet and the glass lobs while the item's `stateHash` is unchanged; `man tend --json` keeps the item with `acked: { at, by }`, and `man wait`, the park, reminders, and `notifyCommand` never read acks. Item keys: `<lane>:<uuid>` (question, landed), `pr:<owner>/<repo>#<n>` (all of a PR's `pr:*` kinds — one ack covers them), `watch:<key>`. `stateHash` covers the status entry (question, landed) or the PR's head sha plus every evidence field a `pr:*` kind stands on (not `observedAt`). |
+
 ## Exit codes
 
 The CLI's exit-code contract, aligned with axi.md P6. **Owner:**

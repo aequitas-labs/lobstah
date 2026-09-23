@@ -90,6 +90,7 @@ import { serveGlass } from './glass.js';
 import { installPet, uninstallPet } from './pet.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
+import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
 import { addPrWatch, autoRegisterPrWatch, observeDispatchPrWatches, pollSecs, runPrCheck } from './pr-watch.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
@@ -109,6 +110,11 @@ work (humans and agents):
                                   never falls back headless; session:<id>
                                   resolves to its trap)
   ls [--all]                      queue, active, recent done      (alias: buoys)
+  attention [ack <item-key> [--by <label>] | unack <item-key>]
+                                  standing attention with ack state; an ack
+                                  hides an item from the pet and glass lobs
+                                  until its state changes (display-only —
+                                  never from the helm's wakes)
   status [<uuid>]                 reconciled state                (alias: buoy)
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
@@ -897,8 +903,42 @@ ${progress}`,
       console.log(MANUAL);
       break;
     }
+    case 'attention': {
+      const sub = pos[0];
+      const report = buildTendReport();
+      pruneStaleAcks(report.attention);
+      if (sub === 'ack' || sub === 'unack') {
+        const key = pos[1];
+        if (!key) throw new UsageError(`attention ${sub} requires an item key\n\n${usageFor('attention')!}`);
+        if (sub === 'unack') {
+          if (!removeAck(key)) throw new UsageError(`no ack for "${key}" — \`lobstah attention\` lists items and their ack state`);
+          console.log(toonKV({ key, acked: false }));
+          break;
+        }
+        const item = report.attention.find((a) => a.key === key);
+        if (!item) throw new UsageError(`no standing attention item "${key}" — \`lobstah attention\` lists the keys`);
+        const ack = { key, kind: item.kind, stateHash: item.stateHash, at: new Date().toISOString(), by: opt('--by') ?? 'terminal' };
+        writeAck(ack);
+        console.log(toonKV({ key, kind: item.kind, acked: true, by: ack.by, stateHash: ack.stateHash }));
+        break;
+      }
+      console.log(
+        toonTable(
+          'attention',
+          report.attention.map((a) => ({
+            key: a.key,
+            kind: a.kind,
+            acked: a.acked ? `${a.acked.by} ${Math.round((Date.now() - Date.parse(a.acked.at)) / 60_000)}m ago` : '',
+            note: a.note ?? '',
+          })),
+          ['key', 'kind', 'acked', 'note'],
+        ),
+      );
+      break;
+    }
     case 'man:tend': {
       const report = buildTendReport();
+      pruneStaleAcks(report.attention); // a changed state re-stands its item; the stale ack goes
       console.log(has('--json') ? JSON.stringify(report, null, 2) : renderTend(report));
       break;
     }

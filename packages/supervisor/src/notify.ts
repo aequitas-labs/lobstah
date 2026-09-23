@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { activeIds, laneDirs, lastEventAt, readStatusLog, reconcile } from '@lobstah/core';
+import { activeIds, answeredAt, laneDirs, lastEventAt, readStatusLog, reconcile } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
 
 export interface NotifyEvent {
@@ -113,9 +113,11 @@ function readAttnCursor(file: string): AttnCursor {
  * human's answer can clear, so a naively level-triggered watcher would re-wake
  * for the same unanswered question at every turn end. Instead each entry is
  * reported once immediately, then re-fired as a reminder every `remindMs`
- * while it still stands — never lost, never a tight loop, and the natural
- * side effect of answering (a new status entry follows the inbox message)
- * ends the reminders. remindMs of 0 disables reminders (pure at-most-once).
+ * while it still stands — never lost, never a tight loop. Answering ends
+ * it: a message to the dispatch newer than the question (answeredAt — any
+ * sender with provenance) means it no longer stands, before the worker has
+ * even read it; a newer needs-decision stands again. Acks never matter here.
+ * remindMs of 0 disables reminders (pure at-most-once).
  * Pass consume=false to peek without touching cursors.
  */
 export function attentionNow(
@@ -136,6 +138,7 @@ export function attentionNow(
       const index = log.length - 1 - [...log].reverse().findIndex((e) => e.verb === state);
       const entry = log[index];
       if (!entry) continue;
+      if (answeredAt(id, lane, entry.at) !== undefined) continue; // answered: nothing to remind
       const file = attnCursorPath(id, lane);
       const cursor = readAttnCursor(file);
       const fresh = index >= cursor.seen;
@@ -164,7 +167,10 @@ export function freshWakeEvents(
       if (log.length > seen) {
         baseline[key] = log.length;
         for (const entry of log.slice(seen)) {
-          if (verbs.includes(entry.verb)) out.push({ id, lane, entry });
+          if (!verbs.includes(entry.verb)) continue;
+          // A question already answered by the time we look is not a wake.
+          if ((entry.verb === 'needs-decision' || entry.verb === 'blocked') && answeredAt(id, lane, entry.at) !== undefined) continue;
+          out.push({ id, lane, entry });
         }
       }
     }
