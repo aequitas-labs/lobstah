@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { laneDirs, lobstahHome, parsePrRef, readEvidence, readWatch } from '@lobstah/core';
+import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readWatch } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
 
 /**
@@ -125,6 +125,9 @@ export function ackItemExists(key: string, culling: ReadonlySet<string> = new Se
   if (key.startsWith('watch:')) return readWatch(key.slice('watch:'.length)) !== undefined;
   const ref = key.startsWith('pr:') ? parsePrRef(key) : undefined;
   if (ref) {
+    // The PR record decides when there is one; evidence only for a PR without.
+    const record = readPr(ref.key);
+    if (record) return record.state === 'OPEN';
     for (const lane of ['work', 'chore'] as Lane[]) {
       let files: string[];
       try {

@@ -1,12 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { laneDirs, loadConfig, lobstahHome, storedDescriptor } from '@lobstah/core';
+import { laneDirs, loadConfig, lobstahHome, prRecordFile, readPrs, removePr, storedDescriptor } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
 
 export interface CullItem {
-  kind: 'done' | 'worktree' | 'state' | 'ack';
+  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr';
   id: string;
   target: string;
   ageDays: number;
@@ -92,6 +92,14 @@ export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
     }
   }
 
+  // PR records for PRs merged or closed longer ago than the window (their
+  // last observation is when the terminal state was seen). Open PRs never.
+  for (const r of readPrs()) {
+    if (r.state === 'OPEN') continue;
+    const seen = Date.parse(r.observedAt) || now;
+    if (seen < cutoff) items.push({ kind: 'pr', id: r.key, target: r.key, ageDays: Math.floor((now - seen) / DAY), bytes: bytesAt(prRecordFile(r.key)) });
+  }
+
   // Orphaned acks: the item is gone (dispatch culled — including by this
   // very sweep — PR merged or closed, watch removed). Acks never age out
   // on their own, so no cutoff applies here.
@@ -126,6 +134,7 @@ export function applyCull(items: CullItem[]): void {
   for (const item of items.filter((i) => i.kind === 'worktree')) removeWorktree(item.id, item.target);
   for (const item of items.filter((i) => i.kind === 'done')) fs.rmSync(item.target, { recursive: true, force: true });
   for (const item of items.filter((i) => i.kind === 'ack')) removeAck(item.target);
+  for (const item of items.filter((i) => i.kind === 'pr')) removePr(item.target);
   for (const item of items.filter((i) => i.kind === 'state')) {
     const dir = path.dirname(item.target);
     for (const f of fs.readdirSync(dir)) {

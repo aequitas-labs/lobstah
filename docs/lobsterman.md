@@ -127,6 +127,14 @@ opts out). What you get depends on what runs:
 `gh` must be on PATH and authenticated; if it isn't, the done report still
 succeeds and the watch's check records `lastError`.
 
+Watching a PR nobody dispatched — `lobstah watch add pr:<owner>/<repo>#<n>`
+with no `--for` — is how a helm follows a human's PR, or one whose
+dispatch chain was culled. Every observation lands in a PR record keyed by
+the PR, so it shows in the glass PRs tab and stacks and in tend's `pr:*`
+attention kinds exactly like a dispatched PR (its dispatch chain column is
+empty). It stays quiet while it's fine: only a failing check or a changes
+request surfaces as a watch event; a merge or close arrives as a notice.
+
 An observed PR joins tend's attention list by kind — `pr:draft`,
 `pr:review` (unresolved threads or changes requested), `pr:checks` (a red
 head), `pr:ready` (approved or all green) — so it crawls in the glass and

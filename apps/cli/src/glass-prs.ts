@@ -1,7 +1,12 @@
 import { parsePrRef, prBadge } from '@lobstah/core';
-import type { PrEvidence } from '@lobstah/core';
+import type { PrEvidence, PrRecord } from '@lobstah/core';
 
-/** The PR picture is derived only from observations already on disk. */
+/**
+ * The PR picture is derived only from observations already on disk. Read
+ * order: PR records (core prs.ts — every observation, man-owned or
+ * dispatch-owned) first; a dispatch's evidence `pr` only for a PR that has
+ * no record yet (observed before records existed).
+ */
 export interface GlassPrDispatch {
   id: string;
   followUp?: string;
@@ -57,6 +62,7 @@ export interface GlassStack {
 export function deriveGlassPrs(
   dispatches: readonly GlassPrDispatch[],
   watches: readonly GlassPrWatch[] = [],
+  records: readonly PrRecord[] = [],
 ): { prs: GlassPr[]; stacks: GlassStack[] } {
   const byId = new Map(dispatches.map((d) => [d.id, d]));
   const rootOf = (id: string): string => {
@@ -79,24 +85,38 @@ export function deriveGlassPrs(
     return depth;
   };
   const watchByKey = new Map(watches.map((w) => [w.key, w]));
+  // Dispatches per PR url: those whose evidence names it, plus those a record lists.
   const grouped = new Map<string, GlassPrDispatch[]>();
-  for (const d of dispatches) {
-    if (!d.pr) continue;
-    const group = grouped.get(d.pr.url) ?? [];
-    group.push(d);
-    grouped.set(d.pr.url, group);
+  const add = (url: string, d: GlassPrDispatch) => {
+    const group = grouped.get(url) ?? [];
+    if (!group.includes(d)) group.push(d);
+    grouped.set(url, group);
+  };
+  for (const d of dispatches) if (d.pr) add(d.pr.url, d);
+  const recordByUrl = new Map(records.map((r) => [r.url, r]));
+  for (const r of records) {
+    for (const id of r.dispatches) {
+      const d = byId.get(id);
+      if (d) add(r.url, d);
+    }
+    if (!grouped.has(r.url)) grouped.set(r.url, []);
   }
   const rows: GlassPr[] = [];
   for (const [url, sources] of grouped) {
-    const latest = [...sources].sort((a, b) => b.pr!.observedAt.localeCompare(a.pr!.observedAt))[0]!;
-    const pr = latest.pr!;
+    const record = recordByUrl.get(url);
+    const latest = [...sources].filter((d) => d.pr).sort((a, b) => b.pr!.observedAt.localeCompare(a.pr!.observedAt))[0];
+    // Records first; evidence only for a PR with no record yet.
+    const pr: PrEvidence | undefined = record ?? latest?.pr;
     const ref = parsePrRef(url);
-    if (!ref) continue;
+    if (!ref || !pr) continue;
     const roots = new Set(sources.map((d) => rootOf(d.id)));
-    const ids = dispatches.filter((d) => roots.has(rootOf(d.id))).map((d) => d.id)
+    const chained = dispatches.filter((d) => roots.has(rootOf(d.id))).map((d) => d.id);
+    // A record also names dispatches since culled from disk: they stay in the chain column.
+    const ids = [...new Set([...chained, ...(record?.dispatches ?? [])])]
       .sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b));
+    const repoKey = latest?.repoKey ?? sources.find((d) => d.repoKey)?.repoKey;
     rows.push({
-      key: ref.key, url, number: pr.number, repo: latest.repoKey ?? `${ref.owner}/${ref.repo}`,
+      key: ref.key, url, number: pr.number, repo: repoKey ?? `${ref.owner}/${ref.repo}`,
       forgeRepo: `${ref.owner}/${ref.repo}`,
       ...(pr.title ? { title: pr.title } : {}),
       state: pr.state, draft: pr.draft, checks: pr.checks, review: pr.review,
@@ -105,7 +125,7 @@ export function deriveGlassPrs(
       badge: prBadge(pr),
       stackId: ref.key, floor: pr.baseRefName ?? '?', position: 0, nextMergeable: false,
       dispatchIds: ids,
-      gate: latest.prGate ?? sources.find((d) => d.prGate)?.prGate,
+      gate: latest?.prGate ?? sources.find((d) => d.prGate)?.prGate,
       watch: watchByKey.get(ref.key),
     });
   }

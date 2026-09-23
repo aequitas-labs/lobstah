@@ -19,6 +19,7 @@ import {
   readEvidence,
   readSessionClaim,
   readStatusLog,
+  readPrs,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, Lane, Notice } from '@lobstah/core';
 import type { TendAttention } from './tend.js';
@@ -222,9 +223,11 @@ export function buildGlassSnapshot() {
     };
   });
   const watches = listWatches();
+  // PR records first (every observation, man-owned or not); evidence for PRs with none yet.
   const { prs, stacks } = deriveGlassPrs(
     dispatches.map((d) => ({ id: d.id, followUp: d.followUp, repoKey: d.repo, pr: d.evidence?.pr, prGate: d.prGate })),
     watches,
+    readPrs(),
   );
   const allNotices = listNotices(Number.MAX_SAFE_INTEGER);
   const live = listTraps();
