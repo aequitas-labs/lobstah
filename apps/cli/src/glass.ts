@@ -298,8 +298,10 @@ h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em
 .controls{margin:0 0 14px}
 .chips{margin-bottom:8px}
 .chip{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
-.controls select,.controls input{background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--fg);font:inherit;padding:4px 8px}
-.controls input{flex:1 1 140px;min-width:120px;max-width:340px}
+.controls select,.controls input[type=search]{background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--fg);font:inherit;padding:4px 8px}
+.controls input[type=search]{flex:1 1 140px;min-width:120px;max-width:340px}
+#chain-control{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+#f-chain{margin:0;width:14px;height:14px;accent-color:var(--link)}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:8px 0 10px}
 .tabs a{color:var(--dim);padding:6px 11px;border-bottom:2px solid transparent}
 .tabs a.on{color:var(--fg);border-color:var(--link)}

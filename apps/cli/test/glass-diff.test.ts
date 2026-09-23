@@ -157,6 +157,14 @@ describe('glass change detector', () => {
     const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
     server.close();
     expect(page).toContain(GLASS_DIFF_JS.trim());
+    expect(page).toContain('#chain-control{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}');
+    expect(page).toContain('<label id="chain-control"><input id="f-chain" type="checkbox"> group by chain</label>');
+    // A missing live helm hides the chip; the page must still ship both it and its detail modal.
+    expect(page).toContain('inp.chips.helms.map');
+    expect(page).toContain('showModal(\\\'helm\\\'');
+    expect(page).toContain("modal.type==='helm'");
+    expect(page).toContain('claude --resume ');
+    expect(diff.sectionInputs(snapshot(), ui({ modal: { type: 'helm', key: 'fleet' } }), NOW).modal.item.x.man).toBe('claude @ x');
     // The whole inline script must still parse.
     const script = page.slice(page.indexOf('<script>') + 8, page.lastIndexOf('</script>'));
     expect(() => new Function(script)).not.toThrow();
