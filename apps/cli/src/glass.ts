@@ -36,8 +36,8 @@ import { deriveGlassPrs } from './glass-prs.js';
  * never advances any cursor: looking through the glass consumes nothing.
  * Look freely, steer only from the helm — links out are copyable commands,
  * never exec endpoints (localhost HTTP is reachable by any webpage). The
- * ⚙ popover's two preferences (view, lobs) are the viewing browser's own,
- * kept in its localStorage — the server has nothing to write.
+ * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
+ * own, kept in its localStorage — the server has nothing to write.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
@@ -64,9 +64,15 @@ const mtime = (f: string): number => {
   }
 };
 
-/** A docs/assets file: installed package layout first, repo second. */
+/**
+ * A docs/assets file: installed package layout first (dist/ → ../docs), then
+ * the workspace (apps/cli/dist/ → ../../../docs). The workspace path was one
+ * level too deep, so every workspace-built glass served its HTML for
+ * /lob-sprite.png and /star.png: the sprite probe failed and the pixel lob
+ * fell back to the waddling emoji.
+ */
 function assetPath(name: string): string | undefined {
-  for (const rel of [`../docs/assets/${name}`, `../../../../docs/assets/${name}`]) {
+  for (const rel of [`../docs/assets/${name}`, `../../../docs/assets/${name}`]) {
     try {
       const p = fileURLToPath(new URL(rel, import.meta.url));
       if (fs.existsSync(p)) return p;
@@ -283,27 +289,34 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 <style>
 :root{--bg:#0e1116;--card:#161b22;--line:#2b3240;--fg:#dbe2ea;--dim:#8b96a5;--ok:#4fc17c;--warn:#e2b93d;--bad:#e26d5c;--link:#6cb2e2}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;padding-block:14px;padding-inline:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;padding-block:14px;padding-inline:16px;
+ /* sticky footer: a full-height column whose active tab grows, so the footer sits at the viewport bottom on short pages */
+ display:flex;flex-direction:column;min-height:100vh}
 h1{font-size:15px;margin:0 0 10px}h1 .dim{color:var(--dim);font-weight:normal}
 h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 6px}
 .chips,.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.controls{margin:0 0 14px}
 .chips{margin-bottom:8px}
 .chip{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
-.controls select,.controls input{background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--fg);font:inherit;padding:4px 8px}
-.controls input{flex:1 1 140px;min-width:120px;max-width:340px}
+.controls select,.controls input[type=search]{background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--fg);font:inherit;padding:4px 8px}
+.controls input[type=search]{flex:1 1 140px;min-width:120px;max-width:340px}
+#chain-control{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+#f-chain{margin:0;width:14px;height:14px;accent-color:var(--link)}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:8px 0 10px}
 .tabs a{color:var(--dim);padding:6px 11px;border-bottom:2px solid transparent}
 .tabs a.on{color:var(--fg);border-color:var(--link)}
-.tabpage{display:none}.tabpage.on{display:block}
+.tabpage{display:none}.tabpage.on{display:block;flex:1 0 auto}
 .headerline{display:flex;align-items:center;gap:8px}.headerline h1{flex:1}
 #settings-slot{min-width:34px;text-align:right;color:var(--dim)}
 #settings-slot #gearbtn{margin-left:0}
-#settingspop{left:auto;right:16px}
-.deckgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
-.deckgrid h2{margin:5px 0}.deckgrid section{min-width:0}
+.deckgrid{display:flex;flex-direction:column;gap:12px}
+.deckgrid h2{margin:5px 0}.deckgrid section{width:100%;min-width:0}
 .deckline{padding:2px 0;border-top:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.deckline.acked{opacity:.55}.deckmore{color:var(--dim);font-size:11px}
-@media(max-width:700px){.deckgrid{grid-template-columns:1fr}}
+.deckline.acked,.card.acked,.rowhead.acked,.badge.acked{opacity:.55}.deckmore{color:var(--dim);font-size:11px;display:inline-block;margin-top:4px}
+.deckline.click{cursor:pointer}.deckline.click:hover{background:#1c2330}
+.deckgrid h2 a{color:inherit}.deckgrid h2 a:hover{color:var(--fg)}
+.deckgrid .cards{grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:10px}
+.deckstack{margin-bottom:9px}.deckstack>.dim{font-size:11px;margin:3px 0 5px}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{background:var(--card);border:none;color:var(--dim);font:inherit;padding:4px 11px;cursor:pointer}
 .seg button.on{background:#26436b;color:var(--fg)}
@@ -313,14 +326,17 @@ th,td{text-align:left;padding:4px 9px;border-top:1px solid var(--line);vertical-
 td.grow{white-space:normal;word-break:break-word;min-width:140px}
 th{color:var(--dim);font-weight:normal;border-top:none;font-size:11px}
 tr.rowhead{cursor:pointer}tr.rowhead:hover{background:#1c2330}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:10px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:12px}
+/* One card style for every tab: even inner padding, and a top row whose badge never touches the id or the edge. */
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;cursor:pointer;min-width:0}
 .card:hover{border-color:#3a455a}
-.card .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.card .top{display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:22px}
+.card .top>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .top .badge{flex-shrink:0}
 .card .meta{color:var(--dim);font-size:12px;margin-top:2px}
 .card .note{margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card .foot{margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;color:var(--dim);font-size:12px}
-.badge{border-radius:5px;padding:1px 7px;font-size:11px;border:1px solid var(--line)}
+.badge{border-radius:5px;padding:1px 7px;font-size:11px;line-height:1.5;border:1px solid var(--line);white-space:nowrap;display:inline-block}
 .v-done{color:var(--ok)}.v-working{color:var(--fg)}.v-needs-decision,.v-blocked{color:var(--bad);font-weight:bold}
 .v-failed{color:var(--bad)}.v-paused,.v-unknown{color:var(--dim)}
 .dim{color:var(--dim)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
@@ -369,18 +385,11 @@ a.lob{color:inherit}
 @keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
 #gearbtn{background:none;border:1px solid var(--line);border-radius:6px;color:var(--dim);font:inherit;font-size:13px;padding:1px 7px;margin-left:8px;cursor:pointer;vertical-align:1px}
 #gearbtn:hover,#gearbtn.on{color:var(--fg);border-color:#3a455a}
-#settingspop{display:none;position:absolute;top:40px;left:16px;z-index:8;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 4px 16px rgba(0,0,0,.5);min-width:230px}
-#settingspop.open{display:block}
-#settingspop .row{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:6px 0}
-#settingspop .lbl{color:var(--dim);font-size:12px}
-#settingspop .hint{display:block;font-size:10px;opacity:.75}
+.settings .row{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:12px 0}
+.settings .lbl{color:var(--fg);font-size:12px}
+.settings .hint{display:block;color:var(--dim);font-size:11px;margin-top:2px}
 </style></head><body>
 <div class="headerline"><h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings">⚙</button></span></div>
-<div id="settingspop" role="dialog" aria-label="settings (this browser only)">
- <div class="row" id="viewrow"><span class="lbl">view</span><span class="seg" id="viewseg"><button data-v="table">table</button><button data-v="cards">cards</button></span></div>
- <div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span><span class="seg" id="lobseg"><button data-l="on">on</button><button data-l="off">off</button></span></div>
- <div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml</span></span><span id="attnkinds" class="dim" style="font-size:11px;text-align:right;max-width:190px"></span></div>
-</div>
 <div class="chips"><span id="chips" style="display:contents"></span><span class="chip dim" id="clock"></span></div>
 <nav class="tabs" id="tabs" aria-label="Spyglass views"><a href="#deck" data-tab="deck">On deck</a><a href="#dispatches" data-tab="dispatches">Dispatches</a><a href="#traps" data-tab="traps">Traps</a><a href="#prs" data-tab="prs">PRs</a><a href="#notices" data-tab="notices">Notices</a></nav>
 <div class="controls">
@@ -461,42 +470,76 @@ function dispatchCards(list){if(!list.length)return '<div class="empty">no dispa
 const KIND_LABEL={'pr:draft':'draft','pr:review':'review','pr:checks':'checks','pr:ready':'ready',landed:'landed',watch:'watch'};
 const KIND_TONE={'pr:review':'bad','pr:checks':'bad','pr:ready':'ok','pr:draft':'dim',watch:'warn'};
 const kindLabel=(k)=>KIND_LABEL[k]||'';
-const isPrKind=(k)=>typeof k==='string'&&k.startsWith('pr:');
 function kindCell(x){
  if(x.kind==='question')return '<span class="v-'+x.verb+'">'+x.verb+'</span>';
  const tone=x.kind==='landed'?(x.verb==='failed'?'bad':'ok'):(KIND_TONE[x.kind]||'dim');
  return '<span class="badge '+tone+'">'+esc(kindLabel(x.kind)||x.kind)+'</span>'+(x.kind==='landed'?' <span class="dim">'+esc(x.verb)+'</span>':'')}
-function deckBlock(title,rows,tab,max){const shown=rows.slice(0,max),more=rows.length-shown.length;
- return '<section><h2>'+title+'</h2>'+(shown.length?shown.join(''):'<div class="empty">none</div>')
- +(more?'<a class="deckmore" href="#'+tab+'">+'+more+' more →</a>':'')+'</section>'}
-function deckLine(body,extra){return '<div class="deckline'+(extra||'')+'">'+body+'</div>'}
-function renderDeck(d,inp){const att=inp.attention;
- const byKind=new Map();for(const x of att){const a=byKind.get(x.kind)||[];a.push(x);byKind.set(x.kind,a)}
- const attention=[...byKind].flatMap(([kind,items])=>items.map((x,i)=>deckLine(
-  (i===0?'<span class="badge dim">'+esc(kindLabel(kind)||kind)+'</span> ':'')+
-  esc(x.repo||'')+' '+esc(x.note||x.verb)+' · '+ageEl(x.at)+
-  (x.acked?' · acked '+ageEl(x.acked.at)+' ago':''),x.acked?' acked':'')));
- const flight=inp.inflight.map(x=>deckLine('<b>'+esc(x.id.slice(0,8))+'</b> '+esc(x.repo||'')+' · '+esc(x.note||x.verb)+' · '+ageEl(x.verbAt)+' · '+esc(x.for||x.claimedBy||'')+' '+prCell(x)));
- const landed=inp.landed.map(x=>deckLine('<b>'+esc(x.id.slice(0,8))+'</b> '+esc(x.repo||'')+' · '+esc(x.verb)+' · '+ageEl(x.at)+' '+
-  (x.prUrl?'<a href="'+esc(x.prUrl)+'" target="_blank" rel="noopener">PR</a>':'')));
- const traps=inp.traps.map(({x:t})=>deckLine('wt:'+esc(t.trapId)+' · '+esc(t.repo||'')+' · '+(t.live?trapRow(t).listen:'stowed / ghosted')));
- const stacks=inp.stacks.map(s=>{const p=d.prs.find(x=>x.number===s.nextNumber&&x.stackId===s.id);
-  return deckLine(s.numbers.map(n=>'#'+n).join(' → ')+' · next: '+(p?'<a href="'+esc(p.url)+'" target="_blank" rel="noopener">#'+p.number+'</a> <span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>':'—')+' · '+s.behind+' behind')});
- return '<div class="deckgrid">'+deckBlock('attention',attention,'notices',4)+deckBlock('in flight',flight,'dispatches',4)
-  +deckBlock('landed since report',landed,'dispatches',3)+deckBlock('traps',traps,'traps',3)+deckBlock('stacks',stacks,'prs',3)+'</div>'}
-function prTable(d,inp){const byStack=new Map();for(const p of inp.prs){const a=byStack.get(p.stackId)||[];a.push(p);byStack.set(p.stackId,a)}
- const rows=[];for(const s of inp.stacks){const prs=byStack.get(s.id)||[];if(!prs.length)continue;
-  rows.push('<tr><th colspan="9">'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?' · open':' · history')+'</th></tr>');
-  for(const p of prs){const review=p.review||{};const w=p.watch;
-   rows.push('<tr><td><a href="'+esc(p.url)+'" target="_blank" rel="noopener">#'+p.number+'</a></td><td class="grow">'+esc(p.title||'')+'</td>'
-    +'<td>'+esc(p.state)+(p.draft?' · draft':'')+'</td><td>'+esc(p.checks.passed)+'/'+esc(p.checks.total)+' passed'+(p.checks.failed?' · '+p.checks.failed+' failed':'')+(p.checks.pending?' · '+p.checks.pending+' pending':'')+'</td>'
-    +'<td>'+esc(p.reviewDecision||'')+(review.unresolvedThreads?' · '+review.unresolvedThreads+' unresolved':'')+(review.changesRequested?' · changes requested':'')+'</td>'
-    +'<td>'+esc(p.mergeStateStatus)+' · '+(p.nextMergeable?'<span class="ok">next mergeable</span>':p.blockedBy?'blocked by #'+p.blockedBy:'')+'</td>'
-    +'<td class="grow">'+p.dispatchIds.map(id=>esc(id.slice(0,8))).join(' → ')+'</td>'
-    +'<td class="grow">'+(w?esc(w.cursor)+' · '+(w.lastCheckedAt?ageEl(w.lastCheckedAt)+' ago':'never checked'):'')+'</td><td>'+esc(p.gate||'')+'</td></tr>')}
- }
- const other=table(['key','owner','cursor','last check','error'],inp.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td>'+esc(w.cursor)+'</td><td>'+(w.lastCheckedAt?ageEl(w.lastCheckedAt):'')+'</td><td>'+esc(w.lastError||'')+'</td></tr>'),'no other watches');
- return table(['PR','title','state','checks','review','merge','dispatch chain','watch','gate'],rows,'no PR evidence')+'<h2>other watches</h2>'+other}
+// On deck's dispatch, trap, and landed items follow the site-wide view.
+// Attention is always a notices table; PRs have their own stack presentation.
+function deckItem(it,view){
+ const badge=it.badge?'<span class="badge '+esc(it.badge.tone||'dim')+'">'+esc(it.badge.text)+'</span>':'';
+ const click=it.open?' onclick="'+it.open+'"':'';
+ if(view==='cards')return '<div class="card'+(it.acked?' acked':'')+'"'+click+(it.open?'':' style="cursor:default"')+'><div class="top"><b>'+it.title+'</b>'+badge+'</div>'
+  +(it.meta?'<div class="meta">'+it.meta+'</div>':'')+'</div>';
+ return '<div class="deckline'+(it.open?' click':'')+(it.acked?' acked':'')+'"'+click+'>'+(badge?badge+' ':'')+'<b>'+it.title+'</b>'+(it.meta?' <span class="dim">· '+it.meta+'</span>':'')+'</div>'}
+function deckBlock(title,items,tab,max,view){const shown=items.slice(0,max),more=items.length-shown.length;
+ const body=shown.length?(view==='cards'?'<div class="cards">'+shown.map(i=>deckItem(i,view)).join('')+'</div>':shown.map(i=>deckItem(i,view)).join('')):'<div class="empty">none</div>';
+ return '<section><h2><a href="#'+tab+'">'+title+' →</a></h2>'+body+(more?'<a class="deckmore" href="#'+tab+'">+'+more+' more →</a>':'')+'</section>'}
+const openDispatch=(lane,id)=>"showModal(\\'dispatch\\',\\'"+esc(lane+':'+id)+"\\')";
+function deckNotices(list){const shown=list.slice(0,4),more=list.length-shown.length;
+ const rows=shown.map(x=>'<tr class="rowhead'+(x.acked?' acked':'')+'" onclick="'+openDispatch(x.lane,x.id)+'"><td>'+kindCell(x)+'</td><td class="grow">'+esc(x.note||x.verb)+'</td><td>'+esc(x.repo||'')+'</td><td>'+ageEl(x.at)+'</td></tr>');
+ return '<section><h2><a href="#notices">attention →</a></h2>'+table(['kind','note','repo','age'],rows,'none')
+  +(more?'<a class="deckmore" href="#notices">+'+more+' more →</a>':'')+'</section>'}
+function deckPrs(inp,view){const shown=inp.stacks.slice(0,3),more=inp.stacks.length-shown.length;
+ const standing=new Map();for(const a of inp.prAttention){const kinds=standing.get(a.key)||[];kinds.push(a);standing.set(a.key,kinds)}
+ const groups=shown.map(s=>({s,members:inp.prs.filter(p=>p.stackId===s.id).sort((a,b)=>a.position-b.position)}));
+ const body=groups.length?groups.map(({s,members})=>{const next=members.find(p=>p.number===s.nextNumber)||members[0];
+  const chain=esc(s.numbers.map(n=>'#'+n).join(' → '));
+  if(view==='cards')return '<div class="deckstack"><div class="dim">'+chain+' · '+(next?'next #'+next.number:'nothing mergeable')+'</div><div class="cards">'
+   +members.map(p=>{const kinds=standing.get(p.key)||[];const acked=kinds.length>0&&kinds.every(a=>a.acked);
+    const badges=kinds.length?kinds.map(a=>'<span class="badge '+esc(KIND_TONE[a.kind]||'dim')+'">'+esc(kindLabel(a.kind))+'</span>').join('')
+     :'<span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>';
+    return '<div class="card'+(acked?' acked':'')+'" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b>'+badges+'</div>'
+     +'<div class="meta">'+esc(p.repo)+' · '+esc(p.badge.text)+(acked?' · acked':'')+'</div></div>'}).join('')+'</div></div>';
+  const badges=members.flatMap(p=>(standing.get(p.key)||[]).map(a=>'<span class="badge '+esc(KIND_TONE[a.kind]||p.badge.tone)+(a.acked?' acked':'')+'">#'+p.number+' '+esc(p.badge.text)+'</span>')).join(' ');
+  return '<div class="deckline'+(next?' click':'')+'"'+(next?' onclick="'+prOpen(next)+'"':'')+'><b>'+chain+'</b> <span class="dim">· '+(next?'next #'+next.number:'nothing mergeable')+'</span>'+(badges?' · '+badges:'')+'</div>'}).join(''):'<div class="empty">none</div>';
+ return '<section><h2><a href="#prs">PRs →</a></h2>'+body+(more?'<a class="deckmore" href="#prs">+'+more+' more →</a>':'')+'</section>'}
+function renderDeck(d,inp){const view=inp.view;
+ const flight=inp.inflight.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||''),badge:{text:x.verb,tone:x.verb==='needs-decision'||x.verb==='blocked'?'bad':'dim'},
+  meta:esc((x.note||'').slice(0,90))+' · '+ageEl(x.verbAt)+' ago'+(x.for||x.claimedBy?' · '+esc(x.for||x.claimedBy):''),open:openDispatch(x.lane,x.id)}));
+ const landed=inp.landed.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||''),badge:{text:x.verb,tone:x.verb==='failed'?'bad':'ok'},
+  meta:esc((x.note||'').slice(0,90))+' · '+ageEl(x.at)+' ago',open:openDispatch(x.lane,x.id)}));
+ const traps=inp.traps.map(({x:t})=>({title:'🪤 wt:'+esc(t.trapId),badge:{text:t.live?(t.harness||'live'):'signed off',tone:t.live?'ok':'dim'},
+  meta:esc(t.repo||'')+' · '+(t.live?trapRow(t).listen:'stowed / ghosted'),open:"showModal(\\'trap\\',\\'"+esc(t.trapId)+"\\')"}));
+ return '<div class="deckgrid">'+deckNotices(inp.attention)+deckBlock('in flight',flight,'dispatches',4,view)
+  +deckBlock('landed since report',landed,'dispatches',3,view)+deckBlock('traps',traps,'traps',3,view)+deckPrs(inp,view)+'</div>'}
+const watchCell=(w)=>{const ws=watchState(w);return w?ws.text+' · '+(ws.at?ageEl(ws.at)+' ago':'never checked'):'<span class="dim">'+ws.text+'</span>'};
+const prOpen=(p)=>"showModal(\\'pr\\',\\'"+esc(p.key)+"\\')";
+const prLink=(p)=>'<a href="'+esc(p.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">#'+p.number+'</a>';
+function prChecks(p){return esc(p.checks.passed)+'/'+esc(p.checks.total)+' passed'+(p.checks.failed?' · '+p.checks.failed+' failed':'')+(p.checks.pending?' · '+p.checks.pending+' pending':'')}
+function prReview(p){const r=p.review||{};return esc(p.reviewDecision||'')+(r.unresolvedThreads?' · '+r.unresolvedThreads+' unresolved':'')+(r.changesRequested?' · changes requested':'')}
+function prMerge(p){return esc(p.mergeStateStatus)+(p.nextMergeable?' · <span class="ok">next mergeable</span>':p.blockedBy?' · blocked by #'+p.blockedBy:'')}
+function prGroups(inp){const byStack=new Map();for(const p of inp.prs){const a=byStack.get(p.stackId)||[];a.push(p);byStack.set(p.stackId,a)}
+ return inp.stacks.map(s=>({s,prs:byStack.get(s.id)||[]})).filter(g=>g.prs.length)}
+function prTable(d,inp){const rows=[];
+ for(const {s,prs} of prGroups(inp)){
+  rows.push('<tr><th colspan="8">'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?' · open':' · history')+'</th></tr>');
+  for(const p of prs)rows.push('<tr class="rowhead" onclick="'+prOpen(p)+'"><td>'+prLink(p)+'</td><td class="grow">'+esc(p.title||'')+'</td>'
+   +'<td>'+esc(p.state)+(p.draft?' · draft':'')+'</td><td>'+prChecks(p)+'</td><td>'+prReview(p)+'</td><td>'+prMerge(p)+'</td>'
+   +'<td>'+watchCell(p.watch)+'</td><td>'+esc(p.gate||'')+'</td></tr>')}
+ return table(['PR','title','state','checks','review','merge','watch','gate'],rows,'no PR evidence')+otherWatches(inp)}
+function prCards(d,inp){const groups=prGroups(inp);
+ const body=groups.length?groups.map(({s,prs})=>'<h2>'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?'':' · history')+'</h2><div class="cards">'
+  +prs.map(p=>'<div class="card" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b><span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span></div>'
+   +'<div class="meta">'+esc(p.repo)+' · '+esc(p.state)+(p.draft?' · draft':'')+' · '+prMerge(p)+'</div>'
+   +'<div class="foot"><span>'+prChecks(p)+'</span><span>'+watchCell(p.watch)+'</span>'+(p.gate?'<span>gate '+esc(p.gate)+'</span>':'')+'</div></div>').join('')+'</div>').join('')
+  :'<div class="empty">no PR evidence</div>';
+ return body+otherWatches(inp)}
+function otherWatches(inp){const short=(c)=>{c=String(c??'');return c.length>24?c.slice(0,23)+'…':c};
+ return '<h2>other watches</h2>'+table(['key','owner','cursor','last check','error'],inp.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td title="'+esc(w.cursor)+'">'+esc(short(w.cursor))+'</td><td>'+(w.lastCheckedAt?ageEl(w.lastCheckedAt):'')+'</td><td>'+esc(w.lastError||'')+'</td></tr>'),'no other watches')}
+function noticeTable(list){return table(['at','kind','text','repo'],
+ list.map(n=>'<tr><td class="dim">'+ageEl(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
+ 'no notices')}
 function trapRow(t){
  if(!t.live)return {stale:false,listen:'<span class="dot"></span><span class="dim">signed off</span>',hb:'<span class="dim">—</span>'};
  const stale=Date.now()-Date.parse(t.heartbeatAt)>1800000;
@@ -521,7 +564,32 @@ function renderModal(d){
  const item=modalItem(d,modal);
  if(!item){modal=null;ov.classList.remove('open');return}
  let html='';
- if(modal.type==='helm'){
+ if(modal.type==='settings'){
+  // Per-browser preferences (localStorage, save()); the kinds line is read-only config.
+  const seg=(name,opts,cur)=>'<span class="seg">'+opts.map(([v,l])=>'<button class="'+(v===cur?'on':'')+'" onclick="'+name+'(\\''+v+'\\')">'+l+'</button>').join('')+'</span>';
+  html='<span class="x" onclick="closeModal()">×</span><h3>⚙ settings <span class="dim" style="font-weight:normal">· this browser only</span></h3>'
+   +'<div class="settings">'
+   +'<div class="row"><span class="lbl">view<span class="hint">cards or table (notices stay a table)</span></span>'+seg('setView',[['table','table'],['cards','cards']],st.view)+'</div>'
+   +'<div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span>'+seg('setLobs',[['on','on'],['off','off']],st.lobs?'on':'off')+'</div>'
+   +'<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">'
+   +esc(item.attentionError?item.attentionError:(item.attentionKinds||[]).join(' · '))+'</span></div></div>';
+ }else if(modal.type==='pr'){
+  const v=prModalView(d,modal.key),p=v.pr,s=v.stack,w=v.watch;
+  html='<span class="x" onclick="closeModal()">×</span><h3>'+prLink(p)+' '+esc(p.title||'')+' <span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>'
+    +(p.draft&&p.badge.text!=='draft'?' <span class="badge dim">draft</span>':'')+'</h3>'
+   +'<div class="sub">'+esc(p.repo)+' · '+esc(p.state)+' · observed '+ageEl(p.observedAt)+' ago'+(p.gate?' · gate '+esc(p.gate):'')+'</div>'
+   +'<div class="sec">checks</div><div>'+prChecks(p)+'</div>'
+   +'<div class="sec">review</div><div>'+(prReview(p)||'<span class="dim">no review yet</span>')+'</div>'
+   +'<div class="sec">merge</div><div>'+prMerge(p)+'</div>'
+   +'<div class="sec">refs</div><div>'+esc(p.headRefName||'?')+' → '+esc(p.baseRefName||'?')+'</div>'
+   +'<div class="sec">stack</div><div>'+(s?s.numbers.map(n=>n===p.number?'<b>#'+n+'</b>':'#'+n).join(' → ')+' · '+s.position+' of '+s.size+' · floor '+esc(s.floor)
+     +(s.nextMergeable?' · <span class="ok">next mergeable</span>':s.blockedBy?' · blocked by #'+s.blockedBy:s.nextNumber?' · next is #'+s.nextNumber:''):'<span class="dim">not stacked</span>')+'</div>'
+   +'<div class="sec">dispatch chain</div><div>'+(v.chain.length?v.chain.map(c=>c.culled?'<span class="dim">'+esc(c.id.slice(0,8))+' (culled)</span>'
+     :'<a href="#" onclick="event.preventDefault();showModal(\\'dispatch\\',\\''+esc(c.modalKey)+'\\')">'+esc(c.id.slice(0,8))+'</a> <span class="dim">'+esc(c.verb)+'</span>').join(' → '):'<span class="dim">none</span>')+'</div>'
+   +'<div class="sec">watch</div>'+(w?'<div>'+esc(w.key)+' · owner '+esc(w.owner||'?')+' · '+(w.lastCheckedAt?'checked '+ageEl(w.lastCheckedAt)+' ago':'never checked')+'</div>'
+     +(w.lastError?'<div class="bad">'+esc(w.lastError)+'</div>':'')+'<div class="dim" style="font-size:11px;margin-top:4px">cursor</div>'+cmdRow(w.cursor)
+     :'<div class="dim">no watch — <code>lobstah watch add '+esc(p.url)+'</code> registers one</div>');
+ }else if(modal.type==='helm'){
   const h=item;
   const stale=Date.now()-Date.parse(h.heartbeatAt)>1800000;
   html='<span class="x" onclick="closeModal()">×</span><h3>⛵ '+esc(h.man)+'</h3>'
@@ -588,9 +656,6 @@ function render(d){
  document.getElementById('f-verb').style.display=tab==='dispatches'?'':'none';
  document.getElementById('chain-control').style.display=tab==='dispatches'?'':'none';
  document.getElementById('f-kind').style.display=tab==='notices'?'':'none';
- document.getElementById('viewrow').style.display=tab==='dispatches'||tab==='traps'?'':'none';
- // The popover's read-only line: the kinds config.toml selects (#32).
- setText(document.getElementById('attnkinds'),d.attentionError?d.attentionError:(d.attentionKinds||[]).join(' · '));
  setText(document.getElementById('clock'),new Date(d.now).toLocaleTimeString('en-GB'));
  const repos=[...new Set([...d.dispatches.map(x=>x.repo),...d.notices.map(x=>x.repo),...d.prs.map(x=>x.repo)].filter(Boolean))].sort();
  const rsel=document.getElementById('f-repo');
@@ -598,7 +663,6 @@ function render(d){
   rsel.innerHTML='<option value="">all repos</option>'+repos.map(r=>'<option'+(r===cur?' selected':'')+'>'+esc(r)+'</option>').join('')}
  const kinds=[...new Set(d.notices.map(n=>n.kind))].sort(),ksel=document.getElementById('f-kind');
  if(ksel.options.length!==kinds.length+1)ksel.innerHTML='<option value="">all notice kinds</option>'+kinds.map(k=>'<option'+(k===st.noticeKind?' selected':'')+'>'+esc(k)+'</option>').join('');
- for(const b of document.querySelectorAll('#viewseg button')){const on=b.dataset.v===st.view;if(b.classList.contains('on')!==on)b.classList.toggle('on',on)}
  if(dirty.has('chips')){
   const hbOld=inp.chips.daemonStale;
   setHTML('chips',
@@ -610,10 +674,8 @@ function render(d){
   setHTML('dispatches',st.view==='cards'?dispatchCards(list):dispatchTable(list))}
  if(tab==='traps'&&dirty.has('traps')){const traps=inp.traps.list.map(t=>t.x);
   setHTML('traps',st.view==='cards'?trapCards(traps):trapTable(traps))}
- if(tab==='notices'&&dirty.has('notices'))setHTML('notices',table(['at','kind','text','repo'],
-  inp.notices.map(n=>'<tr><td class="dim">'+ageEl(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
-  'no notices'));
- if(tab==='prs'&&dirty.has('prs'))setHTML('prs',prTable(d,inp.prs));
+ if(tab==='notices'&&dirty.has('notices'))setHTML('notices',noticeTable(inp.notices.list));
+ if(tab==='prs'&&dirty.has('prs'))setHTML('prs',st.view==='cards'?prCards(d,inp.prs):prTable(d,inp.prs));
  if(dirty.has('foot'))setHTML('foot',
   '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>');
  renderLobs(d.attention||[]);
@@ -659,15 +721,12 @@ window.showModal=(type,key)=>{modal={type,key};tick(true)};
 window.closeModal=()=>{modal=null;if(hashes)hashes.modal=null;document.getElementById('overlay').classList.remove('open')};
 document.getElementById('overlay').addEventListener('click',(e)=>{if(e.target.id==='overlay')closeModal()});
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeModal()});
-document.getElementById('viewseg').addEventListener('click',(e)=>{const v=e.target.dataset&&e.target.dataset.v;if(v){st.view=v;save();tick(true)}});
-// The ⚙ popover: per-browser preferences, localStorage only (save()).
-const pop=document.getElementById('settingspop'),gear=document.getElementById('gearbtn');
-const paintLobs=()=>{for(const b of document.querySelectorAll('#lobseg button'))b.classList.toggle('on',(b.dataset.l==='on')===st.lobs)};
-document.getElementById('lobseg').addEventListener('click',(e)=>{const l=e.target.dataset&&e.target.dataset.l;if(l){st.lobs=l==='on';save();paintLobs();tick(true)}});
-const closePop=()=>{pop.classList.remove('open');gear.classList.remove('on')};
-gear.addEventListener('click',(e)=>{e.stopPropagation();const o=pop.classList.toggle('open');gear.classList.toggle('on',o);paintLobs()});
-document.addEventListener('click',(e)=>{if(!pop.contains(e.target)&&e.target!==gear)closePop()});
-document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closePop()});
+// ⚙ opens the settings modal — the same overlay as every other modal (Escape
+// and click-outside close it). Its two preferences are this browser's own:
+// localStorage via save(); view applies to every tab.
+document.getElementById('gearbtn').addEventListener('click',()=>showModal('settings','browser'));
+window.setView=(v)=>{if(v!=='table'&&v!=='cards')return;st.view=v;save();tick(true)};
+window.setLobs=(v)=>{st.lobs=v==='on';save();lobKey='';tick(true)};
 for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb'],['f-kind','noticeKind']]){
  const el=document.getElementById(id);el.value=st[key];
  el.addEventListener('change',()=>{st[key]=el.value;save();tick(true)})}

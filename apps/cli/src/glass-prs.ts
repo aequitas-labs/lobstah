@@ -17,6 +17,8 @@ export interface GlassPrDispatch {
 
 export interface GlassPrWatch {
   key: string;
+  /** man or dispatch:<uuid> — shown in the PR modal. */
+  owner?: string;
   cursor: string;
   lastCheckedAt?: string;
   lastError?: string;

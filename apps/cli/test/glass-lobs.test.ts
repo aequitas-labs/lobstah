@@ -93,4 +93,15 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
     expect(a).toBe(b);
     expect(a).not.toContain('glass-token');
   });
+
+  it('the workspace build serves the lob sprite and star as images, so the pixel lob walks (not the emoji fallback)', async () => {
+    const server = serveGlass(0);
+    await new Promise((r) => server.once('listening', r));
+    const port = (server.address() as AddressInfo).port;
+    for (const asset of ['/lob-sprite.png', '/star.png']) {
+      const res = await fetch(`http://127.0.0.1:${port}${asset}`);
+      expect(res.headers.get('content-type'), asset).toBe('image/png');
+    }
+    server.close();
+  });
 });
