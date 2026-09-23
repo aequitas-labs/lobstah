@@ -444,7 +444,13 @@ task's diff. That contaminates evidence and falsely serializes merges.
 
 The daemon spawns one runner per dispatch with `setsid`, then records its pid and
 process start time. The runner drives the adapter; the daemon supervises the
-runner and never touches the harness directly.
+runner and never touches the harness directly. A turn that ends with the
+worker's last report on `needs-decision`, `blocked`, or `paused` does not end
+the session: a headless worker waiting on a question stays alive until
+answered, cancelled, or the wall clock — the runner polls the inbox, touches the
+event stream each poll so the wedge detector sees a live wait, delivers the
+answer into the next turn, and stamps `working`. Only a turn ending on `working`
+(or no report) with an empty inbox ends the session and is stamped `done`.
 
 ```ts
 // inside the runner

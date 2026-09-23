@@ -2,7 +2,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, enqueue, ensureLayout, laneDirs, readStatusLog, requestCancel } from '@lobstah/core';
+import {
+  appendEvent,
+  appendStatus,
+  claimNext,
+  enqueue,
+  ensureLayout,
+  eventsPath,
+  laneDirs,
+  readStatusLog,
+  requestCancel,
+  touchEvents,
+} from '@lobstah/core';
 import { reconcileOne } from '../src/daemon.js';
 import type { ActiveState } from '../src/daemon.js';
 import { DEFAULT_LIMITS, DEFAULT_SOAK } from '@lobstah/core';
@@ -103,5 +114,28 @@ describe('reconcileOne — session-claimed catches are not the daemon\'s childre
     reconcileOne(st, cfg, () => {});
     expect(fs.existsSync(st.dir)).toBe(true); // the session gets told first
     expect(readStatusLog('sc3', 'work').at(-1)?.verb).toBe('working');
+  });
+});
+
+describe('reconcileOne — a headless runner waiting on a question is not a wedge', () => {
+  it('a live runner parked on needs-decision whose wait heartbeats the stream is left alone', () => {
+    const st = claimed('wq');
+    appendStatus('wq', 'work', 'working');
+    appendStatus('wq', 'work', 'needs-decision', 'proceed?');
+    // Last real event an hour ago — past the wedge threshold — then the
+    // runner's inbox wait refreshes the stream, as drive() does every poll.
+    appendEvent('wq', 'work', { at: new Date().toISOString(), type: 'turn-end', data: {} });
+    const stale = new Date(Date.now() - 3_600_000);
+    fs.utimesSync(eventsPath('wq', 'work'), stale, stale);
+    touchEvents('wq', 'work');
+    // Our own pid stands in for the live runner; a wedge verdict would SIGKILL it.
+    st.runner = { pid: process.pid, startedAt: stale.toISOString(), attempts: 1 };
+    const logs: string[] = [];
+
+    reconcileOne(st, cfg, (m) => logs.push(m));
+
+    expect(logs).toEqual([]);
+    expect(fs.existsSync(st.dir)).toBe(true);
+    expect(readStatusLog('wq', 'work').at(-1)?.verb).toBe('needs-decision');
   });
 });
