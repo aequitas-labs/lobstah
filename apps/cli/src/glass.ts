@@ -64,9 +64,15 @@ const mtime = (f: string): number => {
   }
 };
 
-/** A docs/assets file: installed package layout first, repo second. */
+/**
+ * A docs/assets file: installed package layout first (dist/ → ../docs), then
+ * the workspace (apps/cli/dist/ → ../../../docs). The workspace path was one
+ * level too deep, so every workspace-built glass served its HTML for
+ * /lob-sprite.png and /star.png: the sprite probe failed and the pixel lob
+ * fell back to the waddling emoji.
+ */
 function assetPath(name: string): string | undefined {
-  for (const rel of [`../docs/assets/${name}`, `../../../../docs/assets/${name}`]) {
+  for (const rel of [`../docs/assets/${name}`, `../../../docs/assets/${name}`]) {
     try {
       const p = fileURLToPath(new URL(rel, import.meta.url));
       if (fs.existsSync(p)) return p;
