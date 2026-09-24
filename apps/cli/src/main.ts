@@ -174,7 +174,7 @@ host processes:
   pet install|uninstall           the desktop pet (macOS): a login LaunchAgent
                                   walks attention questions across the screen
 
-lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
+lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man tend [--json]               tend the whole string: fleet verdict (daemon
                                   up, stalled vs idle), unanswered questions
                                   with ages, each work item's dispatch chain,
@@ -222,7 +222,7 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   helm registration, LOBSTAH_MAN=1, or a
                                   .lobstah-man file. Hookless sessions use the
                                   foreground verbs: soak --wait (worker),
-                                  man wait (lobsterman).
+                                  man wait (lobstah man).
 
 workers (dispatched agents; injected into every brief):
   report <uuid> <verb> [--pr <url>] [--no-watch] [--] [note]
@@ -463,8 +463,8 @@ async function mainCli(): Promise<void> {
   let [cmd, ...args] = process.argv.slice(2);
   const ALIASES: Record<string, string> = { set: 'dispatch', buoys: 'ls', buoy: 'status' };
   cmd = cmd !== undefined ? (ALIASES[cmd] ?? cmd) : cmd;
-  // Lobsterman (orchestrator) commands live under their own namespace;
-  // bare `lobstah man` prints the lobsterman's manual.
+  // Lobstah man (orchestrator) commands live under their own namespace;
+  // bare `lobstah man` prints the lobstah man's manual.
   if (cmd === 'man') {
     cmd = args.length > 0 && args[0] !== '--help' ? `man:${args[0]}` : 'man:manual';
     args = args.slice(1);
@@ -972,7 +972,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'man:helm': {
-      // Take the helm: sign this session on as the one lobsterman for its
+      // Take the helm: sign this session on as the one lobstah man for its
       // grounds. The registration enables the Stop-hook arm check (no marker file
       // needed) and gates the periodic digest; the charter is the persona.
       const sessionId = callerSession(opt('--session'), true)?.id;
@@ -1055,7 +1055,7 @@ async function mainCli(): Promise<void> {
         throw new UsageError(`--peek never blocks — drop --timeout\n\n${usageFor('man:wait')!}`);
       }
       // Strict helm rule: wait consumes attention events — the helm's wakes.
-      // With a claimed lobsterman anywhere, only that session may run it, and
+      // With a claimed lobstah man anywhere, only that session may run it, and
       // a grounds-scoped wait only by that grounds' own helm.
       const caller = callerSession(opt('--session'));
       const sid = caller?.id;
@@ -1211,9 +1211,9 @@ async function mainCli(): Promise<void> {
       // Stop-hook entry point: everything non-actionable is a silent exit
       // 0 — a hook must never break the user's stop with noise. A session
       // that is soaking parks as a worker (waits for bait); otherwise the
-      // lobsterman gate applies (helm registration, marker file, or env).
+      // lobstah man gate applies (helm registration, marker file, or env).
       // Hookless sessions have foreground verbs instead: `soak --wait` for
-      // workers, `man wait` for the lobsterman.
+      // workers, `man wait` for the lobstah man.
       try {
         const hook = readHookStdin();
         const trapReg = hook?.session_id ? trapBySession(hook.session_id) : undefined;
@@ -1248,7 +1248,7 @@ async function mainCli(): Promise<void> {
         const helm = hook?.session_id ? helmOf(hook.session_id) : undefined;
         if (helm) heartbeatHelm(helm.sessionId);
         const cfgHaul = loadConfig();
-        // Strict helm rule: with a claimed lobsterman anywhere, no other
+        // Strict helm rule: with a claimed lobstah man anywhere, no other
         // session parks as one — a marker-armed bystander would consume the
         // helm's wakes. Silent: a hook never breaks a stop with noise.
         if (!helm && liveHelms(cfgHaul.helm.ttlSecs * 1000).length > 0) break;

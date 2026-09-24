@@ -120,7 +120,7 @@ instances, use more homes. One daemon per home, enforced.
 Set one config line — `notifyCommand = "ntfy pub my-topic ..."` — and the
 daemon pings you on `needs-decision`, `blocked`, `done`, and `failed`. No
 model in the loop. Driving lobstah from an agent session instead? `lobstah
-man` prints the lobsterman's manual. `man wait` blocks until a dispatch needs
+man` prints the lobstah man's manual. `man wait` blocks until a dispatch needs
 attention, and unanswered questions re-fire until answered. `man helm`
 signs one session on as the orchestrator for its grounds, and `man report`
 prints the delta since the last acknowledged report. `lobstah glass` serves
@@ -136,9 +136,9 @@ continues the turn the moment something needs it.
   optionally merges approved PRs. GitHub pickup spans every repo you mark
   `pickup = true`; `lobstah pick install` runs it as a service.
   [docs/pickup.md](docs/pickup.md)
-- **Claude Code + Codex plugins** — the lobsterman as a one-step install: the
-  hook wiring (session brief, Stop-hook park, clean stow), the lobsterman
-  and trap skills, and (on Claude Code) `/lobstah:tend`, `/lobstah:helm`,
+- **Claude Code + Codex plugins** — the lobstah man as a one-step install: the
+  hook wiring (session brief, Stop-hook park, clean stow), the `man` and `trap`
+  skills, and (on Claude Code) `/lobstah:tend`, `/lobstah:helm`,
   `/lobstah:relieve`, `/lobstah:soak`, and `/lobstah:stow` commands, no
   settings surgery.
   This repo doubles as the plugin marketplace for both agent registries —
@@ -153,11 +153,11 @@ continues the turn the moment something needs it.
 - **OpenClaw plugin** — gives fleet agents `lobstah_dispatch` / `lobstah_status`
   / `lobstah_send` / `lobstah_cancel` tools and operators a `/lobstah` command.
   [docs/openclaw.md](docs/openclaw.md)
-- **The lobsterman** — one interactive agent session that dispatches,
+- **The lobstah man** — one interactive agent session that dispatches,
   supervises, and hands you outcomes, woken by the `lobstah man` commands.
   Harness-agnostic: hold the helm from Claude Code, Codex, or anything with
   a terminal — the CLI is the contract, and workers mix harnesses per
-  dispatch. [docs/lobsterman.md](docs/lobsterman.md)
+  dispatch. [docs/man.md](docs/man.md)
 
 ## How it holds together 🧭
 

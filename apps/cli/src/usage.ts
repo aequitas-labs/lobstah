@@ -198,7 +198,7 @@ consumes no cursor and steers nothing.`,
   init: `Create ~/.lobstah + config; --scan appends a [repos.*] block per repo found
 under the given directories.`,
   version: `The installed lobstah version.`,
-  'man:manual': `The lobsterman's manual.`,
+  'man:manual': `The lobstah man's manual.`,
   'man:tend': `The whole-fleet pass: verdict, unanswered questions, each work item's chain,
 PR, and merge gate. Pure disk read.`,
   'man:report': `The delta since the last report: landed, arisen, still-waiting, verdict.
@@ -206,7 +206,7 @@ Advances the cursor unless --peek — the acknowledgment man wait's timeout
 digest defers to. --grounds scopes digest and cursor to one helm's territory
 (that helm's alone). Reserved for the claimed helm; identify with --session
 (defaults --grounds to its own).`,
-  'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
+  'man:helm': `Take the helm: sign this session on as the one lobstah man for its grounds.
 Prints the charter, enables the Stop hook, and gates the digest.
 Sign-on records who the man is (harness, directory, host; --label names it).
 A live foreign holder refuses without --take; a stale one is claimable.

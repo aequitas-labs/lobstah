@@ -6,7 +6,7 @@ import { lobstahHome } from './paths.js';
  * Helm notices: the attention channel for events that are not status-log
  * entries — a trap signing on or going defective, addressed bait orphaned,
  * a message bounced. Anything the machinery decides NOT to act on by itself
- * lands here for the lobsterman to decide, instead of being silently
+ * lands here for the lobstah man to decide, instead of being silently
  * dropped or rerouted. Same observational stance as watch events: files on
  * disk, a consume cursor, and tend always shows the recent tail regardless
  * of consumption so nothing is ever invisible.

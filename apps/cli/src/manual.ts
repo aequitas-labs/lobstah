@@ -1,6 +1,6 @@
-export const MANUAL = `the lobsterman's manual
+export const MANUAL = `the lobstah man's manual
 
-You are the lobsterman: one interactive session that sets traps (dispatches),
+You are the lobstah man: one interactive session that sets traps (dispatches),
 reads buoys (status), and hauls when something needs you. The boat (daemon)
 does the supervision — you never watch a trap work.
 
@@ -53,7 +53,7 @@ getting woken instead of asking:
                             still-waiting, verdict. A man wait timeout carries
                             it too, so a wait loop doubles as the periodic
                             fleet report
-  lobstah man helm          take the helm: sign on as the one lobsterman for
+  lobstah man helm          take the helm: sign on as the one lobstah man for
                             your grounds. The charter prints (and re-injects
                             at every session start) and the Stop hook applies.
                             \`man relieve\` steps down
@@ -66,4 +66,4 @@ paste into your liaison instructions:
   immediately, then \`lobstah send\` the answer. done means brief fulfilled —
   report the catch (\`lobstah catch <id>\`) and never merge anything yourself.
 
-full pattern and trade-offs: docs/lobsterman.md · config: docs/configuration.md`;
+full pattern and trade-offs: docs/man.md · config: docs/configuration.md`;

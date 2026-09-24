@@ -10,15 +10,23 @@ const read = (p: string) => fs.readFileSync(`${root}/${p}`, 'utf8');
  * can differ when their Stop-hook behavior differs.
  */
 describe('plugin contracts (claude-code ↔ codex)', () => {
-  it.each(['lobsterman', 'trap'])('the %s skill shares frontmatter in both plugins', (skill) => {
+  it.each(['man', 'trap'])('the %s skill shares frontmatter in both plugins', (skill) => {
     const frontmatter = (raw: string) => raw.match(/^---\n[\s\S]*?\n---/)?.[0];
     expect(frontmatter(read(`plugins/codex/skills/${skill}/SKILL.md`))).toBe(
       frontmatter(read(`plugins/claude-code/skills/${skill}/SKILL.md`)),
     );
   });
 
+  it('names the orchestrator skill man in both plugins', () => {
+    for (const plugin of ['codex', 'claude-code']) {
+      expect(read(`plugins/${plugin}/skills/man/SKILL.md`)).toMatch(/^---\nname: man\n/);
+      expect(fs.existsSync(`${root}/plugins/${plugin}/skills/lobsterman/SKILL.md`)).toBe(false);
+    }
+    expect(fs.existsSync(`${root}/docs/lobsterman.md`)).toBe(false);
+  });
+
   it('each skill stays under 80 lines', () => {
-    for (const skill of ['lobsterman', 'trap']) {
+    for (const skill of ['man', 'trap']) {
       expect(read(`plugins/claude-code/skills/${skill}/SKILL.md`).trimEnd().split('\n').length).toBeLessThan(80);
     }
   });
@@ -35,8 +43,8 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(fs.existsSync(`${root}/${commands}/tend.md`)).toBe(true);
     expect(fs.existsSync(`${root}/${commands}/lobstah.md`)).toBe(false);
     const files = [
-      'README.md', 'docs/lobsterman.md', 'plugins/claude-code/README.md',
-      'plugins/claude-code/skills/lobsterman/SKILL.md',
+      'README.md', 'docs/man.md', 'plugins/claude-code/README.md',
+      'plugins/claude-code/skills/man/SKILL.md',
       'plugins/claude-code/skills/trap/SKILL.md',
       ...fs.readdirSync(`${root}/${commands}`).filter((name) => name.endsWith('.md')).map((name) => `${commands}/${name}`),
       ...fs.readdirSync(`${root}/apps/cli/src`).filter((name) => name.endsWith('.ts')).map((name) => `apps/cli/src/${name}`),

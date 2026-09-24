@@ -150,4 +150,4 @@ See [pickup.md](pickup.md) for the loop semantics these keys drive.
 | Variable | Meaning |
 |---|---|
 | `LOBSTAH_HOME` | The instance root (default `~/.lobstah`). Multiple instances = multiple homes; one daemon per home, enforced. |
-| `LOBSTAH_MAN` | `=1` designates a session as the lobsterman for the `man haul` Stop hook. |
+| `LOBSTAH_MAN` | `=1` designates a session as the lobstah man for the `man haul` Stop hook. |
