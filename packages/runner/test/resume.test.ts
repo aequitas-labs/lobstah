@@ -33,7 +33,12 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-resume-test-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
-  fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = "${home}/repo"\ntrunk = "main"\n`);
+  // JSON.stringify, as appendRepoBlock writes it: a Windows temp path's
+  // backslashes would otherwise read as TOML escapes (\U, \R).
+  fs.writeFileSync(
+    path.join(home, 'config.toml'),
+    `[repos.r]\npath = ${JSON.stringify(path.join(home, 'repo'))}\ntrunk = "main"\n`,
+  );
   delete process.env.LOBSTAH_RESUME;
   delete process.env.LOBSTAH_NUDGE;
 });
