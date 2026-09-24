@@ -74,6 +74,8 @@ import {
   VERBS,
   parsePrRef,
   prBadge,
+  prSortAt,
+  readPrs,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice, WatchAttention } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
@@ -91,7 +93,7 @@ import { installPet, uninstallPet } from './pet.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
-import { addPrWatch, autoRegisterPrWatch, observeDispatchPrWatches, pollSecs, runPrCheck } from './pr-watch.js';
+import { addPrWatch, autoRegisterPrWatch, backfillPrWatches, observeDispatchPrWatches, pollSecs, runPrCheck, syncPrWatches } from './pr-watch.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
@@ -133,6 +135,7 @@ work (humans and agents):
                                   same worktree and brief plus a git progress
                                   note; conversations don't cross harnesses
   catch <uuid>                    the evidence: branch, commits, PR, session
+  prs [sync]                      list known PRs, or refresh due PR watches
   cull [--older-than <days>] [--apply]
                                   sweep aged catch and lost gear — old done/
                                   entries, orphaned worktrees, stale state.
@@ -836,6 +839,7 @@ ${progress}`,
     case 'catch': {
       const id = pos[0];
       if (!id) throw new Error('catch requires a dispatch id');
+      backfillPrWatches();
       const lane = findLane(id);
       const log = readStatusLog(id, lane);
       const ev = readEvidence(id, lane);
@@ -877,6 +881,27 @@ ${progress}`,
       }
       const attachments = storedDescriptor(id, lane)?.attachments ?? [];
       if (attachments.length > 0) console.log(toonTable('attachments', attachments.map((a) => ({ ...a })), ['name', 'type', 'bytes', 'path']));
+      break;
+    }
+    case 'prs': {
+      if (pos[0] === 'sync') {
+        console.log(toonKV(syncPrWatches()));
+        break;
+      }
+      backfillPrWatches();
+      const now = Date.now();
+      const watches = new Map(listWatches().map((w) => [w.key, w]));
+      const rows = readPrs().sort((a, b) => prSortAt(b).localeCompare(prSortAt(a)) || a.key.localeCompare(b.key));
+      console.log(toonTable('prs', rows.map((r) => {
+        const watch = watches.get(r.key);
+        const ageMins = Math.max(0, Math.floor((now - Date.parse(prSortAt(r))) / 60_000));
+        return {
+          number: `#${r.number}`, repo: r.repo, state: r.state, draft: r.draft,
+          checks: `${r.checks.passed}/${r.checks.total} passed, ${r.checks.failed} failed, ${r.checks.pending} pending`,
+          observed: Number.isFinite(ageMins) ? `${ageMins}m ago` : 'unknown',
+          watch: watch ? (watch.lastError ? 'error' : watch.done ? 'done' : 'watching') : 'no watch',
+        };
+      }), ['number', 'repo', 'state', 'draft', 'checks', 'observed', 'watch']));
       break;
     }
     case 'cull': {

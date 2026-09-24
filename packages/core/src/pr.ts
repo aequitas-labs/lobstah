@@ -124,6 +124,11 @@ export interface PrEvidence {
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
   observedAt: string;
+  /** Forge's last update, when the observation captured it. */
+  updatedAt?: string;
+  /** Present for a merged or closed PR when the forge supplies it. */
+  mergedAt?: string;
+  closedAt?: string;
 }
 
 export interface PrReview {
@@ -172,6 +177,9 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
     checks: { total: checks.length, passed: count('passed'), failed: count('failed'), pending: count('pending') },
     review: prReview(view),
     observedAt,
+    ...(view.updatedAt ? { updatedAt: view.updatedAt } : {}),
+    ...(view.mergedAt ? { mergedAt: view.mergedAt } : {}),
+    ...(view.closedAt ? { closedAt: view.closedAt } : {}),
   };
 }
 

@@ -15,6 +15,7 @@ import {
   parsePrRef,
   pendingIds,
   prBadge,
+  prSortAt,
   queuedDescriptor,
   readEvidence,
   readPrs,
@@ -31,6 +32,7 @@ import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import type { MergeView } from '@lobstah/pick';
 import { deriveGlassPrs } from './glass-prs.js';
+import { backfillPrWatches } from './pr-watch.js';
 import type { GlassStack } from './glass-prs.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
@@ -304,7 +306,8 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
       });
     }
   }
-  return out.sort((a, b) => b.ageSecs - a.ageSecs);
+  const updated = new Map(observed.map(({ pr }) => [pr.url, prSortAt(pr)]));
+  return out.sort((a, b) => (updated.get(b.prUrl ?? '') ?? '').localeCompare(updated.get(a.prUrl ?? '') ?? ''));
 }
 
 /** Terminal catches the helm hasn't been reported yet: past its grounds' cursor. */
@@ -484,6 +487,7 @@ function bucketOf(uuid: string): TendDispatch['bucket'] | undefined {
 }
 
 export function buildTendReport(now = Date.now()): TendReport {
+  backfillPrWatches();
   const cfg = loadConfig();
 
   const heartbeat = readJson<{ heartbeat?: string }>(executorPath())?.heartbeat;
@@ -639,6 +643,11 @@ export function buildTendReport(now = Date.now()): TendReport {
   const records = readPrs();
   const legacy = evidencePrs();
   const observed = observedPrs(records, legacy);
+  const byPrUrl = new Map(observed.map(({ pr }) => [pr.url, prSortAt(pr)]));
+  const prStories = stories.filter((s) => s.prUrl).sort((a, b) =>
+    (byPrUrl.get(b.prUrl!) ?? '').localeCompare(byPrUrl.get(a.prUrl!) ?? ''));
+  let prIndex = 0;
+  stories.forEach((s, i) => { if (s.prUrl) stories[i] = prStories[prIndex++]!; });
   const stacks = deriveGlassPrs(legacy.map(({ id, pr }) => ({ id, pr })), [], records).stacks.filter((s) => s.open);
   attention.push(...landedAttention(cfg, now), ...prAttention(now, observed));
   // attentionKinds (config.toml) picks what walks; watch events are

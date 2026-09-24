@@ -29,12 +29,13 @@ import { buildTendReport, landedCatches } from './tend.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_DIFF_JS } from './glass-diff.js';
 import { deriveGlassPrs } from './glass-prs.js';
+import { backfillPrWatches } from './pr-watch.js';
 
 /**
  * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
  * observational stance as `man tend`, with room for detail a terminal
- * can't afford. It binds 127.0.0.1 only, never writes lobstah state, and
- * never advances any cursor: looking through the glass consumes nothing.
+ * can't afford. It binds 127.0.0.1 only; /data may idempotently register
+ * missing PR watches, but never advances a cursor or consumes attention.
  * Look freely, steer only from the helm — links out are copyable commands,
  * never exec endpoints (localhost HTTP is reachable by any webpage). The
  * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
@@ -209,6 +210,7 @@ function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[
 
 /** One disk pass, everything the page renders. Pure read. */
 export function buildGlassSnapshot() {
+  backfillPrWatches();
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const helms = listHelms().map((h) => ({
     ...h,
@@ -532,13 +534,13 @@ function prTable(d,inp){const rows=[];
  for(const {s,prs} of prGroups(inp)){
   rows.push('<tr><th colspan="8">'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?' · open':' · history')+'</th></tr>');
   for(const p of prs)rows.push('<tr class="rowhead" onclick="'+prOpen(p)+'"><td>'+prLink(p)+'</td><td class="grow">'+esc(p.title||'')+'</td>'
-   +'<td>'+esc(p.state)+(p.draft?' · draft':'')+'</td><td>'+prChecks(p)+'</td><td>'+prReview(p)+'</td><td>'+prMerge(p)+'</td>'
+   +'<td>'+esc(p.state)+(p.draft?' · draft':'')+(p.state==='MERGED'&&p.mergedAt?' · '+esc(p.mergedAt):'')+'</td><td>'+prChecks(p)+'</td><td>'+prReview(p)+'</td><td>'+prMerge(p)+'</td>'
    +'<td>'+watchCell(p.watch)+'</td><td>'+esc(p.gate||'')+'</td></tr>')}
  return table(['PR','title','state','checks','review','merge','watch','gate'],rows,'no PR evidence')+otherWatches(inp)}
 function prCards(d,inp){const groups=prGroups(inp);
  const body=groups.length?groups.map(({s,prs})=>'<h2>'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?'':' · history')+'</h2><div class="cards">'
   +prs.map(p=>'<div class="card" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b><span class="badge '+esc(prBadgeClass(p.badge))+'">'+esc(p.badge.text)+'</span></div>'
-   +'<div class="meta">'+esc(p.repo)+' · '+esc(p.state)+(p.draft?' · draft':'')+' · '+prMerge(p)+'</div>'
+   +'<div class="meta">'+esc(p.repo)+' · '+esc(p.state)+(p.draft?' · draft':'')+(p.state==='MERGED'&&p.mergedAt?' · '+esc(p.mergedAt):'')+' · '+prMerge(p)+'</div>'
    +'<div class="foot"><span>'+prChecks(p)+'</span><span>'+watchCell(p.watch)+'</span>'+(p.gate?'<span>gate '+esc(p.gate)+'</span>':'')+'</div></div>').join('')+'</div>').join('')
   :'<div class="empty">no PR evidence</div>';
  return body+otherWatches(inp)}

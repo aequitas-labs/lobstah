@@ -60,7 +60,17 @@ describe('glass PR stacks', () => {
 
   it('keeps two independent stacks separate, including different repos', () => {
     const { stacks } = deriveGlassPrs([...five(), row(30, 'main', 'settings'), row(34, 'main', 'other', 'OPEN', 'other')]);
-    expect(stacks.map((s) => s.numbers)).toEqual([numbers, [30], [34]]);
+    expect(stacks.map((s) => s.numbers)).toEqual([[34], numbers, [30]]);
+  });
+
+  it('orders open stacks by newest observation, then closed history by newest observation', () => {
+    const rows = [
+      row(1, 'main', 'old'), row(2, 'main', 'new'), row(3, 'main', 'closed', 'MERGED'),
+    ];
+    rows[0]!.pr.observedAt = '2026-09-21T00:00:00Z';
+    rows[1]!.pr.observedAt = '2026-09-23T00:00:00Z';
+    rows[2]!.pr.observedAt = '2026-09-24T00:00:00Z';
+    expect(deriveGlassPrs(rows).prs.map((p) => p.number)).toEqual([2, 1, 3]);
   });
 
   it('keeps merged PRs in stack order when upper PRs still refer to them', () => {

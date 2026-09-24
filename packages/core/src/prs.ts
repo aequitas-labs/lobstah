@@ -27,6 +27,11 @@ export interface PrRecord extends PrEvidence {
   dispatches: string[];
 }
 
+/** Records sort by observation time; older shapes can fall back to forge update time. */
+export function prSortAt(pr: Pick<PrEvidence, 'observedAt' | 'updatedAt'>): string {
+  return pr.observedAt || pr.updatedAt || '';
+}
+
 export function prsDir(): string {
   return path.join(lobstahHome(), 'prs');
 }
