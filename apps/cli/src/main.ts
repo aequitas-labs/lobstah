@@ -78,6 +78,8 @@ import {
   readPrs,
   handoffNote,
   resolveSessionHarness,
+  codexDesktopThread,
+  CODEX_DESKTOP_THREAD,
   worktreeProgress,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice, WatchAttention } from '@lobstah/core';
@@ -565,6 +567,10 @@ async function mainCli(): Promise<void> {
         followUp: opt('--follow-up'),
         for: address,
       };
+      // Explicitness is recorded: `claude` is also the default, so the
+      // resolver cannot tell `--harness claude` from nothing without it.
+      if (d.harness) d.harnessExplicit = true;
+      if (d.model) d.modelExplicit = true;
       const lane: Lane = has('--chore') ? 'chore' : 'work';
       const attachments = [
         ...(inheritedAttachments(d.followUp) ?? []),
@@ -765,6 +771,12 @@ async function mainCli(): Promise<void> {
       // id's UUID version, else the descriptor) — never guess from the ask.
       const { harness = 'claude', sessionId } = resolveSessionHarness(id, loadConfig(), lane);
       if (!sessionId) throw new Error(`${id} has no recorded harness session to attach to`);
+      if (harness === 'codex' && codexDesktopThread(sessionId)) {
+        throw new Error(
+          `${id}: ${CODEX_DESKTOP_THREAD} (session ${sessionId}) — open it in the Codex desktop app, ` +
+            `or \`lobstah dispatch --follow-up ${id}\` to start cold with a progress note`,
+        );
+      }
       const worktree = path.join(lobstahHome(), 'worktrees', id);
       const cwd = fs.existsSync(worktree) ? worktree : process.cwd();
       // codex may exist only as the SDK's vendored CLI, never on PATH.
@@ -799,6 +811,8 @@ async function mainCli(): Promise<void> {
         const v = opt(`--${key}`);
         if (v) descriptor[key] = v;
       }
+      if (opt('--harness')) descriptor.harnessExplicit = true;
+      if (opt('--model')) descriptor.modelExplicit = true;
       fs.writeFileSync(descFile, JSON.stringify(descriptor, null, 2));
 
       // Progress note: the conversation cannot cross harnesses, so the next

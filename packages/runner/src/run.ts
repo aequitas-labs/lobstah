@@ -5,11 +5,13 @@ import {
   appendEvent,
   appendStatus,
   complete,
+  droppedModelNote,
   handoffNote,
   isUnresumable,
   loadConfig,
   lobstahHome,
   mergeEvidence,
+  modelForHarness,
   originProgress,
   readEvidence,
   resolveDispatch,
@@ -71,7 +73,16 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
     resolvedHarness: resolved.harness,
     envResume: process.env.LOBSTAH_RESUME,
   });
-  const firstNote = [attempts > 1 ? `attempt ${attempts}` : undefined, plan.note].filter(Boolean).join('; ');
+  // A model never crosses harnesses: one that belongs to another harness is
+  // dropped for the adapter's default rather than failing the dispatch.
+  const firstModel = modelForHarness(plan.harness, resolved.model);
+  const firstNote = [
+    attempts > 1 ? `attempt ${attempts}` : undefined,
+    plan.note,
+    firstModel.dropped ? droppedModelNote(plan.harness, firstModel.dropped) : undefined,
+  ]
+    .filter(Boolean)
+    .join('; ');
   status('working', firstNote || undefined);
   appendEvent(id, lane, {
     at: new Date().toISOString(),
@@ -97,7 +108,6 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
     fs.writeFileSync(wtFile, JSON.stringify({ path: cwd }, null, 2));
   }
 
-  const adapter = deps.loadAdapter(plan.harness);
   const envNudge = process.env.LOBSTAH_NUDGE;
   // A swap's handoff (arriving as the nudge) already carries the progress note.
   const planNudge = plan.cold && !envNudge ? coldNote(plan.cold, cwd, repo.trunk) : undefined;
@@ -121,12 +131,12 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
       }, resolved.limits.wallClockSecs * 1000)
     : undefined;
 
-  const runOnce = async (prompt: string, resumeSession: string | undefined) => {
-    const run = await adapter.start({
+  const runOnce = async (harness: string, prompt: string, resumeSession: string | undefined) => {
+    const run = await deps.loadAdapter(harness).start({
       id,
       cwd,
       prompt,
-      model: resolved.model,
+      model: modelForHarness(harness, resolved.model).model,
       effort: resolved.effort,
       limits: resolved.limits,
       env: {
@@ -143,10 +153,13 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
     return { cancelled, activity, result };
   };
 
-  let outcome = await runOnce(promptWith(envNudge ?? planNudge), plan.resume?.sessionId);
+  let outcome = await runOnce(plan.harness, promptWith(envNudge ?? planNudge), plan.resume?.sessionId);
 
   // A resume the harness refused (not found, culled, foreign) before doing
   // any work falls back to a cold session — it never fails the dispatch.
+  // With no session to preserve, the cold run goes on the harness this
+  // dispatch asked for (explicit, else the configured default), not the
+  // origin's.
   if (
     plan.resume &&
     !outcome.cancelled &&
@@ -154,10 +167,20 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
     outcome.activity === 0 &&
     isUnresumable(outcome.result.error)
   ) {
-    const reason = outcome.result.error!.replace(/\s+/g, ' ').slice(0, 200);
-    status('working', `resume-fallback: ${reason} — starting cold on ${plan.harness} with a progress note`);
-    appendEvent(id, lane, { at: new Date().toISOString(), type: 'runner', data: { resumeFallback: reason } });
-    mergeEvidence(id, lane, { resumeFallback: reason, sessionId: undefined });
+    const reason = outcome.result.error!.replace(/\s+/g, ' ').slice(0, 200).trim();
+    const coldHarness = resolved.harness;
+    const coldModel = modelForHarness(coldHarness, resolved.model);
+    status(
+      'working',
+      `resume-fallback: ${reason} — starting cold on ${coldHarness}` +
+        (coldModel.dropped ? `; ${droppedModelNote(coldHarness, coldModel.dropped)}` : ''),
+    );
+    appendEvent(id, lane, {
+      at: new Date().toISOString(),
+      type: 'runner',
+      data: { resumeFallback: reason, harness: coldHarness },
+    });
+    mergeEvidence(id, lane, { resumeFallback: reason, sessionId: undefined, harness: coldHarness });
     const note = coldNote(
       {
         why: `resume of session ${plan.resume.sessionId} failed`,
@@ -167,7 +190,7 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
       cwd,
       repo.trunk,
     );
-    outcome = await runOnce(promptWith([envNudge, note].filter(Boolean).join('\n\n')), undefined);
+    outcome = await runOnce(coldHarness, promptWith([envNudge, note].filter(Boolean).join('\n\n')), undefined);
   }
 
   if (wallTimer) clearTimeout(wallTimer);

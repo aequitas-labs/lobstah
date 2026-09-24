@@ -41,10 +41,13 @@ beforeEach(() => {
   );
   delete process.env.LOBSTAH_RESUME;
   delete process.env.LOBSTAH_NUDGE;
+  // Desktop-thread detection reads Codex rollouts; never the host's.
+  process.env.CODEX_HOME = path.join(home, 'codex');
 });
 afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
   delete process.env.LOBSTAH_HOME;
+  delete process.env.CODEX_HOME;
 });
 
 interface Start {
@@ -137,7 +140,7 @@ async function runFollowUp(id: string, d: Partial<Descriptor>, deps: RunnerDeps)
 const notes = (id: string) => readStatusLog(id, 'work').map((e) => `${e.verb}${e.note ? `: ${e.note}` : ''}`);
 
 describe('runner — a follow-up resumes with the origin session’s harness', () => {
-  it('a follow-up on a Codex-claimed origin resumes with codex despite --harness claude', async () => {
+  it('a follow-up on a Codex-claimed origin resumes with codex despite a legacy (unrecorded) --harness claude', async () => {
     trapBuiltOrigin('origin', 'codex', CODEX_SID);
     expect(readEvidence('origin', 'work').harness).toBe('codex'); // the trap's claim stamps it
 
@@ -150,6 +153,79 @@ describe('runner — a follow-up resumes with the origin session’s harness', (
     expect(log[0]).toContain('--harness claude ignored');
     expect(log.at(-1)).toBe('done: finished on codex');
     expect(readEvidence('fu', 'work').harness).toBe('codex');
+  });
+
+  it('an explicit --harness claude on a Codex-claimed origin is a swap: cold on claude (e2de5dd7)', async () => {
+    trapBuiltOrigin('origin', 'codex', CODEX_SID);
+    const { deps, starts } = mockDeps({ owns: { [CODEX_SID]: 'codex' } });
+    await runFollowUp('fu', { followUp: 'origin', harness: 'claude', harnessExplicit: true }, deps);
+
+    expect(starts.map((s) => [s.harness, s.opts.resumeSession])).toEqual([['claude', undefined]]);
+    expect(starts[0]!.opts.prompt).toContain('previous agent session (harness: codex)');
+    expect(notes('fu')[0]).toContain('swap — origin session is codex, claude requested; starting cold on claude');
+    expect(notes('fu').at(-1)).toBe('done: finished on claude');
+    expect(readEvidence('fu', 'work').harness).toBe('claude');
+  });
+
+  it('an explicit --harness equal to the origin session’s resumes it', async () => {
+    trapBuiltOrigin('origin', 'codex', CODEX_SID);
+    const { deps, starts } = mockDeps({ owns: { [CODEX_SID]: 'codex' } });
+    await runFollowUp('fu', { followUp: 'origin', harness: 'codex', harnessExplicit: true }, deps);
+    expect(starts.map((s) => [s.harness, s.opts.resumeSession])).toEqual([['codex', CODEX_SID]]);
+  });
+
+  it('an unspecified harness follows the origin', async () => {
+    trapBuiltOrigin('origin', 'codex', CODEX_SID);
+    const { deps, starts } = mockDeps({ owns: { [CODEX_SID]: 'codex' } });
+    await runFollowUp('fu', { followUp: 'origin' }, deps);
+    expect(starts.map((s) => [s.harness, s.opts.resumeSession])).toEqual([['codex', CODEX_SID]]);
+    expect(notes('fu')[0]).toContain('resuming codex session 01a0ceb8 (harness from evidence)');
+  });
+
+  it('a resume failure falls back cold on the descriptor’s harness, not the origin’s', async () => {
+    trapBuiltOrigin('origin', 'codex', CODEX_SID);
+    const { deps, starts } = mockDeps({ owns: { [CODEX_SID]: 'codex' }, gone: [CODEX_SID] });
+    await runFollowUp('fu', { followUp: 'origin', model: 'claude-opus-5-5' }, deps);
+
+    expect(starts.map((s) => [s.harness, s.opts.resumeSession, s.opts.model])).toEqual([
+      ['codex', CODEX_SID, undefined], // the claude model never reaches codex
+      ['claude', undefined, 'claude-opus-5-5'],
+    ]);
+    const log = notes('fu');
+    expect(log[0]).toContain('model claude-opus-5-5 is a claude model — dropped, using codex\'s default');
+    expect(log.some((n) => /^working: resume-fallback: .*no rollout found.* — starting cold on claude$/.test(n))).toBe(true);
+    expect(log.at(-1)).toBe('done: finished on claude');
+    expect(readEvidence('fu', 'work')).toMatchObject({ harness: 'claude', sessionId: 'claude-new-2' });
+  });
+
+  it('a Codex desktop thread is not handed to the CLI: cold on the descriptor’s harness, no attempt', async () => {
+    trapBuiltOrigin('origin', 'codex', CODEX_SID);
+    const day = path.join(process.env.CODEX_HOME!, 'sessions', '2026', '09', '23');
+    fs.mkdirSync(day, { recursive: true });
+    fs.writeFileSync(
+      path.join(day, `rollout-2026-09-23T10-43-27-${CODEX_SID}.jsonl`),
+      JSON.stringify({ type: 'session_meta', payload: { id: CODEX_SID, originator: 'Codex Desktop', source: 'vscode' } }) + '\n',
+    );
+    const { deps, starts } = mockDeps({ owns: { [CODEX_SID]: 'codex' } });
+    await runFollowUp('fu', { followUp: 'origin' }, deps);
+
+    expect(starts.map((s) => [s.harness, s.opts.resumeSession])).toEqual([['claude', undefined]]);
+    expect(starts[0]!.opts.prompt).toContain('The earlier dispatch origin left:');
+    expect(notes('fu')[0]).toContain('Codex desktop thread; not resumable from the CLI (01a0ceb8), starting cold on claude');
+    expect(notes('fu').at(-1)).toBe('done: finished on claude');
+  });
+
+  it('a CLI rollout (codex_exec) is still resumed', async () => {
+    trapBuiltOrigin('origin', 'codex', CODEX_SID);
+    const day = path.join(process.env.CODEX_HOME!, 'sessions', '2026', '09', '23');
+    fs.mkdirSync(day, { recursive: true });
+    fs.writeFileSync(
+      path.join(day, `rollout-2026-09-23T10-43-27-${CODEX_SID}.jsonl`),
+      JSON.stringify({ type: 'session_meta', payload: { id: CODEX_SID, originator: 'codex_exec' } }) + '\n',
+    );
+    const { deps, starts } = mockDeps({ owns: { [CODEX_SID]: 'codex' } });
+    await runFollowUp('fu', { followUp: 'origin' }, deps);
+    expect(starts.map((s) => [s.harness, s.opts.resumeSession])).toEqual([['codex', CODEX_SID]]);
   });
 
   it('an origin claimed before evidence carried harness still resolves through the trap claim', async () => {
@@ -214,6 +290,21 @@ describe('runner — evidence records the harness', () => {
     await runFollowUp('solo', { harness: 'codex' }, deps);
     expect(readEvidence('solo', 'work')).toMatchObject({ harness: 'codex', sessionId: 'codex-new-1' });
     expect(notes('solo')[0]).toBe('working');
+  });
+
+  it('a claude model on a codex spawn is dropped for codex’s default and noted', async () => {
+    const { deps, starts } = mockDeps({ owns: {} });
+    await runFollowUp('m', { harness: 'codex', model: 'claude-opus-5-5' }, deps);
+    expect(starts[0]!.opts.model).toBeUndefined();
+    expect(notes('m')[0]).toBe("working: model claude-opus-5-5 is a claude model — dropped, using codex's default");
+    expect(notes('m').at(-1)).toBe('done: finished on codex');
+  });
+
+  it('a gpt model on a claude spawn is dropped too; a matching model passes through', async () => {
+    const { deps, starts } = mockDeps({ owns: {} });
+    await runFollowUp('g', { harness: 'claude', model: 'gpt-5' }, deps);
+    await runFollowUp('k', { harness: 'codex', model: 'gpt-5' }, deps);
+    expect(starts.map((s) => s.opts.model)).toEqual([undefined, 'gpt-5']);
   });
 
   it('a trap-claimed catch stamps the trap’s harness', () => {
