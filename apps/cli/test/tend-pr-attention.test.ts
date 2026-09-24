@@ -41,7 +41,7 @@ const pr = (over: Partial<PrEvidence> = {}): PrEvidence => ({
   state: 'OPEN',
   draft: false,
   reviewDecision: '',
-  mergeStateStatus: 'BLOCKED',
+  mergeStateStatus: 'CLEAN',
   headSha: 'abc1234',
   checks: { total: 2, passed: 1, failed: 0, pending: 1 },
   review: { unresolvedThreads: 0, changesRequested: false },
@@ -119,6 +119,39 @@ describe('attention kinds — stand and clear', () => {
     expect(renderTend(buildTendReport())).toContain('stack #8 → #9: next #8');
     mergeEvidence(Q, 'work', { pr: { ...lower, state: 'MERGED' } });
     expect(kinds()).toContain('pr:ready');
+  });
+
+  it('merge state gates pr:ready: green and approved but DIRTY is pr:conflict, never ready', () => {
+    const green = { checks: { total: 2, passed: 2, failed: 0, pending: 0 }, reviewDecision: 'APPROVED' };
+    prDispatch({ ...green, mergeStateStatus: 'DIRTY', baseRefName: 'main' });
+    const r = buildTendReport();
+    expect(r.attention).toEqual([
+      expect.objectContaining({ kind: 'pr:conflict', note: '#9 conflicts with main', mergeStateStatus: 'DIRTY', prUrl: URL_ }),
+    ]);
+    expect(r.verdict).not.toBe('needs-attention');
+    restamp({ ...green, mergeStateStatus: 'BEHIND' });
+    expect(kinds()).toEqual([]); // behind: neither conflict nor ready
+    for (const m of ['BLOCKED', 'UNKNOWN', '']) {
+      restamp({ ...green, mergeStateStatus: m });
+      expect(kinds()).toEqual([]);
+    }
+    restamp({ ...green, mergeStateStatus: 'CLEAN' });
+    expect(kinds()).toEqual(['pr:ready']); // clean: conflict clears, ready stands
+    restamp({ ...green, mergeStateStatus: 'DIRTY', state: 'MERGED' });
+    expect(kinds()).toEqual([]);
+  });
+
+  it('pr:conflict is never on the hook, even while a fix continuation runs', () => {
+    expect(onTheHook('pr:conflict', [{ id: FIX, bucket: 'active' }], { reviewRounds: new Set([FIX]), watchFollowUp: FIX })).toBeUndefined();
+  });
+
+  it('prKinds: HAS_HOOKS and UNSTABLE are mergeable; DIRTY stands beside checks and review', () => {
+    const green = { checks: { total: 1, passed: 1, failed: 0, pending: 0 } };
+    expect(prKinds(pr({ ...green, mergeStateStatus: 'HAS_HOOKS' }))).toEqual(['pr:ready']);
+    expect(prKinds(pr({ ...green, mergeStateStatus: 'UNSTABLE' }))).toEqual(['pr:ready']);
+    expect(prKinds(pr({ checks: { total: 1, passed: 0, failed: 1, pending: 0 }, mergeStateStatus: 'DIRTY', review: { unresolvedThreads: 1, changesRequested: false } })))
+      .toEqual(['pr:review', 'pr:checks', 'pr:conflict']);
+    expect(prKinds(pr({ ...green, draft: true, mergeStateStatus: 'DIRTY' }))).toEqual(['pr:draft', 'pr:conflict']);
   });
 
   it('pr:checks stands on a failed check at the head; clears on green or merge', () => {
@@ -231,7 +264,7 @@ describe('the on-the-hook rule', () => {
 
 describe('attentionKinds (config.toml)', () => {
   it('defaults to everything but landed', () => {
-    expect(loadConfig().attentionKinds).toEqual(['question', 'pr:draft', 'pr:review', 'pr:checks', 'pr:ready']);
+    expect(loadConfig().attentionKinds).toEqual(['question', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready']);
   });
 
   it('filters what tend shows', () => {
@@ -246,7 +279,7 @@ describe('attentionKinds (config.toml)', () => {
 
   it('rejects an unknown kind, naming the valid set', () => {
     config('attentionKinds = ["question", "pr:merged"]\n');
-    expect(() => loadConfig()).toThrow(/unknown kind "pr:merged".*question, landed, pr:draft, pr:review, pr:checks, pr:ready/);
+    expect(() => loadConfig()).toThrow(/unknown kind "pr:merged".*question, landed, pr:draft, pr:review, pr:checks, pr:conflict, pr:ready/);
   });
 
   it('prKinds is pure over one observation', () => {

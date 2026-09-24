@@ -52,6 +52,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
     'pr:draft': 'draft',
     'pr:review': 'review',
     'pr:checks': 'checks',
+    'pr:conflict': 'conflicts',
     'pr:ready': 'ready',
     landed: 'landed',
     watch: 'watch',

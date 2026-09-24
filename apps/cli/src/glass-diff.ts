@@ -18,8 +18,10 @@ const LANDED_MAX=8,LANDED_WINDOW_MS=86400000;
 const STALE_DAEMON_MS=90000,STALE_SEAT_MS=1800000;
 // A PR state badge's class: GitHub's state colors (.pr-merged purple,
 // .pr-open green, .pr-draft grey, .pr-closed red). An open PR whose badge
-// carries news (failed checks, changes requested, pending) keeps that tone.
+// carries news (failed checks, changes requested, pending) keeps that tone;
+// a merge-state badge fills: conflicts in GitHub's red, behind grey.
 function prBadgeClass(b){if(!b)return 'dim';const state=b.state||'open';
+ if(state==='open'&&b.merge)return 'pr-'+b.merge;
  return state==='open'&&b.tone&&b.tone!=='ok'?b.tone:'pr-'+state}
 const GLASS_TABS=['deck','dispatches','traps','prs','notices'];
 function tabFromHash(hash){const tab=String(hash||'').replace(/^#/,'');return GLASS_TABS.includes(tab)?tab:'deck'}

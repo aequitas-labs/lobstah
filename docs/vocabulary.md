@@ -177,7 +177,7 @@ badge) and `apps/cli/src/pr-watch.ts` (check, registration, evidence).
 | `merge-state` | `mergeStateStatus` changed (`value`). Evidence only. |
 | `draft` | Draft flipped (`value`). Evidence only. |
 | `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. |
-| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. `review.changesRequested` comes from `reviewDecision` or any reviewer's latest decisive review; `unresolvedThreads` from the GraphQL query, omitted for an observation where that query failed. Comment bodies are never stored. The object is merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show. |
+| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. `review.changesRequested` comes from `reviewDecision` or any reviewer's latest decisive review; `unresolvedThreads` from the GraphQL query, omitted for an observation where that query failed. Comment bodies are never stored. The object is merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show: `merged`, `closed`, `draft`, `conflicts` (`DIRTY`, filled GitHub red, ahead of checks and review), `checks n/m failed`, `changes requested`, `n unresolved`, `checks n/m` (pending), `behind` (`BEHIND`, grey; not an attention kind), `review`, `green` (only for a mergeable merge state), `blocked`, `merge unknown`. |
 | PR record | `~/.lobstah/prs/<owner>__<repo>__<n>.json` — the PR's latest observation keyed by the PR, not by a dispatch: the evidence `pr` object plus `key`, `repo` (`<owner>/<repo>`), and `dispatches` (the ids whose watch observed it; empty for a human's or a culled PR). **Owner:** `packages/core/src/prs.ts` (`upsertPr`, `readPrs`); the one writer is the preset's observation path (`observePr`), on every observation, man-owned or dispatch-owned — a dispatch-owned one also stamps that dispatch's evidence, which stays the per-dispatch view. Tend's `pr:*` kinds and `pr:ready` stack suppression, the glass PRs tab and stacks, the merged/closed notice, and PR acks read records first and fall back to dispatch evidence only for a PR with no record yet. `cull` removes records merged or closed longer than its window, never open ones. |
 
 Every event carries `headSha`. A dispatch-owned PR watch emits only work
@@ -278,7 +278,8 @@ never until someone acknowledges it.
 | `pr:draft` | Evidence `pr` is open and draft. | Ready for review, merged, or closed. |
 | `pr:review` | Evidence `pr` is open with `review.unresolvedThreads > 0` or `review.changesRequested`. | Every thread resolved and no changes requested, or merged / closed. |
 | `pr:checks` | Evidence `pr` is open with a failed check on the observed head. | Green on the head, or merged / closed. |
-| `pr:ready` | Evidence `pr` is open, not draft, no `pr:review` condition holds, and it is approved — or every check passed with none pending. | Merged or closed (or a review condition arises). |
+| `pr:conflict` | Evidence `pr` is open and `mergeStateStatus` is `DIRTY` (GitHub: conflicting with its base). | The merge state leaves `DIRTY` (rebased or merged clean), or merged / closed. |
+| `pr:ready` | Evidence `pr` is open, not draft, no `pr:review` condition holds, `mergeStateStatus` is mergeable (`CLEAN`, `HAS_HOOKS`, or `UNSTABLE` — the last only means non-required checks are red, which `pr:checks` already carries), and it is approved — or every check passed with none pending. `DIRTY`, `BEHIND`, `BLOCKED`, and `UNKNOWN` never yield ready. | Merged or closed (or a review condition arises, or the merge state stops being mergeable). |
 
 `pr:*` kinds read only the `pr:` watch's evidence — never a forge call —
 and carry `prUrl`, `number`, and the fields they derive from. Unconsumed
@@ -292,7 +293,9 @@ chain (the evidence owner and its `followUp` descendants) that is a pickup
 feedback round — pickup's map records it with kind `review` — or the `pr:`
 watch's fix continuation — the watch records it as `lastFollowUpId`. It
 reappears when that dispatch finishes without clearing the condition.
-`question`, `landed`, `pr:draft`, and `pr:ready` are never suppressed.
+`question`, `landed`, `pr:draft`, `pr:conflict`, and `pr:ready` are never
+suppressed — a rebase is the human's or the helm's call, never assumed to be
+the fix continuation's.
 
 **Answered questions.** A `question` stands only while no message to the
 dispatch is newer than its latest `needs-decision` / `blocked` entry. A

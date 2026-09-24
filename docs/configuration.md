@@ -14,7 +14,7 @@ keys of that section.
 |---|---|---|
 | `notifyCommand` | — | Exec'd by the daemon on wake-worthy status transitions with `LOBSTAH_ID`, `LOBSTAH_LANE`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_AT` in the environment. Fire-and-forget; point it at ntfy, a Slack helper, anything. |
 | `notifyVerbs` | `["needs-decision", "blocked", "done", "failed"]` | Which verbs fire `notifyCommand`. |
-| `attentionKinds` | `["question", "pr:draft", "pr:review", "pr:checks", "pr:ready"]` | Which attention kinds `man tend` lists — and so what the desktop pet and the glass walk across the screen. Valid kinds: `question`, `landed` (opt-in), `pr:draft`, `pr:review`, `pr:checks`, `pr:ready`; an unknown kind is a config error naming the valid set. Notify is edge-triggered and fires once per transition; attention is level-triggered and stands until its clear condition ([vocabulary.md](vocabulary.md#attention-contract)). |
+| `attentionKinds` | `["question", "pr:draft", "pr:review", "pr:checks", "pr:conflict", "pr:ready"]` | Which attention kinds `man tend` lists — and so what the desktop pet and the glass walk across the screen. Valid kinds: `question`, `landed` (opt-in), `pr:draft`, `pr:review`, `pr:checks`, `pr:conflict`, `pr:ready`; an unknown kind is a config error naming the valid set. Notify is edge-triggered and fires once per transition; attention is level-triggered and stands until its clear condition ([vocabulary.md](vocabulary.md#attention-contract)). |
 | `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
 
 ## `[repos.<key>]` — workspace definitions

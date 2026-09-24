@@ -878,12 +878,12 @@ async function mainCli(): Promise<void> {
         const watch = watches.get(r.key);
         const ageMins = Math.max(0, Math.floor((now - Date.parse(prSortAt(r))) / 60_000));
         return {
-          number: `#${r.number}`, repo: r.repo, state: r.state, draft: r.draft,
+          number: `#${r.number}`, repo: r.repo, state: r.state, badge: prBadge(r).text, draft: r.draft,
           checks: `${r.checks.passed}/${r.checks.total} passed, ${r.checks.failed} failed, ${r.checks.pending} pending`,
           observed: Number.isFinite(ageMins) ? `${ageMins}m ago` : 'unknown',
           watch: watch ? (watch.lastError ? 'error' : watch.done ? 'done' : 'watching') : 'no watch',
         };
-      }), ['number', 'repo', 'state', 'draft', 'checks', 'observed', 'watch']));
+      }), ['number', 'repo', 'state', 'badge', 'draft', 'checks', 'observed', 'watch']));
       break;
     }
     case 'cull': {

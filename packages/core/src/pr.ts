@@ -348,31 +348,59 @@ export function parseUnresolvedThreads(stdout: string): number | undefined {
   }
 }
 
+/**
+ * GitHub merge states under which an open PR can merge. CLEAN is the plain
+ * case; HAS_HOOKS is clean with pre-receive hooks; UNSTABLE is mergeable with
+ * non-required checks failing — those failures already stand as pr:checks,
+ * so they do not also withhold ready. DIRTY (conflicts), BEHIND, BLOCKED,
+ * UNKNOWN, and an unobserved '' never yield ready.
+ */
+export const MERGEABLE_STATES: ReadonlySet<string> = new Set(['CLEAN', 'HAS_HOOKS', 'UNSTABLE']);
+
+/** True when the observed merge state lets the PR merge (see MERGEABLE_STATES). */
+export function isMergeable(mergeStateStatus: string | undefined): boolean {
+  return MERGEABLE_STATES.has((mergeStateStatus ?? '').toUpperCase());
+}
+
+/** True when GitHub reports the PR conflicting with its base. */
+export function isConflicting(mergeStateStatus: string | undefined): boolean {
+  return (mergeStateStatus ?? '').toUpperCase() === 'DIRTY';
+}
+
 export interface PrBadge {
   text: string;
   tone: 'ok' | 'warn' | 'bad' | 'dim';
   /** GitHub's PR state, which the glass colors the way GitHub does (merged purple, open green, draft grey, closed red). */
   state: 'open' | 'draft' | 'merged' | 'closed';
+  /** Set when the badge is about the merge state: the glass fills `conflicts` GitHub red and `behind` grey. */
+  merge?: 'conflicts' | 'behind';
 }
 
 /**
  * The one-word PR state shown by tend, catch, and the glass — one
  * derivation so the three never disagree. Terminal first, then what blocks
- * a merge, in the order a human would act on it.
+ * a merge, in the order a human would act on it: a conflict first (a rebase
+ * reruns everything after it), then checks and review. `green` only when the
+ * merge state is mergeable, so the badge never reads ready where tend's
+ * pr:ready would not stand.
  */
 export function prBadge(pr: PrEvidence): PrBadge {
   const { total, failed, pending, passed } = pr.checks;
+  const merge = (pr.mergeStateStatus ?? '').toUpperCase();
   if (pr.state === 'MERGED') return { text: 'merged', tone: 'ok', state: 'merged' };
   if (pr.state === 'CLOSED') return { text: 'closed', tone: 'bad', state: 'closed' };
   if (pr.draft) return { text: 'draft', tone: 'dim', state: 'draft' };
+  if (merge === 'DIRTY') return { text: 'conflicts', tone: 'bad', state: 'open', merge: 'conflicts' };
   if (failed > 0) return { text: `checks ${failed}/${total} failed`, tone: 'bad', state: 'open' };
   if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested) return { text: 'changes requested', tone: 'bad', state: 'open' };
   const threads = pr.review?.unresolvedThreads ?? 0;
   if (threads > 0) return { text: `${threads} unresolved`, tone: 'warn', state: 'open' };
   if (pending > 0) return { text: `checks ${passed}/${total}`, tone: 'warn', state: 'open' };
-  if (pr.mergeStateStatus === 'DIRTY') return { text: 'conflicts', tone: 'bad', state: 'open' };
+  if (merge === 'BEHIND') return { text: 'behind', tone: 'dim', state: 'open', merge: 'behind' };
   if (pr.reviewDecision === 'REVIEW_REQUIRED') return { text: 'review', tone: 'warn', state: 'open' };
-  return { text: 'green', tone: 'ok', state: 'open' };
+  if (MERGEABLE_STATES.has(merge)) return { text: 'green', tone: 'ok', state: 'open' };
+  if (merge === 'BLOCKED') return { text: 'blocked', tone: 'warn', state: 'open' };
+  return { text: 'merge unknown', tone: 'dim', state: 'open' };
 }
 
 /** The continuation brief for PR events that are work: a failed check or a review decision. */

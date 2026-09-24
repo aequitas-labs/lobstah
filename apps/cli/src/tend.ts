@@ -16,6 +16,8 @@ import {
   pendingIds,
   prBadge,
   prSortAt,
+  isConflicting,
+  isMergeable,
   queuedDescriptor,
   readEvidence,
   readPrs,
@@ -108,7 +110,9 @@ export interface TendNotice {
  * - `pr:draft`: evidence pr open and draft.
  * - `pr:review`: open, with unresolved review threads or changes requested.
  * - `pr:checks`: open, with failed checks on the observed head.
- * - `pr:ready`: open, not draft, no pr:review standing, approved or all checks passed with none pending.
+ * - `pr:conflict`: open, and GitHub reports it conflicting with its base (mergeStateStatus DIRTY).
+ * - `pr:ready`: open, not draft, no pr:review standing, merge state mergeable (CLEAN / HAS_HOOKS /
+ *   UNSTABLE), and approved or all checks passed with none pending.
  * - `watch`: an unconsumed man-owned watch event — machinery, always on.
  * Only `question` and `watch` drive the verdict; the rest are things to look at.
  */
@@ -136,6 +140,8 @@ export interface TendAttention {
   state?: string;
   draft?: boolean;
   reviewDecision?: string;
+  /** GitHub's merge state as observed (pr:conflict stands on DIRTY; pr:ready needs a mergeable one). */
+  mergeStateStatus?: string;
   headSha?: string;
   checks?: PrEvidence['checks'];
   review?: PrEvidence['review'];
@@ -175,8 +181,10 @@ export function prKinds(pr: PrEvidence): AttentionKind[] {
   const review = (pr.review?.unresolvedThreads ?? 0) > 0 || pr.review?.changesRequested === true;
   if (review) out.push('pr:review');
   if (failed > 0) out.push('pr:checks');
+  if (isConflicting(pr.mergeStateStatus)) out.push('pr:conflict');
   // Ready never contradicts review: outstanding threads or a changes request mean not ready yet.
-  if (!pr.draft && !review && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
+  // Nor the forge: a PR that cannot merge as it stands (conflicting, behind, blocked, unknown) is not ready.
+  if (!pr.draft && !review && isMergeable(pr.mergeStateStatus) && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
   return out;
 }
 
@@ -201,6 +209,7 @@ const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
       .filter(Boolean)
       .join(', ')}`,
   'pr:checks': (pr) => `#${pr.number} checks ${pr.checks.failed}/${pr.checks.total} failed`,
+  'pr:conflict': (pr) => `#${pr.number} conflicts with ${pr.baseRefName ?? 'its base'}`,
   'pr:ready': (pr) => `#${pr.number} ready to merge`,
 };
 
@@ -300,6 +309,7 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
         state: pr.state,
         draft: pr.draft,
         reviewDecision: pr.reviewDecision,
+        mergeStateStatus: pr.mergeStateStatus,
         headSha: pr.headSha,
         checks: pr.checks,
         ...(pr.review ? { review: pr.review } : {}),

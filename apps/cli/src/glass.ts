@@ -344,6 +344,7 @@ tr.rowhead{cursor:pointer}tr.rowhead:hover{background:#1c2330}
 .badge{border-radius:5px;padding:1px 7px;font-size:11px;line-height:1.5;border:1px solid var(--line);white-space:nowrap;display:inline-block}
 .badge.pr-merged{background:var(--pr-merged);border-color:var(--pr-merged-fg);color:#fff}.badge.pr-open{background:var(--pr-open);border-color:var(--pr-open);color:#fff}
 .badge.pr-draft{background:var(--pr-draft);border-color:var(--pr-draft);color:#fff}.badge.pr-closed{background:var(--pr-closed);border-color:var(--pr-closed);color:#fff}
+.badge.pr-conflicts{background:var(--pr-closed);border-color:var(--pr-closed);color:#fff}.badge.pr-behind{background:var(--pr-draft);border-color:var(--pr-draft);color:#fff}
 .badge.unreported{font-weight:normal;font-size:10px;padding:0 5px;vertical-align:1px}
 .v-done{color:var(--ok)}.v-working{color:var(--fg)}.v-needs-decision,.v-blocked{color:var(--bad);font-weight:bold}
 .v-failed{color:var(--bad)}.v-paused,.v-unknown{color:var(--dim)}
@@ -475,8 +476,8 @@ function dispatchCards(list){if(!list.length)return '<div class="empty">no dispa
   +(x.note?'<div class="note">'+esc(x.note)+'</div>':'')
   +'<div class="foot">'+addrCell(x)+' '+prCell(x)+'</div></div>'}).join('')+'</div>'}
 // Attention kinds (tend's contract): the short label shown in lobs, the pet, and the table.
-const KIND_LABEL={'pr:draft':'draft','pr:review':'review','pr:checks':'checks','pr:ready':'ready',landed:'landed',watch:'watch'};
-const KIND_TONE={'pr:review':'bad','pr:checks':'bad','pr:ready':'ok','pr:draft':'dim',watch:'warn'};
+const KIND_LABEL={'pr:draft':'draft','pr:review':'review','pr:checks':'checks','pr:conflict':'conflicts','pr:ready':'ready',landed:'landed',watch:'watch'};
+const KIND_TONE={'pr:review':'bad','pr:checks':'bad','pr:conflict':'pr-conflicts','pr:ready':'ok','pr:draft':'dim',watch:'warn'};
 const kindLabel=(k)=>KIND_LABEL[k]||'';
 function kindCell(x){
  if(x.kind==='question')return '<span class="v-'+x.verb+'">'+x.verb+'</span>';

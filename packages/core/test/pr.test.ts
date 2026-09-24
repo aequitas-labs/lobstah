@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { derivePrEvents, parsePrRef, parseUnresolvedThreads, PR_VIEW_FIELDS, prBadge, prEvidence, prReview } from '../src/pr.js';
+import { derivePrEvents, isConflicting, isMergeable, parsePrRef, parseUnresolvedThreads, PR_VIEW_FIELDS, prBadge, prEvidence, prReview } from '../src/pr.js';
 import type { GhPrView, PrEvidence } from '../src/pr.js';
 
 const ref = parsePrRef('pr:acme/web#26')!;
@@ -125,11 +125,30 @@ describe('prBadge — one derivation for tend, catch, and glass', () => {
     ['pending checks', ev({}), 'checks 1/2', 'warn', 'open'],
     ['unresolved threads', { ...ev({ ...green }), review: { unresolvedThreads: 2, changesRequested: false } }, '2 unresolved', 'warn', 'open'],
     ['changes requested by a reviewer', { ...ev({ ...green }), review: { changesRequested: true } }, 'changes requested', 'bad', 'open'],
-    ['conflicts', ev({ ...green, mergeStateStatus: 'DIRTY' }), 'conflicts', 'bad', 'open'],
-    ['review required', ev({ ...green, reviewDecision: 'REVIEW_REQUIRED' }), 'review', 'warn', 'open'],
+    ['review required', ev({ ...green, reviewDecision: 'REVIEW_REQUIRED', mergeStateStatus: 'CLEAN' }), 'review', 'warn', 'open'],
     ['green', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'CLEAN' }), 'green', 'ok', 'open'],
+    ['green with hooks', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'HAS_HOOKS' }), 'green', 'ok', 'open'],
+    ['green, non-required checks unstable', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'UNSTABLE' }), 'green', 'ok', 'open'],
+    ['blocked', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'BLOCKED' }), 'blocked', 'warn', 'open'],
+    ['merge unknown', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'UNKNOWN' }), 'merge unknown', 'dim', 'open'],
   ])('%s', (_label, pr, text, tone, state) => {
     expect(prBadge(pr)).toEqual({ text, tone, state });
+  });
+
+  it.each([
+    // Green checks and approval do not make a conflicting PR ready — conflicts comes first.
+    ['conflicts', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'DIRTY' }), 'conflicts', 'bad', 'conflicts'],
+    ['conflicts over failed checks', ev({ ...failedAndReviewed, mergeStateStatus: 'DIRTY' }), 'conflicts', 'bad', 'conflicts'],
+    ['behind', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'BEHIND' }), 'behind', 'dim', 'behind'],
+  ])('merge-state badge: %s', (_label, pr, text, tone, merge) => {
+    expect(prBadge(pr)).toEqual({ text, tone, state: 'open', merge });
+  });
+
+  it('isMergeable / isConflicting', () => {
+    expect(['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].every(isMergeable)).toBe(true);
+    expect(['DIRTY', 'BEHIND', 'BLOCKED', 'UNKNOWN', '', undefined].some(isMergeable)).toBe(false);
+    expect(isConflicting('DIRTY')).toBe(true);
+    expect(isConflicting('BEHIND')).toBe(false);
   });
 
   it('counts checks, with a StatusContext judged by its state', () => {
