@@ -108,12 +108,19 @@ One session holds the helm. You talk to it; it runs the fleet.
 npm i -g lobstah             # the plugin wires hooks to the CLI; it doesn't bundle it
 ```
 
-Then, in Claude Code or Codex (v0.114+; Codex asks for a one-time hook trust
-review):
+In Claude Code:
 
 ```
 /plugin marketplace add aequitas-labs/lobstah
 /plugin install lobstah@lobstah
+```
+
+In a Codex terminal (v0.114+), install the plugin and review its hooks when
+Codex asks:
+
+```bash
+codex plugin marketplace add aequitas-labs/lobstah
+codex plugin add lobstah@lobstah
 ```
 
 **Configure**
@@ -126,33 +133,48 @@ lobstah daemon install       # the helm dispatches; the daemon supervises
 
 **Run**
 
-In the session you want at the helm:
+In the Claude Code session you want at the helm:
 
 ```
 /lobstah:helm                # Claude Code; anywhere: lobstah man helm
 ```
 
-Codex ships the skills but no slash commands: run `lobstah man helm
---session <id>` with the id the session-start brief prints. Then just talk:
+Open a new Codex task after installation; use its task id from the
+session-start brief:
+
+```bash
+lobstah man helm --session <task-id>
+```
+
+Then just talk:
 "dispatch a fix for the flaky login test in myapp." The helm writes a
 standalone brief, dispatches it, answers workers' questions, and brings you
 the catch.
 
 Getting woken is the habit to keep. With the plugin, the Stop hook parks the
 helm at every turn end and wakes it the moment a worker needs it, so there is
-nothing to arm. Without hooks, arm the watcher yourself: run `lobstah man
-wait` as a background task, follow its `next:` line when it returns, and
-re-arm it every time.
+nothing to arm. In Codex, the turn stays parked while work is in flight and
+resumes with the notice that needs attention. Without hooks, arm the watcher
+yourself: run `lobstah man wait` as a background task, follow its `next:`
+line when it returns, and re-arm it every time.
 
 To turn another live session into a worker, open it in a linked worktree
 and `/lobstah:soak` (or `lobstah soak`). The helm addresses bait to its
 `wt:<trap>` address and `/lobstah:stow` signs it off.
 
+In a Codex task opened from a linked worktree:
+
+```bash
+lobstah soak --session <task-id>
+```
+
+To sign off later, run `lobstah stow`.
+
 **See it**
 
 ```
 /lobstah:tend                # Claude Code: the fleet at a keystroke
-lobstah man tend             # anywhere: fleet verdict, waiting questions,
+lobstah man tend             # Codex: fleet verdict, waiting questions,
                              # each item's chain, PR, and merge gate
 ```
 
