@@ -100,84 +100,48 @@ lobstah catch <uuid>         # the evidence: branch, commits, PR, session
 
 ## Quickstart: the lobstah man 🦞
 
-One session holds the helm. You talk to it; it runs the fleet.
+One session holds the helm. You talk to it; it runs the fleet. Every step
+is a `lobstah` command, so the sequence is the same in any harness and in a
+plain terminal.
 
 **Install**
 
 ```bash
 npm i -g lobstah             # the plugin wires hooks to the CLI; it doesn't bundle it
-```
-
-In Claude Code:
-
-```
-/plugin marketplace add aequitas-labs/lobstah
-/plugin install lobstah@lobstah
-```
-
-In a Codex terminal (v0.114+), install the plugin and review its hooks when
-Codex asks:
-
-```bash
-codex plugin marketplace add aequitas-labs/lobstah
-codex plugin add lobstah@lobstah
-```
-
-**Configure**
-
-```bash
 lobstah init --scan ~/src    # same repos, same config as the router
-lobstah doctor               # includes a row for the installed plugin
 lobstah daemon install       # the helm dispatches; the daemon supervises
 ```
 
+Then install the lobstah plugin for your harness
+([Claude Code](docs/harness/claude-code.md#install) ·
+[Codex](docs/harness/codex.md#install)) and open a new session. The plugin's
+session-start brief prints the session's id; `<id>` below is that id.
+
 **Run**
 
-In the Claude Code session you want at the helm:
-
-```
-/lobstah:helm                # Claude Code; anywhere: lobstah man helm
-```
-
-Open a new Codex task after installation; use its task id from the
-session-start brief:
-
 ```bash
-lobstah man helm --session <task-id>
+lobstah man helm --session <id>                   # sign on; prints the charter
+lobstah man wait --session <id> --timeout 900     # arm the watcher when the hook asks
+lobstah dispatch --repo myapp --brief ./brief.md  # or just ask the helm to dispatch
+lobstah man tend                                  # fleet verdict, waiting questions, PRs
+lobstah glass                                     # the same, as a live localhost page
+lobstah man relieve --session <id>                # step down
 ```
 
-Then just talk:
-"dispatch a fix for the flaky login test in myapp." The helm writes a
-standalone brief, dispatches it, answers workers' questions, and brings you
-the catch.
+Then just talk: "dispatch a fix for the flaky login test in myapp." The helm
+writes a standalone brief, dispatches it, answers workers' questions, and
+brings you the catch.
 
-Getting woken is the habit to keep. With the plugin, the Stop hook parks the
-helm at every turn end and wakes it the moment a worker needs it, so there is
-nothing to arm. In Codex, the turn stays parked while work is in flight and
-resumes with the notice that needs attention. Without hooks, arm the watcher
-yourself: run `lobstah man wait` as a background task, follow its `next:`
-line when it returns, and re-arm it every time.
+Getting woken is the habit to keep. At every turn end the plugin's Stop hook
+either parks the helm until something needs it, or asks you to arm
+`man wait` as a background task and re-arm it after each wake. With no hook,
+run `man wait` in the foreground and loop on it.
 
-To turn another live session into a worker, open it in a linked worktree
-and `/lobstah:soak` (or `lobstah soak`). The helm addresses bait to its
-`wt:<trap>` address and `/lobstah:stow` signs it off.
+To turn another live session into a worker, open it in a linked worktree and
+run `lobstah soak --session <id>`; the helm addresses bait to its
+`wt:<trap>` address, and `lobstah stow` signs it off.
 
-In a Codex task opened from a linked worktree:
-
-```bash
-lobstah soak --session <task-id>
-```
-
-To sign off later, run `lobstah stow`.
-
-**See it**
-
-```
-/lobstah:tend                # Claude Code: the fleet at a keystroke
-lobstah man tend             # Codex: fleet verdict, waiting questions,
-                             # each item's chain, PR, and merge gate
-```
-
+Harness specifics: [Claude Code](docs/harness/claude-code.md) · [Codex](docs/harness/codex.md).
 The full pattern (charter, grounds, the three tiers of getting woken, traps)
 is in [docs/man.md](docs/man.md).
 
@@ -272,8 +236,8 @@ continues the turn the moment something needs it.
   `/lobstah:relieve`, `/lobstah:soak`, and `/lobstah:stow` commands, no
   settings surgery.
   This repo doubles as the plugin marketplace for both agent registries —
-  in either harness: `/plugin marketplace add aequitas-labs/lobstah`, then
-  `/plugin install lobstah@lobstah`. The park stays inert until a directory
+  install steps per harness are in [docs/harness/claude-code.md](docs/harness/claude-code.md)
+  and [docs/harness/codex.md](docs/harness/codex.md). The park stays inert until a directory
   opts in with a `.lobstah-man` file or the session soaks. Codex hooks need
   Codex v0.114+ and a one-time trust review. Plugin versions track the CLI
   (plugin 0.5.x goes with `lobstah` 0.5.x); `lobstah doctor` and the session

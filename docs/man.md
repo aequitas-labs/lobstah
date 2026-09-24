@@ -225,9 +225,8 @@ Install it from the project you'll run the lobstah man in:
 
 ```bash
 # Easiest: the plugin ships the hooks + the man and trap skills, no settings
-# edits — /plugin marketplace add aequitas-labs/lobstah, then
-# /plugin install lobstah@lobstah (Claude Code and Codex v0.114+; Codex asks
-# for a one-time hook trust review). Or wire the Claude hook by hand:
+# edits — install steps per harness in docs/harness/claude-code.md and
+# docs/harness/codex.md. Or wire the Claude hook by hand:
 lobstah man init            # merges the Stop hook into .claude/settings.local.json
 lobstah man init --shared   # …or the committed .claude/settings.json
 lobstah man init --global   # …or once into ~/.claude/settings.json — any

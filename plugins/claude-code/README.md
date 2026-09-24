@@ -39,18 +39,15 @@ The plugin's version tracks the CLI's: plugin 0.5.x is written for
 row, and the session-start brief adds one line when the installed plugin is
 behind.
 
-## Opting in
+## Using it
 
-The hook never conscripts a session. A session opts in as one of two roles:
-
-| Role | How | What it does |
-| ---- | --- | ------------ |
-| Helm (orchestrator) | `/lobstah:helm`, or `lobstah man helm` | Signs on as the one lobstah man for its grounds: prints the charter and gives the `man wait` command to arm. `/lobstah:relieve` steps down. |
-| Trap (worker) | `/lobstah:soak`, or `lobstah soak` from a linked worktree | Takes work the helm addresses to its `wt:<trap>` address. Never from the primary checkout. `/lobstah:stow` signs off. |
-
-No session flag is needed: Claude Code exports `CLAUDE_CODE_SESSION_ID` to
-every command, and the CLI reads it. The session-start brief prints both
-commands with the id filled in, in case you want `--session` explicitly.
+The hooks never conscript a session: they stay inert until a session signs
+on as the helm (`lobstah man helm`) or as a trap (`lobstah soak`, from a
+linked worktree). Signing on, the session id, getting woken, and how the
+Claude Code CLI and desktop app differ are in
+[docs/harness/claude-code.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/claude-code.md). The quickstart, the same
+in every harness, is in the
+[README](https://github.com/aequitas-labs/lobstah#quickstart-the-lobstah-man-).
 
 Manual fallbacks without the helm: `touch .lobstah-man` in a project (every
 session there parks as the lobstah man), or `LOBSTAH_MAN=1` for one launch.

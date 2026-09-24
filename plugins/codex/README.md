@@ -37,20 +37,15 @@ plugin marketplace upgrade lobstah && codex plugin add lobstah@lobstah`.
 `lobstah doctor` shows a `plugin codex` row, and the session-start brief
 adds one line when the installed plugin is behind.
 
-## Opting in
+## Using it
 
-The park never conscripts a session. A session opts in as one of two roles:
-
-| Role | How | What it does |
-| ---- | --- | ------------ |
-| Helm (orchestrator) | `lobstah man helm --session <task-id>` | Signs on as the one lobstah man for its grounds: prints the charter, parks at turn end, and receives wakes and digests. `lobstah man relieve` steps down. |
-| Trap (worker) | `lobstah soak --session <task-id>` from a linked worktree | Takes work the helm addresses to its `wt:<trap>` address. Never from the primary checkout. `lobstah stow` signs off. |
-
-Open a new Codex task after installation and use the task id from its
-session-start brief for `<task-id>`. Codex ships skills, not slash commands.
-With work in flight, the Stop hook keeps a helm task parked at turn end and
-resumes it when attention arrives; a trap can also listen in the foreground
-with `lobstah soak --wait --timeout 600`.
+The hooks never conscript a session: they stay inert until a session signs
+on as the helm (`lobstah man helm`) or as a trap (`lobstah soak`, from a
+linked worktree). Signing on, the session id, getting woken, and how the
+Codex CLI and desktop app differ are in
+[docs/harness/codex.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/codex.md). The quickstart, the same
+in every harness, is in the
+[README](https://github.com/aequitas-labs/lobstah#quickstart-the-lobstah-man-).
 
 Manual fallbacks without the helm: `touch .lobstah-man` in a project (every
 session there parks as the lobstah man), or `LOBSTAH_MAN=1` for one launch.
