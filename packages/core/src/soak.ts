@@ -283,7 +283,7 @@ export function claimBait(reg: TrapRegistration): { id: string; descriptor: Desc
       at: new Date().toISOString(),
     };
     atomicWrite(claimPath(id, 'work'), JSON.stringify(claim, null, 2));
-    mergeEvidence(id, 'work', { sessionId: reg.sessionId, deliveredTo: mine, deliveredAt: claim.at });
+    mergeEvidence(id, 'work', { sessionId: reg.sessionId, harness: reg.harness, deliveredTo: mine, deliveredAt: claim.at });
     heartbeatTrap(reg.trapId, { claimed: id, parked: true });
     return { id, descriptor };
   }

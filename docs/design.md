@@ -452,6 +452,20 @@ event stream each poll so the wedge detector sees a live wait, delivers the
 answer into the next turn, and stamps `working`. Only a turn ending on `working`
 (or no report) with an empty inbox ends the session and is stamped `done`.
 
+**The session's own harness resumes it.** A session only resumes under the
+harness that wrote it: a Codex thread id handed to Claude Code is "No
+conversation found". The descriptor's `harness` records what was asked, not
+what ran (a trap claims unaddressed work with whatever harness it is), so every
+run stamps `harness` into evidence beside `sessionId` (the adapter's for a
+headless run, the trap's for a claim), and one resolver reads it back for a
+follow-up's fork, a daemon restart, `lobstah swap`, and `attach`. It falls back
+to the claiming trap, then the session id's UUID version, then the descriptor.
+A follow-up whose `--harness` names something the chain never asked for is a
+swap: cold on that harness with the brief plus a progress note. A resume the
+harness refuses before doing any work falls back the same way and records
+`resume-fallback: <reason>` in the status note and evidence. It never fails
+the dispatch. The first status note says which of these happened.
+
 ```ts
 // inside the runner
 const thread = await adapter.start({

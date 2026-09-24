@@ -76,6 +76,9 @@ import {
   prBadge,
   prSortAt,
   readPrs,
+  handoffNote,
+  resolveSessionHarness,
+  worktreeProgress,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice, WatchAttention } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
@@ -751,21 +754,9 @@ async function mainCli(): Promise<void> {
             `or pass --force after cancelling.`,
         );
       }
-      const dirs = laneDirs(lane);
-      const descriptorFile = ['active', 'done']
-        .map((b) => path.join(dirs[b as 'active' | 'done'], id, 'descriptor.json'))
-        .find((f) => fs.existsSync(f));
-      const harness = descriptorFile
-        ? ((JSON.parse(fs.readFileSync(descriptorFile, 'utf8')) as Descriptor).harness ?? 'claude')
-        : 'claude';
-      let sessionId: string | undefined;
-      try {
-        sessionId = (
-          JSON.parse(fs.readFileSync(path.join(dirs.state, `${id}.evidence`), 'utf8')) as { sessionId?: string }
-        ).sessionId;
-      } catch {
-        // no evidence yet
-      }
+      // The session's own harness (evidence, else the claiming trap, else the
+      // id's UUID version, else the descriptor) — never guess from the ask.
+      const { harness = 'claude', sessionId } = resolveSessionHarness(id, loadConfig(), lane);
       if (!sessionId) throw new Error(`${id} has no recorded harness session to attach to`);
       const worktree = path.join(lobstahHome(), 'worktrees', id);
       const cwd = fs.existsSync(worktree) ? worktree : process.cwd();
@@ -794,7 +785,9 @@ async function mainCli(): Promise<void> {
 
       const descFile = path.join(activeDir, 'descriptor.json');
       const descriptor = JSON.parse(fs.readFileSync(descFile, 'utf8')) as Descriptor;
-      const fromHarness = descriptor.harness ?? 'default';
+      // The session's real harness, not the descriptor's ask — a trap-claimed
+      // or follow-up dispatch may be running on something else.
+      const fromHarness = resolveSessionHarness(id, loadConfig(), lane).harness ?? descriptor.harness ?? 'default';
       for (const key of ['harness', 'model', 'effort'] as const) {
         const v = opt(`--${key}`);
         if (v) descriptor[key] = v;
@@ -804,25 +797,7 @@ async function mainCli(): Promise<void> {
       // Progress note: the conversation cannot cross harnesses, so the next
       // incarnation gets brief + committed state + working-tree status.
       const worktree = path.join(lobstahHome(), 'worktrees', id);
-      let progress = 'No worktree progress recorded.';
-      if (fs.existsSync(worktree)) {
-        const git = (...a: string[]) => spawnSync('git', a, { cwd: worktree, encoding: 'utf8' }).stdout?.trim() ?? '';
-        const commits = git('log', '--oneline', '-15');
-        const status = git('status', '--short');
-        progress = `Commits so far:
-${commits || '(none)'}
-
-Uncommitted changes:
-${status || '(clean)'}`;
-      }
-      fs.writeFileSync(
-        path.join(activeDir, 'handoff'),
-        `You are taking over this dispatch from a previous agent session (harness: ${fromHarness}). ` +
-          `Its conversation is not available — the worktree state below is the ground truth. ` +
-          `Review it, then continue the brief from where it stops.
-
-${progress}`,
-      );
+      fs.writeFileSync(path.join(activeDir, 'handoff'), handoffNote(fromHarness, worktreeProgress(worktree)));
 
       // Kill the old incarnation and clear runner state; the daemon observes
       // an unclaimed active dispatch and spawns fresh with the handoff note.
