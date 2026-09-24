@@ -240,19 +240,20 @@ and nothing addressed is ever silently rerouted.
 ## Helm contract
 
 The **helm** is the orchestrator seat: one interactive session signed on as
-the lobsterman for its grounds through `lobstah man helm` — the validated
+the lobstah man for its grounds through `lobstah man helm` — the validated
 write path; nothing else touches `helm/`. Soak enlists workers; helm enlists
 the one who dispatches to them. **Owner:** `packages/core/src/helm.ts`.
 **Enforcement:** one registration file per grounds — the data model cannot
 hold two; a live foreign holder refuses sign-on without `--take`. The rule
 is strict: once a helm is claimed, the orchestrator verbs that consume helm
-state (`man wait`, `man report`, the lobsterman park) are reserved for the
+state (`man wait`, `man report`, the lobstah man park) are reserved for the
 helm session — any other caller is refused with guidance (or, for the hook,
 silently ignored). Read verbs (`man tend`, `man brief`) and the enlistment
 verbs stay open. A stale helm reserves nothing.
 
 | Word | Meaning |
 | ---- | ------- |
+| lobstah man | One interactive session that takes the helm for a grounds, triages the fleet, dispatches work, and answers traps; `lobstah man` also names its CLI command group. |
 | `helm` | Sign a session on as the orchestrator for one grounds. Prints the charter and enables the Stop hook without a marker file. Re-running from the same session is an idempotent re-sign. |
 | watcher registration | `~/.lobstah/watchers/<session-id>.json` stores a `man wait` or `soak --wait` process's PID and heartbeat. The waiter refreshes it while running and removes it on exit; a heartbeat older than five seconds is stale, and a second waiter for the same session refuses. |
 | `man haul --park` | Make the Stop hook wait for attention while work is in flight. `[helm].park = "block"` selects the same mode. In arm mode, the hook allows a stop with a live watcher or blocks with the arm command. |

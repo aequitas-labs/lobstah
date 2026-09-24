@@ -1,11 +1,11 @@
 ---
-name: lobsterman
-description: Take the helm and orchestrate background coding work through lobstah — sign on as the one lobsterman for a grounds, dispatch supervised agents with standalone briefs, address work to traps, answer their questions, collect evidence. Use when the user asks to take the helm, orchestrate, dispatch, run the fleet, farm work out to agents, check on dispatched work, or mentions lobstah or dispatches.
+name: man
+description: Take the helm and orchestrate background coding work through lobstah — sign on as the one lobstah man for a grounds, dispatch supervised agents with standalone briefs, address work to traps, answer their questions, collect evidence. Use when the user asks to take the helm, orchestrate, dispatch, run the fleet, farm work out to agents, check on dispatched work, or mentions lobstah or dispatches.
 ---
 
-# The lobsterman
+# The lobstah man
 
-You are the lobsterman: the one session at the helm for its grounds. You set
+You are the lobstah man: the one session at the helm for its grounds. You set
 traps (dispatches), read buoys (status), and haul when something needs you.
 The boat (the lobstah daemon) does the supervision — you never watch a trap
 work, and you never poll on a loop.
@@ -61,13 +61,14 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 
 ## Getting woken instead of polling
 
-- After `man helm`, run `lobstah man wait --session <id> --timeout 900`
-  as a background task; re-arm after every completion. The Stop hook blocks
-  with standing attention or the arm command when no watcher is live.
-- A timeout (exit 3) carries the digest when something changed; acknowledge
-  it with `lobstah man report`. `man haul --park` waits in the hook.
+- At the helm, the Stop hook (`lobstah man haul`) parks you at turn end
+  while work is in flight and wakes you with events and periodic digests.
+  Nothing to arm.
+- Hookless? Loop `lobstah man wait --timeout 900`: exit 0 is an event,
+  exit 3 a timeout carrying the digest when something changed. Acknowledge
+  a digest with `lobstah man report`.
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
-without the plugin; see docs/lobsterman.md. `lobstah man` prints the full
+without the plugin; see docs/man.md. `lobstah man` prints the full
 manual; `lobstah doctor` diagnoses a broken setup.

@@ -92,7 +92,7 @@ export function liveHelms(ttlMs: number, now = Date.now()): HelmRegistration[] {
 }
 
 /**
- * The strict helm rule: once a lobsterman has signed on, the orchestrator
+ * The strict helm rule: once a lobstah man has signed on, the orchestrator
  * verbs that consume helm state are theirs alone. Returns the refusal
  * message for an unidentified or foreign caller, or undefined when the call
  * is allowed (no live helm anywhere, or the caller is one). A call that
@@ -111,7 +111,7 @@ export function helmGate(live: HelmRegistration[], sessionId?: string, grounds?:
     }
     if (holder) return undefined;
   }
-  if (live.length === 0) return undefined; // no claimed lobsterman — open water
+  if (live.length === 0) return undefined; // no claimed lobstah man — open water
   if (sessionId !== undefined && live.some((h) => h.sessionId === sessionId)) return undefined;
   const holders = live.map((h) => `${h.grounds}=${h.sessionId.slice(0, 8)}`).join(', ');
   return (

@@ -21,4 +21,4 @@ Volunteer this session as a worker (a trap).
    - Never run `man` verbs — they are the helm's.
    - Never merge.
 
-Work arrives at turn end. `/stow` signs the trap off.
+Work arrives at turn end. `/lobstah:stow` signs the trap off.

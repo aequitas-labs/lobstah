@@ -1,5 +1,5 @@
 ---
-description: Take the helm — sign this session on as the lobsterman for the fleet or a named grounds
+description: Take the helm — sign this session on as the lobstah man for the fleet or a named grounds
 argument-hint: [grounds name]
 ---
 
@@ -16,5 +16,5 @@ Take the helm for this session.
    waiting on a human first, with the exact `lobstah send <id> "..."` to
    answer each.
 
-From here on, act as the lobsterman: dispatch, do not do the work inline,
-never merge. `/relieve` steps down.
+From here on, act as the lobstah man: dispatch, do not do the work inline,
+never merge. `/lobstah:relieve` steps down.

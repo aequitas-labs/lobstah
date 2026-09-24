@@ -1,6 +1,6 @@
-# The lobsterman: a single-liaison session on lobstah
+# The lobstah man: a single-liaison session on lobstah
 
-The pattern: you talk to **one** interactive agent — the lobsterman — and it
+The pattern: you talk to **one** interactive agent — the lobstah man — and it
 runs the fleet: dispatching work, supervising, escalating only real decisions.
 Lobstah supplies the machinery for doing that locally without the liaison
 burning tokens on supervision.
@@ -21,7 +21,7 @@ token-efficiency point: supervision is a filesystem read, not a conversation.
 **The helm is harness-agnostic: drive the fleet from whichever session you
 prefer.** The contract is the CLI, not the harness — a Claude Code session,
 a Codex session (hooks since v0.114), or anything with a terminal via the
-foreground loop (`man wait` for the lobsterman, `soak --wait` for workers)
+foreground loop (`man wait` for the lobstah man, `soak --wait` for workers)
 holds the same seat with the same verbs. Workers are equally mixed:
 dispatches pick their harness per item (`--harness claude|codex`), so a
 Codex helm can run Claude workers and the reverse. Sign-on records which
@@ -80,7 +80,7 @@ subscriptions, escape a rate limit, or re-roll a session that went sideways.
 
 ## Tending the string
 
-`lobstah man tend` is the whole-fleet pass — the lobsterman working every trap
+`lobstah man tend` is the whole-fleet pass — the lobstah man working every trap
 in one sweep. It prints a verdict and the story of each piece of work, from a
 pure disk read: no forge calls, no tokens.
 
@@ -217,12 +217,12 @@ work in flight allows a stop with a live watcher and otherwise blocks with
 the arm command. `man haul --park` or `[helm].park = "block"` makes the hook
 wait for attention itself. Without a Stop hook, run `man wait` in the foreground.
 
-The hook is a CLI command — `lobstah man haul` (the lobsterman hauls the
+The hook is a CLI command — `lobstah man haul` (the lobstah man hauls the
 trapline; every orchestrator-facing command lives under `lobstah man`).
-Install it from the project you'll run the lobsterman in:
+Install it from the project you'll run the lobstah man in:
 
 ```bash
-# Easiest: the plugin ships the hooks + the lobsterman and trap skills, no settings
+# Easiest: the plugin ships the hooks + the man and trap skills, no settings
 # edits — /plugin marketplace add aequitas-labs/lobstah, then
 # /plugin install lobstah@lobstah (Claude Code and Codex v0.114+; Codex asks
 # for a one-time hook trust review). Or wire the Claude hook by hand:
@@ -308,7 +308,7 @@ cannot hold two:
   are reserved for the helm session (identified by `--session`, else hook
   stdin, else `$CLAUDE_CODE_SESSION_ID` — inside Claude Code no flag is
   needed; a refusal names the id it resolved and from where), and no
-  other session parks as a lobsterman — those verbs consume the helm's
+  other session parks as a lobstah man — those verbs consume the helm's
   wakes and cursor. A grounds-scoped call is stricter still: it belongs to
   that grounds' own helm, never a neighboring one. `man tend`/`man brief`
   stay open to everyone; a stale helm reserves nothing. Workers never run
@@ -352,7 +352,7 @@ set (one harness launched inside the other) from the session id's format:
 Codex thread ids are UUIDv7, Claude Code session ids UUIDv4 — and
 `--harness` overrides; an undecidable case refuses rather than guessing.
 Once soaking, the same Stop hook
-that parks a lobsterman parks the worker: at turn end it delivers messages
+that parks a lobstah man parks the worker: at turn end it delivers messages
 first, then claims bait and wakes with the brief. While it works a catch,
 the park wakes it for `lobstah send` messages and cancels instead.
 
