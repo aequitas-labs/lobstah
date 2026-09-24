@@ -288,7 +288,9 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 <title>spyglass</title>
 <link rel="icon" type="image/png" href="/icon.png">
 <style>
-:root{--bg:#0e1116;--card:#161b22;--line:#2b3240;--fg:#dbe2ea;--dim:#8b96a5;--ok:#4fc17c;--warn:#e2b93d;--bad:#e26d5c;--link:#6cb2e2}
+:root{--bg:#0e1116;--card:#161b22;--line:#2b3240;--fg:#dbe2ea;--dim:#8b96a5;--ok:#4fc17c;--warn:#e2b93d;--bad:#e26d5c;--link:#6cb2e2;
+ /* GitHub's dark-mode PR state colors (light: merged #8250df, open #1f883d, draft #6e7781, closed #cf222e) */
+ --pr-merged:#8957e5;--pr-merged-fg:#ab7df8;--pr-open:#238636;--pr-draft:#6e7681;--pr-closed:#da3633}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;padding-block:14px;padding-inline:16px;
  /* sticky footer: a full-height column whose active tab grows, so the footer sits at the viewport bottom on short pages */
@@ -338,6 +340,8 @@ tr.rowhead{cursor:pointer}tr.rowhead:hover{background:#1c2330}
 .card .note{margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card .foot{margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;color:var(--dim);font-size:12px}
 .badge{border-radius:5px;padding:1px 7px;font-size:11px;line-height:1.5;border:1px solid var(--line);white-space:nowrap;display:inline-block}
+.badge.pr-merged{background:var(--pr-merged);border-color:var(--pr-merged-fg);color:#fff}.badge.pr-open{background:var(--pr-open);border-color:var(--pr-open);color:#fff}
+.badge.pr-draft{background:var(--pr-draft);border-color:var(--pr-draft);color:#fff}.badge.pr-closed{background:var(--pr-closed);border-color:var(--pr-closed);color:#fff}
 .badge.unreported{font-weight:normal;font-size:10px;padding:0 5px;vertical-align:1px}
 .v-done{color:var(--ok)}.v-working{color:var(--fg)}.v-needs-decision,.v-blocked{color:var(--bad);font-weight:bold}
 .v-failed{color:var(--bad)}.v-paused,.v-unknown{color:var(--dim)}
@@ -451,7 +455,7 @@ function addrCell(x){return x.for?esc(x.for)+(x.evidence&&x.evidence.deliveredTo
 function prCell(x){const url=x.evidence&&(x.evidence.prUrl||x.evidence.pr&&x.evidence.pr.url);if(!url)return '';
  const b=x.prBadge;
  return '<a href="'+esc(url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">PR</a>'
-  +(b?' <span class="badge '+esc(b.tone)+'" title="observed '+esc(b.observedAt)+'">'+esc(b.text)+'</span>':'')
+  +(b?' <span class="badge '+esc(prBadgeClass(b))+'" title="observed '+esc(b.observedAt)+'">'+esc(b.text)+'</span>':'')
   +(x.prGate?' <span class="badge dim" title="merge gate (pick)">'+esc(x.prGate)+'</span>':'')}
 function chainRows(list){if(!st.chain)return list;
  const byId=new Map(list.map(x=>[x.id,x]));
@@ -500,10 +504,10 @@ function deckPrs(inp,view){const shown=inp.stacks.slice(0,3),more=inp.stacks.len
   if(view==='cards')return '<div class="deckstack"><div class="dim">'+chain+' · '+(next?'next #'+next.number:'nothing mergeable')+'</div><div class="cards">'
    +members.map(p=>{const kinds=standing.get(p.key)||[];const acked=kinds.length>0&&kinds.every(a=>a.acked);
     const badges=kinds.length?kinds.map(a=>'<span class="badge '+esc(KIND_TONE[a.kind]||'dim')+'">'+esc(kindLabel(a.kind))+'</span>').join('')
-     :'<span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>';
+     :'<span class="badge '+esc(prBadgeClass(p.badge))+'">'+esc(p.badge.text)+'</span>';
     return '<div class="card'+(acked?' acked':'')+'" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b>'+badges+'</div>'
      +'<div class="meta">'+esc(p.repo)+' · '+esc(p.badge.text)+(acked?' · acked':'')+'</div></div>'}).join('')+'</div></div>';
-  const badges=members.flatMap(p=>(standing.get(p.key)||[]).map(a=>'<span class="badge '+esc(KIND_TONE[a.kind]||p.badge.tone)+(a.acked?' acked':'')+'">#'+p.number+' '+esc(p.badge.text)+'</span>')).join(' ');
+  const badges=members.flatMap(p=>(standing.get(p.key)||[]).map(a=>'<span class="badge '+esc(KIND_TONE[a.kind]||prBadgeClass(p.badge))+(a.acked?' acked':'')+'">#'+p.number+' '+esc(p.badge.text)+'</span>')).join(' ');
   return '<div class="deckline'+(next?' click':'')+'"'+(next?' onclick="'+prOpen(next)+'"':'')+'><b>'+chain+'</b> <span class="dim">· '+(next?'next #'+next.number:'nothing mergeable')+'</span>'+(badges?' · '+badges:'')+'</div>'}).join(''):'<div class="empty">none</div>';
  return '<section><h2><a href="#prs">PRs →</a></h2>'+body+(more?'<a class="deckmore" href="#prs">+'+more+' more →</a>':'')+'</section>'}
 function renderDeck(d,inp){const view=inp.view;
@@ -533,7 +537,7 @@ function prTable(d,inp){const rows=[];
  return table(['PR','title','state','checks','review','merge','watch','gate'],rows,'no PR evidence')+otherWatches(inp)}
 function prCards(d,inp){const groups=prGroups(inp);
  const body=groups.length?groups.map(({s,prs})=>'<h2>'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?'':' · history')+'</h2><div class="cards">'
-  +prs.map(p=>'<div class="card" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b><span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span></div>'
+  +prs.map(p=>'<div class="card" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b><span class="badge '+esc(prBadgeClass(p.badge))+'">'+esc(p.badge.text)+'</span></div>'
    +'<div class="meta">'+esc(p.repo)+' · '+esc(p.state)+(p.draft?' · draft':'')+' · '+prMerge(p)+'</div>'
    +'<div class="foot"><span>'+prChecks(p)+'</span><span>'+watchCell(p.watch)+'</span>'+(p.gate?'<span>gate '+esc(p.gate)+'</span>':'')+'</div></div>').join('')+'</div>').join('')
   :'<div class="empty">no PR evidence</div>';
@@ -578,8 +582,8 @@ function renderModal(d){
    +esc(item.attentionError?item.attentionError:(item.attentionKinds||[]).join(' · '))+'</span></div></div>';
  }else if(modal.type==='pr'){
   const v=prModalView(d,modal.key),p=v.pr,s=v.stack,w=v.watch;
-  html='<span class="x" onclick="closeModal()">×</span><h3>'+prLink(p)+' '+esc(p.title||'')+' <span class="badge '+esc(p.badge.tone)+'">'+esc(p.badge.text)+'</span>'
-    +(p.draft&&p.badge.text!=='draft'?' <span class="badge dim">draft</span>':'')+'</h3>'
+  html='<span class="x" onclick="closeModal()">×</span><h3>'+prLink(p)+' '+esc(p.title||'')+' <span class="badge '+esc(prBadgeClass(p.badge))+'">'+esc(p.badge.text)+'</span>'
+    +(p.draft&&p.badge.text!=='draft'?' <span class="badge pr-draft">draft</span>':'')+'</h3>'
    +'<div class="sub">'+esc(p.repo)+' · '+esc(p.state)+' · observed '+ageEl(p.observedAt)+' ago'+(p.gate?' · gate '+esc(p.gate):'')+'</div>'
    +'<div class="sec">checks</div><div>'+prChecks(p)+'</div>'
    +'<div class="sec">review</div><div>'+(prReview(p)||'<span class="dim">no review yet</span>')+'</div>'

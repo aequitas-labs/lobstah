@@ -343,6 +343,8 @@ export function parseUnresolvedThreads(stdout: string): number | undefined {
 export interface PrBadge {
   text: string;
   tone: 'ok' | 'warn' | 'bad' | 'dim';
+  /** GitHub's PR state, which the glass colors the way GitHub does (merged purple, open green, draft grey, closed red). */
+  state: 'open' | 'draft' | 'merged' | 'closed';
 }
 
 /**
@@ -352,17 +354,17 @@ export interface PrBadge {
  */
 export function prBadge(pr: PrEvidence): PrBadge {
   const { total, failed, pending, passed } = pr.checks;
-  if (pr.state === 'MERGED') return { text: 'merged', tone: 'ok' };
-  if (pr.state === 'CLOSED') return { text: 'closed', tone: 'dim' };
-  if (pr.draft) return { text: 'draft', tone: 'dim' };
-  if (failed > 0) return { text: `checks ${failed}/${total} failed`, tone: 'bad' };
-  if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested) return { text: 'changes requested', tone: 'bad' };
+  if (pr.state === 'MERGED') return { text: 'merged', tone: 'ok', state: 'merged' };
+  if (pr.state === 'CLOSED') return { text: 'closed', tone: 'bad', state: 'closed' };
+  if (pr.draft) return { text: 'draft', tone: 'dim', state: 'draft' };
+  if (failed > 0) return { text: `checks ${failed}/${total} failed`, tone: 'bad', state: 'open' };
+  if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested) return { text: 'changes requested', tone: 'bad', state: 'open' };
   const threads = pr.review?.unresolvedThreads ?? 0;
-  if (threads > 0) return { text: `${threads} unresolved`, tone: 'warn' };
-  if (pending > 0) return { text: `checks ${passed}/${total}`, tone: 'warn' };
-  if (pr.mergeStateStatus === 'DIRTY') return { text: 'conflicts', tone: 'bad' };
-  if (pr.reviewDecision === 'REVIEW_REQUIRED') return { text: 'review', tone: 'warn' };
-  return { text: 'green', tone: 'ok' };
+  if (threads > 0) return { text: `${threads} unresolved`, tone: 'warn', state: 'open' };
+  if (pending > 0) return { text: `checks ${passed}/${total}`, tone: 'warn', state: 'open' };
+  if (pr.mergeStateStatus === 'DIRTY') return { text: 'conflicts', tone: 'bad', state: 'open' };
+  if (pr.reviewDecision === 'REVIEW_REQUIRED') return { text: 'review', tone: 'warn', state: 'open' };
+  return { text: 'green', tone: 'ok', state: 'open' };
 }
 
 /** The continuation brief for PR events that are work: a failed check or a review decision. */

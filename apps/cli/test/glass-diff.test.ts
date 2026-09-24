@@ -204,6 +204,10 @@ describe('glass change detector', () => {
     const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
     server.close();
     expect(page).toContain(GLASS_DIFF_JS.trim());
+    // PR state colors live in one place: GitHub's dark palette, one class per state.
+    expect(page).toContain('--pr-merged:#8957e5;--pr-merged-fg:#ab7df8;');
+    for (const state of ['merged', 'open', 'draft', 'closed']) expect(page).toContain(`.badge.pr-${state}{background:var(--pr-${state})`);
+    expect(page).toContain("'<span class=\"badge '+esc(prBadgeClass(p.badge))+'\">'");
     expect(page).toContain('#chain-control{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}');
     expect(page).toContain('<label id="chain-control"><input id="f-chain" type="checkbox"> group by chain</label>');
     // A missing live helm hides the chip; the page must still ship both it and its detail modal.

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { PrEvidence } from '@lobstah/core';
 import { deriveGlassPrs } from '../src/glass-prs.js';
+import { GLASS_DIFF_JS } from '../src/glass-diff.js';
+
+// The page's badge class, evaluated from the exact source the glass inlines.
+const prBadgeClass = new Function(`${GLASS_DIFF_JS}; return prBadgeClass;`)() as (b: unknown) => string;
 
 const branches = ['main', 'glass', 'evidence', 'kinds', 'acks', 'tabs'];
 const numbers = [26, 27, 29, 32, 33];
@@ -32,6 +36,20 @@ describe('glass PR stacks', () => {
     expect(prs.filter((p) => p.nextMergeable).map((p) => p.number)).toEqual([27]);
     expect(stacks.find((s) => s.nextNumber === 27)?.numbers).toEqual([27, 29, 32, 33]);
     expect(stacks.at(-1)?.numbers).toEqual([26]);
+  });
+
+  it('colors PR state badges as GitHub does: merged purple, open green, draft grey, closed red', () => {
+    const rows = five();
+    rows[0] = row(26, 'main', 'glass', 'MERGED');
+    rows[1] = row(27, 'glass', 'evidence', 'CLOSED');
+    rows[2] = { ...row(29, 'evidence', 'kinds'), pr: { ...row(29, 'evidence', 'kinds').pr, draft: true } };
+    rows[3] = { ...row(32, 'kinds', 'acks'), pr: { ...row(32, 'kinds', 'acks').pr, checks: { total: 2, passed: 1, failed: 1, pending: 0 } } };
+    const cls = new Map(deriveGlassPrs(rows).prs.map((p) => [p.number, prBadgeClass(p.badge)]));
+    expect(cls.get(26)).toBe('pr-merged');
+    expect(cls.get(27)).toBe('pr-closed');
+    expect(cls.get(29)).toBe('pr-draft');
+    expect(cls.get(32)).toBe('bad'); // open with failed checks keeps its news
+    expect(cls.get(33)).toBe('pr-open');
   });
 
   it('shows an untracked base as a plain branch floor', () => {
