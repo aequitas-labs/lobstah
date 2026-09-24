@@ -30,6 +30,22 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(read('plugins/claude-code/README.md')).toContain('lobstah for Claude Code');
   });
 
+  it('Claude slash commands are namespaced in user-facing text', () => {
+    const commands = 'plugins/claude-code/commands';
+    expect(fs.existsSync(`${root}/${commands}/tend.md`)).toBe(true);
+    expect(fs.existsSync(`${root}/${commands}/lobstah.md`)).toBe(false);
+    const files = [
+      'README.md', 'docs/lobsterman.md', 'plugins/claude-code/README.md',
+      'plugins/claude-code/skills/lobsterman/SKILL.md',
+      'plugins/claude-code/skills/trap/SKILL.md',
+      ...fs.readdirSync(`${root}/${commands}`).filter((name) => name.endsWith('.md')).map((name) => `${commands}/${name}`),
+      ...fs.readdirSync(`${root}/apps/cli/src`).filter((name) => name.endsWith('.ts')).map((name) => `apps/cli/src/${name}`),
+    ];
+    for (const file of files) {
+      expect(read(file).match(/(?<![\w:./-])\/(?:helm|soak|stow|relieve|tend)\b/g), file).toBeNull();
+    }
+  });
+
   it('both plugins wire the same hook commands', () => {
     const commands = (raw: string): Record<string, string[]> => {
       const parsed = JSON.parse(raw) as {

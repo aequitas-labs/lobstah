@@ -17,4 +17,4 @@ Take the helm for this session.
    answer each.
 
 From here on, act as the lobsterman: dispatch, do not do the work inline,
-never merge. `/relieve` steps down.
+never merge. `/lobstah:relieve` steps down.
