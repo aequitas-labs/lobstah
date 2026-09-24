@@ -7,7 +7,7 @@
   },
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc"
+    "build": "node ../../scripts/build-glass.mjs && tsc -p glass && tsc"
   },
   "dependencies": {
     "@lobstah/core": "workspace:*",

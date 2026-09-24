@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { appendStatus, enqueue, ensureLayout, mergeEvidence, postNotice, takeHelm } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
+import { GLASS_PAGE } from '../src/glass-page.generated.js';
 
 let home: string;
 beforeEach(() => {
@@ -54,7 +55,13 @@ describe('glass snapshot', () => {
     const port = (server.address() as AddressInfo).port;
     const page = await fetch(`http://127.0.0.1:${port}/`);
     expect(page.status).toBe(200);
-    expect(await page.text()).toContain('spyglass');
+    const html = await page.text();
+    expect(html).toBe(GLASS_PAGE);
+    // One self-contained document: styles and script inline, nothing else to fetch but the served assets.
+    expect(html.match(/<script>/g)).toHaveLength(1);
+    expect(html.match(/<style>/g)).toHaveLength(1);
+    expect(html).not.toMatch(/<script[^>]* src=|<link[^>]*stylesheet/);
+    expect(html).toContain('<title>spyglass</title>');
     const data = (await (await fetch(`http://127.0.0.1:${port}/data`)).json()) as { version: string };
     expect(data.version).toBeTruthy();
     server.close();

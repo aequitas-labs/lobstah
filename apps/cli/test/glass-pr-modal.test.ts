@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { GLASS_DIFF_JS } from '../src/glass-diff.js';
+import * as detector from '../src/glass-diff.js';
 
-// The PR modal's pure data selection, evaluated from the exact page source.
+// The PR modal's pure data selection, imported exactly as the page's bundle imports it.
 type View = {
   pr: { key: string; number: number };
   stack: { numbers: number[]; position: number; size: number; floor: string; nextNumber?: number; nextMergeable: boolean; blockedBy?: number } | null;
   chain: Array<{ id: string; verb?: string; modalKey?: string; culled?: boolean }>;
   watch: { key: string; owner: string; lastCheckedAt: string | null; lastError: string | null; cursor: string } | null;
 };
-const page = new Function(`${GLASS_DIFF_JS}; return { prModalView, watchState, sectionHashes, dirtySections };`)() as {
+const page = detector as unknown as {
   prModalView: (d: unknown, key: string) => View | null;
   watchState: (w: unknown) => { text: string; at: string | null };
   sectionHashes: (d: unknown, ui: unknown, now: number) => Record<string, string>;
