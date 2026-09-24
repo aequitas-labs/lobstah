@@ -42,8 +42,9 @@ naming a dispatch id. Then:
 - A `needs-decision` or `blocked` report queues your question to the human.
   The answer arrives in the dispatch's inbox: `lobstah inbox <id>`.
 - Check `lobstah inbox <id>` at natural checkpoints.
-- After every report, park again (end the turn, or `lobstah soak --wait`)
-  so answers, messages, and the next assignment reach you.
+- Run `lobstah soak --wait --timeout 900` as a background task after sign-on
+  and after every completion or report. The Stop hook blocks with standing
+  work or the arm command when no watcher is live. Re-run after exit 3.
 
 ## Fences
 

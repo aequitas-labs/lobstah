@@ -44,6 +44,8 @@ export interface HelmConfig {
   ttlSecs: number;
   /** Minimum seconds between haul-delivered digests for a helm session. */
   reportSecs: number;
+  /** Stop hook behavior: arm a background watcher or block in the hook. */
+  park?: 'arm' | 'block';
 }
 
 /** A named territory: the subset of configured repos one helm oversees. */

@@ -223,7 +223,7 @@ refused (the session lock); a stale one is adopted.
 
 | Word | Meaning |
 | ---- | ------- |
-| `soak` | Sign the worktree's trap on: it parks at turn end (Stop hook) and takes matching work. `--session` only on first sign-on; re-runs infer everything from the anchor file. `--one` stows after the first catch. `--wait` parks in the foreground — the hookless path: work prints plain, a quiet timeout exits 3, re-running re-arms. Workers never run `man` verbs. |
+| `soak` | Sign the worktree's trap on and take matching work. `--session` is needed only on first sign-on. `--one` stows after the first catch. `--wait` registers a watcher and waits for work; a quiet timeout exits 3. Workers never run `man` verbs. |
 | `stow` | Sign the trap off (run it in the worktree); an open catch requeues (a cancelled one finalizes as failed) and unread messages bounce to the helm. A trap always stows itself freely; stowing someone else's (`--wt`) is steering — the claimed helm's alone. Stow closes the seat, never the session: an opted-in session can only be asked to stop, and a still-looping worker re-enlists visibly (`trap-signed-on`). |
 | address | `--for wt:<trap>` targets one trap; `session:<id>` is an alias resolved to the trap at dispatch time. **Sticky:** addressed work is never the daemon's — it waits for its trap; an orphan (trap gone) surfaces as a `bait-orphaned` notice for the helm to re-address, release, or cancel. Delivery stamps a receipt (`deliveredTo`/`deliveredAt`) into evidence. Unaddressed work defers to a parked matching trap for `[soak].deferSecs`, then the daemon spawns headless. |
 | message | `send wt:<trap> "<text>"` — a conversational continuation, not work: no branch, no catch, no report obligation. Delivered before bait at the trap's next park, stamped with its sender (`helm` / `session:<id>` / `terminal`); undeliverable messages bounce to the helm as notices. |
@@ -253,11 +253,13 @@ verbs stay open. A stale helm reserves nothing.
 
 | Word | Meaning |
 | ---- | ------- |
-| `helm` | Sign a session on as the orchestrator for one grounds. Prints the charter, arms the Stop-hook park without a marker file, and gates the periodic digest. Re-running from the same session is an idempotent re-sign. |
+| `helm` | Sign a session on as the orchestrator for one grounds. Prints the charter and enables the Stop hook without a marker file. Re-running from the same session is an idempotent re-sign. |
+| watcher registration | `~/.lobstah/watchers/<session-id>.json` stores a `man wait` or `soak --wait` process's PID and heartbeat. The waiter refreshes it while running and removes it on exit; a heartbeat older than five seconds is stale, and a second waiter for the same session refuses. |
+| `man haul --park` | Make the Stop hook wait for attention while work is in flight. `[helm].park = "block"` selects the same mode. In arm mode, the hook allows a stop with a live watcher or blocks with the arm command. |
 | `relieve` | Step down. `--take` on another session's `helm` is the only force path: it displaces a live holder deliberately and leaves them a stand-down notice, delivered once at their next park. A holder whose heartbeat lapsed past `[helm].ttlSecs` is stale and claimable without `--take`. |
 | grounds | A named territory: the subset of configured repos one helm oversees, from `[grounds.*]`. A repo belongs to at most one grounds (config error otherwise). No grounds configured means one implicit `fleet` grounds covering every repo. |
 | charter | The helm's persona and scope fences, in Standard Technical English. Printed at sign-on and re-injected by `man brief` at every session start, so it survives restarts and compaction. |
-| digest | The delta since the reported-through cursor: catches landed, attention arisen, still-waiting, fleet verdict. Carried by `man report`, a `man wait` timeout, and — for a helm session, at `[helm].reportSecs` cadence — the park itself. Change-gated: an empty delta is never delivered. |
+| digest | The delta since the reported-through cursor: catches landed, attention arisen, still-waiting, fleet verdict. Carried by `man report`, a `man wait` timeout, and — in blocking park mode, at `[helm].reportSecs` cadence — the park itself. Change-gated: an empty delta is never delivered. |
 
 ## Attention contract
 

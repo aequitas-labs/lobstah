@@ -1,5 +1,5 @@
 {
-  "description": "Park the session while lobstah work is in flight; wake it the moment something needs attention. The Stop hook is inert unless the directory opts in with a .lobstah-man file (or LOBSTAH_MAN=1) or the session is soaking (lobstah soak). SessionStart announces the session id; SessionEnd stows a soaking session cleanly.",
+  "description": "At turn end, block with standing attention or the command to arm a watcher while work is in flight; allow the stop when a watcher is live. man haul --park waits in the hook. Inert unless the helm or trap is signed on or the directory opts in. SessionStart announces the session id; SessionEnd stows a soaking session.",
   "hooks": {
     "SessionStart": [
       {

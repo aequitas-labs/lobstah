@@ -16,7 +16,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-haul-queue-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
-  takeHelm({ sessionId, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000 });
+  takeHelm({ sessionId, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
 });
 afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
@@ -25,7 +25,7 @@ afterEach(() => {
 
 function haul() {
   const started = Date.now();
-  const res = spawnSync(process.execPath, [cli, 'man', 'haul', '--timeout', '2'], {
+  const res = spawnSync(process.execPath, [cli, 'man', 'haul', '--park', '--timeout', '2'], {
     encoding: 'utf8',
     env: { ...process.env, LOBSTAH_HOME: home },
     input: JSON.stringify({ session_id: sessionId }),
@@ -34,7 +34,7 @@ function haul() {
   return { ...res, elapsedMs: Date.now() - started };
 }
 
-describe('man haul with queued-only work', () => {
+describe('man haul --park with queued-only work', () => {
   for (const lane of ['work', 'chore'] as const) {
     it(`parks and heartbeats when ${lane} is queued`, () => {
       enqueue({ id: dispatchId, repo: 'web', brief: 'waiting for a claimant' }, lane);

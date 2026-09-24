@@ -118,7 +118,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
-  'man:haul': { flags: { '--timeout': { value: '<secs>' } } },
+  'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
   'man:brief': { flags: {} },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
 };
@@ -207,7 +207,7 @@ digest defers to. --grounds scopes digest and cursor to one helm's territory
 (that helm's alone). Reserved for the claimed helm; identify with --session
 (defaults --grounds to its own).`,
   'man:helm': `Take the helm: sign this session on as the one lobsterman for its grounds.
-Prints the charter, arms the Stop-hook park, and gates the periodic digest.
+Prints the charter, enables the Stop hook, and gates the digest.
 Sign-on records who the man is (harness, directory, host; --label names it).
 A live foreign holder refuses without --take; a stale one is claimable.
 The session id resolves --session, then hook stdin, then
@@ -221,10 +221,9 @@ blocks: it shows standing events unconsumed, else \`standing: none\`, exit 0
 (heartbeats the helm, defaults --grounds to its own).`,
   'man:init': `Install the haul Stop hook into Claude settings; --marker touches
 .lobstah-man to arm this directory.`,
-  'man:haul': `Stop-hook entry point: park the session while work is in flight (lobsterman
-or soaking worker); prints hook-decision JSON on an event. Hookless sessions
-use the foreground verbs instead: \`soak --wait\` (worker), \`man wait\`
-(lobsterman).`,
+  'man:haul': `Stop-hook entry: standing attention blocks immediately. In arm mode,
+work in flight requires a live watcher or the hook blocks with the arm command.
+--park or [helm].park = "block" waits in the hook instead.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
