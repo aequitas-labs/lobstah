@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>spyglass</title>
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <!-- scripts/build-glass.mjs inlines glass.css here -->
+    <link rel="stylesheet" href="./glass.css" />
+  </head>
+  <body>
+    <div class="headerline">
+      <h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1>
+      <span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings">⚙</button></span>
+    </div>
+    <div class="chips"><span id="chips" style="display: contents"></span><span class="chip dim" id="clock"></span></div>
+    <nav class="tabs" id="tabs" aria-label="Spyglass views">
+      <a href="#deck" data-tab="deck">On deck</a>
+      <a href="#dispatches" data-tab="dispatches">Dispatches</a>
+      <a href="#traps" data-tab="traps">Traps</a>
+      <a href="#prs" data-tab="prs">PRs</a>
+      <a href="#notices" data-tab="notices">Notices</a>
+    </nav>
+    <div class="controls">
+      <select id="f-lane">
+        <option value="">all lanes</option>
+        <option value="work">work</option>
+        <option value="chore">chore</option>
+      </select>
+      <select id="f-repo">
+        <option value="">all repos</option>
+      </select>
+      <select id="f-verb">
+        <option value="">all verbs</option>
+        <option>working</option>
+        <option>needs-decision</option>
+        <option>blocked</option>
+        <option>paused</option>
+        <option>done</option>
+        <option>failed</option>
+        <option>unknown</option>
+      </select>
+      <label id="chain-control"><input id="f-chain" type="checkbox" /> group by chain</label>
+      <select id="f-kind">
+        <option value="">all notice kinds</option>
+      </select>
+      <input id="f-q" type="search" placeholder="search id · note · brief" />
+    </div>
+    <main id="page-deck" class="tabpage"><div id="deck"></div></main>
+    <main id="page-dispatches" class="tabpage"><div id="dispatches"></div></main>
+    <main id="page-traps" class="tabpage"><div id="traps"></div></main>
+    <main id="page-prs" class="tabpage"><div id="prs"></div></main>
+    <main id="page-notices" class="tabpage"><div id="notices"></div></main>
+    <footer id="foot"></footer>
+    <div id="lobs"></div>
+    <div id="overlay"><div class="modal" id="modalbox"></div></div>
+    <!-- scripts/build-glass.mjs bundles src/main.ts and inlines it here -->
+    <script src="./src/main.ts"></script>
+  </body>
+</html>

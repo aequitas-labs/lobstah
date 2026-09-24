@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { PrEvidence } from '@lobstah/core';
 import { deriveGlassPrs } from '../src/glass-prs.js';
-import { GLASS_DIFF_JS } from '../src/glass-diff.js';
+import { prBadgeClass } from '../src/glass-diff.js';
 
-// The page's badge class, evaluated from the exact source the glass inlines.
-const prBadgeClass = new Function(`${GLASS_DIFF_JS}; return prBadgeClass;`)() as (b: unknown) => string;
+// The page's badge class: the same function the glass bundle imports.
 
 const branches = ['main', 'glass', 'evidence', 'kinds', 'acks', 'tabs'];
 const numbers = [26, 27, 29, 32, 33];

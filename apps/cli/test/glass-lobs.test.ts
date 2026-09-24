@@ -70,16 +70,6 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
     expect(items[3]?.text).toBe('…and 2 more — see attention');
   });
 
-  it('the page embeds this exact function', async () => {
-    const server = serveGlass(0);
-    await new Promise((r) => server.once('listening', r));
-    const port = (server.address() as AddressInfo).port;
-    const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
-    server.close();
-    expect(page).toContain(lobItems.toString());
-    expect(page).toContain('lobItems(att,{lobs:st.lobs');
-  });
-
   it('serves no settings endpoint: POST /settings gets the page like any unknown path', async () => {
     const server = serveGlass(0);
     await new Promise((r) => server.once('listening', r));

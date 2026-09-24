@@ -664,6 +664,46 @@ overrides the global, which overrides the adapter default.
 
 ---
 
+## Glass source
+
+The spyglass (`lobstah glass`) is served as one self-contained HTML document,
+but it is written as ordinary source files under `apps/cli/glass/`:
+
+| File | Holds |
+|---|---|
+| `index.html` | the markup skeleton: header, tabs, filter controls, one empty container per section, the modal overlay |
+| `glass.css` | every style; the design tokens (palette including the `.pr-*` badge states, spacing scale, card, badge, and modal metrics) are custom properties at the top |
+| `src/main.ts` | the entry: wires the controls and the window functions the markup's inline handlers call |
+| `src/poll.ts` | `/data` polling (every 2s, one request at a time, paused while the tab is hidden) and per-section change detection |
+| `src/route.ts` | the hash tabs (`#deck`, `#dispatches`, `#traps`, `#prs`, `#notices`) |
+| `src/prefs.ts` | the per-browser preferences and lob hides, in localStorage |
+| `src/render/*.ts` | one renderer per section: deck, dispatches, traps, prs, notices, modals, lobs, header |
+| `src/html.ts` | a small `html` tagged template: interpolations are escaped unless already markup |
+
+The pure helpers stay beside the server in `apps/cli/src` and are imported by
+both sides: `glass-diff.ts` (the change detector, tab route, filters, PR modal
+data) and `glass-lobs.ts` (which lobs walk). The `/data` payload type,
+`GlassSnapshot`, lives in `@lobstah/core`: `buildGlassSnapshot()` returns it
+and every renderer reads it, so a renamed field fails typecheck on both sides.
+The client typechecks under its own `apps/cli/glass/tsconfig.json` (DOM lib).
+
+`scripts/build-glass.mjs` is the bundle step, run by `apps/cli`'s `build`:
+esbuild bundles `src/main.ts` into one script, the CSS is whitespace-minified,
+both are inlined into `index.html`, and the result is written as a string
+module, `apps/cli/src/glass-page.generated.ts` (git-ignored), which
+`serveGlass` imports. The npm bundle and the compiled binaries therefore ship
+the page exactly as before: one document, no files beside it, and the images
+still served by `assetPath`. `pnpm glass:dev` rebuilds on every change under
+`apps/cli/glass` (restart a workspace `lobstah glass` to serve it).
+
+The glass tests load the built page into happy-dom with a fixture snapshot
+and assert on the DOM (`apps/cli/test/glass-page.test.ts`).
+`glass-fidelity.test.ts` diffs the page against the pre-split page
+(`test/fixtures/glass-legacy.html`) on three fixture fleets, section by
+section and by computed style.
+
+---
+
 ## Distribution
 
 MIT. Standalone-installable, useful with nothing else installed.
