@@ -165,10 +165,11 @@ describe('glass change detector', () => {
 
   it('On deck lands the newest eight catches of the last 24h, badging those past the cursor', async () => {
     const HOUR = 3600_000;
-    // Ten catches in the last 24h (c0 newest), one older; the cursor sits after c6, so c0..c5 are unreported.
+    // Ten catches in the last 24h (c0 newest, c9 oldest), one older; the cursor sits after the sixth (c4),
+    // so the four newest, c0..c3, are unreported.
     const catches = Array.from({ length: 10 }, (_, i) => ({
       key: `work:c${i}`, id: `c${i}`, lane: 'work', verb: i === 2 ? 'failed' : 'done', at: iso((i + 1) * HOUR),
-      note: `catch ${i}`, repo: 'web', unreported: i < 6,
+      note: `catch ${i}`, repo: 'web', unreported: i < 4,
     }));
     const old = { key: 'work:old', id: 'old', lane: 'work', verb: 'done', at: iso(25 * HOUR), note: 'yesterday', repo: 'web', unreported: false };
     // Shuffled on the wire: the page orders newest first itself.
@@ -186,7 +187,7 @@ describe('glass change detector', () => {
     expect(section).not.toContain('deckmore');
     expect(section).not.toContain('old');
     const lines = section.split('<div class="deckline').slice(1);
-    expect(lines.map((l) => l.includes('unreported'))).toEqual([true, true, true, true, true, true, false, false]);
+    expect(lines.map((l) => l.includes('unreported'))).toEqual([true, true, true, true, false, false, false, false]);
     expect(lines[2]).toContain('class="badge bad">failed</span>');
 
     // An empty window: the section's empty state.
