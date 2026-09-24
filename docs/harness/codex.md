@@ -35,10 +35,21 @@ says when the plugin is behind.
 | `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs. |
 
 There are no slash commands: the Codex plugin layout has no commands
-directory. Codex loads a skill when your request matches its description,
-so ask for the work ("take the helm for this repo", "work as a lobstah
-trap") or name the skill. The skill then runs the `lobstah` commands from
-the README quickstart.
+directory. The skills run the same `lobstah` commands as the README
+quickstart.
+
+## Invoking the skills
+
+*To be verified from a Codex session.*
+
+Codex documents two ways to trigger an installed skill:
+
+- **Implicitly.** Codex picks a skill when your request matches its
+  description: "take the helm for this repo" loads `man`, "work as a
+  lobstah trap" loads `trap`.
+- **Explicitly.** `/skills` lists the installed skills, and a `$name`
+  mention in a prompt invokes one: `$man take the helm`, `$trap soak from
+  this worktree`.
 
 ## The session id and `--session`
 
