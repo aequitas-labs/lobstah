@@ -61,12 +61,12 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 
 ## Getting woken instead of polling
 
-- At the helm, the Stop hook (`lobstah man haul`) parks you at turn end
-  while work is in flight and wakes you with events and periodic digests.
-  Nothing to arm.
-- Hookless? Loop `lobstah man wait --timeout 900`: exit 0 is an event,
-  exit 3 a timeout carrying the digest when something changed. Acknowledge
-  a digest with `lobstah man report`.
+- After `man helm` on Claude Code, arm `lobstah man wait --session <id>
+  --timeout 900` as a background task. Its completion wakes this session;
+  re-arm after every wake. The Stop hook reminds you if the arm is missing.
+- A timeout (exit 3) carries the digest when something changed; acknowledge
+  it with `lobstah man report`. On hookless/background-less hosts use the
+  foreground wait or opt into the blocking `man haul --park`.
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups

@@ -25,8 +25,9 @@ Fences:
 - Escalation to a human is the gateway's job, not yours.
 
 Idiom:
-- Park at turn end. The Stop hook wakes you with events and periodic digests.
-- Or loop: \`lobstah man wait --timeout 900\`. Exit 0 is an event. Exit 3 is a
+- On Claude Code, arm \`lobstah man wait --session <id> --timeout 900\` as a
+  background task. The Stop hook checks the arm; the wait's completion wakes you.
+- On hookless hosts, loop \`lobstah man wait --timeout 900\`. Exit 0 is an event. Exit 3 is a
   timeout, and it carries the digest when something changed.
 - \`lobstah man report\` prints the delta since your last report.
 - \`lobstah man relieve\` steps down. Never re-take a helm you were relieved of.

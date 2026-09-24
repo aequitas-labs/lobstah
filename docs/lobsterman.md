@@ -186,7 +186,7 @@ Every carrier shares the cursor (per grounds, for a helm):
 - **The wait loop.** A `man wait` timeout (exit 3) prints the delta when
   something changed, so a looping session gets periodic fleet reports for
   free — see the loop idiom below.
-- **The park.** A helm session's Stop-hook park delivers the digest as a wake
+- **The blocking park.** A helm session's opt-in Stop-hook park delivers the digest as a wake
   at `[helm].reportSecs` cadence — including the landed-then-idle case, where
   the last catches finish and nothing is left in flight to wake for.
 - **Direct call.** Anything with a clock — a gateway heartbeat, a cron — runs
@@ -224,40 +224,36 @@ works with every service stopped.
 notifyCommand = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
 ```
 
-**Tier 2 — a background watcher in the liaison session.** The liaison runs
-`lobstah man wait` as a background task; when it exits, the harness's task
-notification wakes the session, and the printed `next:` line tells the agent
-exactly what to do — including re-arming. One watcher per wake is inherent to
-background tasks; the level-trigger makes the re-arm race harmless. Add to the
-liaison instructions:
+**Tier 2 — the default on Claude Code: the hook enforces the arm; the watcher
+waits.** After `man helm`, run `lobstah man wait --session <id> --timeout 900`
+as a background task. Its completion notification wakes the session; handle
+the event or digest, then re-arm. The Stop hook (`lobstah man haul`) checks a
+short-lived heartbeat registration at `~/.lobstah/watchers/<session-id>.json`.
+If work is in flight but no live watcher is registered, it blocks once with
+the exact arm command. A second `man wait` for the same session refuses while
+the first is live. A quiet timeout exits 3 with a peek at the delta, refreshing
+the session's context before the next arm.
 
-```markdown
-After dispatching work, run `lobstah man wait` as a background task. When it
-completes, follow its `next:` instruction, then re-arm it.
-```
+The hook cannot start a background *task* on the session's behalf, and a
+process it spawns cannot wake that session. The wake doors are a blocking
+hook's return, a background task completion notification, or human input.
+Hence the hook only checks the arm and standing attention; the background
+task does the waiting. Attention remains level-triggered, so an event between
+one watcher exiting and the next arm still stands for the next hook or wait.
 
-**Arm it long-lived.** The default (`--timeout 0`) waits forever and returns
-only when something happens — that is the right idiom, not a compromise.
-Every wake costs the session a turn, so a short timeout used as a "check in
-periodically" mechanism buys nothing but noise: attention is level-triggered
-and stands on disk until consumed, so a wait that dies mid-shift drops zero
-events — the next wait delivers everything that accumulated. There is no
-report to miss either; a quiet fleet has nothing to say. Pass `--timeout`
-only as a dead-man's check on the channel itself (an hour, not minutes): a
-quiet timeout prints one line, exits 3, and the re-arm proves the line was
-alive. Liveness reassurance for the human belongs on a status surface
-(`lobstah man tend`), never in the transcript.
+This avoids the Claude desktop app's blocking-hook cost: a typed human
+message otherwise queues until the hook returns or the human presses stop,
+and the app shows “1 running task” with nothing in its task pane. A background
+watcher is visible there and leaves the conversational turn free.
 
-**Tier 3 — park the session on a Stop hook (Claude Code only).** A Stop hook
-that blocks on `lobstah man wait`, so the session never
-really idles — it parks for free and continues the moment something needs it.
-What this buys over tier 2 is not the wake. Both wake on events, and both
-cost a turn per wake. The difference: the re-arm is **structural instead of
-instructed**. Tier 2 works only as long as the model remembers to re-arm the
-watcher after every wake. A forgotten re-arm, a crashed watcher, or an
-interrupted turn leaves the session deaf until a human speaks. The Stop hook
-fires at every turn end, no matter what the model did. Supervision cannot
-lapse through instruction drift, and a blind stop mid-shift is impossible.
+**Tier 3 — blocking park for hosts without background-task wakeups.**
+`lobstah man haul --park` retains the previous foreground park (or set
+`[helm].park = "block"`). The hook blocks while work is in flight, returns
+on attention, and delivers periodic digests. This is also the default for
+Codex until its background-task completion wake path is verified; Codex's
+[Stop hook does support a block reason](https://learn.chatgpt.com/docs/hooks),
+so the reason itself is not the limitation. A plain terminal can loop the
+foreground `man wait` instead.
 
 The hook is a CLI command — `lobstah man haul` (the lobsterman hauls the
 trapline; every orchestrator-facing command lives under `lobstah man`).
@@ -271,7 +267,7 @@ Install it from the project you'll run the lobsterman in:
 lobstah man init            # merges the Stop hook into .claude/settings.local.json
 lobstah man init --shared   # …or the committed .claude/settings.json
 lobstah man init --global   # …or once into ~/.claude/settings.json — any
-                            # directory with a .lobstah-man file then parks
+                            # directory with a .lobstah-man file then checks the arm
 lobstah man init --marker   # also touch .lobstah-man (per-directory gate)
 ```
 
@@ -282,28 +278,18 @@ are preserved verbatim. What it writes:
 { "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "lobstah man haul", "timeout": 14400 }] }] } }
 ```
 
-`haul` gates itself twice: only a designated session parks (launch it with
+`haul` gates itself twice: only a designated session participates (launch it with
 `LOBSTAH_MAN=1 claude`, or `touch .lobstah-man` for a per-directory gate), and
 only while dispatches are in flight — queued dispatches count. Conversational
-turns end free. On an event it blocks the stop with the event as context and
-tells the agent the session re-parks automatically; on timeout or any error
-it silently allows the stop, leaving tier 1 as the backstop past the horizon.
+turns end free. Standing attention blocks with its content even when a watcher
+is live. With no standing item and a live watcher, the hook exits silently;
+without one, it blocks with the arm instruction. A stale heartbeat (over five
+seconds old) is absent. The hook never starts a watcher itself.
 
-Two habits worth adding to a lobsterman session's instructions: run
-`lobstah man wait --peek` at session start (a wake consumed by a session that
-died mid-handling is still standing state — peek resurfaces it without
-consuming it, and returns at once with `standing: none` and exit 0 when
-nothing is; it never blocks, so it takes no `--timeout`), and treat
-the haul context as the work order for that turn.
-
-The trade-offs, honestly. While parked, the turn never ends, so the terminal
-shows a running hook. Each wake appends a turn to the context, and long
-shifts eventually compact. Without the gate, the hook parks every session in
-the project. And parking needs a turn-end hook that
-can block and inject a continuation. Claude Code's Stop hook can, and so can
-Codex's since its hooks system landed (v0.114+; older Codex only has the
-fire-and-forget notify hook, which cannot). Tier 2 is the right default.
-Tier 3 is for a dedicated, long-lived liaison session.
+At session start, `lobstah man wait --peek` checks for a wake consumed before
+a crash without consuming it again; when quiet it returns `standing: none`.
+The watcher is the default ongoing wait, while the Stop hook is its structural
+re-arm backstop. The blocking park remains deliberate rather than automatic.
 
 **Delivery guarantee.** Attention wakes are at-least-once with backoff. An
 unanswered question is reported immediately. While it still stands, it
@@ -351,8 +337,8 @@ leave running catches to the daemon, judge the catch not the keystrokes, stay
 inside your grounds, report deltas not dumps. `man brief` re-injects the
 charter at every session start, so it survives restarts and compaction
 without anyone re-running anything. A helm registration also arms the
-Stop-hook park by itself — no `.lobstah-man` marker, no env var — and gates
-the park-delivered digest above.
+Stop-hook arm check by itself — no `.lobstah-man` marker, no env var — and
+gates the digest above.
 
 **One helm per grounds, enforced.** A **grounds** is a named territory: the
 subset of configured repos one orchestrator oversees (`[grounds.*]`; with
