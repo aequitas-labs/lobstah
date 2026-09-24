@@ -43,6 +43,12 @@ describe('PR stack branch evidence', () => {
     const pr = prEvidence(ref, { ...open, baseRefName: 'main', headRefName: 'glass' }, '2026-09-23T13:00:00Z');
     expect(pr).toMatchObject({ baseRefName: 'main', headRefName: 'glass' });
   });
+
+  it('keeps forge update and merge times from that same view call', () => {
+    expect(PR_VIEW_FIELDS.split(',')).toContain('updatedAt');
+    const pr = prEvidence(ref, { ...merged, updatedAt: '2026-09-23T04:00:00Z' }, '2026-09-23T05:00:00Z');
+    expect(pr).toMatchObject({ updatedAt: '2026-09-23T04:00:00Z', mergedAt: '2026-09-23T03:00:00Z' });
+  });
 });
 
 describe('derivePrEvents', () => {

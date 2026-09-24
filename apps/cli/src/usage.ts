@@ -59,6 +59,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '<uuid>',
   },
   catch: { flags: {}, positionals: '<uuid>' },
+  prs: { subverbs: ['sync'], flags: {} },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' } }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
@@ -144,6 +145,8 @@ working unless --force; --print shows the command instead of running it.`,
   swap: `Hand an active dispatch to a fresh session — same worktree and brief plus a
 git progress note.`,
   catch: `The evidence: branch, commits, PR, session.`,
+  prs: `List known PR records newest first with state, checks, age, and watch state.
+\`prs sync\` registers missing PR watches and refreshes each due PR once.`,
   attention: `Standing attention items with their ack state; \`ack <item-key>\` marks the
 current state seen (--by names who), \`unack\` clears it. Display-only: an ack
 hides the item from the desktop pet and the glass lobs until its state

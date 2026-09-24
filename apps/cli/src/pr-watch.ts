@@ -8,6 +8,7 @@ import {
   evidencePath,
   ghPrView,
   isFailingConclusion,
+  laneDirs,
   listWatches,
   loadConfig,
   mergeEvidence,
@@ -17,9 +18,14 @@ import {
   prFixBrief,
   readEvidence,
   readPr,
+  readPrs,
   readStatusLog,
   readWatch,
+  removeWatch,
+  runWatchCheck,
+  storedDescriptor,
   upsertPr,
+  watchDue,
 } from '@lobstah/core';
 import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch } from '@lobstah/core';
 import { githubRepoFromOrigin } from '@lobstah/pick';
@@ -33,7 +39,8 @@ import { repoOf } from './digest.js';
  * Pick stays the single writer of dispatch-owned watch progress: only a
  * real check run (pick's watch loop, or `man wait` for a man-owned watch)
  * advances a cursor and appends events. The inline poller only observes —
- * it stamps the owner's evidence and never touches the watch.
+ * it stamps the owner's evidence without advancing the watch cursor; a
+ * terminal observation may retire the now-spent watch.
  */
 
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -74,6 +81,103 @@ export function autoRegisterPrWatch(id: string, prUrl: string): Watch | undefine
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Recover watches for PRs that predate automatic registration. This is local
+ * state only: deriving the glass, tend, or catch never calls GitHub. A record
+ * takes precedence over older dispatch evidence when deciding terminal state.
+ */
+export function backfillPrWatches(): number {
+  type Member = { id: string; followUp?: string; at: string };
+  const members = new Map<string, Member>();
+  const known = new Map<string, { terminal?: boolean; observedAt?: string; ids: Set<string> }>();
+  const add = (url: string | undefined, id?: string, terminal?: boolean, observedAt?: string) => {
+    const ref = url && parsePrRef(url);
+    if (!ref) return;
+    const row = known.get(ref.key) ?? { ids: new Set<string>() };
+    if (id) row.ids.add(id);
+    if (terminal !== undefined && (!row.observedAt || (observedAt ?? '') > row.observedAt)) {
+      row.terminal = terminal;
+      row.observedAt = observedAt;
+    }
+    known.set(ref.key, row);
+  };
+  const records = readPrs();
+  const recordKeys = new Set(records.map((r) => r.key));
+  for (const r of records) {
+    add(r.url, undefined, r.state === 'MERGED' || r.state === 'CLOSED', r.observedAt);
+    for (const id of r.dispatches) add(r.url, id);
+  }
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    const dirs = laneDirs(lane);
+    for (const bucket of ['active', 'done'] as const) {
+      let ids: string[];
+      try { ids = fs.readdirSync(dirs[bucket]).filter((id) => !id.startsWith('.')); } catch { continue; }
+      for (const id of ids) {
+        const descriptor = storedDescriptor(id, lane);
+        const at = readStatusLog(id, lane).at(-1)?.at ?? '';
+        members.set(id, { id, followUp: descriptor?.followUp, at });
+      }
+    }
+    let files: string[];
+    try { files = fs.readdirSync(dirs.state).filter((f) => f.endsWith('.evidence')); } catch { continue; }
+    for (const file of files) {
+      const id = file.slice(0, -'.evidence'.length);
+      const ev = readEvidence(id, lane);
+      add(ev.prUrl, id);
+      if (ev.pr) {
+        const ref = parsePrRef(ev.pr.url);
+        add(ev.pr.url, id, ref && !recordKeys.has(ref.key) ? ev.pr.state === 'MERGED' || ev.pr.state === 'CLOSED' : undefined, ev.pr.observedAt);
+      }
+    }
+  }
+  let registered = 0;
+  for (const [key, row] of known) {
+    if (row.terminal) {
+      if (readWatch(key)) removeWatch(key);
+      continue;
+    }
+    if (readWatch(key)) continue;
+    const ref = parsePrRef(key)!;
+    // Follow the newest live member of any dispatch chain that named this PR.
+    // Keep culled ancestors in the seed set: a surviving follow-up can still
+    // point at one of them even though the ancestor's descriptor is gone.
+    const chain = new Set(row.ids);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const member of members.values()) {
+        if (member.followUp && chain.has(member.followUp) && !chain.has(member.id)) {
+          chain.add(member.id);
+          changed = true;
+        }
+      }
+    }
+    const owner = [...chain].map((id) => members.get(id)).filter((m): m is Member => m !== undefined)
+      .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))[0];
+    addPrWatch(ref, owner ? { forId: owner.id } : {});
+    registered++;
+  }
+  if (registered) console.error(`pr-watch-backfill: ${registered} registered`);
+  return registered;
+}
+
+/** Register missing watches and refresh each due PR watch at most once. */
+export function syncPrWatches(): { registered: number; refreshed: number } {
+  const registered = backfillPrWatches();
+  let refreshed = 0;
+  const every = pollSecs();
+  const now = new Date();
+  for (const w of listWatches()) {
+    if (!w.key.startsWith('pr:') || !watchDue(w, every, now.getTime())) continue;
+    const before = readPr(w.key)?.observedAt;
+    const { watch } = runWatchCheck(w, now);
+    const after = readPr(w.key)?.observedAt;
+    if (!watch.lastError && after && after !== before) refreshed++;
+    if (watch.done) removeWatch(w.key);
+  }
+  return { registered, refreshed };
 }
 
 function laneOf(id: string): Lane | undefined {
@@ -211,11 +315,12 @@ export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Da
     const lane = laneOf(id);
     if (!ref || !lane) continue;
     const seen = readPr(ref.key) ?? readEvidence(id, lane).pr;
-    // A terminal PR has nothing left to observe; its watch retires when pick delivers.
+    // A terminal PR has nothing left to observe; backfill/read paths retire a stale watch.
     if (seen && (seen.state === 'MERGED' || seen.state === 'CLOSED')) continue;
     if (seen && now - Date.parse(seen.observedAt) < (w.everySecs ?? defaultEverySecs) * 1000) continue;
     try {
-      observePr(ref, ghPrView(ref), { dispatchId: id, now: new Date(now) });
+      const record = observePr(ref, ghPrView(ref), { dispatchId: id, now: new Date(now) });
+      if (record.state === 'MERGED' || record.state === 'CLOSED') removeWatch(w.key);
     } catch {
       // gh missing or unauthenticated: pick's real check records lastError
     }

@@ -6,7 +6,7 @@ describe('registry-generated usage (axi P10)', () => {
   it('covers every user-facing command, each with prose', () => {
     const expected = [
       'dispatch', 'ls', 'status', 'logs', 'send', 'inbox', 'attach', 'swap',
-      'catch', 'cull', 'cancel', 'report', 'watch', 'soak', 'stow',
+      'catch', 'prs', 'cull', 'cancel', 'report', 'watch', 'soak', 'stow',
       'daemon', 'pick', 'doctor', 'repos', 'init', 'version',
       'man:manual', 'man:tend', 'man:wait', 'man:init', 'man:haul', 'man:brief',
     ];
