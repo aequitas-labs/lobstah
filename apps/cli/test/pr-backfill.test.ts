@@ -96,6 +96,16 @@ describe('PR watch backfill', () => {
     expect(res.stdout).toContain('passed');
   });
 
+  it('lists the prBadge state: a conflicting PR reads conflicts, never green', () => {
+    upsertPr(pr(1, { mergeStateStatus: 'DIRTY' })); upsertPr(pr(2, { mergeStateStatus: 'BEHIND' }));
+    const res = lobstah('prs');
+    expect(res.status).toBe(0);
+    const line = (n: number) => res.stdout.split('\n').find((l) => l.includes(`#${n}`)) ?? '';
+    expect(line(1)).toContain('conflicts');
+    expect(line(2)).toContain('behind');
+    expect(res.stdout).not.toContain('green');
+  });
+
   it('prs sync checks a due PR once, refreshes its record, and retires its terminal watch', () => {
     upsertPr(pr(7));
     // A portable check fixture: the shipped check is exercised against real
