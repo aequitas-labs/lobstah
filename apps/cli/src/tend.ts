@@ -27,7 +27,7 @@ import {
 } from '@lobstah/core';
 import type { AttentionKind, Config, Descriptor, Lane, PrEvidence } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
-import { reportedThroughMs } from './reported.js';
+import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import type { MergeView } from '@lobstah/pick';
 import { deriveGlassPrs } from './glass-prs.js';
@@ -334,6 +334,56 @@ export function landedAttention(cfg: Config, now: number): TendAttention[] {
     }
   }
   return out.sort((a, b) => b.ageSecs - a.ageSecs);
+}
+
+/** One terminal catch for the glass's On deck "Landed" section. */
+export interface LandedCatch {
+  key: string;
+  id: string;
+  lane: Lane;
+  verb: 'done' | 'failed';
+  at: string;
+  note?: string;
+  repo?: string;
+  prUrl?: string;
+  /** Landed after its grounds' reported-through cursor (or the grounds has none). */
+  unreported: boolean;
+}
+
+/**
+ * Every catch whose last verb is `done` or `failed`, newest first, each
+ * marked against its grounds' reported-through cursor. Unlike
+ * `landedAttention` this does not drop reported catches: the glass shows a
+ * rolling window and only badges what the helm has not acknowledged.
+ */
+export function landedCatches(cfg: Config): LandedCatch[] {
+  const out: LandedCatch[] = [];
+  const cursors = new Map<string, number>();
+  const cursorMs = (name: string): number => {
+    if (!cursors.has(name)) cursors.set(name, Date.parse(readCursor(name) ?? '') || 0);
+    return cursors.get(name)!;
+  };
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    for (const id of doneIds(lane)) {
+      const last = readStatusLog(id, lane).at(-1);
+      if (!last || (last.verb !== 'done' && last.verb !== 'failed')) continue;
+      const at = Date.parse(last.at) || 0;
+      const repo = repoOf(id, lane);
+      const ev = readEvidence(id, lane);
+      out.push({
+        key: `${lane}:${id}`,
+        id,
+        lane,
+        verb: last.verb,
+        at: last.at,
+        note: last.note,
+        repo,
+        ...(ev.prUrl ? { prUrl: ev.prUrl } : {}),
+        unreported: at > cursorMs(groundsCursorFor(cfg, repo)),
+      });
+    }
+  }
+  return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
 /** The repo key a dispatch belongs to, from whichever bucket holds its descriptor. */

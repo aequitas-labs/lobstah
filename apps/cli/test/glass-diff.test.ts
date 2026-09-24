@@ -43,6 +43,25 @@ const snapshot = () => ({
 });
 const ui = (over: Partial<Ui> = {}): Ui => ({ st: { view: 'table', lane: '', repo: '', verb: '', q: '' }, open: new Set(), modal: null, ...over });
 
+const table = (_headers: string[], rows: string[]) => `<table>${rows.join('')}</table>`;
+const esc = (v: unknown) => String(v ?? '');
+const ageEl = () => '1m';
+/** The page's On deck renderer, evaluated from the served source (the detector supplies its constants). */
+function deckRenderer(page: string): (d: unknown, inp: unknown) => string {
+  const deckSource = page.slice(page.indexOf('const KIND_LABEL='), page.indexOf('const watchCell='));
+  return new Function('esc', 'ageEl', 'table', 'prOpen', `${GLASS_DIFF_JS}; ${deckSource}; return renderDeck;`)(
+    esc, ageEl, table, (p: { key: string }) => `showPr(${p.key})`,
+  ) as (d: unknown, inp: unknown) => string;
+}
+async function servedPage(): Promise<string> {
+  const server = serveGlass(0);
+  await new Promise((r) => server.once('listening', r));
+  const port = (server.address() as AddressInfo).port;
+  const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+  server.close();
+  return page;
+}
+
 describe('glass change detector', () => {
   it('an identical snapshot, a second later, dirties nothing', () => {
     const a = diff.sectionHashes(snapshot(), ui(), NOW);
@@ -117,13 +136,7 @@ describe('glass change detector', () => {
     const port = (server.address() as AddressInfo).port;
     const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
     server.close();
-    const table = (_headers: string[], rows: string[]) => `<table>${rows.join('')}</table>`;
-    const esc = (v: unknown) => String(v ?? '');
-    const ageEl = () => '1m';
-    const deckSource = page.slice(page.indexOf('const KIND_LABEL='), page.indexOf('const watchCell='));
-    const renderDeck = new Function('esc', 'ageEl', 'table', 'prOpen', `${deckSource}; return renderDeck;`)(
-      esc, ageEl, table, (p: { key: string }) => `showPr(${p.key})`,
-    ) as (d: unknown, inp: unknown) => string;
+    const renderDeck = deckRenderer(page);
     const noticeSource = page.slice(page.indexOf('function noticeTable('), page.indexOf('function trapRow('));
     const noticeTable = new Function('esc', 'ageEl', 'table', `${noticeSource}; return noticeTable;`)(esc, ageEl, table) as
       (list: unknown[]) => string;
@@ -148,6 +161,39 @@ describe('glass change detector', () => {
     expect(page).toContain("setHTML('notices',noticeTable(inp.notices.list))");
     const stackLine = renderDeck({}, { ...inp, view: 'table' });
     expect(stackLine).toContain('#27 checks 1/2 failed');
+  });
+
+  it('On deck lands the newest eight catches of the last 24h, badging those past the cursor', async () => {
+    const HOUR = 3600_000;
+    // Ten catches in the last 24h (c0 newest), one older; the cursor sits after c6, so c0..c5 are unreported.
+    const catches = Array.from({ length: 10 }, (_, i) => ({
+      key: `work:c${i}`, id: `c${i}`, lane: 'work', verb: i === 2 ? 'failed' : 'done', at: iso((i + 1) * HOUR),
+      note: `catch ${i}`, repo: 'web', unreported: i < 6,
+    }));
+    const old = { key: 'work:old', id: 'old', lane: 'work', verb: 'done', at: iso(25 * HOUR), note: 'yesterday', repo: 'web', unreported: false };
+    // Shuffled on the wire: the page orders newest first itself.
+    const d = { ...snapshot(), landed: [old, ...catches.slice().reverse()] };
+    const deck = diff.sectionInputs(d, ui(), NOW).deck;
+    expect(deck.landed.map((c: { id: string }) => c.id)).toEqual(['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']);
+
+    const renderDeck = deckRenderer(await servedPage());
+    const base = { view: 'table', attention: [], prAttention: [], inflight: [], traps: [], stacks: [], prs: [] };
+    const html = renderDeck({}, { ...base, landed: deck.landed });
+    const section = html.slice(html.indexOf('Landed · 24h'), html.indexOf('traps →'));
+    expect(html).toContain('<h2><a href="#dispatches">Landed · 24h →</a></h2>');
+    expect(html).not.toContain('landed since report');
+    expect(section.match(/class="deckline/g)).toHaveLength(8);
+    expect(section).not.toContain('deckmore');
+    expect(section).not.toContain('old');
+    const lines = section.split('<div class="deckline').slice(1);
+    expect(lines.map((l) => l.includes('unreported'))).toEqual([true, true, true, true, true, true, false, false]);
+    expect(lines[2]).toContain('class="badge bad">failed</span>');
+
+    // An empty window: the section's empty state.
+    const stale = diff.sectionInputs({ ...snapshot(), landed: [old] }, ui(), NOW).deck;
+    expect(stale.landed).toEqual([]);
+    const empty = renderDeck({}, { ...base, landed: stale.landed });
+    expect(empty.slice(empty.indexOf('Landed · 24h'), empty.indexOf('traps →'))).toContain('<div class="empty">none</div>');
   });
 
   it('the served page inlines the detector', async () => {

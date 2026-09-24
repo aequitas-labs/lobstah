@@ -12,6 +12,9 @@
  * TypeScript template literal and then inside the page's own script.
  */
 export const GLASS_DIFF_JS = `
+// On deck's Landed section: the newest LANDED_MAX catches (done or failed)
+// within the last LANDED_WINDOW_MS, whatever the report cursor says.
+const LANDED_MAX=8,LANDED_WINDOW_MS=86400000;
 const STALE_DAEMON_MS=90000,STALE_SEAT_MS=1800000;
 const GLASS_TABS=['deck','dispatches','traps','prs','notices'];
 function tabFromHash(hash){const tab=String(hash||'').replace(/^#/,'');return GLASS_TABS.includes(tab)?tab:'deck'}
@@ -51,7 +54,8 @@ function sectionInputs(d,ui,now){
   chips:{daemon:d.daemon,daemonStale:!!d.daemon&&isStale(d.daemon.heartbeat,STALE_DAEMON_MS,now),helms:d.helms.map(seat)},
   deck:{view:st.view,attention:(d.attention||[]).filter(a=>(a.kind==='question'||a.kind==='landed')&&recent(a.at,86400000)&&hasQuery(a.kind,a.repo,a.note,a.id)).map(({ageSecs,...a})=>a),
    prAttention:(d.attention||[]).filter(a=>a.kind&&a.kind.startsWith('pr:')).map(({ageSecs,...a})=>a),
-   landed:(d.landed||[]).filter(a=>recent(a.at,86400000)&&hasQuery(a.repo,a.note,a.id)).map(({ageSecs,...a})=>a),
+   landed:(d.landed||[]).filter(a=>recent(a.at,LANDED_WINDOW_MS)&&hasQuery(a.repo,a.note,a.id))
+    .sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)).slice(0,LANDED_MAX),
    inflight:d.dispatches.filter(x=>x.bucket!=='done'&&matches(x,{...st,lane:'',repo:'',verb:''})),traps:deckTraps.map(seat),
    stacks:(d.stacks||[]).filter(s=>s.open&&hasQuery(s.repo,s.numbers.join(' '))),
    prs:(d.prs||[]).filter(p=>p.state==='OPEN'),error:d.attentionError},

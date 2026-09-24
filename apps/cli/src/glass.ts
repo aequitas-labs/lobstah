@@ -25,7 +25,8 @@ import type { Attachment, Descriptor, Lane, Notice } from '@lobstah/core';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { lobItems } from './glass-lobs.js';
-import { buildTendReport, landedAttention } from './tend.js';
+import { buildTendReport, landedCatches } from './tend.js';
+import type { LandedCatch } from './tend.js';
 import { GLASS_DIFF_JS } from './glass-diff.js';
 import { deriveGlassPrs } from './glass-prs.js';
 
@@ -197,10 +198,10 @@ function dispatchRows() {
  * decided), plus the active attentionKinds for the read-only line under the
  * heading. A config error surfaces on the page instead of failing /data.
  */
-function attentionSnapshot(): { attention: TendAttention[]; landed: TendAttention[]; attentionKinds: string[]; attentionError?: string } {
+function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[]; attentionKinds: string[]; attentionError?: string } {
   try {
     const cfg = loadConfig();
-    return { attention: buildTendReport().attention, landed: landedAttention(cfg, Date.now()), attentionKinds: cfg.attentionKinds };
+    return { attention: buildTendReport().attention, landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
   } catch (err) {
     return { attention: [], landed: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
   }
@@ -337,6 +338,7 @@ tr.rowhead{cursor:pointer}tr.rowhead:hover{background:#1c2330}
 .card .note{margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card .foot{margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;color:var(--dim);font-size:12px}
 .badge{border-radius:5px;padding:1px 7px;font-size:11px;line-height:1.5;border:1px solid var(--line);white-space:nowrap;display:inline-block}
+.badge.unreported{font-weight:normal;font-size:10px;padding:0 5px;vertical-align:1px}
 .v-done{color:var(--ok)}.v-working{color:var(--fg)}.v-needs-decision,.v-blocked{color:var(--bad);font-weight:bold}
 .v-failed{color:var(--bad)}.v-paused,.v-unknown{color:var(--dim)}
 .dim{color:var(--dim)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
@@ -507,12 +509,13 @@ function deckPrs(inp,view){const shown=inp.stacks.slice(0,3),more=inp.stacks.len
 function renderDeck(d,inp){const view=inp.view;
  const flight=inp.inflight.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||''),badge:{text:x.verb,tone:x.verb==='needs-decision'||x.verb==='blocked'?'bad':'dim'},
   meta:esc((x.note||'').slice(0,90))+' · '+ageEl(x.verbAt)+' ago'+(x.for||x.claimedBy?' · '+esc(x.for||x.claimedBy):''),open:openDispatch(x.lane,x.id)}));
- const landed=inp.landed.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||''),badge:{text:x.verb,tone:x.verb==='failed'?'bad':'ok'},
+ const landed=inp.landed.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||'')+(x.unreported?' <span class="badge warn unreported">unreported</span>':''),
+  badge:{text:x.verb,tone:x.verb==='failed'?'bad':'ok'},
   meta:esc((x.note||'').slice(0,90))+' · '+ageEl(x.at)+' ago',open:openDispatch(x.lane,x.id)}));
  const traps=inp.traps.map(({x:t})=>({title:'🪤 wt:'+esc(t.trapId),badge:{text:t.live?(t.harness||'live'):'signed off',tone:t.live?'ok':'dim'},
   meta:esc(t.repo||'')+' · '+(t.live?trapRow(t).listen:'stowed / ghosted'),open:"showModal(\\'trap\\',\\'"+esc(t.trapId)+"\\')"}));
  return '<div class="deckgrid">'+deckNotices(inp.attention)+deckBlock('in flight',flight,'dispatches',4,view)
-  +deckBlock('landed since report',landed,'dispatches',3,view)+deckBlock('traps',traps,'traps',3,view)+deckPrs(inp,view)+'</div>'}
+  +deckBlock('Landed · 24h',landed,'dispatches',LANDED_MAX,view)+deckBlock('traps',traps,'traps',3,view)+deckPrs(inp,view)+'</div>'}
 const watchCell=(w)=>{const ws=watchState(w);return w?ws.text+' · '+(ws.at?ageEl(ws.at)+' ago':'never checked'):'<span class="dim">'+ws.text+'</span>'};
 const prOpen=(p)=>"showModal(\\'pr\\',\\'"+esc(p.key)+"\\')";
 const prLink=(p)=>'<a href="'+esc(p.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">#'+p.number+'</a>';
