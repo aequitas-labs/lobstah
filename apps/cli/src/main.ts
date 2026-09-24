@@ -104,7 +104,7 @@ import { explainRefusal, resolveSessionId, type ResolvedSession } from './sessio
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
-import { armWatcher, liveWatcher } from './watchers.js';
+import { armWatcher, awaitWatcher } from './watchers.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -281,6 +281,11 @@ function callerSession(flag: string | undefined, withStdin = false): ResolvedSes
 function gateHelm(who: ResolvedSession | undefined, grounds?: string): void {
   const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), who?.id, grounds);
   if (refusal) throw new Error(explainRefusal(refusal, who));
+}
+
+/** The arm-block tail: the hook already waited for a watcher that was still starting. */
+function armGraceNote(graceSecs: number): string {
+  return `(No watcher registered within ${graceSecs}s of this stop; one started in the last few seconds would have been accepted.)`;
 }
 
 function hookParkMode(configured: 'arm' | 'block' | undefined, harness?: string): 'arm' | 'block' {
@@ -1068,11 +1073,15 @@ async function mainCli(): Promise<void> {
       if (has('--peek') && opt('--timeout') !== undefined) {
         throw new UsageError(`--peek never blocks — drop --timeout\n\n${usageFor('man:wait')!}`);
       }
+      const caller = callerSession(opt('--session'));
+      const sid = caller?.id;
+      // Register first: the Stop hook checks for this file right after the
+      // helm backgrounds the wait, so the only window left is process startup.
+      // A failed gate below exits, and the exit handler drops the file.
+      const waiter = !has('--peek') && sid ? armWatcher(sid, 'man') : undefined;
       // Strict helm rule: wait consumes attention events — the helm's wakes.
       // With a claimed lobstah man anywhere, only that session may run it, and
       // a grounds-scoped wait only by that grounds' own helm.
-      const caller = callerSession(opt('--session'));
-      const sid = caller?.id;
       const cfgWait = loadConfig();
       let groundsName = opt('--grounds');
       gateHelm(caller, groundsName);
@@ -1083,7 +1092,6 @@ async function mainCli(): Promise<void> {
         heartbeatHelm(callerHelm.sessionId);
         groundsName ??= callerHelm.grounds;
       }
-      const waiter = !has('--peek') && sid ? armWatcher(sid, 'man') : undefined;
       try {
       const timeoutSecs = Number(opt('--timeout') ?? '0');
       const deadline = timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : Number.POSITIVE_INFINITY;
@@ -1237,10 +1245,14 @@ async function mainCli(): Promise<void> {
             // The hook checks once for standing messages/bait, then lets the
             // background soak own the wait and its completion notification.
             if (await soakPark(trapReg.trapId, '0')) break;
-            if (!anythingInFlight() || liveWatcher(trapReg.sessionId, 'trap', trapReg.trapId)) break;
+            if (!anythingInFlight()) break;
+            // A soak --wait backgrounded just before the turn ended may still be starting.
+            const graceSecs = cfg.helm.armGraceSecs;
+            if (await awaitWatcher(trapReg.sessionId, 'trap', graceSecs * 1000, trapReg.trapId)) break;
             console.log(JSON.stringify({ decision: 'block', reason:
               `Arm the watcher: run \`lobstah soak --wait --timeout 900\` as a background task ` +
-              `(it wakes this session when the fleet needs you), then end your turn.` }));
+              `(it wakes this session when the fleet needs you), then end your turn. ` +
+              armGraceNote(graceSecs) }));
             break;
           }
           await soakPark(trapReg.trapId, opt('--timeout'));
@@ -1328,9 +1340,11 @@ async function mainCli(): Promise<void> {
             ].join('\n'));
             break;
           }
-          if (liveWatcher(hook.session_id, 'man')) break;
+          // A wait backgrounded just before the turn ended may still be starting.
+          const graceSecs = cfgHaul.helm.armGraceSecs;
+          if (await awaitWatcher(hook.session_id, 'man', graceSecs * 1000)) break;
           emit(`Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
-            '(it wakes this session when the fleet needs you), then end your turn.');
+            '(it wakes this session when the fleet needs you), then end your turn. ' + armGraceNote(graceSecs));
           break;
         }
         const timeoutSecs = Number(opt('--timeout') ?? '14000');

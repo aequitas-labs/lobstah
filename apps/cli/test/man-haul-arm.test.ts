@@ -31,7 +31,12 @@ const registration = (heartbeatAt: string) => fs.writeFileSync(watcherFile(), JS
   sessionId, kind: 'man', pid: process.pid, heartbeatAt,
 }));
 
+const graceConfig = (secs: number) => fs.writeFileSync(path.join(home, 'config.toml'), `[helm]\narmGraceSecs = ${secs}\n`);
+
 describe('man haul arm mode', () => {
+  // A short grace window keeps the block paths fast; the window has its own tests.
+  beforeEach(() => graceConfig(0.2));
+
   it('blocks with an arm instruction when queued work has no watcher', () => {
     enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
     const res = haul();
@@ -83,6 +88,45 @@ describe('man haul arm mode', () => {
     }));
     expect(trapHaul().stdout).toBe('');
   });
+});
+
+// The hook spawned async, so a registration can land while it is polling.
+const haulAsync = (): Promise<{ stdout: string; ms: number }> => new Promise((resolve, reject) => {
+  const started = Date.now();
+  const child = spawn(process.execPath, [cli, 'man', 'haul'], { env: { ...process.env, LOBSTAH_HOME: home }, stdio: 'pipe' });
+  let stdout = '';
+  child.stdout.on('data', (d) => { stdout += String(d); });
+  child.on('error', reject);
+  child.on('exit', () => resolve({ stdout, ms: Date.now() - started }));
+  child.stdin.end(JSON.stringify({ session_id: sessionId }));
+});
+const later = (ms: number, fn: () => void) => new Promise<void>((resolve) => setTimeout(() => { fn(); resolve(); }, ms));
+
+describe('man haul arm grace window', () => {
+  it('allows a stop when the watcher registers 1 s after the hook starts', async () => {
+    enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
+    fs.mkdirSync(path.dirname(watcherFile()), { recursive: true });
+    const [res] = await Promise.all([haulAsync(), later(1_000, () => registration(new Date().toISOString()))]);
+    expect(res.stdout).toBe('');
+  }, 15_000);
+
+  it('blocks when the registration lands after the window', async () => {
+    graceConfig(1);
+    enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
+    fs.mkdirSync(path.dirname(watcherFile()), { recursive: true });
+    const [res] = await Promise.all([haulAsync(), later(2_500, () => registration(new Date().toISOString()))]);
+    expect(JSON.parse(res.stdout)).toMatchObject({ decision: 'block' });
+    expect(res.stdout).toContain('Arm the watcher');
+    expect(res.stdout).toContain('would have been accepted');
+    expect(res.ms).toBeGreaterThanOrEqual(1_000);
+  }, 15_000);
+
+  it('allows a stop when a stale registration is refreshed within the window', async () => {
+    enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
+    registration(new Date(Date.now() - 10_000).toISOString());
+    const [res] = await Promise.all([haulAsync(), later(1_000, () => registration(new Date().toISOString()))]);
+    expect(res.stdout).toBe('');
+  }, 15_000);
 });
 
 describe('man wait watcher lifecycle', () => {

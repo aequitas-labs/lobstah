@@ -214,7 +214,9 @@ background task and re-arm it after each completion. The wait registers a
 heartbeating watcher for the session and exits with an event or a timeout
 (exit 3). At turn end, `man haul` blocks with standing attention; in arm mode,
 work in flight allows a stop with a live watcher and otherwise blocks with
-the arm command. `man haul --park` or `[helm].park = "block"` makes the hook
+the arm command. The hook first waits up to `[helm].armGraceSecs` (5 s) for a
+watcher that is still starting, so arming and ending the turn at once is safe.
+`man haul --park` or `[helm].park = "block"` makes the hook
 wait for attention itself. Without a Stop hook, run `man wait` in the foreground.
 
 The hook is a CLI command — `lobstah man haul` (the lobstah man hauls the
