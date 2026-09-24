@@ -59,6 +59,16 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
     const body = JSON.parse(JSON.stringify(current));
     return { json: async () => body };
   };
+  // The page probes one sprite with `new Image()`. Resolve it immediately in
+  // the DOM shim; there is no HTTP server for /lob-sprite.png in these tests.
+  // This keeps image loading deterministic on slow Windows runners.
+  w.Image = class {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    set src(_value: string) {
+      queueMicrotask(() => this.onload?.());
+    }
+  };
   // Pin the page's clock: ages and staleness are computed from Date.now().
   w.Date.now = () => opts.now;
   // Polls run when the test says so, never on a real interval; the harness

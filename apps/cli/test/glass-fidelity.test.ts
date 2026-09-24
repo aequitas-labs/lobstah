@@ -166,5 +166,5 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
     const [legacy, built] = [await trace(LEGACY, FIXTURES.empty!(), '?lob'), await trace(GLASS_PAGE, FIXTURES.empty!(), '?lob')];
     expect(legacy.views[0]![1].lobs).toContain('attention questions crawl in here');
     expect(built.views.map(([, v]) => v.lobs)).toEqual(legacy.views.map(([, v]) => v.lobs));
-  });
+  }, 30_000);
 });
