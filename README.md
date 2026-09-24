@@ -25,6 +25,16 @@ and recovers each; status and evidence land on disk. Supervision costs
 nothing — no tokens, no attention — so the whole fleet fits in one
 conversation, and **your agents just bring home the lobstahs**.
 
+## Which one? 🧭
+
+As a **background router**, lobstah takes work you (or a tracker) lob in,
+runs supervised workers in their own worktrees, pings you when something
+needs you, and brings PRs home with no session open. As the **lobstah man**,
+one interactive Claude Code or Codex session takes the helm and runs that
+same fleet from a conversation, woken by the plugin's hooks instead of by
+you. Both sit on the same daemon, so start with the router and add a helm
+whenever you like.
+
 ![Pixel lobster carrying a star across the page](docs/assets/lob-crawl.svg)
 
 ## Requirements 📋
@@ -32,6 +42,122 @@ conversation, and **your agents just bring home the lobstahs**.
 - Node 20+, git, pnpm
 - An authenticated harness CLI: `claude` (Claude Code) and/or Codex. Lobstah
   never handles harness login — you authenticate your own CLI; lobstah invokes it.
+
+## Quickstart: the background router 🪝
+
+Hand lobstah a brief and go do something else.
+
+**Install**
+
+```bash
+npm i -g lobstah             # or from source / a standalone binary: see Install below
+```
+
+**Configure**
+
+```bash
+lobstah init --scan ~/src    # ~/.lobstah + a [repos.*] block per repo found
+                             # (bare `init` writes an example config instead;
+                             #  `lobstah repos add <path>` appends one repo)
+$EDITOR ~/.lobstah/config.toml
+lobstah doctor               # binaries, config, repos, harnesses, heartbeat
+```
+
+```toml
+notifyCommand = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
+
+[repos.myapp]
+path  = "~/src/myapp"
+trunk = "main"
+setup = ["pnpm install"]     # runs in each fresh worktree
+```
+
+`notifyCommand` is how the router reaches you: the daemon runs it on
+`needs-decision`, `blocked`, `done`, and `failed`, with no model in the loop.
+Every key, with defaults: [docs/configuration.md](docs/configuration.md).
+
+**Run**
+
+```bash
+lobstah daemon install       # launchd agent / systemd user unit — survives
+                             # reboots, restarts on crash (`daemon &` for a try)
+lobstah pet install          # macOS: a desktop lobster walks questions to you
+lobstah dispatch --repo myapp --brief ./brief.md
+```
+
+Want work to arrive on its own? `lobstah pick install` runs tracker pickup
+as a service: Linear and GitHub issues assigned to its configured identity
+become dispatches, and status streams back as comments.
+[docs/pickup.md](docs/pickup.md)
+
+**See it**
+
+```bash
+lobstah glass                # the spyglass: a live localhost page (port 4949)
+lobstah ls                   # or the same from the terminal
+lobstah catch <uuid>         # the evidence: branch, commits, PR, session
+```
+
+## Quickstart: the lobstah man 🦞
+
+One session holds the helm. You talk to it; it runs the fleet.
+
+**Install**
+
+```bash
+npm i -g lobstah             # the plugin wires hooks to the CLI; it doesn't bundle it
+```
+
+Then, in Claude Code or Codex (v0.114+; Codex asks for a one-time hook trust
+review):
+
+```
+/plugin marketplace add aequitas-labs/lobstah
+/plugin install lobstah@lobstah
+```
+
+**Configure**
+
+```bash
+lobstah init --scan ~/src    # same repos, same config as the router
+lobstah doctor               # includes a row for the installed plugin
+lobstah daemon install       # the helm dispatches; the daemon supervises
+```
+
+**Run**
+
+In the session you want at the helm:
+
+```
+/lobstah:helm                # Claude Code; anywhere: lobstah man helm
+```
+
+Codex ships the skills but no slash commands: run `lobstah man helm
+--session <id>` with the id the session-start brief prints. Then just talk:
+"dispatch a fix for the flaky login test in myapp." The helm writes a
+standalone brief, dispatches it, answers workers' questions, and brings you
+the catch.
+
+Getting woken is the habit to keep. With the plugin, the Stop hook parks the
+helm at every turn end and wakes it the moment a worker needs it, so there is
+nothing to arm. Without hooks, arm the watcher yourself: run `lobstah man
+wait` as a background task, follow its `next:` line when it returns, and
+re-arm it every time.
+
+To turn another live session into a worker, open it in a linked worktree
+and `/lobstah:soak` (or `lobstah soak`). The helm addresses bait to its
+`wt:<trap>` address and `/lobstah:stow` signs it off.
+
+**See it**
+
+```
+/lobstah:tend                # Claude Code: the fleet at a keystroke
+lobstah man tend             # anywhere: fleet verdict, waiting questions,
+                             # each item's chain, PR, and merge gate
+```
+
+The full pattern (charter, grounds, the three tiers of getting woken, traps)
+is in [docs/man.md](docs/man.md).
 
 ## Install ⚓
 
@@ -62,29 +188,7 @@ The binary drives harnesses through their CLIs instead of the bundled SDKs:
 codex workers run fully Node-free; claude workers still need the (Node-based)
 `claude` CLI on the host.
 
-## Quick start 🪝
-
-```bash
-lobstah init --scan ~/src    # ~/.lobstah + a [repos.*] block per repo found
-                             # (bare `init` writes an example config instead;
-                             #  `lobstah repos add <path>` appends one repo)
-$EDITOR ~/.lobstah/config.toml
-lobstah doctor               # binaries, config, repos, harnesses, heartbeat
-lobstah daemon install       # launchd agent / systemd user unit — survives
-                             # reboots, restarts on crash (`daemon &` for a try)
-lobstah dispatch --repo myapp --brief ./brief.md
-```
-
-```toml
-[repos.myapp]
-path  = "~/src/myapp"
-trunk = "main"
-setup = ["pnpm install"]     # runs in each fresh worktree
-```
-
-Every key, with defaults: [docs/configuration.md](docs/configuration.md).
-
-Watch, steer, take over:
+## Watch, steer, take over 🔭
 
 ```bash
 lobstah ls                            # queue, active, recent done
