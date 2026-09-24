@@ -1,7 +1,7 @@
 {
   "name": "lobstah",
   "displayName": "lobstah",
-  "version": "0.5.0",
+  "version": "0.5.5",
   "description": "Run a fleet of supervised coding agents from one session: dispatch work, get woken when something needs you, never watch the water.",
   "shortDescription": "Dispatch and supervise a fleet of coding agents from one session.",
   "author": {
