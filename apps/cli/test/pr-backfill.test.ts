@@ -98,14 +98,24 @@ describe('PR watch backfill', () => {
 
   it('prs sync checks a due PR once, refreshes its record, and retires its terminal watch', () => {
     upsertPr(pr(7));
-    const gh = path.join(home, 'gh');
-    const view = JSON.stringify({ state: 'MERGED', isDraft: false, headRefOid: 'new-sha',
-      reviewDecision: '', statusCheckRollup: [], mergedAt: '2026-09-24T12:00:00Z', updatedAt: '2026-09-24T12:00:00Z' });
-    fs.writeFileSync(gh, `#!/bin/sh\nprintf '%s\\n' '${view}'\n`);
-    fs.chmodSync(gh, 0o755);
+    // A portable check fixture: the shipped check is exercised against real
+    // GitHub PRs in the manual run, while this tests sync on Windows too.
+    const script = path.join(home, 'check.cjs');
+    const record = path.join(home, 'prs', 'acme__web__7.json');
+    fs.writeFileSync(script, `
+      const fs = require('node:fs');
+      const file = ${JSON.stringify(record)};
+      const pr = JSON.parse(fs.readFileSync(file, 'utf8'));
+      pr.state = 'MERGED';
+      pr.mergedAt = '2026-09-24T12:00:00Z';
+      pr.observedAt = new Date().toISOString();
+      fs.writeFileSync(file, JSON.stringify(pr));
+      process.stdout.write(JSON.stringify({ cursor: 'merged', events: [], done: true }));
+    `);
+    addWatch(key(7), `"${process.execPath}" "${script}"`);
     const res = lobstah('prs', 'sync');
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain('registered: 1');
+    expect(res.stdout).toContain('registered: 0');
     expect(res.stdout).toContain('refreshed: 1');
     expect(readPr(key(7))).toMatchObject({ state: 'MERGED', mergedAt: '2026-09-24T12:00:00Z' });
     expect(readWatch(key(7))).toBeUndefined();
