@@ -667,40 +667,54 @@ overrides the global, which overrides the adapter default.
 ## Glass source
 
 The spyglass (`lobstah glass`) is served as one self-contained HTML document,
-but it is written as ordinary source files under `apps/cli/glass/`:
+but it is written as ordinary source files under `apps/cli/glass/`, rendered
+with [Preact](https://preactjs.com) and [htm](https://github.com/developit/htm)
+(tagged-template markup, no JSX build):
 
 | File | Holds |
 |---|---|
-| `index.html` | the markup skeleton: header, tabs, filter controls, one empty container per section, the modal overlay |
+| `index.html` | the document shell: head, the stylesheet slot, the script slot |
 | `glass.css` | every style; the design tokens (palette including the `.pr-*` badge states, spacing scale, card, badge, and modal metrics) are custom properties at the top |
-| `src/main.ts` | the entry: wires the controls and the window functions the markup's inline handlers call |
-| `src/poll.ts` | `/data` polling (every 2s, one request at a time, paused while the tab is hidden) and per-section change detection |
+| `src/store.ts` | the one store: the latest snapshot, the route, the prefs, the open modal, the stale flag, the lob state |
+| `src/actions.ts` | every change the page can make (open or close a modal, set a preference, hide a lob, receive a snapshot) |
+| `src/main.ts` | the entry: builds the store from localStorage and the URL, renders `App` into the body on every change, starts polling |
+| `src/poll.ts` | `/data` polling: every 2s, one request at a time, paused while the tab is hidden |
 | `src/route.ts` | the hash tabs (`#deck`, `#dispatches`, `#traps`, `#prs`, `#notices`) |
 | `src/prefs.ts` | the per-browser preferences and lob hides, in localStorage |
-| `src/render/*.ts` | one renderer per section: deck, dispatches, traps, prs, notices, modals, lobs, header |
-| `src/html.ts` | a small `html` tagged template: interpolations are escaped unless already markup |
+| `src/components/*.ts` | `App`, `Header`, `Deck`, `Dispatches`, `Traps`, `PRs`, `Notices`, `Modal` (dispatch, trap, helm, PR, settings), `Lobs` |
+| `src/html.ts` | htm bound to Preact's `h` |
+
+Components are pure functions of the store. A new snapshot re-renders the
+page and Preact's reconciliation changes only the DOM whose data changed:
+rows, cards, and lobs are keyed, so an unchanged row keeps its node, an open
+modal keeps its nodes across ticks, and scroll positions stay where the
+reader left them — no per-section hashing or manual node preservation. Only
+the active tab's section renders.
 
 The pure helpers stay beside the server in `apps/cli/src` and are imported by
-both sides: `glass-diff.ts` (the change detector, tab route, filters, PR modal
-data) and `glass-lobs.ts` (which lobs walk). The `/data` payload type,
-`GlassSnapshot`, lives in `@lobstah/core`: `buildGlassSnapshot()` returns it
-and every renderer reads it, so a renamed field fails typecheck on both sides.
-The client typechecks under its own `apps/cli/glass/tsconfig.json` (DOM lib).
+both sides: `glass-diff.ts` (the per-section selectors, tab route, filters,
+PR modal data) and `glass-lobs.ts` (which lobs walk). The `/data` payload
+type, `GlassSnapshot`, lives in `@lobstah/core`: `buildGlassSnapshot()`
+returns it and every component reads it, so a renamed field fails typecheck
+on both sides. The client typechecks under its own
+`apps/cli/glass/tsconfig.json` (DOM lib). `preact` and `htm` are dev
+dependencies of `apps/cli`: they exist only inside the bundled page.
 
 `scripts/build-glass.mjs` is the bundle step, run by `apps/cli`'s `build`:
 esbuild bundles `src/main.ts` into one script, the CSS is whitespace-minified,
 both are inlined into `index.html`, and the result is written as a string
 module, `apps/cli/src/glass-page.generated.ts` (git-ignored), which
 `serveGlass` imports. The npm bundle and the compiled binaries therefore ship
-the page exactly as before: one document, no files beside it, and the images
-still served by `assetPath`. `pnpm glass:dev` rebuilds on every change under
+the page as one document with no files beside it, and the images still
+served by `assetPath`. `pnpm glass:dev` rebuilds on every change under
 `apps/cli/glass` (restart a workspace `lobstah glass` to serve it).
 
 The glass tests load the built page into happy-dom with a fixture snapshot
-and assert on the DOM (`apps/cli/test/glass-page.test.ts`).
-`glass-fidelity.test.ts` diffs the page against the pre-split page
-(`test/fixtures/glass-legacy.html`) on three fixture fleets, section by
-section and by computed style.
+and assert on the DOM (`apps/cli/test/glass-page.test.ts`), counting DOM
+mutations where stability matters. `glass-fidelity.test.ts` drives the page
+and the pre-split page (`test/fixtures/glass-legacy.html`) through the same
+clicks on three fixture fleets and compares every visible section and every
+computed style.
 
 ---
 
