@@ -11,7 +11,7 @@ Codex with no settings surgery.
 | Piece | What it does |
 | ----- | ------------ |
 | SessionStart hook (`lobstah man brief`) | Announces the session's id and a one-line fleet state into the conversation, so every session starts oriented. A session that is neither helm nor trap gets the two copy-paste sign-on commands. |
-| Stop hook (`lobstah man haul`) | Enforces a background watcher on Claude Code; the blocking park remains the Codex default until its background-task completion wake path is verified. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
+| Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends. |
 | `lobsterman` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
 | `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, inbox, stowing. |
@@ -43,7 +43,7 @@ The park never conscripts a session. A session opts in as one of two roles:
 
 | Role | How | What it does |
 | ---- | --- | ------------ |
-| Helm (orchestrator) | `lobstah man helm` | Signs on as the one lobsterman for its grounds and prints the charter. Codex retains the blocking park by default; `lobstah man relieve` steps down. |
+| Helm (orchestrator) | `lobstah man helm` | Signs on as the one lobsterman for its grounds: prints the charter, parks at turn end, and receives wakes and digests. `lobstah man relieve` steps down. |
 | Trap (worker) | `lobstah soak` from a linked worktree | Takes work the helm addresses to its `wt:<trap>` address. Never from the primary checkout. `lobstah stow` signs off. |
 
 Codex documents no session-id environment variable, so pass the id the

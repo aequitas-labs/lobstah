@@ -203,7 +203,7 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   take the helm: one orchestrator per grounds
                                   (a named repo set from [grounds.*], or the
                                   whole fleet). Prints the charter, arms the
-                                  Stop-hook watcher check, and gates the periodic
+                                  Stop hook, and gates the periodic
                                   digest. A live holder refuses without
                                   --take; a stale one is claimable.
   man relieve [--session <id>]    step down from the helm.
@@ -216,7 +216,7 @@ lobsterman (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   parks); --marker touches .lobstah-man.
   man haul [--park] [--timeout <secs>]
                                   Stop-hook entry point: enforce an armed
-                                  watcher on Claude Code; --park blocks in
+                                  watcher in arm mode; --park blocks in
                                   the hook. Prints hook-decision JSON on a
                                   wake, silent exit 0 otherwise. Gate:
                                   helm registration, LOBSTAH_MAN=1, or a
@@ -281,7 +281,6 @@ function gateHelm(who: ResolvedSession | undefined, grounds?: string): void {
   if (refusal) throw new Error(explainRefusal(refusal, who));
 }
 
-/** Claude's Stop hook can instruct and re-check an arm; Codex stays on the blocking park. */
 function hookParkMode(configured: 'arm' | 'block' | undefined, harness?: string): 'arm' | 'block' {
   return configured ?? (harness === 'claude' || (!harness && !!process.env.CLAUDE_CODE_SESSION_ID) ? 'arm' : 'block');
 }
@@ -579,7 +578,7 @@ async function mainCli(): Promise<void> {
         toonHelp([
           `lobstah status ${d.id}`,
           `lobstah send ${d.id} "<instruction>"`,
-          'lobstah man wait --timeout 900   (arm as a background task on Claude Code)',
+          'lobstah man wait --timeout 900   (arm as a background task when the Stop hook asks)',
         ]),
       );
       break;
@@ -1009,7 +1008,9 @@ async function mainCli(): Promise<void> {
           man: helmLabel(res.ok),
           session: sessionId,
           ...(res.ok.tookFrom ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` } : {}),
-          note: `on Claude Code, arm \`lobstah man wait --session ${sessionId} --timeout 900\` as a background task; the Stop hook reminds you if missing. Use \`man haul --park\` for blocking hosts`,
+          note: res.ok.harness === 'claude'
+            ? `arm \`lobstah man wait --session ${sessionId} --timeout 900\` as a background task`
+            : 'Stop hook waits at turn end',
         }),
       );
       console.log(toonHelp([`lobstah man relieve --session ${sessionId}   (step down)`]));
@@ -1243,8 +1244,7 @@ async function mainCli(): Promise<void> {
           );
           break;
         }
-        // A helm registration arms the park on its own — no marker file, no
-        // env var. The park heartbeats it, same as a soaking trap.
+        // A helm registration enables the hook without a marker file or env var.
         const helm = hook?.session_id ? helmOf(hook.session_id) : undefined;
         if (helm) heartbeatHelm(helm.sessionId);
         const cfgHaul = loadConfig();
@@ -1261,7 +1261,7 @@ async function mainCli(): Promise<void> {
           advanceCursor(helm!.grounds, d.now);
           emit(
             `Fleet report for grounds "${helm!.grounds}":\n${renderDigest(d)}\n` +
-              'Handle anything actionable; this session re-parks at turn end.',
+              'Handle anything actionable; the Stop hook checks again at turn end.',
           );
         };
         if (!anythingInFlight()) {
@@ -1277,7 +1277,7 @@ async function mainCli(): Promise<void> {
               [
                 'Fleet notices need a decision:',
                 ...idleNotices.map((n) => `- ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
-                'Each notice names its own remedy. This session re-parks at turn end.',
+                'Each notice names its own remedy. The Stop hook checks again at turn end.',
               ].join('\n'),
             );
             break;
@@ -1438,9 +1438,9 @@ async function mainCli(): Promise<void> {
           worktree: reg.worktree,
           ...(reg.one ? { one: true } : {}),
           note:
-            'this session now takes assigned work: on Claude Code, arm `lobstah soak --wait --timeout 900` ' +
-            'as a background task; the Stop hook reminds you if missing. On hookless hosts use `soak --wait` ' +
-            'in the foreground — never `man wait` (that is the orchestrator\'s command, not yours).',
+            'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
+            'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ' +
+            'Never `man wait` (that is the orchestrator\'s command, not yours).',
         }),
       );
       console.log(

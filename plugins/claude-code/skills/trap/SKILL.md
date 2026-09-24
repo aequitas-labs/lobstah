@@ -42,10 +42,9 @@ naming a dispatch id. Then:
 - A `needs-decision` or `blocked` report queues your question to the human.
   The answer arrives in the dispatch's inbox: `lobstah inbox <id>`.
 - Check `lobstah inbox <id>` at natural checkpoints.
-- On Claude Code, arm `lobstah soak --wait --timeout 900` as a background
-  task after signing on and after every wake or report. Its completion wakes
-  you; the Stop hook reminds you if the arm is missing. On hookless hosts,
-  run `soak --wait` in the foreground and re-run it after exit 3.
+- Run `lobstah soak --wait --timeout 900` as a background task after sign-on
+  and after every completion or report. The Stop hook blocks with standing
+  work or the arm command when no watcher is live. Re-run after exit 3.
 
 ## Fences
 

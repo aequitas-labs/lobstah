@@ -186,7 +186,7 @@ Every carrier shares the cursor (per grounds, for a helm):
 - **The wait loop.** A `man wait` timeout (exit 3) prints the delta when
   something changed, so a looping session gets periodic fleet reports for
   free — see the loop idiom below.
-- **The blocking park.** A helm session's opt-in Stop-hook park delivers the digest as a wake
+- **The blocking park.** A helm session's Stop-hook park delivers the digest as a wake
   at `[helm].reportSecs` cadence — including the landed-then-idle case, where
   the last catches finish and nothing is left in flight to wake for.
 - **Direct call.** Anything with a clock — a gateway heartbeat, a cron — runs
@@ -208,52 +208,13 @@ human is watching — come back later and the transcript is the report.
 
 ## Getting woken instead of asked
 
-Three escalation tiers, least to most invasive. All are built on
-`lobstah man wait`: block until a dispatch — or a watched external source
-(`lobstah watch add`, e.g. a ume review session) — needs attention, print the
-event and what to do next, exit. It is **level-triggered for attention
-states** — if a `needs-decision` or an unconsumed watch event is already
-standing when it starts, it returns immediately — so a gap between one
-watcher exiting and the next arming can never lose an event. When no pick
-process is running, `man wait` runs due watch checks itself, so watching
-works with every service stopped.
-
-**Tier 1 — a push for the human.** Set the daemon's hook and forget it:
-
-```toml
-notifyCommand = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
-```
-
-**Tier 2 — the default on Claude Code: the hook enforces the arm; the watcher
-waits.** After `man helm`, run `lobstah man wait --session <id> --timeout 900`
-as a background task. Its completion notification wakes the session; handle
-the event or digest, then re-arm. The Stop hook (`lobstah man haul`) checks a
-short-lived heartbeat registration at `~/.lobstah/watchers/<session-id>.json`.
-If work is in flight but no live watcher is registered, it blocks once with
-the exact arm command. A second `man wait` for the same session refuses while
-the first is live. A quiet timeout exits 3 with a peek at the delta, refreshing
-the session's context before the next arm.
-
-The hook cannot start a background *task* on the session's behalf, and a
-process it spawns cannot wake that session. The wake doors are a blocking
-hook's return, a background task completion notification, or human input.
-Hence the hook only checks the arm and standing attention; the background
-task does the waiting. Attention remains level-triggered, so an event between
-one watcher exiting and the next arm still stands for the next hook or wait.
-
-This avoids the Claude desktop app's blocking-hook cost: a typed human
-message otherwise queues until the hook returns or the human presses stop,
-and the app shows “1 running task” with nothing in its task pane. A background
-watcher is visible there and leaves the conversational turn free.
-
-**Tier 3 — blocking park for hosts without background-task wakeups.**
-`lobstah man haul --park` retains the previous foreground park (or set
-`[helm].park = "block"`). The hook blocks while work is in flight, returns
-on attention, and delivers periodic digests. This is also the default for
-Codex until its background-task completion wake path is verified; Codex's
-[Stop hook does support a block reason](https://learn.chatgpt.com/docs/hooks),
-so the reason itself is not the limitation. A plain terminal can loop the
-foreground `man wait` instead.
+After `man helm`, run `lobstah man wait --session <id> --timeout 900` as a
+background task and re-arm it after each completion. The wait registers a
+heartbeating watcher for the session and exits with an event or a timeout
+(exit 3). At turn end, `man haul` blocks with standing attention; in arm mode,
+work in flight allows a stop with a live watcher and otherwise blocks with
+the arm command. `man haul --park` or `[helm].park = "block"` makes the hook
+wait for attention itself. Without a Stop hook, run `man wait` in the foreground.
 
 The hook is a CLI command — `lobstah man haul` (the lobsterman hauls the
 trapline; every orchestrator-facing command lives under `lobstah man`).
@@ -267,7 +228,7 @@ Install it from the project you'll run the lobsterman in:
 lobstah man init            # merges the Stop hook into .claude/settings.local.json
 lobstah man init --shared   # …or the committed .claude/settings.json
 lobstah man init --global   # …or once into ~/.claude/settings.json — any
-                            # directory with a .lobstah-man file then checks the arm
+                            # directory with a .lobstah-man file then uses the hook
 lobstah man init --marker   # also touch .lobstah-man (per-directory gate)
 ```
 
@@ -278,18 +239,8 @@ are preserved verbatim. What it writes:
 { "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "lobstah man haul", "timeout": 14400 }] }] } }
 ```
 
-`haul` gates itself twice: only a designated session participates (launch it with
-`LOBSTAH_MAN=1 claude`, or `touch .lobstah-man` for a per-directory gate), and
-only while dispatches are in flight — queued dispatches count. Conversational
-turns end free. Standing attention blocks with its content even when a watcher
-is live. With no standing item and a live watcher, the hook exits silently;
-without one, it blocks with the arm instruction. A stale heartbeat (over five
-seconds old) is absent. The hook never starts a watcher itself.
-
-At session start, `lobstah man wait --peek` checks for a wake consumed before
-a crash without consuming it again; when quiet it returns `standing: none`.
-The watcher is the default ongoing wait, while the Stop hook is its structural
-re-arm backstop. The blocking park remains deliberate rather than automatic.
+`haul` applies to a signed-on helm or trap, or a session opted in with
+`LOBSTAH_MAN=1` or `.lobstah-man`. Queued dispatches count as work in flight.
 
 **Delivery guarantee.** Attention wakes are at-least-once with backoff. An
 unanswered question is reported immediately. While it still stands, it
@@ -313,10 +264,8 @@ must never hide it from the orchestrator that has to answer it. The glass,
 which has no write endpoint, hides a clicked lob per browser in localStorage
 instead.
 
-**Any-harness fallback — the wrapper loop.** Tiers 2 and 3 lean on Claude
-Code features (background-task notifications, the Stop hook). For any other
-harness — or no interactive session at all — an outer loop blocking on `wait`
-spawns one fresh headless turn per event:
+**Wrapper loop.** An outer loop blocking on `wait` can spawn one fresh
+headless turn per event:
 
 ```sh
 while out=$(lobstah man wait); do
@@ -336,8 +285,8 @@ in Standard Technical English: triage and dispatch but never do the work,
 leave running catches to the daemon, judge the catch not the keystrokes, stay
 inside your grounds, report deltas not dumps. `man brief` re-injects the
 charter at every session start, so it survives restarts and compaction
-without anyone re-running anything. A helm registration also arms the
-Stop-hook arm check by itself — no `.lobstah-man` marker, no env var — and
+without anyone re-running anything. A helm registration enables the
+Stop hook by itself — no `.lobstah-man` marker, no env var — and
 gates the digest above.
 
 **One helm per grounds, enforced.** A **grounds** is a named territory: the

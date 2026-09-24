@@ -41,10 +41,10 @@ your working set:
                                                 back to you if undeliverable)
 
 getting woken instead of asking:
-  lobstah man wait --session <id> --timeout 900
-                            arm as a background task after man helm; re-arm
-                            after each wake. The Stop hook reminds if missing
-  lobstah man init          install the Stop-hook arm check, then launch the
+  lobstah man wait          wait for attention; when the Stop hook asks for
+                            an arm, run it as a background task with
+                            --session <id> --timeout 900, then re-arm on exit
+  lobstah man init          install the Stop hook, then launch the
                             designated session with: LOBSTAH_MAN=1 claude
   lobstah man wait --peek   at session start — resurface anything standing
                             without consuming it; never blocks (standing:
@@ -55,8 +55,7 @@ getting woken instead of asking:
                             fleet report
   lobstah man helm          take the helm: sign on as the one lobsterman for
                             your grounds. The charter prints (and re-injects
-                            at every session start), the Stop hook enforces
-                            an armed watcher, and wait timeouts carry digests.
+                            at every session start) and the Stop hook applies.
                             \`man relieve\` steps down
 
 paste into your liaison instructions:

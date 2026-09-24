@@ -6,14 +6,15 @@ const root = fileURLToPath(new URL('../../..', import.meta.url));
 const read = (p: string) => fs.readFileSync(`${root}/${p}`, 'utf8');
 
 /**
- * The Claude Code and Codex plugin layouts ship the same content by copy —
- * there is no build step between the repo and a marketplace install. This
- * guard is the sync mechanism: an edit to one side fails here until the
- * other side matches.
+ * The plugins share skill metadata and hook commands, but their instructions
+ * can differ when their Stop-hook behavior differs.
  */
-describe('plugin parity (claude-code ↔ codex)', () => {
-  it.each(['lobsterman', 'trap'])('the %s skill is byte-identical in both plugins', (skill) => {
-    expect(read(`plugins/codex/skills/${skill}/SKILL.md`)).toBe(read(`plugins/claude-code/skills/${skill}/SKILL.md`));
+describe('plugin contracts (claude-code ↔ codex)', () => {
+  it.each(['lobsterman', 'trap'])('the %s skill shares frontmatter in both plugins', (skill) => {
+    const frontmatter = (raw: string) => raw.match(/^---\n[\s\S]*?\n---/)?.[0];
+    expect(frontmatter(read(`plugins/codex/skills/${skill}/SKILL.md`))).toBe(
+      frontmatter(read(`plugins/claude-code/skills/${skill}/SKILL.md`)),
+    );
   });
 
   it('each skill stays under 80 lines', () => {
