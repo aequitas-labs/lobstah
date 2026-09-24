@@ -25,7 +25,7 @@ struct AttentionItem: Decodable, Equatable {
   var key: String? = nil
   /** Acknowledged for display: the pet skips it (the helm's wakes never do). */
   var acked: AckInfo? = nil
-  /** question | landed | watch | pr:draft | pr:review | pr:checks | pr:ready — absent from an older lobstah. */
+  /** question | landed | watch | pr:draft | pr:review | pr:checks | pr:conflict | pr:ready — absent from an older lobstah. */
   var kind: String? = nil
   /** pr:* kinds: the PR this pet walks for. */
   var prUrl: String? = nil
@@ -39,6 +39,7 @@ struct AttentionItem: Decodable, Equatable {
     case "pr:draft": return "draft"
     case "pr:review": return "review"
     case "pr:checks": return "checks"
+    case "pr:conflict": return "conflicts"
     case "pr:ready": return "ready"
     case "landed": return "landed"
     case "watch": return "watch"

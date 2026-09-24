@@ -115,7 +115,7 @@ opts out). What you get depends on what runs:
 
 - **Only the helm park or `man wait`** (no service): PR state badges in
   `man tend`, `lobstah catch`, and the glass (`merged`, `draft`, `review`,
-  `checks 1/2 failed`, `green`), and a `pr-merged` / `pr-closed` notice
+  `checks 1/2 failed`, `conflicts`, `behind`, `green`), and a `pr-merged` / `pr-closed` notice
   when the PR lands. The inline poller observes at `[pickup].pollSecs`
   (default 45 s), one `gh pr view` per PR per cycle, and forks nothing.
 - **With `lobstah pick`** (watch-only mode needs no tracker; `lobstah pick
@@ -137,7 +137,8 @@ request surfaces as a watch event; a merge or close arrives as a notice.
 
 An observed PR joins tend's attention list by kind — `pr:draft`,
 `pr:review` (unresolved threads or changes requested), `pr:checks` (a red
-head), `pr:ready` (approved or all green) — so it crawls in the glass and
+head), `pr:conflict` (GitHub reports it conflicting with its base),
+`pr:ready` (approved or all green, and GitHub says it can merge) — so it crawls in the glass and
 the desktop pet until its clear condition holds; clicking it opens the PR.
 `pr:review` and `pr:checks` stay off the screen while a worker already owns
 them (a pickup feedback round or the watch's fix continuation in flight).

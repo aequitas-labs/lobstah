@@ -73,10 +73,10 @@ export interface Config {
  * Level-triggered: each stands until its clear condition, unlike notifyVerbs,
  * which fire once per transition.
  */
-export const ATTENTION_KINDS = ['question', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:ready'] as const;
+export const ATTENTION_KINDS = ['question', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready'] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 /** Everything but landed, which is opt-in: the digest already carries landings. */
-export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'pr:draft', 'pr:review', 'pr:checks', 'pr:ready'];
+export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready'];
 
 function parseAttentionKinds(raw: unknown): AttentionKind[] {
   if (raw === undefined) return [...DEFAULT_ATTENTION_KINDS];

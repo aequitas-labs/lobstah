@@ -221,3 +221,14 @@ describe('glass change detector', () => {
     expect(() => new Function(script)).not.toThrow();
   });
 });
+
+describe('prBadgeClass — the glass colors the one prBadge derivation', () => {
+  const cls = new Function(`${GLASS_DIFF_JS}; return prBadgeClass;`)() as (b: unknown) => string;
+  it('fills conflicts GitHub red and behind grey; green stays GitHub open green', () => {
+    expect(cls({ text: 'conflicts', tone: 'bad', state: 'open', merge: 'conflicts' })).toBe('pr-conflicts');
+    expect(cls({ text: 'behind', tone: 'dim', state: 'open', merge: 'behind' })).toBe('pr-behind');
+    expect(cls({ text: 'green', tone: 'ok', state: 'open' })).toBe('pr-open');
+    expect(cls({ text: 'checks 1/2 failed', tone: 'bad', state: 'open' })).toBe('bad');
+    expect(cls({ text: 'merged', tone: 'ok', state: 'merged', merge: 'conflicts' })).toBe('pr-merged');
+  });
+});

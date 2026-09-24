@@ -93,6 +93,7 @@ export function prStateHash(pr: PrEvidence): string {
     state: pr.state,
     draft: pr.draft,
     reviewDecision: pr.reviewDecision,
+    mergeStateStatus: pr.mergeStateStatus,
     checks: pr.checks,
     unresolvedThreads: pr.review?.unresolvedThreads,
     changesRequested: pr.review?.changesRequested ?? false,
