@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../..', import.meta.url));
-const read = (p: string) => fs.readFileSync(`${root}/${p}`, 'utf8');
+const read = (p: string) => fs.readFileSync(`${root}/${p}`, 'utf8').replace(/\r\n/g, '\n');
 
 /**
  * The plugins share skill metadata and hook commands, but their instructions
