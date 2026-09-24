@@ -25,6 +25,8 @@ and recovers each; status and evidence land on disk. Supervision costs
 nothing — no tokens, no attention — so the whole fleet fits in one
 conversation, and **your agents just bring home the lobstahs**.
 
+![Pixel lobster carrying a star across the page](docs/assets/lob-crawl.svg)
+
 ## Requirements 📋
 
 - Node 20+, git, pnpm
@@ -130,6 +132,8 @@ continues the turn the moment something needs it.
 
 ## Add-ons 🎣
 
+- **Desktop pet** — walks attention across your screen; run `lobstah pet install`
+  on macOS. [Install guide](apps/pet/README.md#install)
 - **Tracker pickup** — `lobstah pick` polls Linear and GitHub outbound (no
   webhooks, no tunnel), dispatches assigned work, streams status back as
   comments, forwards replies into the running dispatch, reconciles drift, and
@@ -184,3 +188,5 @@ vocabulary in core, no hosted service.
 ## License
 
 [MIT](LICENSE)
+
+![Pixel lobster carrying a star across the page](docs/assets/lob-crawl.svg)
