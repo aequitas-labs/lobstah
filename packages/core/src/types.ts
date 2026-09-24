@@ -23,7 +23,13 @@ export interface Descriptor {
   repo: string;
   brief: string;
   harness?: string;
+  /** `harness` was named on the command line (`dispatch`/`swap --harness`),
+   * not inherited from a default. An explicit harness that differs from a
+   * follow-up origin's session is a swap: it starts cold on the one asked for. */
+  harnessExplicit?: boolean;
   model?: string;
+  /** `model` was named on the command line (`--model`). */
+  modelExplicit?: boolean;
   effort?: string;
   limits?: DispatchLimits;
   flags?: string[];

@@ -460,11 +460,15 @@ run stamps `harness` into evidence beside `sessionId` (the adapter's for a
 headless run, the trap's for a claim), and one resolver reads it back for a
 follow-up's fork, a daemon restart, `lobstah swap`, and `attach`. It falls back
 to the claiming trap, then the session id's UUID version, then the descriptor.
-A follow-up whose `--harness` names something the chain never asked for is a
-swap: cold on that harness with the brief plus a progress note. A resume the
-harness refuses before doing any work falls back the same way and records
-`resume-fallback: <reason>` in the status note and evidence. It never fails
-the dispatch. The first status note says which of these happened.
+A follow-up with an explicit `--harness` (`harnessExplicit` in the descriptor)
+that differs from the origin session's is a swap: cold on that harness with the
+brief plus a progress note. A resume the harness refuses before doing any work
+falls back cold on the dispatch's own harness (no session is left to keep) and
+records `resume-fallback: <reason> — starting cold on <harness>` in the status
+note and evidence. It never fails the dispatch. A known Codex desktop thread
+skips the attempt, because the CLI does not resume it. A model that belongs to
+another harness is dropped for the adapter's default and never reaches the
+spawn. The first status note says which of these happened.
 
 ```ts
 // inside the runner

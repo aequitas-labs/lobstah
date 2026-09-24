@@ -77,6 +77,8 @@ export function dispatchTool(): AnyAgentTool {
         effort: param(params, 'effort'),
         followUp: param(params, 'followUp'),
       };
+      if (d.harness) d.harnessExplicit = true;
+      if (d.model) d.modelExplicit = true;
       enqueue(d, 'work');
       return text(toonKV({ id: d.id, repo, queued: new Date().toISOString() }), { id: d.id });
     },

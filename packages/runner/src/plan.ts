@@ -1,4 +1,11 @@
-import { harnessFromSessionId, readEvidence, resolveSessionHarness, storedDescriptor } from '@lobstah/core';
+import {
+  CODEX_DESKTOP_THREAD,
+  codexDesktopThread,
+  harnessFromSessionId,
+  readEvidence,
+  resolveSessionHarness,
+  storedDescriptor,
+} from '@lobstah/core';
 import type { Config, Descriptor, Lane } from '@lobstah/core';
 
 /**
@@ -44,6 +51,13 @@ export function planStart(input: PlanInput): StartPlan {
   if (envResume) {
     const own = resolveSessionHarness(id, cfg, lane);
     const harness = (own.sessionId === envResume ? own.harness : harnessFromSessionId(envResume)) ?? resolvedHarness;
+    if (harness === 'codex' && codexDesktopThread(envResume)) {
+      return {
+        harness: resolvedHarness,
+        cold: { why: CODEX_DESKTOP_THREAD, fromHarness: harness },
+        note: `restart: ${CODEX_DESKTOP_THREAD} (${short(envResume)}), starting cold on ${resolvedHarness}`,
+      };
+    }
     return {
       harness,
       resume: { sessionId: envResume, own: true },
@@ -84,12 +98,18 @@ export function planStart(input: PlanInput): StartPlan {
     };
   }
 
-  // A --harness naming what the chain already asked for is inherited habit,
-  // not a request: the origin's session wins. Naming something the chain
-  // never asked for, and the session is not, is a swap.
+  // An explicit --harness (recorded as harnessExplicit) that differs from
+  // the origin session's is a swap. Without the record — a descriptor
+  // written before it existed — a --harness naming what the chain already
+  // asked for is inherited habit, not a request, and only one naming
+  // something the chain never asked for is a swap. An unspecified harness
+  // follows the origin.
   const requested = descriptor.harness;
   const swap =
-    requested !== undefined && requested !== origin.harness && requested !== askedHarness(originId, originLane, cfg);
+    requested !== undefined &&
+    requested !== origin.harness &&
+    (descriptor.harnessExplicit === true ||
+      (descriptor.harnessExplicit === undefined && requested !== askedHarness(originId, originLane, cfg)));
   if (swap) {
     return {
       harness: requested,
@@ -99,6 +119,19 @@ export function planStart(input: PlanInput): StartPlan {
         `starting cold on ${requested} with a progress note`,
     };
   }
+
+  // A Codex desktop thread is not a CLI rollout: `codex exec resume` refuses
+  // it, so don't try — start cold on the harness this dispatch asked for.
+  if (origin.harness === 'codex' && codexDesktopThread(origin.sessionId)) {
+    return {
+      harness: resolvedHarness,
+      cold: { why: CODEX_DESKTOP_THREAD, fromHarness: origin.harness, origin: originRef },
+      note:
+        `follow-up of ${short(originId)}: ${CODEX_DESKTOP_THREAD} (${short(origin.sessionId)}), ` +
+        `starting cold on ${resolvedHarness} with a progress note`,
+    };
+  }
+
   const ignored = requested !== undefined && requested !== origin.harness ? ` (--harness ${requested} ignored for the resume)` : '';
   return {
     harness: origin.harness,

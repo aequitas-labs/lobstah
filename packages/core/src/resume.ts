@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { Config } from './config.js';
@@ -107,7 +108,7 @@ export function resolveSessionHarness(id: string, cfg?: Config, laneHint?: Lane)
  * rollout found for thread id …" / thread-not-found variants.
  */
 const UNRESUMABLE =
-  /no conversation found|no rollout found|(session|thread|conversation)( id)?[^.\n]{0,80}\b(not found|does not exist|unknown|invalid)|(could not|cannot|failed to|unable to) (find|load|resume)[^.\n]{0,40}\b(session|thread|conversation)/i;
+  /no conversation found|no rollout found|thread\/resume failed|(session|thread|conversation)( id)?[^.\n]{0,80}\b(not found|does not exist|unknown|invalid)|(could not|cannot|failed to|unable to) (find|load|resume)[^.\n]{0,40}\b(session|thread|conversation)/i;
 
 export function isUnresumable(error: string | undefined): boolean {
   return error !== undefined && UNRESUMABLE.test(error);
@@ -154,3 +155,65 @@ export function handoffNote(fromHarness: string, progress: string, why?: string)
 ${progress}`
   );
 }
+
+/** `$CODEX_HOME`, else `~/.codex` — where Codex keeps its rollouts. */
+function codexHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+}
+
+/** The rollout file Codex wrote for this thread, if one exists locally. */
+export function codexRolloutFile(threadId: string, home: string = codexHome()): string | undefined {
+  const suffix = `-${threadId}.jsonl`;
+  const walk = (dir: string, depth: number): string | undefined => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return undefined;
+    }
+    for (const e of entries) {
+      if (e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith(suffix)) return path.join(dir, e.name);
+    }
+    if (depth === 0) return undefined;
+    // Newest first: the date directories sort lexically.
+    for (const e of entries.filter((x) => x.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
+      const hit = walk(path.join(dir, e.name), depth - 1);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  // sessions/YYYY/MM/DD/rollout-…-<id>.jsonl; archived_sessions is flat.
+  return walk(path.join(home, 'sessions'), 3) ?? walk(path.join(home, 'archived_sessions'), 0);
+}
+
+/**
+ * Whether a Codex thread was written by the Codex desktop app rather than
+ * the CLI — its rollout's `session_meta.originator` names the desktop app
+ * ("Codex Desktop", "codex_work_desktop"); a CLI run says `codex_exec` or
+ * `codex_sdk_ts`. `codex exec resume` has been observed to refuse desktop
+ * threads ("thread/resume failed: no rollout found for thread id …", e2de5dd7),
+ * so a desktop thread is never handed to the CLI. Returns the originator, or
+ * undefined when the thread is not a known desktop thread (a CLI rollout, or
+ * no local rollout at all — then the resume is still attempted).
+ */
+export function codexDesktopThread(threadId: string, home: string = codexHome()): string | undefined {
+  const file = codexRolloutFile(threadId, home);
+  if (!file) return undefined;
+  let head = '';
+  try {
+    const fd = fs.openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(4096);
+      head = buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, 0)).toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+  const originator = /"originator"\s*:\s*"([^"]*)"/.exec(head)?.[1];
+  return originator && /desktop/i.test(originator) ? originator : undefined;
+}
+
+/** The status phrasing for a desktop thread the CLI will not resume. */
+export const CODEX_DESKTOP_THREAD = 'Codex desktop thread; not resumable from the CLI';
