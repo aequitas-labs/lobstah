@@ -111,19 +111,19 @@ describe('prBadge — one derivation for tend, catch, and glass', () => {
   const ev = (v: Partial<GhPrView>): PrEvidence => prEvidence(ref, { ...open, ...v }, at);
   const green = { statusCheckRollup: [run('a', 'SUCCESS'), run('b', 'SKIPPED')] };
   it.each([
-    ['merged', ev({ ...green, state: 'MERGED' }), 'merged', 'ok'],
-    ['closed', ev({ ...green, state: 'CLOSED' }), 'closed', 'dim'],
-    ['draft', ev({ ...green, isDraft: true }), 'draft', 'dim'],
-    ['failed checks', ev(failedAndReviewed), 'checks 1/2 failed', 'bad'],
-    ['changes requested', ev({ ...green, reviewDecision: 'CHANGES_REQUESTED' }), 'changes requested', 'bad'],
-    ['pending checks', ev({}), 'checks 1/2', 'warn'],
-    ['unresolved threads', { ...ev({ ...green }), review: { unresolvedThreads: 2, changesRequested: false } }, '2 unresolved', 'warn'],
-    ['changes requested by a reviewer', { ...ev({ ...green }), review: { changesRequested: true } }, 'changes requested', 'bad'],
-    ['conflicts', ev({ ...green, mergeStateStatus: 'DIRTY' }), 'conflicts', 'bad'],
-    ['review required', ev({ ...green, reviewDecision: 'REVIEW_REQUIRED' }), 'review', 'warn'],
-    ['green', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'CLEAN' }), 'green', 'ok'],
-  ])('%s', (_label, pr, text, tone) => {
-    expect(prBadge(pr)).toEqual({ text, tone });
+    ['merged', ev({ ...green, state: 'MERGED' }), 'merged', 'ok', 'merged'],
+    ['closed', ev({ ...green, state: 'CLOSED' }), 'closed', 'bad', 'closed'],
+    ['draft', ev({ ...green, isDraft: true }), 'draft', 'dim', 'draft'],
+    ['failed checks', ev(failedAndReviewed), 'checks 1/2 failed', 'bad', 'open'],
+    ['changes requested', ev({ ...green, reviewDecision: 'CHANGES_REQUESTED' }), 'changes requested', 'bad', 'open'],
+    ['pending checks', ev({}), 'checks 1/2', 'warn', 'open'],
+    ['unresolved threads', { ...ev({ ...green }), review: { unresolvedThreads: 2, changesRequested: false } }, '2 unresolved', 'warn', 'open'],
+    ['changes requested by a reviewer', { ...ev({ ...green }), review: { changesRequested: true } }, 'changes requested', 'bad', 'open'],
+    ['conflicts', ev({ ...green, mergeStateStatus: 'DIRTY' }), 'conflicts', 'bad', 'open'],
+    ['review required', ev({ ...green, reviewDecision: 'REVIEW_REQUIRED' }), 'review', 'warn', 'open'],
+    ['green', ev({ ...green, reviewDecision: 'APPROVED', mergeStateStatus: 'CLEAN' }), 'green', 'ok', 'open'],
+  ])('%s', (_label, pr, text, tone, state) => {
+    expect(prBadge(pr)).toEqual({ text, tone, state });
   });
 
   it('counts checks, with a StatusContext judged by its state', () => {

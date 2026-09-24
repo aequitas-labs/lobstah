@@ -15,7 +15,7 @@ import {
   mergeEvidence,
 } from '@lobstah/core';
 import type { PrEvidence } from '@lobstah/core';
-import { buildTendReport, onTheHook, prKinds, readyBlockedByStack, renderTend } from '../src/tend.js';
+import { buildTendReport, landedCatches, onTheHook, prKinds, readyBlockedByStack, renderTend } from '../src/tend.js';
 import { advanceCursor } from '../src/reported.js';
 
 let home: string;
@@ -167,6 +167,20 @@ describe('attention kinds — stand and clear', () => {
     expect(kinds()).toEqual(['landed']);
     advanceCursor('shop', new Date(Date.now() + 1000).toISOString());
     expect(kinds()).toEqual([]);
+  });
+
+  it("the glass's landed catches keep reported ones, badging only those past their grounds' cursor", () => {
+    config('attentionKinds = ["landed"]\n[grounds.shop]\nrepos = ["web"]\n');
+    enqueue({ id: Q, repo: 'web', brief: 'b' }, 'work');
+    claimNext('work');
+    appendStatus(Q, 'work', 'done', 'shipped');
+    complete(Q, 'work');
+    expect(landedCatches(loadConfig())).toEqual([expect.objectContaining({ id: Q, verb: 'done', repo: 'web', unreported: true })]);
+    advanceCursor('fleet', new Date(Date.now() + 1000).toISOString()); // another grounds' cursor: no effect
+    expect(landedCatches(loadConfig())[0]!.unreported).toBe(true);
+    advanceCursor('shop', new Date(Date.now() + 1000).toISOString());
+    expect(landedCatches(loadConfig())).toEqual([expect.objectContaining({ id: Q, unreported: false })]);
+    expect(kinds()).toEqual([]); // tend's own landed attention still clears
   });
 });
 
