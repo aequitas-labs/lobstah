@@ -110,6 +110,19 @@ An **attachment** is a dispatch descriptor entry `{ name, path, bytes, type }`
 pointing to a copied, dispatch-owned file under `state/<id>/attachments/`;
 follow-ups reuse those paths, and messages may carry their own attachments.
 
+## Follow-up and swap
+
+How a dispatch picks up a session it did not start. One resolver
+(`resolveSessionHarness`, `packages/core/src/resume.ts`) names the harness
+that owns a session: evidence `harness`, else the claiming trap, else the
+session id's UUID version (v7 codex, v4 claude), else the descriptor.
+
+| Word | Meaning |
+| ---- | ------- |
+| follow-up | `--follow-up <id>` forks the origin's session **under the origin's harness**, whatever the follow-up's own `--harness` says, unless that `--harness` names something the chain never asked for and the session is not, which makes it a swap. Pickup review rounds and watch continuations are follow-ups. |
+| swap | Start cold on another harness with the brief plus a progress note (commits so far, uncommitted changes, and the origin's branch/PR/commits for a follow-up). `lobstah swap` does it to an active dispatch; a follow-up does it when it asks for a new harness. |
+| `resume-fallback` | Status note and evidence field (`resumeFallback`) recorded when the harness refuses a resume (not found, culled, foreign) before doing any work: the runner starts cold with the progress note and the dispatch proceeds. |
+
 ## Doctor statuses
 
 `lobstah doctor` grades each check with one of four words. **Owner:**

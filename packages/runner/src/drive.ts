@@ -30,6 +30,9 @@ export interface DriveOpts {
 
 export interface DriveResult {
   cancelled: boolean;
+  /** Tool calls and assistant text seen — zero means the session never did
+   * any work (a resume the harness refused ends this way). */
+  activity: number;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -53,6 +56,7 @@ function deliver(run: AdapterRun, id: string, lane: Lane): number {
 export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResult> {
   const { id, lane, pollMs = 3000, stopped = () => false } = opts;
   let cancelled = false;
+  let activity = 0;
   // A harness that exits on its own (crash, external kill) ends any wait.
   let finished = false;
   void run.done.then(() => (finished = true));
@@ -84,6 +88,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
 
   for await (const ev of run.events) {
     appendEvent(id, lane, ev);
+    if (ev.type === 'tool-start' || ev.type === 'text') activity++;
     if (ev.type === 'session' && ev.data?.sessionId) {
       mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId) });
     }
@@ -107,7 +112,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     // the session and let settle() stamp done.
     run.end();
   }
-  return { cancelled };
+  return { cancelled, activity };
 }
 
 export interface SettleInput {

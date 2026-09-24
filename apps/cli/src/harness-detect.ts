@@ -25,6 +25,8 @@
  * CLI); `man helm` records no harness, as it always could.
  */
 
+import { harnessFromSessionId } from '@lobstah/core';
+
 export type Harness = 'claude' | 'codex';
 export type HarnessSource = 'flag' | 'prior' | 'env' | 'session-id';
 
@@ -35,13 +37,8 @@ export interface HarnessResolution {
   reason?: string;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-([0-9a-f])[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-/** The harness a session id's format implies: v7 → codex, v4 → claude, else undefined. */
-export function harnessFromSessionId(sessionId: string | undefined): Harness | undefined {
-  const version = sessionId ? UUID.exec(sessionId)?.[1] : undefined;
-  return version === '7' ? 'codex' : version === '4' ? 'claude' : undefined;
-}
+/** v7 → codex, v4 → claude (shared with the runner's session-harness resolver). */
+export { harnessFromSessionId };
 
 export function detectHarness(opts: {
   flag?: string;

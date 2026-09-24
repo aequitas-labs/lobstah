@@ -44,6 +44,12 @@ export interface StatusEntry {
 
 export interface Evidence {
   sessionId?: string;
+  /** The harness that owns `sessionId` — stamped on first run (the adapter's
+   * for a headless run, the trap's for a trap-claimed catch). A resume only
+   * works under this harness; see resolveSessionHarness. */
+  harness?: string;
+  /** Set when a resume could not happen and the run started cold instead. */
+  resumeFallback?: string;
   branch?: string;
   commits?: string[];
   prUrl?: string;
