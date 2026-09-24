@@ -1,39 +1,23 @@
+import { h } from 'preact';
+import htm from 'htm';
+import type { ComponentChildren } from 'preact';
+
 /**
- * A tiny tagged template for the page's markup. Every interpolated value is
- * escaped (& < > ") unless it is already Html — a nested html`` fragment or
- * raw() — so markup composes and data never becomes markup by accident.
- * Arrays join with no separator; null, undefined, and false render nothing.
+ * htm bound to Preact's h: tagged-template markup that builds virtual DOM,
+ * no build-time JSX. Interpolated text is text, never markup, so nothing
+ * here needs escaping.
+ *
+ * Empty strings are dropped from children: Preact compares a text node's
+ * props with `oldProps || {}`, so an empty text node is rewritten on every
+ * render — a DOM mutation for nothing. An empty text node renders nothing
+ * anyway, so null is the same page.
  */
+type Child = ComponentChildren;
+const clean = (c: Child): Child => (Array.isArray(c) ? c.map(clean) : c === '' ? null : c);
+const hh = (type: Parameters<typeof h>[0], props: Record<string, unknown> | null, ...children: Child[]) =>
+  h(type as never, props as never, ...children.map(clean));
 
-export class Html {
-  constructor(readonly value: string) {}
-  toString(): string {
-    return this.value;
-  }
-}
+export const html = htm.bind(hh);
 
-const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
-
-/** Escape text for an element body or a double-quoted attribute. */
-export const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"]/g, (c) => ESC[c]!);
-
-/** Trusted markup, inserted as-is. */
-export const raw = (s: string): Html => new Html(s);
-
-export type Part = Html | string | number | boolean | null | undefined | readonly Part[];
-
-function part(v: Part): string {
-  if (v instanceof Html) return v.value;
-  if (Array.isArray(v)) return v.map(part).join('');
-  if (v === null || v === undefined || v === false) return '';
-  return esc(v);
-}
-
-export function html(strings: TemplateStringsArray, ...values: Part[]): Html {
-  let out = strings[0]!;
-  for (let i = 0; i < values.length; i++) out += part(values[i]!) + strings[i + 1]!;
-  return new Html(out);
-}
-
-/** Join fragments with a separator (the separator is trusted markup). */
-export const join = (items: readonly Part[], sep = ''): Html => raw(items.map(part).join(sep));
+/** Anything a component can return or nest. */
+export type Children = ComponentChildren;
