@@ -14,7 +14,8 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * every tab in both views, the chain grouping, every modal, the lobs, the
  * preview lob — and the static skeleton after whitespace normalization.
  */
-const LEGACY = fs.readFileSync(new URL('./fixtures/glass-legacy.html', import.meta.url), 'utf8');
+// The exact bytes served, whatever line endings the checkout gave the fixture.
+const LEGACY = fs.readFileSync(new URL('./fixtures/glass-legacy.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 const REGIONS = ['chips', 'clock', 'deck', 'dispatches', 'traps', 'prs', 'notices', 'foot', 'lobs', 'f-repo', 'f-kind'];
 const CONTROLS = ['f-lane', 'f-verb', 'chain-control', 'f-kind', 'stale', 'overlay'];

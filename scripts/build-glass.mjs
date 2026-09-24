@@ -42,7 +42,9 @@ export async function buildGlass({ minify: min = minify } = {}) {
     write: false,
     logLevel: 'silent',
   });
-  const css = await esbuild.transform(fs.readFileSync(path.join(glass, 'glass.css'), 'utf8'), {
+  // Line endings are the checkout's (CRLF on Windows); the page is the same bytes everywhere.
+  const read = (f) => fs.readFileSync(path.join(glass, f), 'utf8').replace(/\r\n/g, '\n');
+  const css = await esbuild.transform(read('glass.css'), {
     loader: 'css',
     // Whitespace only: syntax minification rewrites values (bold → 700),
     // which the fidelity test's computed-style diff would rightly flag.
@@ -51,7 +53,7 @@ export async function buildGlass({ minify: min = minify } = {}) {
   });
   const script = js.outputFiles[0].text.replace(/<\/(script)/gi, '<\\/$1');
   const style = css.code.replace(/<\/(style)/gi, '<\\/$1');
-  let page = fs.readFileSync(path.join(glass, 'index.html'), 'utf8');
+  let page = read('index.html');
   // Build-time comments in the skeleton are for the source reader only.
   page = page.replace(/[ \t]*<!-- scripts\/build-glass\.mjs[^>]*-->\n/g, '');
   page = inline(page, CSS_TAG, `<style>${style.trimEnd()}</style>`);
