@@ -27,6 +27,31 @@ const click = async (g: GlassDom, el: Element | null) => {
   (el as HTMLElement).click();
   await g.settle();
 };
+/** Open a modal the way a reader does: click its row on its tab. */
+async function openRow(g: GlassDom, tab: string, label: string) {
+  await g.go(tab);
+  await click(g, g.$$(`#${tab.slice(1)} tr.rowhead`).find((tr) => text(tr).includes(label)) ?? null);
+}
+async function settings(g: GlassDom, row: 'view' | 'lobs', choice: string) {
+  await click(g, g.$('#gearbtn'));
+  const rowEl = g.$$('#modalbox .settings .row').find((r) => text(r.querySelector('.lbl')).startsWith(row))!;
+  await click(g, [...rowEl.querySelectorAll('.seg button')].find((b) => text(b) === choice) ?? null);
+}
+const escape = async (g: GlassDom) => {
+  g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
+  await g.settle();
+};
+/** Record every DOM mutation under the body while fn runs. */
+async function mutations(g: GlassDom, fn: () => Promise<void>): Promise<MutationRecord[]> {
+  const W = g.window as unknown as { MutationObserver: typeof MutationObserver };
+  const seen: MutationRecord[] = [];
+  const mo = new W.MutationObserver((records) => seen.push(...records));
+  mo.observe(g.document.body as unknown as Node, { subtree: true, childList: true, attributes: true, characterData: true });
+  await fn();
+  seen.push(...mo.takeRecords());
+  mo.disconnect();
+  return seen;
+}
 
 describe('glass page: tabs and hash routing', () => {
   it('opens On deck by default and follows the hash to each tab', async () => {
@@ -65,7 +90,7 @@ describe('glass page: per-section change detection', () => {
     const g = await page(acceptanceFleet(), { hash: '#dispatches' });
     const before = { chips: g.$('#chips .chip'), table: g.$('#dispatches table'), foot: g.$('#foot a'), lob: g.$('#lobs .lob') };
     const fetched = g.fetches();
-    await g.poll();
+    expect(await mutations(g, () => g.poll())).toEqual([]);
     expect(g.fetches()).toBe(fetched + 1);
     expect(g.$('#chips .chip')).toBe(before.chips);
     expect(g.$('#dispatches table')).toBe(before.table);
@@ -73,17 +98,46 @@ describe('glass page: per-section change detection', () => {
     expect(g.$('#lobs .lob')).toBe(before.lob);
   });
 
-  it('a change to one dispatch rewrites the dispatches section and leaves the header alone', async () => {
+  it('a snapshot change to one dispatch re-renders only that row', async () => {
     const g = await page(acceptanceFleet(), { hash: '#dispatches' });
-    const chip = g.$('#chips .chip');
-    const table = g.$('#dispatches table');
+    const rowOf = (id: string) => g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes(id))!;
+    const row = rowOf('bbbbbbbb');
+    const others = g.$$('#dispatches tr.rowhead').filter((tr) => tr !== row);
     const d = acceptanceFleet();
-    d.dispatches[1]!.note = 'a new note';
+    d.dispatches.find((x) => x.id.startsWith('bbbbbbbb'))!.note = 'a new note';
+    g.serve(d);
+    const seen = await mutations(g, () => g.poll());
+    expect(seen.length).toBeGreaterThan(0);
+    // Every mutation is inside the changed row: no other row, no header, no other section.
+    expect(seen.filter((m) => !row.contains(m.target as never))).toEqual([]);
+    expect(rowOf('bbbbbbbb')).toBe(row);
+    expect(text(row)).toContain('a new note');
+    expect(g.$$('#dispatches tr.rowhead').filter((tr) => tr !== row)).toEqual(others);
+  });
+
+  it('cards: a change to one dispatch touches only its card', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#dispatches', prefs: { view: 'cards' } });
+    const card = g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb'))!;
+    const d = acceptanceFleet();
+    d.dispatches.find((x) => x.id.startsWith('bbbbbbbb'))!.verb = 'blocked';
+    g.serve(d);
+    const seen = await mutations(g, () => g.poll());
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((m) => !card.contains(m.target as never))).toEqual([]);
+    expect(card.querySelector('.badge')!.className).toBe('badge v-blocked');
+  });
+
+  it('a new dispatch inserts one row and keeps every existing row node', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#dispatches' });
+    const before = g.$$('#dispatches tr.rowhead');
+    const d = acceptanceFleet();
+    d.dispatches.unshift({ ...d.dispatches[0]!, id: 'eeeeeeee-0000-4000-8000-000000000009', note: 'fresh' });
     g.serve(d);
     await g.poll();
-    expect(g.$('#dispatches table')).not.toBe(table);
-    expect(text(g.$('#dispatches'))).toContain('a new note');
-    expect(g.$('#chips .chip')).toBe(chip);
+    const after = g.$$('#dispatches tr.rowhead');
+    expect(after).toHaveLength(before.length + 1);
+    expect(text(after[0]!)).toContain('eeeeeeee');
+    expect(after.slice(1)).toEqual(before);
   });
 
   it('ages tick in place without a rewrite', async () => {
@@ -127,37 +181,49 @@ describe('glass page: per-section change detection', () => {
 });
 
 describe('glass page: modals', () => {
-  it('an open modal keeps its node across ticks; only its own item changing rebuilds it', async () => {
+  it('an open modal keeps its root element across ten ticks; its own item changing updates it in place', async () => {
     const g = await page(acceptanceFleet());
-    const d = acceptanceFleet();
-    const target = d.dispatches.find((x) => x.verb === 'needs-decision')!;
-    await g.call('showModal', 'dispatch', `${target.lane}:${target.id}`);
+    await openRow(g, '#dispatches', 'cccccccc');
     expect(g.$('#overlay')!.className).toBe('open');
-    const title = g.$('#modalbox h3');
+    const root = g.$('#modalbox')!;
+    const title = g.$('#modalbox h3')!;
+    const secs = g.$$('#modalbox .sec');
     expect(text(title)).toBe('cccccccc needs-decision');
-    // Another dispatch changes: the modal is untouched.
-    d.dispatches[0]!.note = 'elsewhere';
-    g.serve(d);
-    await g.poll();
+    const d = acceptanceFleet();
+    for (let i = 0; i < 10; i++) {
+      // Another dispatch changes every tick; the modal's nodes stay put.
+      d.dispatches[0]!.note = `elsewhere ${i}`;
+      g.serve(structuredClone(d));
+      await g.poll();
+      expect(g.$('#modalbox')).toBe(root);
+      expect(g.$('#modalbox h3')).toBe(title);
+      expect(g.$$('#modalbox .sec')).toEqual(secs);
+    }
+    // Its own dispatch changes: same nodes, new state.
+    const own = structuredClone(d);
+    own.dispatches.find((x) => x.id.startsWith('cccccccc'))!.verb = 'working';
+    g.serve(own);
+    const seen = await mutations(g, () => g.poll());
     expect(g.$('#modalbox h3')).toBe(title);
-    // Its own dispatch changes: the modal rebuilds with the new state.
-    target.verb = 'working';
-    g.serve(d);
-    await g.poll();
-    expect(text(g.$('#modalbox h3'))).toBe('cccccccc working');
+    expect(text(title)).toBe('cccccccc working');
+    // The dispatches table row changed too; nothing outside the modal and that row moved.
+    const row = g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc'))!;
+    expect(seen.filter((m) => !root.contains(m.target as never) && !row.contains(m.target as never))).toEqual([]);
   });
 
   it('Escape and a click outside close the modal; a vanished item closes it', async () => {
     const g = await page(acceptanceFleet());
-    await g.call('showModal', 'trap', 't1');
+    await openRow(g, '#traps', 'wt:t1');
     expect(text(g.$('#modalbox h3'))).toContain('wt:t1');
-    g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
-    await g.settle();
+    await escape(g);
     expect(g.$('#overlay')!.className).toBe('');
-    await g.call('showModal', 'trap', 't1');
+    await openRow(g, '#traps', 'wt:t1');
+    // A click inside the modal keeps it open; a click on the backdrop closes it.
+    await click(g, g.$('#modalbox .sub'));
+    expect(g.$('#overlay')!.className).toBe('open');
     await click(g, g.$('#overlay'));
     expect(g.$('#overlay')!.className).toBe('');
-    await g.call('showModal', 'trap', 't1');
+    await openRow(g, '#traps', 'wt:t1');
     const d = acceptanceFleet();
     d.traps = d.traps.filter((t) => t.trapId !== 't1');
     g.serve(d);
@@ -177,7 +243,7 @@ describe('glass page: modals', () => {
 
   it('the PR modal shows the stack, the dispatch chain, and the watch cursor', async () => {
     const g = await page(acceptanceFleet());
-    await g.call('showModal', 'pr', 'pr:acme/web#42');
+    await openRow(g, '#prs', '#42');
     const box = g.$('#modalbox')!;
     expect(text(box.querySelector('h3'))).toBe('#42 PR 42 checks 3/4');
     expect(text(box)).toContain('#41 → #42 → #43 · 2 of 3 · floor main · blocked by #41');
@@ -343,15 +409,26 @@ describe('glass page: lobs', () => {
     const bubs = g.$$('#lobs .lob .bub').map(text);
     expect(bubs).toHaveLength(4);
     expect(bubs.join(' ')).not.toMatch(/landed item 1|pr:checks item 4|watch item 7/);
-    await g.call('hideLob', 'work:extra0', 'x0');
-    expect(JSON.parse(g.window.localStorage.getItem('spyglass-lob-hidden')!)).toEqual({ 'work:extra0': 'x0' });
-    expect(g.$$('#lobs .lob .bub').map(text).join(' ')).not.toContain('extra question 0');
+    // Clicking a question lob opens its dispatch and hides that lob here.
+    await click(g, g.$$('#lobs .lob').find((l) => text(l).includes('question item 0')) ?? null);
+    expect(text(g.$('#modalbox h3'))).toBe('cccccccc needs-decision');
+    expect(JSON.parse(g.window.localStorage.getItem('spyglass-lob-hidden')!)).toEqual({ 'work:cccccccc-0000-4000-8000-000000000003': 'h0' });
+    expect(g.$$('#lobs .lob .bub').map(text).join(' ')).not.toContain('question item 0');
+    // A new state hash walks it again.
+    const d = everyAttentionFleet();
+    d.attention[0]!.stateHash = 'h0-changed';
+    g.serve(d);
+    await g.poll();
+    expect(g.$$('#lobs .lob .bub').map(text).join(' ')).toContain('question item 0');
   });
 
   it('the lobs switch turns them off', async () => {
     const g = await page(acceptanceFleet(), { prefs: { lobs: false } });
     expect(g.$$('#lobs .lob')).toHaveLength(0);
-    await g.call('setLobs', 'on');
+    await settings(g, 'lobs', 'on');
     expect(g.$$('#lobs .lob')).toHaveLength(2);
+    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).lobs).toBe(true);
+    await settings(g, 'lobs', 'off');
+    expect(g.$$('#lobs .lob')).toHaveLength(0);
   });
 });

@@ -13,16 +13,13 @@ import type {
 } from '@lobstah/core';
 
 /**
- * The glass page's pure helpers: the change detector, the tab route, the
- * filters, and the PR modal's data selection. The page's client bundle
- * (apps/cli/glass/src) imports them, and so do the tests — the browser and
- * the tests run the same code. Keep this module free of Node imports: it is
- * bundled into the page. Types come from @lobstah/core (type-only).
- *
- * Each section of the page gets a hash of the inputs it renders from — the
- * snapshot slice, the viewer's filters, and any time-derived flag (stale
- * heartbeats) that changes the markup. Ages ("3m") are not inputs: the page
- * updates those in place as text, so a quiet fleet rewrites nothing.
+ * The glass page's pure helpers: the per-section selectors (what each
+ * section shows, given the snapshot, the viewer's filters, and the clock),
+ * the tab route, and the PR modal's data selection. The page's client
+ * bundle (apps/cli/glass/src) imports them, and so do the tests — the
+ * browser and the tests run the same code. Keep this module free of Node
+ * imports: it is bundled into the page. Types come from @lobstah/core
+ * (type-only).
  */
 
 // On deck's Landed section: the newest LANDED_MAX catches (done or failed)
@@ -52,7 +49,6 @@ export interface ModalRef {
 
 export interface GlassUi {
   st: Partial<GlassPrefs>;
-  open?: Set<string>;
   modal: ModalRef | null;
 }
 
@@ -88,34 +84,6 @@ export type GlassTab = (typeof GLASS_TABS)[number];
 export function tabFromHash(hash: string | undefined | null): GlassTab {
   const tab = String(hash || '').replace(/^#/, '');
   return (GLASS_TABS as readonly string[]).includes(tab) ? (tab as GlassTab) : 'deck';
-}
-
-export function visibleSections(tab: string): string[] {
-  return ['chips', 'foot', 'modal', tabFromHash('#' + tab)];
-}
-
-export function stableStringify(v: unknown): string {
-  if (v === null || typeof v !== 'object') return v === undefined ? 'null' : JSON.stringify(v);
-  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
-  const o = v as Record<string, unknown>;
-  return (
-    '{' +
-    Object.keys(o)
-      .sort()
-      .filter((k) => o[k] !== undefined)
-      .map((k) => JSON.stringify(k) + ':' + stableStringify(o[k]))
-      .join(',') +
-    '}'
-  );
-}
-
-export function hashStr(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(36) + ':' + s.length;
 }
 
 export function isStale(iso: string | undefined, ms: number, now: number): boolean {
@@ -287,20 +255,4 @@ export function prModalView(d: Pick<GlassSnapshot, 'prs' | 'stacks' | 'dispatche
 /** What the PRs table says about a watch: a short state, never the cursor. */
 export function watchState(w: { lastCheckedAt?: string } | undefined | null): { text: string; at: string | null } {
   return w ? { text: 'watching', at: w.lastCheckedAt || null } : { text: 'no watch', at: null };
-}
-
-export type SectionHashes = Record<string, string>;
-
-export function hashInputs(inputs: object): SectionHashes {
-  const out: SectionHashes = {};
-  for (const k of Object.keys(inputs)) out[k] = hashStr(stableStringify((inputs as Record<string, unknown>)[k]));
-  return out;
-}
-
-export function sectionHashes(d: GlassSnapshot, ui: GlassUi, now: number): SectionHashes {
-  return hashInputs(sectionInputs(d, ui, now));
-}
-
-export function dirtySections(prev: Partial<SectionHashes> | null | undefined, next: SectionHashes): string[] {
-  return Object.keys(next).filter((k) => !prev || prev[k] !== next[k]);
 }

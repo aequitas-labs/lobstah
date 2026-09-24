@@ -1,17 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import * as detector from '../src/glass-diff.js';
 
-// The pure change detector, imported exactly as the page's bundle imports it
-// (the tests feed it partial snapshots: each section reads only its slice).
-type Hashes = Record<string, string>;
+// The pure section selectors, imported exactly as the page's bundle imports
+// them (the tests feed them partial snapshots: each section reads only its slice).
 type Ui = { st: Record<string, string>; open: Set<string>; modal: { type: string; key: string } | null };
 const diff = detector as unknown as {
   sectionInputs: (d: unknown, ui: Ui, now: number) => Record<string, any>;
-  sectionHashes: (d: unknown, ui: Ui, now: number) => Hashes;
-  dirtySections: (prev: Hashes | null, next: Hashes) => string[];
-  stableStringify: (v: unknown) => string;
   tabFromHash: (hash: string) => string;
-  visibleSections: (tab: string) => string[];
 };
 
 const NOW = Date.parse('2026-09-22T12:00:00Z');
@@ -42,55 +37,33 @@ const snapshot = () => ({
 });
 const ui = (over: Partial<Ui> = {}): Ui => ({ st: { view: 'table', lane: '', repo: '', verb: '', q: '' }, open: new Set(), modal: null, ...over });
 
-describe('glass change detector', () => {
-  it('an identical snapshot, a second later, dirties nothing', () => {
-    const a = diff.sectionHashes(snapshot(), ui(), NOW);
-    const b = diff.sectionHashes({ ...snapshot(), now: iso(-1_000) }, ui(), NOW + 1_000);
-    expect(diff.dirtySections(a, b)).toEqual([]);
-  });
-
-  it('marks only the section whose slice changed', () => {
-    const a = diff.sectionHashes(snapshot(), ui(), NOW);
-    const s = snapshot();
-    s.watches[0]!.cursor = 2;
-    expect(diff.dirtySections(a, diff.sectionHashes(s, ui(), NOW))).toEqual(['prs']);
-  });
-
-  it('a change to another dispatch leaves the open modal alone', () => {
-    const view = ui({ modal: { type: 'dispatch', key: 'work:d1' } });
-    const a = diff.sectionHashes(snapshot(), view, NOW);
-    const s = snapshot();
-    s.dispatches[1]!.note = 'changed';
-    expect(diff.dirtySections(a, diff.sectionHashes(s, view, NOW))).toEqual(['deck', 'dispatches']);
-    s.dispatches[0]!.note = 'changed too';
-    expect(diff.dirtySections(a, diff.sectionHashes(s, view, NOW))).toEqual(['deck', 'dispatches', 'modal']);
-  });
-
-  it('a heartbeat crossing the stale line dirties its section with no data change', () => {
-    const a = diff.sectionHashes(snapshot(), ui(), NOW);
-    const later = NOW + 30 * 60_000;
-    expect(diff.dirtySections(a, diff.sectionHashes(snapshot(), ui(), later)).sort()).toEqual(['chips', 'deck', 'traps']);
-  });
-
-  it('first render dirties every section; key order never matters', () => {
-    const next = diff.sectionHashes(snapshot(), ui(), NOW);
-    expect(diff.dirtySections(null, next).sort()).toEqual(
-      ['chips', 'deck', 'dispatches', 'foot', 'modal', 'notices', 'prs', 'traps'],
-    );
-    expect(diff.stableStringify({ b: 1, a: [2, { d: 3, c: 4 }] })).toBe(diff.stableStringify({ a: [2, { c: 4, d: 3 }], b: 1 }));
-  });
-
-  it('uses the URL hash and leaves hidden section hashes untouched until opened', () => {
+describe('glass section selectors', () => {
+  it('routes the URL hash to a tab, deck by default', () => {
     expect(diff.tabFromHash('')).toBe('deck');
     expect(diff.tabFromHash('#dispatches')).toBe('dispatches');
     expect(diff.tabFromHash('#unknown')).toBe('deck');
-    const all = diff.sectionHashes(snapshot(), ui(), NOW);
-    const rendered = Object.fromEntries(diff.visibleSections('deck').map((k) => [k, all[k]]));
-    expect(rendered.prs).toBeUndefined();
-    expect(diff.dirtySections(rendered, all)).toContain('prs');
   });
 
-  it('keeps PR standing out of On deck attention and hashes it with the PR section', () => {
+  it('a heartbeat crossing the stale line flips its seat with no data change', () => {
+    const now = diff.sectionInputs(snapshot(), ui(), NOW);
+    const later = diff.sectionInputs(snapshot(), ui(), NOW + 30 * 60_000);
+    expect([now.chips.daemonStale, now.chips.helms[0].stale, now.traps.list[0].stale]).toEqual([false, false, false]);
+    expect([later.chips.daemonStale, later.chips.helms[0].stale, later.traps.list[0].stale]).toEqual([true, true, true]);
+  });
+
+  it('filters dispatches by lane, repo, verb, and search; in flight ignores all but search', () => {
+    const s = { ...snapshot(), dispatches: [dispatch('d1', 'working', 'on it'), { ...dispatch('d2', 'blocked', 'stuck'), lane: 'chore', repo: 'api' }] };
+    const ids = (st: Record<string, string>) => diff.sectionInputs(s, ui({ st: { view: 'table', lane: '', repo: '', verb: '', q: '', ...st } }), NOW).dispatches.list.map((x: { id: string }) => x.id);
+    expect(ids({})).toEqual(['d1', 'd2']);
+    expect(ids({ lane: 'chore' })).toEqual(['d2']);
+    expect(ids({ repo: 'web' })).toEqual(['d1']);
+    expect(ids({ verb: 'blocked' })).toEqual(['d2']);
+    expect(ids({ q: 'STUCK' })).toEqual(['d2']);
+    const deck = diff.sectionInputs(s, ui({ st: { view: 'table', lane: 'chore', repo: 'api', verb: 'blocked', q: 'on it' } }), NOW).deck;
+    expect(deck.inflight.map((x: { id: string }) => x.id)).toEqual(['d1']);
+  });
+
+  it('keeps PR standing out of On deck attention; the deck carries it with the open PRs', () => {
     const d = {
       ...snapshot(),
       attention: [
@@ -105,9 +78,7 @@ describe('glass change detector', () => {
     const deck = diff.sectionInputs(d, ui(), NOW).deck;
     expect(deck.attention.map((a: { kind: string }) => a.kind)).toEqual(['question', 'landed']);
     expect(deck.prAttention.map((a: { kind: string }) => a.kind)).toEqual(['pr:checks']);
-    const before = diff.sectionHashes(d, ui(), NOW);
-    const after = diff.sectionHashes({ ...d, prs: [{ ...d.prs[0], badge: { text: 'green', tone: 'ok' } }] }, ui(), NOW);
-    expect(diff.dirtySections(before, after)).toContain('deck');
+    expect(deck.prs.map((p: { number: number }) => p.number)).toEqual([27]);
   });
 
   it('On deck lands the newest eight catches of the last 24h, whatever the order on the wire', () => {

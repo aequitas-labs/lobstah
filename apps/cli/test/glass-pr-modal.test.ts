@@ -11,8 +11,6 @@ type View = {
 const page = detector as unknown as {
   prModalView: (d: unknown, key: string) => View | null;
   watchState: (w: unknown) => { text: string; at: string | null };
-  sectionHashes: (d: unknown, ui: unknown, now: number) => Record<string, string>;
-  dirtySections: (a: Record<string, string>, b: Record<string, string>) => string[];
 };
 
 const watch = { key: 'pr:acme/web#9', owner: 'dispatch:d2', cursor: 'eyJoIjoiYWJj…a-long-opaque-cursor', lastCheckedAt: '2026-09-23T18:00:00Z' };
@@ -51,17 +49,5 @@ describe('PR modal data', () => {
     expect(page.watchState(watch)).toEqual({ text: 'watching', at: '2026-09-23T18:00:00Z' });
     expect(page.watchState(undefined)).toEqual({ text: 'no watch', at: null });
     expect(JSON.stringify(page.watchState(watch))).not.toContain('cursor');
-  });
-
-  it('the open PR modal re-renders only when its PR changes', () => {
-    const d = { helms: [], traps: [], notices: [], watches: [], ...snap };
-    const ui = { st: { view: 'table', q: '' }, open: new Set(), modal: { type: 'pr', key: 'pr:acme/web#9' } };
-    const a = page.sectionHashes(d, ui, 0);
-    const other = structuredClone(d);
-    other.prs[0]!.nextMergeable = false;
-    expect(page.dirtySections(a, page.sectionHashes(other, ui, 0))).not.toContain('modal');
-    const own = structuredClone(d);
-    (own.prs[1] as { watch: typeof watch }).watch = { ...watch, lastCheckedAt: '2026-09-23T18:05:00Z' };
-    expect(page.dirtySections(a, page.sectionHashes(own, ui, 0))).toContain('modal');
   });
 });

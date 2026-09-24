@@ -1,8 +1,7 @@
 /**
  * Which lobsters crawl the spyglass page: the pure decision behind the
- * page's renderLobs. Its compiled source is embedded verbatim in the page
- * (lobItems.toString()), so the browser and the tests run the same code —
- * keep it self-contained: no imports, no closures, plain JS once compiled.
+ * page's Lobs component. The page's bundle imports it, so the browser and
+ * the tests run the same code — keep it free of Node imports.
  */
 
 export interface LobAttention {
@@ -23,8 +22,8 @@ export interface LobAttention {
 export interface LobItem {
   key: string;
   text: string;
-  /** onclick for a lob that opens something in the page (a modal). */
-  click?: string;
+  /** The modal a lob opens in the page (a question's dispatch, the preview's helm). */
+  open?: { type: 'dispatch' | 'helm'; key: string };
   /** A PR lob is a plain link out — the glass opens, never acts. */
   href?: string;
   /** The short kind label shown before the text (draft, review, checks, ready, landed, watch). */
@@ -41,8 +40,8 @@ export interface LobOptions {
   hidden?: Record<string, string>;
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */
   preview: boolean;
-  /** onclick for the preview lob (opens the helm when there is one). */
-  previewClick: string;
+  /** The helm the preview lob opens, when there is one. */
+  previewHelm?: string;
 }
 
 export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
@@ -69,12 +68,12 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
             key: (x.kind ?? 'question') + ':' + (x.key ?? x.lane + ':' + x.id),
             text: x.note || x.verb,
             label,
-            click: x.kind === 'watch' ? '' : "showModal('dispatch','" + x.lane + ':' + x.id + "')",
+            ...(x.kind === 'watch' ? {} : { open: { type: 'dispatch' as const, key: x.lane + ':' + x.id } }),
             ...hide,
           };
     });
   if (!items.length && opts.preview) {
-    items = [{ key: 'preview', text: 'attention questions crawl in here', click: opts.previewClick }];
+    items = [{ key: 'preview', text: 'attention questions crawl in here', ...(opts.previewHelm ? { open: { type: 'helm' as const, key: opts.previewHelm } } : {}) }];
   }
   const extra = items.length > 4 ? items.length - 4 : 0;
   items = items.slice(0, 4);
