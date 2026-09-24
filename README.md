@@ -1,5 +1,9 @@
 # lobstah 🦞✨
 
+![Pixel lobster carrying a star across the page](docs/assets/lob-crawl.svg)
+
+The [desktop pet](https://github.com/aequitas-labs/lobstah/blob/main/apps/pet/README.md#install) walks attention across your screen; install it with `lobstah pet install` (macOS).
+
 <img src="docs/assets/lob-star.png" align="right" width="160" alt="lobstah — a lobster waving at a star">
 
 *Nobody stares at the water.*
