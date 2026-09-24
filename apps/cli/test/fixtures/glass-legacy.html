@@ -1,0 +1,597 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>spyglass</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<style>
+:root{--bg:#0e1116;--card:#161b22;--line:#2b3240;--fg:#dbe2ea;--dim:#8b96a5;--ok:#4fc17c;--warn:#e2b93d;--bad:#e26d5c;--link:#6cb2e2;
+ /* GitHub's dark-mode PR state colors (light: merged #8250df, open #1f883d, draft #6e7781, closed #cf222e) */
+ --pr-merged:#8957e5;--pr-merged-fg:#ab7df8;--pr-open:#238636;--pr-draft:#6e7681;--pr-closed:#da3633}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;padding-block:14px;padding-inline:16px;
+ /* sticky footer: a full-height column whose active tab grows, so the footer sits at the viewport bottom on short pages */
+ display:flex;flex-direction:column;min-height:100vh}
+h1{font-size:15px;margin:0 0 10px}h1 .dim{color:var(--dim);font-weight:normal}
+h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 6px}
+.chips,.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.controls{margin:0 0 14px}
+.chips{margin-bottom:8px}
+.chip{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
+.controls select,.controls input[type=search]{background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--fg);font:inherit;padding:4px 8px}
+.controls input[type=search]{flex:1 1 140px;min-width:120px;max-width:340px}
+#chain-control{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+#f-chain{margin:0;width:14px;height:14px;accent-color:var(--link)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:8px 0 10px}
+.tabs a{color:var(--dim);padding:6px 11px;border-bottom:2px solid transparent}
+.tabs a.on{color:var(--fg);border-color:var(--link)}
+.tabpage{display:none}.tabpage.on{display:block;flex:1 0 auto}
+.headerline{display:flex;align-items:center;gap:8px}.headerline h1{flex:1}
+#settings-slot{min-width:34px;text-align:right;color:var(--dim)}
+#settings-slot #gearbtn{margin-left:0}
+.deckgrid{display:flex;flex-direction:column;gap:12px}
+.deckgrid h2{margin:5px 0}.deckgrid section{width:100%;min-width:0}
+.deckline{padding:2px 0;border-top:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.deckline.acked,.card.acked,.rowhead.acked,.badge.acked{opacity:.55}.deckmore{color:var(--dim);font-size:11px;display:inline-block;margin-top:4px}
+.deckline.click{cursor:pointer}.deckline.click:hover{background:#1c2330}
+.deckgrid h2 a{color:inherit}.deckgrid h2 a:hover{color:var(--fg)}
+.deckgrid .cards{grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:10px}
+.deckstack{margin-bottom:9px}.deckstack>.dim{font-size:11px;margin:3px 0 5px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{background:var(--card);border:none;color:var(--dim);font:inherit;padding:4px 11px;cursor:pointer}
+.seg button.on{background:#26436b;color:var(--fg)}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+th,td{text-align:left;padding:4px 9px;border-top:1px solid var(--line);vertical-align:top;white-space:nowrap}
+td.grow{white-space:normal;word-break:break-word;min-width:140px}
+th{color:var(--dim);font-weight:normal;border-top:none;font-size:11px}
+tr.rowhead{cursor:pointer}tr.rowhead:hover{background:#1c2330}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:12px}
+/* One card style for every tab: even inner padding, and a top row whose badge never touches the id or the edge. */
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;cursor:pointer;min-width:0}
+.card:hover{border-color:#3a455a}
+.card .top{display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:22px}
+.card .top>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .top .badge{flex-shrink:0}
+.card .meta{color:var(--dim);font-size:12px;margin-top:2px}
+.card .note{margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .foot{margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;color:var(--dim);font-size:12px}
+.badge{border-radius:5px;padding:1px 7px;font-size:11px;line-height:1.5;border:1px solid var(--line);white-space:nowrap;display:inline-block}
+.badge.pr-merged{background:var(--pr-merged);border-color:var(--pr-merged-fg);color:#fff}.badge.pr-open{background:var(--pr-open);border-color:var(--pr-open);color:#fff}
+.badge.pr-draft{background:var(--pr-draft);border-color:var(--pr-draft);color:#fff}.badge.pr-closed{background:var(--pr-closed);border-color:var(--pr-closed);color:#fff}
+.badge.pr-conflicts{background:var(--pr-closed);border-color:var(--pr-closed);color:#fff}.badge.pr-behind{background:var(--pr-draft);border-color:var(--pr-draft);color:#fff}
+.badge.unreported{font-weight:normal;font-size:10px;padding:0 5px;vertical-align:1px}
+.v-done{color:var(--ok)}.v-working{color:var(--fg)}.v-needs-decision,.v-blocked{color:var(--bad);font-weight:bold}
+.v-failed{color:var(--bad)}.v-paused,.v-unknown{color:var(--dim)}
+.dim{color:var(--dim)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.detail{display:none}.detail.open{display:table-row}.detail td{background:#10151c;white-space:pre-wrap;word-break:break-word;font-size:12px;color:var(--dim)}
+.detail b{color:var(--fg)}
+.empty{color:var(--dim);padding:6px 2px}
+#stale{display:none;color:var(--bad)}
+a{color:var(--link);text-decoration:none}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+#overlay{position:fixed;inset:0;background:rgba(4,7,11,.72);display:none;z-index:10;padding:28px 16px;overflow:auto}
+#overlay.open{display:block}
+.modal{max-width:780px;margin:0 auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;position:relative}
+.modal .x{position:absolute;top:8px;right:12px;cursor:pointer;color:var(--dim);font-size:18px;line-height:1}
+.modal .x:hover{color:var(--fg)}
+.modal h3{margin:0 24px 2px 0;font-size:14px}
+.modal .sub{color:var(--dim);font-size:12px;margin-bottom:10px}
+.modal .sec{color:var(--dim);text-transform:uppercase;letter-spacing:.08em;font-size:11px;margin:14px 0 4px}
+.modal pre{white-space:pre-wrap;word-break:break-word;margin:0;font:inherit;color:var(--fg)}
+.msg{border-left:3px solid var(--line);padding:3px 10px;margin:8px 0;white-space:pre-wrap;word-break:break-word}
+.msg.from-helm{border-color:var(--link)}
+.msg .hdr{color:var(--dim);font-size:11px}
+.catch{border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin:8px 0}
+.catch .hdr{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
+.loglines{color:var(--dim);font-size:12px;white-space:pre-wrap;word-break:break-word;margin-top:4px}
+.cmd{display:flex;gap:8px;align-items:center;margin:5px 0;flex-wrap:wrap}
+.cmd code{background:#10151c;border:1px solid var(--line);border-radius:5px;padding:3px 8px;word-break:break-all;cursor:pointer}
+.cmd code:hover{border-color:#3a455a}
+.cmd code.copied{border-color:var(--ok)}
+.cmd button{background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--dim);font:inherit;font-size:11px;padding:2px 8px;cursor:pointer}
+.cmd button:hover{color:var(--fg)}
+.chip.click{cursor:pointer}.chip.click:hover{border-color:#3a455a}
+footer{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
+.lob{position:fixed;bottom:6px;left:0;z-index:5;cursor:pointer;font-size:34px;line-height:1;user-select:none;animation:crawl 18s linear infinite}
+a.lob{color:inherit}
+.lob .bub .badge{display:inline-block;margin:0 0 3px}
+.lob .sprite{width:72px;height:56px;background:url(/lob-sprite.png) 0 0 no-repeat;background-size:400% 100%;image-rendering:pixelated;animation:step .5s steps(4) infinite}
+.lob .fallback{display:inline-block;animation:waddle .45s ease-in-out infinite alternate}
+.lob .bub{display:none;position:absolute;bottom:58px;right:-8px;z-index:2;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:6px 9px 5px;font-size:11px;line-height:1.35;color:var(--fg);width:max-content;max-width:150px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.lob:hover .bub{display:block}
+.lob .bub span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word}
+.lob .star{position:absolute;left:56px;top:-9px;height:14px;image-rendering:pixelated;z-index:3}
+.lob:hover{animation-play-state:paused}
+@keyframes crawl{0%{transform:translateX(-90px)}100%{transform:translateX(100vw)}}
+@keyframes step{to{background-position-x:-288px}}
+@keyframes waddle{from{transform:rotate(-8deg) translateY(0)}to{transform:rotate(8deg) translateY(-3px)}}
+#gearbtn{background:none;border:1px solid var(--line);border-radius:6px;color:var(--dim);font:inherit;font-size:13px;padding:1px 7px;margin-left:8px;cursor:pointer;vertical-align:1px}
+#gearbtn:hover,#gearbtn.on{color:var(--fg);border-color:#3a455a}
+.settings .row{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:12px 0}
+.settings .lbl{color:var(--fg);font-size:12px}
+.settings .hint{display:block;color:var(--dim);font-size:11px;margin-top:2px}
+</style></head><body>
+<div class="headerline"><h1>🦞✨ spyglass<span id="stale"> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings">⚙</button></span></div>
+<div class="chips"><span id="chips" style="display:contents"></span><span class="chip dim" id="clock"></span></div>
+<nav class="tabs" id="tabs" aria-label="Spyglass views"><a href="#deck" data-tab="deck">On deck</a><a href="#dispatches" data-tab="dispatches">Dispatches</a><a href="#traps" data-tab="traps">Traps</a><a href="#prs" data-tab="prs">PRs</a><a href="#notices" data-tab="notices">Notices</a></nav>
+<div class="controls">
+ <select id="f-lane"><option value="">all lanes</option><option value="work">work</option><option value="chore">chore</option></select>
+ <select id="f-repo"><option value="">all repos</option></select>
+ <select id="f-verb"><option value="">all verbs</option><option>working</option><option>needs-decision</option><option>blocked</option><option>paused</option><option>done</option><option>failed</option><option>unknown</option></select>
+ <label id="chain-control"><input id="f-chain" type="checkbox"> group by chain</label>
+ <select id="f-kind"><option value="">all notice kinds</option></select>
+ <input id="f-q" type="search" placeholder="search id · note · brief">
+</div>
+<main id="page-deck" class="tabpage"><div id="deck"></div></main>
+<main id="page-dispatches" class="tabpage"><div id="dispatches"></div></main>
+<main id="page-traps" class="tabpage"><div id="traps"></div></main>
+<main id="page-prs" class="tabpage"><div id="prs"></div></main>
+<main id="page-notices" class="tabpage"><div id="notices"></div></main>
+<footer id="foot"></footer>
+<div id="lobs"></div>
+<div id="overlay"><div class="modal" id="modalbox"></div></div>
+<script>
+const esc=(s)=>String(s??'').replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const age=(iso)=>{if(!iso)return '';const s=Math.max(0,(Date.now()-Date.parse(iso))/1000);
+ if(s<90)return Math.round(s)+'s';if(s<5400)return Math.round(s/60)+'m';if(s<172800)return (s/3600).toFixed(1)+'h';return Math.round(s/86400)+'d'};
+// Ages tick in place (refreshAges) so a quiet section never needs a rewrite.
+const ageEl=(iso)=>'<span data-age="'+esc(iso)+'">'+age(iso)+'</span>';
+function refreshAges(){for(const el of document.querySelectorAll('[data-age]')){const t=age(el.dataset.age);if(el.textContent!==t)el.textContent=t}}
+
+// On deck's Landed section: the newest LANDED_MAX catches (done or failed)
+// within the last LANDED_WINDOW_MS, whatever the report cursor says.
+const LANDED_MAX=8,LANDED_WINDOW_MS=86400000;
+const STALE_DAEMON_MS=90000,STALE_SEAT_MS=1800000;
+// A PR state badge's class: GitHub's state colors (.pr-merged purple,
+// .pr-open green, .pr-draft grey, .pr-closed red). An open PR whose badge
+// carries news (failed checks, changes requested, pending) keeps that tone;
+// a merge-state badge fills: conflicts in GitHub's red, behind grey.
+function prBadgeClass(b){if(!b)return 'dim';const state=b.state||'open';
+ if(state==='open'&&b.merge)return 'pr-'+b.merge;
+ return state==='open'&&b.tone&&b.tone!=='ok'?b.tone:'pr-'+state}
+const GLASS_TABS=['deck','dispatches','traps','prs','notices'];
+function tabFromHash(hash){const tab=String(hash||'').replace(/^#/,'');return GLASS_TABS.includes(tab)?tab:'deck'}
+function visibleSections(tab){return ['chips','foot','modal',tabFromHash('#'+tab)]}
+function stableStringify(v){
+ if(v===null||typeof v!=='object')return v===undefined?'null':JSON.stringify(v);
+ if(Array.isArray(v))return '['+v.map(stableStringify).join(',')+']';
+ return '{'+Object.keys(v).sort().filter(k=>v[k]!==undefined).map(k=>JSON.stringify(k)+':'+stableStringify(v[k])).join(',')+'}'}
+function hashStr(s){let h=0x811c9dc5;
+ for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}
+ return (h>>>0).toString(36)+':'+s.length}
+function isStale(iso,ms,now){return !!iso&&now-Date.parse(iso)>ms}
+function matches(x,st){
+ if(st.lane&&x.lane!==st.lane)return false;
+ if(st.repo&&x.repo!==st.repo)return false;
+ if(st.verb&&x.verb!==st.verb)return false;
+ if(st.q){const q=st.q.toLowerCase();
+  if(!((x.id+' '+(x.note||'')+' '+(x.brief||'')+' '+(x.repo||'')+' '+(x.for||'')).toLowerCase().includes(q)))return false}
+ return true}
+function modalItem(d,modal){
+ if(!modal)return null;
+ if(modal.type==='helm')return d.helms.find(v=>v.grounds===modal.key)||null;
+ if(modal.type==='dispatch')return d.dispatches.find(v=>v.lane+':'+v.id===modal.key)||null;
+ if(modal.type==='pr')return (d.prs||[]).find(v=>v.key===modal.key)||null;
+ if(modal.type==='settings')return {attentionKinds:d.attentionKinds||[],attentionError:d.attentionError};
+ return d.traps.find(v=>v.trapId===modal.key)||null}
+function sectionInputs(d,ui,now){
+ const st=ui.st;
+ const query=String(st.q||'').toLowerCase();
+ const hasQuery=(...parts)=>!query||parts.join(' ').toLowerCase().includes(query);
+ const seat=(x)=>({x,stale:isStale(x.heartbeatAt,STALE_SEAT_MS,now)});
+ const item=modalItem(d,ui.modal);
+ const recent=(iso,ms)=>!!iso&&now-Date.parse(iso)<=ms;
+ const deckTraps=(d.traps||[]).filter(t=>(t.live||(t.notices||[]).some(n=>
+  (n.kind==='trap-stowed'||n.kind==='trap-ghosted')&&recent(n.at,3600000)))&&hasQuery(t.trapId,t.repo,t.worktree));
+ return {
+  chips:{daemon:d.daemon,daemonStale:!!d.daemon&&isStale(d.daemon.heartbeat,STALE_DAEMON_MS,now),helms:d.helms.map(seat)},
+  deck:{view:st.view,attention:(d.attention||[]).filter(a=>(a.kind==='question'||a.kind==='landed')&&recent(a.at,86400000)&&hasQuery(a.kind,a.repo,a.note,a.id)).map(({ageSecs,...a})=>a),
+   prAttention:(d.attention||[]).filter(a=>a.kind&&a.kind.startsWith('pr:')).map(({ageSecs,...a})=>a),
+   landed:(d.landed||[]).filter(a=>recent(a.at,LANDED_WINDOW_MS)&&hasQuery(a.repo,a.note,a.id))
+    .sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)).slice(0,LANDED_MAX),
+   inflight:d.dispatches.filter(x=>x.bucket!=='done'&&matches(x,{...st,lane:'',repo:'',verb:''})),traps:deckTraps.map(seat),
+   stacks:(d.stacks||[]).filter(s=>s.open&&hasQuery(s.repo,s.numbers.join(' '))),
+   prs:(d.prs||[]).filter(p=>p.state==='OPEN'),error:d.attentionError},
+  dispatches:{view:st.view,chain:st.chain,list:d.dispatches.filter(x=>matches(x,st))},
+  traps:{view:st.view,list:d.traps.filter(t=>(!st.repo||t.repo===st.repo)&&hasQuery(t.trapId,t.repo,t.worktree,t.harness)).map(seat)},
+  prs:{view:st.view,stacks:(d.stacks||[]).filter(s=>!st.repo||s.repo===st.repo),
+   prs:(d.prs||[]).filter(p=>(!st.repo||p.repo===st.repo)&&hasQuery(p.number,p.title,p.url,p.state,p.baseRefName,p.headRefName)),
+   watches:(d.watches||[]).filter(w=>!String(w.key).startsWith('pr:'))},
+  notices:{list:(d.notices||[]).filter(n=>(!st.repo||!n.repo||n.repo===st.repo)&&(!st.noticeKind||n.kind===st.noticeKind)&&hasQuery(n.kind,n.text,n.repo))},
+  foot:{version:d.version,repoUrl:d.repoUrl},
+  // The settings modal re-renders when a preference it shows changes.
+  modal:{modal:ui.modal,item:item&&seat(item),prefs:ui.modal&&ui.modal.type==='settings'?{view:st.view,lobs:st.lobs}:undefined}}}
+// The PR modal's data: the PR, where it sits in its stack, the dispatch
+// chain (linked to their modals when still on disk), and the watch, whose
+// cursor is shown only here, never in the PRs table.
+function prModalView(d,key){
+ const p=(d.prs||[]).find(x=>x.key===key);if(!p)return null;
+ const s=(d.stacks||[]).find(x=>x.id===p.stackId);
+ const byId=new Map((d.dispatches||[]).map(x=>[x.id,x]));
+ const chain=(p.dispatchIds||[]).map(id=>{const x=byId.get(id);
+  return x?{id,verb:x.verb,modalKey:x.lane+':'+x.id}:{id,culled:true}});
+ const w=p.watch;
+ return {pr:p,
+  stack:s?{numbers:s.numbers,position:p.position+1,size:s.numbers.length,floor:s.floor,nextNumber:s.nextNumber,
+   nextMergeable:!!p.nextMergeable,blockedBy:p.blockedBy}:null,
+  chain,
+  watch:w?{key:w.key,owner:w.owner||'',lastCheckedAt:w.lastCheckedAt||null,lastError:w.lastError||null,cursor:w.cursor}:null}}
+// What the PRs table says about a watch: a short state, never the cursor.
+function watchState(w){return w?{text:'watching',at:w.lastCheckedAt||null}:{text:'no watch',at:null}}
+function hashInputs(inputs){const out={};
+ for(const k of Object.keys(inputs))out[k]=hashStr(stableStringify(inputs[k]));
+ return out}
+function sectionHashes(d,ui,now){return hashInputs(sectionInputs(d,ui,now))}
+function dirtySections(prev,next){return Object.keys(next).filter(k=>!prev||prev[k]!==next[k])}
+const open=new Set();
+let modal=null;
+let st={view:'table',lane:'',repo:'',verb:'',q:'',lobs:true,chain:false,noticeKind:''};
+try{Object.assign(st,JSON.parse(localStorage.getItem('spyglass')||'{}'))}catch(e){}
+// A stored value this page doesn't understand falls back to the default.
+if(st.view!=='table'&&st.view!=='cards')st.view='table';
+st.lobs=st.lobs!==false;
+const save=()=>{try{localStorage.setItem('spyglass',JSON.stringify(st))}catch(e){}};
+function table(headers,rows,empty){if(!rows.length)return '<div class="empty">'+empty+'</div>';
+ return '<div class="wrap"><table><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr>'+rows.join('')+'</table></div>'}
+window.copyCmd=async(el,text)=>{try{await navigator.clipboard.writeText(text)}catch(e){return}
+ if(el.tagName==='BUTTON'){el.textContent='✓';setTimeout(()=>{el.textContent='⧉'},1000)}
+ else{el.classList.add('copied');setTimeout(()=>el.classList.remove('copied'),1000)}};
+function cmdRow(text){const j=JSON.stringify(text).replace(/"/g,'&quot;');
+ return '<div class="cmd"><code title="click to copy" onclick="copyCmd(this,'+j+')">'+esc(text)+'</code><button title="copy" onclick="copyCmd(this,'+j+')">⧉</button></div>'}
+function attachmentRows(items){return items.map(a=>'<div class="sub">'+esc(a.name)+' · '+esc(a.type)+' · '+esc(a.bytes)+' bytes</div>'+cmdRow(a.path)).join('')}
+function detailBody(x){return '<div class="sec">brief</div><pre>'+esc(x.brief)+'</pre>'
+ +(x.attachments.length?'<div class="sec">attachments ('+x.attachments.length+')</div>'+attachmentRows(x.attachments):'')
+ +(x.messageAttachments.length?'<div class="sec">message attachments ('+x.messageAttachments.length+')</div>'+attachmentRows(x.messageAttachments):'')
+ +(x.followUp?'<div class="sec">forks</div><pre>'+esc(x.followUp)+'</pre>':'')
+ +'<div class="sec">log</div><div class="loglines">'+(x.log.length?x.log.map(e=>esc(e.at)+'  '+esc(e.verb)+(e.note?'  '+esc(e.note):'')).join('\n'):'no entries yet')+'</div>'
+ +(x.inbox.length?'<div class="sec">inbox</div><div class="loglines">'+x.inbox.map(esc).join('\n---\n')+'</div>':'')
+ +(x.evidence?'<div class="sec">evidence</div><div class="loglines">'+esc(JSON.stringify(x.evidence))+'</div>':'')}
+function tableDetail(x){return '<b>brief</b>\n'+esc(x.brief)
+ +(x.attachments.length?'<div class="sec">attachments ('+x.attachments.length+')</div>'+attachmentRows(x.attachments):'')
+ +(x.messageAttachments.length?'<div class="sec">message attachments ('+x.messageAttachments.length+')</div>'+attachmentRows(x.messageAttachments):'')
+ +(x.followUp?'\n<b>forks</b> '+esc(x.followUp):'')
+ +'\n<b>log</b>\n'+x.log.map(e=>esc(e.at)+'  '+esc(e.verb)+(e.note?'  '+esc(e.note):'')).join('\n')
+ +(x.inbox.length?'\n<b>inbox</b>\n'+x.inbox.map(esc).join('\n---\n'):'')
+ +(x.evidence?'\n<b>evidence</b> '+esc(JSON.stringify(x.evidence)):'')}
+function addrCell(x){return x.for?esc(x.for)+(x.evidence&&x.evidence.deliveredTo?' <span class="ok">✓delivered</span>':' <span class="warn">waiting</span>'):(x.claimedBy?esc(x.claimedBy):'')}
+function prCell(x){const url=x.evidence&&(x.evidence.prUrl||x.evidence.pr&&x.evidence.pr.url);if(!url)return '';
+ const b=x.prBadge;
+ return '<a href="'+esc(url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">PR</a>'
+  +(b?' <span class="badge '+esc(prBadgeClass(b))+'" title="observed '+esc(b.observedAt)+'">'+esc(b.text)+'</span>':'')
+  +(x.prGate?' <span class="badge dim" title="merge gate (pick)">'+esc(x.prGate)+'</span>':'')}
+function chainRows(list){if(!st.chain)return list;
+ const byId=new Map(list.map(x=>[x.id,x]));
+ const root=(x)=>{let at=x,seen=new Set();while(at.followUp&&byId.has(at.followUp)&&!seen.has(at.id)){seen.add(at.id);at=byId.get(at.followUp)}return at.id};
+ const groups=new Map();for(const x of list){const k=root(x),g=groups.get(k)||[];g.push(x);groups.set(k,g)}
+ return [...groups.values()].sort((a,b)=>b[0].sort-a[0].sort).flatMap(g=>g.sort((a,b)=>a.id===root(a)?-1:b.id===root(b)?1:a.sort-b.sort))}
+function dispatchTable(list){return table(['id','lane / bucket','repo','verb','note','age','addressed','pr'],
+ chainRows(list).map(x=>{const k=x.lane+':'+x.id;
+  return '<tr class="rowhead" onclick="showModal(\'dispatch\',\''+k+'\')"><td>'+(st.chain&&x.followUp?'<span class="dim">↳ </span>':'')+esc(x.id.slice(0,8))+'</td><td>'+x.lane+' / '+x.bucket+'</td><td>'+esc(x.repo)+'</td><td class="v-'+x.verb+'">'+x.verb+'</td><td class="grow">'+esc((x.note??'').slice(0,90))+'</td><td>'+ageEl(x.verbAt)+'</td><td>'+addrCell(x)+'</td><td>'+prCell(x)+'</td></tr>'}),
+ 'no dispatches match')}
+function dispatchCards(list){if(!list.length)return '<div class="empty">no dispatches match</div>';
+ return '<div class="cards">'+list.map(x=>{const k=x.lane+':'+x.id;
+  return '<div class="card" onclick="showModal(\'dispatch\',\''+k+'\')"><div class="top"><b>'+esc(x.id.slice(0,8))+'</b><span class="badge v-'+x.verb+'">'+x.verb+'</span></div>'
+  +'<div class="meta">'+esc(x.repo)+' · '+x.lane+' '+x.bucket+' · '+ageEl(x.verbAt)+'</div>'
+  +(x.note?'<div class="note">'+esc(x.note)+'</div>':'')
+  +'<div class="foot">'+addrCell(x)+' '+prCell(x)+'</div></div>'}).join('')+'</div>'}
+// Attention kinds (tend's contract): the short label shown in lobs, the pet, and the table.
+const KIND_LABEL={'pr:draft':'draft','pr:review':'review','pr:checks':'checks','pr:conflict':'conflicts','pr:ready':'ready',landed:'landed',watch:'watch'};
+const KIND_TONE={'pr:review':'bad','pr:checks':'bad','pr:conflict':'pr-conflicts','pr:ready':'ok','pr:draft':'dim',watch:'warn'};
+const kindLabel=(k)=>KIND_LABEL[k]||'';
+function kindCell(x){
+ if(x.kind==='question')return '<span class="v-'+x.verb+'">'+x.verb+'</span>';
+ const tone=x.kind==='landed'?(x.verb==='failed'?'bad':'ok'):(KIND_TONE[x.kind]||'dim');
+ return '<span class="badge '+tone+'">'+esc(kindLabel(x.kind)||x.kind)+'</span>'+(x.kind==='landed'?' <span class="dim">'+esc(x.verb)+'</span>':'')}
+// On deck's dispatch, trap, and landed items follow the site-wide view.
+// Attention is always a notices table; PRs have their own stack presentation.
+function deckItem(it,view){
+ const badge=it.badge?'<span class="badge '+esc(it.badge.tone||'dim')+'">'+esc(it.badge.text)+'</span>':'';
+ const click=it.open?' onclick="'+it.open+'"':'';
+ if(view==='cards')return '<div class="card'+(it.acked?' acked':'')+'"'+click+(it.open?'':' style="cursor:default"')+'><div class="top"><b>'+it.title+'</b>'+badge+'</div>'
+  +(it.meta?'<div class="meta">'+it.meta+'</div>':'')+'</div>';
+ return '<div class="deckline'+(it.open?' click':'')+(it.acked?' acked':'')+'"'+click+'>'+(badge?badge+' ':'')+'<b>'+it.title+'</b>'+(it.meta?' <span class="dim">· '+it.meta+'</span>':'')+'</div>'}
+function deckBlock(title,items,tab,max,view){const shown=items.slice(0,max),more=items.length-shown.length;
+ const body=shown.length?(view==='cards'?'<div class="cards">'+shown.map(i=>deckItem(i,view)).join('')+'</div>':shown.map(i=>deckItem(i,view)).join('')):'<div class="empty">none</div>';
+ return '<section><h2><a href="#'+tab+'">'+title+' →</a></h2>'+body+(more?'<a class="deckmore" href="#'+tab+'">+'+more+' more →</a>':'')+'</section>'}
+const openDispatch=(lane,id)=>"showModal(\'dispatch\',\'"+esc(lane+':'+id)+"\')";
+function deckNotices(list){const shown=list.slice(0,4),more=list.length-shown.length;
+ const rows=shown.map(x=>'<tr class="rowhead'+(x.acked?' acked':'')+'" onclick="'+openDispatch(x.lane,x.id)+'"><td>'+kindCell(x)+'</td><td class="grow">'+esc(x.note||x.verb)+'</td><td>'+esc(x.repo||'')+'</td><td>'+ageEl(x.at)+'</td></tr>');
+ return '<section><h2><a href="#notices">attention →</a></h2>'+table(['kind','note','repo','age'],rows,'none')
+  +(more?'<a class="deckmore" href="#notices">+'+more+' more →</a>':'')+'</section>'}
+function deckPrs(inp,view){const shown=inp.stacks.slice(0,3),more=inp.stacks.length-shown.length;
+ const standing=new Map();for(const a of inp.prAttention){const kinds=standing.get(a.key)||[];kinds.push(a);standing.set(a.key,kinds)}
+ const groups=shown.map(s=>({s,members:inp.prs.filter(p=>p.stackId===s.id).sort((a,b)=>a.position-b.position)}));
+ const body=groups.length?groups.map(({s,members})=>{const next=members.find(p=>p.number===s.nextNumber)||members[0];
+  const chain=esc(s.numbers.map(n=>'#'+n).join(' → '));
+  if(view==='cards')return '<div class="deckstack"><div class="dim">'+chain+' · '+(next?'next #'+next.number:'nothing mergeable')+'</div><div class="cards">'
+   +members.map(p=>{const kinds=standing.get(p.key)||[];const acked=kinds.length>0&&kinds.every(a=>a.acked);
+    const badges=kinds.length?kinds.map(a=>'<span class="badge '+esc(KIND_TONE[a.kind]||'dim')+'">'+esc(kindLabel(a.kind))+'</span>').join('')
+     :'<span class="badge '+esc(prBadgeClass(p.badge))+'">'+esc(p.badge.text)+'</span>';
+    return '<div class="card'+(acked?' acked':'')+'" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b>'+badges+'</div>'
+     +'<div class="meta">'+esc(p.repo)+' · '+esc(p.badge.text)+(acked?' · acked':'')+'</div></div>'}).join('')+'</div></div>';
+  const badges=members.flatMap(p=>(standing.get(p.key)||[]).map(a=>'<span class="badge '+esc(KIND_TONE[a.kind]||prBadgeClass(p.badge))+(a.acked?' acked':'')+'">#'+p.number+' '+esc(p.badge.text)+'</span>')).join(' ');
+  return '<div class="deckline'+(next?' click':'')+'"'+(next?' onclick="'+prOpen(next)+'"':'')+'><b>'+chain+'</b> <span class="dim">· '+(next?'next #'+next.number:'nothing mergeable')+'</span>'+(badges?' · '+badges:'')+'</div>'}).join(''):'<div class="empty">none</div>';
+ return '<section><h2><a href="#prs">PRs →</a></h2>'+body+(more?'<a class="deckmore" href="#prs">+'+more+' more →</a>':'')+'</section>'}
+function renderDeck(d,inp){const view=inp.view;
+ const flight=inp.inflight.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||''),badge:{text:x.verb,tone:x.verb==='needs-decision'||x.verb==='blocked'?'bad':'dim'},
+  meta:esc((x.note||'').slice(0,90))+' · '+ageEl(x.verbAt)+' ago'+(x.for||x.claimedBy?' · '+esc(x.for||x.claimedBy):''),open:openDispatch(x.lane,x.id)}));
+ const landed=inp.landed.map(x=>({title:esc(x.id.slice(0,8))+' '+esc(x.repo||'')+(x.unreported?' <span class="badge warn unreported">unreported</span>':''),
+  badge:{text:x.verb,tone:x.verb==='failed'?'bad':'ok'},
+  meta:esc((x.note||'').slice(0,90))+' · '+ageEl(x.at)+' ago',open:openDispatch(x.lane,x.id)}));
+ const traps=inp.traps.map(({x:t})=>({title:'🪤 wt:'+esc(t.trapId),badge:{text:t.live?(t.harness||'live'):'signed off',tone:t.live?'ok':'dim'},
+  meta:esc(t.repo||'')+' · '+(t.live?trapRow(t).listen:'stowed / ghosted'),open:"showModal(\'trap\',\'"+esc(t.trapId)+"\')"}));
+ return '<div class="deckgrid">'+deckNotices(inp.attention)+deckBlock('in flight',flight,'dispatches',4,view)
+  +deckBlock('Landed · 24h',landed,'dispatches',LANDED_MAX,view)+deckBlock('traps',traps,'traps',3,view)+deckPrs(inp,view)+'</div>'}
+const watchCell=(w)=>{const ws=watchState(w);return w?ws.text+' · '+(ws.at?ageEl(ws.at)+' ago':'never checked'):'<span class="dim">'+ws.text+'</span>'};
+const prOpen=(p)=>"showModal(\'pr\',\'"+esc(p.key)+"\')";
+const prLink=(p)=>'<a href="'+esc(p.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">#'+p.number+'</a>';
+function prChecks(p){return esc(p.checks.passed)+'/'+esc(p.checks.total)+' passed'+(p.checks.failed?' · '+p.checks.failed+' failed':'')+(p.checks.pending?' · '+p.checks.pending+' pending':'')}
+function prReview(p){const r=p.review||{};return esc(p.reviewDecision||'')+(r.unresolvedThreads?' · '+r.unresolvedThreads+' unresolved':'')+(r.changesRequested?' · changes requested':'')}
+function prMerge(p){return esc(p.mergeStateStatus)+(p.nextMergeable?' · <span class="ok">next mergeable</span>':p.blockedBy?' · blocked by #'+p.blockedBy:'')}
+function prGroups(inp){const byStack=new Map();for(const p of inp.prs){const a=byStack.get(p.stackId)||[];a.push(p);byStack.set(p.stackId,a)}
+ return inp.stacks.map(s=>({s,prs:byStack.get(s.id)||[]})).filter(g=>g.prs.length)}
+function prTable(d,inp){const rows=[];
+ for(const {s,prs} of prGroups(inp)){
+  rows.push('<tr><th colspan="8">'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?' · open':' · history')+'</th></tr>');
+  for(const p of prs)rows.push('<tr class="rowhead" onclick="'+prOpen(p)+'"><td>'+prLink(p)+'</td><td class="grow">'+esc(p.title||'')+'</td>'
+   +'<td>'+esc(p.state)+(p.draft?' · draft':'')+(p.state==='MERGED'&&p.mergedAt?' · '+esc(p.mergedAt):'')+'</td><td>'+prChecks(p)+'</td><td>'+prReview(p)+'</td><td>'+prMerge(p)+'</td>'
+   +'<td>'+watchCell(p.watch)+'</td><td>'+esc(p.gate||'')+'</td></tr>')}
+ return table(['PR','title','state','checks','review','merge','watch','gate'],rows,'no PR evidence')+otherWatches(inp)}
+function prCards(d,inp){const groups=prGroups(inp);
+ const body=groups.length?groups.map(({s,prs})=>'<h2>'+esc(s.numbers.map(n=>'#'+n).join(' → '))+' · floor '+esc(s.floor)+(s.open?'':' · history')+'</h2><div class="cards">'
+  +prs.map(p=>'<div class="card" onclick="'+prOpen(p)+'"><div class="top"><b>#'+p.number+' '+esc(p.title||'')+'</b><span class="badge '+esc(prBadgeClass(p.badge))+'">'+esc(p.badge.text)+'</span></div>'
+   +'<div class="meta">'+esc(p.repo)+' · '+esc(p.state)+(p.draft?' · draft':'')+(p.state==='MERGED'&&p.mergedAt?' · '+esc(p.mergedAt):'')+' · '+prMerge(p)+'</div>'
+   +'<div class="foot"><span>'+prChecks(p)+'</span><span>'+watchCell(p.watch)+'</span>'+(p.gate?'<span>gate '+esc(p.gate)+'</span>':'')+'</div></div>').join('')+'</div>').join('')
+  :'<div class="empty">no PR evidence</div>';
+ return body+otherWatches(inp)}
+function otherWatches(inp){const short=(c)=>{c=String(c??'');return c.length>24?c.slice(0,23)+'…':c};
+ return '<h2>other watches</h2>'+table(['key','owner','cursor','last check','error'],inp.watches.map(w=>'<tr><td>'+esc(w.key)+'</td><td>'+esc(w.owner)+'</td><td title="'+esc(w.cursor)+'">'+esc(short(w.cursor))+'</td><td>'+(w.lastCheckedAt?ageEl(w.lastCheckedAt):'')+'</td><td>'+esc(w.lastError||'')+'</td></tr>'),'no other watches')}
+function noticeTable(list){return table(['at','kind','text','repo'],
+ list.map(n=>'<tr><td class="dim">'+ageEl(n.at)+'</td><td>'+esc(n.kind)+'</td><td class="grow">'+esc(n.text)+'</td><td class="dim">'+esc(n.repo??'')+'</td></tr>'),
+ 'no notices')}
+function trapRow(t){
+ if(!t.live)return {stale:false,listen:'<span class="dot"></span><span class="dim">signed off</span>',hb:'<span class="dim">—</span>'};
+ const stale=Date.now()-Date.parse(t.heartbeatAt)>1800000;
+ return {stale,listen:t.firstParkedAt?'<span class="dot ok"></span>listening':'<span class="dot warn"></span>never parked',
+  hb:'<span class="'+(stale?'bad':'ok')+'">'+(stale?'stale ':'')+ageEl(t.heartbeatAt)+' ago</span>'}}
+function mailCell(t){const p=t.messages.filter(m=>m.state==='pending').length;
+ return t.messages.length?('✉ '+t.messages.length+(p?' <span class="warn">('+p+' pending)</span>':'')):''}
+function trapTable(list){return table(['address','repo','worktree','harness','session','listening','heartbeat','mail','catches'],
+ list.map(t=>{const r=trapRow(t);
+  return '<tr class="rowhead'+(t.live?'':' dim')+'" onclick="showModal(\'trap\',\''+esc(t.trapId)+'\')"><td><b>wt:'+esc(t.trapId)+'</b></td><td>'+esc(t.repo??'—')+'</td><td class="grow">'+esc(t.worktree??'')+'</td><td>'+esc(t.harness??'')+'</td><td>'+esc((t.sessionId??'').slice(0,8))+'</td><td>'+r.listen+'</td><td>'+r.hb+'</td><td>'+mailCell(t)+'</td><td>'+t.catches.length+'</td></tr>'}),
+ 'no traps soaking')}
+function trapCards(list){if(!list.length)return '<div class="empty">no traps soaking</div>';
+ return '<div class="cards">'+list.map(t=>{const r=trapRow(t);
+  return '<div class="card'+(t.live?'':' dim')+'" onclick="showModal(\'trap\',\''+esc(t.trapId)+'\')"><div class="top"><b>🪤 wt:'+esc(t.trapId)+'</b><span class="badge">'+esc(t.harness??(t.live?'':'signed off'))+'</span></div>'
+  +'<div class="meta">'+esc(t.repo??(t.live?'addressed bait only':'history'))+(t.sessionId?' · session '+esc(t.sessionId.slice(0,8)):'')+'</div>'
+  +(t.worktree?'<div class="note">'+esc(t.worktree)+'</div>':'')
+  +'<div class="foot">'+r.listen+(t.live?' · heartbeat '+r.hb:'')+' · '+t.catches.length+' catch'+(t.catches.length===1?'':'es')+(mailCell(t)?' · '+mailCell(t):'')+'</div></div>'}).join('')+'</div>'}
+function renderModal(d){
+ const box=document.getElementById('modalbox');
+ const ov=document.getElementById('overlay');
+ if(!modal){ov.classList.remove('open');return}
+ const item=modalItem(d,modal);
+ if(!item){modal=null;ov.classList.remove('open');return}
+ let html='';
+ if(modal.type==='settings'){
+  // Per-browser preferences (localStorage, save()); the kinds line is read-only config.
+  const seg=(name,opts,cur)=>'<span class="seg">'+opts.map(([v,l])=>'<button class="'+(v===cur?'on':'')+'" onclick="'+name+'(\''+v+'\')">'+l+'</button>').join('')+'</span>';
+  html='<span class="x" onclick="closeModal()">×</span><h3>⚙ settings <span class="dim" style="font-weight:normal">· this browser only</span></h3>'
+   +'<div class="settings">'
+   +'<div class="row"><span class="lbl">view<span class="hint">cards or table (notices stay a table)</span></span>'+seg('setView',[['table','table'],['cards','cards']],st.view)+'</div>'
+   +'<div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span>'+seg('setLobs',[['on','on'],['off','off']],st.lobs?'on':'off')+'</div>'
+   +'<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">'
+   +esc(item.attentionError?item.attentionError:(item.attentionKinds||[]).join(' · '))+'</span></div></div>';
+ }else if(modal.type==='pr'){
+  const v=prModalView(d,modal.key),p=v.pr,s=v.stack,w=v.watch;
+  html='<span class="x" onclick="closeModal()">×</span><h3>'+prLink(p)+' '+esc(p.title||'')+' <span class="badge '+esc(prBadgeClass(p.badge))+'">'+esc(p.badge.text)+'</span>'
+    +(p.draft&&p.badge.text!=='draft'?' <span class="badge pr-draft">draft</span>':'')+'</h3>'
+   +'<div class="sub">'+esc(p.repo)+' · '+esc(p.state)+' · observed '+ageEl(p.observedAt)+' ago'+(p.gate?' · gate '+esc(p.gate):'')+'</div>'
+   +'<div class="sec">checks</div><div>'+prChecks(p)+'</div>'
+   +'<div class="sec">review</div><div>'+(prReview(p)||'<span class="dim">no review yet</span>')+'</div>'
+   +'<div class="sec">merge</div><div>'+prMerge(p)+'</div>'
+   +'<div class="sec">refs</div><div>'+esc(p.headRefName||'?')+' → '+esc(p.baseRefName||'?')+'</div>'
+   +'<div class="sec">stack</div><div>'+(s?s.numbers.map(n=>n===p.number?'<b>#'+n+'</b>':'#'+n).join(' → ')+' · '+s.position+' of '+s.size+' · floor '+esc(s.floor)
+     +(s.nextMergeable?' · <span class="ok">next mergeable</span>':s.blockedBy?' · blocked by #'+s.blockedBy:s.nextNumber?' · next is #'+s.nextNumber:''):'<span class="dim">not stacked</span>')+'</div>'
+   +'<div class="sec">dispatch chain</div><div>'+(v.chain.length?v.chain.map(c=>c.culled?'<span class="dim">'+esc(c.id.slice(0,8))+' (culled)</span>'
+     :'<a href="#" onclick="event.preventDefault();showModal(\'dispatch\',\''+esc(c.modalKey)+'\')">'+esc(c.id.slice(0,8))+'</a> <span class="dim">'+esc(c.verb)+'</span>').join(' → '):'<span class="dim">none</span>')+'</div>'
+   +'<div class="sec">watch</div>'+(w?'<div>'+esc(w.key)+' · owner '+esc(w.owner||'?')+' · '+(w.lastCheckedAt?'checked '+ageEl(w.lastCheckedAt)+' ago':'never checked')+'</div>'
+     +(w.lastError?'<div class="bad">'+esc(w.lastError)+'</div>':'')+'<div class="dim" style="font-size:11px;margin-top:4px">cursor</div>'+cmdRow(w.cursor)
+     :'<div class="dim">no watch — <code>lobstah watch add '+esc(p.url)+'</code> registers one</div>');
+ }else if(modal.type==='helm'){
+  const h=item;
+  const stale=Date.now()-Date.parse(h.heartbeatAt)>1800000;
+  html='<span class="x" onclick="closeModal()">×</span><h3>⛵ '+esc(h.man)+'</h3>'
+   +'<div class="sub">helm of <b>'+esc(h.grounds)+'</b> ('+(h.repos||[]).map(esc).join(', ')+')</div>'
+   +'<div class="sub">'+esc(h.harness??'?')+' · '+esc(h.cwd??'?')+(h.host?' · '+esc(h.host):'')+'</div>'
+   +'<div class="sub">session '+esc(h.sessionId??'')+' · signed on '+ageEl(h.signedOnAt)+' ago · heartbeat <span class="'+(stale?'warn':'ok')+'">'+ageEl(h.heartbeatAt)+' ago</span></div>'
+   +(h.sessionId?'<div class="sec">open this session</div>'+cmdRow((h.harness==='codex'?'codex resume ':'claude --resume ')+h.sessionId):'')
+   +(h.transcript?'<div class="sec">transcript</div>'+cmdRow(h.transcript):'');
+ }else if(modal.type==='dispatch'){
+  const x=item;
+  html='<span class="x" onclick="closeModal()">×</span><h3>'+esc(x.id.slice(0,8))+' <span class="badge v-'+x.verb+'">'+x.verb+'</span></h3>'
+   +'<div class="sub">'+esc(x.repo)+' · '+x.lane+' '+x.bucket+' · '+ageEl(x.verbAt)+(x.for?' · '+addrCell(x):'')+' '+prCell(x)+'</div>'
+   +(x.claimedBy&&x.claimedBy.startsWith('wt:')
+     ?'<div class="sec">worked by trap</div>'+cmdRow(x.claimedBy)
+      +'<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone\'s live thread. Message it instead: lobstah send '+esc(x.claimedBy)+' "…"</div>'
+     :'<div class="sec">open this session</div>'+cmdRow('lobstah attach '+x.id))
+   +(x.transcript?'<div class="sec">transcript</div>'+cmdRow(x.transcript):'')
+   +detailBody(x);
+ }else{
+  const t=item;
+  const r=trapRow(t);
+  html='<span class="x" onclick="closeModal()">×</span><h3>🪤 wt:'+esc(t.trapId)+' <span class="badge">'+esc(t.harness??'signed off')+'</span></h3>'
+   +(t.worktree?'<div class="sub">'+esc(t.worktree)+'</div>':'')
+   +'<div class="sub">'+(t.live
+     ?esc(t.repo??'addressed bait only')+' · session '+esc(t.sessionId??'')+' · signed on '+ageEl(t.signedOnAt)+' ago · '+r.listen+' · heartbeat '+r.hb
+     :'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.')+'</div>'
+   +(t.live&&t.sessionId?'<div class="sec">open this session</div>'
+     +cmdRow((t.harness==='codex'?'codex resume ':'claude --resume ')+t.sessionId)
+     +'<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>':'')
+   +'<div class="sec">lifecycle ('+t.notices.length+')</div>'
+   +(t.notices.length?t.notices.map(n=>'<div class="loglines">'+ageEl(n.at)+' ago · <b>'+esc(n.kind)+'</b> — '+esc(n.text)+'</div>').join(''):'<div class="empty">none recorded</div>')
+   +'<div class="sec">messages ('+t.messages.length+')</div>'
+   +(t.messages.length?t.messages.map(m=>'<div class="msg'+(m.from==='helm'?' from-helm':'')+'"><div class="hdr">from '+esc(m.from)+' · '+(m.at?ageEl(m.at)+' ago':'')+' · '+(m.state==='pending'?'<span class="warn">pending</span>':'<span class="ok">delivered</span>')+'</div>'+esc(m.text)+(m.attachments?.length?attachmentRows(m.attachments):'')+'</div>').join(''):'<div class="empty">none</div>')
+   +'<div class="sec">catches ('+t.catches.length+')</div>'
+   +(t.catches.length?t.catches.map(c=>'<div class="catch"><div class="hdr"><b>'+esc(c.id.slice(0,8))+'</b><span class="badge v-'+c.verb+'">'+c.verb+'</span><span class="dim">'+ageEl(c.verbAt)+'</span>'+prCell(c)+'</div>'
+     +'<div class="loglines">'+c.log.map(e=>esc(e.at)+'  '+esc(e.verb)+(e.note?'  '+esc(e.note):'')).join('\n')+'</div></div>').join(''):'<div class="empty">none yet</div>');
+ }
+ // The overlay is the scroll container; keep the reader's place across a rebuild.
+ const top=ov.scrollTop,boxTop=box.scrollTop;
+ box.innerHTML=html;ov.classList.add('open');
+ ov.scrollTop=top;box.scrollTop=boxTop;
+}
+// Rewrite one section, keeping any horizontal/vertical scroll inside it.
+function setHTML(id,html){const el=document.getElementById(id);
+ const sc=[...el.querySelectorAll('.wrap')].map(w=>[w.scrollLeft,w.scrollTop]);
+ el.innerHTML=html;
+ el.querySelectorAll('.wrap').forEach((w,i)=>{if(sc[i]){w.scrollLeft=sc[i][0];w.scrollTop=sc[i][1]}})}
+const setText=(el,t)=>{if(el.textContent!==t)el.textContent=t};
+const TABS=GLASS_TABS;
+const activeTab=()=>tabFromHash(location.hash);
+let hashes={};
+// Render only what changed: each section is keyed on a hash of its inputs,
+// so a quiet tick touches nothing but ticking ages and the clock.
+function render(d){
+ const inp=sectionInputs(d,{st,open,modal},Date.now());
+ const next=hashInputs(inp);
+ const dirty=new Set(dirtySections(hashes,next));
+ const tab=activeTab();
+ const visible=new Set(visibleSections(tab));
+ for(const k of visible)hashes[k]=next[k];
+ for(const name of TABS)document.getElementById('page-'+name).classList.toggle('on',name===tab);
+ for(const a of document.querySelectorAll('#tabs a'))a.classList.toggle('on',a.dataset.tab===tab);
+ document.getElementById('f-lane').style.display=tab==='dispatches'?'':'none';
+ document.getElementById('f-verb').style.display=tab==='dispatches'?'':'none';
+ document.getElementById('chain-control').style.display=tab==='dispatches'?'':'none';
+ document.getElementById('f-kind').style.display=tab==='notices'?'':'none';
+ setText(document.getElementById('clock'),new Date(d.now).toLocaleTimeString('en-GB'));
+ const repos=[...new Set([...d.dispatches.map(x=>x.repo),...d.notices.map(x=>x.repo),...d.prs.map(x=>x.repo)].filter(Boolean))].sort();
+ const rsel=document.getElementById('f-repo');
+ if(rsel.options.length!==repos.length+1){const cur=st.repo;
+  rsel.innerHTML='<option value="">all repos</option>'+repos.map(r=>'<option'+(r===cur?' selected':'')+'>'+esc(r)+'</option>').join('')}
+ const kinds=[...new Set(d.notices.map(n=>n.kind))].sort(),ksel=document.getElementById('f-kind');
+ if(ksel.options.length!==kinds.length+1)ksel.innerHTML='<option value="">all notice kinds</option>'+kinds.map(k=>'<option'+(k===st.noticeKind?' selected':'')+'>'+esc(k)+'</option>').join('');
+ if(dirty.has('chips')){
+  const hbOld=inp.chips.daemonStale;
+  setHTML('chips',
+   '<span class="chip">daemon '+(d.daemon?('<span class="'+(hbOld?'bad':'ok')+'">'+(hbOld?'stale ':'')+ageEl(d.daemon.heartbeat)+' ago</span> <span class="dim">v'+esc(d.daemon.version)+'</span>'):'<span class="bad">down</span>')+'</span>'
+   +inp.chips.helms.map(({x:h,stale})=>
+     '<span class="chip click" onclick="showModal(\'helm\',\''+esc(h.grounds)+'\')">⛵ <b>'+esc(h.man)+'</b> <span class="dim">helm '+esc(h.grounds)+'</span> <span class="'+(stale?'warn':'ok')+'">'+(stale?'stale ':'')+ageEl(h.heartbeatAt)+' ago</span></span>').join(''))}
+ if(tab==='deck'&&dirty.has('deck'))setHTML('deck',renderDeck(d,inp.deck));
+ if(tab==='dispatches'&&dirty.has('dispatches')){const list=inp.dispatches.list;
+  setHTML('dispatches',st.view==='cards'?dispatchCards(list):dispatchTable(list))}
+ if(tab==='traps'&&dirty.has('traps')){const traps=inp.traps.list.map(t=>t.x);
+  setHTML('traps',st.view==='cards'?trapCards(traps):trapTable(traps))}
+ if(tab==='notices'&&dirty.has('notices'))setHTML('notices',noticeTable(inp.notices.list));
+ if(tab==='prs'&&dirty.has('prs'))setHTML('prs',st.view==='cards'?prCards(d,inp.prs):prTable(d,inp.prs));
+ if(dirty.has('foot'))setHTML('foot',
+  '🦞✨ lobstah v'+esc(d.version)+' · <a href="'+esc(d.repoUrl)+'" target="_blank">'+esc(d.repoUrl.replace('https://github.com/',''))+'</a>');
+ renderLobs(d.attention||[]);
+ // The open modal is rebuilt only when its own item (or which one) changed.
+ if(dirty.has('modal'))renderModal(d);
+ refreshAges();
+}
+let spriteOk=null;
+(()=>{const i=new Image();
+ i.onload=()=>{spriteOk=true;lobKey='';tick(true)};
+ i.onerror=()=>{spriteOk=false;lobKey='';tick(true)};
+ i.src='/lob-sprite.png'})();
+let lobKey='';
+function lobItems(att, opts) {
+    if (!opts.lobs)
+        return [];
+    // The same labels the attention table and the desktop pet use.
+    const labels = {
+        'pr:draft': 'draft',
+        'pr:review': 'review',
+        'pr:checks': 'checks',
+        'pr:conflict': 'conflicts',
+        'pr:ready': 'ready',
+        landed: 'landed',
+        watch: 'watch',
+    };
+    const hidden = opts.hidden ?? {};
+    let items = att
+        .filter((x) => !x.acked && !(x.key !== undefined && hidden[x.key] === x.stateHash))
+        .map((x) => {
+        const label = labels[x.kind ?? ''] ?? '';
+        const hide = x.key !== undefined ? { hideKey: x.key, hideHash: x.stateHash ?? '' } : {};
+        return typeof x.kind === 'string' && x.kind.startsWith('pr:') && x.prUrl
+            ? { key: x.kind + ':' + (x.key ?? x.prUrl), text: x.note || x.kind, href: x.prUrl, label, ...hide }
+            : {
+                key: (x.kind ?? 'question') + ':' + (x.key ?? x.lane + ':' + x.id),
+                text: x.note || x.verb,
+                label,
+                click: x.kind === 'watch' ? '' : "showModal('dispatch','" + x.lane + ':' + x.id + "')",
+                ...hide,
+            };
+    });
+    if (!items.length && opts.preview) {
+        items = [{ key: 'preview', text: 'attention questions crawl in here', click: opts.previewClick }];
+    }
+    const extra = items.length > 4 ? items.length - 4 : 0;
+    items = items.slice(0, 4);
+    if (extra)
+        items[3] = { ...items[3], text: '…and ' + extra + ' more — see attention', label: '' };
+    return items;
+}
+// Per-browser lob hides: {itemKey: stateHash}. localStorage only, guarded like st.
+let lobHidden={};
+try{lobHidden=JSON.parse(localStorage.getItem('spyglass-lob-hidden')||'{}')||{}}catch(e){lobHidden={}}
+window.hideLob=(key,hash)=>{lobHidden[key]=hash;try{localStorage.setItem('spyglass-lob-hidden',JSON.stringify(lobHidden))}catch(e){}lobKey='';setTimeout(()=>tick(true),0)};
+const hideCall=(it)=>it.hideKey?"hideLob("+esc(JSON.stringify(it.hideKey)).replace(/'/g,'&#39;')+","+esc(JSON.stringify(it.hideHash))+");":'';
+function renderLobs(att){
+ // st.lobs gates the lobs; acked items (the pet's shared ack) and lobs this
+ // browser already clicked (hidden by item key + state hash) don't walk; a
+ // new state re-shows them. lobItems (glass-lobs.ts) makes that decision;
+ // the glass writes nothing to lobstah — the hide is localStorage.
+ const items=lobItems(att,{lobs:st.lobs,hidden:lobHidden,preview:new URLSearchParams(location.search).has('lob'),
+  previewClick:last&&last.helms.length?"showModal('helm','"+last.helms[0].grounds+"')":''});
+ const key=items.map(i=>i.key).join('|')+(spriteOk===null?'?':spriteOk?'s':'e');
+ if(key===lobKey)return;
+ lobKey=key;
+ // A PR lob is a plain link out (read-only: the glass opens, never acts);
+ // a question lob opens its dispatch modal.
+ document.getElementById('lobs').innerHTML=items.map((it,i)=>{
+  const style='animation-duration:'+(((innerWidth+180)/(100+i*12)).toFixed(1))+'s;animation-delay:-'+((i*9)%14)+'s';
+  const body='<div class="bub">'+(it.label?'<span class="badge dim">'+esc(it.label)+'</span> ':'')+'<span>'+esc(it.text.length>48?it.text.slice(0,47)+'…':it.text)+'</span></div>'
+   +(spriteOk===false?'<span class="fallback">🦞</span>':'<div class="sprite"></div>')
+   +'<img class="star" src="/star.png" alt="" onerror="this.remove()">';
+  return it.href
+   ?'<a class="lob" style="'+style+'" title="open the PR" href="'+esc(it.href)+'" target="_blank" rel="noopener" onclick="'+hideCall(it)+'">'+body+'</a>'
+   :'<div class="lob" style="'+style+'" title="click to open" onclick="'+hideCall(it)+(it.click||'')+'">'+body+'</div>'}).join('');
+}
+window.tog=(k)=>{open.has(k)?open.delete(k):open.add(k);tick(true)};
+window.showModal=(type,key)=>{modal={type,key};tick(true)};
+window.closeModal=()=>{modal=null;if(hashes)hashes.modal=null;document.getElementById('overlay').classList.remove('open')};
+document.getElementById('overlay').addEventListener('click',(e)=>{if(e.target.id==='overlay')closeModal()});
+document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeModal()});
+// ⚙ opens the settings modal — the same overlay as every other modal (Escape
+// and click-outside close it). Its two preferences are this browser's own:
+// localStorage via save(); view applies to every tab.
+document.getElementById('gearbtn').addEventListener('click',()=>showModal('settings','browser'));
+window.setView=(v)=>{if(v!=='table'&&v!=='cards')return;st.view=v;save();tick(true)};
+window.setLobs=(v)=>{st.lobs=v==='on';save();lobKey='';tick(true)};
+for(const[id,key]of[['f-lane','lane'],['f-repo','repo'],['f-verb','verb'],['f-kind','noticeKind']]){
+ const el=document.getElementById(id);el.value=st[key];
+ el.addEventListener('change',()=>{st[key]=el.value;save();tick(true)})}
+const chain=document.getElementById('f-chain');chain.checked=!!st.chain;
+chain.addEventListener('change',()=>{st.chain=chain.checked;save();tick(true)});
+const q=document.getElementById('f-q');q.value=st.q;
+q.addEventListener('input',()=>{st.q=q.value;save();tick(true)});
+window.addEventListener('hashchange',()=>tick(true));
+let last,inflight=false,timer=null;
+const setStale=(on)=>{const el=document.getElementById('stale');const v=on?'inline':'none';if(el.style.display!==v)el.style.display=v};
+// User-driven ticks render synchronously from last; polls fetch one at a time.
+async function tick(rerender){
+ if(rerender&&last){render(last);return}
+ if(inflight)return;
+ inflight=true;
+ try{const r=await fetch('/data');last=await r.json();render(last);setStale(false)}
+ catch(e){setStale(true)}
+ finally{inflight=false}}
+const startPoll=()=>{if(!timer)timer=setInterval(()=>tick(false),2000)};
+const stopPoll=()=>{clearInterval(timer);timer=null};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopPoll();else{tick(false);startPoll()}});
+tick();if(!document.hidden)startPoll();
+</script></body></html>
