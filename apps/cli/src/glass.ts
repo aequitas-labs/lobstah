@@ -21,7 +21,7 @@ import {
   readStatusLog,
   readPrs,
 } from '@lobstah/core';
-import type { Attachment, Descriptor, Lane, Notice } from '@lobstah/core';
+import type { Attachment, Descriptor, GlassDispatch, GlassMessage, GlassSnapshot, GlassTrap, Lane } from '@lobstah/core';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { lobItems } from './glass-lobs.js';
@@ -92,15 +92,6 @@ function transcriptPath(harness?: string, cwd?: string, sessionId?: string): str
   return fs.existsSync(p) ? p : undefined;
 }
 
-interface GlassMessage {
-  file: string;
-  state: 'pending' | 'delivered';
-  from: string;
-  at: string;
-  text: string;
-  attachments?: Attachment[];
-}
-
 function messageAttachments(dir: string): Attachment[] {
   return [dir, path.join(dir, 'handled')].flatMap((folder) =>
     listDir(folder)
@@ -138,7 +129,7 @@ function trapMessages(trapId: string): GlassMessage[] {
   return rows.filter((m): m is GlassMessage => m !== undefined).sort((a, b) => a.file.localeCompare(b.file));
 }
 
-function dispatchRows() {
+function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
   const rows: Array<{ lane: Lane; bucket: 'queued' | 'active' | 'done'; d: Descriptor; sort: number }> = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
     const dirs = laneDirs(lane);
@@ -177,7 +168,7 @@ function dispatchRows() {
         brief: r.d.brief,
         attachments: r.d.attachments ?? [],
         messageAttachments: messageAttachments(inboxDir),
-        verb: last?.verb ?? 'unknown',
+        verb: last?.verb ?? ('unknown' as const),
         note: last?.note,
         verbAt: last?.at,
         claimedBy: claim?.by,
@@ -209,7 +200,7 @@ function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[
 }
 
 /** One disk pass, everything the page renders. Pure read. */
-export function buildGlassSnapshot() {
+export function buildGlassSnapshot(): GlassSnapshot {
   backfillPrWatches();
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const helms = listHelms().map((h) => ({
@@ -257,7 +248,7 @@ export function buildGlassSnapshot() {
   for (const n of allNotices) {
     if (n.kind.startsWith('trap-') && n.refId) seenIds.add(n.refId);
   }
-  const attach = (t: { trapId: string; repo?: string; worktree?: string; harness?: string; sessionId?: string }, liveNow: boolean) => ({
+  const attach = (t: { trapId: string; repo?: string; worktree?: string; harness?: string; sessionId?: string }, liveNow: boolean): GlassTrap => ({
     ...t,
     live: liveNow,
     messages: trapMessages(t.trapId),

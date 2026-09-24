@@ -1,5 +1,5 @@
 import { parsePrRef, prBadge, prSortAt } from '@lobstah/core';
-import type { PrEvidence, PrRecord } from '@lobstah/core';
+import type { GlassPr, GlassPrWatch, GlassStack, PrEvidence, PrRecord } from '@lobstah/core';
 
 /**
  * The PR picture is derived only from observations already on disk. Read
@@ -15,54 +15,7 @@ export interface GlassPrDispatch {
   prGate?: string;
 }
 
-export interface GlassPrWatch {
-  key: string;
-  /** man or dispatch:<uuid> — shown in the PR modal. */
-  owner?: string;
-  cursor: string;
-  lastCheckedAt?: string;
-  lastError?: string;
-}
-
-export interface GlassPr {
-  key: string;
-  url: string;
-  number: number;
-  repo: string;
-  forgeRepo: string;
-  title?: string;
-  state: string;
-  draft: boolean;
-  checks: PrEvidence['checks'];
-  review: PrEvidence['review'];
-  reviewDecision: string;
-  mergeStateStatus: string;
-  baseRefName?: string;
-  headRefName?: string;
-  observedAt: string;
-  updatedAt?: string;
-  mergedAt?: string;
-  closedAt?: string;
-  badge: ReturnType<typeof prBadge>;
-  stackId: string;
-  floor: string;
-  position: number;
-  nextMergeable: boolean;
-  blockedBy?: number;
-  dispatchIds: string[];
-  gate?: string;
-  watch?: GlassPrWatch;
-}
-
-export interface GlassStack {
-  id: string;
-  floor: string;
-  repo: string;
-  numbers: number[];
-  open: boolean;
-  nextNumber?: number;
-  behind: number;
-}
+export type { GlassPr, GlassPrWatch, GlassStack } from '@lobstah/core';
 
 export function deriveGlassPrs(
   dispatches: readonly GlassPrDispatch[],

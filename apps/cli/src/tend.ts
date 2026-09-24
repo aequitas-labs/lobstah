@@ -28,11 +28,10 @@ import {
   toonKV,
   toonTable,
 } from '@lobstah/core';
-import type { AttentionKind, Config, Descriptor, Lane, PrEvidence } from '@lobstah/core';
+import type { AttentionKind, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
-import type { MergeView } from '@lobstah/pick';
 import { deriveGlassPrs } from './glass-prs.js';
 import { backfillPrWatches } from './pr-watch.js';
 import type { GlassStack } from './glass-prs.js';
@@ -116,36 +115,7 @@ export interface TendNotice {
  * - `watch`: an unconsumed man-owned watch event — machinery, always on.
  * Only `question` and `watch` drive the verdict; the rest are things to look at.
  */
-export type TendAttentionKind = AttentionKind | 'watch';
-
-export interface TendAttention {
-  kind: TendAttentionKind;
-  /** Stable item key: `<lane>:<id>` for question/landed, the PR key for pr:*, `watch:<key>` for watch. */
-  key: string;
-  /** Hash of the fields the kind stands on — an ack holds only while it matches (acks.ts). */
-  stateHash: string;
-  /** A human acknowledged this state (display-only: the pet and glass lobs skip it; nothing else does). */
-  acked?: { at: string; by: string };
-  id: string;
-  lane: Lane;
-  /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
-  verb: string;
-  ageSecs: number;
-  at?: string;
-  note?: string;
-  repo?: string;
-  /** pr:* kinds: the evidence fields the kind derives from. */
-  prUrl?: string;
-  number?: number;
-  state?: string;
-  draft?: boolean;
-  reviewDecision?: string;
-  /** GitHub's merge state as observed (pr:conflict stands on DIRTY; pr:ready needs a mergeable one). */
-  mergeStateStatus?: string;
-  headSha?: string;
-  checks?: PrEvidence['checks'];
-  review?: PrEvidence['review'];
-}
+export type { TendAttention, TendAttentionKind } from '@lobstah/core';
 
 export interface ChainMember {
   id: string;
@@ -350,18 +320,7 @@ export function landedAttention(cfg: Config, now: number): TendAttention[] {
 }
 
 /** One terminal catch for the glass's On deck "Landed" section. */
-export interface LandedCatch {
-  key: string;
-  id: string;
-  lane: Lane;
-  verb: 'done' | 'failed';
-  at: string;
-  note?: string;
-  repo?: string;
-  prUrl?: string;
-  /** Landed after its grounds' reported-through cursor (or the grounds has none). */
-  unreported: boolean;
-}
+export type { LandedCatch } from '@lobstah/core';
 
 /**
  * Every catch whose last verb is `done` or `failed`, newest first, each

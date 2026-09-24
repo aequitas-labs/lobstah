@@ -1,33 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { lobstahHome } from '@lobstah/core';
+import type { MergeView, MergeViewPr } from '@lobstah/core';
 
-/** Gate verdict for one open PR, as of the last merge-loop tick. */
-export interface MergeViewPr {
-  number: number;
-  url: string;
-  headRef: string;
-  headSha: string;
-  mergeableState: string;
-  /** waiting-approval | behind-updated | conflict-chore:<uuid> | rebase-failed | blocked | draft | merged */
-  gate: string;
-  /** Dispatch UUID when the branch is lobstah-made (lobstah/<uuid>). */
-  uuid?: string;
-}
-
-/**
- * The merge loop's observation of the forge, persisted per tick so a status
- * view (`lobstah man tend`, a dashboard) can report PR state from disk — at
- * most one poll tick stale — without its own forge calls. Observational, not
- * load-bearing: deleting it loses nothing but history.
- */
-export interface MergeView {
-  updatedAt: string;
-  repo: string;
-  open: MergeViewPr[];
-  /** PRs that left the open set, with how they left. Pruned after 48h. */
-  recent: Array<{ number: number; url: string; disposition: 'merged' | 'closed'; at: string }>;
-}
+export type { MergeView, MergeViewPr } from '@lobstah/core';
 
 function viewPath(): string {
   return path.join(lobstahHome(), 'pickup', 'merge-view.json');
