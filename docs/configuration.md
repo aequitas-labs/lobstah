@@ -68,6 +68,7 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 |---|---|---|
 | `ttlSecs` | `1800` | Heartbeat age past which a helm registration is stale: the next `man helm` claims it without `--take`. The park and `man brief` heartbeat it. |
 | `reportSecs` | `900` | Minimum seconds between park-delivered digests for a helm session. The digest is also change-gated — quiet grounds deliver nothing regardless of cadence. |
+| `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
 
 ## `[grounds.*]` — helm territories
 

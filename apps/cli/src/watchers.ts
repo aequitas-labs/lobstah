@@ -32,6 +32,23 @@ export function liveWatcher(sessionId: string, kind: SessionWatcher['kind'], tra
   return w?.kind === kind && (!trapId || w.trapId === trapId) ? w : undefined;
 }
 
+/**
+ * Poll up to graceMs for a live watcher. `man wait` launched as a background
+ * task right before the turn ends races the Stop hook: the node process may
+ * not have written its registration yet. A stale registration gets the same
+ * window, since a watcher that just timed out is likely being re-armed.
+ */
+export async function awaitWatcher(
+  sessionId: string, kind: SessionWatcher['kind'], graceMs: number, trapId?: string, pollMs = 100,
+): Promise<SessionWatcher | undefined> {
+  const deadline = Date.now() + Math.max(0, graceMs);
+  for (;;) {
+    const w = liveWatcher(sessionId, kind, trapId);
+    if (w || Date.now() >= deadline) return w;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, Math.max(1, deadline - Date.now()))));
+  }
+}
+
 /** One watcher per session. The file is an atomic claim, heartbeated until exit. */
 export function armWatcher(sessionId: string, kind: SessionWatcher['kind'], trapId?: string): { stop: () => void } {
   fs.mkdirSync(watcherDir(), { recursive: true });

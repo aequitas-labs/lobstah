@@ -46,6 +46,8 @@ export interface HelmConfig {
   reportSecs: number;
   /** Stop hook behavior: arm a background watcher or block in the hook. */
   park?: 'arm' | 'block';
+  /** Arm mode: seconds the Stop hook polls for a watcher that is still starting before it blocks. */
+  armGraceSecs: number;
 }
 
 /** A named territory: the subset of configured repos one helm oversees. */
@@ -101,6 +103,7 @@ export const DEFAULT_SOAK: SoakConfig = {
 export const DEFAULT_HELM: HelmConfig = {
   ttlSecs: 1800,
   reportSecs: 900,
+  armGraceSecs: 5,
 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
