@@ -1,10 +1,10 @@
 # lobstah in Claude Code
 
-The [README quickstart](../../README.md#quickstart-the-lobstah-man-) is the
-same in every harness: it uses only `lobstah` commands. This page covers
-what the Claude Code plugin adds on top: slash commands, skills, how the
-session gets its id, and how the Stop hook wakes you. For the pattern
-itself, see [docs/man.md](../man.md).
+Use `/lobstah:man` to load the lobstah man skill. `/lobstah:helm` signs on
+without loading the skill. You can also say "Lobstah man, take the helm."
+
+This page covers the plugin's commands, skills, session id, and Stop hook.
+See [docs/man.md](../man.md) for the full pattern.
 
 ## Install
 

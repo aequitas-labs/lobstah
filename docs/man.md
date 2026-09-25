@@ -217,7 +217,8 @@ work in flight allows a stop with a live watcher and otherwise blocks with
 the arm command. The hook first waits up to `[helm].armGraceSecs` (5 s) for a
 watcher that is still starting, so arming and ending the turn at once is safe.
 `man haul --park` or `[helm].park = "block"` makes the hook
-wait for attention itself. Without a Stop hook, run `man wait` in the foreground.
+wait for attention itself. Without a Stop hook, use the
+[foreground loop below](#without-a-plugin).
 
 The hook is a CLI command — `lobstah man haul` (the lobstah man hauls the
 trapline; every orchestrator-facing command lives under `lobstah man`).
@@ -278,6 +279,22 @@ done
 Zero tokens between events and works anywhere a shell does; the cost is that
 each event gets a fresh context rather than a continuing liaison
 conversation.
+
+### Without a plugin
+
+Run the CLI sequence directly:
+
+```bash
+lobstah man helm --session <id>
+lobstah man wait --session <id> --timeout 900
+lobstah dispatch --repo myapp --brief ./brief.md
+lobstah man tend
+lobstah glass
+lobstah man relieve --session <id>
+```
+
+Without a hook, run `man wait` in the foreground and loop on it after each
+event or timeout.
 
 ## The helm: signing on as the orchestrator
 

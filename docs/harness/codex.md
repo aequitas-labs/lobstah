@@ -1,10 +1,11 @@
 # lobstah in Codex
 
-The [README quickstart](../../README.md#quickstart-the-lobstah-man-) is the
-same in every harness: it uses only `lobstah` commands. This page covers
-what the Codex plugin adds and where Codex differs: skills instead of slash
-commands, `--session` on first sign-on, the blocking park, and the desktop
-app. For the pattern itself, see [docs/man.md](../man.md).
+Use `$lobstah:man` to load the lobstah man skill. You can also say
+"Lobstah man, take the helm."
+
+This page covers the plugin's skills, first sign-on with `--session`,
+the blocking park, and the desktop app. See [docs/man.md](../man.md)
+for the full pattern.
 
 ## Install
 

@@ -100,9 +100,8 @@ lobstah catch <uuid>         # the evidence: branch, commits, PR, session
 
 ## Quickstart: the lobstah man 🦞
 
-One session holds the helm. You talk to it; it runs the fleet. Every step
-is a `lobstah` command, so the sequence is the same in any harness and in a
-plain terminal.
+One session holds the helm. You talk to it; it runs the fleet. The skill runs
+the `lobstah` commands.
 
 **Install**
 
@@ -114,32 +113,29 @@ lobstah daemon install       # the helm dispatches; the daemon supervises
 
 Then install the lobstah plugin for your harness
 ([Claude Code](docs/harness/claude-code.md#install) ·
-[Codex](docs/harness/codex.md#install)) and open a new session. The plugin's
-session-start brief prints the session's id; `<id>` below is that id.
+[Codex](docs/harness/codex.md#install)) and open a new session.
 
 **Run**
 
-```bash
-lobstah man helm --session <id>                   # sign on; prints the charter
-lobstah man wait --session <id> --timeout 900     # arm the watcher when the hook asks
-lobstah dispatch --repo myapp --brief ./brief.md  # or just ask the helm to dispatch
-lobstah man tend                                  # fleet verdict, waiting questions, PRs
-lobstah glass                                     # the same, as a live localhost page
-lobstah man relieve --session <id>                # step down
+Open a new session in the repo (or any folder) with the plugin installed.
+
+```text
+/lobstah:man                      # Claude Code (or /lobstah:helm, the bare sign-on)
+$lobstah:man                      # Codex
 ```
+
+Or just say "Lobstah man, take the helm."
+
+The skill signs on, arms the watcher when the Stop hook asks, and stays woken.
 
 Then just talk: "dispatch a fix for the flaky login test in myapp." The helm
 writes a standalone brief, dispatches it, answers workers' questions, and
 brings you the catch.
 
-Getting woken is the habit to keep. At every turn end the plugin's Stop hook
-either parks the helm until something needs it, or asks you to arm
-`man wait` as a background task and re-arm it after each wake. With no hook,
-run `man wait` in the foreground and loop on it.
-
-To turn another live session into a worker, open it in a linked worktree and
-run `lobstah soak --session <id>`; the helm addresses bait to its
-`wt:<trap>` address, and `lobstah stow` signs it off.
+Use `/lobstah:trap` in Claude Code or `$lobstah:trap` in Codex to turn another
+live session in a linked worktree into a worker. The skill runs `lobstah soak`;
+the helm addresses bait to its `wt:<trap>` address, and `lobstah stow` signs
+it off.
 
 Harness specifics: [Claude Code](docs/harness/claude-code.md) · [Codex](docs/harness/codex.md).
 The full pattern (charter, grounds, the three tiers of getting woken, traps)
