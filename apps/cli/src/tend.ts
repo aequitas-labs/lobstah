@@ -16,8 +16,7 @@ import {
   pendingIds,
   prBadge,
   prSortAt,
-  isConflicting,
-  isMergeable,
+  prStandingKinds,
   queuedDescriptor,
   readEvidence,
   readPrs,
@@ -28,7 +27,7 @@ import {
   toonKV,
   toonTable,
 } from '@lobstah/core';
-import type { AttentionKind, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
+import type { Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
@@ -143,20 +142,7 @@ export function onTheHook(
 }
 
 /** Which pr:* kinds a PR's evidence stands on right now. Pure. */
-export function prKinds(pr: PrEvidence): AttentionKind[] {
-  if (pr.state !== 'OPEN') return [];
-  const out: AttentionKind[] = [];
-  const { failed, pending, total } = pr.checks;
-  if (pr.draft) out.push('pr:draft');
-  const review = (pr.review?.unresolvedThreads ?? 0) > 0 || pr.review?.changesRequested === true;
-  if (review) out.push('pr:review');
-  if (failed > 0) out.push('pr:checks');
-  if (isConflicting(pr.mergeStateStatus)) out.push('pr:conflict');
-  // Ready never contradicts review: outstanding threads or a changes request mean not ready yet.
-  // Nor the forge: a PR that cannot merge as it stands (conflicting, behind, blocked, unknown) is not ready.
-  if (!pr.draft && !review && isMergeable(pr.mergeStateStatus) && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
-  return out;
-}
+export const prKinds = prStandingKinds;
 
 /** Ready is a merge invitation only when no tracked open PR is its base. */
 export function readyBlockedByStack(pr: PrEvidence, tracked: readonly PrEvidence[]): boolean {
@@ -260,9 +246,11 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
     const ref = parsePrRef(pr.url);
     const watchFollowUp = ref ? readWatch(ref.key)?.lastFollowUpId : undefined;
     const chain = dispatch ? chainOf(id) : [];
-    const since = (dispatch ? readStatusLog(id, lane).at(-1)?.at : undefined) ?? pr.observedAt;
     for (const kind of kinds) {
       if (onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
+      // Older dispatch evidence has no record; its observation is the best
+      // available approximation until a PR record is written.
+      const standingSince = pr.standingSince?.[kind] ?? pr.observedAt;
       out.push({
         kind,
         key: ref?.key ?? pr.url,
@@ -270,8 +258,9 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
         id,
         lane,
         verb: kind,
-        ageSecs: Math.max(0, Math.round((now - Date.parse(since)) / 1000)),
-        at: since,
+        ageSecs: Math.max(0, Math.round((now - Date.parse(standingSince)) / 1000)),
+        at: standingSince,
+        standingSince,
         note: PR_KIND_NOTE[kind]!(pr),
         repo: dispatch ? repoOf(id, lane) : (ref ? `${ref.owner}/${ref.repo}` : undefined),
         prUrl: pr.url,
@@ -286,8 +275,7 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
       });
     }
   }
-  const updated = new Map(observed.map(({ pr }) => [pr.url, prSortAt(pr)]));
-  return out.sort((a, b) => (updated.get(b.prUrl ?? '') ?? '').localeCompare(updated.get(a.prUrl ?? '') ?? ''));
+  return out;
 }
 
 /** Terminal catches the helm hasn't been reported yet: past its grounds' cursor. */
@@ -310,6 +298,7 @@ export function landedAttention(cfg: Config, now: number): TendAttention[] {
         verb: last.verb,
         ageSecs: Math.max(0, Math.round((now - at) / 1000)),
         at: last.at,
+        standingSince: last.at,
         note: last.note,
         repo,
         ...(ev.prUrl ? { prUrl: ev.prUrl } : {}),
@@ -499,6 +488,7 @@ export function buildTendReport(now = Date.now()): TendReport {
         verb: last.verb,
         ageSecs: Math.max(0, Math.round((now - Date.parse(last.at)) / 1000)),
         at: last.at,
+        standingSince: last.at,
         note: last.note,
       });
     }
@@ -537,6 +527,7 @@ export function buildTendReport(now = Date.now()): TendReport {
         verb: 'watch',
         ageSecs: oldest?.at ? Math.max(0, Math.round((now - Date.parse(oldest.at)) / 1000)) : 0,
         at: oldest?.at,
+        standingSince: oldest?.at,
         note: pending.at(-1)?.summary,
       });
     }
@@ -632,6 +623,10 @@ export function buildTendReport(now = Date.now()): TendReport {
       return ack ? { ...a, acked: { at: ack.at, by: ack.by } } : a;
     }),
   );
+  // Attention is a queue of standing conditions. Observation recency only
+  // orders the separate PR views, never the pets or this queue.
+  attention.sort((a, b) => (a.standingSince ?? a.at ?? '').localeCompare(b.standingSince ?? b.at ?? '') ||
+    a.key.localeCompare(b.key));
 
   const verdict: TendReport['verdict'] = !daemonUp
     ? 'daemon-down'

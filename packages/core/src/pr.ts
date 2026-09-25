@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import type { AttentionKind } from './config.js';
 
 /**
  * The shipped GitHub PR watch: `pr:<owner>/<repo>#<n>`. The check reads one
@@ -107,6 +108,8 @@ function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
 }
 
 /** The evidence `pr` object: the PR's state as last observed. */
+export type PrStandingKind = Extract<AttentionKind, `pr:${string}`>;
+
 export interface PrEvidence {
   url: string;
   number: number;
@@ -124,11 +127,27 @@ export interface PrEvidence {
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
   observedAt: string;
+  /** First observation at which each currently standing pr:* kind became true (persisted in PR records). */
+  standingSince?: Partial<Record<PrStandingKind, string>>;
   /** Forge's last update, when the observation captured it. */
   updatedAt?: string;
   /** Present for a merged or closed PR when the forge supplies it. */
   mergedAt?: string;
   closedAt?: string;
+}
+
+/** Which pr:* kinds stand on this observation, independent of display suppression. */
+export function prStandingKinds(pr: PrEvidence): PrStandingKind[] {
+  if (pr.state !== 'OPEN') return [];
+  const out: PrStandingKind[] = [];
+  const { failed, pending, total } = pr.checks;
+  if (pr.draft) out.push('pr:draft');
+  const review = (pr.review?.unresolvedThreads ?? 0) > 0 || pr.review?.changesRequested === true;
+  if (review) out.push('pr:review');
+  if (failed > 0) out.push('pr:checks');
+  if (isConflicting(pr.mergeStateStatus)) out.push('pr:conflict');
+  if (!pr.draft && !review && isMergeable(pr.mergeStateStatus) && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
+  return out;
 }
 
 export interface PrReview {

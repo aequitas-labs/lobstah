@@ -31,6 +31,8 @@ export interface TendAttention {
   verb: string;
   ageSecs: number;
   at?: string;
+  /** When this condition began standing; stable across subsequent observations. */
+  standingSince?: string;
   note?: string;
   repo?: string;
   /** pr:* kinds: the evidence fields the kind derives from. */

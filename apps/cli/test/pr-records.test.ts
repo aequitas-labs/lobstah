@@ -64,6 +64,40 @@ describe('PR records (core prs.ts)', () => {
     expect(readPr('pr:acme/lobstah#7')!.dispatches).toEqual(['dispatch-a', 'dispatch-b']);
     expect(readPrs()).toHaveLength(1);
   });
+
+  it('keeps attention in standing order when observation times swap, then clears and restarts a kind', () => {
+    const first = '2026-09-24T10:00:00.000Z';
+    const second = '2026-09-24T10:01:00.000Z';
+    const third = '2026-09-24T10:02:00.000Z';
+    upsertPr(obs(1, { observedAt: first }));
+    upsertPr(obs(2, { observedAt: second }));
+    const attention = () => buildTendReport().attention.filter((a) => a.kind.startsWith('pr:'));
+    expect(attention().map((a) => a.number)).toEqual([1, 2]);
+    expect(attention().map((a) => a.standingSince)).toEqual([first, second]);
+
+    // The newest observation belongs to #1, but the older standing item
+    // keeps its place. PR views still sort by their observation time.
+    upsertPr(obs(1, { observedAt: '2026-09-24T10:04:00.000Z' }));
+    upsertPr(obs(2, { observedAt: '2026-09-24T10:03:00.000Z' }));
+    expect(attention().map((a) => a.number)).toEqual([1, 2]);
+    expect(attention().map((a) => a.standingSince)).toEqual([first, second]);
+
+    upsertPr(obs(3, { observedAt: third, draft: true }));
+    expect(attention().map((a) => a.number)).toEqual([1, 2, 3]);
+    expect(readPr('pr:acme/lobstah#3')?.standingSince).toEqual({ 'pr:draft': third });
+    upsertPr(obs(3, { observedAt: '2026-09-24T10:05:00.000Z', draft: false, checks: { total: 0, passed: 0, failed: 0, pending: 0 } }));
+    expect(readPr('pr:acme/lobstah#3')?.standingSince).toEqual({});
+    upsertPr(obs(3, { observedAt: '2026-09-24T10:06:00.000Z', draft: true }));
+    expect(readPr('pr:acme/lobstah#3')?.standingSince).toEqual({ 'pr:draft': '2026-09-24T10:06:00.000Z' });
+
+    // Sparse evidence keeps the previous optional review field; its standing
+    // timestamp must follow the merged record, not clear spuriously.
+    upsertPr(obs(4, { observedAt: first, review: { unresolvedThreads: 1, changesRequested: false }, checks: { total: 0, passed: 0, failed: 0, pending: 0 } }));
+    const sparse = obs(4, { observedAt: second, checks: { total: 0, passed: 0, failed: 0, pending: 0 } });
+    delete sparse.review;
+    upsertPr(sparse);
+    expect(readPr('pr:acme/lobstah#4')?.standingSince).toEqual({ 'pr:review': first });
+  });
 });
 
 describe('stacks and kinds from records alone (no dispatch evidence)', () => {

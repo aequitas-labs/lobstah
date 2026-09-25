@@ -30,6 +30,9 @@ struct AttentionItem: Decodable, Equatable {
   /** pr:* kinds: the PR this pet walks for. */
   var prUrl: String? = nil
 
+  /** The identity stays fixed when labels, order, or acknowledgements change. */
+  var identity: String { "\(kind ?? "question"):\(key ?? id)" }
+
   /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
   var prLink: URL? { (kind?.hasPrefix("pr:") ?? false) ? prUrl.flatMap(URL.init(string:)) : nil }
 
@@ -102,11 +105,11 @@ func runCommand(_ launch: String, _ args: [String], timeout: TimeInterval = 10) 
   return String(data: data, encoding: .utf8)
 }
 
-func tendAttention() -> [AttentionItem] {
+func tendAttention() -> [AttentionItem]? {
   guard let json = runCommand("/usr/bin/env", ["lobstah", "man", "tend", "--json"]),
         let data = json.data(using: .utf8),
         let report = try? JSONDecoder().decode(TendReport.self, from: data)
-  else { return [] }
+  else { return nil }
   // Acks are display-only: an acked item stays in tend's attention (the helm
   // still needs it) but no longer walks.
   return report.attention.filter { $0.acked == nil }
@@ -284,11 +287,13 @@ final class Pet {
   static let spriteSheet: NSImage? = Bundle.module.url(forResource: "lob-sprite", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
   static let starImage: NSImage? = Bundle.module.url(forResource: "star", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
 
-  let item: AttentionItem
+  var item: AttentionItem
   let panel: NSPanel
   let spriteLayer = CALayer()
   var x: CGFloat
   let speed: CGFloat
+  /** Delay only a new entrance; an existing pet never returns to this state. */
+  var entryAfter: Date?
   var frame = 0
   /** All displays, left to right; the pet crosses each in turn. */
   let screens: [NSScreen]
@@ -300,14 +305,26 @@ final class Pet {
   /** Hovered: the walk pauses, the bubble reveals; the arms keep waving. */
   var hovered = false { didSet { bubble?.isHidden = !hovered } }
   weak var bubble: NSView?
+  weak var label: NSTextField?
 
-  init(item: AttentionItem, index: Int) {
+  /** FNV-1a over UTF-8: unlike Swift's Hasher, stable across processes. */
+  static func walkingSpeed(for key: String) -> CGFloat {
+    var hash: UInt32 = 2_166_136_261
+    for byte in key.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+    return CGFloat(90 + hash % 71)
+  }
+
+  init(item: AttentionItem, entryIndex: Int) {
     self.item = item
     let text = item.bubbleText
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
-    self.speed = 100 + CGFloat(index) * 12
+    self.speed = Pet.walkingSpeed(for: item.identity)
+    // Keep a little spatial separation as well as a 0...2s stagger, so
+    // simultaneous arrivals do not start with their sprites on top of one another.
+    let delay = Double.random(in: 0...2)
+    self.entryAfter = Date().addingTimeInterval(delay)
     let first = screens.first?.frame ?? .zero
-    self.x = first.minX - 200 - CGFloat(index) * 220
+    self.x = first.minX - 200 - CGFloat(entryIndex) * 140
     self.entryX = self.x
 
     let panelW: CGFloat = 300
@@ -370,11 +387,29 @@ final class Pet {
     root.addSubview(star)
     root.pet = self
     self.bubble = bubble
+    self.label = label
 
-    panel.orderFrontRegardless()
+    panel.orderOut(nil)
+  }
+
+  func update(item: AttentionItem) {
+    guard self.item != item else { return }
+    self.item = item
+    let text = item.bubbleText
+    guard let label, let bubble else { return }
+    label.stringValue = text.count > 66 ? String(text.prefix(63)) + "…" : text
+    let fitted = label.sizeThatFits(NSSize(width: 216, height: 120))
+    bubble.setFrameSize(NSSize(width: min(236, fitted.width + 20), height: fitted.height + 12))
+    bubble.setFrameOrigin(NSPoint(x: 276 - bubble.frame.width, y: 88))
+    label.frame = NSRect(x: 10, y: 6, width: fitted.width, height: fitted.height)
   }
 
   func tick(_ dt: CGFloat) {
+    if let until = entryAfter {
+      if Date() < until { return }
+      entryAfter = nil
+      panel.orderFrontRegardless()
+    }
     // Tracking areas miss a window that walks under a stationary cursor, in
     // both directions — poll instead.
     let inside = panel.frame.contains(NSEvent.mouseLocation) && panel.isVisible
@@ -423,10 +458,11 @@ final class Pet {
 // MARK: - app
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-  var pets: [Pet] = []
-  var lastKey = ""
+  var petsByKey: [String: Pet] = [:]
   var statusItem: NSStatusItem?
   var preview = ProcessInfo.processInfo.environment["LOBSTAH_PET_PREVIEW"] != nil
+  let diagnostics = ProcessInfo.processInfo.environment["LOBSTAH_PET_DIAGNOSTICS"] != nil
+  var polling = false
 
   var activity: NSObjectProtocol?
 
@@ -458,11 +494,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       let now = CACurrentMediaTime()
       let dt = CGFloat(min(0.35, now - lastTick))
       lastTick = now
-      for pet in self.pets { pet.tick(dt) }
+      for pet in self.petsByKey.values { pet.tick(dt) }
     }
     walker.tolerance = 0.002
     Timer.scheduledTimer(withTimeInterval: 0.14, repeats: true) { _ in
-      for pet in self.pets { pet.step() }
+      for pet in self.petsByKey.values { pet.step() }
     }
     Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { _ in self.poll() }
     poll()
@@ -470,7 +506,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc func togglePreview() {
     preview.toggle()
-    lastKey = "-"
     poll()
   }
 
@@ -479,9 +514,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func poll() {
+    guard !polling else { return }
+    polling = true
     DispatchQueue.global().async {
-      var items = tendAttention()
+      let snapshot = tendAttention()
       DispatchQueue.main.async {
+        self.polling = false
+        // A failed read is not an empty attention queue. Keep every current
+        // window in place and try again on the next six-second poll.
+        guard var items = snapshot else { return }
         if items.isEmpty && self.preview {
           items = [AttentionItem(id: "preview", verb: "needs-decision", note: "the lobster preview — questions crawl in here")]
         }
@@ -491,12 +532,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           let last = shown.removeLast()
           shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", key: last.key, kind: last.kind, prUrl: last.prUrl))
         }
-        let key = shown.map { "\($0.kind ?? "question"):\($0.key ?? $0.id)" }.joined(separator: "|")
-        guard key != self.lastKey else { return }
-        self.lastKey = key
-        for pet in self.pets { pet.close() }
-        self.pets = shown.enumerated().map { i, item in
-          Pet(item: item, index: i)
+        let visibleKeys = Set(shown.map(\.identity))
+        for key in self.petsByKey.keys.filter({ !visibleKeys.contains($0) }) {
+          self.petsByKey.removeValue(forKey: key)?.close()
+        }
+        let entering = shown.filter { self.petsByKey[$0.identity] == nil }
+        for (index, item) in entering.enumerated() {
+          self.petsByKey[item.identity] = Pet(item: item, entryIndex: index)
+        }
+        for item in shown {
+          self.petsByKey[item.identity]?.update(item: item)
+          if self.diagnostics, let pet = self.petsByKey[item.identity] {
+            NSLog("lobstah pet: %@ window=%@ speed=%@ label=%@", item.identity,
+                  String(pet.panel.windowNumber), String(format: "%.1f", Double(pet.speed)), item.bubbleText)
+          }
         }
       }
     }

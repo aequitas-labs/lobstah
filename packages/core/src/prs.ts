@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { lobstahHome } from './paths.js';
-import { parsePrRef } from './pr.js';
-import type { PrEvidence } from './pr.js';
+import { parsePrRef, prStandingKinds } from './pr.js';
+import type { PrEvidence, PrStandingKind } from './pr.js';
 
 /**
  * PR records: PR state keyed by the PR, not by whichever dispatch reported
@@ -25,6 +25,8 @@ export interface PrRecord extends PrEvidence {
   repo: string;
   /** Dispatches whose pr: watch observed this PR, oldest first; empty for an untracked/human PR. */
   dispatches: string[];
+  /** First observation of each currently standing kind; absent kinds have cleared. */
+  standingSince: Partial<Record<PrStandingKind, string>>;
 }
 
 /** Records sort by observation time; older shapes can fall back to forge update time. */
@@ -82,12 +84,17 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
   const before = readPr(ref.key);
   const dispatches = [...(before?.dispatches ?? [])];
   if (dispatchId && !dispatches.includes(dispatchId)) dispatches.push(dispatchId);
+  const merged = { ...(before ?? {}), ...pr } as PrEvidence;
+  const standingSince: PrRecord['standingSince'] = {};
+  for (const kind of prStandingKinds(merged)) {
+    standingSince[kind] = before?.standingSince?.[kind] ?? pr.observedAt;
+  }
   const after: PrRecord = {
-    ...(before ?? {}),
-    ...pr,
+    ...merged,
     key: ref.key,
     repo: `${ref.owner}/${ref.repo}`,
     dispatches,
+    standingSince,
   };
   fs.mkdirSync(prsDir(), { recursive: true });
   const file = prRecordFile(ref.key);
