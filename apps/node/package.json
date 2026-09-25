@@ -1,6 +1,6 @@
 {
   "name": "lobstah-openclaw-plugin",
-  "version": "0.5.7",
+  "version": "0.5.9",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
