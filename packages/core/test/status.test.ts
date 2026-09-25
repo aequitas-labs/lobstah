@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, ensureLayout, readStatusLog, reconcile } from '../src/index.js';
+import { appendStatus, displayState, ensureLayout, readStatusLog, reconcile } from '../src/index.js';
 
 let home: string;
 beforeEach(() => {
@@ -56,5 +56,20 @@ describe('reconcile', () => {
     expect(
       reconcile({ log: [{ at, verb: 'blocked' }], lastEventAt: Date.now() - 10 * 60_000 }),
     ).toBe('blocked');
+  });
+});
+
+describe('displayState: the queue bucket at the call site', () => {
+  const at = new Date().toISOString();
+  it('a queued descriptor with an empty log is queued', () => {
+    expect(displayState({ log: [], queued: true })).toBe('queued');
+  });
+  it('outside the queue, an empty log stays unknown (the reconciler contract)', () => {
+    expect(displayState({ log: [], queued: false })).toBe('unknown');
+    expect(reconcile({ log: [] })).toBe('unknown');
+  });
+  it('a queued descriptor with a log (requeued bait) keeps its reconciled state', () => {
+    expect(displayState({ log: [{ at, verb: 'working' }], queued: true })).toBe('working');
+    expect(displayState({ log: [{ at, verb: 'failed' }], queued: true })).toBe('failed');
   });
 });

@@ -56,3 +56,17 @@ export function reconcile({ log, lastEventAt, now = Date.now(), busyThresholdMs 
   if (last) return last.verb;
   return 'unknown';
 }
+
+/** What a caller shows: the reconciled state, or `queued` for waiting work. */
+export type DisplayState = ReconciledState | 'queued';
+
+/**
+ * Apply the queue bucket on top of `reconcile`. A descriptor in `queue/`
+ * with an empty status log is `queued`: nobody has claimed it yet, which is
+ * a known state. Everything else keeps the reconciled state, so the
+ * reconciler's contract (no signal is `unknown`) stays intact.
+ */
+export function displayState(input: ReconcileInput & { queued: boolean }): DisplayState {
+  if (input.queued && input.log.length === 0) return 'queued';
+  return reconcile(input);
+}

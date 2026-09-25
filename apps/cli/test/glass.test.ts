@@ -38,6 +38,12 @@ describe('glass snapshot', () => {
     expect(snap.version).toBeTruthy();
   });
 
+  it('a queued descriptor with no log is queued, timed by its queue time', () => {
+    enqueue({ id: UUID, repo: 'web', brief: 'waiting', for: 'wt:deadbeef', queuedAt: '2026-09-24T11:59:00.000Z' }, 'work');
+    const d = buildGlassSnapshot().dispatches.find((x) => x.id === UUID);
+    expect(d).toMatchObject({ bucket: 'queued', verb: 'queued', verbAt: '2026-09-24T11:59:00.000Z', for: 'wt:deadbeef' });
+  });
+
   it('a signed-off trap survives as history via receipts and notices', () => {
     enqueue({ id: UUID, repo: 'web', brief: 'addressed work', for: 'wt:deadbeef' }, 'work');
     mergeEvidence(UUID, 'work', { deliveredTo: 'wt:deadbeef' });

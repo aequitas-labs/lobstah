@@ -64,6 +64,8 @@ import {
   lastEventAt,
   readStatusLog,
   reconcile,
+  displayState,
+  queuedAt,
   requestCancel,
   sendMessage,
   storedDescriptor,
@@ -461,8 +463,10 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
   const sliced = bucket === 'done' ? entries.slice(0, 10) : entries;
   return sliced.map(({ f, m }) => {
     const id = f.replace(/\.json$/, '');
-    const state = reconcile({ log: readStatusLog(id, lane), lastEventAt: lastEventAt(id, lane) });
-    return { id, lane, bucket, state, updated: new Date(m).toISOString() };
+    const queued = bucket === 'queue';
+    const state = displayState({ log: readStatusLog(id, lane), lastEventAt: lastEventAt(id, lane), queued });
+    const updated = (queued && state === 'queued' ? queuedAt(id, lane) : undefined) ?? new Date(m).toISOString();
+    return { id, lane, bucket, state, updated };
   });
 }
 
@@ -582,8 +586,9 @@ async function mainCli(): Promise<void> {
         ...(copyFiles(values('--attach'), dispatchAttachmentsDir(d.id, lane)) ?? []),
       ];
       if (attachments.length > 0) d.attachments = attachments;
+      d.queuedAt = new Date().toISOString();
       enqueue(d, lane);
-      console.log(toonKV({ id: d.id, repo, lane, ...(address ? { for: address } : {}), queued: new Date().toISOString() }));
+      console.log(toonKV({ id: d.id, repo, lane, ...(address ? { for: address } : {}), queued: d.queuedAt }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
@@ -612,8 +617,9 @@ async function mainCli(): Promise<void> {
       }
       const lane = findLane(id);
       const log = readStatusLog(id, lane);
-      const state = reconcile({ log, lastEventAt: lastEventAt(id, lane) });
-      console.log(toonKV({ id, lane, state, lastNote: log.at(-1)?.note, entries: log.length, attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0 }));
+      const since = queuedAt(id, lane);
+      const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined });
+      console.log(toonKV({ id, lane, state, ...(state === 'queued' ? { queued: since } : {}), lastNote: log.at(-1)?.note, entries: log.length, attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0 }));
       console.log(
         toonHelp(
           state === 'needs-decision' || state === 'blocked'
@@ -847,7 +853,7 @@ async function mainCli(): Promise<void> {
       console.log(
         toonKV({
           id,
-          state: reconcile({ log, lastEventAt: lastEventAt(id, lane) }),
+          state: displayState({ log, lastEventAt: lastEventAt(id, lane), queued: queuedAt(id, lane) !== undefined }),
           branch: ev.branch,
           prUrl: ev.prUrl,
           sessionId: ev.sessionId,

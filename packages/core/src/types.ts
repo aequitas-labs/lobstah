@@ -40,6 +40,9 @@ export interface Descriptor {
    * soaking session claims it; once its registration is gone the daemon
    * treats the bait as unaddressed. */
   for?: string;
+  /** When the descriptor entered the queue (ISO). `enqueue` stamps it.
+   * Older descriptors lack it; `queuedAt()` falls back to the file mtime. */
+  queuedAt?: string;
 }
 
 export interface StatusEntry {

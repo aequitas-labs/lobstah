@@ -322,6 +322,24 @@ describe('glass page: On deck', () => {
     expect(text(sections[4]!.querySelector('.deckmore'))).toBe('+1 more →');
   });
 
+  it('a queued in-flight row shows the queued badge, its queue time, and its trap address', async () => {
+    const g = await page(acceptanceFleet());
+    const flight = g.$$('#deck section')[1]!;
+    const line = [...flight.querySelectorAll('.deckline')].find((l) => text(l).includes('dddddddd'))!;
+    expect(text(line.querySelector('.badge'))).toBe('queued');
+    // The empty note keeps its separator (legacy fidelity); the time is the queue time.
+    expect(text(line)).toBe('queued dddddddd api · · 60s ago · wt:t2');
+  });
+
+  it('an in-flight row with no time omits the "· ago" fragment', async () => {
+    const d = acceptanceFleet();
+    d.dispatches = d.dispatches.map((x) => (x.id.startsWith('dddddddd') ? { ...x, verbAt: undefined } : x));
+    const g = await page(d);
+    const line = [...g.$$('#deck section')[1]!.querySelectorAll('.deckline')].find((l) => text(l).includes('dddddddd'))!;
+    expect(text(line)).toBe('queued dddddddd api · · wt:t2');
+    expect(text(line)).not.toContain('ago');
+  });
+
   it('Landed · 24h: the newest eight catches, newest first, unreported badged, failed in red, nothing older', async () => {
     const g = await page(everyAttentionFleet());
     const landed = g.$$('#deck section')[2]!;

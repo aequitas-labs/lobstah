@@ -149,7 +149,7 @@ export interface GlassDispatch {
   brief: string;
   attachments: Attachment[];
   messageAttachments: Attachment[];
-  verb: Verb | 'unknown';
+  verb: Verb | 'unknown' | 'queued';
   note?: string;
   verbAt?: string;
   claimedBy?: string;

@@ -19,7 +19,11 @@ export function enqueue(d: Descriptor, lane: Lane = 'work'): void {
   const inherited = d.followUp && d.attachments === undefined
     ? storedDescriptor(d.followUp, 'work')?.attachments ?? storedDescriptor(d.followUp, 'chore')?.attachments
     : undefined;
-  const descriptor = inherited?.length ? { ...d, attachments: inherited } : d;
+  const descriptor: Descriptor = {
+    ...d,
+    ...(inherited?.length ? { attachments: inherited } : {}),
+    queuedAt: d.queuedAt ?? new Date().toISOString(),
+  };
   atomicWrite(path.join(laneDirs(lane).queue, `${d.id}.json`), JSON.stringify(descriptor, null, 2));
 }
 
@@ -40,6 +44,23 @@ export function queuedDescriptor(id: string, lane: Lane): Descriptor | undefined
   } catch {
     return undefined;
   }
+}
+
+/**
+ * When a still-queued descriptor entered the queue (ISO), or undefined when
+ * it is not in the queue. A descriptor written before `queuedAt` existed
+ * falls back to its file mtime.
+ */
+export function queuedAt(id: string, lane: Lane): string | undefined {
+  const file = path.join(laneDirs(lane).queue, `${id}.json`);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return undefined;
+  }
+  const stamped = queuedDescriptor(id, lane)?.queuedAt;
+  return stamped && !Number.isNaN(Date.parse(stamped)) ? stamped : stat.mtime.toISOString();
 }
 
 /**

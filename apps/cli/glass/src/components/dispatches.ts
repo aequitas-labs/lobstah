@@ -36,7 +36,7 @@ function row(x: GlassDispatch, chain: boolean | undefined) {
 
 function card(x: GlassDispatch) {
   const key = x.lane + ':' + x.id;
-  return html`<div key=${key} class="card" onClick=${opener('dispatch', key)}><div class="top"><b>${x.id.slice(0, 8)}</b><span class=${'badge v-' + x.verb}>${x.verb}</span></div><div class="meta">${x.repo} · ${x.lane} ${x.bucket} · ${Age(x.verbAt)}</div>${x.note && html`<div class="note">${x.note}</div>`}<div class="foot">${addrCell(x)} ${prCell(x)}</div></div>`;
+  return html`<div key=${key} class="card" onClick=${opener('dispatch', key)}><div class="top"><b>${x.id.slice(0, 8)}</b><span class=${'badge v-' + x.verb}>${x.verb}</span></div><div class="meta">${x.repo} · ${x.lane} ${x.bucket}${x.verbAt && [' · ', Age(x.verbAt)]}</div>${x.note && html`<div class="note">${x.note}</div>`}<div class="foot">${addrCell(x)} ${prCell(x)}</div></div>`;
 }
 
 export function Dispatches({ inp }: { inp: SectionInputs['dispatches'] }) {

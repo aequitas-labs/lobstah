@@ -10,6 +10,9 @@ import {
   enqueue,
   ensureLayout,
   pendingIds,
+  queuedAt,
+  queuedDescriptor,
+  laneDirs,
   readDescriptor,
   readStatusLog,
 } from '../src/index.js';
@@ -93,5 +96,36 @@ describe('cancelQueued', () => {
 
   it('an unknown id cancels nothing', () => {
     expect(cancelQueued('nope', 'work')).toBe(false);
+  });
+});
+
+describe('queuedAt', () => {
+  it('enqueue stamps queuedAt; the descriptor round-trips it', () => {
+    const before = Date.now();
+    enqueue(desc('q1'));
+    const stamped = queuedDescriptor('q1', 'work')!.queuedAt!;
+    expect(Date.parse(stamped)).toBeGreaterThanOrEqual(before - 1000);
+    expect(queuedAt('q1', 'work')).toBe(stamped);
+    // A descriptor that already carries queuedAt keeps it.
+    enqueue({ ...desc('q2'), queuedAt: '2026-01-02T03:04:05.000Z' });
+    expect(queuedDescriptor('q2', 'work')!.queuedAt).toBe('2026-01-02T03:04:05.000Z');
+    expect(queuedAt('q2', 'work')).toBe('2026-01-02T03:04:05.000Z');
+    // The claim carries it into active/ unchanged.
+    expect(claimNext('work', (d) => d.id !== 'q2')).toBe('q2');
+    expect(readDescriptor('q2', 'work').queuedAt).toBe('2026-01-02T03:04:05.000Z');
+  });
+
+  it('an old descriptor without queuedAt falls back to the file mtime', () => {
+    const file = path.join(laneDirs('work').queue, 'old.json');
+    fs.writeFileSync(file, JSON.stringify(desc('old')));
+    const mtime = new Date('2026-03-04T05:06:07.000Z');
+    fs.utimesSync(file, mtime, mtime);
+    expect(queuedAt('old', 'work')).toBe('2026-03-04T05:06:07.000Z');
+  });
+
+  it('is undefined once the descriptor has left the queue', () => {
+    enqueue(desc('gone'));
+    claimNext('work');
+    expect(queuedAt('gone', 'work')).toBeUndefined();
   });
 });
