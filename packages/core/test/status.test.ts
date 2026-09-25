@@ -68,6 +68,13 @@ describe('displayState: the queue bucket at the call site', () => {
     expect(displayState({ log: [], queued: false })).toBe('unknown');
     expect(reconcile({ log: [] })).toBe('unknown');
   });
+
+  it('an active dispatch with a claim and no log is working', () => {
+    expect(displayState({ log: [], queued: false, claimedAt: at })).toBe('working');
+    expect(displayState({ log: [{ at, verb: 'needs-decision' }], queued: false, claimedAt: at })).toBe('needs-decision');
+    // reconcile itself is unchanged: no signal is still unknown.
+    expect(reconcile({ log: [] })).toBe('unknown');
+  });
   it('a queued descriptor with a log (requeued bait) keeps its reconciled state', () => {
     expect(displayState({ log: [{ at, verb: 'working' }], queued: true })).toBe('working');
     expect(displayState({ log: [{ at, verb: 'failed' }], queued: true })).toBe('failed');

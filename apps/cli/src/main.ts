@@ -464,8 +464,13 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
   return sliced.map(({ f, m }) => {
     const id = f.replace(/\.json$/, '');
     const queued = bucket === 'queue';
-    const state = displayState({ log: readStatusLog(id, lane), lastEventAt: lastEventAt(id, lane), queued });
-    const updated = (queued && state === 'queued' ? queuedAt(id, lane) : undefined) ?? new Date(m).toISOString();
+    const log = readStatusLog(id, lane);
+    const claimedAt = bucket === 'active' ? readSessionClaim(id, lane)?.at : undefined;
+    const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued, claimedAt });
+    const updated =
+      (queued && state === 'queued' ? queuedAt(id, lane) : undefined) ??
+      (log.length === 0 ? claimedAt : undefined) ??
+      new Date(m).toISOString();
     return { id, lane, bucket, state, updated };
   });
 }
@@ -618,7 +623,8 @@ async function mainCli(): Promise<void> {
       const lane = findLane(id);
       const log = readStatusLog(id, lane);
       const since = queuedAt(id, lane);
-      const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined });
+      const claimedAt = readSessionClaim(id, lane)?.at;
+      const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined, claimedAt });
       console.log(toonKV({ id, lane, state, ...(state === 'queued' ? { queued: since } : {}), lastNote: log.at(-1)?.note, entries: log.length, attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0 }));
       console.log(
         toonHelp(
@@ -853,7 +859,12 @@ async function mainCli(): Promise<void> {
       console.log(
         toonKV({
           id,
-          state: displayState({ log, lastEventAt: lastEventAt(id, lane), queued: queuedAt(id, lane) !== undefined }),
+          state: displayState({
+            log,
+            lastEventAt: lastEventAt(id, lane),
+            queued: queuedAt(id, lane) !== undefined,
+            claimedAt: readSessionClaim(id, lane)?.at,
+          }),
           branch: ev.branch,
           prUrl: ev.prUrl,
           sessionId: ev.sessionId,

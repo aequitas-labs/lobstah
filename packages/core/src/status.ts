@@ -8,11 +8,11 @@ export function isVerb(v: string): v is Verb {
 }
 
 /** The write path IS the validation: anything outside the verb set is rejected. */
-export function appendStatus(id: string, lane: Lane, verb: string, note?: string): StatusEntry {
+export function appendStatus(id: string, lane: Lane, verb: string, note?: string, at?: string): StatusEntry {
   if (!isVerb(verb)) {
     throw new Error(`invalid status verb "${verb}" — must be one of: ${VERBS.join(', ')}`);
   }
-  const entry: StatusEntry = { at: new Date().toISOString(), verb, ...(note ? { note } : {}) };
+  const entry: StatusEntry = { at: at ?? new Date().toISOString(), verb, ...(note ? { note } : {}) };
   fs.appendFileSync(statusPath(id, lane), `${JSON.stringify(entry)}\n`);
   return entry;
 }
@@ -60,13 +60,26 @@ export function reconcile({ log, lastEventAt, now = Date.now(), busyThresholdMs 
 /** What a caller shows: the reconciled state, or `queued` for waiting work. */
 export type DisplayState = ReconciledState | 'queued';
 
+export interface DisplayInput extends ReconcileInput {
+  queued: boolean;
+  /**
+   * `claim.at` of an active dispatch a trap claimed (`claim.json`), if any.
+   * Pass it only for the active bucket.
+   */
+  claimedAt?: string;
+}
+
 /**
- * Apply the queue bucket on top of `reconcile`. A descriptor in `queue/`
- * with an empty status log is `queued`: nobody has claimed it yet, which is
- * a known state. Everything else keeps the reconciled state, so the
- * reconciler's contract (no signal is `unknown`) stays intact.
+ * Apply the known buckets on top of `reconcile`. A descriptor in `queue/`
+ * with an empty status log is `queued`: nobody has claimed it yet. An active
+ * dispatch with a trap claim and an empty status log is `working`: the trap
+ * holds it. A claim writes its own `working` entry, so this case only covers
+ * claims written before that entry existed. Everything else keeps the
+ * reconciled state, so the reconciler's contract (no signal is `unknown`)
+ * stays intact.
  */
-export function displayState(input: ReconcileInput & { queued: boolean }): DisplayState {
+export function displayState(input: DisplayInput): DisplayState {
   if (input.queued && input.log.length === 0) return 'queued';
+  if (!input.queued && input.claimedAt !== undefined && input.log.length === 0) return 'working';
   return reconcile(input);
 }
