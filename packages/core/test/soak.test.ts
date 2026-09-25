@@ -134,6 +134,27 @@ describe('claimBait', () => {
     expect(readTrap(reg.trapId)?.claimed).toBe('mine');
   });
 
+  it('writes the first status entry: working, at the claim time, noting the trap', () => {
+    const reg = trap('s1', 'web');
+    enqueue({ id: 'w1', repo: 'web', brief: 'x' });
+    claimBait(reg);
+    const claim = readSessionClaim('w1', 'work')!;
+    expect(readStatusLog('w1', 'work')).toEqual([{ at: claim.at, verb: 'working', note: `claimed by wt:${reg.trapId}` }]);
+    expect(readEvidence('w1', 'work').deliveredAt).toBe(claim.at);
+  });
+
+  it('a re-claim after requeue appends another claim entry', () => {
+    const reg = trap('s1', 'web');
+    enqueue({ id: 'w1', repo: 'web', brief: 'x' });
+    claimBait(reg);
+    releaseCatch(readTrap(reg.trapId)!);
+    const again = trap('s2', 'web');
+    claimBait(again);
+    const log = readStatusLog('w1', 'work');
+    expect(log.map((e) => e.verb)).toEqual(['working', 'working']);
+    expect(log.at(-1)).toMatchObject({ at: readSessionClaim('w1', 'work')!.at, note: `claimed by wt:${again.trapId}` });
+  });
+
   it('never takes bait addressed to another trap', () => {
     enqueue({ id: 'theirs', repo: 'web', brief: 'x', for: 'wt:deadbeef' });
     expect(claimBait(trap('s1', 'web'))).toBeNull();
@@ -250,6 +271,17 @@ describe('releaseCatch and the ghost-trap sweep', () => {
     const actions = sweepGhostTraps(1000, Date.now() + 60_000);
     expect(actions).toEqual([{ trapId: reg.trapId, requeued: 'w1' }]);
     expect(pendingIds('work')).toEqual(['w1']);
+  });
+
+  it('the claim entry does not keep a dead trap alive past the TTL', () => {
+    const reg = caughtTrap('s1', 'w1');
+    const claimAt = Date.parse(readStatusLog('w1', 'work')[0]!.at);
+    const beatAt = Date.parse(reg.heartbeatAt);
+    // The claim entry is never newer than the heartbeat written with it.
+    expect(claimAt).toBeLessThanOrEqual(beatAt);
+    const ttl = 120_000;
+    expect(sweepGhostTraps(ttl, beatAt + ttl)).toEqual([]); // still inside the TTL
+    expect(sweepGhostTraps(ttl, beatAt + ttl + 1)).toEqual([{ trapId: reg.trapId, requeued: 'w1' }]);
   });
 
   it('a fresh status report keeps a stale-heartbeat trap out of the sweep', () => {

@@ -283,6 +283,11 @@ export function claimBait(reg: TrapRegistration): { id: string; descriptor: Desc
       at: new Date().toISOString(),
     };
     atomicWrite(claimPath(id, 'work'), JSON.stringify(claim, null, 2));
+    // The claim is the first status entry: the dispatch is `working` from
+    // now, not `unknown` until the trap's first report. It carries the claim
+    // time, which is never later than the heartbeat below, so it cannot keep
+    // a dead trap out of the ghost sweep past the TTL.
+    appendStatus(id, 'work', 'working', `claimed by ${mine}`, claim.at);
     mergeEvidence(id, 'work', { sessionId: reg.sessionId, harness: reg.harness, deliveredTo: mine, deliveredAt: claim.at });
     heartbeatTrap(reg.trapId, { claimed: id, parked: true });
     return { id, descriptor };

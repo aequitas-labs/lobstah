@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
   activeIds,
   answeredAt,
+  displayState,
   executorPath,
   laneDirs,
   lastEventAt,
@@ -20,11 +21,11 @@ import {
   queuedDescriptor,
   readEvidence,
   readPrs,
+  readSessionClaim,
   readStatusLog,
   queuedAt,
   readWatch,
   readWatchEvents,
-  reconcile,
   toonKV,
   toonTable,
 } from '@lobstah/core';
@@ -397,7 +398,10 @@ function doneIds(lane: Lane): string[] {
 function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']): TendDispatch {
   const log = readStatusLog(id, lane);
   const last = log.at(-1);
-  const state = bucket === 'queued' ? 'queued' : reconcile({ log, lastEventAt: lastEventAt(id, lane) });
+  // A trap's claim with no report yet is `working`, dated from the claim.
+  const claimedAt = bucket === 'active' ? readSessionClaim(id, lane)?.at : undefined;
+  const state =
+    bucket === 'queued' ? 'queued' : displayState({ log, lastEventAt: lastEventAt(id, lane), queued: false, claimedAt });
   const evidence = readEvidence(id, lane);
   const answered =
     last && (last.verb === 'needs-decision' || last.verb === 'blocked') ? answeredAt(id, lane, last.at) : undefined;
@@ -408,7 +412,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     state,
     note: last?.note,
     // Queued work has no log yet; its time is when it entered the queue.
-    at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : undefined),
+    at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),
     ...(answered ? { answeredAt: answered } : {}),
     prUrl: evidence.prUrl,
     pr: evidence.pr,

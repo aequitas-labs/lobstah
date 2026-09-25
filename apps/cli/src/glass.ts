@@ -170,9 +170,14 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
         messageAttachments: messageAttachments(inboxDir),
         // A queued descriptor with no log is waiting, not unknown; its time
         // is the queue time.
-        verb: r.bucket === 'queued' && log.length === 0 ? ('queued' as const) : (last?.verb ?? ('unknown' as const)),
+        // An active dispatch a trap claimed, with no log, is working since
+        // the claim.
+        verb:
+          r.bucket === 'queued' && log.length === 0
+            ? ('queued' as const)
+            : (last?.verb ?? (claim ? ('working' as const) : ('unknown' as const))),
         note: last?.note,
-        verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : undefined),
+        verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
         claimedBy: claim?.by,
         log,
         inbox: listDir(inboxDir)
