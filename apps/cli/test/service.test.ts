@@ -31,6 +31,12 @@ describe('service unit rendering', () => {
     expect(unit).toContain('Environment=LOBSTAH_HOME=/home/u/.lobstah');
   });
 
+  it('glass service stays in the foreground on the configured port', () => {
+    const glass = { ...spec, kind: 'glass' as const, port: 5187 };
+    expect(renderLaunchdPlist(glass)).toContain('<string>--port</string>\n    <string>5187</string>');
+    expect(renderSystemdUnit(glass)).toContain('glass --port 5187');
+  });
+
   it('servicePathEnv leads with the node directory and dedupes', () => {
     const p = servicePathEnv('/usr/bin/node', '/home/u');
     const parts = p.split(':');

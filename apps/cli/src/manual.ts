@@ -18,11 +18,14 @@ your working set:
   lobstah man tend [--json]                     tend the string: fleet verdict,
                                                 unanswered questions, each work
                                                 item's chain + PR + merge gate
-  lobstah glass [--port <n>]                    the spyglass: tend as a live
+  lobstah glass [--port <n>] [--detach]         the spyglass: tend as a live
                                                 localhost page — traps with
                                                 their lifecycle and mail,
                                                 briefs, logs, notices, merge
                                                 view; consumes no cursor
+  lobstah glass stop | status | install | uninstall
+                                                manage the detached glass or
+                                                its user service
   lobstah watch add <key> --check <cmd>         stand watch on something
                                                 external (a review session, a
                                                 CI run) — its events wake you

@@ -61,6 +61,9 @@ describe('glass snapshot', () => {
     const port = (server.address() as AddressInfo).port;
     const page = await fetch(`http://127.0.0.1:${port}/`);
     expect(page.status).toBe(200);
+    expect(page.headers.get('server')).toMatch(/^lobstah-glass\//);
+    const version = (await (await fetch(`http://127.0.0.1:${port}/api/version`)).json()) as { service: string; pid: number };
+    expect(version).toEqual(expect.objectContaining({ service: 'lobstah-glass', pid: process.pid }));
     const html = await page.text();
     expect(html).toBe(GLASS_PAGE);
     // One self-contained document: styles and script inline, nothing else to fetch but the served assets.

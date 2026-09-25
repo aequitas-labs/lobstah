@@ -89,7 +89,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   daemon: { subverbs: ['install', 'uninstall'], flags: { '--interval': { value: '<ms>' } } },
   pick: { subverbs: ['once', 'install', 'uninstall'], flags: {} },
   doctor: { flags: {} },
-  glass: { flags: { '--port': { value: '<n>' } } },
+  glass: { subverbs: ['stop', 'status', 'install', 'uninstall'], flags: { '--port': { value: '<n>' }, '--detach': {} } },
   pet: { subverbs: ['install', 'uninstall'], flags: { '--binary': { value: '<path>' } } },
   repos: { subverbs: ['add'], flags: { '--pickup': {}, '--key': { value: '<k>' } }, positionals: '[<path>]' },
   init: { flags: { '--scan': {}, '--pickup': {} }, positionals: '[<dir>...]' },
@@ -193,7 +193,8 @@ Quitting the pet sticks until next login; uninstall removes the agent.`,
   glass: `The spyglass: tend as a live localhost web page — attention, dispatches,
 traps with lifecycle and mail, notices, merge view; filters and a
 table/cards toggle. Read-only and binds 127.0.0.1 only: looking through it
-consumes no cursor and steers nothing.`,
+consumes no cursor and steers nothing. --detach starts it in the background;
+stop and status manage that process. install and uninstall manage a user service.`,
   repos: `List configured repos, or detect one and append its [repos.*] block.`,
   init: `Create ~/.lobstah + config; --scan appends a [repos.*] block per repo found
 under the given directories.`,

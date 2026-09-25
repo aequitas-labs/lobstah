@@ -5,6 +5,8 @@ import { parse } from 'smol-toml';
 import { configPath, executorPath, loadConfig, lobstahHome, lobstahVersion, onPath, packagePresent } from '@lobstah/core';
 import { loadPickupConfig } from '@lobstah/pick';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND } from './plugin-version.js';
+import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
+import { serviceFile } from './service.js';
 
 export interface DoctorRow {
   check: string;
@@ -62,7 +64,7 @@ export function pluginRows(cliVersion: string, opts: { env?: NodeJS.ProcessEnv; 
   return rows;
 }
 
-export function runDoctor(now = Date.now()): DoctorRow[] {
+export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   const rows: DoctorRow[] = [];
   const push = (check: string, status: DoctorRow['status'], detail: string) => rows.push({ check, status, detail });
 
@@ -82,6 +84,15 @@ export function runDoctor(now = Date.now()): DoctorRow[] {
     codexPath || codexSdk ? 'ok' : 'warn',
     codexPath ? 'on PATH' : codexSdk ? 'vendored SDK (attach uses it too)' : 'neither codex nor the SDK — codex dispatches will fail',
   );
+
+  try {
+    const port = glassPort();
+    const info = await probeGlass(port);
+    const installed = process.platform === 'win32' ? false : fs.existsSync(serviceFile('glass'));
+    push('glass', info ? 'ok' : 'warn', `${installed ? 'service installed' : 'service not installed'}; ${info ? `${glassUrl(port)} answering (v${info.version})` : `${glassUrl(port)} not answering (CLI v${lobstahVersion()})`}`);
+  } catch (err) {
+    push('glass', 'warn', err instanceof Error ? err.message : String(err));
+  }
 
   const cfgFile = configPath();
   if (!fs.existsSync(cfgFile)) {

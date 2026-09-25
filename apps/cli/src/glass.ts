@@ -296,6 +296,12 @@ export function serveGlass(port: number): http.Server {
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
   const server = http.createServer((req, res) => {
+    res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
+    if (req.url === '/api/version' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ service: 'lobstah-glass', version: lobstahVersion(), pid: process.pid }));
+      return;
+    }
     if (req.url === '/lob.png' && lob) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
       res.end(fs.readFileSync(lob));

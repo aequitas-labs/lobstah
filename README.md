@@ -92,6 +92,9 @@ become dispatches, and status streams back as comments.
 
 **See it**
 
+The lobstah man skill brings up the glass and prints its URL.
+`lobstah man helm` alone does not.
+
 ```bash
 lobstah glass                # the spyglass: a live localhost page (port 4949)
 lobstah ls                   # or the same from the terminal

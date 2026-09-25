@@ -12,6 +12,7 @@ import {
 import { charter } from './charter.js';
 import { inspectSoakSite } from './soak-site.js';
 import { buildTendReport } from './tend.js';
+import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 
 const SOAK_WHERE = '(from a linked worktree, never the primary checkout)';
 
@@ -55,8 +56,9 @@ function sessionGrounds(cwd: string | undefined): { grounds?: Grounds; placehold
  * the persona survives restarts and compaction; the start counts as a
  * heartbeat), a trap, or neither (offered the two sign-ons).
  */
-export function buildBriefContext(sessionId: string, cwd?: string): string {
+export async function buildBriefContext(sessionId: string, cwd?: string): Promise<string> {
   let fleet = '';
+  let glass = '';
   try {
     const r = buildTendReport();
     const waiting = r.attention.filter((a) => a.kind === 'question' || a.kind === 'watch').length;
@@ -69,6 +71,13 @@ export function buildBriefContext(sessionId: string, cwd?: string): string {
   } catch {
     // a brief must never fail the session start
   }
+  try {
+    const port = glassPort();
+    if (await probeGlass(port)) glass = ` Glass: ${glassUrl(port)}.`;
+  } catch {
+    // a brief must never fail the session start
+  }
+  fleet += glass;
   const helmReg = helmOf(sessionId);
   if (helmReg) {
     heartbeatHelm(helmReg.sessionId);
