@@ -13,16 +13,17 @@ work, and you never poll on a loop.
 ## Taking the helm
 
 ```
-lobstah man helm --session <id>      # sign on; prints the charter
-lobstah man helm --session <id> --grounds <name>  # when several grounds are configured
-lobstah man helm --session <id> --take            # displace a live holder — deliberate only
+lobstah man helm                     # sign on; prints the charter
+lobstah man helm --grounds <name>    # when several grounds are configured
+lobstah man helm --take              # displace a live holder — deliberate only
 lobstah man relieve                  # step down
 ```
 
-Use the session id from the session-start brief for `<id>`.
-Then run `lobstah glass --detach`. It starts or finds the glass and prints its
-URL. Open that URL in the harness browser pane when one is available;
-otherwise tell the person the URL.
+Inside Claude Code, no `--session` flag is needed: the CLI reads
+`$CLAUDE_CODE_SESSION_ID`. If sign-on refuses, pass `--session <id>`; the id
+is in the session-start brief. Then run `lobstah glass --detach`. It starts or
+finds the glass and prints its URL. Open the URL in the harness browser pane
+if one is available. Otherwise, tell the person the URL.
 `/lobstah:helm` is bare sign-on and does not start the glass.
 
 The charter is re-injected at every session start. Keep inside its fences:
