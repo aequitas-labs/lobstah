@@ -25,6 +25,16 @@ and recovers each; status and evidence land on disk. Supervision costs
 nothing — no tokens, no attention — so the whole fleet fits in one
 conversation, and **your agents just bring home the lobstahs**.
 
+## Which one? 🧭
+
+As a **background router**, lobstah takes work you (or a tracker) lob in,
+runs supervised workers in their own worktrees, pings you when something
+needs you, and brings PRs home with no session open. As the **lobstah man**,
+one interactive Claude Code or Codex session takes the helm and runs that
+same fleet from a conversation, woken by the plugin's hooks instead of by
+you. Both sit on the same daemon, so start with the router and add a helm
+whenever you like.
+
 ![Pixel lobster carrying a star across the page](docs/assets/lob-crawl.svg)
 
 ## Requirements 📋
@@ -32,6 +42,104 @@ conversation, and **your agents just bring home the lobstahs**.
 - Node 20+, git, pnpm
 - An authenticated harness CLI: `claude` (Claude Code) and/or Codex. Lobstah
   never handles harness login — you authenticate your own CLI; lobstah invokes it.
+
+## Quickstart: the background router 🪝
+
+Hand lobstah a brief and go do something else.
+
+**Install**
+
+```bash
+npm i -g lobstah             # or from source / a standalone binary: see Install below
+```
+
+**Configure**
+
+```bash
+lobstah init --scan ~/src    # ~/.lobstah + a [repos.*] block per repo found
+                             # (bare `init` writes an example config instead;
+                             #  `lobstah repos add <path>` appends one repo)
+$EDITOR ~/.lobstah/config.toml
+lobstah doctor               # binaries, config, repos, harnesses, heartbeat
+```
+
+```toml
+notifyCommand = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
+
+[repos.myapp]
+path  = "~/src/myapp"
+trunk = "main"
+setup = ["pnpm install"]     # runs in each fresh worktree
+```
+
+`notifyCommand` is how the router reaches you: the daemon runs it on
+`needs-decision`, `blocked`, `done`, and `failed`, with no model in the loop.
+Every key, with defaults: [docs/configuration.md](docs/configuration.md).
+
+**Run**
+
+```bash
+lobstah daemon install       # launchd agent / systemd user unit — survives
+                             # reboots, restarts on crash (`daemon &` for a try)
+lobstah pet install          # macOS: a desktop lobster walks questions to you
+lobstah dispatch --repo myapp --brief ./brief.md
+```
+
+Want work to arrive on its own? `lobstah pick install` runs tracker pickup
+as a service: Linear and GitHub issues assigned to its configured identity
+become dispatches, and status streams back as comments.
+[docs/pickup.md](docs/pickup.md)
+
+**See it**
+
+```bash
+lobstah glass                # the spyglass: a live localhost page (port 4949)
+lobstah ls                   # or the same from the terminal
+lobstah catch <uuid>         # the evidence: branch, commits, PR, session
+```
+
+## Quickstart: the lobstah man 🦞
+
+One session holds the helm. You talk to it; it runs the fleet. The skill runs
+the `lobstah` commands.
+
+**Install**
+
+```bash
+npm i -g lobstah             # the plugin wires hooks to the CLI; it doesn't bundle it
+lobstah init --scan ~/src    # same repos, same config as the router
+lobstah daemon install       # the helm dispatches; the daemon supervises
+```
+
+Then install the lobstah plugin for your harness
+([Claude Code](docs/harness/claude-code.md#install) ·
+[Codex](docs/harness/codex.md#install)) and open a new session.
+
+**Run**
+
+Open a new session in the repo (or any folder) with the plugin installed.
+
+```text
+/lobstah:man                      # Claude Code (or /lobstah:helm, the bare sign-on)
+$lobstah:man                      # Codex
+```
+
+Or just say "Lobstah man, take the helm."
+
+The skill signs on, arms the watcher when the Stop hook asks, and stays woken.
+
+Then just talk: "dispatch a fix for the flaky login test in myapp." The helm
+writes a standalone brief, dispatches it, answers workers' questions, and
+brings you the catch.
+
+Use `/lobstah:trap` in Claude Code or `$lobstah:trap` in Codex to turn another
+live session in a linked worktree into a worker. The skill runs `lobstah soak`;
+the helm addresses bait to its `wt:<trap>` address, and `lobstah stow` signs
+it off.
+
+Harness specifics: [Claude Code](docs/harness/claude-code.md) · [Codex](docs/harness/codex.md).
+The full pattern (charter, grounds, the three tiers of getting woken, traps)
+is in [docs/man.md](docs/man.md).
 
 ## Install ⚓
 
@@ -62,29 +170,7 @@ The binary drives harnesses through their CLIs instead of the bundled SDKs:
 codex workers run fully Node-free; claude workers still need the (Node-based)
 `claude` CLI on the host.
 
-## Quick start 🪝
-
-```bash
-lobstah init --scan ~/src    # ~/.lobstah + a [repos.*] block per repo found
-                             # (bare `init` writes an example config instead;
-                             #  `lobstah repos add <path>` appends one repo)
-$EDITOR ~/.lobstah/config.toml
-lobstah doctor               # binaries, config, repos, harnesses, heartbeat
-lobstah daemon install       # launchd agent / systemd user unit — survives
-                             # reboots, restarts on crash (`daemon &` for a try)
-lobstah dispatch --repo myapp --brief ./brief.md
-```
-
-```toml
-[repos.myapp]
-path  = "~/src/myapp"
-trunk = "main"
-setup = ["pnpm install"]     # runs in each fresh worktree
-```
-
-Every key, with defaults: [docs/configuration.md](docs/configuration.md).
-
-Watch, steer, take over:
+## Watch, steer, take over 🔭
 
 ```bash
 lobstah ls                            # queue, active, recent done
@@ -146,8 +232,8 @@ continues the turn the moment something needs it.
   `/lobstah:relieve`, `/lobstah:soak`, and `/lobstah:stow` commands, no
   settings surgery.
   This repo doubles as the plugin marketplace for both agent registries —
-  in either harness: `/plugin marketplace add aequitas-labs/lobstah`, then
-  `/plugin install lobstah@lobstah`. The park stays inert until a directory
+  install steps per harness are in [docs/harness/claude-code.md](docs/harness/claude-code.md)
+  and [docs/harness/codex.md](docs/harness/codex.md). The park stays inert until a directory
   opts in with a `.lobstah-man` file or the session soaks. Codex hooks need
   Codex v0.114+ and a one-time trust review. Plugin versions track the CLI
   (plugin 0.5.x goes with `lobstah` 0.5.x); `lobstah doctor` and the session
