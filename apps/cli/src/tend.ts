@@ -21,6 +21,7 @@ import {
   readEvidence,
   readPrs,
   readStatusLog,
+  queuedAt,
   readWatch,
   readWatchEvents,
   reconcile,
@@ -406,7 +407,8 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     bucket,
     state,
     note: last?.note,
-    at: last?.at,
+    // Queued work has no log yet; its time is when it entered the queue.
+    at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : undefined),
     ...(answered ? { answeredAt: answered } : {}),
     prUrl: evidence.prUrl,
     pr: evidence.pr,

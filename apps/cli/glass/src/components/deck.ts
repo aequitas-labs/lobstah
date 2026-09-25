@@ -99,7 +99,12 @@ export function Deck({ inp }: { inp: DeckInputs }) {
     key: x.lane + ':' + x.id,
     title: [x.id.slice(0, 8), ' ', x.repo || ''],
     badge: { text: x.verb, tone: x.verb === 'needs-decision' || x.verb === 'blocked' ? 'bad' : 'dim' },
-    meta: [(x.note || '').slice(0, 90), ' · ', Age(x.verbAt), ' ago', (x.for || x.claimedBy) && ' · ' + (x.for || x.claimedBy)],
+    // No time at all (no log, no queue time): drop the fragment, not render "· ago".
+    meta: [
+      (x.note || '').slice(0, 90),
+      x.verbAt && [' · ', Age(x.verbAt), ' ago'],
+      (x.for || x.claimedBy) && ' · ' + (x.for || x.claimedBy),
+    ],
     open: opener('dispatch', x.lane + ':' + x.id),
   }));
   const landed = inp.landed.map((x): DeckItem => ({

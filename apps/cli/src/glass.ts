@@ -19,6 +19,7 @@ import {
   readEvidence,
   readSessionClaim,
   readStatusLog,
+  queuedAt,
   readPrs,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassMessage, GlassSnapshot, GlassTrap, Lane } from '@lobstah/core';
@@ -167,9 +168,11 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
         brief: r.d.brief,
         attachments: r.d.attachments ?? [],
         messageAttachments: messageAttachments(inboxDir),
-        verb: last?.verb ?? ('unknown' as const),
+        // A queued descriptor with no log is waiting, not unknown; its time
+        // is the queue time.
+        verb: r.bucket === 'queued' && log.length === 0 ? ('queued' as const) : (last?.verb ?? ('unknown' as const)),
         note: last?.note,
-        verbAt: last?.at,
+        verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : undefined),
         claimedBy: claim?.by,
         log,
         inbox: listDir(inboxDir)

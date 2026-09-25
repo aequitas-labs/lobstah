@@ -377,7 +377,8 @@ tr.rowhead:hover {
 .v-done {
   color: var(--ok);
 }
-.v-working {
+.v-working,
+.v-queued {
   color: var(--fg);
 }
 .v-needs-decision,

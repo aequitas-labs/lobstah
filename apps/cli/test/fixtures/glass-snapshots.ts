@@ -180,9 +180,9 @@ export function acceptanceFleet(): GlassSnapshot {
   });
   const q = dispatch('dddddddd-0000-4000-8000-000000000004', {
     bucket: 'queued',
-    verb: 'unknown',
+    verb: 'queued',
     note: undefined,
-    verbAt: undefined,
+    verbAt: ago(MIN),
     log: [],
     repo: 'api',
     lane: 'chore',
