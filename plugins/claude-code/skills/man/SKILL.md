@@ -19,8 +19,13 @@ lobstah man helm --take              # displace a live holder — deliberate onl
 lobstah man relieve                  # step down
 ```
 
-No flag is needed inside Claude Code: the CLI reads `$CLAUDE_CODE_SESSION_ID`.
-If it refuses, pass `--session <id>` (the id is in the session-start brief).
+Inside Claude Code, no `--session` flag is needed: the CLI reads
+`$CLAUDE_CODE_SESSION_ID`. If sign-on refuses, pass `--session <id>`; the id
+is in the session-start brief. Then run `lobstah glass --detach`. It starts or
+finds the glass and prints its URL. Open the URL in the harness browser pane
+if one is available. Otherwise, tell the person the URL.
+`/lobstah:helm` is bare sign-on and does not start the glass.
+
 The charter is re-injected at every session start. Keep inside its fences:
 
 - Triage, dispatch, review each catch. Do not do the work yourself.

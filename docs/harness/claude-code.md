@@ -6,6 +6,9 @@ without loading the skill. You can also say "Lobstah man, take the helm."
 This page covers the plugin's commands, skills, session id, and Stop hook.
 See [docs/man.md](../man.md) for the full pattern.
 
+The lobstah man skill brings up the glass and prints its URL. Open it in the
+browser pane. `lobstah man helm` alone does not start the glass.
+
 ## Install
 
 ```bash

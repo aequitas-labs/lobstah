@@ -96,6 +96,7 @@ import { applyCull, planCull } from './cull.js';
 import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
+import { glassLines, glassPort, glassStatus, glassUrl, probeGlass, readGlassState, startDetachedGlass, stopGlass } from './glass-lifecycle.js';
 import { installPet, uninstallPet } from './pet.js';
 import { installService, uninstallService } from './service.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
@@ -184,12 +185,13 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   with ages, each work item's dispatch chain,
                                   PR, and merge-gate status from pick's last
                                   observation. Pure disk read — no forge calls.
-  glass [--port <n>]              the spyglass: tend as a live localhost web
+  glass [--port <n>] [--detach]   the spyglass: tend as a live localhost web
                                   page — attention, dispatches, traps with
                                   their lifecycle and mail, notices, merge
                                   view. Read-only; consumes no cursor.
+                                  stop | status | install | uninstall manage it.
                                   Port: --port, else $LOBSTAH_GLASS_PORT,
-                                  else 4949 (the pet reads the same var).
+                                  else [glass].port (default 4949).
   man wait [--timeout <secs>] [--peek]
                                   block until a dispatch or watched source
                                   needs attention, then print the event and
@@ -1419,7 +1421,7 @@ async function mainCli(): Promise<void> {
       if (!hook?.session_id) break;
       // One extra line when the loaded plugin lags the CLI; silent otherwise.
       const behind = pluginBehindLine(lobstahVersion());
-      const context = buildBriefContext(hook.session_id, hook.cwd ?? process.cwd()) + (behind ? `\n${behind}` : '');
+      const context = (await buildBriefContext(hook.session_id, hook.cwd ?? process.cwd())) + (behind ? `\n${behind}` : '');
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }),
       );
@@ -1580,12 +1582,50 @@ async function mainCli(): Promise<void> {
       throw new UsageError(`pet requires a subverb: install | uninstall\n\n${usageFor('pet')!}`);
     }
     case 'glass': {
-      // $LOBSTAH_GLASS_PORT is shared with the desktop pet, so both agree on where the glass lives.
-      const port = Number(opt('--port') ?? process.env.LOBSTAH_GLASS_PORT ?? '4949');
-      serveGlass(port);
+      readGlassState();
+      const requestedPort = opt('--port') === undefined ? undefined : Number(opt('--port'));
+      if (requestedPort !== undefined && (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535)) {
+        throw new UsageError('glass --port must be an integer from 1 to 65535');
+      }
+      if (pos[0] === 'stop') {
+        const stopped = await stopGlass();
+        console.log(toonKV({ glass: stopped.stopped ? 'stopped' : 'not running', ...stopped }));
+        break;
+      }
+      if (pos[0] === 'status') {
+        const status = await glassStatus(requestedPort ?? glassPort());
+        console.log(toonKV({ glass: status.info ? 'running' : 'stopped', port: status.port, ...(status.info ? { ...(status.info.pid ? { pid: status.info.pid } : {}), version: status.info.version } : {}) }));
+        break;
+      }
+      const port = requestedPort ?? glassPort();
+      if (pos[0] === 'install') {
+        const res = installService('glass', port);
+        console.log(toonKV({ service: 'glass', ...res }));
+        break;
+      }
+      if (pos[0] === 'uninstall') {
+        const res = uninstallService('glass');
+        console.log(toonKV({ service: 'glass', ...res }));
+        break;
+      }
+      if (has('--detach')) {
+        const { info, already } = await startDetachedGlass(port);
+        console.log(toonKV(glassLines(port, info, already)));
+        break;
+      }
+      const existing = await probeGlass(port);
+      if (existing) {
+        console.log(toonKV(glassLines(port, existing, true)));
+        break;
+      }
+      const server = serveGlass(port);
+      await new Promise<void>((resolve, reject) => {
+        server.once('listening', () => resolve());
+        server.once('error', reject);
+      });
       console.log(
         toonKV({
-          glass: `http://127.0.0.1:${port}`,
+          glass: glassUrl(port),
           mode: 'read-only — looking consumes nothing',
           stop: 'ctrl-c',
         }),
@@ -1593,7 +1633,7 @@ async function mainCli(): Promise<void> {
       return; // the open server keeps the process alive
     }
     case 'doctor': {
-      const rows = runDoctor();
+      const rows = await runDoctor();
       console.log(toonTable('doctor', rows as unknown as Array<Record<string, unknown>>, ['check', 'status', 'detail']));
       if (rows.some((r) => r.status === 'fail')) process.exitCode = 1;
       break;

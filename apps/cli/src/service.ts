@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { COMPILED_BINARY, lobstahHome, onPath } from '@lobstah/core';
 
-export type ServiceKind = 'daemon' | 'pick';
+export type ServiceKind = 'daemon' | 'pick' | 'glass';
 
 export interface ServiceSpec {
   kind: ServiceKind;
@@ -16,6 +16,11 @@ export interface ServiceSpec {
   pathEnv: string;
   home: string;
   logDir: string;
+  port?: number;
+}
+
+function serviceArgs(spec: ServiceSpec): string[] {
+  return [spec.nodePath, spec.entry, spec.kind, ...(spec.kind === 'glass' && spec.port ? ['--port', String(spec.port)] : [])].filter(Boolean);
 }
 
 function xml(s: string): string {
@@ -30,7 +35,7 @@ export function renderLaunchdPlist(spec: ServiceSpec): string {
   <key>Label</key><string>lobstah.${spec.kind}</string>
   <key>ProgramArguments</key>
   <array>
-${[spec.nodePath, spec.entry, spec.kind]
+${serviceArgs(spec)
   .filter(Boolean)
   .map((a) => `    <string>${xml(a)}</string>`)
   .join('\n')}
@@ -54,7 +59,7 @@ export function renderSystemdUnit(spec: ServiceSpec): string {
 Description=lobstah ${spec.kind}
 
 [Service]
-ExecStart=${[spec.nodePath, spec.entry, spec.kind].filter(Boolean).join(' ')}
+ExecStart=${serviceArgs(spec).join(' ')}
 Restart=always
 RestartSec=5
 Environment=PATH=${spec.pathEnv}
@@ -99,7 +104,7 @@ function run(cmd: string, args: string[]): { ok: boolean; out: string } {
 }
 
 /** Write the unit for this platform and load it. Idempotent: reinstalling reloads. */
-export function installService(kind: ServiceKind): { file: string; loaded: boolean; detail: string } {
+export function installService(kind: ServiceKind, port?: number): { file: string; loaded: boolean; detail: string } {
   if (process.platform === 'win32') {
     throw new Error(`no service manager support on Windows — run \`lobstah ${kind}\` under your process manager of choice`);
   }
@@ -113,8 +118,9 @@ export function installService(kind: ServiceKind): { file: string; loaded: boole
     pathEnv: servicePathEnv(process.execPath),
     home: lobstahHome(),
     logDir: path.join(lobstahHome(), 'logs'),
+    port,
   };
-  if (!onPath('git', spec.pathEnv)) {
+  if (kind !== 'glass' && !onPath('git', spec.pathEnv)) {
     throw new Error(`git is not reachable on the service PATH (${spec.pathEnv}) — the daemon cannot allocate worktrees`);
   }
   fs.mkdirSync(spec.logDir, { recursive: true });
@@ -134,6 +140,7 @@ export function installService(kind: ServiceKind): { file: string; loaded: boole
 }
 
 export function uninstallService(kind: ServiceKind): { file: string; removed: boolean } {
+  if (process.platform === 'win32') throw new Error(`no service manager support on Windows`);
   const file = serviceFile(kind);
   if (process.platform === 'darwin') {
     if (fs.existsSync(file)) run('launchctl', ['unload', file]);

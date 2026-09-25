@@ -7,6 +7,9 @@ This page covers the plugin's skills, first sign-on with `--session`,
 the blocking park, and the desktop app. See [docs/man.md](../man.md)
 for the full pattern.
 
+The lobstah man skill brings up the glass and prints its URL. Open it in the
+desktop browser pane. `lobstah man helm` alone does not start the glass.
+
 ## Install
 
 Codex v0.114+ (the hooks system).

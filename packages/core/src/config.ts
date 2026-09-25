@@ -50,6 +50,10 @@ export interface HelmConfig {
   armGraceSecs: number;
 }
 
+export interface GlassConfig {
+  port: number;
+}
+
 /** A named territory: the subset of configured repos one helm oversees. */
 export interface GroundsConfig {
   repos: string[];
@@ -61,6 +65,7 @@ export interface Config {
   limits: LimitsConfig;
   soak: SoakConfig;
   helm: HelmConfig;
+  glass: GlassConfig;
   grounds: Record<string, GroundsConfig>;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
   notifyCommand?: string;
@@ -105,6 +110,8 @@ export const DEFAULT_HELM: HelmConfig = {
   reportSecs: 900,
   armGraceSecs: 5,
 };
+
+export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,
@@ -151,6 +158,7 @@ export function loadConfig(): Config {
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
     soak: { ...DEFAULT_SOAK, ...((raw.soak as Partial<SoakConfig>) ?? {}) },
     helm: { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) },
+    glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
     grounds,
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,

@@ -149,6 +149,11 @@ something to look at, not a stall: it never flips the verdict to
 
 ### The spyglass
 
+The lobstah man skill brings up the glass when it takes the helm.
+`lobstah man helm` alone does not. `lobstah man relieve` leaves it running.
+`lobstah glass stop` stops a detached glass. `lobstah glass install` runs it
+as a user service.
+
 `lobstah glass [--port <n>]` serves tend as a live web page on 127.0.0.1
 (default port 4949): the fleet verdict and attention questions, every
 dispatch with its full brief, status log, inbox, and evidence, each trap
@@ -307,6 +312,9 @@ charter at every session start, so it survives restarts and compaction
 without anyone re-running anything. A helm registration enables the
 Stop hook by itself — no `.lobstah-man` marker, no env var — and
 gates the digest above.
+
+The lobstah man skill prints the glass URL. `[glass].port` sets the port;
+`LOBSTAH_GLASS_PORT` takes precedence.
 
 **One helm per grounds, enforced.** A **grounds** is a named territory: the
 subset of configured repos one orchestrator oversees (`[grounds.*]`; with
