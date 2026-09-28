@@ -32,7 +32,9 @@ layer.
 ## Set it up
 
 1. Install lobstah, configure your repos, start the daemon
-   ([README](../README.md#install)).
+   ([README](../README.md#install)). To upgrade: `npm i -g lobstah`,
+   `lobstah daemon restart`, `lobstah glass restart`, then the plugin update
+   ([README](../README.md#upgrade)).
 2. Start an interactive session anywhere and paste this into the project's
    agent instructions (`AGENTS.md` / `CLAUDE.md`), or just say it:
 
@@ -179,7 +181,8 @@ something to look at, not a stall: it never flips the verdict to
 The lobstah man skill brings up the glass when it takes the helm.
 `lobstah man helm` alone does not. `lobstah man relieve` leaves it running.
 `lobstah glass stop` stops a detached glass. `lobstah glass install` runs it
-as a user service.
+as a user service. `lobstah glass restart` restarts the service, or a
+detached glass (stop, then `--detach`).
 
 `lobstah glass [--port <n>]` serves tend as a live web page on 127.0.0.1
 (default port 4949): the fleet verdict and attention questions, every

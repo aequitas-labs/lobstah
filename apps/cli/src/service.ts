@@ -98,6 +98,30 @@ export function serviceFile(kind: ServiceKind): string {
     : path.join(os.homedir(), '.config', 'systemd', 'user', `lobstah-${kind}.service`);
 }
 
+/** True when this host has the service's unit file (launchd plist or systemd unit). */
+export function serviceInstalled(kind: ServiceKind): boolean {
+  return fs.existsSync(serviceFile(kind));
+}
+
+/**
+ * The service-manager command that restarts an installed service: launchd
+ * `kickstart -k` (kill, then start) for the agent's label, or systemd's
+ * user-unit restart.
+ */
+export function restartCommand(kind: ServiceKind, platform: NodeJS.Platform = process.platform, uid = process.getuid?.() ?? 0): string[] {
+  return platform === 'darwin'
+    ? ['launchctl', 'kickstart', '-k', `gui/${uid}/lobstah.${kind}`]
+    : ['systemctl', '--user', 'restart', `lobstah-${kind}.service`];
+}
+
+/** Restart an installed service through its service manager. */
+export function restartService(kind: ServiceKind): { ok: boolean; command: string; out: string } {
+  if (process.platform === 'win32') throw new Error(`no service manager support on Windows`);
+  const [cmd, ...args] = restartCommand(kind);
+  const res = run(cmd!, args);
+  return { ...res, command: [cmd, ...args].join(' ') };
+}
+
 function run(cmd: string, args: string[]): { ok: boolean; out: string } {
   const res = spawnSync(cmd, args, { encoding: 'utf8' });
   return { ok: res.status === 0, out: `${res.stdout ?? ''}${res.stderr ?? ''}`.trim() };

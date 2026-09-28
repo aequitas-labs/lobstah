@@ -175,6 +175,22 @@ The binary drives harnesses through their CLIs instead of the bundled SDKs:
 codex workers run fully Node-free; claude workers still need the (Node-based)
 `claude` CLI on the host.
 
+### Upgrade
+
+```bash
+npm i -g lobstah
+lobstah daemon restart        # waits for the new heartbeat; refused while
+                              # dispatches are active (--force overrides)
+lobstah glass restart         # the glass service, or a detached glass
+lobstah pick restart          # only if you run pick as a service
+```
+
+Then update the harness plugin: `/plugin update lobstah@lobstah` in Claude
+Code, or `codex plugin marketplace upgrade lobstah && codex plugin add
+lobstah@lobstah` in Codex. `lobstah daemon status` shows the running daemon's
+version, pid, and heartbeat age. `lobstah doctor` shows a warning when a
+plugin version differs from the CLI's.
+
 ## Watch, steer, take over 🔭
 
 ```bash

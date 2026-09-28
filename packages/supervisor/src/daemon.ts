@@ -240,6 +240,7 @@ function writeHeartbeat(cfg: Config): void {
     harnesses: detectHarnesses(),
     maxConcurrent: cfg.limits.maxConcurrent,
     version: lobstahVersion(),
+    pid: process.pid,
     heartbeat: new Date().toISOString(),
   };
   const tmp = `${executorPath()}.tmp`;
