@@ -239,6 +239,22 @@ describe('done without a PR', () => {
     expect(pendingIds('work')).toHaveLength(0); // held for a human, not retried
   });
 
+  it('tells the notify hook why, as a reason code', async () => {
+    const seen: Array<{ verb: string; reason?: string }> = [];
+    const hook = (n: { verb: string; reason?: string }) => seen.push({ verb: n.verb, reason: n.reason });
+    const a = await ended('linear:DEMO-60', 'issue', { commits: ['abc feat'] });
+    await reportLoop(a.src, a.st, () => {}, hook);
+    const b = await ended('linear:DEMO-61', 'issue', { commits: [] });
+    await reportLoop(b.src, b.st, () => {}, hook);
+    const c = await ended('linear:DEMO-62', 'issue', { commits: ['abc feat'], prUrl: 'https://x/pull/62' });
+    await reportLoop(c.src, c.st, () => {}, hook);
+    expect(seen).toEqual([
+      { verb: 'needs-decision', reason: 'no-pr' },
+      { verb: 'needs-decision', reason: 'no-changes' },
+      { verb: 'done', reason: undefined },
+    ]);
+  });
+
   it('asks a human when an issue ends done with nothing at all', async () => {
     const { src, st } = await ended('linear:DEMO-38', 'issue', { commits: [] });
     await reportLoop(src, st);
