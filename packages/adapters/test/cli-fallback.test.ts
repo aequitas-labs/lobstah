@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { claudeCliArgs, startClaudeCli } from '../src/claude.js';
+import { claudeCliArgs, claudeSdkOptions, startClaudeCli } from '../src/claude.js';
 import { codexExecArgs, startCodexCli } from '../src/codex.js';
 import type { AdapterStartOpts } from '../src/types.js';
 
@@ -37,6 +37,26 @@ describe('claudeCliArgs', () => {
     expect(args.join(' ')).toContain('--max-turns 7');
     expect(args.join(' ')).toContain('--resume sess-9 --fork-session');
     expect(args.join(' ')).toContain('--effort high');
+  });
+});
+
+describe('configured effort reaches Claude', () => {
+  // Omitted, the session takes effortLevel from the host's settings files — on
+  // one host a user's `medium` — whatever the config said.
+  it('the SDK path passes it as an option', () => {
+    expect(claudeSdkOptions(opts({ model: 'claude-opus-5-5', effort: 'high' }))).toMatchObject({
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    });
+  });
+
+  it('the CLI fallback passes it as --effort', () => {
+    expect(claudeCliArgs(opts({ effort: 'xhigh' })).join(' ')).toContain('--effort xhigh');
+  });
+
+  it('unset stays unset on both paths, leaving the model default', () => {
+    expect(claudeSdkOptions(opts())).not.toHaveProperty('effort');
+    expect(claudeCliArgs(opts())).not.toContain('--effort');
   });
 });
 
