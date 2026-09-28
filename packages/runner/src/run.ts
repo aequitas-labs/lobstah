@@ -14,13 +14,16 @@ import {
   modelForHarness,
   originProgress,
   readEvidence,
+  releaseWorktreeLock,
+  acquireWorktreeLock,
   resolveDispatch,
   worktreeProgress,
 } from '@lobstah/core';
 import type { Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
 import { loadAdapter } from '@lobstah/adapters';
 import type { Adapter, AdapterRun } from '@lobstah/adapters';
-import { allocate, collectEvidence, worktreePath } from '@lobstah/worktree';
+import { allocate, chooseWorktree, collectEvidence, prepareReuse, worktreePath } from '@lobstah/worktree';
+import type { ChooseInput, WorktreeChoice } from '@lobstah/worktree';
 import { buildPrompt } from './contract.js';
 import { drive, settle } from './drive.js';
 import { planStart } from './plan.js';
@@ -30,10 +33,16 @@ import type { StartPlan } from './plan.js';
 export interface RunnerDeps {
   loadAdapter: (name: string) => Adapter;
   allocate: (repo: RepoConfig, id: string) => Promise<string>;
-  collectEvidence: (repo: RepoConfig, id: string) => Promise<{ branch: string; commits: string[] }>;
+  /** Whether a follow-up reuses its chain's worktree (takes the lock on reuse). */
+  chooseWorktree: (input: ChooseInput) => Promise<WorktreeChoice>;
+  /** Fetch trunk in a reused worktree; re-run setup if a lockfile changed. */
+  prepareReuse: (repo: RepoConfig, dir: string) => Promise<{ setupRan: boolean }>;
+  collectEvidence: (repo: RepoConfig, dir: string) => Promise<{ branch: string; commits: string[] }>;
 }
 
-const defaultDeps: RunnerDeps = { loadAdapter, allocate, collectEvidence };
+const defaultDeps: RunnerDeps = { loadAdapter, allocate, chooseWorktree, prepareReuse, collectEvidence };
+
+const short = (s: string) => s.slice(0, 8);
 
 /** The note a cold replacement session reads in place of the conversation. */
 function coldNote(cold: NonNullable<StartPlan['cold']>, cwd: string, trunk: string): string {
@@ -42,7 +51,8 @@ function coldNote(cold: NonNullable<StartPlan['cold']>, cwd: string, trunk: stri
   return handoffNote(cold.fromHarness ?? 'unknown', parts.join('\n\n'), cold.why);
 }
 
-export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = defaultDeps): Promise<void> {
+export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerDeps> = {}): Promise<void> {
+  const deps: RunnerDeps = { ...defaultDeps, ...seams };
   const id = path.basename(activeDir);
   const status = (verb: Verb, note?: string) => appendStatus(id, lane, verb, note);
 
@@ -73,6 +83,27 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
     resolvedHarness: resolved.harness,
     envResume: process.env.LOBSTAH_RESUME,
   });
+  // Which worktree: the one recorded on a restart; for a follow-up, its
+  // chain's worktree when that is clean and free; else a fresh one. The
+  // decision (and the lock on reuse) comes before the first status note, so
+  // the note can say which it was. Allocation itself runs after the note.
+  const wtFile = path.join(activeDir, 'worktree.json');
+  let recorded: string | undefined;
+  let choice: WorktreeChoice | undefined;
+  if (fs.existsSync(wtFile)) {
+    recorded = (JSON.parse(fs.readFileSync(wtFile, 'utf8')) as { path: string }).path;
+    if (!fs.existsSync(recorded)) throw new Error(`recorded worktree ${recorded} is gone`);
+  } else if (fs.existsSync(worktreePath(id))) {
+    throw new Error(`unrecorded worktree already exists for ${id} — refusing to proceed`);
+  } else if (descriptor.followUp && cfg.limits.reuseWorktree !== false) {
+    choice = await deps.chooseWorktree({ id, lane, repoKey: descriptor.repo, repo, followUp: descriptor.followUp });
+  }
+  const worktreeNote = choice
+    ? choice.reuse
+      ? `reusing worktree of ${short(choice.from)}`
+      : `fresh worktree (${choice.reason})`
+    : undefined;
+
   // A model never crosses harnesses: one that belongs to another harness is
   // dropped for the adapter's default rather than failing the dispatch.
   const firstModel = modelForHarness(plan.harness, resolved.model);
@@ -80,6 +111,7 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
     attempts > 1 ? `attempt ${attempts}` : undefined,
     plan.note,
     firstModel.dropped ? droppedModelNote(plan.harness, firstModel.dropped) : undefined,
+    worktreeNote,
   ]
     .filter(Boolean)
     .join('; ');
@@ -96,17 +128,31 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
   mergeEvidence(id, lane, { harness: plan.harness, sessionId: plan.resume?.own ? own : undefined });
 
   // Reuse the recorded worktree on restart; allocate exactly once otherwise.
-  const wtFile = path.join(activeDir, 'worktree.json');
   let cwd: string;
-  if (fs.existsSync(wtFile)) {
-    cwd = (JSON.parse(fs.readFileSync(wtFile, 'utf8')) as { path: string }).path;
-    if (!fs.existsSync(cwd)) throw new Error(`recorded worktree ${cwd} is gone`);
-  } else if (fs.existsSync(worktreePath(id))) {
-    throw new Error(`unrecorded worktree already exists for ${id} — refusing to proceed`);
+  if (recorded) {
+    cwd = recorded;
+    acquireWorktreeLock(cwd, id, lane);
+  } else if (choice?.reuse) {
+    // The follow-up continues where the origin stopped: same branch, same
+    // HEAD. Only trunk is fetched, and setup runs only for a changed lockfile.
+    cwd = choice.path;
+    const { setupRan } = await deps.prepareReuse(repo, cwd);
+    if (setupRan) console.log(`[runner] lockfile changed since setup last ran in ${cwd}: setup re-run`);
+    appendEvent(id, lane, {
+      at: new Date().toISOString(),
+      type: 'runner',
+      data: { worktree: cwd, worktreeOf: choice.owner, setupRan },
+    });
+    fs.writeFileSync(wtFile, JSON.stringify({ path: cwd, of: choice.owner }, null, 2));
   } else {
     cwd = await deps.allocate(repo, id);
+    acquireWorktreeLock(cwd, id, lane);
     fs.writeFileSync(wtFile, JSON.stringify({ path: cwd }, null, 2));
   }
+  // Evidence names the checkout, so catch, tend, the glass, and the cull
+  // resolve a reused follow-up to the directory it really ran in.
+  const worktreeOf = (JSON.parse(fs.readFileSync(wtFile, 'utf8')) as { of?: string }).of;
+  mergeEvidence(id, lane, { worktree: cwd, worktreeOf });
 
   const envNudge = process.env.LOBSTAH_NUDGE;
   // A swap's handoff (arriving as the nudge) already carries the progress note.
@@ -202,7 +248,7 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
   const { cancelled, result } = outcome;
 
   try {
-    const gitEvidence = await deps.collectEvidence(repo, id);
+    const gitEvidence = await deps.collectEvidence(repo, cwd);
     console.log(`[runner] git evidence: ${JSON.stringify(gitEvidence)}`);
     mergeEvidence(id, lane, { ...gitEvidence, sessionId: result.sessionId ?? readEvidence(id, lane).sessionId });
     console.log(`[runner] evidence after merge: ${JSON.stringify(readEvidence(id, lane))}`);
@@ -215,5 +261,6 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
 
   settle(id, lane, { cancelled, wallClockHit, error: result.error });
 
+  releaseWorktreeLock(cwd, id);
   complete(id, lane);
 }

@@ -70,6 +70,16 @@ use by hand. So the crew is inspectable with tools you already have:
   the Claude/Codex desktop apps' session lists) show dispatch sessions too —
   they're stored where the harness always stores them.
 
+A follow-up (`lobstah dispatch --follow-up <id>`) resumes the origin's
+conversation and, by default, its worktree too: it runs in the checkout of
+the newest dispatch in its chain, on the branch and HEAD where that dispatch
+stopped, without a second dependency install. It allocates a fresh worktree
+instead when that checkout has uncommitted changes, is gone, or another
+dispatch runs in it; its first status note says which (`reusing worktree of
+<origin>` or `fresh worktree (<reason>)`). `lobstah catch` prints the
+`worktree` a dispatch ran in, and `worktreeOf` when it reused one.
+`[limits].reuseWorktree = false` turns reuse off.
+
 Attach refuses while a dispatch is `working` (two writers, one session);
 follow the logs or `send` instead, or cancel and then attach.
 
@@ -444,7 +454,10 @@ Worktrees are 1 to 8 GB each. `lobstah cull` sweeps what is finished: `done/`
 entries older than the window (`--older-than <days>`, default 14), worktrees
 whose dispatch is finished or gone, stale state files, merged or closed PR
 records, and orphaned acks. It never touches queued or active work, and
-`git worktree remove` keeps each dispatch's branch.
+`git worktree remove` keeps each dispatch's branch. A worktree that follow-ups
+reused is one worktree shared by the chain: it stays while any dispatch in
+the chain is queued or active, and it ages from the newest dispatch that
+used it.
 
 Without `--apply` it is a dry run: it measures each target and prints the
 sizes. A worktree is measured with one `du -sk`; where `du` is missing

@@ -69,6 +69,10 @@ export interface Evidence {
   deliveredAt?: string;
   /** The PR's state as last observed by its `pr:` watch (see pr.ts). */
   pr?: PrEvidence;
+  /** The checkout the dispatch ran in (headless dispatches only). */
+  worktree?: string;
+  /** Set when the dispatch reused an earlier dispatch's worktree: that dispatch's id. */
+  worktreeOf?: string;
 }
 
 export type EventType =

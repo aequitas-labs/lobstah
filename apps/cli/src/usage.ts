@@ -146,7 +146,7 @@ word is message text, even "--session".`,
 working unless --force; --print shows the command instead of running it.`,
   swap: `Hand an active dispatch to a fresh session — same worktree and brief plus a
 git progress note.`,
-  catch: `The evidence: branch, commits, PR, session.`,
+  catch: `The evidence: branch, commits, PR, session, and the worktree it ran in.`,
   prs: `List known PR records newest first with state, checks, age, and watch state.
 \`prs sync\` refreshes each due PR watch once. It registers no watch.`,
   attention: `Standing attention items with their ack state; \`ack <item-key>\` marks the

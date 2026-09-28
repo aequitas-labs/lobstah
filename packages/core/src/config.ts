@@ -20,6 +20,11 @@ export interface RepoConfig {
   harness?: HarnessDefaults;
   /** Opt this repo into tracker pickup (multi-repo [pickup.github] mode). */
   pickup?: boolean;
+  /**
+   * Repo-relative paths whose untracked files do not make a worktree dirty
+   * for reuse by a follow-up (build output, caches, scratch notes).
+   */
+  scratch?: string[];
 }
 
 export interface LimitsConfig {
@@ -46,6 +51,12 @@ export interface LimitsConfig {
    * claims work that creates a worktree. 0 turns the guard off.
    */
   minFreeGB: number;
+  /**
+   * A follow-up reuses the worktree of the newest dispatch in its chain when
+   * that worktree is clean and no other dispatch is using it. false
+   * allocates a fresh worktree for every dispatch.
+   */
+  reuseWorktree: boolean;
 }
 
 export interface SoakConfig {
@@ -152,6 +163,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   attachmentMaxBytes: 25 * 1024 * 1024,
   retentionDays: 0,
   minFreeGB: 0,
+  reuseWorktree: true,
 };
 
 export function configPath(): string {
@@ -176,6 +188,7 @@ export function loadConfig(): Config {
       env: (r.env as Record<string, string>) ?? undefined,
       harness: (r.harness as HarnessDefaults) ?? undefined,
       pickup: r.pickup === undefined ? undefined : Boolean(r.pickup),
+      scratch: Array.isArray(r.scratch) ? r.scratch.map(String) : undefined,
     };
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;

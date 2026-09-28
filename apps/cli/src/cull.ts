@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
+  dispatchWorktree,
+  followUpAncestors,
   formatGB,
   laneDirs,
   listTraps,
@@ -124,9 +126,11 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
 
   const wtRoot = path.join(lobstahHome(), 'worktrees');
   const trapped = trapWorktreeIds(wtRoot);
+  const usage = worktreeUsage(opts.keepOpenPrs ? openPr : undefined);
   for (const id of idsIn(wtRoot)) {
-    if (live.has(id) || trapped.has(id)) continue;
-    const doneAt = doneMtimes.get(id);
+    if (live.has(id) || trapped.has(id) || usage.live.has(id)) continue;
+    // A shared worktree ages from the newest dispatch that used it.
+    const doneAt = usage.newest.get(id) ?? doneMtimes.get(id);
     if (doneAt !== undefined && doneAt >= cutoff) continue; // recent catch — keep for attach/swap
     const p = path.join(wtRoot, id);
     const from = doneAt ?? fs.statSync(p).mtimeMs;
@@ -198,6 +202,43 @@ export function openPrDispatches(): Set<string> {
 }
 
 /**
+ * Who uses each worktree under `worktrees/`, keyed by the owner id (the
+ * directory name). A follow-up that reused its origin's worktree counts as
+ * a user of the origin's directory.
+ *
+ * live: owners some queued or active dispatch uses or may use. A queued or
+ * active dispatch keeps its own worktree and the worktree of every dispatch
+ * in the chain behind it, since a queued follow-up may still reuse one.
+ * With `openPr`, an owner some user of which has an open PR is live too.
+ *
+ * newest: per owner, the newest done-entry mtime among its users.
+ */
+export function worktreeUsage(openPr?: Set<string>): { live: Set<string>; newest: Map<string, number> } {
+  const live = new Set<string>();
+  const newest = new Map<string, number>();
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    const d = laneDirs(lane);
+    const inFlight = [...idsIn(d.queue), ...idsIn(d.active)];
+    for (const id of inFlight) {
+      live.add(dispatchWorktree(id, lane).owner);
+      for (const up of followUpAncestors(id, lane)) live.add(dispatchWorktree(up).owner);
+    }
+    for (const id of idsIn(d.done)) {
+      const owner = dispatchWorktree(id, lane).owner;
+      if (openPr?.has(id)) live.add(owner);
+      let m: number;
+      try {
+        m = fs.statSync(path.join(d.done, id)).mtimeMs;
+      } catch {
+        continue;
+      }
+      newest.set(owner, Math.max(newest.get(owner) ?? 0, m));
+    }
+  }
+  return { live, newest };
+}
+
+/**
  * Worktree ids a soaking trap is anchored in. A live session works there, so
  * no cull removes them, whatever the dispatch's state.
  */
@@ -257,14 +298,17 @@ export function planPressureCull(now = Date.now()): CullItem[] {
     for (const id of idsIn(d.active)) live.add(id);
     for (const id of idsIn(d.done)) doneMtimes.set(id, fs.statSync(path.join(d.done, id)).mtimeMs);
   }
-  for (const id of openPrDispatches()) live.add(id);
+  const openPr = openPrDispatches();
+  for (const id of openPr) live.add(id);
   const wtRoot = path.join(lobstahHome(), 'worktrees');
   for (const id of trapWorktreeIds(wtRoot)) live.add(id);
+  const usage = worktreeUsage(openPr);
+  for (const id of usage.live) live.add(id);
   const items: CullItem[] = [];
   for (const id of idsIn(wtRoot)) {
     if (live.has(id)) continue;
     const p = path.join(wtRoot, id);
-    const from = doneMtimes.get(id) ?? fs.statSync(p).mtimeMs;
+    const from = usage.newest.get(id) ?? doneMtimes.get(id) ?? fs.statSync(p).mtimeMs;
     items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: 0, ageFrom: from });
   }
   return items.sort((a, b) => a.ageFrom! - b.ageFrom! || a.id.localeCompare(b.id));
@@ -285,8 +329,23 @@ export function removeWorktree(id: string, dir: string): void {
         return;
       }
     } catch {
-      // fall through to the blunt path
+      // fall through
     }
+  }
+  // The owner's done entry may be gone while a follow-up that reused its
+  // worktree kept it alive: ask the worktree itself for its repo.
+  try {
+    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      cwd: dir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (common) {
+      execFileSync('git', ['--git-dir', common, 'worktree', 'remove', '--force', dir], { stdio: 'ignore' });
+      return;
+    }
+  } catch {
+    // fall through to the blunt path
   }
   fs.rmSync(dir, { recursive: true, force: true });
 }

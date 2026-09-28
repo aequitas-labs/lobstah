@@ -73,6 +73,7 @@ import {
   requestCancel,
   sendMessage,
   storedDescriptor,
+  dispatchWorktree,
   trapAttachmentsDir,
   toonHelp,
   toonKV,
@@ -97,6 +98,7 @@ import { charter } from './charter.js';
 import { buildBriefContext } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { runCull } from './cull.js';
+import { worktreeView } from './worktree-view.js';
 import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
@@ -816,7 +818,7 @@ async function mainCli(): Promise<void> {
             `or \`lobstah dispatch --follow-up ${id}\` to start cold with a progress note`,
         );
       }
-      const worktree = path.join(lobstahHome(), 'worktrees', id);
+      const worktree = dispatchWorktree(id, lane).path;
       const cwd = fs.existsSync(worktree) ? worktree : process.cwd();
       // codex may exist only as the SDK's vendored CLI, never on PATH.
       const invocation =
@@ -856,7 +858,7 @@ async function mainCli(): Promise<void> {
 
       // Progress note: the conversation cannot cross harnesses, so the next
       // incarnation gets brief + committed state + working-tree status.
-      const worktree = path.join(lobstahHome(), 'worktrees', id);
+      const worktree = dispatchWorktree(id, lane).path;
       fs.writeFileSync(path.join(activeDir, 'handoff'), handoffNote(fromHarness, worktreeProgress(worktree)));
 
       // Kill the old incarnation and clear runner state; the daemon observes
@@ -889,6 +891,7 @@ async function mainCli(): Promise<void> {
           branch: ev.branch,
           prUrl: ev.prUrl,
           sessionId: ev.sessionId,
+          ...worktreeView(id, lane),
           note: log.at(-1)?.note,
         }),
       );

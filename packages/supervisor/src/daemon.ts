@@ -33,6 +33,7 @@ import {
   noticeOrphanedBait,
   readSessionClaim,
   readStatusLog,
+  releaseDispatchLock,
   daemonSkip,
   sweepGhostTraps,
 } from '@lobstah/core';
@@ -79,6 +80,13 @@ function listActive(lane: Lane): ActiveState[] {
 }
 
 function finalize(st: ActiveState): void {
+  // A finished dispatch releases its worktree's lock, so a follow-up can
+  // reuse the checkout. (A lock whose dispatch is finished is stale anyway.)
+  try {
+    releaseDispatchLock(st.dir, st.id);
+  } catch {
+    // no record, or the worktree is gone
+  }
   try {
     fs.renameSync(st.dir, path.join(laneDirs(st.lane).done, st.id));
   } catch {
