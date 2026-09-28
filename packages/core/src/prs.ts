@@ -27,6 +27,8 @@ export interface PrRecord extends PrEvidence {
   dispatches: string[];
   /** First observation of each currently standing kind; absent kinds have cleared. */
   standingSince: Partial<Record<PrStandingKind, string>>;
+  /** Number of observations. The first is a baseline, never a repair trigger. */
+  observations?: number;
 }
 
 /** Records sort by observation time; older shapes can fall back to forge update time. */
@@ -84,7 +86,7 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
   const before = readPr(ref.key);
   const dispatches = [...(before?.dispatches ?? [])];
   if (dispatchId && !dispatches.includes(dispatchId)) dispatches.push(dispatchId);
-  const merged = { ...(before ?? {}), ...pr } as PrEvidence;
+  const merged = { ...(before ?? {}), ...pr, failingChecks: pr.failingChecks } as PrEvidence;
   const standingSince: PrRecord['standingSince'] = {};
   for (const kind of prStandingKinds(merged)) {
     standingSince[kind] = before?.standingSince?.[kind] ?? pr.observedAt;
@@ -95,13 +97,20 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
     repo: `${ref.owner}/${ref.repo}`,
     dispatches,
     standingSince,
+    observations: (before?.observations ?? 0) + 1,
+    repair: before?.headSha === pr.headSha ? before?.repair : undefined,
   };
-  fs.mkdirSync(prsDir(), { recursive: true });
-  const file = prRecordFile(ref.key);
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, `${JSON.stringify(after, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  writePr(after);
   return { before, after };
+}
+
+/** Persist a watch repair transition without another forge observation. */
+export function writePr(pr: PrRecord): void {
+  fs.mkdirSync(prsDir(), { recursive: true });
+  const file = prRecordFile(pr.key);
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(pr, null, 2)}\n`);
+  fs.renameSync(tmp, file);
 }
 
 export function removePr(key: string): boolean {

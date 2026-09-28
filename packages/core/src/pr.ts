@@ -135,6 +135,17 @@ function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
 /** The evidence `pr` object: the PR's state as last observed. */
 export type PrStandingKind = Extract<AttentionKind, `pr:${string}`>;
 
+export interface PrRepair {
+  headSha: string;
+  kind: 'conflict' | 'checks' | 'review';
+  attempts: number;
+  maxAttempts?: number;
+  status: 'repairing' | 'gave-up' | 'blocked';
+  reason?: string;
+  dispatchId?: string;
+  observationsAtRepair?: number;
+}
+
 export interface PrEvidence {
   url: string;
   number: number;
@@ -153,6 +164,10 @@ export interface PrEvidence {
    * (no permission); the counts are then zero and mean nothing.
    */
   checks: { total: number; passed: number; failed: number; pending: number; unknown?: 'no permission' | 'latest run' };
+  /** Latest failing runs, for a repair brief. */
+  failingChecks?: Array<{ name: string; detailsUrl?: string }>;
+  /** Watch repair state, present in persistent PR records. */
+  repair?: PrRepair;
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
   observedAt: string;
@@ -230,6 +245,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
       pending: count('pending'),
       ...(view.checksError ? { unknown: 'no permission' as const } : count('unknown') > 0 ? { unknown: 'latest run' as const } : {}),
     },
+    ...(count('failed') > 0 ? { failingChecks: checks.filter((c) => c.outcome === 'failed').map((c) => ({ name: c.name, ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}) })) } : {}),
     review: prReview(view),
     observedAt,
     ...(view.updatedAt ? { updatedAt: view.updatedAt } : {}),
@@ -478,6 +494,10 @@ export function prBadge(pr: PrEvidence): PrBadge {
   const merge = (pr.mergeStateStatus ?? '').toUpperCase();
   if (pr.state === 'MERGED') return { text: 'merged', tone: 'ok', state: 'merged' };
   if (pr.state === 'CLOSED') return { text: 'closed', tone: 'bad', state: 'closed' };
+  if (pr.repair?.status === 'repairing' && pr.repair.headSha === pr.headSha) {
+    const { kind, attempts, maxAttempts } = pr.repair;
+    return { text: `repairing: ${kind} (attempt ${attempts} of ${maxAttempts ?? 2})`, tone: 'warn', state: 'open' };
+  }
   if (pr.draft) return { text: 'draft', tone: 'dim', state: 'draft' };
   if (merge === 'DIRTY') return { text: 'conflicts', tone: 'bad', state: 'open', merge: 'conflicts' };
   if (failed > 0) return { text: `checks ${failed}/${total} failed`, tone: 'bad', state: 'open' };

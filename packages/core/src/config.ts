@@ -102,6 +102,14 @@ export interface WatchConfig {
    * `lobstah watch release`.
    */
   maxForksPerCycle: number;
+  /** Repair dispatch-owned PRs before raising check or conflict attention. */
+  autoRepair: boolean;
+  /** Repair PR merge conflicts when autoRepair is on. */
+  conflicts: boolean;
+  /** Repair failed PR checks when autoRepair is on. */
+  checks: boolean;
+  /** Maximum repair follow-ups on one PR head sha. */
+  maxRepairsPerPr: number;
 }
 
 export interface GlassConfig {
@@ -170,7 +178,7 @@ export const DEFAULT_HELM: HelmConfig = {
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
-export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3 };
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,

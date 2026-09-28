@@ -901,6 +901,19 @@ async function mainCli(): Promise<void> {
         }
       }
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined);
+      // A trap reports from its own checkout; keep its last commit as the
+      // ownership anchor for safe PR-watch repairs after the session moves on.
+      if (verb === 'done') {
+        const claim = readSessionClaim(id, lane);
+        let ownCheckout = false;
+        try { ownCheckout = !!claim?.by.startsWith('wt:') && !!claim.worktree && fs.realpathSync(claim.worktree) === fs.realpathSync(process.cwd()); } catch { /* removed checkout */ }
+        if (ownCheckout) {
+          const git = (args: string[]) => spawnSync('git', args, { cwd: process.cwd(), encoding: 'utf8', timeout: 10_000 });
+          const head = git(['rev-parse', 'HEAD']);
+          const branch = git(['branch', '--show-current']);
+          if (head.status === 0 && branch.status === 0) mergeEvidence(id, lane, { commits: [head.stdout.trim()], branch: branch.stdout.trim() });
+        }
+      }
       if (prUrl) mergeEvidence(id, lane, { prUrl });
       // A done PR stays observed: CI, review, and merge flow back through its
       // pr: watch instead of lobstah going blind at "PR open".

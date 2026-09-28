@@ -247,6 +247,12 @@ describe('prBadge — one derivation for tend, catch, and glass', () => {
     const pr = ev({ statusCheckRollup: [run('a', 'SUCCESS'), { __typename: 'StatusContext', context: 'ci/legacy', state: 'PENDING' }, run('c', 'TIMED_OUT')] });
     expect(pr.checks).toEqual({ total: 3, passed: 1, failed: 1, pending: 1 });
   });
+
+  it('shows the current repair attempt instead of a conflict badge', () => {
+    const evidence = ev({ mergeStateStatus: 'DIRTY' });
+    expect(prBadge({ ...evidence, repair: { headSha: evidence.headSha, kind: 'conflict', attempts: 1, maxAttempts: 2, status: 'repairing' } }).text)
+      .toBe('repairing: conflict (attempt 1 of 2)');
+  });
 });
 
 describe('review fields (gh pr view reviews + the reviewThreads GraphQL count)', () => {
