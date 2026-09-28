@@ -99,19 +99,22 @@ describe('retention cull (the daemon culler)', () => {
   });
 
   it('never culls active or queued dispatches, however old', () => {
-    enqueue({ id: 'q1', repo: 'r', brief: 'b' });
-    enqueue({ id: 'a1', repo: 'r', brief: 'b' });
-    claimNext('work'); // claims q1 (oldest first)
-    for (const id of ['q1', 'a1']) {
+    enqueue({ id: 'x1', repo: 'r', brief: 'b' });
+    enqueue({ id: 'x2', repo: 'r', brief: 'b' });
+    const active = claimNext('work')!;
+    const queued = active === 'x1' ? 'x2' : 'x1';
+    for (const id of [active, queued]) {
       const wt = path.join(home, 'worktrees', id);
       fs.mkdirSync(wt);
       age(wt, 60);
     }
-    age(path.join(laneDirs('work').queue, 'a1.json'), 60);
+    age(path.join(laneDirs('work').queue, `${queued}.json`), 60);
+    age(path.join(laneDirs('work').active, active), 60);
     expect(cliCuller.retention(14, Date.now(), 10, () => {})).toBe(0);
-    expect(fs.existsSync(path.join(home, 'worktrees', 'q1'))).toBe(true);
-    expect(fs.existsSync(path.join(home, 'worktrees', 'a1'))).toBe(true);
-    expect(fs.existsSync(path.join(laneDirs('work').queue, 'a1.json'))).toBe(true);
+    expect(fs.existsSync(path.join(home, 'worktrees', active))).toBe(true);
+    expect(fs.existsSync(path.join(home, 'worktrees', queued))).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('work').queue, `${queued}.json`))).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('work').active, active))).toBe(true);
   });
 
   it('culls at most one batch per pass, oldest first', () => {
