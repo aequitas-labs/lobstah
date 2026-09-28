@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 // @ts-expect-error — a plain .mjs script, exercised as the release path runs it
 import { checkVersions, cliVersion, syncVersions, TARGETS } from '../../../scripts/sync-versions.mjs';
 import { pluginRows } from '../src/doctor.js';
-import { installedClaudePlugin, installedCodexPlugin, pluginBehindLine, pluginDrift } from '../src/plugin-version.js';
+import { installedClaudePlugin, installedCodexPlugin, pluginBehindLine, pluginDrift, versionGap } from '../src/plugin-version.js';
 
 const repo = fileURLToPath(new URL('../../..', import.meta.url));
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -87,16 +87,29 @@ function claudeHome(version: string): string {
 const noHarnessEnv = { PATH: process.env.PATH };
 
 describe('doctor: plugin rows', () => {
-  it('match → ok', () => {
-    const [claude] = pluginRows('0.5.0', { home: claudeHome('0.5.2'), env: noHarnessEnv });
+  it('equal → ok, reading "matches"', () => {
+    const [claude] = pluginRows('0.5.2', { home: claudeHome('0.5.2'), env: noHarnessEnv });
     expect(claude).toMatchObject({ check: 'plugin claude', status: 'ok' });
-    expect(claude!.detail).toContain('v0.5.2 matches CLI v0.5.0');
+    expect(claude!.detail).toContain('v0.5.2 matches CLI v0.5.2');
   });
 
-  it('drift → warn, naming both versions and the update command', () => {
+  it('patch behind → warn with the update command, never "matches"', () => {
+    const [claude] = pluginRows('0.5.10', { home: claudeHome('0.5.9'), env: noHarnessEnv });
+    expect(claude).toMatchObject({ check: 'plugin claude', status: 'warn' });
+    expect(claude!.detail).toContain('plugin v0.5.9 is a patch version behind CLI v0.5.10 — /plugin update lobstah@lobstah');
+    expect(claude!.detail).not.toContain('matches');
+  });
+
+  it('patch ahead → warn, suggesting a CLI update', () => {
+    const [claude] = pluginRows('0.5.9', { home: claudeHome('0.5.10'), env: noHarnessEnv });
+    expect(claude).toMatchObject({ status: 'warn' });
+    expect(claude!.detail).toContain('plugin v0.5.10 is a patch version ahead of CLI v0.5.9 — update the CLI: npm i -g lobstah');
+  });
+
+  it('minor behind → warn (today\'s severity), naming both versions and the update command', () => {
     const [claude] = pluginRows('0.5.0', { home: claudeHome('0.1.0'), env: noHarnessEnv });
     expect(claude).toMatchObject({ check: 'plugin claude', status: 'warn' });
-    expect(claude!.detail).toContain('plugin v0.1.0 is behind CLI v0.5.0 — /plugin update lobstah@lobstah');
+    expect(claude!.detail).toContain('plugin v0.1.0 is a minor version behind CLI v0.5.0 — /plugin update lobstah@lobstah');
   });
 
   it('absent → skip, for both harnesses', () => {
@@ -132,10 +145,26 @@ describe('doctor: plugin rows', () => {
     expect(pluginBehindLine('0.0.0-dev', { home: claudeHome('0.1.0'), env: noHarnessEnv })).toBeUndefined();
   });
 
-  it('compares major.minor only', () => {
-    expect(pluginDrift('0.5.9', '0.5.0')).toBe('match');
+  it('compares the full version, prerelease included', () => {
+    expect(pluginDrift('0.5.10', '0.5.10')).toBe('match');
+    expect(pluginDrift('0.5.9', '0.5.10')).toBe('behind');
+    expect(pluginDrift('0.5.10', '0.5.9')).toBe('ahead');
     expect(pluginDrift('0.4.9', '0.5.0')).toBe('behind');
     expect(pluginDrift('0.10.0', '0.9.3')).toBe('ahead');
+    expect(pluginDrift('0.5.10-rc.1', '0.5.10')).toBe('behind');
+    expect(pluginDrift('0.5.10-rc.2', '0.5.10-rc.10')).toBe('behind');
+    expect(pluginDrift('0.5.10', '0.5.10-rc.1')).toBe('ahead');
+    expect(pluginDrift('0.0.0-dev', '0.0.0-dev')).toBe('match');
+    expect(versionGap('0.5.9', '0.5.10')).toBe('patch');
+    expect(versionGap('0.5.10-rc.1', '0.5.10')).toBe('patch');
+    expect(versionGap('0.4.9', '0.5.0')).toBe('minor');
+    expect(versionGap('1.0.0', '0.5.0')).toBe('major');
+    expect(versionGap('0.5.10', '0.5.10')).toBeUndefined();
+  });
+
+  it('a workspace build (0.0.0-dev) never warns against itself', () => {
+    expect(pluginRows('0.0.0-dev', { home: claudeHome('0.0.0-dev'), env: noHarnessEnv })[0]!.status).not.toBe('warn');
+    expect(pluginBehindLine('0.0.0-dev', { home: claudeHome('0.0.0-dev'), env: noHarnessEnv })).toBeUndefined();
   });
 });
 
@@ -144,7 +173,11 @@ describe('man brief: the one-line drift warning', () => {
     expect(pluginBehindLine('0.5.0', { home: claudeHome('0.1.0'), env: noHarnessEnv })).toBe(
       'lobstah: plugin 0.1.0 is behind CLI 0.5.0 — /plugin update lobstah@lobstah',
     );
+    expect(pluginBehindLine('0.5.10', { home: claudeHome('0.5.9'), env: noHarnessEnv })).toBe(
+      'lobstah: plugin 0.5.9 is behind CLI 0.5.10 — /plugin update lobstah@lobstah',
+    );
     expect(pluginBehindLine('0.5.0', { home: claudeHome('0.5.0'), env: noHarnessEnv })).toBeUndefined();
+    expect(pluginBehindLine('0.5.9', { home: claudeHome('0.5.10'), env: noHarnessEnv })).toBeUndefined();
     expect(pluginBehindLine('0.5.0', { home: path.join(tmp, 'none'), env: noHarnessEnv })).toBeUndefined();
   });
 
