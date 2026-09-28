@@ -253,10 +253,21 @@ export function isFailingConclusion(conclusion: string | undefined): boolean {
  * Diff one observation against the cursor. One event per change: a check
  * that completed (or completed differently) on the current head, a review
  * decision, merge state, or draft flip, and the terminal merged / closed.
- * A first observation (cursor "0") reports completed checks, a standing
- * review decision, and a terminal state — merge state and draft are its
- * baseline, not news. A new head sha resets check memory, so the same check
- * failing again after a push is a new event.
+ *
+ * The first observation (cursor "0", or a cursor that does not decode) is
+ * the baseline, not news:
+ * - An OPEN PR: completed checks, merge state, and draft are recorded in the
+ *   cursor and emit nothing. A check that already failed is in the PR record
+ *   and in tend, but it forks no CI-fix dispatch. A standing review decision
+ *   is still reported.
+ * - A MERGED or CLOSED PR: nothing is emitted and the watch is done. The PR
+ *   record carries the terminal state; the merged / closed notice comes from
+ *   the record (observePr), not from here.
+ * After the baseline, only a check that completes (or changes conclusion) on
+ * the same head, or any completed check on a new head sha, is news. A new
+ * head sha resets check memory, so the same check failing again after a push
+ * is a new event. A PR that is MERGED or CLOSED never emits check or review
+ * events: there is nothing left to fix.
  *
  * Each event's seq is derived from the previous cursor and the change, so a
  * replay over the same cursor yields the same seqs and the watch's seq
@@ -285,8 +296,13 @@ export function derivePrEvents(
   const push = (kind: PrEventKind, detail: string, summary: string, extra: Partial<PrEvent>, notice: boolean) =>
     events.push({ seq: `${epoch}:${kind}:${detail}`, kind, summary: `${ref.key} ${summary}`, ...base, ...extra, notice });
 
+  const done = now.s === 'MERGED' || now.s === 'CLOSED';
+  // First sight of a terminal PR: record only. No checks, no review, no notice event.
+  if (prev === undefined && done) return { cursor: next, events, done };
+
   const sameHead = prev !== undefined && prev.h === now.h;
-  for (const c of checks) {
+  // The first observation of an open PR is the check baseline; a terminal PR has nothing to fix.
+  for (const c of prev === undefined || done ? [] : checks) {
     if (c.outcome === 'pending') continue;
     if (sameHead && prev!.c[c.name] === c.conclusion) continue;
     const failed = c.outcome === 'failed';
@@ -298,7 +314,7 @@ export function derivePrEvents(
       !failed,
     );
   }
-  if (now.r !== '' && (prev === undefined || prev.r !== now.r)) {
+  if (!done && now.r !== '' && (prev === undefined || prev.r !== now.r)) {
     // Routing of review feedback is decided at delivery (config-dependent);
     // the check marks it work-shaped.
     push('review-decision', now.r, `review decision ${now.r} at ${sha7}`, { value: now.r }, false);
@@ -309,8 +325,7 @@ export function derivePrEvents(
   if (prev !== undefined && prev.d !== now.d) {
     push('draft', String(now.d), now.d ? 'converted to draft' : 'ready for review', { value: now.d }, true);
   }
-  const done = now.s === 'MERGED' || now.s === 'CLOSED';
-  if (done && prev?.s !== now.s) {
+  if (done && prev!.s !== now.s) {
     if (now.s === 'MERGED') push('merged', 'merged', `merged at ${sha7}`, {}, true);
     else push('closed', 'closed', 'closed without merge', {}, true);
   }

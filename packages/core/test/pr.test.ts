@@ -52,12 +52,35 @@ describe('PR stack branch evidence', () => {
 });
 
 describe('derivePrEvents', () => {
-  it('first observation: completed checks only; merge state and draft are baseline', () => {
+  it('first observation of an open PR is the baseline: no check events; merge state and draft are baseline too', () => {
     const r = derivePrEvents(ref, open, '0');
-    expect(r.events.map((e) => [e.kind, e.name])).toEqual([['check-completed', 'test (ubuntu)']]);
-    expect(r.events[0]!.notice).toBe(true); // green is evidence, not work
-    expect(r.events[0]!.headSha).toBe(SHA);
+    expect(r.events).toEqual([]);
     expect(r.done).toBe(false);
+  });
+
+  it('first observation of an open PR with a failed check forks nothing; a later new failure on the same head is news once', () => {
+    const withFailure: GhPrView = { ...open, statusCheckRollup: [run('lint', 'FAILURE'), run('test (ubuntu)', 'SUCCESS'), run('test (windows)', null, 'IN_PROGRESS')] };
+    const first = derivePrEvents(ref, withFailure, '0');
+    expect(first.events.filter((e) => e.kind === 'check-completed')).toEqual([]);
+    const later: GhPrView = { ...withFailure, statusCheckRollup: [run('lint', 'FAILURE'), run('test (ubuntu)', 'SUCCESS'), run('test (windows)', 'FAILURE')] };
+    const second = derivePrEvents(ref, later, first.cursor);
+    expect(second.events.map((e) => [e.kind, e.name, e.notice])).toEqual([['check-completed', 'test (windows)', false]]);
+    expect(derivePrEvents(ref, later, second.cursor).events).toEqual([]);
+  });
+
+  it.each([
+    ['MERGED', merged],
+    ['CLOSED', { ...failedAndReviewed, state: 'CLOSED', closedAt: '2026-09-23T03:00:00Z' } as GhPrView],
+  ])('first observation of a %s PR with failed checks emits nothing and retires', (_state, view) => {
+    const r = derivePrEvents(ref, view, '0');
+    expect(r.events).toEqual([]);
+    expect(r.done).toBe(true);
+  });
+
+  it('a terminal PR never emits check or review events, even after a baseline', () => {
+    const c = derivePrEvents(ref, open, '0').cursor;
+    const m = derivePrEvents(ref, { ...merged, headRefOid: 'c0ffee0000' }, c);
+    expect(m.events.map((e) => e.kind)).toEqual(['merged']);
   });
 
   it('a check flipping to FAILURE and a review decision each emit one event, carrying the head sha', () => {

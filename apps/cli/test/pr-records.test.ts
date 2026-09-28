@@ -151,7 +151,8 @@ describe('man-owned PR watches are quiet unless something needs a human', () => 
   });
 
   it('a failing check and a changes request are attention', () => {
-    const failed = derivePrEvents(ref, view({ reviewDecision: 'CHANGES_REQUESTED', statusCheckRollup: [{ __typename: 'CheckRun', name: 'ci', status: 'COMPLETED', conclusion: 'FAILURE' }] }), '0');
+    const baseline = derivePrEvents(ref, view(), '0');
+    const failed = derivePrEvents(ref, view({ reviewDecision: 'CHANGES_REQUESTED', statusCheckRollup: [{ __typename: 'CheckRun', name: 'ci', status: 'COMPLETED', conclusion: 'FAILURE' }] }), baseline.cursor);
     expect(manEvents(failed.events).map((e) => e.kind).sort()).toEqual(['check-completed', 'review-decision']);
     // the dispatch-owned filter beside it is unchanged
     expect(workEvents(ref, failed.events, false).map((e) => e.kind).sort()).toEqual(['check-completed', 'review-decision']);
@@ -171,6 +172,25 @@ describe('man-owned PR watches are quiet unless something needs a human', () => 
     expect(notices[0]).toMatchObject({ refId: 'pr:acme/lobstah#9' });
     expect(notices[0]!.text).toContain('no dispatch (watched by the helm)');
     expect(readPr(ref.key)!.state).toBe('MERGED');
+  });
+
+  it('first sight of a PR merged more than 24 hours ago records MERGED and posts no notice', () => {
+    const now = new Date('2026-09-28T12:00:00Z');
+    observePr(ref, view({ state: 'MERGED', mergedAt: '2026-09-20T12:00:00Z' }), { now });
+    expect(readPr(ref.key)!.state).toBe('MERGED');
+    expect(listNotices(50).filter((n) => n.kind === 'pr-merged')).toHaveLength(0);
+  });
+
+  it('first sight of a PR merged or closed within 24 hours posts one notice', () => {
+    const now = new Date('2026-09-28T12:00:00Z');
+    const mergedView = view({ state: 'MERGED', mergedAt: '2026-09-28T11:00:00Z' });
+    observePr(ref, mergedView, { now });
+    observePr(ref, mergedView, { now });
+    expect(listNotices(50).filter((n) => n.kind === 'pr-merged')).toHaveLength(1);
+    const other = parsePrRef('https://github.com/acme/lobstah/pull/10')!;
+    observePr(other, view({ state: 'CLOSED', closedAt: '2026-09-28T11:30:00Z' }), { now });
+    expect(listNotices(50).filter((n) => n.kind === 'pr-closed')).toHaveLength(1);
+    expect(readPr(other.key)!.state).toBe('CLOSED');
   });
 });
 

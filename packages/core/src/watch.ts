@@ -45,6 +45,12 @@ export interface Watch {
   lastFollowUpId?: string;
   /** Delivered `done` — retire after the owner consumes the tail. */
   done?: boolean;
+  /**
+   * Set when a watch cycle reached its fork cap ([watch].maxForksPerCycle)
+   * before this watch's events forked. A held watch keeps checking and
+   * buffering, but forks nothing until `lobstah watch release` clears it.
+   */
+  heldAt?: string;
 }
 
 export interface WatchEvent {
@@ -120,9 +126,30 @@ export function addWatch(
     seen: existing?.seen ?? 0,
     seenAt: existing?.seenAt ?? 0,
     lastFollowUpId: existing?.lastFollowUpId,
+    heldAt: existing?.heldAt,
   };
   writeWatch(w);
   return w;
+}
+
+/** Mark a watch held: its buffered events wait for `lobstah watch release`. */
+export function holdWatch(key: string, now = new Date()): void {
+  const w = readWatch(key);
+  if (!w || w.heldAt) return;
+  w.heldAt = now.toISOString();
+  writeWatch(w);
+}
+
+/** Clear the hold on one watch, or on every held watch when key is undefined. Returns the released keys. */
+export function releaseHeldWatches(key?: string): string[] {
+  const out: string[] = [];
+  for (const w of key === undefined ? listWatches() : [readWatch(key)].filter((x): x is Watch => x !== undefined)) {
+    if (!w.heldAt) continue;
+    w.heldAt = undefined;
+    writeWatch(w);
+    out.push(w.key);
+  }
+  return out;
 }
 
 export function removeWatch(key: string): boolean {

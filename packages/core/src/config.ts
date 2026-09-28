@@ -56,6 +56,15 @@ export interface HelmConfig {
   armGraceSecs: number;
 }
 
+export interface WatchConfig {
+  /**
+   * The most CI-fix (continuation) dispatches one watch cycle may fork.
+   * Watches over the cap are held, listed in tend, and fork nothing until
+   * `lobstah watch release`.
+   */
+  maxForksPerCycle: number;
+}
+
 export interface GlassConfig {
   port: number;
 }
@@ -72,6 +81,7 @@ export interface Config {
   soak: SoakConfig;
   helm: HelmConfig;
   glass: GlassConfig;
+  watch: WatchConfig;
   grounds: Record<string, GroundsConfig>;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
   notifyCommand?: string;
@@ -118,6 +128,8 @@ export const DEFAULT_HELM: HelmConfig = {
 };
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
+
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,
@@ -166,6 +178,7 @@ export function loadConfig(): Config {
     soak: { ...DEFAULT_SOAK, ...((raw.soak as Partial<SoakConfig>) ?? {}) },
     helm: { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) },
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
+    watch: { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) },
     grounds,
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,

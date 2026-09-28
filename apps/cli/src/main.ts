@@ -45,6 +45,7 @@ import {
   listWatches,
   pendingWatchEvents,
   readWatchEvents,
+  releaseHeldWatches,
   readEvidence,
   removeWatch,
   runWatchCheck,
@@ -166,7 +167,15 @@ work (humans and agents):
                                   cycle). --for stamps a pr state object into
                                   that dispatch's evidence; failing checks
                                   fork a CI-fix continuation (pick only);
-                                  merged/closed post a helm notice.
+                                  merged/closed post a helm notice. The
+                                  first check is a baseline: it forks
+                                  nothing, and a PR already merged or
+                                  closed is recorded and retired.
+  watch backfill [--apply]        list PRs in dispatch history with no watch
+                                  (dry run); --apply registers them. Read
+                                  commands never register a watch.
+  watch release <key>|--all       let a watch held by the per-cycle fork
+                                  cap ([watch].maxForksPerCycle) fork again
 
 host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
@@ -854,7 +863,6 @@ async function mainCli(): Promise<void> {
     case 'catch': {
       const id = pos[0];
       if (!id) throw new Error('catch requires a dispatch id');
-      backfillPrWatches();
       const lane = findLane(id);
       const log = readStatusLog(id, lane);
       const ev = readEvidence(id, lane);
@@ -908,7 +916,6 @@ async function mainCli(): Promise<void> {
         console.log(toonKV(syncPrWatches()));
         break;
       }
-      backfillPrWatches();
       const now = Date.now();
       const watches = new Map(listWatches().map((w) => [w.key, w]));
       const rows = readPrs().sort((a, b) => prSortAt(b).localeCompare(prSortAt(a)) || a.key.localeCompare(b.key));
@@ -1712,6 +1719,22 @@ async function mainCli(): Promise<void> {
         );
         break;
       }
+      if (sub === 'backfill') {
+        // Explicit migration for PRs in old dispatch history. Dry run unless --apply.
+        const apply = has('--apply');
+        const rows = backfillPrWatches({ apply });
+        console.log(toonTable('backfill', rows.map((r) => ({ ...r })), ['key', 'action', 'owner']));
+        console.log(toonKV({ applied: apply, register: rows.filter((r) => r.action === 'register').length, retire: rows.filter((r) => r.action === 'retire').length }));
+        if (!apply && rows.length > 0) console.log('dry run — pass --apply to write');
+        break;
+      }
+      if (sub === 'release') {
+        const key = pos[1];
+        if (!key && !has('--all')) throw new Error('watch release requires a key or --all');
+        const released = releaseHeldWatches(has('--all') ? undefined : key);
+        console.log(toonKV({ released: released.length }));
+        break;
+      }
       if (sub === 'rm') {
         const key = pos[1];
         if (!key) throw new Error('watch rm requires a key');
@@ -1724,9 +1747,10 @@ async function mainCli(): Promise<void> {
         cursor: w.cursor,
         pending: readWatchEvents(w.key).length - w.seen,
         lastChecked: w.lastCheckedAt ?? '-',
+        held: w.heldAt ? 'held' : '',
         error: w.lastError ?? '',
       }));
-      console.log(toonTable('watches', rows, ['key', 'owner', 'cursor', 'pending', 'lastChecked', 'error']));
+      console.log(toonTable('watches', rows, ['key', 'owner', 'cursor', 'pending', 'lastChecked', 'held', 'error']));
       break;
     }
     case 'init': {

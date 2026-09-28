@@ -65,7 +65,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
   report: { flags: { '--pr': { value: '<url>' }, '--no-watch': {} }, positionals: '<uuid> <verb> [note...]' },
   watch: {
-    subverbs: ['add', 'rm', 'ls', 'check-pr'],
+    subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'release'],
     flags: {
       '--check': { value: '<cmd>' },
       '--for': { value: '<uuid>' },
@@ -73,6 +73,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--every': { value: '<s>' },
       '--brief': { value: '<template>' },
       '--stream': { value: '<cmd>' },
+      '--apply': {},
+      '--all': {},
     },
     positionals: '[<key>]',
   },
@@ -146,7 +148,7 @@ working unless --force; --print shows the command instead of running it.`,
 git progress note.`,
   catch: `The evidence: branch, commits, PR, session.`,
   prs: `List known PR records newest first with state, checks, age, and watch state.
-\`prs sync\` registers missing PR watches and refreshes each due PR once.`,
+\`prs sync\` refreshes each due PR watch once. It registers no watch.`,
   attention: `Standing attention items with their ack state; \`ack <item-key>\` marks the
 current state seen (--by names who), \`unack\` clears it. Display-only: an ack
 hides the item from the desktop pet and the glass lobs until its state
@@ -162,12 +164,11 @@ claimed helm this requires --session <helm-id>.`,
 paused | done | failed. --pr goes anywhere; after \`--\` every word is note.
 \`done --pr <github PR url>\` also registers the PR's pr: watch, owned by this
 dispatch (idempotent; --no-watch opts out).`,
-  watch: `Stand watch on something external; bare \`watch\` (or \`watch ls\`) lists.
-The check command answers "anything since {cursor}?" in JSON.
-\`watch add pr:<owner>/<repo>#<n>\` (or a PR URL) with no --check installs the
-shipped PR check (\`watch check-pr\`, one \`gh pr view\` per cycle). With --for,
-failing checks fork a CI-fix continuation (pick only) and the dispatch's
-evidence carries a \`pr\` state object.`,
+  watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
+installs the shipped PR check; with --for, a check that fails after the first
+(baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
+\`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
+\`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
   soak: `Volunteer this session as a worker. Identity is the worktree: sign-on
 anchors a trap id (.lobstah-trap) and prints its wt:<trap> address; re-runs
 here need no flags (--session only on first sign-on). Refused from a

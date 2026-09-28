@@ -83,12 +83,26 @@ export function autoRegisterPrWatch(id: string, prUrl: string): Watch | undefine
   }
 }
 
+/** One PR the backfill would register (or retire). */
+export interface BackfillRow {
+  key: string;
+  action: 'register' | 'retire';
+  owner: string;
+}
+
 /**
- * Recover watches for PRs that predate automatic registration. This is local
- * state only: deriving the glass, tend, or catch never calls GitHub. A record
- * takes precedence over older dispatch evidence when deciding terminal state.
+ * `lobstah watch backfill`: find PRs in dispatch history that have no watch.
+ * This is an explicit migration command. No read command calls it. Without
+ * `apply` it only lists what it would do. With `apply` it registers a watch
+ * for each PR not known to be terminal, and removes the watch of a PR known
+ * to be MERGED or CLOSED. It reads local state only and never calls GitHub.
+ * A PR record takes precedence over older dispatch evidence when deciding
+ * terminal state. A new watch starts at cursor "0", so its first check is a
+ * baseline and forks nothing (derivePrEvents).
  */
-export function backfillPrWatches(): number {
+export function backfillPrWatches(opts: { apply?: boolean } = {}): BackfillRow[] {
+  const apply = opts.apply === true;
+  const rows: BackfillRow[] = [];
   type Member = { id: string; followUp?: string; at: string };
   const members = new Map<string, Member>();
   const known = new Map<string, { terminal?: boolean; observedAt?: string; ids: Set<string> }>();
@@ -132,10 +146,13 @@ export function backfillPrWatches(): number {
       }
     }
   }
-  let registered = 0;
   for (const [key, row] of known) {
     if (row.terminal) {
-      if (readWatch(key)) removeWatch(key);
+      const existing = readWatch(key);
+      if (existing) {
+        rows.push({ key, action: 'retire', owner: existing.owner });
+        if (apply) removeWatch(key);
+      }
       continue;
     }
     if (readWatch(key)) continue;
@@ -156,16 +173,14 @@ export function backfillPrWatches(): number {
     }
     const owner = [...chain].map((id) => members.get(id)).filter((m): m is Member => m !== undefined)
       .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))[0];
-    addPrWatch(ref, owner ? { forId: owner.id } : {});
-    registered++;
+    rows.push({ key, action: 'register', owner: owner ? `dispatch:${owner.id}` : 'man' });
+    if (apply) addPrWatch(ref, owner ? { forId: owner.id } : {});
   }
-  if (registered) console.error(`pr-watch-backfill: ${registered} registered`);
-  return registered;
+  return rows;
 }
 
-/** Register missing watches and refresh each due PR watch at most once. */
-export function syncPrWatches(): { registered: number; refreshed: number } {
-  const registered = backfillPrWatches();
+/** Refresh each due PR watch at most once. Registers nothing. */
+export function syncPrWatches(): { refreshed: number } {
   let refreshed = 0;
   const every = pollSecs();
   const now = new Date();
@@ -177,12 +192,15 @@ export function syncPrWatches(): { registered: number; refreshed: number } {
     if (!watch.lastError && after && after !== before) refreshed++;
     if (watch.done) removeWatch(w.key);
   }
-  return { registered, refreshed };
+  return { refreshed };
 }
 
 function laneOf(id: string): Lane | undefined {
   return (['work', 'chore'] as Lane[]).find((l) => fs.existsSync(evidencePath(id, l)) || readStatusLog(id, l).length > 0);
 }
+
+/** A first observation of a terminal PR posts a notice only when it ended this recently. */
+export const FIRST_SIGHT_NOTICE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * One observation of a PR, written everywhere it belongs: the PR record
@@ -194,6 +212,8 @@ function laneOf(id: string): Lane | undefined {
  * inline poller, announces it, and the previous state plus a dedupe key
  * keep it once-only. A PR with no record yet (observed before records
  * existed) falls back to the dispatch's previous evidence for that state.
+ * A PR seen for the first time already MERGED or CLOSED gets at most one
+ * notice, and none when it ended more than 24 hours ago.
  */
 export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: string; now?: Date } = {}): PrRecord {
   const now = opts.now ?? new Date();
@@ -204,7 +224,11 @@ export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: strin
   const { before, after } = upsertPr(pr, lane ? id : undefined);
   if (id && lane) mergeEvidence(id, lane, { pr });
   const was = before?.state ?? legacyBefore?.state;
-  if (was === 'OPEN' && (pr.state === 'MERGED' || pr.state === 'CLOSED')) {
+  const terminal = pr.state === 'MERGED' || pr.state === 'CLOSED';
+  // First sight of a terminal PR: announce only when it ended in the last 24 hours.
+  const endedAt = Date.parse(view.mergedAt ?? view.closedAt ?? '');
+  const recentEnd = Number.isFinite(endedAt) && now.getTime() - endedAt <= FIRST_SIGHT_NOTICE_MS;
+  if (terminal && (was === 'OPEN' || (was === undefined && recentEnd))) {
     const merged = pr.state === 'MERGED';
     const owner = after.dispatches.at(-1);
     const ownerLane = owner ? laneOf(owner) : undefined;
@@ -315,7 +339,7 @@ export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Da
     const lane = laneOf(id);
     if (!ref || !lane) continue;
     const seen = readPr(ref.key) ?? readEvidence(id, lane).pr;
-    // A terminal PR has nothing left to observe; backfill/read paths retire a stale watch.
+    // A terminal PR has nothing left to observe; pick's check retires its watch.
     if (seen && (seen.state === 'MERGED' || seen.state === 'CLOSED')) continue;
     if (seen && now - Date.parse(seen.observedAt) < (w.everySecs ?? defaultEverySecs) * 1000) continue;
     try {

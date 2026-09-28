@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, claimNext, enqueue, ensureLayout, executorPath } from '@lobstah/core';
+import { addWatch, appendStatus, claimNext, enqueue, ensureLayout, executorPath, holdWatch } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 
 let home: string;
@@ -110,6 +110,19 @@ describe('man tend — watches join', () => {
     expect(row!.ageSecs).toBeGreaterThanOrEqual(119);
     expect(r.watches[0]).toMatchObject({ key: 'ume:plan', owner: 'man', pendingEvents: 1 });
     expect(renderTend(r)).toContain('feedback batch');
+  });
+
+  it('a watch held by the per-cycle fork cap is listed as held', () => {
+    heartbeat();
+    addWatch('pr:acme/web#1', 'true', { owner: 'dispatch:77777777-7777-7777-7777-777777777777' });
+    addWatch('pr:acme/web#2', 'true', { owner: 'dispatch:88888888-8888-8888-8888-888888888888' });
+    holdWatch('pr:acme/web#2');
+    const r = buildTendReport();
+    expect(r.watches.find((w) => w.key === 'pr:acme/web#2')?.heldAt).toBeDefined();
+    expect(r.watches.find((w) => w.key === 'pr:acme/web#1')?.heldAt).toBeUndefined();
+    const text = renderTend(r);
+    expect(text).toMatch(/pr:acme\/web#2[^\n]*held/);
+    expect(text).not.toMatch(/pr:acme\/web#1[^\n]*held/);
   });
 
   it('a consumed man-owned watch is listed but raises no attention', () => {

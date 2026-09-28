@@ -29,13 +29,12 @@ import { buildTendReport, landedCatches } from './tend.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE } from './glass-page.generated.js';
 import { deriveGlassPrs } from './glass-prs.js';
-import { backfillPrWatches } from './pr-watch.js';
 
 /**
  * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
  * observational stance as `man tend`, with room for detail a terminal
- * can't afford. It binds 127.0.0.1 only; /data may idempotently register
- * missing PR watches, but never advances a cursor or consumes attention.
+ * can't afford. It binds 127.0.0.1 only; /data registers no watch, never
+ * advances a cursor, and never consumes attention.
  * Look freely, steer only from the helm — links out are copyable commands,
  * never exec endpoints (localhost HTTP is reachable by any webpage). The
  * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
@@ -208,7 +207,6 @@ function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[
 
 /** One disk pass, everything the page renders. Pure read. */
 export function buildGlassSnapshot(): GlassSnapshot {
-  backfillPrWatches();
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const helms = listHelms().map((h) => ({
     ...h,
