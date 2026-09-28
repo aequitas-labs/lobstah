@@ -42,6 +42,8 @@ import {
   relieveHelm,
   resolveGrounds,
   takeHelm,
+  noticeWakes,
+  wakeFloorMs,
   listWatches,
   watchErrorCell,
   pendingWatchEvents,
@@ -101,7 +103,8 @@ import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
 import { glassLines, glassPort, glassStatus, glassUrl, probeGlass, readGlassState, startDetachedGlass, stopGlass } from './glass-lifecycle.js';
 import { installPet, uninstallPet } from './pet.js';
-import { installService, uninstallService } from './service.js';
+import { installService, restartService, serviceInstalled, uninstallService } from './service.js';
+import { activeDispatchCount, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
 import { addPrWatch, autoRegisterPrWatch, backfillPrWatches, observeDispatchPrWatches, pollSecs, runPrCheck, syncPrWatches } from './pr-watch.js';
@@ -187,6 +190,11 @@ host processes:
   daemon install|uninstall        write + load the launchd agent / systemd user
   pick install|uninstall          unit for this host, with resolved node and
                                   lobstah paths (launchd gets no shell env)
+  daemon restart [--force]        restart the installed service (launchctl
+  pick restart                    kickstart -k / systemctl --user restart);
+                                  the daemon waits for its new heartbeat and
+                                  refuses while dispatches are active
+  daemon status                   installed, running, pid, version, heartbeat
   pet install|uninstall           the desktop pet (macOS): a login LaunchAgent
                                   walks attention questions across the screen
 
@@ -200,7 +208,8 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   page — attention, dispatches, traps with
                                   their lifecycle and mail, notices, merge
                                   view. Read-only; consumes no cursor.
-                                  stop | status | install | uninstall manage it.
+                                  stop | status | install | uninstall |
+                                  restart manage it.
                                   Port: --port, else $LOBSTAH_GLASS_PORT,
                                   else [glass].port (default 4949).
   man wait [--timeout <secs>] [--peek]
@@ -1039,6 +1048,7 @@ async function mainCli(): Promise<void> {
           man: helmLabel(res.ok),
           session: sessionId,
           ...(res.ok.tookFrom ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` } : {}),
+          ...(res.ok.wakesFrom ? { wakesFrom: `${res.ok.wakesFrom} (older notices are not wakes; \`lobstah man tend\` lists them)` } : {}),
           note: res.ok.harness === 'claude'
             ? `arm \`lobstah man wait --session ${sessionId} --timeout 900\` as a background task`
             : 'Stop hook waits at turn end',
@@ -1137,12 +1147,17 @@ async function mainCli(): Promise<void> {
         groundsRepos !== undefined
           ? (n: Notice) => n.repo === undefined || groundsRepos.has(n.repo)
           : undefined;
+      // A helm's cursor starts at its sign-on: older notices and watch
+      // events are consumed without waking. Standing questions and
+      // standing conditions still wake (attentionNow, noticeWakes).
+      const wakes = noticeWakes(callerHelm);
+      const floorMs = wakeFloorMs(callerHelm);
       runDueManWatches();
       const standing = attentionNow(consume, remindMs, Date.now(), matchGrounds);
-      const standingWatches = pendingWatchEvents(consume);
+      const standingWatches = pendingWatchEvents(consume, 'man', Date.now(), floorMs);
       // Consumed as usual, but a session is never woken by its own action's
       // notice — the echo carries no news for its author.
-      const standingNotices = unseenNotices(consume, noticeFilter).filter((n) => n.by === undefined || n.by !== sid);
+      const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
       if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0) {
         if (standing.length > 0) emit(standing);
         if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
@@ -1174,12 +1189,12 @@ async function mainCli(): Promise<void> {
           return;
         }
         runDueManWatches(); // no pick running? this loop is the poller
-        const watched = pendingWatchEvents(true);
+        const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
         if (watched.length > 0) {
           emitWatchAttention(watched, sid);
           return;
         }
-        const freshNotices = unseenNotices(consume, noticeFilter).filter((n) => n.by === undefined || n.by !== sid);
+        const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
         if (freshNotices.length > 0) {
           emitNotices(freshNotices, sid);
           return;
@@ -1309,6 +1324,7 @@ async function mainCli(): Promise<void> {
           const idleNotices = unseenNotices(
             true,
             helm ? (n: Notice) => n.repo === undefined || helm.repos.includes(n.repo) : undefined,
+            noticeWakes(helm),
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
             emit(
@@ -1336,12 +1352,15 @@ async function mainCli(): Promise<void> {
             : undefined;
         const helmNoticeFilter =
           helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
+        // The helm's cursor starts at its sign-on (see `man wait`).
+        const helmWakes = noticeWakes(helm);
+        const helmFloorMs = wakeFloorMs(helm);
         if (!has('--park') && hookParkMode(cfgHaul.helm.park, helm?.harness) === 'arm' && hook?.session_id) {
           // Peeking is level-triggered: a wake standing between watchers must
           // block this stop even if a registration is still heartbeating.
           const evs = attentionNow(false, remindMs, Date.now(), matchHelm);
-          const watched = pendingWatchEvents(false);
-          const notices = unseenNotices(false, helmNoticeFilter).filter((n) => n.by === undefined || n.by !== hook.session_id);
+          const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
+          const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
           if (evs.length || watched.length || notices.length) {
             emit([
               'A lobstah dispatch, watched source, or fleet notice needs attention:',
@@ -1363,9 +1382,9 @@ async function mainCli(): Promise<void> {
         const deadline = Date.now() + timeoutSecs * 1000;
         runDueManWatches();
         let evs = attentionNow(true, remindMs, Date.now(), matchHelm);
-        let watched = pendingWatchEvents(true);
+        let watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
         const notEcho = (n: Notice) => n.by === undefined || n.by !== hook?.session_id;
-        let fleetNotices = unseenNotices(true, helmNoticeFilter).filter(notEcho);
+        let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
         if (evs.length === 0 && watched.length === 0 && fleetNotices.length === 0) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
@@ -1374,8 +1393,8 @@ async function mainCli(): Promise<void> {
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
             runDueManWatches();
-            watched = pendingWatchEvents(true);
-            fleetNotices = unseenNotices(true, helmNoticeFilter).filter(notEcho);
+            watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
+            fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
             if (evs.length > 0 || watched.length > 0 || fleetNotices.length > 0) break;
           }
         }
@@ -1557,6 +1576,37 @@ async function mainCli(): Promise<void> {
         console.log(toonKV({ service: kind, file: res.file, removed: res.removed }));
         break;
       }
+      if (pos[0] === 'status') {
+        if (kind !== 'daemon') throw new UsageError(`pick has no status subverb\n\n${usageFor('pick')!}`);
+        console.log(toonKV(daemonStatus(serviceInstalled('daemon'))));
+        break;
+      }
+      if (pos[0] === 'restart') {
+        const active = kind === 'daemon' ? activeDispatchCount() : 0;
+        const refusal = restartRefusal({ kind, installed: serviceInstalled(kind), active, force: has('--force') });
+        if (refusal) throw new Error(refusal);
+        const oldPid = kind === 'daemon' ? readHeartbeat()?.pid : undefined;
+        const started = Date.now();
+        const res = restartService(kind);
+        if (!res.ok) throw new Error(`\`${res.command}\` failed: ${res.out || 'no output'}`);
+        if (kind === 'pick') {
+          console.log(toonKV({ service: kind, restarted: res.command }));
+          break;
+        }
+        const hb = await awaitHeartbeat(started, oldPid);
+        console.log(
+          toonKV({
+            service: kind,
+            restarted: res.command,
+            ...(active > 0 ? { interrupted: `${active} active dispatch(es) (--force)` } : {}),
+            ...(hb
+              ? { running: `v${hb.version ?? '?'}`, ...(hb.pid !== undefined ? { pid: hb.pid } : {}) }
+              : { heartbeat: `none within ${RESTART_WAIT_MS / 1000}s — see ${path.join(lobstahHome(), 'logs', 'daemon.err')}` }),
+          }),
+        );
+        if (!hb) process.exitCode = 1;
+        break;
+      }
       if (kind === 'daemon') await daemon(Number(opt('--interval') ?? '5000'), console.log, { culler: cliCuller });
       else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;
@@ -1591,6 +1641,41 @@ async function mainCli(): Promise<void> {
         break;
       }
       const port = requestedPort ?? glassPort();
+      if (pos[0] === 'restart') {
+        if (serviceInstalled('glass')) {
+          const before = await probeGlass(port);
+          const res = restartService('glass');
+          if (!res.ok) throw new Error(`\`${res.command}\` failed: ${res.out || 'no output'}`);
+          // Wait for the port to answer again, from a new process.
+          const deadline = Date.now() + RESTART_WAIT_MS;
+          let info = await probeGlass(port);
+          while (Date.now() < deadline && (!info || (before?.pid !== undefined && info.pid === before.pid))) {
+            await new Promise((r) => setTimeout(r, 250));
+            info = await probeGlass(port);
+          }
+          const fresh = info && !(before?.pid !== undefined && info.pid === before.pid);
+          console.log(
+            toonKV({
+              service: 'glass',
+              restarted: res.command,
+              ...(fresh ? { glass: glassUrl(port), running: `v${info!.version}` } : { glass: `${glassUrl(port)} not answering within ${RESTART_WAIT_MS / 1000}s` }),
+            }),
+          );
+          if (!fresh) process.exitCode = 1;
+          break;
+        }
+        const detached = readGlassState();
+        if (!detached) {
+          throw new Error(
+            `${restartRefusal({ kind: 'glass', installed: false, active: 0, force: false })}, or start a detached glass with \`lobstah glass --detach\``,
+          );
+        }
+        // A detached glass has no service manager: stop it, then start it again on its port.
+        await stopGlass();
+        const { info } = await startDetachedGlass(detached.port);
+        console.log(toonKV({ glass: glassUrl(detached.port), restarted: 'detached (stop, then --detach)', running: `v${info.version}` }));
+        break;
+      }
       if (pos[0] === 'install') {
         const res = installService('glass', port);
         console.log(toonKV({ service: 'glass', ...res }));

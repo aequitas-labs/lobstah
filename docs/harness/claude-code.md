@@ -22,9 +22,9 @@ In Claude Code:
 /plugin install lobstah@lobstah
 ```
 
-Plugin versions track the CLI: plugin 0.5.x goes with `lobstah` 0.5.x.
-When `npm i -g lobstah` moves to a new minor version, run
-`/plugin update lobstah@lobstah`. `lobstah doctor` shows a `plugin claude`
+Plugin versions track the CLI: plugin 0.5.10 goes with `lobstah` 0.5.10.
+After every `npm i -g lobstah`, run `/plugin update lobstah@lobstah`. A
+patch release can change a skill too. `lobstah doctor` shows a `plugin claude`
 row, and the session-start brief says when the plugin is behind.
 
 ## What the plugin adds

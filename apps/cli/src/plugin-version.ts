@@ -71,13 +71,6 @@ export function installedClaudePlugin(opts: Env = {}): InstalledPlugin | undefin
   return version ? { harness: 'claude', version, root: entry.installPath } : undefined;
 }
 
-const semverKey = (v: string): number[] => v.split(/[.-]/).slice(0, 3).map((n) => Number(n) || 0);
-const newer = (a: string, b: string): number => {
-  const [x, y] = [semverKey(a), semverKey(b)];
-  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return (x[i] ?? 0) - (y[i] ?? 0);
-  return 0;
-};
-
 /** The Codex plugin the harness loads, or undefined when it isn't installed and enabled. */
 export function installedCodexPlugin(opts: Env = {}): InstalledPlugin | undefined {
   const env = opts.env ?? process.env;
@@ -98,7 +91,7 @@ export function installedCodexPlugin(opts: Env = {}): InstalledPlugin | undefine
     return undefined;
   }
   // Several cached versions can sit side by side; the newest is the live one.
-  for (const d of dirs.sort(newer).reverse()) {
+  for (const d of dirs.sort(compareVersions).reverse()) {
     const root = path.join(cache, d);
     const version = manifestVersion(path.join(root, '.codex-plugin', 'plugin.json'));
     if (version) return { harness: 'codex', version, root };
@@ -106,21 +99,64 @@ export function installedCodexPlugin(opts: Env = {}): InstalledPlugin | undefine
   return undefined;
 }
 
-/** major.minor — patch releases never change what a skill describes. */
-const minor = (v: string): string => semverKey(v).slice(0, 2).join('.');
+interface Semver {
+  core: [number, number, number];
+  pre: string[];
+}
+
+const parseSemver = (v: string): Semver => {
+  const [main = '', ...rest] = v.trim().replace(/^v/, '').split('+')[0]!.split('-');
+  const n = main.split('.').map((x) => Number(x) || 0);
+  const pre = rest.join('-');
+  return { core: [n[0] ?? 0, n[1] ?? 0, n[2] ?? 0], pre: pre ? pre.split('.') : [] };
+};
+
+/** Semver precedence: negative when a < b, 0 when equal, positive when a > b. */
+export function compareVersions(a: string, b: string): number {
+  const [x, y] = [parseSemver(a), parseSemver(b)];
+  for (let i = 0; i < 3; i++) if (x.core[i] !== y.core[i]) return x.core[i]! - y.core[i]!;
+  // A prerelease sorts before its release.
+  if (!x.pre.length || !y.pre.length) return y.pre.length - x.pre.length;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const [p, q] = [x.pre[i], y.pre[i]];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    if (p === q) continue;
+    const [np, nq] = [/^\d+$/.test(p), /^\d+$/.test(q)];
+    if (np && nq) return Number(p) - Number(q);
+    if (np !== nq) return np ? -1 : 1;
+    return p < q ? -1 : 1;
+  }
+  return 0;
+}
 
 export type Drift = 'match' | 'behind' | 'ahead';
+/** How far apart two unequal versions are: the highest part that differs. */
+export type Gap = 'major' | 'minor' | 'patch';
 
+/**
+ * Compares the full version. Every release can change what a skill
+ * describes (0.5.9 changed the man skill), so a patch gap is drift too.
+ */
 export function pluginDrift(pluginVersion: string, cliVersion: string): Drift {
-  if (minor(pluginVersion) === minor(cliVersion)) return 'match';
-  return newer(pluginVersion, cliVersion) < 0 ? 'behind' : 'ahead';
+  const c = compareVersions(pluginVersion, cliVersion);
+  return c === 0 ? 'match' : c < 0 ? 'behind' : 'ahead';
+}
+
+/** The highest version part that differs; undefined for equal versions. */
+export function versionGap(a: string, b: string): Gap | undefined {
+  const [x, y] = [parseSemver(a).core, parseSemver(b).core];
+  if (x[0] !== y[0]) return 'major';
+  if (x[1] !== y[1]) return 'minor';
+  return compareVersions(a, b) === 0 ? undefined : 'patch';
 }
 
 /**
  * The SessionStart brief's one line, only when the plugin the running
  * harness loaded is behind the CLI; undefined otherwise (nothing installed,
- * match, or ahead). The hook's own environment says which harness runs it:
- * CLAUDE* → Claude Code's plugin, only CODEX* → Codex's. Never throws — a
+ * equal, or ahead). A patch gap counts. The hook's own environment says
+ * which harness runs it: CLAUDE* → Claude Code's plugin, only CODEX* →
+ * Codex's. Never throws — a
  * hook must never fail a session start.
  */
 export function pluginBehindLine(cliVersion: string, opts: Env = {}): string | undefined {

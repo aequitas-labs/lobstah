@@ -22,8 +22,8 @@ codex plugin add lobstah@lobstah
 
 These are the commands verified from a Codex session (see the
 [appendix](#appendix-verified-from-a-codex-session)). Plugin versions track
-the CLI: plugin 0.5.x goes with `lobstah` 0.5.x. When `npm i -g lobstah`
-moves to a new minor version, run
+the CLI: plugin 0.5.10 goes with `lobstah` 0.5.10. After every
+`npm i -g lobstah` (a patch release can change a skill too), run
 `codex plugin marketplace upgrade lobstah && codex plugin add lobstah@lobstah`.
 `lobstah doctor` shows a `plugin codex` row, and the session-start brief
 says when the plugin is behind.

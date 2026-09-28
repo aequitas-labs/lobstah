@@ -50,4 +50,14 @@ describe('helm notices', () => {
     const theirs = unseenNotices(true, (n) => n.repo === 'b');
     expect(theirs.map((n) => n.text)).toEqual(['theirs']);
   });
+
+  it('an owned notice the wake predicate rejects is consumed without waking, and never stalls the cursor', () => {
+    postNotice({ kind: 'trap-stowed', text: 'old', repo: 'a' });
+    postNotice({ kind: 'trap-stowed', text: 'new', repo: 'a' });
+    const mine = (n: { repo?: string }) => n.repo === 'a';
+    const wakes = (n: { text: string }) => n.text !== 'old';
+    expect(unseenNotices(true, mine, wakes).map((n) => n.text)).toEqual(['new']);
+    expect(unseenNotices(true, mine, wakes)).toEqual([]);
+    expect(listNotices().map((n) => n.text)).toEqual(['old', 'new']); // still listed
+  });
 });

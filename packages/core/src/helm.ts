@@ -1,8 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from './config.js';
+import { readHold } from './disk.js';
+import type { Notice } from './notices.js';
 import { lobstahHome } from './paths.js';
 import type { WindowRef } from './window.js';
+import { listWatches } from './watch.js';
 
 /**
  * The helm: one orchestrator session per grounds. `lobstah man helm` writes
@@ -25,6 +28,14 @@ export interface HelmRegistration {
   label?: string;
   /** Where the session's window lives — a companion app's focus target. */
   window?: WindowRef;
+  /**
+   * The wake cursor's start. Notices and watch events recorded before it are
+   * not wakes for this helm; `man tend` and the glass still list them.
+   * Set to the sign-on time when the grounds had no live helm; inherited on
+   * a `--take` from a live helm and on a re-sign by the same session.
+   * Absent on registrations written before it existed: no floor.
+   */
+  wakesFrom?: string;
   /** Set when this registration displaced a live predecessor via --take. */
   tookFrom?: { sessionId: string; at: string };
 }
@@ -165,12 +176,18 @@ export function takeHelm(opts: {
   }
   const iso = new Date(now).toISOString();
   const same = existing?.sessionId === opts.sessionId;
+  const live = existing !== undefined && now - (Date.parse(existing.heartbeatAt) || 0) <= opts.ttlMs;
   const reg: HelmRegistration = {
     sessionId: opts.sessionId,
     grounds: opts.grounds.name,
     repos: opts.grounds.repos,
     signedOnAt: same ? existing.signedOnAt : iso,
     heartbeatAt: iso,
+    // A new helm on empty grounds starts its cursor now: a notice delivered
+    // to nobody while no helm was signed on is not news. A take from a live
+    // helm, or the same session signing on again, keeps the cursor, so
+    // nothing in flight is dropped.
+    wakesFrom: same || live ? existing!.wakesFrom : iso,
     // Identity refreshes on every sign-on; a re-sign without one keeps what
     // the registration already knows.
     harness: opts.identity?.harness ?? (same ? existing.harness : undefined),
@@ -185,6 +202,40 @@ export function takeHelm(opts: {
   };
   atomicWrite(helmPath(opts.grounds.name), JSON.stringify(reg, null, 2));
   return { ok: reg };
+}
+
+/** The helm's wake floor in epoch ms; 0 when it has none. */
+export function wakeFloorMs(h: HelmRegistration | undefined): number {
+  return h?.wakesFrom ? Date.parse(h.wakesFrom) || 0 : 0;
+}
+
+/**
+ * True while the condition a notice announced still stands: a free-space
+ * hold on queued dispatches, or a watch still failing. Such a notice wakes a
+ * helm even when it predates the helm's sign-on, because the condition is
+ * current, not old news.
+ */
+export function noticeStands(n: Notice): boolean {
+  switch (n.kind) {
+    case 'disk-held':
+      return readHold() !== undefined;
+    case 'watch-failing':
+    case 'watch-held':
+      return listWatches().some(
+        (w) =>
+          (w.key === n.refId || w.owner === `dispatch:${n.refId}`) &&
+          (n.kind === 'watch-failing' ? w.failingNoticed === true : true),
+      );
+    default:
+      return false;
+  }
+}
+
+/** The wake predicate for a helm: notices from its sign-on on, plus standing conditions. */
+export function noticeWakes(h: HelmRegistration | undefined): ((n: Notice) => boolean) | undefined {
+  const floor = wakeFloorMs(h);
+  if (floor === 0) return undefined;
+  return (n) => (Date.parse(n.at) || 0) >= floor || noticeStands(n);
 }
 
 /** Step down from every helm this session holds; returns the grounds names. */

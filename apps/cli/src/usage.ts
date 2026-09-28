@@ -88,10 +88,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--quiet': {} } },
-  daemon: { subverbs: ['install', 'uninstall'], flags: { '--interval': { value: '<ms>' } } },
-  pick: { subverbs: ['once', 'install', 'uninstall'], flags: {} },
+  daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} } },
+  pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
   doctor: { flags: {} },
-  glass: { subverbs: ['stop', 'status', 'install', 'uninstall'], flags: { '--port': { value: '<n>' }, '--detach': {} } },
+  glass: { subverbs: ['stop', 'status', 'install', 'uninstall', 'restart'], flags: { '--port': { value: '<n>' }, '--detach': {} } },
   pet: { subverbs: ['install', 'uninstall'], flags: { '--binary': { value: '<path>' } } },
   repos: { subverbs: ['add'], flags: { '--pickup': {}, '--key': { value: '<k>' } }, positionals: '[<path>]' },
   init: { flags: { '--scan': {}, '--pickup': {} }, positionals: '[<dir>...]' },
@@ -183,9 +183,11 @@ Stowing another session's trap is steering — with a claimed helm, only the
 helm may (pass its --session). The trap's own worktree or session is always
 free to stow itself.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
-writes + loads a launchd agent / systemd user unit.`,
+writes + loads a launchd agent / systemd user unit; restart restarts it and
+waits for the new heartbeat (refused while dispatches are active, unless
+--force); status shows installed, running, pid, version, heartbeat age.`,
   pick: `Tracker loops: poll Linear/GitHub, dispatch assigned work, report back,
-reconcile, merge.`,
+reconcile, merge. install, uninstall, and restart manage its user service.`,
   doctor: `Check binaries, config, repos, harnesses, and the daemon heartbeat; exit 1
 on failures.`,
   pet: `The desktop pet (macOS): attention questions crawl across the screen as
@@ -197,7 +199,8 @@ Quitting the pet sticks until next login; uninstall removes the agent.`,
 traps with lifecycle and mail, notices, merge view; filters and a
 table/cards toggle. Read-only and binds 127.0.0.1 only: looking through it
 consumes no cursor and steers nothing. --detach starts it in the background;
-stop and status manage that process. install and uninstall manage a user service.`,
+stop and status manage that process. install and uninstall manage a user service.
+restart restarts the service, or a detached glass (stop, then --detach).`,
   repos: `List configured repos, or detect one and append its [repos.*] block.`,
   init: `Create ~/.lobstah + config; --scan appends a [repos.*] block per repo found
 under the given directories.`,

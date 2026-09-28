@@ -21,7 +21,7 @@ import {
 import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
 import { planPressureCull } from './cull.js';
-import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND } from './plugin-version.js';
+import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
 
@@ -47,7 +47,9 @@ function git(repoPath: string, ...args: string[]): { ok: boolean; out: string } 
  */
 /**
  * One row per harness plugin: the version the harness actually loads versus
- * the CLI's, compared on major.minor (plugin versions track the CLI).
+ * the CLI's, compared on the full version (plugin versions track the CLI).
+ * Any gap is a warning: a patch gap never fails the run, and neither does a
+ * minor or major gap.
  */
 export function pluginRows(cliVersion: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): DoctorRow[] {
   const rows: DoctorRow[] = [];
@@ -68,13 +70,14 @@ export function pluginRows(cliVersion: string, opts: { env?: NodeJS.ProcessEnv; 
       continue;
     }
     const drift = pluginDrift(p.version, cliVersion);
+    const gap = versionGap(p.version, cliVersion);
     rows.push(
       drift === 'match'
         ? { check, status: 'ok', detail: `v${p.version} matches CLI v${cliVersion} (${p.root})` }
         : {
             check,
             status: 'warn',
-            detail: `plugin v${p.version} is ${drift} CLI v${cliVersion} — ${drift === 'behind' ? UPDATE_COMMAND[harness] : 'update the CLI: npm i -g lobstah'} (${p.root})`,
+            detail: `plugin v${p.version} is ${gap ? `a ${gap} version ` : ''}${drift === 'ahead' ? 'ahead of' : drift} CLI v${cliVersion} — ${drift === 'behind' ? UPDATE_COMMAND[harness] : 'update the CLI: npm i -g lobstah'} (${p.root})`,
           },
     );
   }

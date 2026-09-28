@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { laneDirs, readEvidence, readStatusLog, toonKV, toonTable, TERMINAL_VERBS } from '@lobstah/core';
+import { laneDirs, readEvidence, readHelm, wakeFloorMs, readStatusLog, toonKV, toonTable, TERMINAL_VERBS } from '@lobstah/core';
 import type { Descriptor, Lane } from '@lobstah/core';
 import { buildTendReport, repoOf } from './tend.js';
 import type { TendReport } from './tend.js';
@@ -65,7 +65,9 @@ export interface DigestOptions {
 export function buildDigest(opts: DigestOptions = {}): Digest {
   const now = opts.now ?? Date.now();
   const name = opts.cursor ?? 'fleet';
-  const sinceMs = reportedThroughMs(name, now);
+  // A helm's report starts no earlier than its wake cursor: a new helm on
+  // empty grounds is not handed old landings as news.
+  const sinceMs = Math.max(reportedThroughMs(name, now), wakeFloorMs(readHelm(name)));
   const since = new Date(sinceMs).toISOString();
   const inGrounds = (repo: string | undefined): boolean =>
     opts.repos === undefined || repo === undefined || opts.repos.has(repo);

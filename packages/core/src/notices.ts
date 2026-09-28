@@ -116,8 +116,15 @@ export function listNotices(limit = 20): Notice[] {
  * Notices past the seen-cursor. `consume` advances the cursor over what is
  * returned; a filter leaves non-matching notices standing for their owner
  * (per-grounds consumption — one helm never eats another's notices).
+ * `wakes` narrows what is returned among the owned notices: an owned notice
+ * it rejects (e.g. one older than the helm's sign-on) is consumed without
+ * waking anyone.
  */
-export function unseenNotices(consume: boolean, filter?: (n: Notice) => boolean): Notice[] {
+export function unseenNotices(
+  consume: boolean,
+  filter?: (n: Notice) => boolean,
+  wakes?: (n: Notice) => boolean,
+): Notice[] {
   let seen = '';
   try {
     seen = fs.readFileSync(cursorFile(), 'utf8').trim();
@@ -125,8 +132,8 @@ export function unseenNotices(consume: boolean, filter?: (n: Notice) => boolean)
     // never consumed
   }
   const fresh = listNotices(200).filter((n) => n.seq > seen);
-  const matched = filter ? fresh.filter(filter) : fresh;
-  if (consume && matched.length > 0) {
+  const owned = filter ? fresh.filter(filter) : fresh;
+  if (consume && owned.length > 0) {
     if (!filter) {
       fs.writeFileSync(cursorFile(), fresh.at(-1)!.seq);
     } else {
@@ -140,5 +147,5 @@ export function unseenNotices(consume: boolean, filter?: (n: Notice) => boolean)
       if (through > seen) fs.writeFileSync(cursorFile(), through);
     }
   }
-  return matched;
+  return wakes ? owned.filter(wakes) : owned;
 }

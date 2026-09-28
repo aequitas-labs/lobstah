@@ -370,18 +370,21 @@ export function pendingWatchEvents(
   consume: boolean,
   owner: 'man' | 'dispatch' = 'man',
   now = Date.now(),
+  /** Events recorded before this (a helm's sign-on) are consumed without waking. */
+  sinceMs = 0,
 ): WatchAttention[] {
   const out: WatchAttention[] = [];
   for (const w of listWatches()) {
     const isMan = w.owner === 'man';
     if ((owner === 'man') !== isMan) continue;
     const events = readWatchEvents(w.key);
-    const fresh = events.slice(w.seen);
-    if (fresh.length === 0) {
+    const unseen = events.slice(w.seen);
+    if (unseen.length === 0) {
       if (w.done && consume) removeWatch(w.key);
       continue;
     }
-    out.push({ watch: w, events: fresh });
+    const fresh = sinceMs > 0 ? unseen.filter((e) => (Date.parse(e.at) || 0) >= sinceMs) : unseen;
+    if (fresh.length > 0) out.push({ watch: w, events: fresh });
     if (consume) {
       w.seen = events.length;
       w.seenAt = now;
