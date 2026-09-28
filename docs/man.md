@@ -127,6 +127,33 @@ opts out). What you get depends on what runs:
 `gh` must be on PATH and authenticated; if it isn't, the done report still
 succeeds and the watch's check records `lastError`.
 
+Which commands register a watch. Only these write points register one:
+
+- `lobstah report <id> done --pr <url>` registers the watch for the PR the
+  worker just opened.
+- `lobstah watch add <key>` registers the watch you name.
+- `lobstah watch backfill --apply` registers watches for PRs in old dispatch
+  history. Without `--apply` it only lists them. Nothing runs it for you.
+
+Read commands never register a watch: `catch`, `man tend`, `status`, `ls`,
+`prs`, `prs sync`, `attention`, and the glass. They read PR records and
+watches that already exist. `prs sync` refreshes existing PR watches only.
+
+The first check of a new watch is a baseline:
+
+- An open PR: checks that already failed show in the PR record and in tend,
+  but they fork no CI-fix dispatch. Only a check that fails after the
+  baseline, or a failed check on a new head sha, forks one.
+- A merged or closed PR: the check records `MERGED` or `CLOSED` in the PR
+  record and retires the watch. It forks nothing and raises no attention. A
+  `pr-merged` / `pr-closed` notice is posted once only when the PR ended in
+  the last 24 hours.
+
+One watch cycle forks at most `[watch].maxForksPerCycle` continuations
+(default 3). Watches over the cap are held and listed as `held` in
+`man tend` and `lobstah watch`. `lobstah watch release <key>` (or `--all`)
+lets them fork again.
+
 Watching a PR nobody dispatched — `lobstah watch add pr:<owner>/<repo>#<n>`
 with no `--for` — is how a helm follows a human's PR, or one whose
 dispatch chain was culled. Every observation lands in a PR record keyed by

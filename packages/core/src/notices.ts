@@ -20,7 +20,8 @@ export type NoticeKind =
   | 'bait-orphaned'
   | 'message-bounced'
   | 'pr-merged'
-  | 'pr-closed';
+  | 'pr-closed'
+  | 'watch-held';
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */

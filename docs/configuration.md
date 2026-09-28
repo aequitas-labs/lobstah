@@ -83,6 +83,12 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 |---|---|---|
 | `port` | `4949` | Localhost port for the glass. `LOBSTAH_GLASS_PORT` takes precedence. |
 
+## `[watch]` — watch delivery
+
+| Key | Default | Meaning |
+|---|---|---|
+| `maxForksPerCycle` | `3` | The most continuation (CI-fix) dispatches one watch cycle of `lobstah pick` may fork. Each watch over the cap is held: its events stay buffered, `man tend` and `lobstah watch` list it as `held`, one `watch-held` notice names the held watches, and it forks nothing until `lobstah watch release <key>` (or `--all`). |
+
 ## `[grounds.*]` — helm territories
 
 One helm per grounds; a repo belongs to at most one grounds (`man helm`

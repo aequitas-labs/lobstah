@@ -34,7 +34,6 @@ import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { deriveGlassPrs } from './glass-prs.js';
-import { backfillPrWatches } from './pr-watch.js';
 import type { GlassStack } from './glass-prs.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
@@ -75,6 +74,8 @@ export interface TendWatch {
   owner: string;
   cursor: string;
   pendingEvents: number;
+  /** Set when the fork cap held this watch; its events wait for `lobstah watch release`. */
+  heldAt?: string;
   lastSummary?: string;
   lastAt?: string;
   error?: string;
@@ -451,7 +452,6 @@ function bucketOf(uuid: string): TendDispatch['bucket'] | undefined {
 }
 
 export function buildTendReport(now = Date.now()): TendReport {
-  backfillPrWatches();
   const cfg = loadConfig();
 
   const heartbeat = readJson<{ heartbeat?: string }>(executorPath())?.heartbeat;
@@ -513,6 +513,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       owner: w.owner,
       cursor: w.cursor,
       pendingEvents: pending.length,
+      ...(w.heldAt ? { heldAt: w.heldAt } : {}),
       lastSummary: last?.summary,
       lastAt: last?.at,
       error: w.lastError,
@@ -747,10 +748,11 @@ export function renderTend(r: TendReport): string {
           key: w.key,
           owner: w.owner,
           pending: w.pendingEvents,
+          held: w.heldAt ? 'held' : '',
           last: w.lastSummary ?? '',
           error: w.error ?? '',
         })),
-        ['key', 'owner', 'pending', 'last', 'error'],
+        ['key', 'owner', 'pending', 'held', 'last', 'error'],
       ),
     );
   }

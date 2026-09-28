@@ -167,18 +167,23 @@ previous observation that the cursor carries, plus — while the PR is open —
 one read-only `gh api graphql` query for `reviewThreads { isResolved }`,
 which `gh pr view --json` cannot return (no bodies are requested). `report <id> done --pr
 <url>` registers the same watch owned by `dispatch:<id>` (idempotent;
-`--no-watch` opts out). **Owner:** `packages/core/src/pr.ts` (derivation,
-badge) and `apps/cli/src/pr-watch.ts` (check, registration, evidence).
+`--no-watch` opts out). `lobstah watch backfill --apply` registers watches
+for PRs in old dispatch history; it is a dry run without `--apply`. No other
+path registers a PR watch: read commands (`catch`, `man tend`, `status`,
+`ls`, `prs`, the glass) never do. **Owner:** `packages/core/src/pr.ts`
+(derivation, badge) and `apps/cli/src/pr-watch.ts` (check, registration,
+evidence).
 
 | Word | Meaning |
 | ---- | ------- |
 | `pr:` key | `pr:<owner>/<repo>#<n>` — one watch per PR. |
 | cursor | The last observation (head sha, per-check conclusions, review decision, merge state, draft, state), base64url-encoded. An unchanged PR re-emits nothing and returns the same cursor. A new head sha resets check memory. |
-| `check-completed` | A check reached a conclusion on the current head (`name`, `conclusion`, `detailsUrl`). Failing → work; passing → evidence only. |
+| first observation | Cursor `0`. It is the baseline. An open PR emits no `check-completed` events: a check that already failed shows in the PR record and tend but forks nothing. A merged or closed PR emits nothing, records its state, and the watch retires; the notice is posted only when the PR ended in the last 24 hours. |
+| `check-completed` | A check reached a conclusion on the current head after the baseline (`name`, `conclusion`, `detailsUrl`). Failing → work; passing → evidence only. Never emitted for a merged or closed PR. |
 | `review-decision` | The review decision changed (`value`). Work, unless `[pickup.github]` covers the repo — then pickup's feedback rule owns it ([pickup.md](pickup.md), "Feedback pickup"). |
 | `merge-state` | `mergeStateStatus` changed (`value`). Evidence only. |
 | `draft` | Draft flipped (`value`). Evidence only. |
-| `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. |
+| `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. Emitted only on an open → terminal change, never on the first observation. |
 | evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. `review.changesRequested` comes from `reviewDecision` or any reviewer's latest decisive review; `unresolvedThreads` from the GraphQL query, omitted for an observation where that query failed. Comment bodies are never stored. The object is merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show: `merged`, `closed`, `draft`, `conflicts` (`DIRTY`, filled GitHub red, ahead of checks and review), `checks n/m failed`, `changes requested`, `n unresolved`, `checks n/m` (pending), `behind` (`BEHIND`, grey; not an attention kind), `review`, `green` (only for a mergeable merge state), `blocked`, `merge unknown`. |
 | PR record | `~/.lobstah/prs/<owner>__<repo>__<n>.json` — the PR's latest observation keyed by the PR, not by a dispatch: the evidence `pr` object plus `key`, `repo` (`<owner>/<repo>`), and `dispatches` (the ids whose watch observed it; empty for a human's or a culled PR). **Owner:** `packages/core/src/prs.ts` (`upsertPr`, `readPrs`); the one writer is the preset's observation path (`observePr`), on every observation, man-owned or dispatch-owned — a dispatch-owned one also stamps that dispatch's evidence, which stays the per-dispatch view. Tend's `pr:*` kinds and `pr:ready` stack suppression, the glass PRs tab and stacks, the merged/closed notice, and PR acks read records first and fall back to dispatch evidence only for a PR with no record yet. `cull` removes records merged or closed longer than its window, never open ones. |
 
@@ -187,7 +192,14 @@ events (a failing check; a review decision pickup doesn't own), so the
 `owner` row is unchanged: its events always fork. The rest is evidence.
 Merged and closed reach the helm as a `pr-merged` / `pr-closed` notice,
 posted once by whichever process first records the open → terminal
-transition on the **PR record** — not by event routing.
+transition on the **PR record** — not by event routing. A PR whose first
+record is already terminal gets the notice only when it ended in the last
+24 hours.
+
+One pick watch cycle forks at most `[watch].maxForksPerCycle`
+continuations (default 3). Each watch over the cap is held (`heldAt` on the
+watch): tend and `lobstah watch` list it as `held`, a `watch-held` notice
+names it, and it forks nothing until `lobstah watch release`.
 
 A man-owned PR watch (no `--for`) delivers as attention only what needs a
 human (`manEvents`, beside `workEvents` in `apps/cli/src/pr-watch.ts`): a

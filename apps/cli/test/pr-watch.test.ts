@@ -102,8 +102,9 @@ describe('evidence and routing', () => {
   });
 
   it('a dispatch-owned watch emits only work: failed checks, and review decisions unless pickup owns review feedback', () => {
-    const { events } = derivePrEvents(ref, view('MERGED'), '0');
-    expect(events.map((e) => e.kind).sort()).toEqual(['check-completed', 'merged', 'review-decision']);
+    const baseline = derivePrEvents(ref, { ...view('OPEN'), reviewDecision: '', statusCheckRollup: [] }, '0');
+    const { events } = derivePrEvents(ref, view('OPEN'), baseline.cursor);
+    expect(events.map((e) => e.kind).sort()).toEqual(['check-completed', 'review-decision']);
     expect(workEvents(ref, events, false).map((e) => e.kind)).toEqual(['check-completed', 'review-decision']);
     expect(workEvents(ref, events, true).map((e) => e.kind)).toEqual(['check-completed']);
   });

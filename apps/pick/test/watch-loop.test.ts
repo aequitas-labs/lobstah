@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, ensureLayout, laneDirs, listWatches, readWatch, signOnTrap } from '@lobstah/core';
+import { addWatch, appendStatus, ensureLayout, laneDirs, listNotices, listWatches, readWatch, releaseHeldWatches, signOnTrap } from '@lobstah/core';
 import type { Descriptor } from '@lobstah/core';
 import { watchLoop } from '../src/loops/watch.js';
 import type { ReportNotification } from '../src/loops/report.js';
@@ -144,5 +144,49 @@ describe('watchLoop', () => {
     await watchLoop(45, () => {});
     expect(queuedDescriptors()).toHaveLength(0);
     expect(listWatches()).toHaveLength(0);
+  });
+
+  it('forks at most [watch].maxForksPerCycle continuations per cycle and holds the rest until released', async () => {
+    const keys: string[] = [];
+    for (let n = 1; n <= 5; n++) {
+      const owner = `3333333${n}-3333-3333-3333-333333333333`;
+      makeOwnerDispatch(owner);
+      appendStatus(owner, 'work', 'done', 'shipped');
+      const key = `ci:${n}`;
+      keys.push(key);
+      addWatch(key, eventCheck([{ seq: 1, summary: `check failed ${n}` }], `c${n}`), { owner: `dispatch:${owner}` });
+    }
+    const logs: string[] = [];
+    await watchLoop(45, (m) => logs.push(m));
+    expect(queuedDescriptors()).toHaveLength(3);
+    const held = listWatches().filter((w) => w.heldAt).map((w) => w.key).sort();
+    expect(held).toHaveLength(2);
+    expect(logs.some((l) => l.includes('fork cap 3 reached'))).toBe(true);
+    const notices = listNotices(50).filter((n) => n.kind === 'watch-held');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.text).toContain(held[0]!);
+
+    // Held watches stay held across cycles: nothing more forks, no second notice.
+    await watchLoop(45, () => {});
+    expect(queuedDescriptors()).toHaveLength(3);
+    expect(listNotices(50).filter((n) => n.kind === 'watch-held')).toHaveLength(1);
+
+    // Release lets them fork on the next cycle.
+    expect(releaseHeldWatches().sort()).toEqual(held);
+    await watchLoop(45, () => {});
+    expect(queuedDescriptors()).toHaveLength(5);
+    expect(listWatches().filter((w) => w.heldAt)).toEqual([]);
+  });
+
+  it('reads the fork cap from [watch].maxForksPerCycle', async () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nmaxForksPerCycle = 1\n');
+    for (let n = 1; n <= 3; n++) {
+      const owner = `4444444${n}-4444-4444-4444-444444444444`;
+      makeOwnerDispatch(owner);
+      addWatch(`ci:${n}`, eventCheck([{ seq: 1, summary: `fail ${n}` }], `d${n}`), { owner: `dispatch:${owner}` });
+    }
+    await watchLoop(45, () => {});
+    expect(queuedDescriptors()).toHaveLength(1);
+    expect(listWatches().filter((w) => w.heldAt)).toHaveLength(2);
   });
 });

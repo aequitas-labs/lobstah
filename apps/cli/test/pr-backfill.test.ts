@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { addWatch, appendStatus, ensureLayout, laneDirs, mergeEvidence, readPr, readWatch, upsertPr } from '@lobstah/core';
+import { addWatch, appendStatus, ensureLayout, laneDirs, listWatches, mergeEvidence, pendingIds, readPr, readWatch, upsertPr } from '@lobstah/core';
 import type { PrEvidence } from '@lobstah/core';
 import { backfillPrWatches } from '../src/pr-watch.js';
 import { buildTendReport } from '../src/tend.js';
@@ -40,16 +40,61 @@ const dispatch = (id: string, followUp?: string) => {
   appendStatus(id, 'work', 'done', 'shipped');
 };
 
-describe('PR watch backfill', () => {
+const files = (dir: string): string[] => {
+  const d = path.join(home, dir);
+  return fs.existsSync(d) ? fs.readdirSync(d) : [];
+};
+
+describe('read commands never register PR watches', () => {
+  it('catch, man tend, the glass snapshot, status, ls, and prs over 20 done dispatches with PR evidence create no watch and no dispatch', () => {
+    for (let n = 1; n <= 20; n++) {
+      const id = `dispatch-${String(n).padStart(2, '0')}`;
+      dispatch(id);
+      const failed = { total: 2, passed: 1, failed: 1, pending: 0 };
+      mergeEvidence(id, 'work', { prUrl: url(n), pr: pr(n, { state: n % 2 ? 'MERGED' : 'OPEN', checks: failed }) });
+    }
+    const watchersBefore = files('watchers');
+    const queueBefore = pendingIds('work').length;
+    for (const args of [['catch', 'dispatch-01'], ['catch', 'dispatch-02'], ['man', 'tend'], ['status'], ['ls'], ['ls', '--all'], ['prs']]) {
+      const res = lobstah(...args);
+      expect(res.status, `${args.join(' ')}: ${res.stderr}`).toBe(0);
+    }
+    buildTendReport();
+    buildGlassSnapshot();
+    expect(files('watches')).toEqual([]);
+    expect(listWatches()).toEqual([]);
+    expect(files('watchers')).toEqual(watchersBefore);
+    expect(pendingIds('work').length).toBe(queueBefore);
+    expect(pendingIds('chore')).toEqual([]);
+  });
+});
+
+describe('watch backfill (explicit migration)', () => {
+  it('is a dry run by default and registers only with --apply', () => {
+    dispatch('dispatch-a');
+    mergeEvidence('dispatch-a', 'work', { prUrl: url(1), pr: pr(1) });
+    const dry = lobstah('watch', 'backfill');
+    expect(dry.status).toBe(0);
+    expect(dry.stdout).toContain(key(1));
+    expect(dry.stdout).toContain('dry run');
+    expect(readWatch(key(1))).toBeUndefined();
+    const applied = lobstah('watch', 'backfill', '--apply');
+    expect(applied.status).toBe(0);
+    expect(readWatch(key(1))?.owner).toBe('dispatch:dispatch-a');
+    expect(readWatch(key(1))?.cursor).toBe('0');
+  });
+
   it('registers an open evidence PR once, skips terminal evidence, and leaves existing watches alone', () => {
     dispatch('dispatch-a');
     mergeEvidence('dispatch-a', 'work', { prUrl: url(1), pr: pr(1) });
     dispatch('dispatch-b');
     mergeEvidence('dispatch-b', 'work', { prUrl: url(2), pr: pr(2, { state: 'MERGED' }) });
-    expect(backfillPrWatches()).toBe(1);
+    expect(backfillPrWatches()).toEqual([{ key: key(1), action: 'register', owner: 'dispatch:dispatch-a' }]);
+    expect(readWatch(key(1))).toBeUndefined(); // dry run
+    expect(backfillPrWatches({ apply: true })).toHaveLength(1);
     expect(readWatch(key(1))?.owner).toBe('dispatch:dispatch-a');
     expect(readWatch(key(2))).toBeUndefined();
-    expect(backfillPrWatches()).toBe(0);
+    expect(backfillPrWatches({ apply: true })).toEqual([]);
   });
 
   it('chooses the latest on-disk chain member, or man when the chain is gone', () => {
@@ -58,7 +103,7 @@ describe('PR watch backfill', () => {
     mergeEvidence('dispatch-a', 'work', { prUrl: url(3), pr: pr(3) });
     upsertPr(pr(3), 'dispatch-a');
     upsertPr(pr(4), 'culled-dispatch');
-    expect(backfillPrWatches()).toBe(2);
+    expect(backfillPrWatches({ apply: true })).toHaveLength(2);
     expect(readWatch(key(3))?.owner).toBe('dispatch:dispatch-z');
     expect(readWatch(key(4))?.owner).toBe('man');
   });
@@ -68,28 +113,20 @@ describe('PR watch backfill', () => {
     upsertPr(pr(3), 'culled-dispatch');
     upsertPr(pr(4, { state: 'CLOSED' }));
     addWatch(key(4), 'echo custom');
-    expect(backfillPrWatches()).toBe(1);
+    const rows = backfillPrWatches({ apply: true });
+    expect(rows.map((r) => r.action).sort()).toEqual(['register', 'retire']);
     expect(readWatch(key(3))?.owner).toBe('dispatch:dispatch-z');
     expect(readWatch(key(4))).toBeUndefined();
   });
+});
 
-  it('backfills on tend, glass data, and catch read paths', () => {
-    dispatch('dispatch-a');
-    mergeEvidence('dispatch-a', 'work', { prUrl: url(5), pr: pr(5) });
-    buildTendReport();
-    expect(readWatch(key(5))).toBeDefined();
-    fs.rmSync(path.join(home, 'watches'), { recursive: true });
-    buildGlassSnapshot();
-    expect(readWatch(key(5))).toBeDefined();
-    fs.rmSync(path.join(home, 'watches'), { recursive: true });
-    expect(lobstah('catch', 'dispatch-a').status).toBe(0);
-    expect(readWatch(key(5))).toBeDefined();
-  });
-
+describe('prs', () => {
   it('lists three records newest first, with state and watch status', () => {
     upsertPr(pr(1)); upsertPr(pr(3)); upsertPr(pr(2));
+    addWatch(key(3), 'echo custom');
     const res = lobstah('prs');
     expect(res.status).toBe(0);
+    expect(res.stdout).toContain('no watch');
     expect(res.stdout.indexOf('#3')).toBeLessThan(res.stdout.indexOf('#2'));
     expect(res.stdout.indexOf('#2')).toBeLessThan(res.stdout.indexOf('#1'));
     expect(res.stdout).toContain('watching');
@@ -106,8 +143,9 @@ describe('PR watch backfill', () => {
     expect(res.stdout).not.toContain('green');
   });
 
-  it('prs sync checks a due PR once, refreshes its record, and retires its terminal watch', () => {
+  it('prs sync checks a due PR once, refreshes its record, retires its terminal watch, and registers nothing', () => {
     upsertPr(pr(7));
+    upsertPr(pr(8));
     // A portable check fixture: the shipped check is exercised against real
     // GitHub PRs in the manual run, while this tests sync on Windows too.
     const script = path.join(home, 'check.cjs');
@@ -125,12 +163,11 @@ describe('PR watch backfill', () => {
     addWatch(key(7), `"${process.execPath}" "${script}"`);
     const res = lobstah('prs', 'sync');
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain('registered: 0');
     expect(res.stdout).toContain('refreshed: 1');
     expect(readPr(key(7))).toMatchObject({ state: 'MERGED', mergedAt: '2026-09-24T12:00:00Z' });
     expect(readWatch(key(7))).toBeUndefined();
     const second = lobstah('prs', 'sync');
-    expect(second.stdout).toContain('registered: 0');
     expect(second.stdout).toContain('refreshed: 0');
+    expect(readWatch(key(8))).toBeUndefined();
   });
 });

@@ -4,11 +4,14 @@ import { randomUUID } from 'node:crypto';
 import {
   appendWatchEvents,
   enqueue,
+  holdWatch,
   laneDirs,
+  loadConfig,
   lastEventAt,
   listWatches,
   markFollowUp,
   pendingWatchEvents,
+  postNotice,
   readWatch,
   readWatchEvents,
   readStatusLog,
@@ -66,20 +69,20 @@ function isTerminal(id: string): boolean {
  * the latest session in the chain with the buffered events as its brief. One
  * continuation in flight per watch — further events buffer until it finishes.
  */
-function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => void): void {
+function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => void): boolean {
   const owner = w.owner.slice('dispatch:'.length);
   const target = w.lastFollowUpId && !laneOf(w.lastFollowUpId) ? owner : (w.lastFollowUpId ?? owner);
   const targetLane = laneOf(target);
   if (!targetLane) {
     log(`watch ${w.key}: owner dispatch ${target} is gone — dropping watch`);
     removeWatch(w.key);
-    return;
+    return false;
   }
   const descriptor = descriptorOf(target, targetLane);
   if (!descriptor) {
     log(`watch ${w.key}: no descriptor for ${target} — dropping watch`);
     removeWatch(w.key);
-    return;
+    return false;
   }
   const id = randomUUID();
   const brief = (w.brief ?? DEFAULT_BRIEF)
@@ -102,6 +105,17 @@ function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => 
     `watch ${w.key}: ${pending.length} event(s) → continuation ${id} ` +
       (live ? `(addressed to soaking ${claimant!.slice(0, 8)})` : `(forks ${target})`),
   );
+  return true;
+}
+
+/** [watch].maxForksPerCycle; a bad value falls back to the default of 3. */
+function maxForksPerCycle(): number {
+  try {
+    const n = Number(loadConfig().watch.maxForksPerCycle);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 3;
+  } catch {
+    return 3;
+  }
 }
 
 function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotification) => void): void {
@@ -114,11 +128,33 @@ function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotifica
   });
 }
 
-/** Fork continuations for buffered dispatch-owned events, retire spent watches. */
-function deliverDispatchOwned(log: (m: string) => void): void {
+/**
+ * Fork continuations for buffered dispatch-owned events, retire spent
+ * watches. One call is one cycle, and it forks at most
+ * [watch].maxForksPerCycle continuations. Each watch over the cap is held:
+ * its events stay buffered, tend lists it as held, one notice names it, and
+ * it forks nothing until `lobstah watch release`. A held watch is skipped.
+ */
+export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPerCycle()): void {
+  let forks = 0;
+  const held: string[] = [];
   for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
+    if (watch.heldAt) continue; // waits for `lobstah watch release`
     if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // one continuation in flight
-    spawnContinuation(watch, events, log);
+    if (forks >= cap) {
+      holdWatch(watch.key);
+      held.push(watch.key);
+      continue;
+    }
+    if (spawnContinuation(watch, events, log)) forks++;
+  }
+  if (held.length > 0) {
+    log(`watch: fork cap ${cap} reached — held ${held.join(', ')}`);
+    postNotice({
+      kind: 'watch-held',
+      text: `watch cycle reached its fork cap (${cap}); held ${held.length}: ${held.join(', ')} — \`lobstah watch release <key>\` or \`--all\` to let them fork`,
+      refId: held[0],
+    });
   }
   // A retired source with nothing left to deliver has spent its purpose.
   for (const w of listWatches()) {
