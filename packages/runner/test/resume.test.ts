@@ -99,13 +99,13 @@ function mockDeps(opts: { owns: Record<string, string>; gone?: string[] }) {
       return { events, send: () => {}, end: finish, kill: finish, done };
     },
   });
-  const deps: RunnerDeps = {
+  const deps: Partial<RunnerDeps> = {
     loadAdapter: adapter,
     allocate: async (_repo, id) => {
       fs.mkdirSync(worktreePath(id), { recursive: true });
       return worktreePath(id);
     },
-    collectEvidence: async (_repo, id) => ({ branch: `lobstah/${id}`, commits: [] }),
+    collectEvidence: async (_repo, dir) => ({ branch: `lobstah/${path.basename(dir)}`, commits: [] }),
   };
   return { deps, starts };
 }
@@ -131,7 +131,7 @@ function headlessOrigin(id: string, evidence: Parameters<typeof mergeEvidence>[2
   complete(id, 'work');
 }
 
-async function runFollowUp(id: string, d: Partial<Descriptor>, deps: RunnerDeps): Promise<void> {
+async function runFollowUp(id: string, d: Partial<Descriptor>, deps: Partial<RunnerDeps>): Promise<void> {
   enqueue({ id, repo: 'r', brief: 'address review', ...d });
   expect(claimNext('work')).toBe(id);
   await main(path.join(laneDirs('work').active, id), 'work', deps);

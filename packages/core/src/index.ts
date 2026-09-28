@@ -23,3 +23,4 @@ export * from './resume.js';
 export * from './glass.js';
 export * from './models.js';
 export * from './disk.js';
+export * from './worktrees.js';

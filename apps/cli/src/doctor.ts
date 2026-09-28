@@ -17,6 +17,7 @@ import {
   readHold,
   statfsFreeBytes,
   worktreesDir,
+  readKeptWorktrees,
 } from '@lobstah/core';
 import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
@@ -189,10 +190,15 @@ export function diskRow(cfg: Config, freeBytes: FreeBytesReader = statfsFreeByte
     `retentionDays ${retentionDays > 0 ? retentionDays : 'off'}`,
     cullable.length > 0 ? `${cullable.length} cullable worktree(s), oldest ${oldest}d` : 'no cullable worktrees',
   ];
+  parts.push(`releaseOnMerge ${cfg.limits.releaseOnMerge ? 'on' : 'off'}`);
+  const kept = readKeptWorktrees();
+  if (kept.length > 0) {
+    parts.push(`kept: unpushed work (${kept.length} worktree(s) of merged PRs: ${kept.map((k) => `${k.id.slice(0, 8)} ${k.reason.replace(/^unpushed work: /, '')}`).join(', ')})`);
+  }
   const hold = readHold();
   if (hold) parts.push(`dispatches held since ${hold.since}`);
   const short = free !== undefined && minFreeGB > 0 && free < minFreeGB * GB;
-  return { check: 'disk', status: free === undefined || short || hold ? 'warn' : 'ok', detail: parts.join('; ') };
+  return { check: 'disk', status: free === undefined || short || hold || kept.length > 0 ? 'warn' : 'ok', detail: parts.join('; ') };
 }
 
 export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {

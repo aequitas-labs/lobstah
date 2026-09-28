@@ -127,6 +127,11 @@ function dispatchModal(x: GlassDispatch) {
     html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
     html`<div class="sub">${x.repo} · ${x.lane} ${x.bucket} · ${Age(x.verbAt)}${x.for && [' · ', addrCell(x)]} ${prCell(x)}</div>`,
     session,
+    x.worktree && [
+      html`<div class="sec">worktree${x.worktreeOf ? ' (reused from ' + x.worktreeOf.slice(0, 8) + ')' : ''}</div>`,
+      cmdRow(x.worktree),
+      x.worktreeKept && html`<div class="dim" style="font-size:11px">kept: ${x.worktreeKept}</div>`,
+    ],
     x.transcript && [html`<div class="sec">transcript</div>`, cmdRow(x.transcript)],
     detailBody(x),
   ];

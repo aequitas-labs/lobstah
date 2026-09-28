@@ -1,16 +1,26 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import { exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { lobstahHome } from '@lobstah/core';
-import type { RepoConfig } from '@lobstah/core';
+import {
+  acquireWorktreeLock,
+  activeIds,
+  chainWorktree,
+  dispatchWorktree,
+  laneOf,
+  listTraps,
+  storedDescriptor,
+  worktreeGitDir,
+  worktreeHolder,
+  worktreePath,
+} from '@lobstah/core';
+import type { Lane, RepoConfig } from '@lobstah/core';
+
+export { worktreePath };
 
 const run = promisify(execFile);
 const shell = promisify(exec);
-
-export function worktreePath(id: string): string {
-  return path.join(lobstahHome(), 'worktrees', id);
-}
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const { stdout } = await run('git', args, { cwd, env: process.env });
@@ -82,8 +92,9 @@ async function gitShared(cwd: string, ...args: string[]): Promise<string> {
 }
 
 /**
- * One worktree per dispatch, branched from trunk. Never reuse a worktree
- * across dispatches, and never allocate a second one for the same id.
+ * A fresh worktree for a dispatch, branched from trunk. Never allocate a
+ * second one for the same id. (A follow-up may instead reuse its chain's
+ * worktree: see chooseWorktree.)
  */
 export async function allocate(repo: RepoConfig, id: string): Promise<string> {
   const dir = worktreePath(id);
@@ -99,19 +110,203 @@ export async function allocate(repo: RepoConfig, id: string): Promise<string> {
   // never useful, and writing it takes .git/config's lock, which concurrent
   // allocations contend for too.
   await gitShared(repo.path, 'worktree', 'add', '--no-track', dir, '-b', `lobstah/${id}`, `origin/${repo.trunk}`);
-  for (const cmd of repo.setup ?? []) {
-    await shell(cmd, { cwd: dir, env: { ...process.env, ...(repo.env ?? {}) } });
-  }
+  await runSetup(repo, dir);
   return dir;
 }
 
-export async function collectEvidence(repo: RepoConfig, id: string): Promise<{ branch: string; commits: string[] }> {
-  const dir = worktreePath(id);
+async function runSetup(repo: RepoConfig, dir: string): Promise<void> {
+  for (const cmd of repo.setup ?? []) {
+    await shell(cmd, { cwd: dir, env: { ...process.env, ...(repo.env ?? {}) } });
+  }
+  recordSetup(repo, dir);
+}
+
+/**
+ * Lockfiles whose change means the repo's `setup` commands (a dependency
+ * install) must run again in a reused worktree.
+ */
+export const LOCKFILES = [
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'yarn.lock',
+  'bun.lock',
+  'bun.lockb',
+  'Cargo.lock',
+  'go.sum',
+  'poetry.lock',
+  'uv.lock',
+  'Pipfile.lock',
+  'Gemfile.lock',
+  'composer.lock',
+  'Package.resolved',
+];
+
+/** A hash of the setup commands and every lockfile at the worktree's root. */
+export function setupHash(repo: RepoConfig, dir: string): string {
+  const h = createHash('sha256');
+  h.update(JSON.stringify(repo.setup ?? []));
+  for (const name of LOCKFILES) {
+    const file = path.join(dir, name);
+    if (!fs.existsSync(file)) continue;
+    h.update(`\0${name}\0`);
+    h.update(fs.readFileSync(file));
+  }
+  return h.digest('hex');
+}
+
+function setupRecordFile(dir: string): string | undefined {
+  const gitDir = worktreeGitDir(dir);
+  return gitDir ? path.join(gitDir, 'lobstah-setup.json') : undefined;
+}
+
+/** Record the setup hash in the worktree's git dir, after setup ran. */
+function recordSetup(repo: RepoConfig, dir: string): void {
+  const file = setupRecordFile(dir);
+  if (file) fs.writeFileSync(file, JSON.stringify({ hash: setupHash(repo, dir), at: new Date().toISOString() }, null, 2));
+}
+
+function recordedSetupHash(dir: string): string | undefined {
+  const file = setupRecordFile(dir);
+  try {
+    return file ? (JSON.parse(fs.readFileSync(file, 'utf8')) as { hash?: string }).hash : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a follow-up reuses its chain's worktree, and why not when it does not. */
+export type WorktreeChoice =
+  | {
+      reuse: true;
+      path: string;
+      /** The dispatch that allocated the directory. */
+      owner: string;
+      /** The newest chain member that ran in it. */
+      from: string;
+    }
+  | { reuse: false; reason: string };
+
+export interface ChooseInput {
+  /** The follow-up's own id and lane: the lock is taken in its name. */
+  id: string;
+  lane: Lane;
+  /** The repo key the follow-up runs against. */
+  repoKey: string;
+  repo: RepoConfig;
+  /** descriptor.followUp */
+  followUp: string;
+}
+
+const short = (s: string) => s.slice(0, 8);
+
+function realpath(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** A path from `git status --porcelain`, normalized for comparison with scratch paths. */
+function norm(p: string): string {
+  return p
+    .replace(/^"(.*)"$/, '$1')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/\/+$/, '');
+}
+
+/** True when every line is an untracked file under a scratch path. */
+export function onlyScratch(porcelain: string, scratch: string[] | undefined): boolean {
+  const lines = porcelain.split('\n').filter((l) => l.trim() !== '');
+  if (lines.length === 0) return true;
+  const roots = (scratch ?? []).map(norm).filter(Boolean);
+  if (roots.length === 0) return false;
+  return lines.every((line) => {
+    if (!line.startsWith('?? ')) return false;
+    const p = norm(line.slice(3));
+    return roots.some((r) => p === r || p.startsWith(`${r}/`));
+  });
+}
+
+/**
+ * Decide whether a follow-up reuses the worktree of the newest dispatch in
+ * its chain whose worktree still exists. It reuses only when all hold: the
+ * worktree exists, belongs to the same repo, no other active dispatch runs
+ * in it, and `git status --porcelain` is clean (untracked files under the
+ * repo's `scratch` paths excepted). On reuse the worktree's lock is taken in
+ * the follow-up's name, so a second follow-up allocates fresh. A dirty
+ * worktree is never cleaned or reset: it is left alone.
+ */
+export async function chooseWorktree(input: ChooseInput): Promise<WorktreeChoice> {
+  const { id, lane, repoKey, repo, followUp } = input;
+  const found = chainWorktree(followUp);
+  if (!found) return { reuse: false, reason: 'origin worktree is gone' };
+  const ownerRepo = storedDescriptor(found.owner, laneOf(found.owner) ?? lane)?.repo ?? storedDescriptor(found.from, laneOf(found.from) ?? lane)?.repo;
+  if (ownerRepo !== undefined && ownerRepo !== repoKey) {
+    return { reuse: false, reason: `origin worktree belongs to repo ${ownerRepo}` };
+  }
+  try {
+    const common = await git(found.path, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+    const mine = await git(repo.path, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+    if (realpath(common) !== realpath(mine)) return { reuse: false, reason: 'origin worktree belongs to another repo' };
+  } catch {
+    return { reuse: false, reason: 'origin worktree is not a readable git checkout' };
+  }
+  const here = realpath(found.path);
+  // A trap works in its own checkout; lobstah never reuses one, even one a
+  // trap anchored inside a dispatch's worktree.
+  for (const t of listTraps()) {
+    if (typeof t.worktree !== 'string') continue;
+    const rel = path.relative(here, realpath(t.worktree));
+    if (!rel.startsWith('..') && !path.isAbsolute(rel)) return { reuse: false, reason: 'origin worktree is a trap’s' };
+  }
+  for (const l of ['work', 'chore'] as Lane[]) {
+    for (const other of activeIds(l)) {
+      if (other === id) continue;
+      if (realpath(dispatchWorktree(other, l).path) === here) {
+        return { reuse: false, reason: `origin worktree is in use by ${short(other)}` };
+      }
+    }
+  }
+  const holder = worktreeHolder(found.path);
+  if (holder && holder.id !== id) return { reuse: false, reason: `origin worktree is in use by ${short(holder.id)}` };
+  let porcelain: string;
+  try {
+    porcelain = await git(found.path, 'status', '--porcelain');
+  } catch {
+    return { reuse: false, reason: 'origin worktree is not a readable git checkout' };
+  }
+  if (!onlyScratch(porcelain, repo.scratch)) {
+    return { reuse: false, reason: 'origin worktree has uncommitted changes; allocated a fresh one' };
+  }
+  const held = acquireWorktreeLock(found.path, id, lane);
+  if (held) return { reuse: false, reason: `origin worktree is in use by ${short(held.id)}` };
+  return { reuse: true, path: found.path, owner: found.owner, from: found.from };
+}
+
+/**
+ * Ready a reused worktree: fetch trunk, and run the repo's `setup` commands
+ * again only when a lockfile (or the commands) changed since they last ran
+ * there. The checked-out branch and HEAD are left alone. Returns whether
+ * setup ran.
+ */
+export async function prepareReuse(repo: RepoConfig, dir: string): Promise<{ setupRan: boolean }> {
+  await gitShared(dir, 'fetch', 'origin', repo.trunk);
+  if (!(repo.setup?.length)) return { setupRan: false };
+  if (recordedSetupHash(dir) === setupHash(repo, dir)) return { setupRan: false };
+  await runSetup(repo, dir);
+  return { setupRan: true };
+}
+
+export async function collectEvidence(repo: RepoConfig, dir: string): Promise<{ branch: string; commits: string[] }> {
   const branch = await git(dir, 'rev-parse', '--abbrev-ref', 'HEAD');
   const log = await git(dir, 'log', '--oneline', `origin/${repo.trunk}..HEAD`);
   return { branch, commits: log ? log.split('\n') : [] };
 }
 
+/** Remove the worktree a dispatch allocated (its own `worktrees/<id>`). */
 export async function remove(repo: RepoConfig, id: string): Promise<void> {
   const dir = worktreePath(id);
   if (!fs.existsSync(dir)) return;

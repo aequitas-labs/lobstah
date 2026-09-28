@@ -33,6 +33,7 @@ import {
   noticeOrphanedBait,
   readSessionClaim,
   readStatusLog,
+  releaseDispatchLock,
   daemonSkip,
   sweepGhostTraps,
 } from '@lobstah/core';
@@ -79,6 +80,13 @@ function listActive(lane: Lane): ActiveState[] {
 }
 
 function finalize(st: ActiveState): void {
+  // A finished dispatch releases its worktree's lock, so a follow-up can
+  // reuse the checkout. (A lock whose dispatch is finished is stale anyway.)
+  try {
+    releaseDispatchLock(st.dir, st.id);
+  } catch {
+    // no record, or the worktree is gone
+  }
   try {
     fs.renameSync(st.dir, path.join(laneDirs(st.lane).done, st.id));
   } catch {
@@ -270,6 +278,12 @@ export interface DaemonCuller {
    */
   retention(days: number, now: number, batch: number, log: (m: string) => void): number;
   /**
+   * `[limits].releaseOnMerge`: remove the worktrees of finished dispatch
+   * chains whose PR merged, when clean and pushed, at most `batch` per call.
+   * Returns the released worktree ids.
+   */
+  release?(now: number, batch: number, log: (m: string) => void): string[];
+  /**
    * Remove finished worktrees oldest first until `enough()` is true or none
    * are left, at most `batch` per call. Returns how many it removed.
    */
@@ -291,20 +305,40 @@ export const CULL_BATCH = 10;
 /**
  * The retention cull, throttled to once per CULL_INTERVAL_MS. The stamp is
  * written before the pass, so a pass that throws is not retried every tick.
- * Returns true when a pass ran.
+ * With `[limits].releaseOnMerge` the pass first releases merged PRs'
+ * worktrees (one `worktree-released` notice lists them), then culls with
+ * whatever is left of the batch. Returns true when a pass ran.
  */
 export function retentionPass(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
   const days = cfg.limits.retentionDays;
-  if (!hooks.culler || !(days > 0)) return false;
+  const release = cfg.limits.releaseOnMerge === true && hooks.culler?.release !== undefined;
+  if (!hooks.culler || (!(days > 0) && !release)) return false;
   const now = hooks.now?.() ?? Date.now();
   const last = lastCullPassAt();
   if (last !== undefined && now - last < CULL_INTERVAL_MS) return false;
   stampCullPass(now);
-  try {
-    const n = hooks.culler.retention(days, now, CULL_BATCH, log);
-    if (n > 0) log(`retention cull: ${n} finished dispatch(es) older than ${days}d removed`);
-  } catch (err) {
-    log(`retention cull error: ${err instanceof Error ? err.message : String(err)}`);
+  // Merge releases and the retention cull share one pass and one batch.
+  let budget = CULL_BATCH;
+  if (release) {
+    try {
+      const ids = hooks.culler.release!(now, budget, log);
+      budget -= ids.length;
+      if (ids.length > 0) {
+        const text = `released on merge: ${ids.length} worktree(s) of merged PRs removed (${ids.map((id) => id.slice(0, 8)).join(', ')}); branches kept`;
+        postNotice({ kind: 'worktree-released', text });
+        log(text);
+      }
+    } catch (err) {
+      log(`release on merge error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (days > 0 && budget > 0) {
+    try {
+      const n = hooks.culler.retention(days, now, budget, log);
+      if (n > 0) log(`retention cull: ${n} finished dispatch(es) older than ${days}d removed`);
+    } catch (err) {
+      log(`retention cull error: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   return true;
 }

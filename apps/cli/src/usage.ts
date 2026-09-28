@@ -146,7 +146,7 @@ word is message text, even "--session".`,
 working unless --force; --print shows the command instead of running it.`,
   swap: `Hand an active dispatch to a fresh session — same worktree and brief plus a
 git progress note.`,
-  catch: `The evidence: branch, commits, PR, session.`,
+  catch: `The evidence: branch, commits, PR, session, and the worktree it ran in.`,
   prs: `List known PR records newest first with state, checks, age, and watch state.
 \`prs sync\` refreshes each due PR watch once. It registers no watch.`,
   attention: `Standing attention items with their ack state; \`ack <item-key>\` marks the
@@ -158,7 +158,8 @@ watch:<key>. An unknown key exits 2.`,
   cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
 without --apply (default 14 days): it measures each target (one du per
 worktree). --apply measures nothing; it deletes and prints the count and the
-free-space change. The daemon culls on its own with [limits].retentionDays.`,
+free-space change. The daemon culls on its own with [limits].retentionDays, and
+frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
   cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,

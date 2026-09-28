@@ -156,6 +156,12 @@ export interface GlassDispatch {
   log: StatusEntry[];
   inbox: string[];
   evidence?: Evidence;
+  /** The checkout it ran in (the origin's, for a follow-up that reused it); `(removed)` once culled. */
+  worktree?: string;
+  /** The dispatch whose worktree it reused. */
+  worktreeOf?: string;
+  /** Why releaseOnMerge kept its worktree after the PR merged. */
+  worktreeKept?: string;
   transcript?: string;
   /** Newest first: queue/active/done mtime. */
   sort: number;

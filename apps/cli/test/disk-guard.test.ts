@@ -149,7 +149,7 @@ describe('minFreeGB — the free-space guard', () => {
     fs.mkdirSync(path.join(home, 'worktrees', 'orphan'));
     const row = diskRow(loadConfig(), () => disk(3.2));
     expect(row.status).toBe('warn');
-    expect(row.detail).toMatch(/^3\.2 GB free on .*worktrees; minFreeGB 10; retentionDays 14; 1 cullable worktree\(s\), oldest 0d$/);
+    expect(row.detail).toMatch(/^3\.2 GB free on .*worktrees; minFreeGB 10; retentionDays 14; 1 cullable worktree\(s\), oldest 0d; releaseOnMerge off$/);
     expect(diskRow({ ...loadConfig(), limits: { ...DEFAULT_LIMITS } }, () => disk(80)).status).toBe('ok');
   });
 });

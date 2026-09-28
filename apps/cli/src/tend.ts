@@ -36,6 +36,7 @@ import type { DiskHold, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvid
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
+import { worktreeView } from './worktree-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import type { GlassStack } from './glass-prs.js';
 
@@ -57,6 +58,12 @@ export interface TendDispatch {
   prUrl?: string;
   /** PR state as last observed by the chain's pr: watch. */
   pr?: PrEvidence;
+  /** The checkout it ran in (the origin's, for a follow-up that reused it). */
+  worktree?: string;
+  /** The dispatch whose worktree it reused. */
+  worktreeOf?: string;
+  /** Why releaseOnMerge kept its worktree after the PR merged. */
+  worktreeKept?: string;
 }
 
 export interface TendStory {
@@ -436,6 +443,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     ...(answered ? { answeredAt: answered } : {}),
     prUrl: evidence.prUrl,
     pr: evidence.pr,
+    ...(bucket === 'queued' ? {} : worktreeView(id, lane)),
   };
 }
 
