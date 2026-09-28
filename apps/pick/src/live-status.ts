@@ -46,7 +46,7 @@ export function liveStatus(id: string, lane: Lane, verb: Verb, createdAt: string
     const runner = JSON.parse(fs.readFileSync(path.join(laneDirs(lane).active, id, 'runner.json'), 'utf8')) as { attempts?: number };
     attempts = runner.attempts ?? 1;
   } catch { /* queued or finished */ }
-  lines.push(`elapsed: ${age(elapsed)}${attempts > 1 ? ` (attempt ${attempts})` : ''}`);
+  lines.push(`elapsed: ${age(elapsed)} (attempt ${attempts})`);
 
   const worktree = evidence.worktree;
   const branch = (worktree && git(worktree, 'branch', '--show-current')) || evidence.branch;

@@ -72,4 +72,15 @@ describe('headless remote preservation', () => {
     expect(files).not.toContain('.env.local');
     expect(git(bare, 'rev-parse', 'refs/heads/lobstah/test')).toBe(git(dir, 'rev-parse', 'HEAD'));
   });
+
+  it('does not checkpoint or push on trunk', async () => {
+    const { dir, bare } = repo();
+    git(dir, 'switch', 'main');
+    fs.writeFileSync(path.join(dir, 'README.md'), 'unsafe on trunk\n');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
+      policy: { pushEarly: true, draftPr: true, checkpointOnStop: true }, intervalMs: 1000 });
+    expect(await remote.saveBeforeStop()).toBe('checkpoint skipped: detached or trunk');
+    expect(git(dir, 'status', '--porcelain')).toContain('README.md');
+    expect(git(bare, 'rev-parse', 'refs/heads/main')).toBe(git(dir, 'rev-parse', 'HEAD'));
+  });
 });

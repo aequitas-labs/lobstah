@@ -53,6 +53,7 @@ export function keepRemote(opts: {
   let busy: Promise<void> | undefined;
   let stopped = false;
   let opened = false;
+  let opening: Promise<void> | undefined;
 
   const branchName = async (): Promise<string | undefined> => {
     const branch = await git('symbolic-ref', '--quiet', '--short', 'HEAD').catch(() => '');
@@ -79,7 +80,7 @@ export function keepRemote(opts: {
     mergeEvidence(id, lane, { prUrl: match[0] });
     // The CLI owns PR-watch formatting. An absent CLI must not block pushes.
     const bin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'bin', 'lobstah');
-    if (fs.existsSync(bin)) await command(bin, ['watch', 'add', match[0], '--for', id], 15_000).catch(() => {});
+    await command(fs.existsSync(bin) ? bin : 'lobstah', ['watch', 'add', match[0], '--for', id], 15_000).catch(() => {});
   };
 
   const check = async (): Promise<void> => {
@@ -97,7 +98,7 @@ export function keepRemote(opts: {
       pushedHead = head;
       mergeEvidence(id, lane, { branch });
       note(`remote saved: ${branch}@${head.slice(0, 12)}`);
-      await draft(branch);
+      if (!opening) opening = draft(branch).finally(() => { opening = undefined; });
     } catch (err) {
       note(`push rejected for ${branch}@${head.slice(0, 12)}: ${firstLine(err)}; retry after HEAD moves`);
     }
@@ -117,6 +118,7 @@ export function keepRemote(opts: {
       clearInterval(timer);
       await busy;
       await check().catch((err) => note(`final push unavailable: ${firstLine(err)}`));
+      await opening;
     },
     saveBeforeStop: async () => {
       stopped = true;
@@ -142,6 +144,7 @@ export function keepRemote(opts: {
       // A checkpoint may have moved HEAD; give it one final chance to land.
       lastSeenHead = undefined;
       await check().catch((err) => note(`final push unavailable: ${firstLine(err)}`));
+      await opening;
       const head = await git('rev-parse', '--short', 'HEAD').catch(() => 'unknown');
       const pr = readEvidence(id, lane).prUrl;
       const message = `${saved}; ${branch}@${head}${pr ? `; draft PR ${pr}` : ''}`;

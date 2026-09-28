@@ -64,6 +64,13 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | `pushEarly` | `true` | Push each new committed HEAD to its non-trunk branch on `origin` within 10 seconds. A rejected push is noted and retried only after HEAD moves. |
 | `draftPr` | `true` | After first push, adopt an existing PR or open one draft PR when `gh` is available. |
 | `checkpointOnStop` | `true` | Before a nonterminal stop, checkpoint eligible tracked and untracked files, then push. Ignored files and secret/build denylist paths are excluded. Set all three switches to `false` for prior runner behavior. |
+
+A runner extends its active-work window when a fresh activity event or new HEAD
+shows progress at the boundary. The elapsed budget and current window are
+persisted across restarts; a pause with `--waiting-on` does not spend active
+time. At the hard ceiling, the status verb remains `failed` for compatibility,
+but its note starts `budget:` and tells the man what work was saved and to
+send a continuation.
 | `backgroundWaitSecs` | `1800` | A turn that ends without a report is held open this long while background work the worker started is still running (a push behind a slow pre-push gate); the harness wakes the worker when it settles. Heartbeats keep the wedge detector off the wait. Keep it below `wallClockSecs`, which still ends the run. |
 | `choreRetentionDays` | `7` | Completed chores age out of `chores/done/`. |
 | `attachmentMaxBytes` | `26214400` (25 MiB) | Maximum size of each file supplied with repeatable `dispatch --attach` or `send --attach`. |

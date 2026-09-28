@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   appendEvent,
@@ -14,6 +15,7 @@ import {
   modelForHarness,
   originProgress,
   pausedWaiting,
+  readActivity,
   readEvidence,
   readStatusLog,
   releaseWorktreeLock,
@@ -186,18 +188,67 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   let wallClockHit = false;
   let current: AdapterRun | undefined;
+  const wallFile = path.join(activeDir, 'wallclock.json');
+  const wallState = (() => {
+    try {
+      return JSON.parse(fs.readFileSync(wallFile, 'utf8')) as {
+        elapsedMs: number; windowMs: number; lastProgressAt?: string; lastHead?: string;
+      };
+    } catch { return { elapsedMs: 0, windowMs: resolved.limits.wallClockSecs! * 1000 }; }
+  })();
+  const head = () => {
+    try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+    catch { return undefined; }
+  };
+  wallState.lastHead ??= head();
+  const maxWallMs = Math.max(resolved.limits.wallClockSecs ?? 0,
+    cfg.limits.maxWallClockSecs ?? (resolved.limits.wallClockSecs ?? 0) * 4) * 1000;
+  const persistWall = (elapsedMs: number, windowMs: number) => {
+    const tmp = `${wallFile}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify({ ...wallState, elapsedMs, windowMs }));
+    fs.renameSync(tmp, wallFile);
+  };
+  const madeProgress = () => {
+    const activity = readActivity(id, lane);
+    const recent = activity && Date.now() - Date.parse(activity.at) <= cfg.limits.wedgeThresholdSecs * 1000;
+    if (recent && activity.at !== wallState.lastProgressAt) {
+      wallState.lastProgressAt = activity.at;
+      wallState.lastHead = head();
+      return true;
+    }
+    const currentHead = head();
+    if (currentHead && currentHead !== wallState.lastHead) {
+      wallState.lastHead = currentHead;
+      return true;
+    }
+    return false;
+  };
   // The wall clock does not run while the worker is paused on something
   // external (`report paused --waiting-on`): waiting on a review is not work.
   const wallTimer = resolved.limits.wallClockSecs
     ? startWallClock({
         limitMs: resolved.limits.wallClockSecs * 1000,
+        maxMs: maxWallMs,
+        initialElapsedMs: wallState.elapsedMs,
+        initialWindowMs: wallState.windowMs,
         paused: () => pausedWaiting(readStatusLog(id, lane).at(-1)),
+        progress: madeProgress,
+        onTick: persistWall,
         onExpire: () => {
           wallClockHit = true;
           current?.kill();
         },
       })
     : undefined;
+
+  if (wallTimer && wallState.elapsedMs >= maxWallMs) {
+    wallTimer.stop();
+    const saved = remoteEnabled ? await remote.saveBeforeStop() : undefined;
+    settle(id, lane, { cancelled: false, wallClockHit: true, budgetNote: saved });
+    releaseWorktreeLock(cwd, id);
+    complete(id, lane);
+    return;
+  }
 
   const runOnce = async (harness: string, prompt: string, resumeSession: string | undefined) => {
     const run = await deps.loadAdapter(harness).start({
@@ -271,9 +322,10 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   const { cancelled, result } = outcome;
 
   const terminal = ['done', 'failed'].includes(readStatusLog(id, lane).at(-1)?.verb ?? '');
+  let savedNote: string | undefined;
   if (remoteEnabled && (wallClockHit || cancelled || !!result.error || !terminal)) {
-    const saved = await remote.saveBeforeStop();
-    status('working', `work saved before stop: ${saved}`);
+    savedNote = await remote.saveBeforeStop();
+    status('working', `work saved before stop: ${savedNote}`);
   } else {
     await remote.stop();
   }
@@ -290,7 +342,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     });
   }
 
-  settle(id, lane, { cancelled, wallClockHit, error: result.error });
+  settle(id, lane, { cancelled, wallClockHit, error: result.error, budgetNote: savedNote });
 
   releaseWorktreeLock(cwd, id);
   complete(id, lane);

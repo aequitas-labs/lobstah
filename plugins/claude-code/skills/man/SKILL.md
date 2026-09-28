@@ -76,5 +76,4 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
-without the plugin; see docs/man.md. `lobstah man` prints the full
-manual; `lobstah doctor` diagnoses a broken setup.
+without the plugin; see docs/man.md. `lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken setup.
