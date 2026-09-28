@@ -46,7 +46,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true } }, positionals: '<uuid>|wt:<trap> [<message...>]' },
+  send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--harness': { value: HARNESS }, '--model': { value: '<m>' }, '--for': { value: 'wt:<trap>' }, '--no-wake': {} }, positionals: '<uuid>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -135,12 +135,10 @@ Alias: set --bait.`,
   status: `Reconciled state for one dispatch, or all active without an id. Alias: buoy.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
-  send: `Deliver an instruction: to a dispatch's inbox (<uuid>), or to the session
-manning a worktree (wt:<trap> — delivered at its next park, no catch
-lifecycle; undeliverable messages bounce to the helm). Messages carry their
-sender. With a claimed helm, sending requires --session <helm-id>. Flags go
-anywhere; repeat --attach to copy files with the message. After \`--\` every
-word is message text, even "--session".`,
+  send: `Steer a live chain, queue for pending work, or wake a finished chain
+as a follow-up. --no-wake leaves finished mail unread. --for, --harness,
+and --model shape a new follow-up; --attach copies files. A claimed helm
+requires --session <helm-id>. wt:<trap> messages arrive at its next park.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,

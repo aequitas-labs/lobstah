@@ -37,7 +37,8 @@ The charter is re-injected at every session start. Keep inside its fences:
 ```
 lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
 lobstah dispatch ... --for wt:<trap>              # address it to one trap
-lobstah send <id>|wt:<trap> "<instruction>"       # steer, delivered between turns
+lobstah send <id>|wt:<trap> "<instruction>"       # steer live/queued work; wake
+                                                  # finished work as a follow-up
 lobstah status <id>                               # reconciled state + last note
 lobstah catch <id>                                # evidence: branch, commits, PR
 lobstah cancel <id>                               # cut one away

@@ -45,7 +45,11 @@ the background, dispatch it with the `lobstah` CLI instead of doing it inline:
 - `lobstah dispatch --repo <key> --brief-text "<full brief>"` — returns an id.
   Write briefs that stand alone; the worker has no other context.
 - `lobstah status [<id>]`, `lobstah ls` — check progress when I ask, not on a loop.
-- `lobstah send <id> "<instruction>"` — steer a running dispatch.
+- `lobstah send <id> "<instruction>"` — steer a live dispatch, add to a queued
+  dispatch's inbox, or wake a finished chain as a follow-up. Sending to any
+  member of a finished chain follows up its newest member. Use `--no-wake` to
+  leave a message in a finished inbox without starting work (nothing reads it).
+  A new follow-up accepts `--harness`, `--model`, and `--for wt:<trap>`.
 - `lobstah cancel <id>` — stop one.
 - A dispatch reporting `needs-decision` is waiting on ME — surface its question
   immediately, then `lobstah send` my answer.
@@ -78,7 +82,12 @@ instead when that checkout has uncommitted changes, is gone, or another
 dispatch runs in it; its first status note says which (`reusing worktree of
 <origin>` or `fresh worktree (<reason>)`). `lobstah catch` prints the
 `worktree` a dispatch ran in, and `worktreeOf` when it reused one.
-`[limits].reuseWorktree = false` turns reuse off.
+`[limits].reuseWorktree = false` turns reuse off. Normally, use
+`lobstah send <id> "<instruction>"` for a continuation: it delivers to the
+live or queued member of the chain, or creates a follow-up of the newest
+finished member. If that member was last claimed by a trap still signed on,
+the follow-up returns to that trap unless `--for` overrides it. Otherwise it
+is unaddressed for a headless worker.
 
 Attach refuses while a dispatch is `working` (two writers, one session);
 follow the logs or `send` instead, or cancel and then attach.

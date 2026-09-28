@@ -138,8 +138,9 @@ work (humans and agents):
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
   send <uuid>|wt:<trap> [--attach <file> ...] [--] <message>
-                                  deliver an instruction: to a dispatch's
-                                  inbox, or to the session manning a worktree
+                                  steer a live chain, queue for its pending
+                                  member, or wake finished work as a follow-up;
+                                  --no-wake leaves finished mail unread
                                   (arrives at its next park; undeliverable
                                   messages bounce to the helm)
   inbox <uuid>                    read and acknowledge pending messages
@@ -477,6 +478,59 @@ function inheritedAttachments(id: string | undefined): Descriptor['attachments']
   return undefined;
 }
 
+interface ChainMember {
+  id: string;
+  lane: Lane;
+  descriptor: Descriptor;
+  bucket: 'queue' | 'active' | 'done';
+}
+
+/** Resolve both directions of a follow-up chain, including queued children. */
+function dispatchChain(target: string): ChainMember[] {
+  const members = new Map<string, ChainMember>();
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    const dirs = laneDirs(lane);
+    for (const bucket of ['queue', 'active', 'done'] as const) {
+      for (const entry of fs.readdirSync(dirs[bucket])) {
+        if (entry.startsWith('.')) continue;
+        const id = bucket === 'queue' ? entry.replace(/\.json$/, '') : entry;
+        const descriptor = storedDescriptor(id, lane);
+        if (descriptor) members.set(id, { id, lane, descriptor, bucket });
+      }
+    }
+  }
+  if (!members.has(target)) throw new Error(`unknown dispatch ${target}`);
+  const rootOf = (id: string): string => {
+    const seen = new Set<string>();
+    while (members.get(id)?.descriptor.followUp && !seen.has(id)) {
+      seen.add(id);
+      id = members.get(id)!.descriptor.followUp!;
+    }
+    return id;
+  };
+  const root = rootOf(target);
+  return [...members.values()]
+    .filter((member) => rootOf(member.id) === root)
+    .sort((a, b) => (a.descriptor.queuedAt ?? '').localeCompare(b.descriptor.queuedAt ?? '') || a.id.localeCompare(b.id));
+}
+
+/** An active record only steers a worker while its runner or trap is live. */
+function liveChainMember(member: ChainMember): boolean {
+  if (member.bucket !== 'active') return false;
+  const dir = path.join(laneDirs(member.lane).active, member.id);
+  const claim = readSessionClaim(member.id, member.lane);
+  if (claim?.by.startsWith('wt:')) {
+    const reg = readTrap(claim.by.slice('wt:'.length));
+    return reg?.claimed === member.id && Date.now() - (Date.parse(reg.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000;
+  }
+  try {
+    const runner = JSON.parse(fs.readFileSync(path.join(dir, 'runner.json'), 'utf8')) as { pid: number; processStartTime?: string };
+    return pidAlive(runner.pid, runner.processStartTime);
+  } catch {
+    return false;
+  }
+}
+
 function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<string, unknown>> {
   const dir = laneDirs(lane)[bucket];
   const entries = fs
@@ -546,6 +600,43 @@ async function mainCli(): Promise<void> {
       throw err;
     }
   };
+  /** The one dispatch creation path, shared by `dispatch` and waking `send`. */
+  const startDispatch = (d: Descriptor, lane: Lane, files: string[], session?: ResolvedSession): string[] => {
+    const warnings: string[] = [];
+    let address = d.for;
+    if (address) {
+      const cfgDispatch = loadConfig();
+      gateHelm(session);
+      if (address.startsWith('session:')) {
+        const sid = address.slice('session:'.length);
+        const trap = trapBySession(sid);
+        if (!trap) throw new Error(`session ${sid.slice(0, 8)} is not signed on anywhere — have it run \`lobstah soak\` first`);
+        address = `wt:${trap.trapId}`;
+      }
+      if (!address.startsWith('wt:')) {
+        throw new Error('dispatch --for takes a trap address: --for wt:<trap-id> (or session:<id>, resolved to its trap)');
+      }
+      const trap = readTrap(address.slice('wt:'.length));
+      if (!trap) throw new Error(`no trap ${address} is signed on — \`lobstah man tend\` lists live traps`);
+      const hbAgeSecs = Math.round((Date.now() - (Date.parse(trap.heartbeatAt) || 0)) / 1000);
+      if (trap.firstParkedAt === undefined) {
+        warnings.push(`trap ${address} has never listened (signed on, no park yet) — delivery waits until its session parks`);
+      } else if (hbAgeSecs > cfgDispatch.soak.deferSecs) {
+        warnings.push(`trap ${address} is not currently parked (heartbeat ${hbAgeSecs}s ago) — delivery waits for its next park.`);
+      }
+    }
+    d.for = address;
+    if (d.harness) d.harnessExplicit = true;
+    if (d.model) d.modelExplicit = true;
+    const attachments = [
+      ...(inheritedAttachments(d.followUp) ?? []),
+      ...(copyFiles(files, dispatchAttachmentsDir(d.id, lane)) ?? []),
+    ];
+    if (attachments.length > 0) d.attachments = attachments;
+    d.queuedAt = new Date().toISOString();
+    enqueue(d, lane);
+    return warnings;
+  };
 
   switch (cmd) {
     case 'dispatch': {
@@ -555,46 +646,6 @@ async function mainCli(): Promise<void> {
       if (!repo || (!briefFile && !briefText)) {
         throw new Error('dispatch requires --repo and --brief <file> (or --brief-text)');
       }
-      let address = opt('--for');
-      const warnings: string[] = [];
-      if (address) {
-        const cfgDispatch = loadConfig();
-        // Addressing a specific trap is steering — the claimed helm's alone.
-        gateHelm(callerSession(opt('--session')));
-        // `session:` is an alias resolved to the trap at dispatch time, so
-        // the queued address survives session restarts.
-        if (address.startsWith('session:')) {
-          const sid = address.slice('session:'.length);
-          const t = trapBySession(sid);
-          if (!t) {
-            throw new Error(
-              `session ${sid.slice(0, 8)} is not signed on anywhere — have it run \`lobstah soak\` from its ` +
-                'worktree first, then address with `--for wt:<trap-id>` (printed at sign-on).',
-            );
-          }
-          address = `wt:${t.trapId}`;
-        }
-        if (!address.startsWith('wt:')) {
-          throw new Error('dispatch --for takes a trap address: --for wt:<trap-id> (or session:<id>, resolved to its trap)');
-        }
-        const target = readTrap(address.slice('wt:'.length));
-        if (!target) {
-          throw new Error(`no trap ${address} is signed on — \`lobstah man tend\` lists live traps`);
-        }
-        // Dispatch-time honesty: address a trap that is not listening and
-        // the work waits — say so now, not in a post-mortem.
-        const hbAgeSecs = Math.round((Date.now() - (Date.parse(target.heartbeatAt) || 0)) / 1000);
-        if (target.firstParkedAt === undefined) {
-          warnings.push(
-            `trap ${address} has never listened (signed on, no park yet) — delivery waits until its session ` +
-              'parks (Stop hook at turn end, or `lobstah soak --wait`). Addressed work never falls back to a headless worker.',
-          );
-        } else if (hbAgeSecs > cfgDispatch.soak.deferSecs) {
-          warnings.push(
-            `trap ${address} is not currently parked (heartbeat ${hbAgeSecs}s ago) — delivery waits for its next park.`,
-          );
-        }
-      }
       const d: Descriptor = {
         id: opt('--id') ?? randomUUID(),
         repo,
@@ -603,21 +654,11 @@ async function mainCli(): Promise<void> {
         model: opt('--model'),
         effort: opt('--effort'),
         followUp: opt('--follow-up'),
-        for: address,
+        for: opt('--for'),
       };
-      // Explicitness is recorded: `claude` is also the default, so the
-      // resolver cannot tell `--harness claude` from nothing without it.
-      if (d.harness) d.harnessExplicit = true;
-      if (d.model) d.modelExplicit = true;
       const lane: Lane = has('--chore') ? 'chore' : 'work';
-      const attachments = [
-        ...(inheritedAttachments(d.followUp) ?? []),
-        ...(copyFiles(values('--attach'), dispatchAttachmentsDir(d.id, lane)) ?? []),
-      ];
-      if (attachments.length > 0) d.attachments = attachments;
-      d.queuedAt = new Date().toISOString();
-      enqueue(d, lane);
-      console.log(toonKV({ id: d.id, repo, lane, ...(address ? { for: address } : {}), queued: d.queuedAt }));
+      const warnings = startDispatch(d, lane, values('--attach'), callerSession(opt('--session')));
+      console.log(toonKV({ id: d.id, repo, lane, ...(d.for ? { for: d.for } : {}), queued: d.queuedAt }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
@@ -655,7 +696,7 @@ async function mainCli(): Promise<void> {
           state === 'needs-decision' || state === 'blocked'
             ? [`lobstah send ${id} "<answer>"`, `lobstah logs ${id} --follow`]
             : state === 'done' || state === 'failed'
-              ? [`lobstah catch ${id}   (branch, commits, PR)`]
+              ? [`lobstah catch ${id}   (branch, commits, PR)`, `lobstah send ${id} "<instruction>"   (wakes it as a follow-up in its worktree)`]
               : [`lobstah logs ${id} --follow`, `lobstah send ${id} "<instruction>"`],
         ),
       );
@@ -736,11 +777,59 @@ async function mainCli(): Promise<void> {
         }
         break;
       }
-      const lane = findLane(target);
-      const attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(target, lane)) ?? [];
-      const block = attachmentBlock(attachments);
-      const name = sendMessage(target, lane, `[from ${from}]\n${[text, block].filter(Boolean).join('\n\n')}`, from, attachments);
-      console.log(toonKV({ id: target, from, queued: name }));
+      const chain = dispatchChain(target);
+      const targetMember = chain.find((item) => item.id === target)!;
+      const noWakeFinished = has('--no-wake') && targetMember.bucket === 'done';
+      const active = chain.filter(liveChainMember).at(-1);
+      const queued = chain.filter((member) => member.bucket === 'queue').at(-1);
+      const recipient = noWakeFinished ? undefined : active ?? queued;
+      if (recipient || noWakeFinished) {
+        const member = recipient ?? targetMember;
+        const attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(member.id, member.lane)) ?? [];
+        const block = attachmentBlock(attachments);
+        const name = sendMessage(member.id, member.lane, `[from ${from}]\n${[text, block].filter(Boolean).join('\n\n')}`, from, attachments);
+        console.log(`delivered: inbox of ${member.id}${member.bucket === 'queue' ? ' (queued)' : ''}`);
+        console.log(toonKV({ id: member.id, from, queued: name }));
+        if (noWakeFinished) console.log('warning: --no-wake left this message in a finished dispatch; nothing will read it.');
+        break;
+      }
+      const origin = chain.at(-1)!;
+      const lastVerb = readStatusLog(origin.id, origin.lane).at(-1)?.verb;
+      if (origin.bucket !== 'done' && lastVerb !== 'needs-decision' && lastVerb !== 'blocked') {
+        throw new Error(`dispatch ${origin.id} has no live worker but is not finished — wait for reconciliation before sending`);
+      }
+      let address = opt('--for');
+      let headless = false;
+      if (!address) {
+        const claimFile = path.join(laneDirs(origin.lane)[origin.bucket], origin.id, 'claim.json');
+        let claimedBy: string | undefined;
+        try {
+          claimedBy = (JSON.parse(fs.readFileSync(claimFile, 'utf8')) as { by?: string }).by;
+        } catch {
+          claimedBy = readEvidence(origin.id, origin.lane).deliveredTo;
+        }
+        const trap = claimedBy?.startsWith('wt:') ? readTrap(claimedBy.slice('wt:'.length)) : undefined;
+        if (trap && Date.now() - (Date.parse(trap.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000) address = claimedBy;
+        else headless = true;
+      }
+      const followUp: Descriptor = {
+        id: randomUUID(),
+        repo: origin.descriptor.repo,
+        brief: `Follow-up instruction from ${from} on dispatch ${origin.id}:\n${text}`,
+        followUp: origin.id,
+        harness: opt('--harness'),
+        model: opt('--model'),
+        for: address,
+      };
+      const warnings = startDispatch(followUp, origin.lane, values('--attach'), sender);
+      // A vanished worker's question is answered by this follow-up. Keep
+      // provenance in the old inbox so answeredAt clears the standing gate.
+      if (lastVerb === 'needs-decision' || lastVerb === 'blocked') {
+        sendMessage(origin.id, origin.lane, `[from ${from}]\n${text}`, from);
+      }
+      console.log(`started: follow-up ${followUp.id} of ${origin.id}`);
+      if (headless) console.log('delivery: unaddressed; a headless worker will take it');
+      for (const warning of warnings) console.log(toonKV({ warning }));
       break;
     }
     case 'report': {
@@ -920,6 +1009,9 @@ async function mainCli(): Promise<void> {
       if (ev.commits?.length) {
         console.log(`commits[${ev.commits.length}]:`);
         for (const c of ev.commits) console.log(`  ${c}`);
+      }
+      if (fs.existsSync(path.join(laneDirs(lane).done, id))) {
+        console.log(toonHelp([`lobstah send ${id} "<instruction>"   (wakes it as a follow-up in its worktree)`]));
       }
       const attachments = storedDescriptor(id, lane)?.attachments ?? [];
       if (attachments.length > 0) console.log(toonTable('attachments', attachments.map((a) => ({ ...a })), ['name', 'type', 'bytes', 'path']));
@@ -1129,7 +1221,7 @@ async function mainCli(): Promise<void> {
           `next: run \`lobstah status ${ev.id}\` for full state` +
             (ev.entry.verb === 'needs-decision' || ev.entry.verb === 'blocked'
               ? `, answer with \`lobstah send ${ev.id} "<answer>"\``
-              : ', collect the evidence and report the outcome') +
+              : `, collect the evidence, then \`lobstah send ${ev.id} "<instruction>"\` to wake a follow-up if needed`) +
             `, then re-arm a background \`lobstah man wait${sid ? ` --session ${sid}` : ''}\`.`,
         );
       };
