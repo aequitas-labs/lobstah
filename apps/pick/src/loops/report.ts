@@ -34,6 +34,8 @@ export interface ReportNotification {
   verb: Verb | 'watch';
   note?: string;
   prUrl?: string;
+  /** Set when pickup reported a verb other than the dispatch's own; see Unfinished. */
+  reason?: UnfinishedReason;
 }
 
 /**
@@ -45,12 +47,23 @@ export interface ReportNotification {
  * if the PR is attached later. Review rounds push to an existing PR and are
  * exempt.
  */
-export function unfinishedNote(kind: string, status: string, evidence: Evidence): string | undefined {
+export function unfinished(kind: string, status: string, evidence: Evidence): Unfinished | undefined {
   if (kind !== 'issue' || status !== 'done' || evidence.prUrl) return undefined;
   const n = evidence.commits?.length ?? 0;
   return n > 0
-    ? `Ended done with ${n} commit(s) on \`${evidence.branch ?? 'its branch'}\` but no PR — the branch may never have been pushed.`
-    : 'Ended done with no commits and no PR — nothing to review.';
+    ? { reason: 'no-pr', note: `Ended done with ${n} commit(s) on \`${evidence.branch ?? 'its branch'}\` but no PR — the branch may never have been pushed.` }
+    : { reason: 'no-changes', note: 'Ended done with no commits and no PR — nothing to review.' };
+}
+
+/**
+ * Why pickup reported a verb other than the dispatch's own. notifyCommand gets
+ * it as LOBSTAH_REASON, so a hook can route on the fact instead of re-deriving
+ * it from the note. Unset when the verb is the dispatch's own.
+ */
+export type UnfinishedReason = 'no-pr' | 'no-changes';
+export interface Unfinished {
+  reason: UnfinishedReason;
+  note: string;
 }
 
 export async function reportLoop(
@@ -73,17 +86,18 @@ export async function reportLoop(
         lastEventAt: lastEventAt(entry.uuid, lane),
       });
       const evidence = readEvidence(entry.uuid, lane);
-      const unfinished = unfinishedNote(entry.kind, status, evidence);
-      const verb = unfinished ? 'needs-decision' : status;
+      const held = unfinished(entry.kind, status, evidence);
+      const verb = held ? 'needs-decision' : status;
       if (verb !== 'unknown' && verb !== entry.lastReported) {
-        await source.report(key, verb as Verb, { ...evidence, ...(unfinished ? { note: unfinished } : {}), uuid: entry.uuid });
+        await source.report(key, verb as Verb, { ...evidence, ...(held ? { note: held.note } : {}), uuid: entry.uuid });
         state.update(key, { lastReported: verb as Verb });
         log(`${key}: reported ${verb}`);
         notify({
           key,
           uuid: entry.uuid,
           verb: verb as Verb,
-          note: unfinished ?? readStatusLog(entry.uuid, lane).at(-1)?.note,
+          note: held?.note ?? readStatusLog(entry.uuid, lane).at(-1)?.note,
+          reason: held?.reason,
           prUrl: evidence.prUrl,
         });
       }

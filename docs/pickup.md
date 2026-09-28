@@ -43,8 +43,11 @@ reference, never the secret.
 
 **Notifications are a hook, not a vendor.** `notifyCommand` under `[pickup]`
 is exec'd on every verb transition with `LOBSTAH_KEY`, `LOBSTAH_UUID`,
-`LOBSTAH_VERB`, `LOBSTAH_NOTE`, and `LOBSTAH_PR_URL` in the environment —
-fire-and-forget, never blocking the loop. Point it at whatever the host
+`LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`, and `LOBSTAH_REASON` in the
+environment — fire-and-forget, never blocking the loop. `LOBSTAH_REASON` says
+why pickup reported a verb other than the dispatch's own — `no-pr` or
+`no-changes` for an issue that ended done without a PR — so a hook routes on
+the fact rather than parsing the note. Point it at whatever the host
 already has (a Slack helper, `openclaw message send`); lobstah stays free of
 messaging vendors.
 
