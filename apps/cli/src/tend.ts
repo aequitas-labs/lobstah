@@ -720,7 +720,7 @@ export function renderTend(r: TendReport): string {
       chores: r.counts.choresActive,
       done24h: r.counts.done24h,
       failed24h: r.counts.failed24h,
-      ...(r.hold ? { held: `${r.hold.reason} on ${r.hold.dir} (since ${r.hold.since})` } : {}),
+      ...(r.hold ? { diskHold: `${r.hold.reason} on ${r.hold.dir} (since ${r.hold.since})` } : {}),
     }),
   );
   for (const stack of r.stacks) {

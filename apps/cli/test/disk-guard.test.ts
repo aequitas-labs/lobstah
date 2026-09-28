@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { DEFAULT_LIMITS, enqueue, ensureLayout, executorPath, GB, laneDirs, listNotices, loadConfig, readHold } from '@lobstah/core';
+import { addWatch, DEFAULT_LIMITS, enqueue, holdWatch, writeHold, ensureLayout, executorPath, GB, laneDirs, listNotices, loadConfig, readHold } from '@lobstah/core';
 import type { Config } from '@lobstah/core';
 import { CULL_INTERVAL_MS, retentionPass, spaceGuard, tick } from '@lobstah/supervisor';
 import type { DaemonCuller } from '@lobstah/supervisor';
@@ -86,6 +86,21 @@ describe('minFreeGB — the free-space guard', () => {
     expect(spaceGuard(loadConfig(), hooks, () => {})).toBe(true);
     expect(kinds()).toEqual(['disk-held', 'disk-cleared']);
     expect(buildTendReport().stories.flatMap((s) => s.dispatches).find((x) => x.id === 'held-1')?.state).toBe('queued');
+  });
+
+  it('tend shows a disk hold and a fork-cap watch hold side by side', () => {
+    fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
+    enqueue({ id: 'both-1', repo: 'r', brief: 'b' });
+    writeHold({ since: new Date().toISOString(), checkedAt: new Date().toISOString(), freeBytes: disk(2), needBytes: disk(10), dir: '/wt' });
+    addWatch('pr:acme/web#2', 'true', { owner: 'dispatch:88888888-8888-8888-8888-888888888888' });
+    holdWatch('pr:acme/web#2');
+    const r = buildTendReport();
+    expect(r.hold?.reason).toBe('held: 2 GB free, needs 10 GB');
+    expect(r.watches.find((w) => w.key === 'pr:acme/web#2')?.heldAt).toBeDefined();
+    const text = renderTend(r);
+    expect(text).toContain('diskHold: "held: 2 GB free, needs 10 GB on /wt (since');
+    expect(text).toContain('both-1:held (2 GB free, needs 10 GB)');
+    expect(text).toMatch(/pr:acme\/web#2[^\n]*held/);
   });
 
   it('runs the cull first and claims without a hold when the cull frees enough', () => {
