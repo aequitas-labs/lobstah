@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   activeIds,
   activityView,
+  waitingView,
   DEFAULT_LIMITS,
   readActivity,
   executorPath,
@@ -198,6 +199,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
         note: (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
         verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
         activity: r.bucket === 'active' ? activityView(readActivity(id, r.lane), staleSecs) : undefined,
+        waiting: r.bucket === 'active' ? waitingView(last) : undefined,
         claimedBy: claim?.by,
         log,
         inbox: listDir(inboxDir)

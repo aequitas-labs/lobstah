@@ -8,6 +8,8 @@ export interface ClassifyInput {
   hasRunner: boolean;
   alive?: boolean;
   lastVerb?: Verb;
+  /** The last report is `paused` with `--waiting-on`: waiting on something external, so never wedged. */
+  pausedWaiting?: boolean;
   lastEventAt?: number;
   startedAt?: number;
   now: number;
@@ -25,6 +27,7 @@ export function classify(input: ClassifyInput): Classification {
   if (!hasRunner) return 'unclaimed';
   if (alive === undefined) return 'unknown';
   if (!alive) return 'dead';
+  if (input.pausedWaiting) return 'busy';
   const baseline = lastEventAt ?? startedAt;
   if (baseline === undefined) return 'unknown';
   return now - baseline > wedgeThresholdMs ? 'wedged' : 'busy';

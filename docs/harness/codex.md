@@ -85,6 +85,15 @@ trap. On 0.114 to 0.116, Codex has no post-tool hook: a trap's liveness
 comes from its reports and its park only, and a long stretch of work
 without a report can be swept after `[soak].ttlSecs`.
 
+## Waiting on something external
+
+The Codex `man` and `trap` skills are hand-maintained copies, not generated
+from the Claude Code skills, so they do not carry the `paused --waiting-on`
+guidance. A Codex trap learns it from the brief it receives with each catch:
+before it waits on a review, a PR, or a deploy, it reports
+`paused "<note>" --waiting-on <kind> --link <url>`. See
+[Waiting on](../vocabulary.md#waiting-on).
+
 ## The session id and `--session`
 
 Codex exports no session-id variable, so the CLI cannot find the id on its

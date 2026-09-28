@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   activeIds,
+  waitingText,
+  waitingView,
   activityLine,
   activityView,
   readActivity,
@@ -35,7 +37,7 @@ import {
   holdReason,
   readHold,
 } from '@lobstah/core';
-import type { ActivityView, DiskHold, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
+import type { ActivityView, WaitingView, DiskHold, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
@@ -69,6 +71,8 @@ export interface TendDispatch {
   worktreeKept?: string;
   /** What the worker is doing now (active dispatches only). Stale past wedgeThresholdSecs. */
   activity?: ActivityView;
+  /** What a paused (or questioning) worker waits on outside lobstah (`report --waiting-on`). */
+  waiting?: WaitingView;
 }
 
 export interface TendStory {
@@ -450,6 +454,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     pr: evidence.pr,
     ...(bucket === 'queued' ? {} : worktreeView(id, lane)),
     ...(bucket === 'active' ? { activity: activityView(readActivity(id, lane), staleSecs) } : {}),
+    ...(bucket === 'active' && waitingView(last) ? { waiting: waitingView(last) } : {}),
   };
 }
 
@@ -768,7 +773,8 @@ export function renderTend(r: TendReport): string {
               (d) =>
                 `${d.id.slice(0, 8)}:${d.state}` +
                 (d.state === 'held' && d.note ? ` (${d.note.replace(/^held: /, '')})` : '') +
-                (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : ''),
+                (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
+                (d.waiting ? ` (${waitingText(d.waiting)})` : ''),
             )
             .join(' → '),
           pr: s.prState ? `${s.prState} ${s.prUrl ?? ''}`.trim() : (s.prUrl ?? ''),

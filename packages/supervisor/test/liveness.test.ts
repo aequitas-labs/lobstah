@@ -37,3 +37,14 @@ describe('classify — dead and wedged get opposite treatment', () => {
     expect(classify({ hasRunner: true, alive: true, now, wedgeThresholdMs: threshold })).toBe('unknown');
   });
 });
+
+describe('classify — a worker paused on something external is not wedged', () => {
+  it('paused with --waiting-on stays busy past the wedge threshold; dead is still dead', () => {
+    const now = 1_000_000_000;
+    const old = now - 3600_000;
+    const base = { hasRunner: true, alive: true, lastVerb: 'paused' as const, lastEventAt: old, now, wedgeThresholdMs: 600_000 };
+    expect(classify(base)).toBe('wedged');
+    expect(classify({ ...base, pausedWaiting: true })).toBe('busy');
+    expect(classify({ ...base, alive: false, pausedWaiting: true })).toBe('dead');
+  });
+});

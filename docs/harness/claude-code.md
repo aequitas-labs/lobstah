@@ -36,7 +36,7 @@ row, and the session-start brief says when the plugin is behind.
 | PostToolUse hook (`lobstah soak beat`) | After every tool call in a soaking session: refreshes the trap's liveness and writes its catch's activity (the tool name and its primary target, redacted). At most once per 30 seconds per trap. No network, no git; always exits 0, errors go to `~/.lobstah/logs/beat.log`. Inert when not soaking or with `[soak].beat = false`. |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends. |
 | `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken. |
-| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs. |
+| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, and `paused --waiting-on` before waiting on something external (for ume, the non-blocking push when the await cannot run as a tracked background task). |
 
 Slash commands, each a shortcut for a CLI verb:
 

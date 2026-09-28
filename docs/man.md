@@ -128,6 +128,16 @@ worker's verb and note stay the primary line. `lobstah status <id>` prints
 the same line as `activity:`, and `lobstah ls` has an `activity` column. See
 [Activity](vocabulary.md#activity).
 
+A worker that waits on something outside lobstah (a ume review, a PR
+review, a deploy) reports `paused "<note>" --waiting-on review --link <url>`
+before it waits. Tend, `status`, `ls`, and the glass then show
+`paused: waiting on review` with the link and the time waited. It is a
+state, not a question: nothing to answer, no attention, no pet. A paused
+headless worker is never counted as wedged and its wall clock stops, but it
+still holds a `maxConcurrent` slot while its process is alive. A paused
+trap is kept out of the ghost sweep until `--until` or
+`[soak].pausedTtlSecs` (24 hours). See [Waiting on](vocabulary.md#waiting-on).
+
 ### PR state after done
 
 A dispatch reports `done` when its PR opens; `report done --pr <url>`

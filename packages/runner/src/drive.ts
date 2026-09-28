@@ -123,7 +123,8 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
 
   /** Wait for an inbox message. Heartbeats the event stream every poll. */
   const awaitAnswer = async (verb: Verb): Promise<void> => {
-    record({ at: new Date().toISOString(), type: 'runner', data: { waiting: verb } });
+    const on = readStatusLog(id, lane).at(-1)?.waitingOn;
+    record({ at: new Date().toISOString(), type: 'runner', data: { waiting: verb, ...(on ? { on } : {}) } });
     while (true) {
       if (stopped() || finished) return;
       if (cancelRequested(id, lane)) return cancel();

@@ -1,4 +1,4 @@
-import { attachmentBlock, VERBS } from '@lobstah/core';
+import { attachmentBlock, VERBS, WAITING_ON } from '@lobstah/core';
 import type { Attachment } from '@lobstah/core';
 
 /**
@@ -21,6 +21,8 @@ export function buildPrompt(brief: string, opts: { id: string; nudge?: string; a
     reporting,
     `Use \`needs-decision\` when you are blocked on a question only a human can answer, then stop. ` +
       `New operator messages may arrive between your turns as user messages; treat them as instructions from the dispatcher.`,
+    `Before you wait on something outside lobstah (a human review, a PR review, a deploy), report ` +
+      `\`lobstah report ${opts.id} paused "<note>" --waiting-on ${WAITING_ON.join('|')} --link <url>\`. Report \`working\` when you resume.`,
     `Commit your work with clear messages. Do not merge anything.`,
     `--- BRIEF ---`,
     brief,

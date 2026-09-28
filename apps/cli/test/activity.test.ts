@@ -98,7 +98,7 @@ describe('activity in status, ls, tend, and the glass', () => {
 
     const status = lobstah(['status', id]);
     expect(status.stdout).toMatch(/^activity: Edit src\/a\.ts \(1\ds ago\)$/m);
-    expect(lobstah(['ls']).stdout).toMatch(new RegExp(`${id},work,active,working,[^,]+,Edit src/a\\.ts \\(1\\ds ago\\)`));
+    expect(lobstah(['ls']).stdout).toMatch(new RegExp(`${id},work,active,working,[^,]+,,Edit src/a\\.ts \\(1\\ds ago\\)`));
 
     const tend = buildTendReport();
     const d = tend.stories.flatMap((s) => s.dispatches).find((x) => x.id === id)!;

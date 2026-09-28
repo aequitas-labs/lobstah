@@ -63,7 +63,16 @@ export const COMMANDS: Record<string, CommandSpec> = {
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' } }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
-  report: { flags: { '--pr': { value: '<url>' }, '--no-watch': {} }, positionals: '<uuid> <verb> [note...]' },
+  report: {
+    flags: {
+      '--pr': { value: '<url>' },
+      '--no-watch': {},
+      '--waiting-on': { value: 'review|pr|deploy|person|external' },
+      '--link': { value: '<url>' },
+      '--until': { value: '<iso|30m|4h|2d>' },
+    },
+    positionals: '<uuid> <verb> [note...]',
+  },
   watch: {
     subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'release'],
     flags: {
@@ -165,9 +174,10 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `The validated status write path: working | needs-decision | blocked |
-paused | done | failed. --pr goes anywhere; after \`--\` every word is note.
-\`done --pr <github PR url>\` also registers the PR's pr: watch, owned by this
-dispatch (idempotent; --no-watch opts out).`,
+paused | done | failed. After \`--\` every word is note. \`done --pr <PR url>\`
+registers the PR's pr: watch (--no-watch opts out). --waiting-on and --link
+(paused, needs-decision, blocked) say what the worker waits on outside
+lobstah; --until (paused) sets when the pause expires.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

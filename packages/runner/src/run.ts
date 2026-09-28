@@ -13,7 +13,9 @@ import {
   mergeEvidence,
   modelForHarness,
   originProgress,
+  pausedWaiting,
   readEvidence,
+  readStatusLog,
   releaseWorktreeLock,
   acquireWorktreeLock,
   resolveDispatch,
@@ -27,6 +29,7 @@ import type { ChooseInput, WorktreeChoice } from '@lobstah/worktree';
 import { buildPrompt } from './contract.js';
 import { drive, settle } from './drive.js';
 import { planStart } from './plan.js';
+import { startWallClock } from './wallclock.js';
 import type { StartPlan } from './plan.js';
 
 /** Seams for tests: the harness, and the git work around it. */
@@ -170,11 +173,17 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   let wallClockHit = false;
   let current: AdapterRun | undefined;
+  // The wall clock does not run while the worker is paused on something
+  // external (`report paused --waiting-on`): waiting on a review is not work.
   const wallTimer = resolved.limits.wallClockSecs
-    ? setTimeout(() => {
-        wallClockHit = true;
-        current?.kill();
-      }, resolved.limits.wallClockSecs * 1000)
+    ? startWallClock({
+        limitMs: resolved.limits.wallClockSecs * 1000,
+        paused: () => pausedWaiting(readStatusLog(id, lane).at(-1)),
+        onExpire: () => {
+          wallClockHit = true;
+          current?.kill();
+        },
+      })
     : undefined;
 
   const runOnce = async (harness: string, prompt: string, resumeSession: string | undefined) => {
@@ -245,7 +254,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     outcome = await runOnce(coldHarness, promptWith([envNudge, note].filter(Boolean).join('\n\n')), undefined);
   }
 
-  if (wallTimer) clearTimeout(wallTimer);
+  wallTimer?.stop();
   const { cancelled, result } = outcome;
 
   try {

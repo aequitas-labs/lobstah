@@ -44,3 +44,29 @@ describe('glass: the activity line sits under the verb and note', () => {
     expect(text(el)).toBe('stale · Edit src/parse.ts · 20m ago');
   });
 });
+
+describe('glass: a paused dispatch says what it waits on', () => {
+  it('shows the kind, the time waited, and links the URL', async () => {
+    const d = acceptanceFleet();
+    const x = d.dispatches.find((y) => y.id.startsWith('bbbbbbbb'))!;
+    x.verb = 'paused';
+    x.waiting = { on: 'review', link: 'https://ume.example.com/s/abc', since: ago(12 * 60_000), waitedSecs: 720 };
+    const g = await page(d, { hash: '#dispatches', prefs: { view: 'cards' } });
+    const card = g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb'))!;
+    const w = card.querySelector('.waiting')!;
+    expect(text(w)).toBe('paused: waiting on review · 12m · ume.example.com/s/abc');
+    const a = w.querySelector('a')!;
+    expect(a.getAttribute('href')).toBe('https://ume.example.com/s/abc');
+    expect(a.getAttribute('target')).toBe('_blank');
+  });
+
+  it('never renders a non-http link', async () => {
+    const d = acceptanceFleet();
+    const x = d.dispatches.find((y) => y.id.startsWith('bbbbbbbb'))!;
+    x.verb = 'paused';
+    x.waiting = { on: 'external', link: 'javascript:alert(1)', since: ago(60_000), waitedSecs: 60 };
+    const g = await page(d, { hash: '#dispatches' });
+    expect(g.$$('#dispatches .waiting a')).toHaveLength(0);
+    expect(text(g.$$('#dispatches .waiting')[0])).toBe('paused: waiting on external · 60s');
+  });
+});

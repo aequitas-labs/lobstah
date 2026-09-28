@@ -327,6 +327,11 @@ tr.rowhead:hover {
   color: var(--fg);
   opacity: 0.85;
 }
+.waiting {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dim);
+}
 .activity.stale {
   color: var(--dim);
   opacity: 1;

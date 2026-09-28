@@ -47,8 +47,7 @@ lobstah man report                                # the delta since your last re
 lobstah man wait --peek                           # standing events, not consumed
 ```
 
-Repo keys come from `~/.lobstah/config.toml`; `lobstah repos` lists them.
-All output is TOON — parse it directly.
+Repo keys: `~/.lobstah/config.toml` (`lobstah repos`). All output is TOON.
 Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 
 ## Rules
@@ -59,6 +58,8 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   falls back to a headless worker. `man tend` lists live traps.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
+- `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long.
+- Before you wait on something external yourself, say what (for ume: push with ume's non-blocking form unless the await runs as a tracked background task).
 - `done` means the brief is fulfilled — report the catch. Never merge.
 - `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; a PR a worker already owns stays off.

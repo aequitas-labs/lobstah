@@ -16,7 +16,7 @@ anything else. The status log is append-only; the last entry wins.
 | `working` | Making progress; nothing needed. | Nobody. |
 | `needs-decision` | Blocked on a judgment call only a human (or the orchestrator) can make. The note carries the question. A headless worker waiting on a question stays alive until answered (`lobstah send`), cancelled, or the wall clock. | Human — re-fires every `remindSecs` until answered. |
 | `blocked` | Cannot proceed for an external reason (missing access, broken dependency). | Human. |
-| `paused` | Intentionally idle; resume is expected. | Whoever paused it. |
+| `paused` | Intentionally idle; resume is expected. With `--waiting-on`, the worker says what it waits on outside lobstah (see [Waiting on](#waiting-on)). A state, not a question: it raises no attention and does not walk the pet. | Whoever paused it, or the thing it waits on. |
 | `done` | The brief is fulfilled. Terminal. Merging is never the dispatch's job. | Merge loop / reviewer. |
 | `failed` | Cannot fulfill the brief; work preserved in the worktree. Terminal. | Human. |
 
@@ -24,6 +24,46 @@ anything else. The status log is append-only; the last entry wins.
 logged, process state stops mattering and the daemon finalizes.
 
 Source of truth: `VERBS` in `packages/core/src/types.ts`.
+
+## Waiting on
+
+What a worker waits on outside lobstah: a human review in ume, a PR review, a
+deploy. A report says it with flags:
+
+```bash
+lobstah report <id> paused "<note>" --waiting-on <kind> [--link <url>] [--until <iso|duration>]
+```
+
+| Kind | Meaning |
+| --- | --- |
+| `review` | A human review of an artifact (a ume plan or result). |
+| `pr` | A pull request review or merge. |
+| `deploy` | A deploy or release to finish. |
+| `person` | A named person to act. |
+| `external` | Anything else outside lobstah. |
+
+`--waiting-on` and `--link` are valid only with `paused`, `needs-decision`,
+and `blocked`; `--until` only with `paused`. The link must be http or https.
+`--until` takes an ISO time or a duration from now (`30m`, `4h`, `2d`). The
+fields are stored on the status entry (`waitingOn`, `link`, `until`); the
+write path (`appendStatus`) rejects anything else.
+
+Effects of `paused` with `--waiting-on`:
+
+- `lobstah status`, `lobstah ls`, `lobstah man tend`, and the glass show
+  `paused: waiting on review` with the link and the time waited. The glass
+  card links the URL.
+- A **trap** whose catch last reported `paused` (with or without
+  `--waiting-on`) is not ghost-swept until `--until` passes, or, without it,
+  until `[soak].pausedTtlSecs` (default 24 hours) after the report. After
+  that it sweeps as before, and the `trap-ghosted` notice says the pause
+  expired.
+- A **headless** worker is not classified `wedged`, however long it is
+  silent, and its `wallClockSecs` limit does not run while it is paused. It
+  still holds its slot: a live paused runner counts against `maxConcurrent`.
+- No attention, no notice, no pet. It is a state, not a question.
+
+Source of truth: `WAITING_ON` in `packages/core/src/types.ts`.
 
 ## Reconciled state
 
@@ -95,7 +135,7 @@ daemon — it never reaches a tracker.
 | `busy` | Runner alive, activity within the wedge threshold. | Nothing. |
 | `terminal` | Terminal verb logged. | Finalize once the process is gone. |
 | `dead` | Pid verified gone (pid + process-start-time, so pid reuse can't lie). | Respawn with session resume, bounded by `maxRestartAttempts`; then `failed`. |
-| `wedged` | Alive but no activity past `wedgeThresholdSecs`. | SIGKILL the group, fork the session with a nudge, same bound. |
+| `wedged` | Alive but no activity past `wedgeThresholdSecs`. Never a worker whose last report is `paused` with `--waiting-on` (that is `busy`). | SIGKILL the group, fork the session with a nudge, same bound. |
 | `unknown` | Contradictory or missing evidence. | Touch nothing; log it. |
 
 Dead and wedged get opposite treatment on purpose: a dead process is safe to
@@ -294,7 +334,7 @@ refused (the session lock); a stale one is adopted.
 | message | `send wt:<trap> "<text>"` — a conversational continuation, not work: no branch, no catch, no report obligation. Delivered before bait at the trap's next park, stamped with its sender (`helm` / `session:<id>` / `terminal`); undeliverable messages bounce to the helm as notices. |
 | catch | The active dispatch a trap claimed (`claim.json`, `by: wt:<id>`). One catch per trap; one active item per worktree. The daemon never spawns or restarts it — the session's reports are its liveness. |
 | beat | `lobstah soak beat`, run by the plugin's post-tool hook after every tool call. It resolves the trap from the working directory (files only: no git, no network), refreshes the trap's beat (`soaking/<trap>.beat`, separate from the registration), and writes the claimed catch's [activity](#activity). Throttled to one per 30 seconds per trap. Inert in a session that is not soaking, or with `[soak].beat = false`. Always exits 0; errors go to `logs/beat.log`. |
-| ghost trap | A registration whose heartbeat **and** beat lapsed past `[soak].ttlSecs` **after having parked at least once**. The sweep removes it, requeues its catch, and posts a `trap-ghosted` notice; re-soaking the worktree restores the same address. A fresh report or a fresh beat keeps a working session out of the sweep. A fresh beat also holds the session lock. |
+| ghost trap | A registration whose heartbeat **and** beat lapsed past `[soak].ttlSecs` **after having parked at least once**. The sweep removes it, requeues its catch, and posts a `trap-ghosted` notice; re-soaking the worktree restores the same address. A fresh report or a fresh beat keeps a working session out of the sweep. A fresh beat also holds the session lock. A catch whose last report is `paused` keeps its trap until the pause expires ([Waiting on](#waiting-on)). |
 | defective enlistment | A stale registration that **never parked** — signed on but never listened (usually no Stop hook). Not swept: the helm gets a `trap-defective` notice with the remedy (`soak --wait`), and the registration stays so the address keeps protecting its work. |
 | notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): sign-ons, first parks, sign-offs, ghosts, defective enlistments, orphaned work, bounced messages, PRs merged or closed, watches held over the fork cap (`watch-held`), failing (`watch-failing`), and recovered (`watch-recovered`), free-space holds (`disk-held`, `disk-cleared`), and worktrees released after their PR merged (`worktree-released`, one per cull pass). A trap leaves the registry only through a `trap-stowed` or `trap-ghosted` notice — the end-state is always explicit. Consumed by `man wait`/the park; tend always shows the recent tail. |
 

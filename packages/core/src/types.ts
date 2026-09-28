@@ -45,10 +45,22 @@ export interface Descriptor {
   queuedAt?: string;
 }
 
+/** What a paused (or questioning) worker waits on, outside lobstah. */
+export const WAITING_ON = ['review', 'pr', 'deploy', 'person', 'external'] as const;
+export type WaitingOn = (typeof WAITING_ON)[number];
+/** The verbs that may say what they wait on (`--waiting-on`, `--link`). */
+export const WAITING_ON_VERBS: readonly Verb[] = ['paused', 'needs-decision', 'blocked'];
+
 export interface StatusEntry {
   at: string;
   verb: Verb;
   note?: string;
+  /** What the worker waits on (paused, needs-decision, blocked only). */
+  waitingOn?: WaitingOn;
+  /** Where to look: the review, the PR, the deploy (http or https). */
+  link?: string;
+  /** When a pause expires (ISO). paused only; the ghost sweep honors it. */
+  until?: string;
 }
 
 export interface Evidence {

@@ -152,6 +152,7 @@ export function activityFromEvent(ev: NormalizedEvent, root?: string): Omit<Acti
     case 'thinking':
       return { kind: 'thinking', summary: 'thinking' };
     case 'runner': {
+      if (typeof data.on === 'string') return { kind: 'waiting', summary: redactSummary(`waiting on ${data.on}`) };
       if (typeof data.waiting === 'string') return { kind: 'waiting', summary: redactSummary(`waiting for an answer (${data.waiting})`) };
       if (data.holding === 'background') return { kind: 'waiting', summary: 'waiting on background work' };
       return undefined;

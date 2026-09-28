@@ -75,6 +75,11 @@ export interface SoakConfig {
    * writes its catch's activity. False makes the hook do nothing.
    */
   beat: boolean;
+  /**
+   * How long a trap whose catch last reported `paused` is kept out of the
+   * ghost sweep, from the report. `report paused --until` overrides it.
+   */
+  pausedTtlSecs: number;
 }
 
 export interface HelmConfig {
@@ -152,6 +157,7 @@ export const DEFAULT_SOAK: SoakConfig = {
   deferSecs: 90,
   ttlSecs: 1800,
   beat: true,
+  pausedTtlSecs: 86400,
 };
 
 export const DEFAULT_HELM: HelmConfig = {

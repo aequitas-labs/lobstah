@@ -7,6 +7,10 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   acknowledge,
+  isVerb,
+  waitingFields,
+  waitingText,
+  waitingView,
   activityLine,
   activityView,
   DEFAULT_LIMITS,
@@ -498,11 +502,20 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
     const claimedAt = bucket === 'active' ? readSessionClaim(id, lane)?.at : undefined;
     const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued, claimedAt });
     const activity = bucket === 'active' ? activityView(readActivity(id, lane), staleSecs) : undefined;
+    const waiting = bucket === 'active' ? waitingView(log.at(-1)) : undefined;
     const updated =
       (queued && state === 'queued' ? queuedAt(id, lane) : undefined) ??
       (log.length === 0 ? claimedAt : undefined) ??
       new Date(m).toISOString();
-    return { id, lane, bucket, state, updated, activity: activity ? activityLine(activity) : '' };
+    return {
+      id,
+      lane,
+      bucket,
+      state,
+      updated,
+      waiting: waiting ? waitingText(waiting) : '',
+      activity: activity ? activityLine(activity) : '',
+    };
   });
 }
 
@@ -655,7 +668,7 @@ async function mainCli(): Promise<void> {
       const rows = lanes.flatMap((lane) =>
         (['queue', 'active', 'done'] as const).flatMap((b) => rowsFor(lane, b)),
       );
-      console.log(toonTable('dispatches', rows, ['id', 'lane', 'bucket', 'state', 'updated', 'activity']));
+      console.log(toonTable('dispatches', rows, ['id', 'lane', 'bucket', 'state', 'updated', 'waiting', 'activity']));
       console.log(toonHelp(['lobstah status <id>', 'lobstah man tend   (verdict + stories + gates)']));
       break;
     }
@@ -663,7 +676,7 @@ async function mainCli(): Promise<void> {
       const id = pos[0];
       if (!id) {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
-        console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'activity']));
+        console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'waiting', 'activity']));
         break;
       }
       const lane = findLane(id);
@@ -674,6 +687,7 @@ async function mainCli(): Promise<void> {
       // Activity only while the dispatch is live: a finished one did its last thing.
       const live = fs.existsSync(path.join(laneDirs(lane).active, id));
       const activity = live ? activityView(readActivity(id, lane), wedgeSecs()) : undefined;
+      const waitingNow = live ? waitingView(log.at(-1)) : undefined;
       console.log(
         toonKV({
           id,
@@ -681,6 +695,8 @@ async function mainCli(): Promise<void> {
           state,
           ...(state === 'queued' ? { queued: since } : {}),
           lastNote: log.at(-1)?.note,
+          ...(waitingNow ? { [log.at(-1)!.verb]: waitingText(waitingNow) } : {}),
+          ...(waitingNow?.until ? { until: waitingNow.until } : {}),
           ...(activity ? { activity: activityLine(activity) } : {}),
           entries: log.length,
           attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0,
@@ -786,13 +802,31 @@ async function mainCli(): Promise<void> {
       const note = rest.join(' ') || undefined;
       const prUrl = opt('--pr');
       const noWatch = has('--no-watch');
-      const entry = appendStatus(id, lane, verb, note);
+      const waiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
+      const saysWaiting = waiting.waitingOn !== undefined || waiting.link !== undefined || waiting.until !== undefined;
+      if (saysWaiting && isVerb(verb)) {
+        try {
+          waitingFields(verb, waiting);
+        } catch (err) {
+          throw new UsageError(`${err instanceof Error ? err.message : String(err)}\n\n${usageFor('report')!}`);
+        }
+      }
+      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined);
       if (prUrl) mergeEvidence(id, lane, { prUrl });
       // A done PR stays observed: CI, review, and merge flow back through its
       // pr: watch instead of lobstah going blind at "PR open".
       const prWatch = verb === 'done' && prUrl && !noWatch ? autoRegisterPrWatch(id, prUrl) : undefined;
       console.log(
-        toonKV({ id, verb: entry.verb, at: entry.at, ...(prUrl ? { prUrl } : {}), ...(prWatch ? { watch: prWatch.key } : {}) }),
+        toonKV({
+          id,
+          verb: entry.verb,
+          at: entry.at,
+          ...(entry.waitingOn ? { waitingOn: entry.waitingOn } : {}),
+          ...(entry.link ? { link: entry.link } : {}),
+          ...(entry.until ? { until: entry.until } : {}),
+          ...(prUrl ? { prUrl } : {}),
+          ...(prWatch ? { watch: prWatch.key } : {}),
+        }),
       );
       // Self-instructive next step, right where the reporter reads it: an
       // instruction that lives only in session memory decays over a long
