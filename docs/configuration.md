@@ -33,6 +33,12 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 `[repos.<key>.harness]` — per-repo harness defaults: `default` (`claude` \|
 `codex`), `model`, `effort`.
 
+`effort` reaches both harnesses: Claude as its effort level (`low`, `medium`,
+`high`, `xhigh`, `max`), Codex as `model_reasoning_effort`. Set it for Claude
+rather than relying on the default — left unset, a Claude session takes
+`effortLevel` from the host's settings files, including the user's own
+`~/.claude/settings.json`.
+
 `lobstah repos add <path> [--pickup]` detects and appends a block (origin,
 default branch from `origin/HEAD`, setup from the lockfile); `lobstah init
 --scan <dir>...` does the same for every git repo found under the given

@@ -70,6 +70,26 @@ const userMessage = (content: string) => ({
   session_id: '',
 });
 
+/**
+ * The SDK options for a dispatch. `effort` must be passed explicitly: when it
+ * is omitted, the session takes `effortLevel` from whatever settings files the
+ * host has — a user's own `~/.claude/settings.json` included — so the
+ * configured level silently never applied. Raw `flags` still come last and win.
+ */
+export function claudeSdkOptions(opts: AdapterStartOpts): Record<string, unknown> {
+  return {
+    cwd: opts.cwd,
+    model: opts.model,
+    ...(opts.effort ? { effort: opts.effort } : {}),
+    maxTurns: opts.limits.maxTurns,
+    resume: opts.resumeSession,
+    forkSession: opts.resumeSession ? true : undefined,
+    permissionMode: 'bypassPermissions',
+    env: { ...process.env, ...opts.env },
+    extraArgs: flagsToExtraArgs(opts.flags),
+  };
+}
+
 /** The headless invocation matching what the SDK path configures. */
 export function claudeCliArgs(opts: AdapterStartOpts): string[] {
   const args = [
@@ -80,6 +100,7 @@ export function claudeCliArgs(opts: AdapterStartOpts): string[] {
     '--permission-mode', 'bypassPermissions',
   ];
   if (opts.model) args.push('--model', opts.model);
+  if (opts.effort) args.push('--effort', opts.effort);
   if (opts.limits.maxTurns) args.push('--max-turns', String(opts.limits.maxTurns));
   if (opts.resumeSession) args.push('--resume', opts.resumeSession, '--fork-session');
   args.push(...opts.flags);
@@ -196,16 +217,7 @@ export function createClaudeAdapter(): Adapter {
 
       const q = sdk.query({
         prompt: userMessages(),
-        options: {
-          cwd: opts.cwd,
-          model: opts.model,
-          maxTurns: opts.limits.maxTurns,
-          resume: opts.resumeSession,
-          forkSession: opts.resumeSession ? true : undefined,
-          permissionMode: 'bypassPermissions',
-          env: { ...process.env, ...opts.env },
-          extraArgs: flagsToExtraArgs(opts.flags),
-        },
+        options: claudeSdkOptions(opts),
       });
 
       const events = new AsyncQueue<NormalizedEvent>();
