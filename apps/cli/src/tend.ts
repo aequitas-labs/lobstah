@@ -12,6 +12,7 @@ import {
   listNotices,
   listTraps,
   listWatches,
+  watchErrorCell,
   loadConfig,
   parsePrRef,
   pendingIds,
@@ -113,7 +114,7 @@ export interface TendNotice {
  * - `pr:checks`: open, with failed checks on the observed head.
  * - `pr:conflict`: open, and GitHub reports it conflicting with its base (mergeStateStatus DIRTY).
  * - `pr:ready`: open, not draft, no pr:review standing, merge state mergeable (CLEAN / HAS_HOOKS /
- *   UNSTABLE), and approved or all checks passed with none pending.
+ *   UNSTABLE), check results readable, and approved or all checks passed with none pending.
  * - `watch`: an unconsumed man-owned watch event — machinery, always on.
  * Only `question` and `watch` drive the verdict; the rest are things to look at.
  */
@@ -516,7 +517,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       ...(w.heldAt ? { heldAt: w.heldAt } : {}),
       lastSummary: last?.summary,
       lastAt: last?.at,
-      error: w.lastError,
+      error: w.lastError ? watchErrorCell(w) : undefined,
     });
     if (w.owner.startsWith('dispatch:')) {
       const label = `${w.key}${pending.length > 0 ? ` (${pending.length} pending)` : ''}`;

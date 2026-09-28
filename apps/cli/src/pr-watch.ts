@@ -313,7 +313,10 @@ export function runPrCheck(refArg: string, cursor: string | undefined, forId: st
   const out = derivePrEvents(ref, view, cursor);
   observePr(ref, view, { dispatchId: forId });
   const events = forId ? workEvents(ref, out.events) : manEvents(out.events);
-  return JSON.stringify({ cursor: out.cursor, events, ...(out.done ? { done: true } : {}) });
+  // Degraded view (no permission to read checks): the state is recorded and
+  // the cursor advances, and the watch still records the permission error.
+  const error = view.checksError ? `${view.checksError} (reading check results; checks unknown, PR state recorded)` : undefined;
+  return JSON.stringify({ cursor: out.cursor, events, ...(out.done ? { done: true } : {}), ...(error ? { error } : {}) });
 }
 
 /** Poll cadence: [pickup].pollSecs, the same default as pick's. */
@@ -342,11 +345,13 @@ export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Da
     // A terminal PR has nothing left to observe; pick's check retires its watch.
     if (seen && (seen.state === 'MERGED' || seen.state === 'CLOSED')) continue;
     if (seen && now - Date.parse(seen.observedAt) < (w.everySecs ?? defaultEverySecs) * 1000) continue;
+    // A failing watch backs off (core watch.ts); the observe-only pass must not poll around it.
+    if (w.failures && !watchDue(w, defaultEverySecs, now)) continue;
     try {
       const record = observePr(ref, ghPrView(ref), { dispatchId: id, now: new Date(now) });
       if (record.state === 'MERGED' || record.state === 'CLOSED') removeWatch(w.key);
     } catch {
-      // gh missing or unauthenticated: pick's real check records lastError
+      // gh missing, unauthenticated, or forbidden: pick's real check records the streak
     }
   }
 }

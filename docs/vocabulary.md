@@ -143,11 +143,16 @@ A **watch** is a standing outbound poll on something external (a ume review
 session, a CI run) registered through `lobstah watch add` — the validated
 write path; nothing else touches `watches/`. **Owner:**
 `packages/core/src/watch.ts`. **Enforcement:** check output that doesn't
-parse records `lastError` and advances nothing.
+parse records `lastError` and advances nothing. A failed check keeps its
+reason (the first meaningful line of its output), exit code, and the start of
+the failure streak; the third consecutive failure posts one `watch-failing`
+notice and the next success one `watch-recovered`. A permission, auth,
+not-found, or rate-limit failure doubles the watch's interval per failure, up
+to one hour ([github.md](github.md#when-a-pr-watch-fails)).
 
 | Word | Meaning |
 | ---- | ------- |
-| `check` | Shell command exec'd with `{cursor}` substituted; prints `{ "cursor", "events"?, "done"? }` JSON. Read-only and idempotent — pick and an inline `man wait` coordinate only by the `lastCheckedAt` stamp. |
+| `check` | Shell command exec'd with `{cursor}` substituted; prints `{ "cursor", "events"?, "done"?, "error"? }` JSON. `error` marks a check that half-worked: its cursor and events apply, and the error counts as a failure. Read-only and idempotent — pick and an inline `man wait` coordinate only by the `lastCheckedAt` stamp. |
 | `cursor` | Opaque progress marker, advanced only from successful check output. The stream of record: a crashed watcher resumes from it losslessly. |
 | `owner` | Who the events belong to: `man` (surface via `man wait`/`man haul` + notify) or `dispatch:<uuid>` (fork a continuation of that chain). Events are never unowned work. |
 | `done` | The source is finished (session closed, run complete); the watch retires after its last events are consumed. |
@@ -184,7 +189,8 @@ evidence).
 | `merge-state` | `mergeStateStatus` changed (`value`). Evidence only. |
 | `draft` | Draft flipped (`value`). Evidence only. |
 | `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. Emitted only on an open → terminal change, never on the first observation. |
-| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. `review.changesRequested` comes from `reviewDecision` or any reviewer's latest decisive review; `unresolvedThreads` from the GraphQL query, omitted for an observation where that query failed. Comment bodies are never stored. The object is merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show: `merged`, `closed`, `draft`, `conflicts` (`DIRTY`, filled GitHub red, ahead of checks and review), `checks n/m failed`, `changes requested`, `n unresolved`, `checks n/m` (pending), `behind` (`BEHIND`, grey; not an attention kind), `review`, `green` (only for a mergeable merge state), `blocked`, `merge unknown`. |
+| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending, unknown? }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. `review.changesRequested` comes from `reviewDecision` or any reviewer's latest decisive review; `unresolvedThreads` from the GraphQL query, omitted for an observation where that query failed. Comment bodies are never stored. The object is merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show: `merged`, `closed`, `draft`, `conflicts` (`DIRTY`, filled GitHub red, ahead of checks and review), `checks n/m failed`, `changes requested`, `n unresolved`, `checks n/m` (pending), `behind` (`BEHIND`, grey; not an attention kind), `checks unknown` (the watch may not read check results; never ready), `review`, `green` (only for a mergeable merge state), `blocked`, `merge unknown`. |
+| checks unknown | Without `Checks: read`, the check re-reads the PR without `statusCheckRollup`: the PR state is recorded, `checks.unknown` is `no permission`, and the check's output carries the permission `error`. `pr:ready` never stands on unknown checks. |
 | PR record | `~/.lobstah/prs/<owner>__<repo>__<n>.json` — the PR's latest observation keyed by the PR, not by a dispatch: the evidence `pr` object plus `key`, `repo` (`<owner>/<repo>`), and `dispatches` (the ids whose watch observed it; empty for a human's or a culled PR). **Owner:** `packages/core/src/prs.ts` (`upsertPr`, `readPrs`); the one writer is the preset's observation path (`observePr`), on every observation, man-owned or dispatch-owned — a dispatch-owned one also stamps that dispatch's evidence, which stays the per-dispatch view. Tend's `pr:*` kinds and `pr:ready` stack suppression, the glass PRs tab and stacks, the merged/closed notice, and PR acks read records first and fall back to dispatch evidence only for a PR with no record yet. `cull` removes records merged or closed longer than its window, never open ones. |
 
 Every event carries `headSha`. A dispatch-owned PR watch emits only work
@@ -244,7 +250,7 @@ refused (the session lock); a stale one is adopted.
 | catch | The active dispatch a trap claimed (`claim.json`, `by: wt:<id>`). One catch per trap; one active item per worktree. The daemon never spawns or restarts it — the session's reports are its liveness. |
 | ghost trap | A registration whose heartbeat lapsed past `[soak].ttlSecs` **after having parked at least once**. The sweep removes it, requeues its catch, and posts a `trap-ghosted` notice; re-soaking the worktree restores the same address. A fresh report on the catch keeps a mid-turn session out of the sweep. |
 | defective enlistment | A stale registration that **never parked** — signed on but never listened (usually no Stop hook). Not swept: the helm gets a `trap-defective` notice with the remedy (`soak --wait`), and the registration stays so the address keeps protecting its work. |
-| notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): sign-ons, first parks, sign-offs, ghosts, defective enlistments, orphaned work, bounced messages. A trap leaves the registry only through a `trap-stowed` or `trap-ghosted` notice — the end-state is always explicit. Consumed by `man wait`/the park; tend always shows the recent tail. |
+| notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): sign-ons, first parks, sign-offs, ghosts, defective enlistments, orphaned work, bounced messages, PRs merged or closed, watches held over the fork cap (`watch-held`), failing (`watch-failing`), and recovered (`watch-recovered`). A trap leaves the registry only through a `trap-stowed` or `trap-ghosted` notice — the end-state is always explicit. Consumed by `man wait`/the park; tend always shows the recent tail. |
 
 Delivery routes by ownership, same as watches: a continuation for a chain
 claimed by a live trap is addressed back to that trap and stays sticky.

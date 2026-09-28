@@ -21,7 +21,9 @@ export type NoticeKind =
   | 'message-bounced'
   | 'pr-merged'
   | 'pr-closed'
-  | 'watch-held';
+  | 'watch-held'
+  | 'watch-failing'
+  | 'watch-recovered';
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */

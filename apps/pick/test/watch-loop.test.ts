@@ -190,3 +190,28 @@ describe('watchLoop', () => {
     expect(listWatches().filter((w) => w.heldAt)).toHaveLength(2);
   });
 });
+
+// A `#!/bin/sh` gh stub: POSIX only.
+describe.skipIf(process.platform === 'win32')('watchLoop failure logging', () => {
+  it("logs the check's own reason with the watch key and exit code, then backs off", async () => {
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(
+      path.join(bin, 'gh'),
+      `#!/bin/sh\necho 'GraphQL: Resource not accessible by integration (repository.pullRequest.statusCheckRollup)' >&2\nexit 1\n`,
+    );
+    fs.chmodSync(path.join(bin, 'gh'), 0o755);
+    addWatch('pr:owner/repo#12', `PATH="${bin}:$PATH" gh pr view 12 --repo owner/repo --json statusCheckRollup`);
+    const lines: string[] = [];
+    await watchLoop(45, (m) => lines.push(m));
+    expect(lines).toEqual([
+      'pr:owner/repo#12 check failed: Resource not accessible by integration (repository.pullRequest.statusCheckRollup) (exit 1) — grant the GitHub App `Checks: read` (or use a token with the `repo` scope); see docs/github.md',
+    ]);
+    // Backed off: the next cycle, one cadence later, does not re-run the check.
+    const w = readWatch('pr:owner/repo#12')!;
+    w.lastCheckedAt = new Date(Date.now() - 50_000).toISOString();
+    fs.writeFileSync(path.join(dir, 'watches', 'pr-owner-repo-12.json'), JSON.stringify(w));
+    await watchLoop(45, (m) => lines.push(m));
+    expect(lines).toHaveLength(1);
+  });
+});

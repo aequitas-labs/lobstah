@@ -2,6 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { lobstahHome } from './paths.js';
+import { classifyGhError, firstMeaningfulLine, isBackoffKind } from './gh-errors.js';
+import type { GhErrorKind } from './gh-errors.js';
+import { postNotice } from './notices.js';
 
 /**
  * A watch is a standing outbound poll on something external — a ume review
@@ -14,6 +17,14 @@ import { lobstahHome } from './paths.js';
  * Unchanged cursor + no events = quiet. `done: true` retires the watch after
  * its events are delivered. Non-zero exit or unparseable output records
  * lastError and leaves the cursor untouched — the next due check retries.
+ * A check that half-worked prints its JSON with an `"error": "..."` string:
+ * the cursor and events apply, and the error counts as a failure too.
+ *
+ * Failures form a streak: the reason, exit code, and the time of the first
+ * failure are kept on the watch; the third consecutive failure posts one
+ * `watch-failing` notice, and the first success after it posts one
+ * `watch-recovered`. A permission, auth, not-found, or rate-limit failure
+ * backs the watch off (see watchIntervalSecs).
  * Checks must be read-only and idempotent: both pick and an inline `man wait`
  * may run them, coordinated only by the lastCheckedAt stamp.
  */
@@ -37,7 +48,19 @@ export interface Watch {
   brief?: string;
   createdAt: string;
   lastCheckedAt?: string;
+  /** The first meaningful line of the last failure; cleared on success. */
   lastError?: string;
+  /** Exit code of the last failed check (absent for a half-worked check that exited 0). */
+  lastExit?: number;
+  /** Consecutive failed checks in the current streak. */
+  failures?: number;
+  /** When the current failure streak began. */
+  failingSince?: string;
+  /** Classified cause of the last failure (gh-errors.ts), and what to do about it. */
+  errorKind?: GhErrorKind;
+  remedy?: string;
+  /** The streak's `watch-failing` notice was posted; a recovery notice is owed. */
+  failingNoticed?: boolean;
   /** Events delivered to the owner (count into the events file). */
   seen: number;
   seenAt: number;
@@ -123,6 +146,14 @@ export function addWatch(
     brief: opts.brief ?? existing?.brief,
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     lastCheckedAt: existing?.lastCheckedAt,
+    // A re-add keeps the failure streak: its backoff and its one notice.
+    lastError: existing?.lastError,
+    lastExit: existing?.lastExit,
+    failures: existing?.failures,
+    failingSince: existing?.failingSince,
+    errorKind: existing?.errorKind,
+    remedy: existing?.remedy,
+    failingNoticed: existing?.failingNoticed,
     seen: existing?.seen ?? 0,
     seenAt: existing?.seenAt ?? 0,
     lastFollowUpId: existing?.lastFollowUpId,
@@ -193,9 +224,27 @@ export function setWatchCursor(key: string, cursor: string): void {
   writeWatch(w);
 }
 
-/** A check is due when its cadence has elapsed since the last stamp (by anyone). */
+/** Longest poll interval a backing-off watch reaches. */
+export const WATCH_BACKOFF_CAP_SECS = 3600;
+/** Consecutive failures that raise the one `watch-failing` notice. */
+export const WATCH_FAILING_NOTICE_AT = 3;
+
+/**
+ * The watch's current poll interval. A watch failing for a cause that will
+ * not fix itself (permission, auth, not found, rate limit) doubles its
+ * interval with each consecutive failure, capped at one hour (or at its own
+ * interval, when that is longer already). Other failures retry at cadence.
+ */
+export function watchIntervalSecs(w: Pick<Watch, 'everySecs' | 'failures' | 'errorKind'>, defaultEverySecs: number): number {
+  const base = w.everySecs ?? defaultEverySecs;
+  const n = w.failures ?? 0;
+  if (n <= 0 || !isBackoffKind(w.errorKind)) return base;
+  return Math.min(base * 2 ** Math.min(n, 30), Math.max(base, WATCH_BACKOFF_CAP_SECS));
+}
+
+/** A check is due when its interval has elapsed since the last stamp (by anyone). */
 export function watchDue(w: Watch, defaultEverySecs: number, now = Date.now()): boolean {
-  const every = (w.everySecs ?? defaultEverySecs) * 1000;
+  const every = watchIntervalSecs(w, defaultEverySecs) * 1000;
   const last = w.lastCheckedAt ? Date.parse(w.lastCheckedAt) : 0;
   return now - last >= every;
 }
@@ -213,19 +262,23 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
   const cmd = w.check.replaceAll('{cursor}', w.cursor);
   const res = spawnSync(cmd, { shell: true, encoding: 'utf8', timeout: CHECK_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
   if (res.status !== 0 || res.error) {
-    w.lastError = (res.error?.message || res.stderr?.trim() || `exit ${res.status}`).slice(0, 500);
+    // lobstah's own commands print `error: ...` on stdout (axi.md P6); gh prints to stderr.
+    const toonError = /^error:.*$/m.exec(res.stdout ?? '')?.[0];
+    const reason = res.error?.message || firstMeaningfulLine(toonError, res.stderr, res.stdout) || 'no output';
+    recordWatchFailure(w, reason, res.status ?? undefined, now);
     writeWatch(w);
     return { watch: w, fresh: [] };
   }
-  let parsed: { cursor?: unknown; events?: unknown; done?: unknown };
+  let parsed: { cursor?: unknown; events?: unknown; done?: unknown; error?: unknown };
   try {
     parsed = JSON.parse(res.stdout) as typeof parsed;
   } catch {
-    w.lastError = `unparseable check output: ${res.stdout.slice(0, 200).trim()}`;
+    recordWatchFailure(w, `unparseable check output: ${res.stdout.slice(0, 200).trim()}`, undefined, now);
     writeWatch(w);
     return { watch: w, fresh: [] };
   }
-  w.lastError = undefined;
+  if (typeof parsed.error === 'string' && parsed.error) recordWatchFailure(w, parsed.error, undefined, now);
+  else recordWatchSuccess(w);
   const events: WatchEvent[] = Array.isArray(parsed.events)
     ? (parsed.events as Array<Record<string, unknown>>).map((e) => ({
         seq: (e.seq ?? w.cursor) as number | string,
@@ -239,6 +292,67 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
   if (parsed.done === true) w.done = true;
   writeWatch(w);
   return { watch: w, fresh };
+}
+
+/**
+ * One failed check: keep the reason and exit code, extend the streak, and
+ * post the streak's one `watch-failing` notice at the third failure. The
+ * dedupe key names the streak's start, so pick and `man wait` racing on the
+ * same watch still post it once.
+ */
+export function recordWatchFailure(w: Watch, reason: string, exit: number | undefined, now = new Date()): void {
+  const cls = classifyGhError(reason);
+  w.lastError = reason.slice(0, 500);
+  w.lastExit = exit;
+  w.errorKind = cls.kind;
+  w.remedy = cls.remedy;
+  w.failures = (w.failures ?? 0) + 1;
+  w.failingSince ??= now.toISOString();
+  if (w.failures >= WATCH_FAILING_NOTICE_AT && !w.failingNoticed) {
+    w.failingNoticed = true;
+    postNotice({
+      kind: 'watch-failing',
+      text: `${w.key} failing ${w.failures}× since ${w.failingSince}: ${watchErrorText(w)}`,
+      refId: w.owner.startsWith('dispatch:') ? w.owner.slice('dispatch:'.length) : w.key,
+      dedupeKey: `watch-failing-${w.key}-${w.failingSince}`,
+    });
+  }
+}
+
+/** One good check: end the streak, and post `watch-recovered` if the streak was announced. */
+export function recordWatchSuccess(w: Watch): void {
+  if (w.failingNoticed) {
+    postNotice({
+      kind: 'watch-recovered',
+      text: `${w.key} recovered after ${w.failures ?? 0} failed check(s) since ${w.failingSince ?? '?'}`,
+      refId: w.owner.startsWith('dispatch:') ? w.owner.slice('dispatch:'.length) : w.key,
+      dedupeKey: `watch-recovered-${w.key}-${w.failingSince ?? ''}`,
+    });
+  }
+  w.lastError = undefined;
+  w.lastExit = undefined;
+  w.errorKind = undefined;
+  w.remedy = undefined;
+  w.failures = undefined;
+  w.failingSince = undefined;
+  w.failingNoticed = undefined;
+}
+
+/** The reason, exit code, and remedy of a failing watch, on one line. */
+export function watchErrorText(w: Pick<Watch, 'lastError' | 'lastExit' | 'remedy'>): string {
+  if (!w.lastError) return '';
+  return `${w.lastError}${w.lastExit !== undefined ? ` (exit ${w.lastExit})` : ''}${w.remedy ? ` — ${w.remedy}` : ''}`;
+}
+
+/** The daemon log line for a failed check: `<key> check failed: <reason> (exit N) — <remedy>`. */
+export function watchFailureLogLine(w: Watch): string {
+  return `${w.key} check failed: ${watchErrorText(w)}`;
+}
+
+/** tend's and the glass's error cell: the reason, then when the streak began. */
+export function watchErrorCell(w: Pick<Watch, 'lastError' | 'lastExit' | 'remedy' | 'failures' | 'failingSince'>): string {
+  if (!w.lastError) return '';
+  return `${watchErrorText(w)} · failing since ${w.failingSince ?? '?'}${w.failures && w.failures > 1 ? ` (${w.failures}×)` : ''}`;
 }
 
 export interface WatchAttention {
