@@ -8,6 +8,18 @@ import {
   appendStatus,
   cancelRequested,
   claimNext,
+  clearHold,
+  formatGB,
+  GB,
+  lastCullPassAt,
+  pendingIds,
+  postNotice,
+  queuedDescriptor,
+  readHold,
+  stampCullPass,
+  statfsFreeBytes,
+  worktreesDir,
+  writeHold,
   COMPILED_BINARY,
   detectHarnesses,
   ensureLayout,
@@ -24,7 +36,7 @@ import {
   daemonSkip,
   sweepGhostTraps,
 } from '@lobstah/core';
-import type { Config, Lane, RunnerInfo } from '@lobstah/core';
+import type { Config, Descriptor, FreeBytesReader, Lane, RunnerInfo } from '@lobstah/core';
 import { classify, killGroup, pidAlive, processStartTime } from './liveness.js';
 import { DEFAULT_NOTIFY_VERBS, execNotify, notifiableIds, pendingNotifications } from './notify.js';
 
@@ -244,9 +256,123 @@ function pruneChores(cfg: Config): void {
   }
 }
 
+/**
+ * Culling lives in the CLI (it shares code with `lobstah cull`), so the CLI
+ * hands the daemon a culler. Without one the daemon never deletes anything.
+ */
+export interface DaemonCuller {
+  /**
+   * Cull finished dispatches older than `days`: done entries, worktrees,
+   * state, stale PR records and acks. Keeps branches, open-PR dispatches,
+   * and all queued and active work. At most `batch` dispatches per call.
+   * Returns how many dispatches it culled.
+   */
+  retention(days: number, now: number, batch: number, log: (m: string) => void): number;
+  /**
+   * Remove finished worktrees oldest first until `enough()` is true or none
+   * are left, at most `batch` per call. Returns how many it removed.
+   */
+  pressure(enough: () => boolean, now: number, batch: number, log: (m: string) => void): number;
+}
+
+export interface DaemonHooks {
+  culler?: DaemonCuller;
+  /** Free-space reader; tests inject a fake so they never read the real disk. */
+  freeBytes?: FreeBytesReader;
+  now?: () => number;
+}
+
+/** The retention cull runs at most once per this interval. */
+export const CULL_INTERVAL_MS = 3_600_000;
+/** At most this many dispatches (or worktrees) per cull pass, so one pass cannot stall the claim loop. */
+export const CULL_BATCH = 10;
+
+/**
+ * The retention cull, throttled to once per CULL_INTERVAL_MS. The stamp is
+ * written before the pass, so a pass that throws is not retried every tick.
+ * Returns true when a pass ran.
+ */
+export function retentionPass(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
+  const days = cfg.limits.retentionDays;
+  if (!hooks.culler || !(days > 0)) return false;
+  const now = hooks.now?.() ?? Date.now();
+  const last = lastCullPassAt();
+  if (last !== undefined && now - last < CULL_INTERVAL_MS) return false;
+  stampCullPass(now);
+  try {
+    const n = hooks.culler.retention(days, now, CULL_BATCH, log);
+    if (n > 0) log(`retention cull: ${n} finished dispatch(es) older than ${days}d removed`);
+  } catch (err) {
+    log(`retention cull error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return true;
+}
+
+function liftHold(log: (m: string) => void, text: string): void {
+  if (!readHold()) return;
+  clearHold();
+  postNotice({ kind: 'disk-cleared', text });
+  log(text);
+}
+
+/**
+ * The free-space guard, run before the daemon claims work that creates a
+ * worktree. Below `[limits].minFreeGB` it first removes finished worktrees
+ * (oldest first); if space is still short it records a hold and returns
+ * false, and the work stays queued. One notice when a hold starts, one when
+ * it clears. A failed read never blocks claiming.
+ */
+export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
+  const need = (cfg.limits.minFreeGB ?? 0) * GB;
+  if (!(need > 0)) {
+    liftHold(log, 'free-space hold cleared: [limits].minFreeGB is off');
+    return true;
+  }
+  const dir = worktreesDir();
+  const read = hooks.freeBytes ?? statfsFreeBytes;
+  const now = hooks.now?.() ?? Date.now();
+  let free: number;
+  try {
+    free = read(dir);
+  } catch (err) {
+    log(`free-space check failed (${err instanceof Error ? err.message : String(err)}); claiming anyway`);
+    return true;
+  }
+  if (free < need && hooks.culler) {
+    try {
+      const n = hooks.culler.pressure(() => (free = read(dir)) >= need, now, CULL_BATCH, log);
+      if (n > 0) free = read(dir);
+      if (n > 0) log(`free-space cull: ${n} finished worktree(s) removed, ${formatGB(free)} free`);
+    } catch (err) {
+      log(`free-space cull error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (free >= need) {
+    liftHold(log, `free-space hold cleared: ${formatGB(free)} free, needs ${formatGB(need)} — claiming resumes`);
+    return true;
+  }
+  const prior = readHold();
+  const at = new Date(now).toISOString();
+  writeHold({ since: prior?.since ?? at, checkedAt: at, freeBytes: free, needBytes: need, dir });
+  if (!prior) {
+    const text = `dispatches held: ${formatGB(free)} free on ${dir}, needs ${formatGB(need)} ([limits].minFreeGB) — queued work waits`;
+    postNotice({ kind: 'disk-held', text });
+    log(text);
+  }
+  return false;
+}
+
+/** Whether the daemon would claim anything from this lane right now. */
+function claimable(lane: Lane, skip?: (d: Descriptor) => boolean): boolean {
+  return pendingIds(lane).some((id) => {
+    const d = queuedDescriptor(id, lane);
+    return d !== undefined && !skip?.(d);
+  });
+}
+
 const daemonStartedAt = Date.now();
 
-export function tick(log: (m: string) => void = () => {}): void {
+export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {}): void {
   const cfg = loadConfig();
   ensureLayout();
   writeHeartbeat(cfg);
@@ -265,14 +391,23 @@ export function tick(log: (m: string) => void = () => {}): void {
   noticeOrphanedBait();
   const workSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
 
+  retentionPass(cfg, hooks, log);
+  // Every claim creates a worktree, so the free-space guard gates claiming
+  // in both lanes. With nothing to claim there is nothing to hold.
+  const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : undefined);
+  const roomy = (['chore', 'work'] as Lane[]).some((lane) => claimable(lane, skipFor(lane)))
+    ? spaceGuard(cfg, hooks, log)
+    : (liftHold(log, 'free-space hold cleared: nothing left to claim'), true);
+
   for (const lane of ['chore', 'work'] as Lane[]) {
     const active = listActive(lane);
     for (const st of active) reconcileOne(st, cfg, log);
+    if (!roomy) continue;
 
     const ceiling = lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent;
     let inFlight = listActive(lane).length;
     while (inFlight < ceiling) {
-      const id = claimNext(lane, lane === 'work' ? workSkip : undefined);
+      const id = claimNext(lane, skipFor(lane));
       if (!id) break;
       log(`${id}: claimed (${lane})`);
       inFlight++;
@@ -357,7 +492,11 @@ export function watchQueues(onChange: () => void): () => void {
   };
 }
 
-export async function daemon(intervalMs = 5000, log: (m: string) => void = console.log): Promise<never> {
+export async function daemon(
+  intervalMs = 5000,
+  log: (m: string) => void = console.log,
+  hooks: DaemonHooks = {},
+): Promise<never> {
   ensureLayout();
   acquireDaemonLock();
   log(`lobstah daemon: watching ${laneDirs('work').queue} every ${intervalMs}ms`);
@@ -365,7 +504,7 @@ export async function daemon(intervalMs = 5000, log: (m: string) => void = conso
   watchQueues(() => wake?.());
   while (true) {
     try {
-      tick(log);
+      tick(log, hooks);
     } catch (err) {
       log(`tick error: ${err instanceof Error ? err.message : String(err)}`);
     }

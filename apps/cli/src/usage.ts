@@ -156,7 +156,9 @@ changes — never from man tend --json, man wait, the park, or reminders.
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
 watch:<key>. An unknown key exits 2.`,
   cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
-without --apply (default 14 days).`,
+without --apply (default 14 days): it measures each target (one du per
+worktree). --apply measures nothing; it deletes and prints the count and the
+free-space change. The daemon culls on its own with [limits].retentionDays.`,
   cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,

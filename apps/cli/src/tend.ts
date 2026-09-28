@@ -29,8 +29,10 @@ import {
   readWatchEvents,
   toonKV,
   toonTable,
+  holdReason,
+  readHold,
 } from '@lobstah/core';
-import type { Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
+import type { DiskHold, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
@@ -379,6 +381,8 @@ export interface TendReport {
   helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number }>;
   merge?: MergeView;
   stacks: GlassStack[];
+  /** A free-space hold: the daemon leaves unaddressed queued work in the queue. */
+  hold?: DiskHold & { reason: string };
 }
 
 function readJson<T>(file: string): T | undefined {
@@ -397,13 +401,27 @@ function doneIds(lane: Lane): string[] {
   }
 }
 
+/**
+ * The free-space hold reason for a queued dispatch the daemon would claim,
+ * or undefined. Addressed bait waits for its trap, not for disk space.
+ */
+export function heldReason(id: string, lane: Lane, hold = readHold()): string | undefined {
+  if (!hold) return undefined;
+  const d = queuedDescriptor(id, lane);
+  return d && d.for === undefined ? holdReason(hold) : undefined;
+}
+
 function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']): TendDispatch {
   const log = readStatusLog(id, lane);
   const last = log.at(-1);
   // A trap's claim with no report yet is `working`, dated from the claim.
   const claimedAt = bucket === 'active' ? readSessionClaim(id, lane)?.at : undefined;
-  const state =
-    bucket === 'queued' ? 'queued' : displayState({ log, lastEventAt: lastEventAt(id, lane), queued: false, claimedAt });
+  const held = bucket === 'queued' ? heldReason(id, lane) : undefined;
+  const state = held
+    ? 'held'
+    : bucket === 'queued'
+      ? 'queued'
+      : displayState({ log, lastEventAt: lastEventAt(id, lane), queued: false, claimedAt });
   const evidence = readEvidence(id, lane);
   const answered =
     last && (last.verb === 'needs-decision' || last.verb === 'blocked') ? answeredAt(id, lane, last.at) : undefined;
@@ -412,7 +430,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     lane,
     bucket,
     state,
-    note: last?.note,
+    note: held ?? last?.note,
     // Queued work has no log yet; its time is when it entered the queue.
     at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),
     ...(answered ? { answeredAt: answered } : {}),
@@ -558,7 +576,10 @@ export function buildTendReport(now = Date.now()): TendReport {
     const st = fs.statSync(path.join(laneDirs('work').queue, `${id}.json`), { throwIfNoEntry: false });
     return st ? Math.max(max, now - st.mtimeMs) : max;
   }, 0);
+  const hold = readHold();
+  // A hold is the daemon choosing not to claim, not claiming broken.
   const stalled =
+    !hold &&
     daemonUp &&
     unaddressedQueued.length > 0 &&
     active.length < cfg.limits.maxConcurrent &&
@@ -684,6 +705,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     helms,
     merge,
     stacks,
+    ...(hold ? { hold: { ...hold, reason: holdReason(hold) } } : {}),
   };
 }
 
@@ -698,6 +720,7 @@ export function renderTend(r: TendReport): string {
       chores: r.counts.choresActive,
       done24h: r.counts.done24h,
       failed24h: r.counts.failed24h,
+      ...(r.hold ? { held: `${r.hold.reason} on ${r.hold.dir} (since ${r.hold.since})` } : {}),
     }),
   );
   for (const stack of r.stacks) {
@@ -729,6 +752,7 @@ export function renderTend(r: TendReport): string {
             .map(
               (d) =>
                 `${d.id.slice(0, 8)}:${d.state}` +
+                (d.state === 'held' && d.note ? ` (${d.note.replace(/^held: /, '')})` : '') +
                 (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : ''),
             )
             .join(' → '),

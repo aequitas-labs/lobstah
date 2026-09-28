@@ -91,7 +91,7 @@ The verdict distinguishes states that look identical from the outside:
 | `daemon-down` | No fresh heartbeat — nothing is being supervised. |
 | `stalled` | Work queued, capacity free, daemon alive, nothing claiming — actually broken. |
 | `needs-attention` | An unanswered `needs-decision`/`blocked` is standing, with its age. |
-| `working` | Dispatches active or queued, nothing waiting on a human. |
+| `working` | Dispatches active or queued, nothing waiting on a human. A free-space hold counts here, not as `stalled`. |
 | `idle` | Everything drained; the quiet is real. |
 
 Below the verdict: counts (queued, active, chores, done/failed last 24h), the
@@ -426,6 +426,47 @@ enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 `soak --wait`) and left standing so the address keeps protecting its work.
 Nobody is conscripted: only a worktree whose session ran `soak` ever
 receives work.
+
+### Culling and disk space
+
+Worktrees are 1 to 8 GB each. `lobstah cull` sweeps what is finished: `done/`
+entries older than the window (`--older-than <days>`, default 14), worktrees
+whose dispatch is finished or gone, stale state files, merged or closed PR
+records, and orphaned acks. It never touches queued or active work, and
+`git worktree remove` keeps each dispatch's branch.
+
+Without `--apply` it is a dry run: it measures each target and prints the
+sizes. A worktree is measured with one `du -sk`; where `du` is missing
+(Windows) a file walk measures it instead. `--apply` measures nothing. It
+deletes, then prints the count and the change in free space on the worktrees
+volume.
+
+```
+$ lobstah cull
+cull[2]{kind,id,ageDays,bytes}:
+  done,6a1f…,21,4120
+  worktree,6a1f…,21,3221225472
+totalBytes: 3221229592
+total: 3 GB
+dry run — pass --apply to remove
+```
+
+The daemon can do this on its own. Two `[limits]` keys turn it on
+([configuration](configuration.md#limits)); both are off by default:
+
+- `retentionDays` — once an hour at most, the daemon culls finished
+  dispatches older than this, 10 at a time. A dispatch whose PR is still open
+  is kept.
+- `minFreeGB` — before it claims work (each claim creates a worktree), the
+  daemon reads free space on the worktrees volume. Below the limit it removes
+  finished worktrees, oldest first, until the limit is met. If space is still
+  short, the work stays queued. `man tend` shows it as
+  `held (3.2 GB free, needs 10 GB)`, the glass shows the same reason in the
+  note column, and one `disk-held` notice reaches the helm. When space
+  returns, one `disk-cleared` notice follows and claiming resumes.
+
+`lobstah doctor` prints a `disk` row: free space on the worktrees volume, both
+limits, and the count and age of the worktrees a cull could remove.
 
 ## What the daemon gives your liaison for free
 

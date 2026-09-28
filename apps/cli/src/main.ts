@@ -94,7 +94,8 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { charter } from './charter.js';
 import { buildBriefContext } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
-import { applyCull, planCull } from './cull.js';
+import { runCull } from './cull.js';
+import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
@@ -933,23 +934,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'cull': {
-      const days = Number(opt('--older-than') ?? '14');
-      const plan = planCull(days);
-      console.log(
-        toonTable(
-          'cull',
-          plan.map((i) => ({ kind: i.kind, id: i.id, ageDays: i.ageDays, bytes: i.bytes })),
-          ['kind', 'id', 'ageDays', 'bytes'],
-        ),
-      );
-      console.log(toonKV({ totalBytes: plan.reduce((sum, item) => sum + item.bytes, 0) }));
-      if (plan.length === 0) break;
-      if (has('--apply')) {
-        applyCull(plan);
-        console.log(`applied: ${plan.length} removed`);
-      } else {
-        console.log('dry run — pass --apply to remove');
-      }
+      console.log(runCull(Number(opt('--older-than') ?? '14'), has('--apply')));
       break;
     }
     case 'man:manual': {
@@ -1572,7 +1557,7 @@ async function mainCli(): Promise<void> {
         console.log(toonKV({ service: kind, file: res.file, removed: res.removed }));
         break;
       }
-      if (kind === 'daemon') await daemon(Number(opt('--interval') ?? '5000'));
+      if (kind === 'daemon') await daemon(Number(opt('--interval') ?? '5000'), console.log, { culler: cliCuller });
       else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;
     }

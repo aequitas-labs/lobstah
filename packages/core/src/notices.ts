@@ -23,7 +23,9 @@ export type NoticeKind =
   | 'pr-closed'
   | 'watch-held'
   | 'watch-failing'
-  | 'watch-recovered';
+  | 'watch-recovered'
+  | 'disk-held'
+  | 'disk-cleared';
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */
