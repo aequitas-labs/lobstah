@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, DEFAULT_LIMITS, enqueue, holdWatch, writeHold, ensureLayout, executorPath, GB, laneDirs, listNotices, loadConfig, readHold } from '@lobstah/core';
+import { addWatch, readWatch, recordWatchFailure, DEFAULT_LIMITS, enqueue, holdWatch, writeHold, ensureLayout, executorPath, GB, laneDirs, listNotices, loadConfig, readHold } from '@lobstah/core';
 import type { Config } from '@lobstah/core';
 import { CULL_INTERVAL_MS, retentionPass, spaceGuard, tick } from '@lobstah/supervisor';
 import type { DaemonCuller } from '@lobstah/supervisor';
@@ -88,12 +88,19 @@ describe('minFreeGB — the free-space guard', () => {
     expect(buildTendReport().stories.flatMap((s) => s.dispatches).find((x) => x.id === 'held-1')?.state).toBe('queued');
   });
 
-  it('tend shows a disk hold and a fork-cap watch hold side by side', () => {
+  it('tend shows a disk hold, a fork-cap watch hold, and a watch error side by side', () => {
     fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
     enqueue({ id: 'both-1', repo: 'r', brief: 'b' });
     writeHold({ since: new Date().toISOString(), checkedAt: new Date().toISOString(), freeBytes: disk(2), needBytes: disk(10), dir: '/wt' });
     addWatch('pr:acme/web#2', 'true', { owner: 'dispatch:88888888-8888-8888-8888-888888888888' });
     holdWatch('pr:acme/web#2');
+    addWatch('pr:acme/web#3', 'true', { owner: 'dispatch:99999999-9999-9999-9999-999999999999' });
+    const failing = readWatch('pr:acme/web#3')!;
+    recordWatchFailure(failing, 'HTTP 403: Resource not accessible by integration', 1);
+    // The checker persists the failure; this test stands in for it.
+    const dir = path.join(home, 'watches');
+    const file = fs.readdirSync(dir).find((f) => f.endsWith('.json') && fs.readFileSync(path.join(dir, f), 'utf8').includes('web#3'))!;
+    fs.writeFileSync(path.join(dir, file), JSON.stringify(failing));
     const r = buildTendReport();
     expect(r.hold?.reason).toBe('held: 2 GB free, needs 10 GB');
     expect(r.watches.find((w) => w.key === 'pr:acme/web#2')?.heldAt).toBeDefined();
@@ -101,6 +108,7 @@ describe('minFreeGB — the free-space guard', () => {
     expect(text).toContain('diskHold: "held: 2 GB free, needs 10 GB on /wt (since');
     expect(text).toContain('both-1:held (2 GB free, needs 10 GB)');
     expect(text).toMatch(/pr:acme\/web#2[^\n]*held/);
+    expect(text).toMatch(/pr:acme\/web#3[^\n]*HTTP 403: Resource not accessible by integration/);
   });
 
   it('runs the cull first and claims without a hold when the cull frees enough', () => {
