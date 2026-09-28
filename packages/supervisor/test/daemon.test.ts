@@ -88,12 +88,12 @@ describe('reconcileOne — session-claimed catches are not the daemon\'s childre
     const st = claimed(id);
     fs.writeFileSync(
       path.join(st.dir, 'claim.json'),
-      JSON.stringify({ by: 'session:sess-1', harness: 'claude', worktree: '/wt', at: new Date().toISOString() }),
+      JSON.stringify({ by: 'wt:trap-1', harness: 'codex', worktree: '/wt', at: new Date().toISOString() }),
     );
     return st;
   }
 
-  it('never spawns a runner for a session-claimed dispatch', () => {
+  it('never spawns a runner for a trap-claimed dispatch', () => {
     const st = sessionClaimed('sc1');
     reconcileOne(st, cfg, () => {});
     expect(fs.existsSync(path.join(st.dir, 'runner.json'))).toBe(false);
@@ -114,6 +114,19 @@ describe('reconcileOne — session-claimed catches are not the daemon\'s childre
     reconcileOne(st, cfg, () => {});
     expect(fs.existsSync(st.dir)).toBe(true); // the session gets told first
     expect(readStatusLog('sc3', 'work').at(-1)?.verb).toBe('working');
+  });
+});
+
+describe('reconcileOne — a budget stop cannot restart', () => {
+  it('finalizes saved work even when the dead runner has restart attempts available', () => {
+    const st = claimed('budget-stop');
+    appendStatus('budget-stop', 'work', 'failed', 'budget: out of time; work saved; send continue to resume');
+    st.runner = { pid: DEAD_PID, startedAt: new Date().toISOString(), attempts: 1 };
+    const logs: string[] = [];
+    reconcileOne(st, cfg, (m) => logs.push(m));
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'budget-stop'))).toBe(true);
+    expect(logs.some((line) => /respawn|restart/i.test(line))).toBe(false);
+    expect(readStatusLog('budget-stop', 'work').at(-1)?.note).toMatch(/^budget:/);
   });
 });
 

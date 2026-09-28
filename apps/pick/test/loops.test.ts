@@ -174,6 +174,73 @@ describe('report loop', () => {
     expect(src.reports.map((r) => r.verb)).toEqual(['working']);
   });
 
+  it('posts a transition when editing an existing live comment becomes unavailable', async () => {
+    const src = new FakeSource() as FakeSource & {
+      createLiveComment: (key: string, body: string) => Promise<string>;
+      editLiveComment: (key: string, id: string, body: string) => Promise<void>;
+    };
+    let created = 0;
+    src.createLiveComment = async () => { created++; return 'comment-1'; };
+    src.editLiveComment = async () => { throw new Error('edit permission revoked'); };
+    src.items = [item('fake:edit-fallback')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get('fake:edit-fallback')!.uuid;
+    claimNext('work');
+    appendStatus(uuid, 'work', 'working');
+    await reportLoop(src, st);
+    appendStatus(uuid, 'work', 'done');
+    await reportLoop(src, st);
+    expect(created).toBe(1);
+    expect(st.get('fake:edit-fallback')!.liveCommentUnavailable).toBe(true);
+    expect(src.reports.map((r) => r.verb)).toEqual(['done']);
+  });
+
+  it('keeps the live comment id across pickup restarts and never creates a second one', async () => {
+    const src = new FakeSource() as FakeSource & {
+      createLiveComment: (key: string, body: string) => Promise<string>;
+      editLiveComment: (key: string, id: string, body: string) => Promise<void>;
+    };
+    const created: string[] = [];
+    const edited: string[] = [];
+    src.createLiveComment = async () => { created.push('new'); return 'comment-1'; };
+    src.editLiveComment = async (_key, id) => { edited.push(id); };
+    src.items = [item('fake:restart')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get('fake:restart')!.uuid;
+    claimNext('work');
+    appendStatus(uuid, 'work', 'working');
+    await reportLoop(src, st);
+    const restarted = new PickupState();
+    expect(restarted.get('fake:restart')!.liveCommentId).toBe('comment-1');
+    appendStatus(uuid, 'work', 'done');
+    await reportLoop(src, restarted);
+    expect(created).toHaveLength(1);
+    expect(edited).toEqual(['comment-1']);
+  });
+
+  it('with liveComment=false keeps transition comments exactly as before', async () => {
+    const src = new FakeSource() as FakeSource & {
+      createLiveComment: (key: string, body: string) => Promise<string>;
+      editLiveComment: (key: string, id: string, body: string) => Promise<void>;
+    };
+    let created = 0;
+    src.createLiveComment = async () => { created++; return 'comment-1'; };
+    src.editLiveComment = async () => {};
+    src.items = [item('fake:disabled')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get('fake:disabled')!.uuid;
+    claimNext('work');
+    appendStatus(uuid, 'work', 'working');
+    await reportLoop(src, st, () => {}, () => {}, false);
+    appendStatus(uuid, 'work', 'done');
+    await reportLoop(src, st, () => {}, () => {}, false);
+    expect(created).toBe(0);
+    expect(src.reports.map((r) => r.verb)).toEqual(['working', 'done']);
+  });
+
   it('replays verb changes and advances lastReported only on success', async () => {
     const src = new FakeSource();
     src.items = [item('fake:4')];

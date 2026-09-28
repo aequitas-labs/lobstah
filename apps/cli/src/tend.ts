@@ -57,6 +57,8 @@ export interface TendDispatch {
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';
   state: string;
+  /** Budget exhaustion is work saved for continuation, not a worker error. */
+  outOfTimeWorkSaved?: boolean;
   note?: string;
   at?: string;
   /** A needs-decision / blocked the helm (or anyone) has answered but the worker hasn't acted on yet. */
@@ -454,6 +456,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     lane,
     bucket,
     state,
+    ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
     note: held ?? last?.note,
     // Queued work has no log yet; its time is when it entered the queue.
     at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),
@@ -780,7 +783,7 @@ export function renderTend(r: TendReport): string {
           dispatches: s.dispatches
             .map(
               (d) =>
-                `${d.id.slice(0, 8)}:${d.state}` +
+                `${d.id.slice(0, 8)}:${d.outOfTimeWorkSaved ? 'out of time, work saved' : d.state}` +
                 (d.state === 'held' && d.note ? ` (${d.note.replace(/^held: /, '')})` : '') +
                 (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
                 (d.waiting ? ` (${waitingText(d.waiting)})` : ''),

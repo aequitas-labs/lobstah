@@ -21,6 +21,13 @@ afterEach(() => {
 const UUID = '33333333-3333-3333-3333-333333333333';
 
 describe('glass snapshot', () => {
+  it('marks a budget stop as work saved for continuation in the payload', () => {
+    enqueue({ id: UUID, repo: 'web', brief: 'do the thing' }, 'work');
+    appendStatus(UUID, 'work', 'failed', 'budget: out of time; checkpoint committed; send continue to resume');
+    const d = buildGlassSnapshot().dispatches.find((x) => x.id === UUID);
+    expect(d).toMatchObject({ verb: 'failed', outOfTimeWorkSaved: true });
+  });
+
   it('reads dispatches, standing questions, and the helm from disk', () => {
     enqueue({ id: UUID, repo: 'web', brief: 'do the thing' }, 'work');
     appendStatus(UUID, 'work', 'needs-decision', 'which color?');

@@ -7,6 +7,9 @@ const threshold = 600_000;
 describe('classify — dead and wedged get opposite treatment', () => {
   it('terminal verb wins regardless of process state', () => {
     expect(classify({ hasRunner: true, alive: true, lastVerb: 'done', now, wedgeThresholdMs: threshold })).toBe('terminal');
+    // A budget stop reports failed with a budget: note; even a dead runner
+    // must finalize instead of entering the restart ladder.
+    expect(classify({ hasRunner: true, alive: false, lastVerb: 'failed', now, wedgeThresholdMs: threshold })).toBe('terminal');
   });
   it('no runner yet means unclaimed, not dead', () => {
     expect(classify({ hasRunner: false, now, wedgeThresholdMs: threshold })).toBe('unclaimed');

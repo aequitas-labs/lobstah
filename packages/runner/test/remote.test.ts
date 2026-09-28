@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { ensureLayout, readEvidence } from '@lobstah/core';
+import { ensureLayout, laneDirs, readEvidence } from '@lobstah/core';
 import { checkpointAllowed, keepRemote } from '../src/remote.js';
 
 let root: string;
@@ -53,9 +53,13 @@ describe('headless remote preservation', () => {
     const { dir, bare } = repo();
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin);
-    const gh = path.join(bin, 'gh');
-    fs.writeFileSync(gh, '#!/bin/sh\nif [ "$2" = "view" ]; then exit 1; fi\necho https://github.com/example/repo/pull/7\n');
-    fs.chmodSync(gh, 0o755);
+    const gh = path.join(bin, process.platform === 'win32' ? 'gh.cmd' : 'gh');
+    if (process.platform === 'win32') {
+      fs.writeFileSync(gh, '@echo off\r\nif "%2"=="view" exit /b 1\r\necho https://github.com/example/repo/pull/7\r\n');
+    } else {
+      fs.writeFileSync(gh, '#!/bin/sh\nif [ "$2" = "view" ]; then exit 1; fi\necho https://github.com/example/repo/pull/7\n');
+      fs.chmodSync(gh, 0o755);
+    }
     process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ''}`;
     fs.writeFileSync(path.join(dir, 'README.md'), 'changed\n');
     fs.writeFileSync(path.join(dir, 'new.ts'), 'export const x = 1;\n');
@@ -79,8 +83,113 @@ describe('headless remote preservation', () => {
     fs.writeFileSync(path.join(dir, 'README.md'), 'unsafe on trunk\n');
     const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
       policy: { pushEarly: true, draftPr: true, checkpointOnStop: true }, intervalMs: 1000 });
-    expect(await remote.saveBeforeStop()).toBe('checkpoint skipped: detached or trunk');
+    expect(await remote.saveBeforeStop()).toContain('checkpoint skipped: detached or trunk');
     expect(git(dir, 'status', '--porcelain')).toContain('README.md');
     expect(git(bare, 'rev-parse', 'refs/heads/main')).toBe(git(dir, 'rev-parse', 'HEAD'));
+  });
+
+  it('records a rejected non-fast-forward push with Git stderr and waits for a new HEAD', async () => {
+    const { dir, bare } = repo();
+    fs.writeFileSync(path.join(dir, 'local.txt'), 'local\n');
+    git(dir, 'add', 'local.txt');
+    git(dir, 'commit', '-m', 'local');
+    const rival = path.join(root, 'rival');
+    git(root, 'clone', bare, rival);
+    git(rival, 'config', 'user.name', 'Rival');
+    git(rival, 'config', 'user.email', 'rival@example.test');
+    git(rival, 'switch', '-c', 'lobstah/test');
+    fs.writeFileSync(path.join(rival, 'rival.txt'), 'remote\n');
+    git(rival, 'add', 'rival.txt');
+    git(rival, 'commit', '-m', 'remote');
+    git(rival, 'push', 'origin', 'lobstah/test');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
+      policy: { pushEarly: true, draftPr: false, checkpointOnStop: false } });
+    await remote.stop();
+    const note = readEvidence(id, 'work').note ?? '';
+    expect(note).toContain('push rejected');
+    expect(note).toMatch(/rejected|fetch first|non-fast-forward/i);
+    await remote.stop();
+    expect(readEvidence(id, 'work').note).toBe(note);
+    git(dir, 'fetch', 'origin');
+    git(dir, 'rebase', 'origin/lobstah/test'); // a new HEAD can now fast-forward the branch
+    await remote.stop();
+    expect(git(bare, 'rev-parse', 'refs/heads/lobstah/test')).toBe(git(dir, 'rev-parse', 'HEAD'));
+  });
+
+  it('records a missing origin once instead of silently skipping the push', async () => {
+    const { dir } = repo();
+    fs.writeFileSync(path.join(dir, 'local.txt'), 'local\n');
+    git(dir, 'add', 'local.txt');
+    git(dir, 'commit', '-m', 'local');
+    git(dir, 'remote', 'remove', 'origin');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
+      policy: { pushEarly: true, draftPr: false, checkpointOnStop: false } });
+    const saved = await remote.saveBeforeStop();
+    expect(saved).toContain('push rejected');
+    expect(saved).toMatch(/origin.*does not appear|not a git repository/i);
+    const note = readEvidence(id, 'work').note;
+    await remote.stop();
+    expect(readEvidence(id, 'work').note).toBe(note);
+  });
+
+  it('with all remote flags false leaves commits and working files local', async () => {
+    const { dir, bare } = repo();
+    fs.writeFileSync(path.join(dir, 'README.md'), 'unstaged\n');
+    const head = git(dir, 'rev-parse', 'HEAD');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
+      policy: { pushEarly: false, draftPr: false, checkpointOnStop: false } });
+    await remote.stop();
+    await remote.saveBeforeStop();
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(dir, 'status', '--porcelain')).toContain('README.md');
+    expect(git(bare, 'branch', '--list', 'lobstah/test')).toBe('');
+    expect(readEvidence(id, 'work').prUrl).toBeUndefined();
+  });
+
+  it('on detached HEAD leaves files uncommitted and records why', async () => {
+    const { dir } = repo();
+    git(dir, 'checkout', '--detach');
+    fs.writeFileSync(path.join(dir, 'README.md'), 'detached edit\n');
+    const head = git(dir, 'rev-parse', 'HEAD');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
+      policy: { pushEarly: true, draftPr: true, checkpointOnStop: true } });
+    await remote.saveBeforeStop();
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(dir, 'status', '--porcelain')).toContain('README.md');
+    expect(readEvidence(id, 'work').note).toContain('detached or trunk; files left in place');
+  });
+
+  it('pushes even when gh cannot authenticate, but creates no PR', async () => {
+    const { dir, bare } = repo();
+    fs.writeFileSync(path.join(dir, 'local.txt'), 'local\n');
+    git(dir, 'add', 'local.txt');
+    git(dir, 'commit', '-m', 'local');
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    const gh = path.join(bin, process.platform === 'win32' ? 'gh.cmd' : 'gh');
+    if (process.platform === 'win32') fs.writeFileSync(gh, '@echo off\r\necho authentication required 1>&2\r\nexit /b 1\r\n');
+    else { fs.writeFileSync(gh, '#!/bin/sh\necho authentication required >&2\nexit 1\n'); fs.chmodSync(gh, 0o755); }
+    process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ''}`;
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
+      policy: { pushEarly: true, draftPr: true, checkpointOnStop: false } });
+    await remote.saveBeforeStop();
+    expect(git(bare, 'rev-parse', 'refs/heads/lobstah/test')).toBe(git(dir, 'rev-parse', 'HEAD'));
+    expect(readEvidence(id, 'work').prUrl).toBeUndefined();
+    expect(readEvidence(id, 'work').note).toContain('draft PR unavailable: authentication required');
+  });
+
+  it('refuses push and checkpoint for a trap-claimed dispatch', async () => {
+    const { dir, bare } = repo();
+    fs.writeFileSync(path.join(dir, 'README.md'), 'trap edit\n');
+    const active = path.join(laneDirs('work').active, id);
+    fs.mkdirSync(active, { recursive: true });
+    fs.writeFileSync(path.join(active, 'claim.json'), JSON.stringify({ by: 'wt:test' }));
+    const head = git(dir, 'rev-parse', 'HEAD');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
+      policy: { pushEarly: true, draftPr: true, checkpointOnStop: true } });
+    expect(await remote.saveBeforeStop()).toContain('trap-claimed');
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(dir, 'status', '--porcelain')).toContain('README.md');
+    expect(git(bare, 'branch', '--list', 'lobstah/test')).toBe('');
   });
 });

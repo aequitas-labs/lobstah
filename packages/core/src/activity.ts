@@ -178,7 +178,9 @@ export function readActivity(id: string, lane: Lane): Activity | undefined {
     const parsed = JSON.parse(fs.readFileSync(activityPath(id, lane), 'utf8')) as Activity;
     if (typeof parsed.at !== 'string' || typeof parsed.summary !== 'string') return undefined;
     if (!(ACTIVITY_KINDS as readonly string[]).includes(parsed.kind)) return undefined;
-    return parsed;
+    // Treat on-disk activity as untrusted too: old or externally written
+    // records may predate writeActivity's redaction.
+    return { ...parsed, summary: redactSummary(parsed.summary) };
   } catch {
     return undefined;
   }

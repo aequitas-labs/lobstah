@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { mergeEvidence, readEvidence } from '@lobstah/core';
+import { mergeEvidence, readEvidence, readSessionClaim, resolveOnPath } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 
 const exec = promisify(execFile);
@@ -20,7 +20,8 @@ export interface RemoteRun {
 }
 
 function firstLine(err: unknown): string {
-  return (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 240);
+  const stderr = err && typeof err === 'object' && 'stderr' in err ? String(err.stderr).trim() : '';
+  return (stderr || (err instanceof Error ? err.message : String(err))).replace(/\s+/g, ' ').slice(0, 240);
 }
 
 /** Only source-like files enter an automatic checkpoint; ignored files never enter the candidate set. */
@@ -44,8 +45,13 @@ export function keepRemote(opts: {
   intervalMs?: number;
 }): RemoteRun {
   const { id, lane, cwd, trunk, policy } = opts;
-  const command = async (bin: string, args: string[], timeout = 120_000): Promise<string> =>
-    (await exec(bin, args, { cwd, encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024 })).stdout.trim();
+  const command = async (bin: string, args: string[], timeout = 120_000): Promise<string> => {
+    const file = bin === 'gh' ? (resolveOnPath('gh') ?? bin) : bin;
+    return (await exec(file, args, {
+      cwd, encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024,
+      shell: process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(file),
+    })).stdout.trim();
+  };
   const git = (...args: string[]) => command('git', args);
   const note = (message: string) => mergeEvidence(id, lane, { note: message.slice(0, 300) });
   let lastSeenHead: string | undefined;
@@ -54,6 +60,9 @@ export function keepRemote(opts: {
   let stopped = false;
   let opened = false;
   let opening: Promise<void> | undefined;
+  let pushProblem: string | undefined;
+  let draftProblem: string | undefined;
+  const trapClaimed = () => readSessionClaim(id, lane)?.by?.startsWith('wt:') === true;
 
   const branchName = async (): Promise<string | undefined> => {
     const branch = await git('symbolic-ref', '--quiet', '--short', 'HEAD').catch(() => '');
@@ -70,13 +79,15 @@ export function keepRemote(opts: {
         url = await command('gh', ['pr', 'create', '--draft', '--base', trunk, '--head', branch,
           '--title', opts.title.slice(0, 120), '--body', `Work in progress for lobstah dispatch ${id}.`]);
       } catch (err) {
-        note(`draft PR unavailable: ${firstLine(err)}`);
+        draftProblem = `draft PR unavailable: ${firstLine(err)}`;
+        note(draftProblem);
         return;
       }
     }
     const match = url.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
     if (!match) return;
     opened = true;
+    draftProblem = undefined;
     mergeEvidence(id, lane, { prUrl: match[0] });
     // The CLI owns PR-watch formatting. An absent CLI must not block pushes.
     const bin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'bin', 'lobstah');
@@ -84,11 +95,12 @@ export function keepRemote(opts: {
   };
 
   const check = async (): Promise<void> => {
-    if (!policy.pushEarly) return;
+    if (!policy.pushEarly || trapClaimed()) return;
     const branch = await branchName();
     if (!branch) return;
     const head = await git('rev-parse', 'HEAD');
-    const ahead = await git('rev-list', '--count', `origin/${trunk}..HEAD`).catch(() => '0');
+    // If origin is absent, try the push once so Git's actual error reaches the status note.
+    const ahead = await git('rev-list', '--count', `origin/${trunk}..HEAD`).catch(() => '1');
     if (ahead === '0') return;
     if (head === lastSeenHead) return; // rejected push retries only after HEAD moves
     lastSeenHead = head;
@@ -96,11 +108,13 @@ export function keepRemote(opts: {
     try {
       await git('push', '-u', 'origin', branch);
       pushedHead = head;
+      pushProblem = undefined;
       mergeEvidence(id, lane, { branch });
       note(`remote saved: ${branch}@${head.slice(0, 12)}`);
       if (!opening) opening = draft(branch).finally(() => { opening = undefined; });
     } catch (err) {
-      note(`push rejected for ${branch}@${head.slice(0, 12)}: ${firstLine(err)}; retry after HEAD moves`);
+      pushProblem = `push rejected for ${branch}@${head.slice(0, 12)}: ${firstLine(err)}; retry after HEAD moves`;
+      note(pushProblem);
     }
   };
 
@@ -124,8 +138,13 @@ export function keepRemote(opts: {
       stopped = true;
       clearInterval(timer);
       await busy;
+      if (trapClaimed()) return 'checkpoint skipped: trap-claimed dispatch';
       const branch = await branchName();
-      if (!branch) return 'checkpoint skipped: detached or trunk';
+      if (!branch) {
+        const message = 'checkpoint skipped: detached or trunk; files left in place';
+        note(message);
+        return message;
+      }
       let saved = 'no working-tree changes';
       if (policy.checkpointOnStop) {
         try {
@@ -141,13 +160,13 @@ export function keepRemote(opts: {
           }
         } catch (err) { saved = `checkpoint unavailable: ${firstLine(err)}`; }
       }
-      // A checkpoint may have moved HEAD; give it one final chance to land.
-      lastSeenHead = undefined;
+      // A checkpoint changes HEAD, so check() will retry naturally; a rejected
+      // push of the same HEAD must not be retried on this stop path.
       await check().catch((err) => note(`final push unavailable: ${firstLine(err)}`));
       await opening;
       const head = await git('rev-parse', '--short', 'HEAD').catch(() => 'unknown');
       const pr = readEvidence(id, lane).prUrl;
-      const message = `${saved}; ${branch}@${head}${pr ? `; draft PR ${pr}` : ''}`;
+      const message = `${saved}; ${branch}@${head}${pr ? `; draft PR ${pr}` : ''}${pushProblem ? `; ${pushProblem}` : ''}${draftProblem ? `; ${draftProblem}` : ''}`;
       note(message);
       return message;
     },

@@ -21,6 +21,17 @@ function heartbeat(agoMs = 0): void {
 }
 
 describe('man tend — the fleet verdict', () => {
+  it('labels a budget stop as out of time with work saved, not a generic failure', () => {
+    heartbeat();
+    enqueue({ id: 'budget-stop', repo: 'r', brief: 'b' });
+    claimNext('work');
+    appendStatus('budget-stop', 'work', 'failed', 'budget: out of time; checkpoint committed; send continue to resume');
+    const report = buildTendReport();
+    const dispatch = report.stories.flatMap((story) => story.dispatches).find((d) => d.id === 'budget-stop');
+    expect(dispatch?.outOfTimeWorkSaved).toBe(true);
+    expect(renderTend(report)).toContain('out of time, work saved');
+  });
+
   it('empty home with a fresh heartbeat is idle, not stalled', () => {
     heartbeat();
     expect(buildTendReport().verdict).toBe('idle');

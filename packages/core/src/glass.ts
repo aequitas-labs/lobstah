@@ -152,6 +152,8 @@ export interface GlassDispatch {
   attachments: Attachment[];
   messageAttachments: Attachment[];
   verb: Verb | 'unknown' | 'queued';
+  /** A budget stop: work is saved for continuation, distinct from a worker failure. */
+  outOfTimeWorkSaved?: boolean;
   note?: string;
   verbAt?: string;
   /** What the worker is doing now, from its event stream or its post-tool hook. Stale past wedgeThresholdSecs. */
