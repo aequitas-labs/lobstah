@@ -95,6 +95,8 @@ export function githubRows(
   api: GhApi = ghApi,
   hasGh = onPath('gh'),
 ): DoctorRow[] {
+  // No GitHub repo configured: nothing to probe, and no network call to make.
+  if (repos.length === 0) return [{ check: 'github', status: 'skip', detail: 'no configured repo has a GitHub origin' }];
   if (!hasGh) return [{ check: 'github', status: 'warn', detail: 'gh not on PATH — PR watches and pickup cannot reach GitHub' }];
   const rows: DoctorRow[] = [];
   const user = api('user');

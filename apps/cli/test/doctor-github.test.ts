@@ -63,4 +63,10 @@ describe('doctor github rows', () => {
     expect(rows[0]!.detail).toContain('gh auth');
     expect(githubRows(REPOS, a, false)[0]!.detail).toContain('gh not on PATH');
   });
+
+  it('skips without calling gh when no configured repo has a GitHub origin', () => {
+    const { api: a, calls } = api({ user: '{"login":"octocat"}' });
+    expect(githubRows([], a, true)).toEqual([{ check: 'github', status: 'skip', detail: 'no configured repo has a GitHub origin' }]);
+    expect(calls).toEqual([]);
+  });
 });

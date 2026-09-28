@@ -37,7 +37,8 @@ github web  warn  acme/web: pull requests readable, contents readable, checks NO
 
 The first row says which identity `gh` runs as: a user (by login) or an
 App installation. The repo rows probe pull requests, contents, and check
-runs on the trunk. Every probe is a read-only `GET`.
+runs on the trunk. Every probe is a read-only `GET`. With no GitHub repo configured, the
+row reads `skip` and doctor makes no GitHub call.
 
 ## When a PR watch fails
 
