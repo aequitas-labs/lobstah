@@ -191,7 +191,8 @@ describe('watchLoop', () => {
   });
 });
 
-describe('watchLoop failure logging', () => {
+// A `#!/bin/sh` gh stub: POSIX only.
+describe.skipIf(process.platform === 'win32')('watchLoop failure logging', () => {
   it("logs the check's own reason with the watch key and exit code, then backs off", async () => {
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin, { recursive: true });

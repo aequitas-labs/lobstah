@@ -232,7 +232,8 @@ describe('review fields (gh pr view reviews + the reviewThreads GraphQL count)',
   });
 });
 
-describe('degraded view: the App may not read check results', () => {
+// A `#!/bin/sh` gh stub on PATH: POSIX only.
+describe.skipIf(process.platform === 'win32')('degraded view: the App may not read check results', () => {
   let dir: string;
   let savedPath: string | undefined;
   const APPROVED_CLEAN = {
@@ -295,7 +296,10 @@ ${mode === 'all-forbidden' ? `echo 'GraphQL: Resource not accessible by integrat
     expect(() => ghPrView(ref)).toThrow(/Resource not accessible by integration .*fails even without check results/);
   });
 
-  it('the fallback field list is the full list minus statusCheckRollup', () => {
+});
+
+describe('PR_VIEW_FIELDS_NO_CHECKS', () => {
+  it('is the full list minus statusCheckRollup', () => {
     expect(PR_VIEW_FIELDS_NO_CHECKS.split(',')).toEqual(PR_VIEW_FIELDS.split(',').filter((f) => f !== 'statusCheckRollup'));
   });
 });

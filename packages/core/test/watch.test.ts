@@ -139,6 +139,7 @@ describe('removeWatch', () => {
   });
 });
 
+// Shell-script checks and a `#!/bin/sh` gh stub: POSIX only (the pure rules below run everywhere).
 describe('watch failures', () => {
   /** A stubbed `gh` that fails the way a GitHub App without Checks: read does. */
   function stubGh(stderr: string, code = 1): string {
@@ -151,7 +152,7 @@ describe('watch failures', () => {
   }
   const FORBIDDEN = 'GraphQL: Resource not accessible by integration (repository.pullRequest.statusCheckRollup)';
 
-  it("keeps the failing command's stderr and exit code; the log line names the key, reason, and remedy", () => {
+  it.skipIf(process.platform === 'win32')("keeps the failing command's stderr and exit code; the log line names the key, reason, and remedy", () => {
     const w = addWatch('pr:acme/web#12', stubGh(FORBIDDEN));
     const { watch } = runWatchCheck(w);
     expect(watch.lastError).toBe('Resource not accessible by integration (repository.pullRequest.statusCheckRollup)');
@@ -164,14 +165,14 @@ describe('watch failures', () => {
     expect(watchErrorCell(watch)).toContain(`failing since ${watch.failingSince}`);
   });
 
-  it("reads lobstah's own `error:` line from stdout when stderr is empty", () => {
+  it.skipIf(process.platform === 'win32')("reads lobstah's own `error:` line from stdout when stderr is empty", () => {
     const w = addWatch('pr:acme/web#13', `echo 'error: Resource not accessible by integration'; exit 1`);
     const { watch } = runWatchCheck(w);
     expect(watch.lastError).toBe('Resource not accessible by integration');
     expect(watch.lastExit).toBe(1);
   });
 
-  it('posts watch-failing once at the third failure, and watch-recovered once on recovery', () => {
+  it.skipIf(process.platform === 'win32')('posts watch-failing once at the third failure, and watch-recovered once on recovery', () => {
     const script = path.join(dir, 'flaky.sh');
     const flag = path.join(dir, 'ok');
     fs.writeFileSync(script, `if [ -f "${flag}" ]; then echo '{"cursor":"1"}'; else echo 'HTTP 401: Bad credentials' >&2; exit 1; fi\n`);
@@ -196,7 +197,7 @@ describe('watch failures', () => {
     void w;
   });
 
-  it('a streak shorter than three posts nothing, not even a recovery', () => {
+  it.skipIf(process.platform === 'win32')('a streak shorter than three posts nothing, not even a recovery', () => {
     const script = path.join(dir, 'blip.sh');
     const flag = path.join(dir, 'ok2');
     fs.writeFileSync(script, `if [ -f "${flag}" ]; then echo '{"cursor":"1"}'; else exit 1; fi\n`);
@@ -208,7 +209,7 @@ describe('watch failures', () => {
     expect(listNotices(100)).toEqual([]);
   });
 
-  it('a check that half-worked applies its cursor and still records the error', () => {
+  it.skipIf(process.platform === 'win32')('a check that half-worked applies its cursor and still records the error', () => {
     addWatch('half', `echo '{"cursor":"7","error":"Resource not accessible by integration"}'`);
     const { watch } = runWatchCheck(readWatch('half')!);
     expect(watch.cursor).toBe('7');

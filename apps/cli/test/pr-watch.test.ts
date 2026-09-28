@@ -124,7 +124,8 @@ describe('evidence and routing', () => {
   });
 });
 
-describe('a PR watch without permission to read checks (stubbed gh)', () => {
+// A `#!/bin/sh` gh stub on PATH: POSIX only.
+describe.skipIf(process.platform === 'win32')('a PR watch without permission to read checks (stubbed gh)', () => {
   const VIEW = {
     state: 'OPEN',
     isDraft: false,
