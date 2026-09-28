@@ -17,20 +17,51 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-/** What git prints when another git process holds a lock this one needs. */
-const LOCK_CONTENTION = [/cannot lock ref/, /unable to update local ref/, /Unable to create '[^']*\.lock': File exists/];
+/**
+ * What git prints when another git process won a race for a ref or lock this
+ * one needs. Each pattern is the stable part of the message, not a whole line.
+ */
+const LOCK_CONTENTION = [
+  // All versions: the ref's lock file is held, or the ref moved under us
+  // ("cannot lock ref '<ref>': is at <a> but expected <b>").
+  /cannot lock ref/,
+  // All versions: fetch's per-ref summary line when a ref update failed.
+  /unable to update local ref/,
+  // All versions: another process holds a lock file (index, config, a ref).
+  /Unable to create '[^']*\.lock': File exists/,
+  // git 2.51 and later: fetch batches its ref updates and reports a loser as
+  // "error: fetching ref <ref> failed: incorrect old value provided". The
+  // reason is git's untranslated ref-transaction text; it means another
+  // process moved the ref between our read and our write, which on a shared
+  // fetch is the same benign race as "cannot lock ref" above.
+  /incorrect old value provided/,
+  // git 2.51 and later: the same batched report when the ref's lock file is
+  // held by another process ("fetching ref <ref> failed: reference already
+  // exists"). The files backend maps the lock's EEXIST to this reason; older
+  // git printed "Unable to create '<ref>.lock': File exists" instead.
+  /reference already exists/,
+];
+
+/** git's stderr, falling back to the error message. */
+function gitStderr(err: unknown): string {
+  const stderr = (err as { stderr?: string }).stderr;
+  return (stderr ?? (err instanceof Error ? err.message : String(err))).trim();
+}
 
 export function isLockContention(err: unknown): boolean {
   const text = `${(err as { stderr?: string }).stderr ?? ''}\n${err instanceof Error ? err.message : ''}`;
   return LOCK_CONTENTION.some((re) => re.test(text));
 }
 
+const ATTEMPTS = 6;
+
 /**
  * git against the shared repo, retrying lock contention. Each dispatch
  * allocates in its own runner process, so dispatches claimed in one poll
  * fetch into the same repo at once. Git lets one of them update
- * refs/remotes/origin/<trunk>, and the rest fail "cannot lock ref" with
- * nothing wrong: they all want the same result, so the losers wait and retry.
+ * refs/remotes/origin/<trunk>, and the rest fail ("cannot lock ref", or on
+ * git 2.51+ "incorrect old value provided") with nothing wrong: they all
+ * want the same result, so the losers wait and retry.
  * Anything else still fails at once.
  */
 async function gitShared(cwd: string, ...args: string[]): Promise<string> {
@@ -38,7 +69,12 @@ async function gitShared(cwd: string, ...args: string[]): Promise<string> {
     try {
       return await git(cwd, ...args);
     } catch (err) {
-      if (attempt >= 6 || !isLockContention(err)) throw err;
+      if (!isLockContention(err)) throw err;
+      if (attempt >= ATTEMPTS) {
+        // Name the cause and keep git's words, so a new wording or a stuck
+        // lock is visible at once, not a generic allocation failure.
+        throw new Error(`git ${args.join(' ')}: lock contention, ${attempt} attempts\n${gitStderr(err)}`, { cause: err });
+      }
       // 100ms doubling to 3.2s, jittered so retries do not collide again.
       await new Promise((r) => setTimeout(r, 100 * 2 ** (attempt - 1) * (0.5 + Math.random())));
     }
