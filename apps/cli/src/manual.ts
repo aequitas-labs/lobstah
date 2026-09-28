@@ -9,7 +9,8 @@ your working set:
   lobstah buoys                                 scan the water (alias of ls)
   lobstah buoy <id>                             check one buoy (alias of status)
   lobstah logs <id> --follow                    listen on one line
-  lobstah send <id> "<instruction>"             more bait, delivered between turns
+  lobstah send <id> "<instruction>"             steer live or queued work; wake
+                                                finished work as a follow-up
   lobstah attach <id>                           bring one trap alongside
   lobstah swap <id> --harness codex             re-rig on the same spot
   lobstah catch <id>                            land the catch (evidence)
