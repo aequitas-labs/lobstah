@@ -130,6 +130,7 @@ function dispatchModal(x: GlassDispatch) {
     x.worktree && [
       html`<div class="sec">worktree${x.worktreeOf ? ' (reused from ' + x.worktreeOf.slice(0, 8) + ')' : ''}</div>`,
       cmdRow(x.worktree),
+      x.worktreeKept && html`<div class="dim" style="font-size:11px">kept: ${x.worktreeKept}</div>`,
     ],
     x.transcript && [html`<div class="sec">transcript</div>`, cmdRow(x.transcript)],
     detailBody(x),

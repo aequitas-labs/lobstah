@@ -73,6 +73,8 @@ export interface Evidence {
   worktree?: string;
   /** Set when the dispatch reused an earlier dispatch's worktree: that dispatch's id. */
   worktreeOf?: string;
+  /** When `[limits].releaseOnMerge` removed the worktree after the PR merged (ISO). */
+  worktreeReleased?: string;
 }
 
 export type EventType =

@@ -242,7 +242,7 @@ export function worktreeUsage(openPr?: Set<string>): { live: Set<string>; newest
  * Worktree ids a soaking trap is anchored in. A live session works there, so
  * no cull removes them, whatever the dispatch's state.
  */
-function trapWorktreeIds(wtRoot: string): Set<string> {
+export function trapWorktreeIds(wtRoot: string): Set<string> {
   const ids = new Set<string>();
   const real = (p: string) => {
     try {

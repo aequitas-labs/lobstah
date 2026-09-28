@@ -57,6 +57,12 @@ export interface LimitsConfig {
    * allocates a fresh worktree for every dispatch.
    */
   reuseWorktree: boolean;
+  /**
+   * When a PR watch records a merge, the daemon's next cull pass removes the
+   * worktree of the dispatch chain that owns the PR, if every dispatch in it
+   * is finished, the worktree is clean, and its HEAD is on the remote.
+   */
+  releaseOnMerge: boolean;
 }
 
 export interface SoakConfig {
@@ -164,6 +170,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   retentionDays: 0,
   minFreeGB: 0,
   reuseWorktree: true,
+  releaseOnMerge: false,
 };
 
 export function configPath(): string {

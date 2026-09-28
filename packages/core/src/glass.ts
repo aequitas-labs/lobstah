@@ -160,6 +160,8 @@ export interface GlassDispatch {
   worktree?: string;
   /** The dispatch whose worktree it reused. */
   worktreeOf?: string;
+  /** Why releaseOnMerge kept its worktree after the PR merged. */
+  worktreeKept?: string;
   transcript?: string;
   /** Newest first: queue/active/done mtime. */
   sort: number;

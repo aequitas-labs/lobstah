@@ -62,6 +62,8 @@ export interface TendDispatch {
   worktree?: string;
   /** The dispatch whose worktree it reused. */
   worktreeOf?: string;
+  /** Why releaseOnMerge kept its worktree after the PR merged. */
+  worktreeKept?: string;
 }
 
 export interface TendStory {

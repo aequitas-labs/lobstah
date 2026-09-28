@@ -489,8 +489,24 @@ The daemon can do this on its own. Two `[limits]` keys turn it on
   note column, and one `disk-held` notice reaches the helm. When space
   returns, one `disk-cleared` notice follows and claiming resumes.
 
-`lobstah doctor` prints a `disk` row: free space on the worktrees volume, both
-limits, and the count and age of the worktrees a cull could remove.
+A third key, `releaseOnMerge`, frees a worktree as soon as its PR merges
+instead of waiting out `retentionDays`. When a PR watch records `merged`, the
+next cull pass removes the worktree of the dispatch that owns the PR and of
+every dispatch in its follow-up chain that ran on that PR. It checks first:
+every dispatch in the chain is finished, the worktree is clean, and its HEAD
+is on the remote after a fetch. A worktree that fails a check is kept and
+listed as `kept: unpushed work`. A PR closed without merge releases nothing,
+and a trap's worktree is never released. Branches and the dispatch record
+stay; `lobstah catch` says `worktree: released on merge (<time>)`. One
+`worktree-released` notice per pass lists what went.
+
+`lobstah doctor` prints a `disk` row: free space on the worktrees volume, the
+limits, the count and age of the worktrees a cull could remove, and any
+merged PR's worktree that `releaseOnMerge` kept, with the reason:
+
+```
+disk  warn  412.3 GB free on ~/.lobstah/worktrees; minFreeGB 10; retentionDays 14; 3 cullable worktree(s), oldest 9d; releaseOnMerge on; kept: unpushed work (1 worktree(s) of merged PRs: 6a1f0c2e HEAD is not on the remote)
+```
 
 ## What the daemon gives your liaison for free
 

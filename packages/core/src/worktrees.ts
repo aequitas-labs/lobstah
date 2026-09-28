@@ -239,3 +239,39 @@ export function releaseDispatchLock(dispatchDir: string, id: string): void {
   const rec = readRecord(path.join(dispatchDir, 'worktree.json'));
   if (rec) releaseWorktreeLock(rec.path, id);
 }
+
+// ---------------------------------------------------------------------------
+// releaseOnMerge bookkeeping: worktrees kept, and why.
+
+export interface KeptWorktree {
+  /** The worktree's owner id (the directory name under `worktrees/`). */
+  id: string;
+  reason: string;
+  pr?: string;
+  at: string;
+}
+
+export function keptWorktreesPath(): string {
+  return path.join(lobstahHome(), 'release-kept.json');
+}
+
+/** Worktrees a merge would have released but the safety checks kept. */
+export function readKeptWorktrees(): KeptWorktree[] {
+  try {
+    const list = JSON.parse(fs.readFileSync(keptWorktreesPath(), 'utf8')) as KeptWorktree[];
+    return Array.isArray(list) ? list.filter((k) => fs.existsSync(worktreePath(k.id))) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeKeptWorktrees(list: KeptWorktree[]): void {
+  const file = keptWorktreesPath();
+  if (list.length === 0) {
+    fs.rmSync(file, { force: true });
+    return;
+  }
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
+  fs.renameSync(tmp, file);
+}
