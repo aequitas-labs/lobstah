@@ -21,6 +21,8 @@ import {
   readSessionClaim,
   readStatusLog,
   queuedAt,
+  holdReason,
+  readHold,
   readPrs,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassMessage, GlassSnapshot, GlassTrap, Lane } from '@lobstah/core';
@@ -150,6 +152,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
       if (d) rows.push({ lane, bucket: 'done', d, sort: at });
     }
   }
+  const hold = readHold();
   return rows
     .map((r) => {
       const id = r.d.id;
@@ -176,7 +179,8 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
           r.bucket === 'queued' && log.length === 0
             ? ('queued' as const)
             : (last?.verb ?? (claim ? ('working' as const) : ('unknown' as const))),
-        note: last?.note,
+        // Held for free space: the note carries the reason.
+        note: (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
         verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
         claimedBy: claim?.by,
         log,

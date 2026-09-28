@@ -7,14 +7,20 @@ import {
   configPath,
   executorPath,
   firstMeaningfulLine,
+  formatGB,
+  GB,
   loadConfig,
   lobstahHome,
   lobstahVersion,
   onPath,
   packagePresent,
+  readHold,
+  statfsFreeBytes,
+  worktreesDir,
 } from '@lobstah/core';
-import type { RepoConfig } from '@lobstah/core';
+import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
+import { planPressureCull } from './cull.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
@@ -158,6 +164,34 @@ export function githubRepos(repos: Record<string, RepoConfig>): Array<{ key: str
   return out;
 }
 
+/**
+ * The `disk` row: free space on the worktrees volume, the limits in force,
+ * and how many finished worktrees a cull could remove (and the oldest one's
+ * age). Warns while free space is below `[limits].minFreeGB`.
+ */
+export function diskRow(cfg: Config, freeBytes: FreeBytesReader = statfsFreeBytes, now = Date.now()): DoctorRow {
+  const dir = worktreesDir();
+  let free: number | undefined;
+  try {
+    free = freeBytes(fs.existsSync(dir) ? dir : lobstahHome());
+  } catch {
+    free = undefined;
+  }
+  const { minFreeGB, retentionDays } = cfg.limits;
+  const cullable = fs.existsSync(dir) ? planPressureCull(now) : [];
+  const oldest = cullable.reduce((max, i) => Math.max(max, i.ageDays), 0);
+  const parts = [
+    free === undefined ? 'free space unreadable' : `${formatGB(free)} free on ${dir}`,
+    `minFreeGB ${minFreeGB > 0 ? minFreeGB : 'off'}`,
+    `retentionDays ${retentionDays > 0 ? retentionDays : 'off'}`,
+    cullable.length > 0 ? `${cullable.length} cullable worktree(s), oldest ${oldest}d` : 'no cullable worktrees',
+  ];
+  const hold = readHold();
+  if (hold) parts.push(`dispatches held since ${hold.since}`);
+  const short = free !== undefined && minFreeGB > 0 && free < minFreeGB * GB;
+  return { check: 'disk', status: free === undefined || short || hold ? 'warn' : 'ok', detail: parts.join('; ') };
+}
+
 export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   const rows: DoctorRow[] = [];
   const push = (check: string, status: DoctorRow['status'], detail: string) => rows.push({ check, status, detail });
@@ -256,6 +290,9 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
       push('daemon', 'warn', 'heartbeat unreadable');
     }
   }
+
+  const disk = diskRow(cfg);
+  push(disk.check, disk.status, disk.detail);
 
   // Registrations from before worktree-anchored traps have no trapId and
   // can never claim work again — surface them instead of ignoring quietly.

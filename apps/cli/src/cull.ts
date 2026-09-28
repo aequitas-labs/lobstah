@@ -1,8 +1,25 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { laneDirs, loadConfig, lobstahHome, prRecordFile, readPrs, removePr, storedDescriptor } from '@lobstah/core';
-import type { Lane } from '@lobstah/core';
+import {
+  formatGB,
+  laneDirs,
+  listTraps,
+  loadConfig,
+  lobstahHome,
+  parsePrRef,
+  prRecordFile,
+  readEvidence,
+  readPr,
+  readPrs,
+  removePr,
+  statfsFreeBytes,
+  storedDescriptor,
+  toonKV,
+  toonTable,
+  worktreesDir,
+} from '@lobstah/core';
+import type { FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
 
 export interface CullItem {
@@ -10,16 +27,56 @@ export interface CullItem {
   id: string;
   target: string;
   ageDays: number;
+  /** Bytes on disk. 0 when the plan was made without measuring. */
   bytes: number;
+  /** Milliseconds since epoch the age is counted from (oldest first ordering). */
+  ageFrom?: number;
+}
+
+export interface PlanOptions {
+  /**
+   * Measure each target. Only a dry run measures: an apply deletes without
+   * sizing, because walking 190 GB of worktrees takes minutes.
+   */
+  measure?: boolean;
+  /** Keep every dispatch whose PR is still open (the daemon's retention cull). */
+  keepOpenPrs?: boolean;
 }
 
 const DAY = 86_400_000;
 
-function bytesAt(target: string): number {
+function walkBytes(target: string): number {
   const stat = fs.lstatSync(target);
-  if (stat.isDirectory()) return fs.readdirSync(target).reduce((sum, name) => sum + bytesAt(path.join(target, name)), 0);
+  if (stat.isDirectory()) return fs.readdirSync(target).reduce((sum, name) => sum + walkBytes(path.join(target, name)), 0);
   return stat.isFile() ? stat.size : 0;
 }
+
+/**
+ * The sizing functions, on one object so tests can spy on them and prove an
+ * apply makes no size calls.
+ */
+export const sizing = {
+  /** Recursive lstat walk. Exact apparent size; slow on large trees. */
+  walk(target: string): number {
+    return walkBytes(target);
+  },
+  /**
+   * A worktree's size from one `du -sk`. Falls back to the JS walk where
+   * `du` is missing (Windows) or fails.
+   */
+  worktree(target: string, platform: NodeJS.Platform = process.platform): number {
+    if (platform !== 'win32') {
+      try {
+        const out = execFileSync('du', ['-sk', target], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        const kb = Number(out.trim().split(/\s+/)[0]);
+        if (Number.isFinite(kb)) return kb * 1024;
+      } catch {
+        // no du, or it failed: fall back to the walk
+      }
+    }
+    return walkBytes(target);
+  },
+};
 
 function idsIn(dir: string): Set<string> {
   try {
@@ -34,7 +91,9 @@ function idsIn(dir: string): Set<string> {
  * dispatch is finished or gone), and stale state files for ids nothing knows.
  * Never touches queue/ or active/ — in-flight work is the daemon's.
  */
-export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
+export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOptions = {}): CullItem[] {
+  const measure = opts.measure ?? true;
+  const size = (target: string) => (measure ? sizing.walk(target) : 0);
   const cutoff = now - olderThanDays * DAY;
   const items: CullItem[] = [];
   const live = new Set<string>();
@@ -47,26 +106,31 @@ export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
     }
   };
 
+  const openPr = opts.keepOpenPrs ? openPrDispatches() : new Set<string>();
+
   for (const lane of ['work', 'chore'] as Lane[]) {
     const d = laneDirs(lane);
     for (const id of idsIn(d.queue)) { live.add(id); retainReferences(id, lane); }
     for (const id of idsIn(d.active)) { live.add(id); retainReferences(id, lane); }
     for (const id of idsIn(d.done)) {
       const p = path.join(d.done, id);
+      if (openPr.has(id)) { live.add(id); retainReferences(id, lane); continue; }
       const m = fs.statSync(p).mtimeMs;
       doneMtimes.set(id, m);
       if (m >= cutoff) retainReferences(id, lane);
-      if (m < cutoff) items.push({ kind: 'done', id, target: p, ageDays: Math.floor((now - m) / DAY), bytes: bytesAt(p) });
+      if (m < cutoff) items.push({ kind: 'done', id, target: p, ageDays: Math.floor((now - m) / DAY), bytes: size(p), ageFrom: m });
     }
   }
 
   const wtRoot = path.join(lobstahHome(), 'worktrees');
+  const trapped = trapWorktreeIds(wtRoot);
   for (const id of idsIn(wtRoot)) {
-    if (live.has(id)) continue;
+    if (live.has(id) || trapped.has(id)) continue;
     const doneAt = doneMtimes.get(id);
     if (doneAt !== undefined && doneAt >= cutoff) continue; // recent catch — keep for attach/swap
     const p = path.join(wtRoot, id);
-    items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - fs.statSync(p).mtimeMs) / DAY), bytes: bytesAt(p) });
+    const from = doneAt ?? fs.statSync(p).mtimeMs;
+    items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: measure ? sizing.worktree(p) : 0, ageFrom: from });
   }
 
   for (const lane of ['work', 'chore'] as Lane[]) {
@@ -82,13 +146,13 @@ export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
       const previous = groups.get(id);
       groups.set(id, {
         mtime: Math.max(previous?.mtime ?? 0, fs.statSync(target).mtimeMs),
-        bytes: (previous?.bytes ?? 0) + bytesAt(target),
+        bytes: (previous?.bytes ?? 0) + size(target),
       });
     }
     for (const [id, group] of groups) {
       const ageFrom = doneMtimes.get(id) ?? group.mtime;
       if (ageFrom >= cutoff) continue;
-      items.push({ kind: 'state', id, target: path.join(d.state, `${id}.*`), ageDays: Math.floor((now - ageFrom) / DAY), bytes: group.bytes });
+      items.push({ kind: 'state', id, target: path.join(d.state, `${id}.*`), ageDays: Math.floor((now - ageFrom) / DAY), bytes: group.bytes, ageFrom });
     }
   }
 
@@ -97,7 +161,7 @@ export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
   for (const r of readPrs()) {
     if (r.state === 'OPEN') continue;
     const seen = Date.parse(r.observedAt) || now;
-    if (seen < cutoff) items.push({ kind: 'pr', id: r.key, target: r.key, ageDays: Math.floor((now - seen) / DAY), bytes: bytesAt(prRecordFile(r.key)) });
+    if (seen < cutoff) items.push({ kind: 'pr', id: r.key, target: r.key, ageDays: Math.floor((now - seen) / DAY), bytes: size(prRecordFile(r.key)), ageFrom: seen });
   }
 
   // Orphaned acks: the item is gone (dispatch culled — including by this
@@ -106,13 +170,111 @@ export function planCull(olderThanDays: number, now = Date.now()): CullItem[] {
   const culling = new Set(items.filter((i) => i.kind === 'done' || i.kind === 'state').map((i) => i.id));
   for (const a of listAcks()) {
     if (ackItemExists(a.key, culling)) continue;
-    items.push({ kind: 'ack', id: a.key, target: a.key, ageDays: Math.floor((now - (Date.parse(a.at) || now)) / DAY), bytes: bytesAt(ackFile(a.key)) });
+    const at = Date.parse(a.at) || now;
+    items.push({ kind: 'ack', id: a.key, target: a.key, ageDays: Math.floor((now - at) / DAY), bytes: size(ackFile(a.key)), ageFrom: at });
   }
   return items;
 }
 
-/** Worktrees are removed through git when the owning repo is still known. */
-function removeWorktree(id: string, dir: string): void {
+/**
+ * Dispatch ids whose PR is still open: a PR record lists the dispatch and
+ * says OPEN, or the dispatch's own evidence does (the record wins when both
+ * exist). A PR never observed is not known to be open.
+ */
+export function openPrDispatches(): Set<string> {
+  const open = new Set<string>();
+  for (const r of readPrs()) if (r.state === 'OPEN') for (const id of r.dispatches ?? []) open.add(id);
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    for (const id of idsIn(laneDirs(lane).done)) {
+      if (open.has(id)) continue;
+      const ev = readEvidence(id, lane);
+      const url = ev.pr?.url ?? ev.prUrl;
+      const ref = url ? parsePrRef(url) : undefined;
+      const record = ref ? readPr(ref.key) : undefined;
+      if ((record ? record.state : ev.pr?.state) === 'OPEN') open.add(id);
+    }
+  }
+  return open;
+}
+
+/**
+ * Worktree ids a soaking trap is anchored in. A live session works there, so
+ * no cull removes them, whatever the dispatch's state.
+ */
+function trapWorktreeIds(wtRoot: string): Set<string> {
+  const ids = new Set<string>();
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const root = real(wtRoot);
+  for (const t of listTraps()) {
+    if (typeof t.worktree !== 'string') continue;
+    const rel = path.relative(root, real(t.worktree));
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) ids.add(rel.split(path.sep)[0]!);
+  }
+  return ids;
+}
+
+/** The dispatch id an item belongs to, or its own key for PR records and non-dispatch acks. */
+function groupOf(item: CullItem): string {
+  if (item.kind === 'ack') return /^(?:work|chore):(.+)$/.exec(item.id)?.[1] ?? item.id;
+  return item.id;
+}
+
+/**
+ * Bound one pass: keep the items of the `maxGroups` oldest groups (a group
+ * is one dispatch id, or one PR record, or one stray ack). An ack whose
+ * dispatch is deferred to a later pass is deferred with it.
+ */
+export function limitBatch(items: CullItem[], maxGroups: number): { batch: CullItem[]; deferred: number } {
+  const oldest = new Map<string, number>();
+  for (const item of items) {
+    const g = groupOf(item);
+    oldest.set(g, Math.min(oldest.get(g) ?? Infinity, item.ageFrom ?? Infinity));
+  }
+  const order = [...oldest.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([g]) => g);
+  const keep = new Set(order.slice(0, maxGroups));
+  return { batch: items.filter((i) => keep.has(groupOf(i))), deferred: order.length - keep.size };
+}
+
+/**
+ * Worktrees the free-space guard may remove, oldest first: the worktree of
+ * every finished dispatch, and every worktree nothing owns. Never a queued
+ * or active dispatch's, never one a soaking trap works in, and never one
+ * whose PR is still open. No age cutoff
+ * and no sizing: the guard reads free space after each removal instead.
+ */
+export function planPressureCull(now = Date.now()): CullItem[] {
+  const live = new Set<string>();
+  const doneMtimes = new Map<string, number>();
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    const d = laneDirs(lane);
+    for (const id of idsIn(d.queue)) live.add(id);
+    for (const id of idsIn(d.active)) live.add(id);
+    for (const id of idsIn(d.done)) doneMtimes.set(id, fs.statSync(path.join(d.done, id)).mtimeMs);
+  }
+  for (const id of openPrDispatches()) live.add(id);
+  const wtRoot = path.join(lobstahHome(), 'worktrees');
+  for (const id of trapWorktreeIds(wtRoot)) live.add(id);
+  const items: CullItem[] = [];
+  for (const id of idsIn(wtRoot)) {
+    if (live.has(id)) continue;
+    const p = path.join(wtRoot, id);
+    const from = doneMtimes.get(id) ?? fs.statSync(p).mtimeMs;
+    items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: 0, ageFrom: from });
+  }
+  return items.sort((a, b) => a.ageFrom! - b.ageFrom! || a.id.localeCompare(b.id));
+}
+
+/**
+ * Worktrees are removed through git when the owning repo is still known.
+ * `git worktree remove` keeps the branch: a culled dispatch's commits stay.
+ */
+export function removeWorktree(id: string, dir: string): void {
   for (const lane of ['work', 'chore'] as Lane[]) {
     const descFile = path.join(laneDirs(lane).done, id, 'descriptor.json');
     try {
@@ -141,4 +303,36 @@ export function applyCull(items: CullItem[]): void {
       if (f === item.id || f.startsWith(`${item.id}.`)) fs.rmSync(path.join(dir, f), { recursive: true, force: true });
     }
   }
+}
+
+/**
+ * `lobstah cull [--older-than <days>] [--apply]`. A dry run measures each
+ * target and prints the sizes. An apply measures nothing: it deletes, then
+ * reports the change in free space on the worktrees volume.
+ */
+export function runCull(days: number, apply: boolean, freeBytes: FreeBytesReader = statfsFreeBytes, now = Date.now()): string {
+  const plan = planCull(days, now, { measure: !apply });
+  const lines: string[] = [];
+  if (!apply) {
+    lines.push(toonTable('cull', plan.map((i) => ({ kind: i.kind, id: i.id, ageDays: i.ageDays, bytes: i.bytes })), ['kind', 'id', 'ageDays', 'bytes']));
+    const total = plan.reduce((sum, item) => sum + item.bytes, 0);
+    lines.push(toonKV({ totalBytes: total, total: formatGB(total) }));
+    if (plan.length > 0) lines.push('dry run — pass --apply to remove');
+    return lines.join('\n');
+  }
+  lines.push(toonTable('cull', plan.map((i) => ({ kind: i.kind, id: i.id, ageDays: i.ageDays })), ['kind', 'id', 'ageDays']));
+  if (plan.length === 0) return lines.join('\n');
+  const read = (): number | undefined => {
+    try {
+      return freeBytes(worktreesDir());
+    } catch {
+      return undefined;
+    }
+  };
+  const before = read();
+  applyCull(plan);
+  const after = read();
+  const freed = before !== undefined && after !== undefined ? Math.max(0, after - before) : undefined;
+  lines.push(`applied: ${plan.length} removed` + (freed !== undefined ? `, ${formatGB(freed)} freed (free-space change on the worktrees volume)` : ''));
+  return lines.join('\n');
 }

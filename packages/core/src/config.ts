@@ -36,6 +36,16 @@ export interface LimitsConfig {
   backgroundWaitSecs: number;
   choreRetentionDays: number;
   attachmentMaxBytes: number;
+  /**
+   * The daemon culls finished work dispatches (done and failed) older than
+   * this many days, with their worktrees and state. 0 turns it off.
+   */
+  retentionDays: number;
+  /**
+   * Free space, in GB, the worktrees volume must have before the daemon
+   * claims work that creates a worktree. 0 turns the guard off.
+   */
+  minFreeGB: number;
 }
 
 export interface SoakConfig {
@@ -140,6 +150,8 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   backgroundWaitSecs: 1800,
   choreRetentionDays: 7,
   attachmentMaxBytes: 25 * 1024 * 1024,
+  retentionDays: 0,
+  minFreeGB: 0,
 };
 
 export function configPath(): string {
