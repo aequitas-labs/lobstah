@@ -15,6 +15,7 @@ import {
   prEvidence,
   prReview,
   prStandingKinds,
+  isFailingConclusion,
 } from '../src/pr.js';
 import type { GhPrView, PrEvidence } from '../src/pr.js';
 
@@ -148,6 +149,58 @@ describe('derivePrEvents', () => {
     const r = derivePrEvents(ref, { ...open, state: 'CLOSED', closedAt: '2026-09-23T03:00:00Z' }, c);
     expect(r.events.map((e) => e.kind)).toEqual(['closed']);
     expect(r.done).toBe(true);
+  });
+});
+
+describe('latest check run', () => {
+  const timed = (name: string, conclusion: string, time: number) => ({
+    ...run(name, conclusion),
+    completedAt: `2026-09-28T00:${String(time).padStart(2, '0')}:00Z`,
+    startedAt: `2026-09-28T00:${String(time - 1).padStart(2, '0')}:00Z`,
+  });
+
+  it('counts only the latest Approval Gate run, even when rollup order is mixed', () => {
+    const rollup = [
+      timed('Approval Gate', 'CANCELLED', 3),
+      ...['build', 'lint', 'test', 'typecheck', 'security'].map((n) => timed(n, 'SUCCESS', 4)),
+      timed('Approval Gate', 'SUCCESS', 4),
+      timed('Approval Gate', 'FAILURE', 1),
+      timed('Approval Gate', 'CANCELLED', 2),
+    ];
+    const view = { ...open, mergeStateStatus: 'CLEAN', statusCheckRollup: rollup };
+    const evidence = prEvidence(ref, view, '2026-09-28T01:00:00Z');
+    expect(evidence.checks).toEqual({ total: 6, passed: 6, failed: 0, pending: 0 });
+    expect(prStandingKinds(evidence)).toContain('pr:ready');
+    const prior = derivePrEvents(ref, { ...view, statusCheckRollup: [timed('Approval Gate', 'FAILURE', 1)] }, '0');
+    expect(derivePrEvents(ref, view, prior.cursor).events.filter((e) => e.kind === 'check-completed' && e.name === 'Approval Gate'))
+      .toMatchObject([{ conclusion: 'SUCCESS' }]);
+  });
+
+  it('uses completedAt then startedAt and keeps same names from different apps separate', () => {
+    const checks = [
+      { ...timed('ci', 'FAILURE', 1), app: { slug: 'actions' }, startedAt: '2026-09-28T00:59:00Z' },
+      { ...timed('ci', 'SUCCESS', 2), app: { slug: 'actions' } },
+      { ...timed('ci', 'FAILURE', 3), app: { slug: 'other' } },
+    ];
+    expect(prEvidence(ref, { ...open, statusCheckRollup: checks }, '2026-09-28T01:00:00Z').checks)
+      .toEqual({ total: 2, passed: 1, failed: 1, pending: 0 });
+  });
+
+  it('treats cancelled and stale latest runs as unknown, never as failures or ready', () => {
+    for (const conclusion of ['CANCELLED', 'STALE']) {
+      const view = { ...open, mergeStateStatus: 'CLEAN', statusCheckRollup: [timed('ci', conclusion, 2)] };
+      const evidence = prEvidence(ref, view, '2026-09-28T01:00:00Z');
+      expect(evidence.checks).toEqual({ total: 1, passed: 0, failed: 0, pending: 0, unknown: 'latest run' });
+      expect(prStandingKinds(evidence)).not.toContain('pr:checks');
+      expect(prStandingKinds(evidence)).not.toContain('pr:ready');
+      expect(isFailingConclusion(conclusion)).toBe(false);
+      const cursor = derivePrEvents(ref, open, '0').cursor;
+      expect(derivePrEvents(ref, view, cursor).events.filter((e) => e.kind === 'check-completed')).toEqual([]);
+    }
+    for (const conclusion of ['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']) {
+      expect(isFailingConclusion(conclusion)).toBe(true);
+    }
+    for (const conclusion of ['SUCCESS', 'NEUTRAL', 'SKIPPED']) expect(isFailingConclusion(conclusion)).toBe(false);
   });
 });
 

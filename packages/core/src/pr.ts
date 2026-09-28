@@ -53,6 +53,11 @@ export interface GhRollupItem {
   context?: string;
   state?: string;
   targetUrl?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt?: string;
+  workflowName?: string;
+  app?: { name?: string; slug?: string };
 }
 
 /** One entry of `gh pr view --json reviews` — only the fields the check reads (never the body). */
@@ -90,7 +95,7 @@ export interface GhPrView {
   checksError?: string;
 }
 
-type Outcome = 'passed' | 'failed' | 'pending';
+type Outcome = 'passed' | 'failed' | 'pending' | 'unknown';
 interface Check {
   name: string;
   /** Completed conclusion (upper-case), or '' while pending. */
@@ -101,11 +106,13 @@ interface Check {
 
 const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const PENDING = new Set(['', 'PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED']);
+const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR']);
 
 function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
-  const out: Check[] = [];
-  for (const c of rollup ?? []) {
+  const latest = new Map<string, { check: Check; completedAt: string; startedAt: string; index: number }>();
+  for (const [index, c] of (rollup ?? []).entries()) {
     const name = c.name ?? c.context ?? '?';
+    const key = [name, c.app?.slug ?? c.app?.name ?? '', c.workflowName ?? ''].join('\0');
     // A CheckRun still running has no conclusion; a StatusContext's state is its verdict.
     const conclusion = (
       c.__typename === 'StatusContext' || (c.conclusion === undefined && c.state !== undefined)
@@ -114,10 +121,15 @@ function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
           ? ''
           : (c.conclusion ?? '')
     ).toUpperCase();
-    const outcome: Outcome = PENDING.has(conclusion) ? 'pending' : PASSED.has(conclusion) ? 'passed' : 'failed';
-    out.push({ name, conclusion: outcome === 'pending' ? '' : conclusion, outcome, detailsUrl: c.detailsUrl ?? c.targetUrl });
+    const outcome: Outcome = PENDING.has(conclusion) ? 'pending' : PASSED.has(conclusion) ? 'passed' : FAILED.has(conclusion) ? 'failed' : 'unknown';
+    const completedAt = c.completedAt ?? '';
+    const startedAt = c.startedAt ?? c.createdAt ?? '';
+    const old = latest.get(key);
+    if (!old || completedAt > old.completedAt || (completedAt === old.completedAt && (startedAt > old.startedAt || (startedAt === old.startedAt && index > old.index)))) {
+      latest.set(key, { check: { name, conclusion: outcome === 'pending' ? '' : conclusion, outcome, detailsUrl: c.detailsUrl ?? c.targetUrl }, completedAt, startedAt, index });
+    }
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  return [...latest.values()].map((v) => v.check).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** The evidence `pr` object: the PR's state as last observed. */
@@ -140,7 +152,7 @@ export interface PrEvidence {
    * Check counts. `unknown` is set when the check results could not be read
    * (no permission); the counts are then zero and mean nothing.
    */
-  checks: { total: number; passed: number; failed: number; pending: number; unknown?: 'no permission' };
+  checks: { total: number; passed: number; failed: number; pending: number; unknown?: 'no permission' | 'latest run' };
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
   observedAt: string;
@@ -216,7 +228,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
       passed: count('passed'),
       failed: count('failed'),
       pending: count('pending'),
-      ...(view.checksError ? { unknown: 'no permission' as const } : {}),
+      ...(view.checksError ? { unknown: 'no permission' as const } : count('unknown') > 0 ? { unknown: 'latest run' as const } : {}),
     },
     review: prReview(view),
     observedAt,
@@ -270,7 +282,7 @@ export interface PrEvent {
 }
 
 export function isFailingConclusion(conclusion: string | undefined): boolean {
-  return !!conclusion && !PASSED.has(conclusion) && !PENDING.has(conclusion);
+  return FAILED.has((conclusion ?? '').toUpperCase());
 }
 
 /**
@@ -327,7 +339,7 @@ export function derivePrEvents(
   const sameHead = prev !== undefined && prev.h === now.h;
   // The first observation of an open PR is the check baseline; a terminal PR has nothing to fix.
   for (const c of prev === undefined || done ? [] : checks) {
-    if (c.outcome === 'pending') continue;
+    if (c.outcome === 'pending' || c.outcome === 'unknown') continue;
     if (sameHead && prev!.c[c.name] === c.conclusion) continue;
     const failed = c.outcome === 'failed';
     push(
