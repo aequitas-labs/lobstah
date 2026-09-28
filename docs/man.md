@@ -372,6 +372,14 @@ cannot hold two:
   only events and notices for its own grounds' repos (events whose repo is
   unknowable stay visible to all helms). Two helms never eat each other's
   wakes.
+- The wake cursor starts at sign-on. When `man helm` signs on and the
+  grounds has no live helm, notices and watch events recorded before the
+  sign-on are not wakes: they were delivered to nobody, and they are not
+  news. `man tend` and the glass Notices tab still list them. Standing
+  attention still wakes: an unanswered `needs-decision` or `blocked`, a
+  free-space hold on queued dispatches, a failing watch. The `man report`
+  digest also starts at the sign-on. A `--take` from a live helm keeps that
+  helm's cursor, so nothing in flight is dropped.
 
 ## Soaking: a live session volunteers as a worker
 

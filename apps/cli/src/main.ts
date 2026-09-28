@@ -42,6 +42,8 @@ import {
   relieveHelm,
   resolveGrounds,
   takeHelm,
+  noticeWakes,
+  wakeFloorMs,
   listWatches,
   watchErrorCell,
   pendingWatchEvents,
@@ -1039,6 +1041,7 @@ async function mainCli(): Promise<void> {
           man: helmLabel(res.ok),
           session: sessionId,
           ...(res.ok.tookFrom ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` } : {}),
+          ...(res.ok.wakesFrom ? { wakesFrom: `${res.ok.wakesFrom} (older notices are not wakes; \`lobstah man tend\` lists them)` } : {}),
           note: res.ok.harness === 'claude'
             ? `arm \`lobstah man wait --session ${sessionId} --timeout 900\` as a background task`
             : 'Stop hook waits at turn end',
@@ -1137,12 +1140,17 @@ async function mainCli(): Promise<void> {
         groundsRepos !== undefined
           ? (n: Notice) => n.repo === undefined || groundsRepos.has(n.repo)
           : undefined;
+      // A helm's cursor starts at its sign-on: older notices and watch
+      // events are consumed without waking. Standing questions and
+      // standing conditions still wake (attentionNow, noticeWakes).
+      const wakes = noticeWakes(callerHelm);
+      const floorMs = wakeFloorMs(callerHelm);
       runDueManWatches();
       const standing = attentionNow(consume, remindMs, Date.now(), matchGrounds);
-      const standingWatches = pendingWatchEvents(consume);
+      const standingWatches = pendingWatchEvents(consume, 'man', Date.now(), floorMs);
       // Consumed as usual, but a session is never woken by its own action's
       // notice — the echo carries no news for its author.
-      const standingNotices = unseenNotices(consume, noticeFilter).filter((n) => n.by === undefined || n.by !== sid);
+      const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
       if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0) {
         if (standing.length > 0) emit(standing);
         if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
@@ -1174,12 +1182,12 @@ async function mainCli(): Promise<void> {
           return;
         }
         runDueManWatches(); // no pick running? this loop is the poller
-        const watched = pendingWatchEvents(true);
+        const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
         if (watched.length > 0) {
           emitWatchAttention(watched, sid);
           return;
         }
-        const freshNotices = unseenNotices(consume, noticeFilter).filter((n) => n.by === undefined || n.by !== sid);
+        const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
         if (freshNotices.length > 0) {
           emitNotices(freshNotices, sid);
           return;
@@ -1309,6 +1317,7 @@ async function mainCli(): Promise<void> {
           const idleNotices = unseenNotices(
             true,
             helm ? (n: Notice) => n.repo === undefined || helm.repos.includes(n.repo) : undefined,
+            noticeWakes(helm),
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
             emit(
@@ -1336,12 +1345,15 @@ async function mainCli(): Promise<void> {
             : undefined;
         const helmNoticeFilter =
           helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
+        // The helm's cursor starts at its sign-on (see `man wait`).
+        const helmWakes = noticeWakes(helm);
+        const helmFloorMs = wakeFloorMs(helm);
         if (!has('--park') && hookParkMode(cfgHaul.helm.park, helm?.harness) === 'arm' && hook?.session_id) {
           // Peeking is level-triggered: a wake standing between watchers must
           // block this stop even if a registration is still heartbeating.
           const evs = attentionNow(false, remindMs, Date.now(), matchHelm);
-          const watched = pendingWatchEvents(false);
-          const notices = unseenNotices(false, helmNoticeFilter).filter((n) => n.by === undefined || n.by !== hook.session_id);
+          const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
+          const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
           if (evs.length || watched.length || notices.length) {
             emit([
               'A lobstah dispatch, watched source, or fleet notice needs attention:',
@@ -1363,9 +1375,9 @@ async function mainCli(): Promise<void> {
         const deadline = Date.now() + timeoutSecs * 1000;
         runDueManWatches();
         let evs = attentionNow(true, remindMs, Date.now(), matchHelm);
-        let watched = pendingWatchEvents(true);
+        let watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
         const notEcho = (n: Notice) => n.by === undefined || n.by !== hook?.session_id;
-        let fleetNotices = unseenNotices(true, helmNoticeFilter).filter(notEcho);
+        let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
         if (evs.length === 0 && watched.length === 0 && fleetNotices.length === 0) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
@@ -1374,8 +1386,8 @@ async function mainCli(): Promise<void> {
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
             runDueManWatches();
-            watched = pendingWatchEvents(true);
-            fleetNotices = unseenNotices(true, helmNoticeFilter).filter(notEcho);
+            watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
+            fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
             if (evs.length > 0 || watched.length > 0 || fleetNotices.length > 0) break;
           }
         }
