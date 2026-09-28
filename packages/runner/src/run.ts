@@ -9,6 +9,7 @@ import {
   droppedModelNote,
   handoffNote,
   isUnresumable,
+  isTrapCatch,
   loadConfig,
   lobstahHome,
   mergeEvidence,
@@ -60,6 +61,9 @@ function coldNote(cold: NonNullable<StartPlan['cold']>, cwd: string, trunk: stri
 export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerDeps> = {}): Promise<void> {
   const deps: RunnerDeps = { ...defaultDeps, ...seams };
   const id = path.basename(activeDir);
+  // The daemon excludes trap catches from headless slots. A directly invoked
+  // runner must apply the same rule before starting a clock or touching work.
+  if (isTrapCatch(id, lane)) throw new Error(`refusing headless runner for trap catch ${id}`);
   const status = (verb: Verb, note?: string) => appendStatus(id, lane, verb, note);
 
   const cfg = loadConfig();

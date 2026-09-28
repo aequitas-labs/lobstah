@@ -36,6 +36,7 @@ import {
   toonTable,
   holdReason,
   readHold,
+  slotUsage,
 } from '@lobstah/core';
 import type { ActivityView, WaitingView, DiskHold, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
@@ -396,7 +397,8 @@ export function repoOf(id: string, lane: Lane): string | undefined {
 export interface TendReport {
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
   daemon: { up: boolean; lastHeartbeat?: string };
-  counts: { queued: number; active: number; choresActive: number; done24h: number; failed24h: number };
+  counts: { queued: number; active: number; headlessActive: number; trapActive: number; headlessLimit: number; choresActive: number; done24h: number; failed24h: number };
+  queueWait?: string;
   attention: TendAttention[];
   stories: TendStory[];
   watches: TendWatch[];
@@ -509,6 +511,7 @@ export function buildTendReport(now = Date.now()): TendReport {
 
   const queued = pendingIds('work');
   const active = activeIds('work');
+  const slots = slotUsage('work');
   const choresActive = activeIds('chore').length + pendingIds('chore').length;
 
   let done24h = 0;
@@ -613,8 +616,20 @@ export function buildTendReport(now = Date.now()): TendReport {
     !hold &&
     daemonUp &&
     unaddressedQueued.length > 0 &&
-    active.length < cfg.limits.maxConcurrent &&
+    slots.headless < cfg.limits.maxConcurrent &&
     oldestQueuedAge > CLAIM_STALE_MS;
+
+  let queueWait: string | undefined;
+  if (unaddressedQueued.length > 0 && slots.headless >= cfg.limits.maxConcurrent) {
+    queueWait = `queued work waits: all ${cfg.limits.maxConcurrent} headless slots are in use`;
+  } else if (queued.length > 0 && unaddressedQueued.length === 0) {
+    const registered = listTraps();
+    const notListening = [...new Set(awaiting.map((a) => a.for))].filter((address) => {
+      const reg = registered.find((r) => address === `wt:${r.trapId}`);
+      return !reg || !!reg.claimed || !reg.firstParkedAt || now - Date.parse(reg.heartbeatAt) > cfg.soak.deferSecs * 1000;
+    });
+    if (notListening.length) queueWait = `queued work waits: trap ${notListening.join(', ')} not listening`;
+  }
 
   const merge = readMergeView();
   const gateFor = (uuid: string, prUrl?: string): string | undefined => {
@@ -727,7 +742,9 @@ export function buildTendReport(now = Date.now()): TendReport {
   return {
     verdict,
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
-    counts: { queued: queued.length, active: active.length, choresActive, done24h, failed24h },
+    counts: { queued: queued.length, active: active.length, headlessActive: slots.headless, trapActive: slots.traps,
+      headlessLimit: cfg.limits.maxConcurrent, choresActive, done24h, failed24h },
+    queueWait,
     attention,
     stories,
     watches,
@@ -748,13 +765,14 @@ export function renderTend(r: TendReport): string {
       verdict: r.verdict,
       daemon: r.daemon.up ? 'up' : `down (last heartbeat ${r.daemon.lastHeartbeat ?? 'never'})`,
       queued: r.counts.queued,
-      active: r.counts.active,
+      active: `headless: ${r.counts.headlessActive} of ${r.counts.headlessLimit}; traps: ${r.counts.trapActive}`,
       chores: r.counts.choresActive,
       done24h: r.counts.done24h,
       failed24h: r.counts.failed24h,
       ...(r.hold ? { diskHold: `${r.hold.reason} on ${r.hold.dir} (since ${r.hold.since})` } : {}),
     }),
   );
+  if (r.queueWait) lines.push(r.queueWait);
   for (const stack of r.stacks) {
     lines.push(`stack ${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
   }

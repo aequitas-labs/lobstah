@@ -3,8 +3,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { ensureLayout, laneDirs, readEvidence } from '@lobstah/core';
+import { claimNext, enqueue, ensureLayout, laneDirs, readEvidence } from '@lobstah/core';
 import { checkpointAllowed, keepRemote } from '../src/remote.js';
+import { main } from '../src/run.js';
 
 let root: string;
 let previousPath: string | undefined;
@@ -191,5 +192,15 @@ describe('headless remote preservation', () => {
     expect(git(dir, 'rev-parse', 'HEAD')).toBe(head);
     expect(git(dir, 'status', '--porcelain')).toContain('README.md');
     expect(git(bare, 'branch', '--list', 'lobstah/test')).toBe('');
+  });
+
+  it('never starts a headless runner or time window for a trap catch', async () => {
+    enqueue({ id, repo: 'r', brief: 'trap work' });
+    claimNext('work');
+    const active = path.join(laneDirs('work').active, id);
+    fs.writeFileSync(path.join(active, 'claim.json'), JSON.stringify({ by: 'wt:test' }));
+    await expect(main(active, 'work')).rejects.toThrow('refusing headless runner for trap catch');
+    expect(fs.existsSync(path.join(active, 'runner.json'))).toBe(false);
+    expect(fs.existsSync(path.join(active, 'wallclock.json'))).toBe(false);
   });
 });

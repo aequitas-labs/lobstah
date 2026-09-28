@@ -32,6 +32,8 @@ import {
   listTraps,
   noticeOrphanedBait,
   readSessionClaim,
+  isTrapCatch,
+  slotUsage,
   readStatusLog,
   releaseDispatchLock,
   daemonSkip,
@@ -141,7 +143,8 @@ function sessionOf(st: ActiveState): string | undefined {
   }
 }
 
-export function reconcileOne(st: ActiveState, cfg: Config, log: (m: string) => void): void {
+export function reconcileOne(st: ActiveState, cfg: Config, log: (m: string) => void,
+  spawnHeadless: typeof spawnRunner = spawnRunner): void {
   const hasDescriptor = fs.existsSync(path.join(st.dir, 'descriptor.json'));
   if (!hasDescriptor) {
     // a crashed claim: mkdir happened, rename didn't. Sweep once it is stale.
@@ -198,7 +201,7 @@ export function reconcileOne(st: ActiveState, cfg: Config, log: (m: string) => v
 
   switch (cls) {
     case 'unclaimed':
-      spawnRunner(st, { attempts: 1 });
+      spawnHeadless(st, { attempts: 1 });
       log(`${st.id}: spawned runner`);
       break;
     case 'terminal':
@@ -211,7 +214,7 @@ export function reconcileOne(st: ActiveState, cfg: Config, log: (m: string) => v
       const attempts = (st.runner?.attempts ?? 0) + 1;
       if (attempts <= cfg.limits.maxRestartAttempts + 1) {
         log(`${st.id}: runner died, respawning (attempt ${attempts})`);
-        spawnRunner(st, { attempts, resume: sessionOf(st) });
+        spawnHeadless(st, { attempts, resume: sessionOf(st) });
       } else {
         appendStatus(st.id, st.lane, 'failed', 'runner died repeatedly; work preserved');
         finalize(st);
@@ -225,7 +228,7 @@ export function reconcileOne(st: ActiveState, cfg: Config, log: (m: string) => v
       if (st.runner) killGroup(st.runner.pid, 'SIGKILL');
       if (attempts <= cfg.limits.maxRestartAttempts + 1) {
         log(`${st.id}: wedged (no activity), forking session with a nudge (attempt ${attempts})`);
-        spawnRunner(st, {
+        spawnHeadless(st, {
           attempts,
           resume: sessionOf(st),
           nudge:
@@ -298,6 +301,8 @@ export interface DaemonHooks {
   /** Free-space reader; tests inject a fake so they never read the real disk. */
   freeBytes?: FreeBytesReader;
   now?: () => number;
+  /** Test seam for process spawning; production uses spawnRunner. */
+  spawnRunner?: typeof spawnRunner;
 }
 
 /** The retention cull runs at most once per this interval. */
@@ -431,20 +436,22 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   const workSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
 
   retentionPass(cfg, hooks, log);
-  // Every claim creates a worktree, so the free-space guard gates claiming
-  // in both lanes. With nothing to claim there is nothing to hold.
   const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : undefined);
-  const roomy = (['chore', 'work'] as Lane[]).some((lane) => claimable(lane, skipFor(lane)))
+  for (const lane of ['chore', 'work'] as Lane[]) {
+    for (const st of listActive(lane)) reconcileOne(st, cfg, log, hooks.spawnRunner);
+  }
+  // Only a headless claim creates a worktree. Trap catches do not spend slots
+  // or require space, so avoid a disk hold when no headless slot is open.
+  const hasHeadlessSlot = (lane: Lane) => slotUsage(lane).headless < (lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent);
+  const roomy = (['chore', 'work'] as Lane[]).some((lane) => hasHeadlessSlot(lane) && claimable(lane, skipFor(lane)))
     ? spaceGuard(cfg, hooks, log)
-    : (liftHold(log, 'free-space hold cleared: nothing left to claim'), true);
+    : (liftHold(log, 'free-space hold cleared: no headless slot has claimable work'), true);
 
   for (const lane of ['chore', 'work'] as Lane[]) {
-    const active = listActive(lane);
-    for (const st of active) reconcileOne(st, cfg, log);
     if (!roomy) continue;
 
     const ceiling = lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent;
-    let inFlight = listActive(lane).length;
+    let inFlight = listActive(lane).filter((st) => !isTrapCatch(st.id, lane)).length;
     while (inFlight < ceiling) {
       const id = claimNext(lane, skipFor(lane));
       if (!id) break;
@@ -452,7 +459,7 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
       inFlight++;
       // next reconcile pass spawns it; spawn now to avoid a tick of latency
       const st = listActive(lane).find((s) => s.id === id);
-      if (st) reconcileOne(st, cfg, log);
+      if (st) reconcileOne(st, cfg, log, hooks.spawnRunner);
     }
   }
 

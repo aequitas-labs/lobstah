@@ -220,6 +220,7 @@ export interface GlassSnapshot {
   version: string;
   repoUrl: string;
   daemon?: { version?: string; heartbeat?: string };
+  slots?: { headless: number; limit: number; traps: number };
   helms: GlassHelm[];
   traps: GlassTrap[];
   /** Newest first. */

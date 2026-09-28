@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { appendStatus, enqueue, ensureLayout, mergeEvidence, postNotice, takeHelm } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, laneDirs, mergeEvidence, postNotice, takeHelm } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 
@@ -26,6 +26,15 @@ describe('glass snapshot', () => {
     appendStatus(UUID, 'work', 'failed', 'budget: out of time; checkpoint committed; send continue to resume');
     const d = buildGlassSnapshot().dispatches.find((x) => x.id === UUID);
     expect(d).toMatchObject({ verb: 'failed', outOfTimeWorkSaved: true });
+  });
+
+  it('reports headless and trap activity separately for the header', () => {
+    enqueue({ id: 'headless', repo: 'web', brief: 'work' });
+    claimNext('work');
+    enqueue({ id: 'trap', repo: 'web', brief: 'work' });
+    claimNext('work');
+    fs.writeFileSync(path.join(laneDirs('work').active, 'trap', 'claim.json'), JSON.stringify({ by: 'wt:trap1' }));
+    expect(buildGlassSnapshot().slots).toEqual({ headless: 1, limit: 2, traps: 1 });
   });
 
   it('reads dispatches, standing questions, and the helm from disk', () => {

@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { mergeEvidence, readEvidence, readSessionClaim, resolveOnPath } from '@lobstah/core';
+import { isTrapCatch, mergeEvidence, readEvidence, resolveOnPath } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 
 const exec = promisify(execFile);
@@ -62,7 +62,7 @@ export function keepRemote(opts: {
   let opening: Promise<void> | undefined;
   let pushProblem: string | undefined;
   let draftProblem: string | undefined;
-  const trapClaimed = () => readSessionClaim(id, lane)?.by?.startsWith('wt:') === true;
+  const trapClaimed = () => isTrapCatch(id, lane);
 
   const branchName = async (): Promise<string | undefined> => {
     const branch = await git('symbolic-ref', '--quiet', '--short', 'HEAD').catch(() => '');
