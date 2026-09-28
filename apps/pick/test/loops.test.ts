@@ -12,6 +12,7 @@ import { approvalDedupKey, mergeLoop, qualifiedApproval, qualifyingSet } from '.
 import { DEFAULT_MERGE_POLICY } from '../src/types.js';
 import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../src/types.js';
 import { readMergeView } from '../src/merge-view.js';
+import { cycle } from '../src/run.js';
 
 let home: string;
 beforeEach(() => {
@@ -26,6 +27,8 @@ afterEach(() => {
 
 class FakeSource implements Source {
   name = 'fake';
+  owned: (key: string) => boolean = () => true;
+  inboundKeys: string[] = [];
   items: WorkItem[] = [];
   claimable = true;
   tracked: TrackedItem[] = [];
@@ -39,7 +42,11 @@ class FakeSource implements Source {
   async report(key: string, verb: Verb, ev: Evidence & { uuid: string }) {
     this.reports.push({ key, verb, uuid: ev.uuid });
   }
-  async inbound(key: string) { return this.inboundMsgs.get(key) ?? []; }
+  owns(key: string) { return this.owned(key); }
+  async inbound(key: string) {
+    this.inboundKeys.push(key);
+    return this.inboundMsgs.get(key) ?? [];
+  }
   async inProgress() { return this.tracked; }
   async recoverUuid(key: string) { return this.recoverable.get(key); }
   async reset(key: string) { this.resets.push(key); }
@@ -159,6 +166,65 @@ describe('report loop', () => {
     await reportLoop(src, st);
     const inboxDir = path.join(home, 'inbox', uuid);
     expect(fs.readdirSync(inboxDir).filter((f) => f.endsWith('.msg'))).toHaveLength(1);
+  });
+
+  it("walks only its own keys in the shared ledger — never another source's", async () => {
+    // Linear and GitHub share one ledger. Before owns(), each source's
+    // inbound() threw on the other's keys and the loop never got past them.
+    const linear = new FakeSource();
+    linear.owned = (k) => k.startsWith('linear:');
+    const github = new FakeSource();
+    github.owned = (k) => k.startsWith('gh:o/r#');
+    linear.items = [item('linear:DEMO-10')];
+    github.items = [item('gh:o/r#pr7@rv1', 'review')];
+    const st = new PickupState();
+    await dispatchLoop(linear, st);
+    await dispatchLoop(github, st);
+    for (const key of ['linear:DEMO-10', 'gh:o/r#pr7@rv1']) {
+      claimNext('work');
+      appendStatus(st.get(key)!.uuid, 'work', 'working');
+    }
+    await reportLoop(linear, st);
+    await reportLoop(github, st);
+    expect(linear.reports.map((r) => r.key)).toEqual(['linear:DEMO-10']);
+    expect(github.reports.map((r) => r.key)).toEqual(['gh:o/r#pr7@rv1']);
+    expect(linear.inboundKeys).toEqual(['linear:DEMO-10']);
+    expect(github.inboundKeys).toEqual(['gh:o/r#pr7@rv1']);
+  });
+
+  it('one unreachable item does not starve the rest of the ledger', async () => {
+    const src = new FakeSource();
+    src.items = [item('fake:gone'), item('fake:ok')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    for (const key of ['fake:gone', 'fake:ok']) {
+      claimNext('work');
+      appendStatus(st.get(key)!.uuid, 'work', 'working');
+    }
+    src.inbound = async (key: string) => {
+      if (key === 'fake:gone') throw new Error('Entity not found: Issue');
+      return [];
+    };
+    await expect(reportLoop(src, st)).rejects.toThrow('fake:gone: Entity not found: Issue');
+    expect(st.get('fake:ok')!.lastReported).toBe('working');
+  });
+});
+
+describe('pickup cycle', () => {
+  it('reconciles even when the report loop throws', async () => {
+    const src = new FakeSource();
+    src.items = [item('fake:r1')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    claimNext('work');
+    appendStatus(st.get('fake:r1')!.uuid, 'work', 'working');
+    src.items = [];
+    src.inbound = async () => { throw new Error('tracker hiccup'); };
+    src.tracked = [{ key: 'fake:orphan', open: true }];
+    const logs: string[] = [];
+    await cycle([src], [], st, 60, (m) => logs.push(m), () => {});
+    expect(logs.some((m) => m.includes('fake:r1: tracker hiccup'))).toBe(true);
+    expect(src.resets).toEqual(['fake:orphan']);
   });
 });
 

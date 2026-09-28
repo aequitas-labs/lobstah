@@ -100,3 +100,11 @@ describe('Linear reconciliation', () => {
     expect(filter).toEqual({ delegate: { isMe: { eq: true } }, state: types ? { type: { in: types } } : { name: { eq: 'Todo' } } });
   });
 });
+
+describe('key ownership', () => {
+  it('owns linear keys, nothing else', () => {
+    const s = source();
+    expect(s.owns('linear:DEMO-1')).toBe(true);
+    expect(s.owns('gh:o/r#pr1501@5f1d64978f6c43de320c15b20e5a77a8d3112e13')).toBe(false);
+  });
+});

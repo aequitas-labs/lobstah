@@ -42,39 +42,48 @@ export async function reportLoop(
   log: (m: string) => void = () => {},
   notify: (n: ReportNotification) => void = () => {},
 ): Promise<void> {
+  // One unreachable item must not starve the rest of the ledger: visit every
+  // entry, then reject with what failed so the cycle still logs it.
+  const failures: string[] = [];
   for (const [key, entry] of state.entries()) {
+    if (!source.owns(key)) continue; // the ledger is shared; its own source reports it
     if (entry.released) continue; // retain retry history without replaying the old dispatch
-    const lane = dispatchLane(entry.uuid);
-    if (!lane) continue; // reconcile owns missing dispatches
-    const verb = reconcile({
-      log: readStatusLog(entry.uuid, lane),
-      lastEventAt: lastEventAt(entry.uuid, lane),
-    });
-    if (verb !== 'unknown' && verb !== entry.lastReported) {
-      const evidence = readEvidence(entry.uuid, lane);
-      await source.report(key, verb as Verb, { ...evidence, uuid: entry.uuid });
-      state.update(key, { lastReported: verb as Verb });
-      log(`${key}: reported ${verb}`);
-      notify({
-        key,
-        uuid: entry.uuid,
-        verb: verb as Verb,
-        note: readStatusLog(entry.uuid, lane).at(-1)?.note,
-        prUrl: evidence.prUrl,
+    try {
+      const lane = dispatchLane(entry.uuid);
+      if (!lane) continue; // reconcile owns missing dispatches
+      const verb = reconcile({
+        log: readStatusLog(entry.uuid, lane),
+        lastEventAt: lastEventAt(entry.uuid, lane),
       });
-    }
-    // A terminal verb can precede process exit. Wait for the daemon to move
-    // the dispatch to done before allowing another attempt at the same issue.
-    if (entry.kind === 'issue' && verb === 'failed' && fs.existsSync(path.join(laneDirs(lane).done, entry.uuid))) {
-      state.releaseIssue(key);
-      log(`${key}: finalized failure released for a bounded retry`);
-      continue;
-    }
-    const msgs = await source.inbound(key, entry.lastInboundAt);
-    if (msgs.length > 0) {
-      for (const m of msgs) sendMessage(entry.uuid, lane, m, `tracker:${source.name.startsWith('gh:') ? 'github' : source.name}`);
-      state.update(key, { lastInboundAt: new Date().toISOString() });
-      log(`${key}: forwarded ${msgs.length} comment(s) to inbox`);
+      if (verb !== 'unknown' && verb !== entry.lastReported) {
+        const evidence = readEvidence(entry.uuid, lane);
+        await source.report(key, verb as Verb, { ...evidence, uuid: entry.uuid });
+        state.update(key, { lastReported: verb as Verb });
+        log(`${key}: reported ${verb}`);
+        notify({
+          key,
+          uuid: entry.uuid,
+          verb: verb as Verb,
+          note: readStatusLog(entry.uuid, lane).at(-1)?.note,
+          prUrl: evidence.prUrl,
+        });
+      }
+      // A terminal verb can precede process exit. Wait for the daemon to move
+      // the dispatch to done before allowing another attempt at the same issue.
+      if (entry.kind === 'issue' && verb === 'failed' && fs.existsSync(path.join(laneDirs(lane).done, entry.uuid))) {
+        state.releaseIssue(key);
+        log(`${key}: finalized failure released for a bounded retry`);
+        continue;
+      }
+      const msgs = await source.inbound(key, entry.lastInboundAt);
+      if (msgs.length > 0) {
+        for (const m of msgs) sendMessage(entry.uuid, lane, m, `tracker:${source.name.startsWith('gh:') ? 'github' : source.name}`);
+        state.update(key, { lastInboundAt: new Date().toISOString() });
+        log(`${key}: forwarded ${msgs.length} comment(s) to inbox`);
+      }
+    } catch (err) {
+      failures.push(`${key}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+  if (failures.length > 0) throw new Error(failures.join('; '));
 }

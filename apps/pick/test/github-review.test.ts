@@ -176,3 +176,13 @@ describe('post-PR feedback pickup', () => {
     expect(await source().poll()).toEqual([]);
   });
 });
+
+describe('key ownership', () => {
+  it('owns its own issue and review keys, nothing else', () => {
+    const s = source();
+    expect(s.owns('gh:o/r#12')).toBe(true);
+    expect(s.owns('gh:o/r#pr12@rv5252340326')).toBe(true);
+    expect(s.owns('linear:BAS-534')).toBe(false);
+    expect(s.owns('gh:o/r2#12')).toBe(false); // a second repo's source
+  });
+});

@@ -356,6 +356,13 @@ design rather than by trust:
   In Progress item because the table lacks an entry for it. A missing mapping
   triggers a rebuild, and only a rebuilt table may declare an orphan. Losing a
   file must never cancel live work.
+- **Shared, so owned.** Every source writes into one table. A loop that walks
+  it acts only on the keys its source `owns()` — a Linear key handed to the
+  GitHub source, or the reverse, is not an item that source can read. And no
+  single entry may fail the walk: each is isolated, the rest still report, and
+  the loop rejects afterwards so the cycle logs it. Dispatch, report, and
+  reconcile are guarded separately, so a report that cannot land never takes
+  reconciliation down with it.
 
 ---
 

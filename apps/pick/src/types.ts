@@ -27,6 +27,11 @@ export interface TrackedItem {
 /** A source translates tracker vocabulary to lobstah vocabulary and nothing else. */
 export interface Source {
   name: string;
+  /**
+   * Whether a pickup-ledger key is this source's. Every source shares one
+   * ledger, so a loop that walks it must skip the keys another source wrote.
+   */
+  owns(key: string): boolean;
   poll(): Promise<WorkItem[]>;
   /** Tracker-side state transition — the cross-machine mutex. */
   claim(item: WorkItem): Promise<boolean>;
