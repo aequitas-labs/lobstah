@@ -86,6 +86,8 @@ export type EventType =
   | 'tool-start'
   | 'tool-end'
   | 'text'
+  /** The model is reasoning. Carries no content. */
+  | 'thinking'
   | 'error'
   | 'runner';
 

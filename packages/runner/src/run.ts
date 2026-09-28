@@ -197,6 +197,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     const { cancelled, activity } = await drive(run, {
       id,
       lane,
+      cwd,
       stopped: () => wallClockHit,
       backgroundWaitMs: cfg.limits.backgroundWaitSecs * 1000,
     });

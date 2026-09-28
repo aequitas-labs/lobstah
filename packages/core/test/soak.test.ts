@@ -4,7 +4,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   appendStatus,
+  beatTrap,
   claimBait,
+  readActivity,
+  readBeat,
   daemonSkip,
   enqueue,
   ensureLayout,
@@ -304,5 +307,77 @@ describe('window capture', () => {
     expect(ref?.bundleId).toBe('com.googlecode.iterm2');
     expect(ref?.itermSession).toBe('w0t2p0:UUID');
     expect(ref?.tmuxPane).toBe('%3');
+  });
+});
+
+describe('soak beat (post-tool hook liveness)', () => {
+  function caught(sessionId: string, baitId: string): TrapRegistration {
+    enqueue({ id: baitId, repo: 'web', brief: 'x' });
+    const reg = trap(sessionId, 'web');
+    claimBait(reg);
+    return readTrap(reg.trapId)!;
+  }
+
+  it('refreshes the beat and writes activity for the claimed catch, from a subdirectory', () => {
+    const reg = caught('s1', 'w1');
+    const sub = path.join(reg.worktree, 'src', 'deep');
+    fs.mkdirSync(sub, { recursive: true });
+    const res = beatTrap({
+      cwd: sub,
+      sessionId: 's1',
+      toolName: 'Edit',
+      toolInput: { file_path: path.join(reg.worktree, 'src', 'a.ts'), new_string: 'ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8' },
+    });
+    expect(res).toEqual({ beat: true, trapId: reg.trapId, activityFor: 'w1' });
+    expect(readBeat(reg.trapId)?.sessionId).toBe('s1');
+    const a = readActivity('w1', 'work')!;
+    expect(a.kind).toBe('tool');
+    expect(a.summary).toBe('Edit src/a.ts');
+  });
+
+  it('is throttled per trap', () => {
+    const reg = caught('s1', 'w1');
+    const now = Date.now();
+    expect(beatTrap({ cwd: reg.worktree, toolName: 'Read', now }).beat).toBe(true);
+    expect(beatTrap({ cwd: reg.worktree, toolName: 'Edit', now: now + 29_000 })).toEqual({ beat: false, reason: 'throttled' });
+    expect(readActivity('w1', 'work')?.summary).toBe('Read');
+    expect(beatTrap({ cwd: reg.worktree, toolName: 'Edit', now: now + 30_000 }).beat).toBe(true);
+  });
+
+  it('is inert outside a soaking worktree and for another session', () => {
+    const elsewhere = path.join(home, 'plain');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    expect(beatTrap({ cwd: elsewhere, toolName: 'Read' })).toEqual({ beat: false, reason: 'not-soaking' });
+    const reg = trap('s1', 'web');
+    stowTrap(reg.trapId);
+    expect(beatTrap({ cwd: reg.worktree, toolName: 'Read' })).toEqual({ beat: false, reason: 'not-soaking' });
+    const again = trap('s2', 'web');
+    expect(beatTrap({ cwd: again.worktree, sessionId: 'someone-else' })).toEqual({ beat: false, reason: 'other-session' });
+    expect(readBeat(again.trapId)).toBeUndefined();
+  });
+
+  it('beats without a catch refresh liveness only', () => {
+    const reg = trap('s1', 'web');
+    expect(beatTrap({ cwd: reg.worktree, toolName: 'Read' })).toEqual({ beat: true, trapId: reg.trapId });
+  });
+
+  it('the ghost sweep honors a fresh beat, then sweeps once it goes stale', () => {
+    const reg = caught('s1', 'w1');
+    const ttl = 120_000;
+    const beatAt = Date.parse(reg.heartbeatAt) + 100_000;
+    beatTrap({ cwd: reg.worktree, toolName: 'Bash', now: beatAt });
+    // Heartbeat and claim entry are both past the TTL; the beat is not.
+    expect(sweepGhostTraps(ttl, beatAt + ttl)).toEqual([]);
+    expect(readTrap(reg.trapId)).toBeDefined();
+    expect(sweepGhostTraps(ttl, beatAt + ttl + 1)).toEqual([{ trapId: reg.trapId, requeued: 'w1' }]);
+    expect(readBeat(reg.trapId)).toBeUndefined();
+  });
+
+  it('a live beat holds the session lock like a live heartbeat', () => {
+    const reg = trap('s1', 'web');
+    const later = Date.parse(reg.heartbeatAt) + TTL_MS + 60_000;
+    beatTrap({ cwd: reg.worktree, now: later - 1000 });
+    const res = signOnTrap({ sessionId: 's2', harness: 'claude', repo: 'web', worktree: reg.worktree, cwd: reg.worktree, ttlMs: TTL_MS, now: later });
+    expect('held' in res).toBe(true);
   });
 });

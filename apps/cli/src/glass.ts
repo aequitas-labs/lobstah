@@ -5,6 +5,9 @@ import * as http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
   activeIds,
+  activityView,
+  DEFAULT_LIMITS,
+  readActivity,
   executorPath,
   helmLabel,
   laneDirs,
@@ -133,6 +136,15 @@ function trapMessages(trapId: string): GlassMessage[] {
   return rows.filter((m): m is GlassMessage => m !== undefined).sort((a, b) => a.file.localeCompare(b.file));
 }
 
+/** Activity older than this shows stale. A config error falls back to the default. */
+function wedgeSecs(): number {
+  try {
+    return loadConfig().limits.wedgeThresholdSecs;
+  } catch {
+    return DEFAULT_LIMITS.wedgeThresholdSecs;
+  }
+}
+
 function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
   const rows: Array<{ lane: Lane; bucket: 'queued' | 'active' | 'done'; d: Descriptor; sort: number }> = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
@@ -155,6 +167,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
     }
   }
   const hold = readHold();
+  const staleSecs = wedgeSecs();
   return rows
     .map((r) => {
       const id = r.d.id;
@@ -184,6 +197,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
         // Held for free space: the note carries the reason.
         note: (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
         verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
+        activity: r.bucket === 'active' ? activityView(readActivity(id, r.lane), staleSecs) : undefined,
         claimedBy: claim?.by,
         log,
         inbox: listDir(inboxDir)

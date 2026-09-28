@@ -118,6 +118,16 @@ view](pickup.md#merge-view) pickup persists each tick, so PR state is at most
 one poll interval stale without tend making a single network call. `--json`
 emits the full report for dashboards and scripts to render.
 
+The work table's `activity` column shows what each live dispatch is doing
+now, with its age: `Edit src/a.ts (12s ago)`. It comes from the runner's
+event stream (headless) or the post-tool hook (a trap), never from the
+worker's reports, so it stays current when the worker forgets to report.
+Past `[limits].wedgeThresholdSecs` it reads `stale: … (14m ago)`. A long
+silence is shown, not escalated: it raises no attention and no notice. The
+worker's verb and note stay the primary line. `lobstah status <id>` prints
+the same line as `activity:`, and `lobstah ls` has an `activity` column. See
+[Activity](vocabulary.md#activity).
+
 ### PR state after done
 
 A dispatch reports `done` when its PR opens; `report done --pr <url>`
@@ -440,8 +450,15 @@ the daemon spawns headless. Conversational steering goes through
 `send wt:<trap> "..."` — a message, not bait: no branch, no catch, sender
 stamped, bounced to the helm when undeliverable.
 
+A soaking session proves it is alive three ways: its park heartbeat, its
+reports, and its **beat**. The plugin's post-tool hook runs
+`lobstah soak beat` after tool calls: at most once per 30 seconds it
+refreshes the trap's beat and writes the claimed catch's activity. A trap
+that works for an hour without reporting is not swept while it beats.
+`[soak].beat = false` turns the hook off.
+
 Liveness has two failure shapes with two remedies: a registration that
-parked before and went quiet past `[soak].ttlSecs` is a **ghost trap** —
+parked before and went quiet (no park, report, or beat) past `[soak].ttlSecs` is a **ghost trap** —
 swept, catch requeued, noticed; one that **never parked** is a **defective
 enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 `soak --wait`) and left standing so the address keeps protecting its work.

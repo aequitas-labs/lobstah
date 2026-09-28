@@ -79,6 +79,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<key>]',
   },
   soak: {
+    subverbs: ['beat'],
     flags: {
       '--session': { value: '<id>' },
       '--one': {},
@@ -174,10 +175,10 @@ installs the shipped PR check; with --for, a check that fails after the first
 \`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
   soak: `Volunteer this session as a worker. Identity is the worktree: sign-on
 anchors a trap id (.lobstah-trap) and prints its wt:<trap> address; re-runs
-here need no flags (--session only on first sign-on). Refused from a
-primary checkout. --one signs off after the first completed assignment.
---wait listens in the foreground right now (for sessions without Stop
-hooks): work prints plain, a quiet timeout exits 3 — run it again.`,
+need no flags. Refused from a primary checkout. --one signs off after the
+first catch. --wait listens in the foreground (no Stop hook): a quiet timeout
+exits 3 — run it again. \`soak beat\` is the post-tool hook: trap liveness
+and catch activity; inert off a trap or with [soak].beat = false; exits 0.`,
   stow: `Sign the worktree's trap off (run it there, or pass --wt/--session); an
 unfinished assignment requeues and unread messages bounce to the helm.
 Stowing another session's trap is steering — with a claimed helm, only the

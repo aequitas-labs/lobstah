@@ -34,6 +34,7 @@ says when the plugin is behind.
 | ----- | ------------ |
 | SessionStart hook (`lobstah man brief`) | Prints the session id and a one-line fleet state. A session that is neither helm nor trap gets the two sign-on commands, with the id filled in. |
 | Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it when something needs attention. Inert unless the session holds the helm or is soaking. |
+| PostToolUse hook (`lobstah soak beat`) | After a tool call in a soaking session: refreshes the trap's liveness and writes its catch's activity. Needs Codex 0.117.0+ (see [below](#post-tool-hook-what-codex-has)). Older Codex ignores the event, and a trap's liveness then comes from its reports and its park only. |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends. |
 | `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken. |
 | `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs. |
@@ -59,6 +60,30 @@ respectively. This verification stopped before running either sign-on
 command. The desktop task's supplied skill catalog names
 `lobstah:lobsterman` and `lobstah:trap`; *the desktop picker and its exact
 inserted mention remain to be verified from the desktop UI*.
+
+## Post-tool hook: what Codex has
+
+Codex has a `PostToolUse` hook event, with the same `hooks.json` shape as
+Claude Code. Verified in the openai/codex source at commit `e07e58c`:
+
+- `codex-rs/hooks/src/lib.rs` lists `PostToolUse` among the hook event names,
+  and `codex-rs/config/src/hook_config.rs` maps the `PostToolUse` key.
+- The stdin payload (`PostToolUseCommandInput`, `codex-rs/hooks/src/schema.rs`)
+  carries `session_id`, `cwd`, `hook_event_name`, `tool_name`, `tool_input`,
+  and `tool_response`: the fields `lobstah soak beat` reads.
+- It arrived in 0.117.0 for shell commands only (openai/codex#15531), gained
+  `apply_patch` and MCP tools in 0.124.0 (#18391, #18385), and other local
+  function tools in 0.135.0 (#23757).
+- It does not fire for hosted tools such as web search, and it fires only
+  when the tool call succeeds (a shell command that exits non-zero still
+  counts).
+
+Docs: <https://developers.openai.com/codex/hooks>.
+
+So on Codex 0.117.0+ a trap beats after its tool calls, like a Claude Code
+trap. On 0.114 to 0.116, Codex has no post-tool hook: a trap's liveness
+comes from its reports and its park only, and a long stretch of work
+without a report can be swept after `[soak].ttlSecs`.
 
 ## The session id and `--session`
 

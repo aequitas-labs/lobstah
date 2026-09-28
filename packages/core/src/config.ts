@@ -70,6 +70,11 @@ export interface SoakConfig {
   deferSecs: number;
   /** Heartbeat age past which a registration is a ghost trap and gets swept. */
   ttlSecs: number;
+  /**
+   * The post-tool hook (`lobstah soak beat`) refreshes a trap's liveness and
+   * writes its catch's activity. False makes the hook do nothing.
+   */
+  beat: boolean;
 }
 
 export interface HelmConfig {
@@ -146,6 +151,7 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
 export const DEFAULT_SOAK: SoakConfig = {
   deferSecs: 90,
   ttlSecs: 1800,
+  beat: true,
 };
 
 export const DEFAULT_HELM: HelmConfig = {

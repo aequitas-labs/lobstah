@@ -321,6 +321,16 @@ tr.rowhead:hover {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.activity {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg);
+  opacity: 0.85;
+}
+.activity.stale {
+  color: var(--dim);
+  opacity: 1;
+}
 .card .foot {
   margin-top: 8px;
   display: flex;

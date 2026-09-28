@@ -56,7 +56,7 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 |---|---|---|
 | `maxConcurrent` | `2` | Work-lane dispatches running at once. |
 | `choreConcurrent` | `1` | Chore-lane ceiling (rebases and other machine-originated runs). |
-| `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. |
+| `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. Also the age past which `status`, `ls`, `man tend`, and the glass show a dispatch's activity line as stale. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
 | `wallClockSecs` | `3600` | Hard per-dispatch ceiling, enforced by the runner. |
 | `backgroundWaitSecs` | `1800` | A turn that ends without a report is held open this long while background work the worker started is still running (a push behind a slow pre-push gate); the harness wakes the worker when it settles. Heartbeats keep the wedge detector off the wait. Keep it below `wallClockSecs`, which still ends the run. |
@@ -72,7 +72,8 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | Key | Default | Meaning |
 |---|---|---|
 | `deferSecs` | `90` | A soaking session whose park heartbeat is this fresh holds unaddressed matching bait — the daemon waits instead of spawning. Addressed bait (`--for session:<id>`) waits regardless, until the registration is gone. |
-| `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues its open catch (or finalizes a cancelled one as failed). A fresh `lobstah report` on the catch counts as liveness too. |
+| `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues its open catch (or finalizes a cancelled one as failed). A fresh `lobstah report` on the catch counts as liveness too, and so does a fresh beat. |
+| `beat` | `true` | The post-tool hook (`lobstah soak beat`) refreshes a soaking session's liveness and writes its catch's activity, at most once per 30 seconds per trap. With `false` the hook does nothing, and a trap's liveness comes from its reports and its park only. |
 
 ## `[helm]` — the orchestrator seat (`lobstah man helm`)
 

@@ -40,6 +40,49 @@ The value set is the six verbs plus `unknown`. Precedence, highest first:
 4. Nothing trustworthy → `unknown`. **Absence of signal never means fine** —
    `unknown` is a prompt to look, not a synonym for idle.
 
+## Activity
+
+What a worker is doing *now*. It comes from the event stream and from hooks,
+never from the model remembering to report. The four layers, from least to
+most detail: **liveness** (alive or stuck), **activity** (what it is doing
+now), **narrative** (where it is in the plan: the six verbs, at milestones),
+and **transcript** (everything). Liveness and activity are machine-derived.
+Narrative stays with the worker.
+
+One record per dispatch, `state/<id>.activity`: `{ at, kind, summary }`.
+
+| Kind | Source |
+| --- | --- |
+| `tool` | A tool call started. The summary is the tool name and its primary target: a file path relative to the worktree, a command's first word, a URL's host. |
+| `message` | The model wrote text. The summary is fixed (`writing a message`); the text is never copied. |
+| `thinking` | The model is reasoning. No content. |
+| `waiting` | The runner holds the run open: for an answer to a question, or for background work. |
+
+The summary is never the tool's full input, file contents, an environment
+value, or anything that looks like a secret (token prefixes, JWTs, bearer
+values, `key=value` pairs with a secret-sounding key, long mixed runs of
+letters and digits are replaced with `[redacted]`). It is capped at 80
+characters.
+
+Writers:
+
+- **Headless:** the runner derives it from every event it drives. At most one
+  write per 10 seconds, plus one on every change of kind; a held record is
+  written when the window closes. Atomic write.
+- **Trap:** the post-tool hook runs `lobstah soak beat`, which writes the
+  record for the trap's claimed catch. At most one beat per 30 seconds per
+  trap.
+
+Readers: `lobstah status <id>` (`activity: <summary> (<age> ago)`),
+`lobstah ls` (an `activity` column), `lobstah man tend` (the work table), and
+the glass (under the verb and note on each dispatch). Past
+`[limits].wedgeThresholdSecs` the line shows as **stale** (dim in the glass,
+`stale:` in text, with its age). Staleness is displayed, not escalated: no
+attention kind, no notice, no pet. The worker's own verb and note stay the
+primary line; activity never replaces them.
+
+Source of truth: `packages/core/src/activity.ts`.
+
 ## Liveness classification
 
 What the *process* is doing, independent of what it claims. Computed by
@@ -250,7 +293,8 @@ refused (the session lock); a stale one is adopted.
 | address | `--for wt:<trap>` targets one trap; `session:<id>` is an alias resolved to the trap at dispatch time. **Sticky:** addressed work is never the daemon's — it waits for its trap; an orphan (trap gone) surfaces as a `bait-orphaned` notice for the helm to re-address, release, or cancel. Delivery stamps a receipt (`deliveredTo`/`deliveredAt`) into evidence. Unaddressed work defers to a parked matching trap for `[soak].deferSecs`, then the daemon spawns headless. |
 | message | `send wt:<trap> "<text>"` — a conversational continuation, not work: no branch, no catch, no report obligation. Delivered before bait at the trap's next park, stamped with its sender (`helm` / `session:<id>` / `terminal`); undeliverable messages bounce to the helm as notices. |
 | catch | The active dispatch a trap claimed (`claim.json`, `by: wt:<id>`). One catch per trap; one active item per worktree. The daemon never spawns or restarts it — the session's reports are its liveness. |
-| ghost trap | A registration whose heartbeat lapsed past `[soak].ttlSecs` **after having parked at least once**. The sweep removes it, requeues its catch, and posts a `trap-ghosted` notice; re-soaking the worktree restores the same address. A fresh report on the catch keeps a mid-turn session out of the sweep. |
+| beat | `lobstah soak beat`, run by the plugin's post-tool hook after every tool call. It resolves the trap from the working directory (files only: no git, no network), refreshes the trap's beat (`soaking/<trap>.beat`, separate from the registration), and writes the claimed catch's [activity](#activity). Throttled to one per 30 seconds per trap. Inert in a session that is not soaking, or with `[soak].beat = false`. Always exits 0; errors go to `logs/beat.log`. |
+| ghost trap | A registration whose heartbeat **and** beat lapsed past `[soak].ttlSecs` **after having parked at least once**. The sweep removes it, requeues its catch, and posts a `trap-ghosted` notice; re-soaking the worktree restores the same address. A fresh report or a fresh beat keeps a working session out of the sweep. A fresh beat also holds the session lock. |
 | defective enlistment | A stale registration that **never parked** — signed on but never listened (usually no Stop hook). Not swept: the helm gets a `trap-defective` notice with the remedy (`soak --wait`), and the registration stays so the address keeps protecting its work. |
 | notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): sign-ons, first parks, sign-offs, ghosts, defective enlistments, orphaned work, bounced messages, PRs merged or closed, watches held over the fork cap (`watch-held`), failing (`watch-failing`), and recovered (`watch-recovered`), free-space holds (`disk-held`, `disk-cleared`), and worktrees released after their PR merged (`worktree-released`, one per cull pass). A trap leaves the registry only through a `trap-stowed` or `trap-ghosted` notice — the end-state is always explicit. Consumed by `man wait`/the park; tend always shows the recent tail. |
 

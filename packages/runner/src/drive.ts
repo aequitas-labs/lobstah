@@ -1,5 +1,6 @@
 import {
   acknowledge,
+  ActivityTracker,
   appendEvent,
   appendStatus,
   cancelRequested,
@@ -8,8 +9,9 @@ import {
   TERMINAL_VERBS,
   touchEvents,
   unhandled,
+  writeActivity,
 } from '@lobstah/core';
-import type { Lane, Verb } from '@lobstah/core';
+import type { Lane, NormalizedEvent, Verb } from '@lobstah/core';
 import type { AdapterRun } from '@lobstah/adapters';
 
 /**
@@ -33,6 +35,10 @@ export interface DriveOpts {
   backgroundWaitMs?: number;
   /** Once background work settles, how long to wait for the harness to wake the worker. */
   settleGraceMs?: number;
+  /** The worktree: activity shows file targets relative to it. */
+  cwd?: string;
+  /** Minimum interval between activity writes of the same kind (default 10s). */
+  activityThrottleMs?: number;
 }
 
 /**
@@ -86,6 +92,16 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     backgroundWaitMs = 30 * 60_000,
     settleGraceMs = 120_000,
   } = opts;
+  // Activity comes from the stream, never from the model: every event the
+  // runner sees can update what the dispatch is doing now.
+  const tracker = new ActivityTracker((a) => writeActivity(id, lane, a), {
+    root: opts.cwd,
+    throttleMs: opts.activityThrottleMs,
+  });
+  const record = (ev: NormalizedEvent) => {
+    appendEvent(id, lane, ev);
+    tracker.observe(ev);
+  };
   let cancelled = false;
   let activity = 0;
   // A harness that exits on its own (crash, external kill) ends any wait.
@@ -107,7 +123,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
 
   /** Wait for an inbox message. Heartbeats the event stream every poll. */
   const awaitAnswer = async (verb: Verb): Promise<void> => {
-    appendEvent(id, lane, { at: new Date().toISOString(), type: 'runner', data: { waiting: verb } });
+    record({ at: new Date().toISOString(), type: 'runner', data: { waiting: verb } });
     while (true) {
       if (stopped() || finished) return;
       if (cancelRequested(id, lane)) return cancel();
@@ -121,7 +137,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
   let nudged = false;
   let hold: { heartbeat: ReturnType<typeof setInterval>; expiry: ReturnType<typeof setTimeout> } | undefined;
   const runnerEvent = (data: Record<string, unknown>) =>
-    appendEvent(id, lane, { at: new Date().toISOString(), type: 'runner', data });
+    record({ at: new Date().toISOString(), type: 'runner', data });
 
   const releaseHold = () => {
     if (!hold) return;
@@ -166,7 +182,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
   };
 
   for await (const ev of run.events) {
-    appendEvent(id, lane, ev);
+    record(ev);
     if (ev.type === 'background') {
       liveBackground = Number(ev.data?.live ?? 0);
       // The work settled: the harness should wake the worker now, so stop
@@ -218,6 +234,8 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     unreported();
   }
   releaseHold();
+  tracker.flush();
+  tracker.stop();
   return { cancelled, activity };
 }
 

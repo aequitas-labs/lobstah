@@ -10,6 +10,7 @@ import { postNotice } from './notices.js';
 import type { WindowRef } from './window.js';
 import { TERMINAL_VERBS } from './types.js';
 import { attachmentBlock } from './attachments.js';
+import { toolSummary, toolTarget, writeActivity } from './activity.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -129,7 +130,7 @@ export function signOnTrap(opts: {
   const trapId = ensureTrapId(opts.worktree);
   const prior = readTrap(trapId);
   if (prior && prior.sessionId !== opts.sessionId) {
-    const fresh = now - (Date.parse(prior.heartbeatAt) || 0) <= opts.ttlMs;
+    const fresh = now - trapLastSeen(prior) <= opts.ttlMs;
     if (fresh) return { held: prior };
   }
   const iso = new Date(now).toISOString();
@@ -170,6 +171,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   const reg = readTrap(trapId);
   if (!reg) return undefined;
   fs.rmSync(regPath(trapId), { force: true });
+  fs.rmSync(beatPath(trapId), { force: true });
   postNotice({
     kind: 'trap-stowed',
     text: `trap wt:${trapId} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
@@ -332,12 +334,15 @@ export interface GhostSweepAction {
  * with the diagnosis instead of a silent sweep, and the registration stays
  * so the address keeps protecting its bait. A session mid-catch proves
  * liveness through its status reports, so a fresh report keeps a trap out
- * of the sweep even when the park heartbeat lapsed.
+ * of the sweep even when the park heartbeat lapsed. So does a fresh beat
+ * (`lobstah soak beat`, run by the post-tool hook): a session busy with tools
+ * for longer than the TTL is working, not gone.
  */
 export function sweepGhostTraps(ttlMs: number, now = Date.now()): GhostSweepAction[] {
   const actions: GhostSweepAction[] = [];
   for (const reg of listTraps()) {
-    if (now - msOf(reg.heartbeatAt) <= ttlMs) continue;
+    // A fresh park heartbeat or a fresh tool beat: the session is alive.
+    if (now - trapLastSeen(reg) <= ttlMs) continue;
     if (reg.firstParkedAt === undefined) {
       const posted = postNotice({
         kind: 'trap-defective',
@@ -364,6 +369,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now()): GhostSweepActi
       actions.push({ trapId: reg.trapId });
     }
     fs.rmSync(regPath(reg.trapId), { force: true });
+    fs.rmSync(beatPath(reg.trapId), { force: true });
     postNotice({
       kind: 'trap-ghosted',
       text: `trap wt:${reg.trapId} ghosted (went quiet mid-watch) — registration removed; re-soaking the worktree restores the same address`,
@@ -415,4 +421,82 @@ export function baitBrief(id: string, d: Descriptor): string {
     d.brief,
     ...(d.attachments?.length ? ['', attachmentBlock(d.attachments)] : []),
   ].join('\n');
+}
+
+/**
+ * The trap's last tool beat (`lobstah soak beat`). Kept in its own file,
+ * `soaking/<trapId>.beat`, so a beat never rewrites the registration and
+ * cannot race a park or a claim that does.
+ */
+export interface TrapBeat {
+  at: string;
+  sessionId?: string;
+}
+
+function beatPath(trapId: string): string {
+  return path.join(soakingDir(), `${trapId}.beat`);
+}
+
+export function readBeat(trapId: string): TrapBeat | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(beatPath(trapId), 'utf8')) as TrapBeat;
+    return typeof parsed.at === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The newest liveness signal a trap has given: its park heartbeat or its tool beat. */
+export function trapLastSeen(reg: TrapRegistration): number {
+  return Math.max(msOf(reg.heartbeatAt), msOf(readBeat(reg.trapId)?.at ?? ''));
+}
+
+/** The trap anchored at `dir` or any directory above it. Reads files only: no git. */
+export function trapIdAbove(dir: string): string | undefined {
+  let at = path.resolve(dir);
+  for (;;) {
+    const id = trapIdAt(at);
+    if (id !== undefined) return id;
+    const up = path.dirname(at);
+    if (up === at) return undefined;
+    at = up;
+  }
+}
+
+export interface BeatInput {
+  /** Where the tool ran (the hook's `cwd`). */
+  cwd: string;
+  /** The hook's session id; a beat from a session that does not man the trap is ignored. */
+  sessionId?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  /** Minimum interval between beats for one trap. */
+  throttleMs?: number;
+  now?: number;
+}
+
+export type BeatResult =
+  | { beat: false; reason: 'not-soaking' | 'other-session' | 'throttled' }
+  | { beat: true; trapId: string; activityFor?: string };
+
+/**
+ * One post-tool beat. Resolves the trap from the working directory, then
+ * refreshes the trap's beat and, when it holds an open catch, writes that
+ * catch's activity. Inert when the directory is not a signed-on trap's
+ * worktree. Throttled per trap. Files only: no network, no git.
+ */
+export function beatTrap(input: BeatInput): BeatResult {
+  const now = input.now ?? Date.now();
+  const trapId = trapIdAbove(input.cwd);
+  const reg = trapId !== undefined ? readTrap(trapId) : undefined;
+  if (!trapId || !reg) return { beat: false, reason: 'not-soaking' };
+  if (input.sessionId && input.sessionId !== reg.sessionId) return { beat: false, reason: 'other-session' };
+  const last = msOf(readBeat(trapId)?.at ?? '');
+  if (now - last < (input.throttleMs ?? 30_000)) return { beat: false, reason: 'throttled' };
+  const at = new Date(now).toISOString();
+  atomicWrite(beatPath(trapId), JSON.stringify({ at, sessionId: reg.sessionId } satisfies TrapBeat));
+  if (!hasOpenCatch(reg)) return { beat: true, trapId };
+  const name = input.toolName || 'tool';
+  writeActivity(reg.claimed!, 'work', { at, kind: 'tool', summary: toolSummary(name, toolTarget(input.toolInput), reg.worktree) });
+  return { beat: true, trapId, activityFor: reg.claimed };
 }
