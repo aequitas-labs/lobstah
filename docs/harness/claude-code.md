@@ -38,6 +38,9 @@ row, and the session-start brief says when the plugin is behind.
 | `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken. |
 | `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, and `paused --waiting-on` before waiting on something external (for ume, the non-blocking push when the await cannot run as a tracked background task). |
 
+`lobstah send <id> "<instruction>"` steers live or queued work and wakes a
+finished dispatch as a follow-up.
+
 Slash commands, each a shortcut for a CLI verb:
 
 | Command | CLI equivalent |

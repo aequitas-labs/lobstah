@@ -36,8 +36,8 @@ says when the plugin is behind.
 | Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it when something needs attention. Inert unless the session holds the helm or is soaking. |
 | PostToolUse hook (`lobstah soak beat`) | After a tool call in a soaking session: refreshes the trap's liveness and writes its catch's activity. Needs Codex 0.117.0+ (see [below](#post-tool-hook-what-codex-has)). Older Codex ignores the event, and a trap's liveness then comes from its reports and its park only. |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends. |
-| `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken. |
-| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs. |
+| `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken, and sending a follow-up to finished work. |
+| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, and `paused --waiting-on` before external waits. |
 
 There are no slash commands: the Codex plugin layout has no commands
 directory. The skills run the same `lobstah` commands as the README
@@ -87,12 +87,14 @@ without a report can be swept after `[soak].ttlSecs`.
 
 ## Waiting on something external
 
-The Codex `man` and `trap` skills are hand-maintained copies, not generated
-from the Claude Code skills, so they do not carry the `paused --waiting-on`
-guidance. A Codex trap learns it from the brief it receives with each catch:
-before it waits on a review, a PR, or a deploy, it reports
-`paused "<note>" --waiting-on <kind> --link <url>`. See
+Before a trap waits on a review, PR, deploy, person, or other external event,
+it reports `paused "<note>" --waiting-on <kind> --link <url>`. Resume with a
+`working` report. A Codex task cannot run an await as a tracked background
+task: use the external tool's non-blocking form and end the turn. See
 [Waiting on](../vocabulary.md#waiting-on).
+
+`lobstah send <id> "<instruction>"` steers live or queued work and wakes a
+finished dispatch as a follow-up.
 
 ## The session id and `--session`
 

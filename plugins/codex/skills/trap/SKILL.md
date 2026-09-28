@@ -20,9 +20,11 @@ lobstah stow                  # sign off
 
 - Run `soak` from a linked worktree, never the repo's primary checkout —
   it refuses there. Create one with `git worktree add ../<name> -b <branch>`.
-- No flag is needed inside Claude Code: the CLI reads
-  `$CLAUDE_CODE_SESSION_ID`. If it refuses, pass `--session <id>` from the
-  session-start brief. Re-runs in the same worktree need no flags.
+<!-- harness-specific:start -->
+Invoke `$lobstah:trap` to load this skill; Codex has no `/lobstah:*` commands.
+Codex exports no session variable: pass `--session <task-id>` from the
+session-start brief on first sign-on. Re-runs in the worktree need no flags.
+<!-- harness-specific:end -->
 - The harness (claude or codex) is inferred from the environment and the
   session id; `--harness claude|codex` overrides.
 - Your address is `wt:<trap>`. It belongs to the worktree and survives
@@ -42,8 +44,18 @@ naming a dispatch id. Then:
 - A `needs-decision` or `blocked` report queues your question to the human.
   The answer arrives in the dispatch's inbox: `lobstah inbox <id>`.
 - Check `lobstah inbox <id>` at natural checkpoints.
-- After every report, park again (end the turn, or `lobstah soak --wait`)
-  so answers, messages, and the next assignment reach you.
+- Before you wait on something outside lobstah (a ume review, a PR review, a
+  deploy), report `paused "<note>" --waiting-on review|pr|deploy|person|external
+  --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,
+  not a question: nobody is paged. Report `working` when you resume.
+<!-- harness-specific:start -->
+- For ume: use the ume skill's non-blocking push; Codex cannot run the await
+  as a tracked background task. End the turn while it runs.
+- After sign-on and after every completion or report, run one foreground
+  `lobstah soak --wait --timeout 600` if no waiter is already active. The
+  Stop hook blocks in park mode with standing work; there is no watcher to
+  arm. A quiet exit 3 means re-run the wait, never stow.
+<!-- harness-specific:end -->
 
 ## Fences
 

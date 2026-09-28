@@ -11,10 +11,11 @@ Codex with no settings surgery.
 | Piece | What it does |
 | ----- | ------------ |
 | SessionStart hook (`lobstah man brief`) | Announces the session's id and a one-line fleet state into the conversation, so every session starts oriented. A session that is neither helm nor trap gets the two copy-paste sign-on commands. |
+| PostToolUse hook (`lobstah soak beat`) | Refreshes a soaking trap's liveness and records redacted activity after supported tool calls (Codex 0.117.0+). |
 | Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends. |
 | `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
-| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, inbox, stowing. |
+| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, inbox, `paused --waiting-on` before external waits, stowing. |
 
 ## Requirements
 
@@ -46,6 +47,10 @@ Codex CLI and desktop app differ are in
 [docs/harness/codex.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/codex.md). The quickstart, the same
 in every harness, is in the
 [README](https://github.com/aequitas-labs/lobstah#quickstart-the-lobstah-man-).
+
+`lobstah send <id> "<instruction>"` steers live or queued work and wakes a
+finished dispatch as a follow-up. Use `$lobstah:man` or `$lobstah:trap` to
+load the skills; Codex has no `/lobstah:*` commands.
 
 Manual fallbacks without the helm: `touch .lobstah-man` in a project (every
 session there parks as the lobstah man), or `LOBSTAH_MAN=1` for one launch.

@@ -20,9 +20,12 @@ lobstah stow                  # sign off
 
 - Run `soak` from a linked worktree, never the repo's primary checkout —
   it refuses there. Create one with `git worktree add ../<name> -b <branch>`.
+<!-- harness-specific:start -->
+Invoke `/lobstah:trap` to load this skill.
 - No flag is needed inside Claude Code: the CLI reads
   `$CLAUDE_CODE_SESSION_ID`. If it refuses, pass `--session <id>` from the
   session-start brief. Re-runs in the same worktree need no flags.
+<!-- harness-specific:end -->
 - The harness (claude or codex) is inferred from the environment and the
   session id; `--harness claude|codex` overrides.
 - Your address is `wt:<trap>`. It belongs to the worktree and survives
@@ -46,11 +49,13 @@ naming a dispatch id. Then:
   deploy), report `paused "<note>" --waiting-on review|pr|deploy|person|external
   --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,
   not a question: nobody is paged. Report `working` when you resume.
+<!-- harness-specific:start -->
 - For ume: push with the ume skill's non-blocking form when this harness
   cannot run the await as a tracked background task.
 - Run `lobstah soak --wait --timeout 900` as a background task after sign-on
   and after every completion or report. The Stop hook blocks with standing
   work or the arm command when no watcher is live. Re-run after exit 3.
+<!-- harness-specific:end -->
 
 ## Fences
 
