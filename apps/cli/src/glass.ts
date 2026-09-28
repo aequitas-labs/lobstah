@@ -28,6 +28,7 @@ import {
   queuedAt,
   holdReason,
   readHold,
+  slotUsage,
   readPrs,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassMessage, GlassSnapshot, GlassTrap, Lane } from '@lobstah/core';
@@ -236,6 +237,7 @@ function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[
 /** One disk pass, everything the page renders. Pure read. */
 export function buildGlassSnapshot(): GlassSnapshot {
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
+  const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
     ...h,
     session: h.sessionId.slice(0, 8),
@@ -297,6 +299,7 @@ export function buildGlassSnapshot(): GlassSnapshot {
     version: lobstahVersion(),
     repoUrl: REPO_URL,
     daemon: executor ? { version: executor.version, heartbeat: executor.heartbeat } : undefined,
+    slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps },
     helms,
     traps: [
       ...live.map((t) => attach(t, true)),

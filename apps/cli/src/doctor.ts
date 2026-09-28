@@ -16,6 +16,7 @@ import {
   packagePresent,
   readHold,
   statfsFreeBytes,
+  slotUsage,
   worktreesDir,
   readKeptWorktrees,
 } from '@lobstah/core';
@@ -282,8 +283,11 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   }
 
   const hb = executorPath();
+  const workSlots = slotUsage('work');
+  const choreSlots = slotUsage('chore');
+  const slots = `headless: ${workSlots.headless} of ${cfg.limits.maxConcurrent} work, ${choreSlots.headless} of ${cfg.limits.choreConcurrent} chore; traps: ${workSlots.traps + choreSlots.traps}`;
   if (!fs.existsSync(hb)) {
-    push('daemon', 'warn', 'no heartbeat — daemon not running (`lobstah daemon install`)');
+    push('daemon', 'warn', `no heartbeat — daemon not running (\`lobstah daemon install\`); ${slots}`);
   } else {
     try {
       const payload = JSON.parse(fs.readFileSync(hb, 'utf8')) as { heartbeat?: string; version?: string };
@@ -292,11 +296,11 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
         'daemon',
         age < HEARTBEAT_STALE_MS ? 'ok' : 'warn',
         age < HEARTBEAT_STALE_MS
-          ? `heartbeat ${Math.round(age / 1000)}s ago (v${payload.version ?? '?'})`
-          : `heartbeat stale (${Math.round(age / 1000)}s) — daemon down or wedged`,
+          ? `heartbeat ${Math.round(age / 1000)}s ago (v${payload.version ?? '?'}); ${slots}`
+          : `heartbeat stale (${Math.round(age / 1000)}s) — daemon down or wedged; ${slots}`,
       );
     } catch {
-      push('daemon', 'warn', 'heartbeat unreadable');
+      push('daemon', 'warn', `heartbeat unreadable; ${slots}`);
     }
   }
 

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { claimNext, enqueue, ensureLayout, executorPath } from '@lobstah/core';
 import { restartCommand } from '../src/service.js';
-import { restartRefusal } from '../src/restart.js';
+import { activeDispatchCounts, restartRefusal } from '../src/restart.js';
 import { usageFor } from '../src/usage.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).
@@ -63,9 +63,9 @@ describe('restart refusals', () => {
   });
 
   it('the daemon refuses while dispatches are active, and says how many; --force overrides', () => {
-    expect(restartRefusal({ kind: 'daemon', installed: true, active: 2, force: false })).toContain('2 dispatch(es) active');
+    expect(restartRefusal({ kind: 'daemon', installed: true, active: 2, traps: 3, force: false })).toContain('2 headless dispatch(es) and 3 trap catch(es) active');
     expect(restartRefusal({ kind: 'daemon', installed: true, active: 2, force: true })).toBeUndefined();
-    expect(restartRefusal({ kind: 'daemon', installed: true, active: 0, force: false })).toBeUndefined();
+    expect(restartRefusal({ kind: 'daemon', installed: true, active: 0, traps: 3, force: false })).toBeUndefined();
     expect(restartRefusal({ kind: 'pick', installed: true, active: 2, force: false })).toBeUndefined();
   });
 });
@@ -94,8 +94,15 @@ describe('lobstah daemon|pick|glass restart', () => {
     claimNext('work');
     const res = lobstah('daemon', 'restart');
     expect(res.status).toBe(1);
-    expect(res.stdout).toContain('1 dispatch(es) active');
+    expect(res.stdout).toContain('1 headless dispatch(es)');
     expect(res.stdout).toContain('--force');
+  });
+
+  it('counts trap catches separately from supervised runners', () => {
+    enqueue({ id: 'trap-catch', repo: 'r', brief: 'b' });
+    claimNext('work');
+    fs.writeFileSync(path.join(home, 'active', 'trap-catch', 'claim.json'), JSON.stringify({ by: 'wt:trap1' }));
+    expect(activeDispatchCounts()).toEqual({ headless: 0, traps: 1 });
   });
 
   it('usage lists restart, status, and --force', () => {

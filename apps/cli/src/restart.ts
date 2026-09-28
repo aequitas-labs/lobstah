@@ -1,5 +1,5 @@
 import * as fs from 'node:fs';
-import { activeIds, executorPath } from '@lobstah/core';
+import { executorPath, slotUsage } from '@lobstah/core';
 import type { ServiceKind } from './service.js';
 
 /** How long a restart waits for the new process to show itself. */
@@ -15,24 +15,30 @@ export const INSTALL_COMMAND: Record<ServiceKind, string> = {
   glass: 'lobstah glass install',
 };
 
-/** Dispatches the daemon supervises right now: claimed work and chores. */
+/** The daemon supervises only headless runners; trap catches survive its restart. */
+export function activeDispatchCounts(): { headless: number; traps: number } {
+  const work = slotUsage('work');
+  const chore = slotUsage('chore');
+  return { headless: work.headless + chore.headless, traps: work.traps + chore.traps };
+}
+
 export function activeDispatchCount(): number {
-  return activeIds('work').length + activeIds('chore').length;
+  return activeDispatchCounts().headless;
 }
 
 /**
  * The refusal for a restart that must not run, or undefined when it may.
  * A service that is not installed cannot be restarted by its manager. The
- * daemon supervises active dispatches, so restarting it under them needs
- * --force; queued work is fine, it waits for the new daemon.
+ * daemon supervises headless active dispatches, so restarting it under them
+ * needs --force. Trap catches keep running in their own sessions.
  */
-export function restartRefusal(opts: { kind: ServiceKind; installed: boolean; active: number; force: boolean }): string | undefined {
+export function restartRefusal(opts: { kind: ServiceKind; installed: boolean; active: number; traps?: number; force: boolean }): string | undefined {
   if (!opts.installed) {
     return `the ${opts.kind} service is not installed — install it with \`${INSTALL_COMMAND[opts.kind]}\``;
   }
   if (opts.kind === 'daemon' && opts.active > 0 && !opts.force) {
     return (
-      `${opts.active} dispatch(es) active — restarting the daemon interrupts their supervision. ` +
+      `${opts.active} headless dispatch(es) and ${opts.traps ?? 0} trap catch(es) active — restarting the daemon interrupts headless supervision only. ` +
       'Wait for them to finish, or pass --force.'
     );
   }
@@ -80,6 +86,7 @@ function pidAlive(pid: number): boolean {
 
 /** `lobstah daemon status`: installed, running, pid, version, heartbeat age. */
 export function daemonStatus(installed: boolean, now = Date.now()): Record<string, string | number | boolean> {
+  const usage = activeDispatchCounts();
   const hb = readHeartbeat();
   const ageSecs = hb ? Math.max(0, Math.round((now - (Date.parse(hb.heartbeat) || 0)) / 1000)) : undefined;
   const fresh = ageSecs !== undefined && ageSecs * 1000 < HEARTBEAT_STALE_MS;
@@ -87,6 +94,8 @@ export function daemonStatus(installed: boolean, now = Date.now()): Record<strin
   return {
     daemon: running ? 'running' : 'stopped',
     installed,
+    headless: usage.headless,
+    trapCatches: usage.traps,
     ...(hb?.pid !== undefined ? { pid: hb.pid } : {}),
     ...(hb?.version ? { version: hb.version } : {}),
     heartbeat: ageSecs === undefined ? 'never' : `${ageSecs}s ago`,

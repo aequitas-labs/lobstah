@@ -114,7 +114,7 @@ import { serveGlass } from './glass.js';
 import { glassLines, glassPort, glassStatus, glassUrl, probeGlass, readGlassState, startDetachedGlass, stopGlass } from './glass-lifecycle.js';
 import { installPet, uninstallPet } from './pet.js';
 import { installService, restartService, serviceInstalled, uninstallService } from './service.js';
-import { activeDispatchCount, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
+import { activeDispatchCounts, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
 import { addPrWatch, autoRegisterPrWatch, backfillPrWatches, observeDispatchPrWatches, pollSecs, runPrCheck, syncPrWatches } from './pr-watch.js';
@@ -1655,8 +1655,9 @@ async function mainCli(): Promise<void> {
         break;
       }
       if (pos[0] === 'restart') {
-        const active = kind === 'daemon' ? activeDispatchCount() : 0;
-        const refusal = restartRefusal({ kind, installed: serviceInstalled(kind), active, force: has('--force') });
+        const usage = kind === 'daemon' ? activeDispatchCounts() : { headless: 0, traps: 0 };
+        const active = usage.headless;
+        const refusal = restartRefusal({ kind, installed: serviceInstalled(kind), active, traps: usage.traps, force: has('--force') });
         if (refusal) throw new Error(refusal);
         const oldPid = kind === 'daemon' ? readHeartbeat()?.pid : undefined;
         const started = Date.now();
@@ -1671,7 +1672,8 @@ async function mainCli(): Promise<void> {
           toonKV({
             service: kind,
             restarted: res.command,
-            ...(active > 0 ? { interrupted: `${active} active dispatch(es) (--force)` } : {}),
+            ...(kind === 'daemon' ? { headless: usage.headless, trapCatches: `${usage.traps} unaffected` } : {}),
+            ...(active > 0 ? { interrupted: `${active} headless dispatch(es) (--force)` } : {}),
             ...(hb
               ? { running: `v${hb.version ?? '?'}`, ...(hb.pid !== undefined ? { pid: hb.pid } : {}) }
               : { heartbeat: `none within ${RESTART_WAIT_MS / 1000}s — see ${path.join(lobstahHome(), 'logs', 'daemon.err')}` }),
@@ -1922,6 +1924,7 @@ ${exampleRepo}[harness]
 default = "claude"
 
 [limits]
+# Headless daemon runners only; trap catches do not use these slots.
 maxConcurrent      = 2
 choreConcurrent    = 1
 wedgeThresholdSecs = 600

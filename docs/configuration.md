@@ -54,8 +54,8 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `maxConcurrent` | `2` | Work-lane dispatches running at once. |
-| `choreConcurrent` | `1` | Chore-lane ceiling (rebases and other machine-originated runs). |
+| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. |
+| `choreConcurrent` | `1` | Headless chore-lane runner ceiling (rebases and other machine-originated runs). |
 | `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. Also the age past which `status`, `ls`, `man tend`, and the glass show a dispatch's activity line as stale. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
 | `wallClockSecs` | `3600` | Hard per-dispatch ceiling, enforced by the runner. Time paused with `report paused --waiting-on` does not count. A paused runner still holds its `maxConcurrent` slot while its process is alive. |

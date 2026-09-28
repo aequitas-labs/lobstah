@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, claimNext, enqueue, ensureLayout, executorPath, holdWatch } from '@lobstah/core';
+import { addWatch, appendStatus, claimNext, enqueue, ensureLayout, executorPath, holdWatch, laneDirs } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 
 let home: string;
@@ -43,6 +43,26 @@ describe('man tend — the fleet verdict', () => {
     heartbeat();
     enqueue({ id: 'a3', repo: 'r', brief: 'b' });
     expect(buildTendReport().verdict).toBe('working');
+  });
+
+  it('shows headless slots separately from trap catches and explains a full queue', () => {
+    heartbeat();
+    for (const id of ['head1', 'head2', 'trap1']) {
+      enqueue({ id, repo: 'r', brief: 'b' });
+      claimNext('work');
+    }
+    fs.writeFileSync(path.join(laneDirs('work').active, 'trap1', 'claim.json'), JSON.stringify({ by: 'wt:trap1' }));
+    enqueue({ id: 'head3', repo: 'r', brief: 'queued' });
+    const text = renderTend(buildTendReport());
+    expect(text).toContain('active: headless: 2 of 2; traps: 1');
+    expect(text).toContain('queued work waits: all 2 headless slots are in use');
+  });
+
+  it('names an addressed trap that is not listening', () => {
+    heartbeat();
+    enqueue({ id: 'addressed', repo: 'r', brief: 'b', for: 'wt:missing' });
+    const text = renderTend(buildTendReport());
+    expect(text).toContain('queued work waits: trap wt:missing not listening');
   });
 
   it('an unanswered needs-decision outranks working and carries its age', () => {
