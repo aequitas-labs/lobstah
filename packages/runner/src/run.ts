@@ -148,7 +148,12 @@ export async function main(activeDir: string, lane: Lane, deps: RunnerDeps = def
       resumeSession,
     });
     current = run;
-    const { cancelled, activity } = await drive(run, { id, lane, stopped: () => wallClockHit });
+    const { cancelled, activity } = await drive(run, {
+      id,
+      lane,
+      stopped: () => wallClockHit,
+      backgroundWaitMs: cfg.limits.backgroundWaitSecs * 1000,
+    });
     const result = await run.done;
     return { cancelled, activity, result };
   };

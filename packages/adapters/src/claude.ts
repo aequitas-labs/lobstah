@@ -27,6 +27,8 @@ interface StreamMessage {
   session_id?: string;
   total_cost_usd?: number;
   message?: { content?: Array<{ type?: string; name?: string; text?: string }> };
+  /** `background_tasks_changed`: every live background task, replacing the last set. */
+  tasks?: Array<{ task_id?: string; ambient?: boolean }>;
 }
 
 /**
@@ -43,6 +45,12 @@ export function pumpClaudeMessage(
   if (msg.type === 'system' && msg.subtype === 'init') {
     if (msg.session_id) onSession(msg.session_id);
     push({ at, type: 'session', data: { sessionId: msg.session_id } });
+  } else if (msg.type === 'system' && msg.subtype === 'background_tasks_changed') {
+    // A level signal, not paired start/stop edges. Ambient tasks (watchers,
+    // live-update monitors) are not activity, so they do not count as work
+    // the worker is waiting on.
+    const live = (msg.tasks ?? []).filter((t) => !t.ambient).length;
+    push({ at, type: 'background', data: { live } });
   } else if (msg.type === 'assistant') {
     for (const block of msg.message?.content ?? []) {
       if (block.type === 'tool_use') {

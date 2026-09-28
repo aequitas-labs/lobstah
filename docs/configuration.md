@@ -58,6 +58,7 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
 | `wallClockSecs` | `3600` | Hard per-dispatch ceiling, enforced by the runner. |
+| `backgroundWaitSecs` | `1800` | A turn that ends without a report is held open this long while background work the worker started is still running (a push behind a slow pre-push gate); the harness wakes the worker when it settles. Heartbeats keep the wedge detector off the wait. Keep it below `wallClockSecs`, which still ends the run. |
 | `choreRetentionDays` | `7` | Completed chores age out of `chores/done/`. |
 | `attachmentMaxBytes` | `26214400` (25 MiB) | Maximum size of each file supplied with repeatable `dispatch --attach` or `send --attach`. |
 
@@ -102,7 +103,7 @@ repos = ["lobstah", "lavish"]
 | Key | Default | Meaning |
 |---|---|---|
 | `pollSecs` | `45` | Poll cadence. Outbound only — no webhooks, ever. |
-| `notifyCommand` | — | Pickup's own hook, fired on tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`, and `LOBSTAH_REASON` — why pickup reported a verb other than the dispatch's own (`no-pr`, `no-changes`), empty otherwise. |
+| `notifyCommand` | — | Pickup's own hook, fired on tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`. |
 
 ### Token sources (both trackers)
 

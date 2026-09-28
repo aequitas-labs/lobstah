@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { claudeCliArgs, claudeSdkOptions, startClaudeCli } from '../src/claude.js';
+import { claudeCliArgs, claudeSdkOptions, pumpClaudeMessage, startClaudeCli } from '../src/claude.js';
 import { codexExecArgs, startCodexCli } from '../src/codex.js';
 import type { AdapterStartOpts } from '../src/types.js';
 
@@ -57,6 +57,19 @@ describe('configured effort reaches Claude', () => {
   it('unset stays unset on both paths, leaving the model default', () => {
     expect(claudeSdkOptions(opts())).not.toHaveProperty('effort');
     expect(claudeCliArgs(opts())).not.toContain('--effort');
+  });
+});
+
+describe('background work reaches the runner', () => {
+  it('counts live background tasks, leaving out ambient watchers', () => {
+    const seen: Array<{ type: string; data?: Record<string, unknown> }> = [];
+    pumpClaudeMessage(
+      { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'push' }, { task_id: 'mon', ambient: true }] },
+      (e) => seen.push(e),
+      () => {},
+    );
+    pumpClaudeMessage({ type: 'system', subtype: 'background_tasks_changed', tasks: [] }, (e) => seen.push(e), () => {});
+    expect(seen.map((e) => [e.type, e.data?.live])).toEqual([['background', 1], ['background', 0]]);
   });
 });
 
