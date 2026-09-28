@@ -28,7 +28,9 @@ export interface RepoConfig {
 }
 
 export interface LimitsConfig {
+  /** Maximum daemon-spawned work runners; trap catches use their own sessions. */
   maxConcurrent: number;
+  /** Maximum daemon-spawned chore runners; trap catches use no slots. */
   choreConcurrent: number;
   wedgeThresholdSecs: number;
   maxRestartAttempts: number;
