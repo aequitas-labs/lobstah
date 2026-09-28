@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, enqueue, ensureLayout, pendingIds, readDescriptor } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, mergeEvidence, pendingIds, readDescriptor } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { PickupState } from '../src/state.js';
 import { dispatchLoop } from '../src/loops/dispatch.js';
@@ -34,13 +34,13 @@ class FakeSource implements Source {
   tracked: TrackedItem[] = [];
   recoverable = new Map<string, string>();
   resets: string[] = [];
-  reports: Array<{ key: string; verb: Verb; uuid: string }> = [];
+  reports: Array<{ key: string; verb: Verb; uuid: string; note?: string }> = [];
   inboundMsgs = new Map<string, string[]>();
 
   async poll() { return this.items; }
   async claim() { return this.claimable; }
   async report(key: string, verb: Verb, ev: Evidence & { uuid: string }) {
-    this.reports.push({ key, verb, uuid: ev.uuid });
+    this.reports.push({ key, verb, uuid: ev.uuid, note: ev.note });
   }
   owns(key: string) { return this.owned(key); }
   async inbound(key: string) {
@@ -132,6 +132,7 @@ describe('report loop', () => {
     claimNext('work');
     appendStatus(uuid, 'work', 'working');
     await reportLoop(src, st);
+    mergeEvidence(uuid, 'work', { prUrl: 'https://x/pull/4' });
     appendStatus(uuid, 'work', 'done');
     await reportLoop(src, st);
     await reportLoop(src, st); // no change → no extra report
@@ -149,6 +150,7 @@ describe('report loop', () => {
     const seen: Array<{ verb: string; note?: string }> = [];
     appendStatus(uuid, 'work', 'working');
     await reportLoop(src, st, () => {}, (n) => seen.push({ verb: n.verb, note: n.note }));
+    mergeEvidence(uuid, 'work', { prUrl: 'https://x/pull/9' });
     appendStatus(uuid, 'work', 'done', 'shipped it');
     await reportLoop(src, st, () => {}, (n) => seen.push({ verb: n.verb, note: n.note }));
     await reportLoop(src, st, () => {}, (n) => seen.push({ verb: n.verb, note: n.note }));
@@ -207,6 +209,56 @@ describe('report loop', () => {
     };
     await expect(reportLoop(src, st)).rejects.toThrow('fake:gone: Entity not found: Issue');
     expect(st.get('fake:ok')!.lastReported).toBe('working');
+  });
+});
+
+describe('done without a PR', () => {
+  async function ended(key: string, kind: 'issue' | 'review', ev: Parameters<typeof mergeEvidence>[2]) {
+    const src = new FakeSource();
+    src.items = [item(key, kind)];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get(key)!.uuid;
+    claimNext('work');
+    mergeEvidence(uuid, 'work', ev);
+    appendStatus(uuid, 'work', 'done');
+    return { src, st, uuid };
+  }
+
+  it('asks a human when an issue ends done with commits but no PR', async () => {
+    // The push ran into the Bash timeout, went to the background, and died
+    // with the session; the run still ended done.
+    const { src, st } = await ended('linear:DEMO-56', 'issue', {
+      branch: 'bas-1056-photo-skip', commits: ['ffc32fa9 feat(chat): auto-send'],
+    });
+    await reportLoop(src, st);
+    expect(src.reports).toHaveLength(1);
+    expect(src.reports[0]).toMatchObject({ verb: 'needs-decision' });
+    expect(src.reports[0].note).toContain('1 commit(s) on `bas-1056-photo-skip` but no PR');
+    await dispatchLoop(src, st);
+    expect(pendingIds('work')).toHaveLength(0); // held for a human, not retried
+  });
+
+  it('asks a human when an issue ends done with nothing at all', async () => {
+    const { src, st } = await ended('linear:DEMO-38', 'issue', { commits: [] });
+    await reportLoop(src, st);
+    expect(src.reports.map((r) => r.verb)).toEqual(['needs-decision']);
+    expect(src.reports[0].note).toContain('no commits and no PR');
+  });
+
+  it('reports done once the PR is attached', async () => {
+    const { src, st, uuid } = await ended('linear:DEMO-57', 'issue', { commits: ['abc feat'] });
+    await reportLoop(src, st);
+    await reportLoop(src, st); // no duplicate while unchanged
+    mergeEvidence(uuid, 'work', { prUrl: 'https://x/pull/57' });
+    await reportLoop(src, st);
+    expect(src.reports.map((r) => r.verb)).toEqual(['needs-decision', 'done']);
+  });
+
+  it('lets a review round end done without a new PR', async () => {
+    const { src, st } = await ended('fake:pr7@rv1', 'review', { commits: ['abc address review'] });
+    await reportLoop(src, st);
+    expect(src.reports.map((r) => r.verb)).toEqual(['done']);
   });
 });
 

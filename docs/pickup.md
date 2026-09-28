@@ -164,6 +164,13 @@ verb with no mapping is a config error at startup, not a silent drop.
 | `done` | attach PR link, move to In Review | comment with PR link |
 | `failed` | comment with evidence, back to Todo | comment with evidence |
 
+An issue dispatch that ends `done` with no PR attached is reported as
+`needs-decision` instead, with a note naming its commits and branch. The brief
+asks for a PR, so a run without one did not finish — most often a push that
+died in the background when the session ended. It stays in the claimed state
+for a human, and reports `done` if the PR is attached later. Review rounds push
+to an existing PR and are exempt.
+
 ### Inbox bridging
 
 `inbound()` turns new human comments on a claimed item into
@@ -311,7 +318,8 @@ restarts: one initial attempt plus `[limits].maxRestartAttempts` retries
 (default two). Legacy entries count as one attempt. At the cap, the issue stays
 in the start state for human attention; polling does not claim it again.
 Successful dispatches and review-round keys remain deduplicated. A `done`
-report alone is not a failure verdict, regardless of commit count.
+report is never a failure verdict: an issue that ends done without a PR is
+held for a human as `needs-decision`, not released for retry.
 
 **Residual, by honesty:** same-machine reconciliation cannot detect
 whole-machine death — the reconciler dies with the laptop. The stale
