@@ -20,6 +20,7 @@ import {
   runWatchCheck,
   setWatchCursor,
   watchDue,
+  watchFailureLogLine,
 } from '@lobstah/core';
 import { readSessionClaim, readTrap } from '@lobstah/core';
 import type { Descriptor, Lane, Watch, WatchEvent } from '@lobstah/core';
@@ -175,7 +176,7 @@ export async function watchLoop(
   for (const w of listWatches()) {
     if (watchDue(w, defaultEverySecs)) {
       const { watch, fresh } = runWatchCheck(w);
-      if (watch.lastError) log(`watch ${w.key}: check failed — ${watch.lastError}`);
+      if (watch.lastError) log(watchFailureLogLine(watch));
       notifyMan(watch, fresh, notify);
     }
   }

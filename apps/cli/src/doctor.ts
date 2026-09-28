@@ -2,8 +2,19 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'smol-toml';
-import { configPath, executorPath, loadConfig, lobstahHome, lobstahVersion, onPath, packagePresent } from '@lobstah/core';
-import { loadPickupConfig } from '@lobstah/pick';
+import {
+  classifyGhError,
+  configPath,
+  executorPath,
+  firstMeaningfulLine,
+  loadConfig,
+  lobstahHome,
+  lobstahVersion,
+  onPath,
+  packagePresent,
+} from '@lobstah/core';
+import type { RepoConfig } from '@lobstah/core';
+import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
@@ -62,6 +73,87 @@ export function pluginRows(cliVersion: string, opts: { env?: NodeJS.ProcessEnv; 
     );
   }
   return rows;
+}
+
+/** Runs `gh api <path>` (a GET) and returns the parsed body or gh's first error line. */
+export type GhApi = (apiPath: string) => { ok: true; out: string } | { ok: false; err: string };
+
+export const ghApi: GhApi = (apiPath) => {
+  const res = spawnSync('gh', ['api', '--method', 'GET', apiPath], { encoding: 'utf8', timeout: 30_000 });
+  if (res.error) return { ok: false, err: `gh: ${res.error.message}` };
+  if (res.status !== 0) return { ok: false, err: firstMeaningfulLine(res.stderr, res.stdout) ?? `gh exited ${res.status}` };
+  return { ok: true, out: res.stdout };
+};
+
+/**
+ * The `github` rows: which identity gh runs as, then one read-only probe per
+ * configured GitHub origin — can it read pull requests, contents, and check
+ * results? Every call is a GET. See docs/github.md for the permissions.
+ */
+export function githubRows(
+  repos: Array<{ key: string; forgeRepo: string; trunk: string }>,
+  api: GhApi = ghApi,
+  hasGh = onPath('gh'),
+): DoctorRow[] {
+  if (!hasGh) return [{ check: 'github', status: 'warn', detail: 'gh not on PATH — PR watches and pickup cannot reach GitHub' }];
+  const rows: DoctorRow[] = [];
+  const user = api('user');
+  if (user.ok) {
+    let login = '?';
+    try { login = (JSON.parse(user.out) as { login?: string }).login ?? '?'; } catch { /* keep ? */ }
+    rows.push({ check: 'github', status: 'ok', detail: `gh runs as user ${login}` });
+  } else {
+    // An App installation token cannot read /user, but can list its repositories.
+    const inst = api('installation/repositories?per_page=1');
+    if (inst.ok) {
+      let n = '?';
+      try { n = String((JSON.parse(inst.out) as { total_count?: number }).total_count ?? '?'); } catch { /* keep ? */ }
+      rows.push({ check: 'github', status: 'ok', detail: `gh runs as a GitHub App installation (${n} repos)` });
+    } else {
+      const cls = classifyGhError(user.err);
+      rows.push({ check: 'github', status: 'fail', detail: `gh identity unknown: ${user.err}${cls.remedy ? ` — ${cls.remedy}` : ''}` });
+      return rows;
+    }
+  }
+  for (const r of repos) {
+    const probes: Array<[keyof typeof PROBE_PERMISSION, string]> = [
+      ['pull requests', `repos/${r.forgeRepo}/pulls?state=all&per_page=1`],
+      ['contents', `repos/${r.forgeRepo}/commits?per_page=1`],
+      ['checks', `repos/${r.forgeRepo}/commits/${encodeURIComponent(r.trunk)}/check-runs?per_page=1`],
+    ];
+    const results = probes.map(([what, p]) => ({ what, res: api(p) }));
+    const denied = results.filter((x) => !x.res.ok);
+    const detail = results.map((x) => `${x.what} ${x.res.ok ? 'readable' : 'NOT readable'}`).join(', ');
+    if (denied.length === 0) {
+      rows.push({ check: `github ${r.key}`, status: 'ok', detail: `${r.forgeRepo}: ${detail}` });
+      continue;
+    }
+    const first = denied[0]!;
+    const err = first.res.ok ? '' : first.res.err;
+    const cls = classifyGhError(err);
+    // A forbidden read names the permission for that probe, not the generic Checks one.
+    const forbidden = cls.kind === 'checks-permission' || cls.kind === 'permission' || /HTTP 403/.test(err);
+    const remedy = forbidden ? `grant the GitHub App \`${PROBE_PERMISSION[first.what]}: read\`; see docs/github.md` : cls.remedy;
+    rows.push({
+      check: `github ${r.key}`,
+      status: 'warn',
+      detail: `${r.forgeRepo}: ${detail} — ${first.what}: ${err}${remedy ? ` — ${remedy}` : ''}`,
+    });
+  }
+  return rows;
+}
+
+const PROBE_PERMISSION = { 'pull requests': 'Pull requests', contents: 'Contents', checks: 'Checks' } as const;
+
+/** Configured repos with a GitHub origin (config's origin, else the checkout's `origin` remote). */
+export function githubRepos(repos: Record<string, RepoConfig>): Array<{ key: string; forgeRepo: string; trunk: string }> {
+  const out: Array<{ key: string; forgeRepo: string; trunk: string }> = [];
+  for (const [key, r] of Object.entries(repos)) {
+    const origin = r.origin ?? (fs.existsSync(r.path) ? git(r.path, 'remote', 'get-url', 'origin').out : '');
+    const forgeRepo = origin ? githubRepoFromOrigin(origin) : undefined;
+    if (forgeRepo) out.push({ key, forgeRepo, trunk: r.trunk });
+  }
+  return out;
 }
 
 export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
@@ -128,6 +220,8 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
       trunk.ok ? `${repo.path} (trunk origin/${repo.trunk})` : `origin/${repo.trunk} not found — check trunk or \`git fetch\``,
     );
   }
+
+  for (const row of githubRows(githubRepos(cfg.repos))) push(row.check, row.status, row.detail);
 
   if (parsed.pickup) {
     try {

@@ -1,5 +1,21 @@
-import { describe, expect, it } from 'vitest';
-import { derivePrEvents, isConflicting, isMergeable, parsePrRef, parseUnresolvedThreads, PR_VIEW_FIELDS, prBadge, prEvidence, prReview } from '../src/pr.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  derivePrEvents,
+  ghPrView,
+  isConflicting,
+  isMergeable,
+  parsePrRef,
+  parseUnresolvedThreads,
+  PR_VIEW_FIELDS,
+  PR_VIEW_FIELDS_NO_CHECKS,
+  prBadge,
+  prEvidence,
+  prReview,
+  prStandingKinds,
+} from '../src/pr.js';
 import type { GhPrView, PrEvidence } from '../src/pr.js';
 
 const ref = parsePrRef('pr:acme/web#26')!;
@@ -213,5 +229,73 @@ describe('review fields (gh pr view reviews + the reviewThreads GraphQL count)',
 
   it('gh pr view requests reviews in the same call', () => {
     expect(PR_VIEW_FIELDS.split(',')).toContain('reviews');
+  });
+});
+
+describe('degraded view: the App may not read check results', () => {
+  let dir: string;
+  let savedPath: string | undefined;
+  const APPROVED_CLEAN = {
+    state: 'OPEN',
+    isDraft: false,
+    headRefOid: SHA,
+    baseRefName: 'main',
+    headRefName: 'feat',
+    mergeStateStatus: 'CLEAN',
+    reviewDecision: 'APPROVED',
+    reviews: [],
+    updatedAt: '2026-09-28T00:00:00Z',
+  };
+  /** A stubbed gh: statusCheckRollup is forbidden (or everything is), the rest answers. */
+  function stubGh(mode: 'checks-forbidden' | 'all-forbidden') {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-ghstub-'));
+    const gh = path.join(dir, 'gh');
+    fs.writeFileSync(
+      gh,
+      `#!/bin/sh
+case "$*" in
+  *"api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'; exit 0 ;;
+esac
+case "$*" in
+  *statusCheckRollup*) echo 'GraphQL: Resource not accessible by integration (repository.pullRequest.commits.nodes.0.commit.statusCheckRollup)' >&2; exit 1 ;;
+esac
+${mode === 'all-forbidden' ? `echo 'GraphQL: Resource not accessible by integration (repository.pullRequest)' >&2; exit 1` : `echo '${JSON.stringify(APPROVED_CLEAN)}'`}
+`,
+    );
+    fs.chmodSync(gh, 0o755);
+    savedPath = process.env.PATH;
+    process.env.PATH = `${dir}:${process.env.PATH}`;
+  }
+  afterEach(() => {
+    process.env.PATH = savedPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('retries without statusCheckRollup, records the PR state, marks checks unknown, and never reports ready', () => {
+    stubGh('checks-forbidden');
+    const view = ghPrView(ref);
+    expect(view.state).toBe('OPEN');
+    expect(view.reviewDecision).toBe('APPROVED');
+    expect(view.mergeStateStatus).toBe('CLEAN');
+    expect(view.statusCheckRollup).toBeUndefined();
+    expect(view.checksError).toMatch(/^Resource not accessible by integration/);
+    const ev = prEvidence(ref, view, '2026-09-28T00:00:00Z');
+    expect(ev.checks.unknown).toBe('no permission');
+    expect(ev.state).toBe('OPEN');
+    expect(ev.reviewDecision).toBe('APPROVED');
+    expect(ev.mergeStateStatus).toBe('CLEAN');
+    // Approved and clean would be ready — but not with unknown checks.
+    expect(prStandingKinds(ev)).not.toContain('pr:ready');
+    expect(prStandingKinds({ ...ev, checks: { ...ev.checks, unknown: undefined } })).toContain('pr:ready');
+    expect(prBadge(ev)).toMatchObject({ text: 'checks unknown', tone: 'warn' });
+  });
+
+  it('a view forbidden even without check results throws, and says so', () => {
+    stubGh('all-forbidden');
+    expect(() => ghPrView(ref)).toThrow(/Resource not accessible by integration .*fails even without check results/);
+  });
+
+  it('the fallback field list is the full list minus statusCheckRollup', () => {
+    expect(PR_VIEW_FIELDS_NO_CHECKS.split(',')).toEqual(PR_VIEW_FIELDS.split(',').filter((f) => f !== 'statusCheckRollup'));
   });
 });

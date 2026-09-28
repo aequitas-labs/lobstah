@@ -41,6 +41,12 @@ rotation just works), or `tokenEnv` (read per call, so a wrapper can refresh
 it). This mirrors OpenClaw's own secret-reference pattern: config carries a
 reference, never the secret.
 
+**GitHub permissions.** A GitHub App behind pickup, the workers, and PR
+watches needs `Checks: read`, `Pull requests: read and write`,
+`Contents: read and write`, `Metadata: read`, and — for GitHub issue
+pickup — `Issues: read and write`. [github.md](github.md) says what each one
+is used for and what fails without it; `lobstah doctor` probes them.
+
 **Notifications are a hook, not a vendor.** `notifyCommand` under `[pickup]`
 is exec'd on every verb transition with `LOBSTAH_KEY`, `LOBSTAH_UUID`,
 `LOBSTAH_VERB`, `LOBSTAH_NOTE`, and `LOBSTAH_PR_URL` in the environment —

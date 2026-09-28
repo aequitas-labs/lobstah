@@ -10,6 +10,7 @@ export * from './config.js';
 export * from './toon.js';
 export * from './version.js';
 export * from './harness.js';
+export * from './gh-errors.js';
 export * from './watch.js';
 export * from './soak.js';
 export * from './notices.js';

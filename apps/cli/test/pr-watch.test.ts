@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, derivePrEvents, enqueue, ensureLayout, listNotices, parsePrRef, readEvidence, readStatusLog, readWatch } from '@lobstah/core';
+import { appendStatus, derivePrEvents, enqueue, ensureLayout, listNotices, parsePrRef, readEvidence, readPr, readStatusLog, readWatch, runWatchCheck } from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
 import { pickupOwnsReviewFeedback, stampPrEvidence, workEvents } from '../src/pr-watch.js';
 
@@ -121,5 +121,70 @@ describe('evidence and routing', () => {
     );
     expect(pickupOwnsReviewFeedback('acme/web')).toBe(true);
     expect(pickupOwnsReviewFeedback('acme/api')).toBe(false);
+  });
+});
+
+describe('a PR watch without permission to read checks (stubbed gh)', () => {
+  const VIEW = {
+    state: 'OPEN',
+    isDraft: false,
+    headRefOid: 'abc1234def',
+    baseRefName: 'main',
+    headRefName: 'feat',
+    mergeStateStatus: 'CLEAN',
+    reviewDecision: 'APPROVED',
+    reviews: [],
+  };
+  function stubGh(mode: 'checks-forbidden' | 'all-forbidden'): NodeJS.ProcessEnv {
+    const bin = path.join(home, 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(
+      path.join(bin, 'gh'),
+      `#!/bin/sh
+case "$*" in *"api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'; exit 0 ;; esac
+case "$*" in *statusCheckRollup*) echo 'GraphQL: Resource not accessible by integration (repository.pullRequest.statusCheckRollup)' >&2; exit 1 ;; esac
+${mode === 'all-forbidden' ? `echo 'GraphQL: Resource not accessible by integration (repository.pullRequest)' >&2; exit 1` : `echo '${JSON.stringify(VIEW)}'`}
+`,
+    );
+    fs.chmodSync(path.join(bin, 'gh'), 0o755);
+    return { ...process.env, LOBSTAH_HOME: home, PATH: `${bin}:${process.env.PATH}` };
+  }
+  const run = (env: NodeJS.ProcessEnv, ...args: string[]) =>
+    spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env, timeout: 10_000 });
+
+  it('check-pr degrades: records the PR state with checks unknown, advances the cursor, and reports the error', () => {
+    const env = stubGh('checks-forbidden');
+    const res = run(env, 'watch', 'check-pr', 'pr:acme/web#12', '--cursor', '0');
+    expect(res.status).toBe(0);
+    const out = JSON.parse(res.stdout) as { cursor: string; error?: string };
+    expect(out.cursor).not.toBe('0');
+    expect(out.error).toMatch(/^Resource not accessible by integration .*checks unknown, PR state recorded/);
+    const rec = readPr('pr:acme/web#12')!;
+    expect(rec.state).toBe('OPEN');
+    expect(rec.reviewDecision).toBe('APPROVED');
+    expect(rec.checks.unknown).toBe('no permission');
+  });
+
+  it("a failing check's reason reaches the watch's error field and tend's watches table", () => {
+    const env = stubGh('all-forbidden');
+    run(env, 'watch', 'add', 'pr:acme/web#12');
+    const saved = process.env.PATH;
+    process.env.PATH = env.PATH;
+    try {
+      const t0 = Date.parse('2026-09-28T00:00:00Z');
+      for (let i = 0; i < 3; i++) runWatchCheck(readWatch('pr:acme/web#12')!, new Date(t0 + i * 3_600_000));
+    } finally {
+      process.env.PATH = saved;
+    }
+    const w = readWatch('pr:acme/web#12')!;
+    expect(w.lastError).toBe('Resource not accessible by integration (repository.pullRequest) (fails even without check results)');
+    expect(w.lastExit).toBe(1);
+    expect(w.failures).toBe(3);
+    expect(w.errorKind).toBe('permission');
+    expect(listNotices(100).filter((n) => n.kind === 'watch-failing')).toHaveLength(1);
+    const tend = run(env, 'man', 'tend');
+    expect(tend.stdout).toContain('pr:acme/web#12');
+    expect(tend.stdout).toContain('Resource not accessible by integration');
+    expect(tend.stdout).toContain('failing since 2026-09-28T00:00:00.000Z');
   });
 });

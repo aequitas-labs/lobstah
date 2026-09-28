@@ -252,7 +252,8 @@ export function prModalView(d: Pick<GlassSnapshot, 'prs' | 'stacks' | 'dispatche
   };
 }
 
-/** What the PRs table says about a watch: a short state, never the cursor. */
-export function watchState(w: { lastCheckedAt?: string } | undefined | null): { text: string; at: string | null } {
-  return w ? { text: 'watching', at: w.lastCheckedAt || null } : { text: 'no watch', at: null };
+/** What the PRs table says about a watch: a short state, never the cursor. A failing watch says so; the modal has the reason. */
+export function watchState(w: { lastCheckedAt?: string; lastError?: string } | undefined | null): { text: string; at: string | null } {
+  if (!w) return { text: 'no watch', at: null };
+  return { text: w.lastError ? 'failing' : 'watching', at: w.lastCheckedAt || null };
 }

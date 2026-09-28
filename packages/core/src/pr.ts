@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { AttentionKind } from './config.js';
+import { firstMeaningfulLine } from './gh-errors.js';
 
 /**
  * The shipped GitHub PR watch: `pr:<owner>/<repo>#<n>`. The check reads one
@@ -34,6 +35,12 @@ export function parsePrRef(s: string): PrRef | undefined {
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
   'state,isDraft,headRefOid,baseRefName,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
+
+/** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
+export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',').filter((f) => f !== 'statusCheckRollup').join(',');
+
+/** GitHub's answer when an App installation (or fine-grained token) lacks a permission. */
+const FORBIDDEN = /resource not accessible by (integration|personal access token)/i;
 
 export interface GhRollupItem {
   __typename?: string;
@@ -75,6 +82,12 @@ export interface GhPrView {
    * carries no unresolvedThreads.
    */
   unresolvedThreads?: number;
+  /**
+   * Set when check results could not be read (the App lacks `Checks: read`)
+   * and the view was fetched without them: gh's reason. The observation then
+   * marks its checks unknown, and the PR is never ready.
+   */
+  checksError?: string;
 }
 
 type Outcome = 'passed' | 'failed' | 'pending';
@@ -123,7 +136,11 @@ export interface PrEvidence {
   /** Current GitHub branch relation; the base may retarget after a lower PR merges. */
   baseRefName?: string;
   headRefName?: string;
-  checks: { total: number; passed: number; failed: number; pending: number };
+  /**
+   * Check counts. `unknown` is set when the check results could not be read
+   * (no permission); the counts are then zero and mean nothing.
+   */
+  checks: { total: number; passed: number; failed: number; pending: number; unknown?: 'no permission' };
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
   observedAt: string;
@@ -146,7 +163,8 @@ export function prStandingKinds(pr: PrEvidence): PrStandingKind[] {
   if (review) out.push('pr:review');
   if (failed > 0) out.push('pr:checks');
   if (isConflicting(pr.mergeStateStatus)) out.push('pr:conflict');
-  if (!pr.draft && !review && isMergeable(pr.mergeStateStatus) && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
+  // Unknown checks (no permission to read them) never stand as ready.
+  if (!pr.checks.unknown && !pr.draft && !review && isMergeable(pr.mergeStateStatus) && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
   return out;
 }
 
@@ -193,7 +211,13 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
     headSha: view.headRefOid,
     ...(view.baseRefName ? { baseRefName: view.baseRefName } : {}),
     ...(view.headRefName ? { headRefName: view.headRefName } : {}),
-    checks: { total: checks.length, passed: count('passed'), failed: count('failed'), pending: count('pending') },
+    checks: {
+      total: checks.length,
+      passed: count('passed'),
+      failed: count('failed'),
+      pending: count('pending'),
+      ...(view.checksError ? { unknown: 'no permission' as const } : {}),
+    },
     review: prReview(view),
     observedAt,
     ...(view.updatedAt ? { updatedAt: view.updatedAt } : {}),
@@ -332,16 +356,35 @@ export function derivePrEvents(
   return { cursor: next, events, done };
 }
 
-/** One `gh pr view`; throws with gh's own stderr so the watch records it as lastError. */
+/**
+ * One `gh pr view`; throws with gh's own first stderr line so the watch
+ * records it as lastError. When the App may not read check results, the
+ * view is fetched again without statusCheckRollup: the PR state is still
+ * recorded, checksError carries the reason, and the checks read unknown.
+ * If the view fails even without check results, the error says so.
+ */
 export function ghPrView(ref: PrRef): GhPrView {
-  const res = spawnSync(
-    'gh',
-    ['pr', 'view', String(ref.number), '--repo', `${ref.owner}/${ref.repo}`, '--json', PR_VIEW_FIELDS],
-    { encoding: 'utf8', timeout: 60_000 },
-  );
+  const view1 = (fields: string) =>
+    spawnSync('gh', ['pr', 'view', String(ref.number), '--repo', `${ref.owner}/${ref.repo}`, '--json', fields], {
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+  const reason = (r: ReturnType<typeof view1>) => firstMeaningfulLine(r.stderr) ?? `gh exited ${r.status}`;
+  let res = view1(PR_VIEW_FIELDS);
   if (res.error) throw new Error(`gh: ${res.error.message}`);
-  if (res.status !== 0) throw new Error(res.stderr.trim() || `gh exited ${res.status}`);
+  let checksError: string | undefined;
+  if (res.status !== 0 && FORBIDDEN.test(res.stderr ?? '')) {
+    checksError = reason(res);
+    const retry = view1(PR_VIEW_FIELDS_NO_CHECKS);
+    if (retry.error) throw new Error(`gh: ${retry.error.message}`);
+    if (retry.status !== 0) {
+      throw new Error(FORBIDDEN.test(retry.stderr ?? '') ? `${reason(retry)} (fails even without check results)` : reason(retry));
+    }
+    res = retry;
+  }
+  if (res.status !== 0) throw new Error(reason(res));
   const view = JSON.parse(res.stdout) as GhPrView;
+  if (checksError) view.checksError = checksError;
   if (view.state === 'OPEN') {
     const threads = ghUnresolvedThreads(ref);
     if (threads !== undefined) view.unresolvedThreads = threads;
@@ -429,6 +472,7 @@ export function prBadge(pr: PrEvidence): PrBadge {
   if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested) return { text: 'changes requested', tone: 'bad', state: 'open' };
   const threads = pr.review?.unresolvedThreads ?? 0;
   if (threads > 0) return { text: `${threads} unresolved`, tone: 'warn', state: 'open' };
+  if (pr.checks.unknown) return { text: 'checks unknown', tone: 'warn', state: 'open' };
   if (pending > 0) return { text: `checks ${passed}/${total}`, tone: 'warn', state: 'open' };
   if (merge === 'BEHIND') return { text: 'behind', tone: 'dim', state: 'open', merge: 'behind' };
   if (pr.reviewDecision === 'REVIEW_REQUIRED') return { text: 'review', tone: 'warn', state: 'open' };

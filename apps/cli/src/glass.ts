@@ -12,6 +12,7 @@ import {
   listNotices,
   listTraps,
   listWatches,
+  watchErrorCell,
   loadConfig,
   lobstahVersion,
   pendingIds,
@@ -227,7 +228,9 @@ export function buildGlassSnapshot(): GlassSnapshot {
       prGate: open?.gate,
     };
   });
-  const watches = listWatches();
+  // The glass shows a failing watch's whole error cell (reason, exit code,
+  // remedy, streak start) wherever it shows lastError — the same text as tend.
+  const watches = listWatches().map((w) => (w.lastError ? { ...w, lastError: watchErrorCell(w) } : w));
   // PR records first (every observation, man-owned or not); evidence for PRs with none yet.
   const { prs, stacks } = deriveGlassPrs(
     dispatches.map((d) => ({ id: d.id, followUp: d.followUp, repoKey: d.repo, pr: d.evidence?.pr, prGate: d.prGate })),

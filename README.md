@@ -75,6 +75,8 @@ setup = ["pnpm install"]     # runs in each fresh worktree
 `notifyCommand` is how the router reaches you: the daemon runs it on
 `needs-decision`, `blocked`, `done`, and `failed`, with no model in the loop.
 Every key, with defaults: [docs/configuration.md](docs/configuration.md).
+The GitHub App permissions lobstah needs (Checks read, Pull requests and
+Contents read and write): [docs/github.md](docs/github.md).
 
 **Run**
 

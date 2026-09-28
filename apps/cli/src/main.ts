@@ -43,6 +43,7 @@ import {
   resolveGrounds,
   takeHelm,
   listWatches,
+  watchErrorCell,
   pendingWatchEvents,
   readWatchEvents,
   releaseHeldWatches,
@@ -1748,7 +1749,7 @@ async function mainCli(): Promise<void> {
         pending: readWatchEvents(w.key).length - w.seen,
         lastChecked: w.lastCheckedAt ?? '-',
         held: w.heldAt ? 'held' : '',
-        error: w.lastError ?? '',
+        error: watchErrorCell(w),
       }));
       console.log(toonTable('watches', rows, ['key', 'owner', 'cursor', 'pending', 'lastChecked', 'held', 'error']));
       break;
