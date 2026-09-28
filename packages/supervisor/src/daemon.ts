@@ -134,17 +134,19 @@ export function spawnRunner(st: ActiveState, opts: { attempts: number; resume?: 
 
 function sessionOf(st: ActiveState): string | undefined {
   try {
-    const ev = JSON.parse(
-      fs.readFileSync(path.join(laneDirs(st.lane).state, `${st.id}.evidence`), 'utf8'),
-    ) as { sessionId?: string };
+    const ev = JSON.parse(fs.readFileSync(path.join(laneDirs(st.lane).state, `${st.id}.evidence`), 'utf8')) as { sessionId?: string };
     return ev.sessionId;
   } catch {
     return undefined;
   }
 }
 
-export function reconcileOne(st: ActiveState, cfg: Config, log: (m: string) => void,
-  spawnHeadless: typeof spawnRunner = spawnRunner): void {
+export function reconcileOne(
+  st: ActiveState,
+  cfg: Config,
+  log: (m: string) => void,
+  spawnHeadless: typeof spawnRunner = spawnRunner,
+): void {
   const hasDescriptor = fs.existsSync(path.join(st.dir, 'descriptor.json'));
   if (!hasDescriptor) {
     // a crashed claim: mkdir happened, rename didn't. Sweep once it is stale.
@@ -303,6 +305,8 @@ export interface DaemonHooks {
   now?: () => number;
   /** Test seam for process spawning; production uses spawnRunner. */
   spawnRunner?: typeof spawnRunner;
+  /** Dispatch-owned PR observer and repairer, provided by the CLI daemon entry. */
+  prWatches?: (now: number, log: (message: string) => void) => void;
 }
 
 /** The retention cull runs at most once per this interval. */
@@ -419,6 +423,7 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   const cfg = loadConfig();
   ensureLayout();
   writeHeartbeat(cfg);
+  hooks.prWatches?.(hooks.now?.() ?? Date.now(), log);
 
   for (const action of sweepGhostTraps(cfg.soak.ttlSecs * 1000, Date.now(), cfg.soak.pausedTtlSecs * 1000)) {
     log(
@@ -442,7 +447,8 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   }
   // Only a headless claim creates a worktree. Trap catches do not spend slots
   // or require space, so avoid a disk hold when no headless slot is open.
-  const hasHeadlessSlot = (lane: Lane) => slotUsage(lane).headless < (lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent);
+  const hasHeadlessSlot = (lane: Lane) =>
+    slotUsage(lane).headless < (lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent);
   const roomy = (['chore', 'work'] as Lane[]).some((lane) => hasHeadlessSlot(lane) && claimable(lane, skipFor(lane)))
     ? spaceGuard(cfg, hooks, log)
     : (liftHold(log, 'free-space hold cleared: no headless slot has claimable work'), true);
@@ -538,11 +544,7 @@ export function watchQueues(onChange: () => void): () => void {
   };
 }
 
-export async function daemon(
-  intervalMs = 5000,
-  log: (m: string) => void = console.log,
-  hooks: DaemonHooks = {},
-): Promise<never> {
+export async function daemon(intervalMs = 5000, log: (m: string) => void = console.log, hooks: DaemonHooks = {}): Promise<never> {
   ensureLayout();
   acquireDaemonLock();
   log(`lobstah daemon: watching ${laneDirs('work').queue} every ${intervalMs}ms`);

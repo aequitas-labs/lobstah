@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { claimNext, enqueue, ensureLayout, laneDirs } from '@lobstah/core';
 import { runDoctor } from '../src/doctor.js';
+import { stampRepairerBeat } from '../src/pr-repair.js';
 
 let home: string;
 beforeEach(() => {
@@ -26,4 +27,11 @@ it('adds slot usage to the existing daemon row without adding a new row', async 
   const rows = await runDoctor();
   expect(rows.filter((r) => r.check === 'daemon')).toHaveLength(1);
   expect(rows.find((r) => r.check === 'daemon')?.detail).toContain('headless: 1 of 2 work, 0 of 1 chore; traps: 1');
+});
+
+it('reports the repairer process and warns when its heartbeat is absent', async () => {
+  expect((await runDoctor()).find((r) => r.check === 'PR repairer')).toMatchObject({ status: 'warn', detail: 'no repairer is running' });
+  stampRepairerBeat();
+  expect((await runDoctor()).find((r) => r.check === 'PR repairer')).toMatchObject({ status: 'ok' });
+  expect((await runDoctor()).find((r) => r.check === 'PR repairer')?.detail).toContain(`daemon pid ${process.pid}`);
 });

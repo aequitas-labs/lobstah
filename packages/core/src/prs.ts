@@ -73,6 +73,34 @@ export function readPrs(): PrRecord[] {
   });
 }
 
+/** One process at a time may plan and claim work for a PR. Observations use the same lock. */
+export function withPrLock<T>(key: string, action: () => T): T {
+  fs.mkdirSync(prsDir(), { recursive: true });
+  const lock = `${prRecordFile(key)}.lock`;
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try {
+      fs.mkdirSync(lock);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      try {
+        // A crashed claimant leaves a directory. Its work is reconsidered on the next tick.
+        if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock);
+      } catch {
+        /* another process removed it first */
+      }
+      if (Date.now() >= deadline) throw new Error(`PR record locked: ${key}`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  try {
+    return action();
+  } finally {
+    fs.rmdirSync(lock);
+  }
+}
+
 /**
  * Write one observation. Fields come from the new observation (an absent
  * optional field keeps the previous value, e.g. a title set elsewhere);
@@ -83,25 +111,27 @@ export function readPrs(): PrRecord[] {
 export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrRecord; after: PrRecord } {
   const ref = parsePrRef(pr.url);
   if (!ref) throw new Error(`not a PR url: ${pr.url}`);
-  const before = readPr(ref.key);
-  const dispatches = [...(before?.dispatches ?? [])];
-  if (dispatchId && !dispatches.includes(dispatchId)) dispatches.push(dispatchId);
-  const merged = { ...(before ?? {}), ...pr, failingChecks: pr.failingChecks } as PrEvidence;
-  const standingSince: PrRecord['standingSince'] = {};
-  for (const kind of prStandingKinds(merged)) {
-    standingSince[kind] = before?.standingSince?.[kind] ?? pr.observedAt;
-  }
-  const after: PrRecord = {
-    ...merged,
-    key: ref.key,
-    repo: `${ref.owner}/${ref.repo}`,
-    dispatches,
-    standingSince,
-    observations: (before?.observations ?? 0) + 1,
-    repair: before?.headSha === pr.headSha ? before?.repair : undefined,
-  };
-  writePr(after);
-  return { before, after };
+  return withPrLock(ref.key, () => {
+    const before = readPr(ref.key);
+    const dispatches = [...(before?.dispatches ?? [])];
+    if (dispatchId && !dispatches.includes(dispatchId)) dispatches.push(dispatchId);
+    const merged = { ...(before ?? {}), ...pr, failingChecks: pr.failingChecks } as PrEvidence;
+    const standingSince: PrRecord['standingSince'] = {};
+    for (const kind of prStandingKinds(merged)) {
+      standingSince[kind] = before?.standingSince?.[kind] ?? pr.observedAt;
+    }
+    const after: PrRecord = {
+      ...merged,
+      key: ref.key,
+      repo: `${ref.owner}/${ref.repo}`,
+      dispatches,
+      standingSince,
+      observations: (before?.observations ?? 0) + 1,
+      repair: before?.headSha === pr.headSha ? before?.repair : undefined,
+    };
+    writePr(after);
+    return { before, after };
+  });
 }
 
 /** Persist a watch repair transition without another forge observation. */

@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import {
   appendWatchEvents,
   enqueue,
@@ -25,10 +24,9 @@ import {
   setWatchCursor,
   watchDue,
   watchFailureLogLine,
-  writePr,
 } from '@lobstah/core';
 import { readSessionClaim, readTrap } from '@lobstah/core';
-import type { Descriptor, Lane, PrRecord, Watch, WatchEvent } from '@lobstah/core';
+import type { Descriptor, Lane, Watch, WatchEvent } from '@lobstah/core';
 import type { ReportNotification } from './report.js';
 
 const DEFAULT_BRIEF = `You are resuming earlier work. The watched source {key} produced new events:
@@ -75,7 +73,13 @@ function isTerminal(id: string): boolean {
  * the latest session in the chain with the buffered events as its brief. One
  * continuation in flight per watch — further events buffer until it finishes.
  */
-function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => void, fixedBrief?: string, targetOverride?: string): string | undefined {
+function spawnContinuation(
+  w: Watch,
+  pending: WatchEvent[],
+  log: (m: string) => void,
+  fixedBrief?: string,
+  targetOverride?: string,
+): string | undefined {
   const owner = w.owner.slice('dispatch:'.length);
   const target = targetOverride ?? (w.lastFollowUpId && !laneOf(w.lastFollowUpId) ? owner : (w.lastFollowUpId ?? owner));
   const targetLane = laneOf(target);
@@ -104,10 +108,7 @@ function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => 
   const trapAddress = claim?.by.startsWith('wt:') ? claim.by : deliveredTo?.startsWith('wt:') ? deliveredTo : undefined;
   const claimant = trapAddress?.slice('wt:'.length);
   const live = claimant !== undefined && readTrap(claimant) !== undefined;
-  enqueue(
-    { id, repo: descriptor.repo, brief, followUp: target, ...(live ? { for: trapAddress } : {}) },
-    'work',
-  );
+  enqueue({ id, repo: descriptor.repo, brief, followUp: target, ...(live ? { for: trapAddress } : {}) }, 'work');
   markFollowUp(w.key, id, readWatchEvents(w.key).length);
   log(
     `watch ${w.key}: ${pending.length} event(s) → continuation ${id} ` +
@@ -124,141 +125,6 @@ function maxForksPerCycle(): number {
   } catch {
     return 3;
   }
-}
-
-type RepairKind = 'conflict' | 'checks' | 'review';
-type PrCommit = { sha?: string; author?: { login?: string } | null; committer?: { login?: string } | null; commit?: { author?: { email?: string }; committer?: { email?: string } } };
-
-/** A known dispatch commit anchors identity; later PR commits must have the same author AND committer. */
-export function branchOwnership(commits: PrCommit[], knownShas: ReadonlySet<string>): { safe: boolean; reason?: string } {
-  let lastKnown = -1;
-  commits.forEach((c, i) => { if (c.sha && [...knownShas].some((sha) => c.sha!.startsWith(sha.split(' ')[0]!))) lastKnown = i; });
-  if (lastKnown < 0) return { safe: false, reason: 'commit ownership unknown: no dispatch commit on the PR branch' };
-  const identity = (c: PrCommit) => [c.author?.login ?? c.commit?.author?.email ?? '', c.committer?.login ?? c.commit?.committer?.email ?? ''];
-  const owner = identity(commits[lastKnown]!);
-  if (owner.some((x) => !x)) return { safe: false, reason: 'commit ownership unknown: dispatch identity missing' };
-  for (const commit of commits.slice(lastKnown + 1)) {
-    const current = identity(commit);
-    if (current.some((x) => !x)) return { safe: false, reason: 'commit ownership unknown: newer commit identity missing' };
-    if (current[0] !== owner[0] || current[1] !== owner[1]) return { safe: false, reason: 'person commits since the last lobstah commit' };
-  }
-  return { safe: true };
-}
-
-function repairOwnership(pr: PrRecord, w: Watch, latest: string): { safe: boolean; reason?: string } {
-  const ids = new Set([...pr.dispatches, w.owner.slice('dispatch:'.length), latest, ...(w.lastFollowUpId ? [w.lastFollowUpId] : [])]);
-  const knownShas = new Set<string>();
-  for (const id of ids) {
-    const lane = laneOf(id);
-    if (lane) for (const sha of readEvidence(id, lane).commits ?? []) knownShas.add(sha);
-  }
-  if ([...knownShas].some((sha) => pr.headSha.startsWith(sha.split(' ')[0]!))) return { safe: true };
-  const ref = /^pr:([^/]+)\/([^#]+)#(\d+)$/.exec(pr.key);
-  if (!ref) return { safe: false, reason: 'commit ownership unknown: invalid PR key' };
-  const result = spawnSync('gh', ['api', `repos/${ref[1]}/${ref[2]}/pulls/${ref[3]}/commits?per_page=100`], { encoding: 'utf8', timeout: 60_000 });
-  if (result.error || result.status !== 0) return { safe: false, reason: 'commit ownership unknown: GitHub commits could not be read' };
-  try {
-    const commits = JSON.parse(result.stdout) as PrCommit[];
-    if (!Array.isArray(commits) || commits.length >= 100 || commits.at(-1)?.sha !== pr.headSha) {
-      return { safe: false, reason: 'commit ownership unknown: incomplete PR commit list' };
-    }
-    return branchOwnership(commits, knownShas);
-  } catch {
-    return { safe: false, reason: 'commit ownership unknown: invalid GitHub commit list' };
-  }
-}
-
-function repairKind(pr: PrRecord): RepairKind | undefined {
-  if (pr.mergeStateStatus === 'DIRTY') return 'conflict';
-  if (pr.checks.failed > 0) return 'checks';
-  if (pr.review?.changesRequested) return 'review';
-  return undefined;
-}
-
-/** Find the newest chain member and any queued/active member, including manual follow-ups. */
-function chainState(owner: string): { latest: string; busy: boolean } {
-  const dirs = laneDirs('work');
-  const found: Array<{ descriptor: Descriptor; bucket: 'queue' | 'active' | 'done' }> = [];
-  for (const bucket of ['queue', 'active', 'done'] as const) {
-    let names: string[];
-    try { names = fs.readdirSync(dirs[bucket]); } catch { continue; }
-    for (const name of names) {
-      const id = bucket === 'queue' ? name.replace(/\.json$/, '') : name;
-      if (bucket === 'queue' && !name.endsWith('.json')) continue;
-      const descriptor = descriptorOf(id, 'work');
-      if (descriptor) found.push({ descriptor, bucket });
-    }
-  }
-  const chain = new Set([owner]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const row of found) if (row.descriptor.followUp && chain.has(row.descriptor.followUp) && !chain.has(row.descriptor.id)) {
-      chain.add(row.descriptor.id);
-      changed = true;
-    }
-  }
-  const members = found.filter((row) => chain.has(row.descriptor.id));
-  const byId = new Map(members.map((row) => [row.descriptor.id, row.descriptor]));
-  const depth = (row: (typeof members)[number]): number => {
-    let n = 0, at = row.descriptor.followUp;
-    const seen = new Set<string>();
-    while (at && byId.has(at) && !seen.has(at)) { seen.add(at); n++; at = byId.get(at)?.followUp; }
-    return n;
-  };
-  const latest = members.sort((a, b) => depth(b) - depth(a) || (b.descriptor.queuedAt ?? '').localeCompare(a.descriptor.queuedAt ?? ''))[0]?.descriptor.id ?? owner;
-  const busy = members.some((row) => row.bucket !== 'done' && !isTerminal(row.descriptor.id));
-  return { latest, busy };
-}
-
-/** The repair prompt uses the PR's actual base branch, including stacked PRs. */
-export function repairBrief(pr: PrRecord, kind: RepairKind): string {
-  const intro = `Repair ${pr.url} on its existing branch ${pr.headRefName ?? '(see PR)'} at ${pr.headSha}. Do not open a new PR.`;
-  const finish = `Run the relevant tests. Push the PR branch and report done with the same PR URL.`;
-  if (kind === 'conflict') return `${intro}\nFetch the PR's base branch ${pr.baseRefName ?? '(read from PR)'}. Bring the PR branch up to date with that base by this repo's convention. Resolve conflicts while keeping both sides' intent. Push with --force-with-lease only if you rebased. ${finish}`;
-  if (kind === 'checks') {
-    const checks = (pr.failingChecks ?? []).map((c) => `- ${c.name}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`).join('\n');
-    return `${intro}\nLatest failing checks:\n${checks || '- Read the failing check from GitHub'}\nRead each check log. Fix a real failure. If it is a flake, rerun it at most once. ${finish}`;
-  }
-  return `${intro}\nRead the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish}`;
-}
-
-/** Schedule at most `cap` PR repairs before generic watch continuations use the rest of the cycle budget. */
-export function deliverPrRepairs(log: (m: string) => void, cap: number): number {
-  const cfg = loadConfig().watch;
-  if (!cfg.autoRepair) return 0;
-  let forks = 0;
-  const limit = Number.isFinite(cfg.maxRepairsPerPr) && cfg.maxRepairsPerPr >= 0 ? Math.floor(cfg.maxRepairsPerPr) : 2;
-  for (const w of listWatches()) {
-    if (!w.key.startsWith('pr:') || !w.owner.startsWith('dispatch:') || w.done || w.heldAt) continue;
-    const pr = readPr(w.key);
-    if (!pr || pr.state !== 'OPEN' || pr.dispatches.length === 0) continue;
-    const kind = repairKind(pr);
-    if (!kind || (kind === 'conflict' && !cfg.conflicts) || (kind === 'checks' && !cfg.checks)) continue;
-    if ((pr.observations ?? 0) <= 1) continue; // first sight is a baseline
-    const previous = pr.repair?.headSha === pr.headSha ? pr.repair : undefined;
-    if (previous?.status === 'repairing' && previous.dispatchId && !isTerminal(previous.dispatchId)) continue;
-    if (previous?.status === 'blocked' || previous?.status === 'gave-up') continue;
-    if (previous?.observationsAtRepair !== undefined && (pr.observations ?? 0) <= previous.observationsAtRepair) continue;
-    const attempts = previous?.attempts ?? 0;
-    if (attempts >= limit) {
-      writePr({ ...pr, repair: { headSha: pr.headSha, kind, attempts, maxAttempts: limit, status: 'gave-up', reason: `repair limit reached (${attempts} of ${limit})` } });
-      continue;
-    }
-    const chain = chainState(w.owner.slice('dispatch:'.length));
-    if (chain.busy) continue; // the chain already has work queued or active
-    const ownership = repairOwnership(pr, w, chain.latest);
-    if (!ownership.safe) {
-      writePr({ ...pr, repair: { headSha: pr.headSha, kind, attempts, maxAttempts: limit, status: 'blocked', reason: ownership.reason } });
-      continue;
-    }
-    if (forks >= cap) continue;
-    const id = spawnContinuation(w, [], log, repairBrief(pr, kind), chain.latest);
-    if (!id) continue;
-    writePr({ ...pr, repair: { headSha: pr.headSha, kind, attempts: attempts + 1, maxAttempts: limit, status: 'repairing', dispatchId: id, observationsAtRepair: pr.observations } });
-    forks++;
-  }
-  return forks;
 }
 
 function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotification) => void): void {
@@ -279,7 +145,8 @@ function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotifica
  * it forks nothing until `lobstah watch release`. A held watch is skipped.
  */
 export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPerCycle()): void {
-  let forks = deliverPrRepairs(log, cap);
+  // The daemon owns PR repair delivery. Pickup only delivers generic watches.
+  let forks = 0;
   const autoRepair = loadConfig().watch.autoRepair;
   const held: string[] = [];
   for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
@@ -320,7 +187,10 @@ export async function watchLoop(
   log: (m: string) => void,
   notify: (n: ReportNotification) => void = () => {},
 ): Promise<void> {
+  const autoRepair = loadConfig().watch.autoRepair;
   for (const w of listWatches()) {
+    // The daemon observes and repairs dispatch-owned PRs when auto-repair is on.
+    if (autoRepair && w.key.startsWith('pr:') && w.owner.startsWith('dispatch:')) continue;
     if (watchDue(w, defaultEverySecs)) {
       const { watch, fresh } = runWatchCheck(w);
       if (watch.lastError) log(watchFailureLogLine(watch));

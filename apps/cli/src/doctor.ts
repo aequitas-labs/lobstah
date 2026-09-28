@@ -26,6 +26,7 @@ import { planPressureCull } from './cull.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
+import { liveRepairer } from './pr-repair.js';
 
 export interface DoctorRow {
   check: string;
@@ -68,7 +69,11 @@ export function pluginRows(cliVersion: string, opts: { env?: NodeJS.ProcessEnv; 
       continue;
     }
     if (devCli) {
-      rows.push({ check, status: 'skip', detail: `v${p.version} installed; this CLI is a dev build (v${cliVersion}) — nothing to compare` });
+      rows.push({
+        check,
+        status: 'skip',
+        detail: `v${p.version} installed; this CLI is a dev build (v${cliVersion}) — nothing to compare`,
+      });
       continue;
     }
     const drift = pluginDrift(p.version, cliVersion);
@@ -113,14 +118,22 @@ export function githubRows(
   const user = api('user');
   if (user.ok) {
     let login = '?';
-    try { login = (JSON.parse(user.out) as { login?: string }).login ?? '?'; } catch { /* keep ? */ }
+    try {
+      login = (JSON.parse(user.out) as { login?: string }).login ?? '?';
+    } catch {
+      /* keep ? */
+    }
     rows.push({ check: 'github', status: 'ok', detail: `gh runs as user ${login}` });
   } else {
     // An App installation token cannot read /user, but can list its repositories.
     const inst = api('installation/repositories?per_page=1');
     if (inst.ok) {
       let n = '?';
-      try { n = String((JSON.parse(inst.out) as { total_count?: number }).total_count ?? '?'); } catch { /* keep ? */ }
+      try {
+        n = String((JSON.parse(inst.out) as { total_count?: number }).total_count ?? '?');
+      } catch {
+        /* keep ? */
+      }
       rows.push({ check: 'github', status: 'ok', detail: `gh runs as a GitHub App installation (${n} repos)` });
     } else {
       const cls = classifyGhError(user.err);
@@ -194,7 +207,9 @@ export function diskRow(cfg: Config, freeBytes: FreeBytesReader = statfsFreeByte
   parts.push(`releaseOnMerge ${cfg.limits.releaseOnMerge ? 'on' : 'off'}`);
   const kept = readKeptWorktrees();
   if (kept.length > 0) {
-    parts.push(`kept: unpushed work (${kept.length} worktree(s) of merged PRs: ${kept.map((k) => `${k.id.slice(0, 8)} ${k.reason.replace(/^unpushed work: /, '')}`).join(', ')})`);
+    parts.push(
+      `kept: unpushed work (${kept.length} worktree(s) of merged PRs: ${kept.map((k) => `${k.id.slice(0, 8)} ${k.reason.replace(/^unpushed work: /, '')}`).join(', ')})`,
+    );
   }
   const hold = readHold();
   if (hold) parts.push(`dispatches held since ${hold.since}`);
@@ -227,7 +242,11 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
     const port = glassPort();
     const info = await probeGlass(port);
     const installed = process.platform === 'win32' ? false : fs.existsSync(serviceFile('glass'));
-    push('glass', info ? 'ok' : 'warn', `${installed ? 'service installed' : 'service not installed'}; ${info ? `${glassUrl(port)} answering (v${info.version})` : `${glassUrl(port)} not answering (CLI v${lobstahVersion()})`}`);
+    push(
+      'glass',
+      info ? 'ok' : 'warn',
+      `${installed ? 'service installed' : 'service not installed'}; ${info ? `${glassUrl(port)} answering (v${info.version})` : `${glassUrl(port)} not answering (CLI v${lobstahVersion()})`}`,
+    );
   } catch (err) {
     push('glass', 'warn', err instanceof Error ? err.message : String(err));
   }
@@ -272,10 +291,7 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   if (parsed.pickup) {
     try {
       const pk = loadPickupConfig();
-      const sources = [
-        ...pk.github.map((g) => `gh:${g.repo}→${g.key}`),
-        ...(pk.linear ? ['linear'] : []),
-      ];
+      const sources = [...pk.github.map((g) => `gh:${g.repo}→${g.key}`), ...(pk.linear ? ['linear'] : [])];
       push('pickup', sources.length > 0 ? 'ok' : 'warn', sources.join(', ') || 'section present but no sources');
     } catch (err) {
       push('pickup', 'fail', err instanceof Error ? err.message : String(err));
@@ -303,6 +319,17 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
       push('daemon', 'warn', `heartbeat unreadable; ${slots}`);
     }
   }
+
+  const repairer = liveRepairer(now);
+  push(
+    'PR repairer',
+    cfg.watch.autoRepair ? (repairer ? 'ok' : 'warn') : 'skip',
+    cfg.watch.autoRepair
+      ? repairer
+        ? `${repairer.process} pid ${repairer.pid}; heartbeat ${Math.round((now - Date.parse(repairer.at)) / 1000)}s ago`
+        : 'no repairer is running'
+      : 'auto-repair is off',
+  );
 
   const disk = diskRow(cfg);
   push(disk.check, disk.status, disk.detail);

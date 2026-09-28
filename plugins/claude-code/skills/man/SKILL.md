@@ -63,7 +63,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 - Before you wait on something external yourself, say what (for ume: push with ume's non-blocking form unless the await runs as a tracked background task).
 - `done` means the brief is fulfilled — report the catch. Never merge.
 - `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
-- Attention kinds (`attentionKinds` in config.toml) decide what walks; a PR a worker already owns stays off.
+- Attention kinds (`attentionKinds` in config.toml) decide what walks; lobstah repairs conflicts and failed checks on its own PRs, and attention means it gave up or cannot act.
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.
 
 ## Getting woken instead of polling
@@ -75,5 +75,6 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   it with `lobstah man report`. `man haul --park` waits in the hook.
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 
-Manual fallbacks: `.lobstah-man` and `man init`; see docs/man.md.
-`lobstah man` prints help; `lobstah doctor` diagnoses setup.
+Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
+without the plugin; see docs/man.md. `lobstah man` prints the full
+manual; `lobstah doctor` diagnoses a broken setup.

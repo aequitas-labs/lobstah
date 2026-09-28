@@ -37,7 +37,9 @@ export const PR_VIEW_FIELDS =
   'state,isDraft,headRefOid,baseRefName,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
 
 /** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
-export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',').filter((f) => f !== 'statusCheckRollup').join(',');
+export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',')
+  .filter((f) => f !== 'statusCheckRollup')
+  .join(',');
 
 /** GitHub's answer when an App installation (or fine-grained token) lacks a permission. */
 const FORBIDDEN = /resource not accessible by (integration|personal access token)/i;
@@ -122,12 +124,23 @@ function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
           ? ''
           : (c.conclusion ?? '')
     ).toUpperCase();
-    const outcome: Outcome = PENDING.has(conclusion) ? 'pending' : PASSED.has(conclusion) ? 'passed' : FAILED.has(conclusion) ? 'failed' : 'unknown';
+    const outcome: Outcome = PENDING.has(conclusion)
+      ? 'pending'
+      : PASSED.has(conclusion)
+        ? 'passed'
+        : FAILED.has(conclusion)
+          ? 'failed'
+          : 'unknown';
     const startedAt = c.startedAt ?? c.createdAt ?? '';
     const at = c.completedAt ?? startedAt;
     const old = latest.get(key);
     if (!old || at > old.at || (at === old.at && (startedAt > old.startedAt || (startedAt === old.startedAt && index > old.index)))) {
-      latest.set(key, { check: { key, name, conclusion: outcome === 'pending' ? '' : conclusion, outcome, detailsUrl: c.detailsUrl ?? c.targetUrl }, at, startedAt, index });
+      latest.set(key, {
+        check: { key, name, conclusion: outcome === 'pending' ? '' : conclusion, outcome, detailsUrl: c.detailsUrl ?? c.targetUrl },
+        at,
+        startedAt,
+        index,
+      });
     }
   }
   return [...latest.values()].map((v) => v.check).sort((a, b) => a.name.localeCompare(b.name));
@@ -145,6 +158,9 @@ export interface PrRepair {
   reason?: string;
   dispatchId?: string;
   observationsAtRepair?: number;
+  /** Atomic claim metadata for one repairer. */
+  startedAt?: string;
+  by?: string;
 }
 
 export interface PrEvidence {
@@ -192,7 +208,16 @@ export function prStandingKinds(pr: PrEvidence): PrStandingKind[] {
   if (failed > 0) out.push('pr:checks');
   if (isConflicting(pr.mergeStateStatus)) out.push('pr:conflict');
   // Unknown checks (no permission to read them) never stand as ready.
-  if (!pr.checks.unknown && !pr.draft && !review && isMergeable(pr.mergeStateStatus) && failed === 0 && pending === 0 && (pr.reviewDecision === 'APPROVED' || total > 0)) out.push('pr:ready');
+  if (
+    !pr.checks.unknown &&
+    !pr.draft &&
+    !review &&
+    isMergeable(pr.mergeStateStatus) &&
+    failed === 0 &&
+    pending === 0 &&
+    (pr.reviewDecision === 'APPROVED' || total > 0)
+  )
+    out.push('pr:ready');
   return out;
 }
 
@@ -246,7 +271,13 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
       pending: count('pending'),
       ...(view.checksError ? { unknown: 'no permission' as const } : count('unknown') > 0 ? { unknown: 'latest run' as const } : {}),
     },
-    ...(count('failed') > 0 ? { failingChecks: checks.filter((c) => c.outcome === 'failed').map((c) => ({ name: c.name, ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}) })) } : {}),
+    ...(count('failed') > 0
+      ? {
+          failingChecks: checks
+            .filter((c) => c.outcome === 'failed')
+            .map((c) => ({ name: c.name, ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}) })),
+        }
+      : {}),
     review: prReview(view),
     observedAt,
     ...(view.updatedAt ? { updatedAt: view.updatedAt } : {}),
@@ -342,7 +373,10 @@ export function derivePrEvents(
     c: Object.fromEntries(checks.map((c) => [c.key, c.conclusion])),
   };
   const next = encodeCursor(now);
-  const epoch = createHash('sha1').update(cursor ?? '0').digest('hex').slice(0, 10);
+  const epoch = createHash('sha1')
+    .update(cursor ?? '0')
+    .digest('hex')
+    .slice(0, 10);
   const sha7 = view.headRefOid.slice(0, 7);
   const base = { pr: ref.key, url: ref.url, headSha: view.headRefOid };
   const events: PrEvent[] = [];
@@ -502,7 +536,8 @@ export function prBadge(pr: PrEvidence): PrBadge {
   if (pr.draft) return { text: 'draft', tone: 'dim', state: 'draft' };
   if (merge === 'DIRTY') return { text: 'conflicts', tone: 'bad', state: 'open', merge: 'conflicts' };
   if (failed > 0) return { text: `checks ${failed}/${total} failed`, tone: 'bad', state: 'open' };
-  if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested) return { text: 'changes requested', tone: 'bad', state: 'open' };
+  if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested)
+    return { text: 'changes requested', tone: 'bad', state: 'open' };
   const threads = pr.review?.unresolvedThreads ?? 0;
   if (threads > 0) return { text: `${threads} unresolved`, tone: 'warn', state: 'open' };
   if (pr.checks.unknown) return { text: 'checks unknown', tone: 'warn', state: 'open' };
