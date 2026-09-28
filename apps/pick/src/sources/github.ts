@@ -61,6 +61,10 @@ export class GithubSource implements Source, MergeSource {
     this.name = `gh:${cfg.repo}`;
   }
 
+  owns(key: string): boolean {
+    return key.startsWith(`${this.name}#`);
+  }
+
   private async api<T>(method: string, url: string, body?: unknown): Promise<T> {
     const res = await fetch(`${API}${url}`, {
       method,

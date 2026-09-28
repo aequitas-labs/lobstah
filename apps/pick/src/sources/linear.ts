@@ -55,6 +55,10 @@ export class LinearSource implements Source {
 
   constructor(private cfg: LinearConfig) {}
 
+  owns(key: string): boolean {
+    return key.startsWith('linear:');
+  }
+
   private async gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
     const res = await fetch(API, {
       method: 'POST',

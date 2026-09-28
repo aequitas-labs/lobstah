@@ -104,7 +104,7 @@ function syncStreams(
   }
 }
 
-async function cycle(
+export async function cycle(
   sources: Source[],
   merges: Array<{ source: MergeSource; policy: MergePolicy }>,
   state: PickupState,
@@ -113,12 +113,18 @@ async function cycle(
   notify: (n: ReportNotification) => void,
 ): Promise<void> {
   for (const source of sources) {
-    try {
-      await dispatchLoop(source, state, log);
-      await reportLoop(source, state, log, notify);
-      await reconcileLoop(source, state, log);
-    } catch (err) {
-      log(`${source.name}: ${err instanceof Error ? err.message : String(err)}`);
+    // A guard per loop: reconcile is the safety net for a report that never
+    // lands, so a throw in one loop must not skip the loops after it.
+    for (const loop of [
+      () => dispatchLoop(source, state, log),
+      () => reportLoop(source, state, log, notify),
+      () => reconcileLoop(source, state, log),
+    ]) {
+      try {
+        await loop();
+      } catch (err) {
+        log(`${source.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
   for (const { source, policy } of merges) {
