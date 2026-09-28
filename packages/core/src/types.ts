@@ -75,6 +75,8 @@ export type EventType =
   | 'session'
   | 'turn-start'
   | 'turn-end'
+  /** Live background work changed: `data.live` counts tasks that are activity. */
+  | 'background'
   | 'tool-start'
   | 'tool-end'
   | 'text'

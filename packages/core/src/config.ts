@@ -28,6 +28,12 @@ export interface LimitsConfig {
   wedgeThresholdSecs: number;
   maxRestartAttempts: number;
   wallClockSecs: number;
+  /**
+   * How long a turn that ends without a report is held open while background
+   * work the worker started is still running. The harness wakes the worker
+   * when that work settles; past this window the worker is asked to report.
+   */
+  backgroundWaitSecs: number;
   choreRetentionDays: number;
   attachmentMaxBytes: number;
 }
@@ -119,6 +125,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   wedgeThresholdSecs: 600,
   maxRestartAttempts: 2,
   wallClockSecs: 3600,
+  backgroundWaitSecs: 1800,
   choreRetentionDays: 7,
   attachmentMaxBytes: 25 * 1024 * 1024,
 };

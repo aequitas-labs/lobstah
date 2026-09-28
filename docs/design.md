@@ -449,8 +449,20 @@ worker's last report on `needs-decision`, `blocked`, or `paused` does not end
 the session: a headless worker waiting on a question stays alive until
 answered, cancelled, or the wall clock — the runner polls the inbox, touches the
 event stream each poll so the wedge detector sees a live wait, delivers the
-answer into the next turn, and stamps `working`. Only a turn ending on `working`
-(or no report) with an empty inbox ends the session and is stamped `done`.
+answer into the next turn, and stamps `working`. A turn ending on `done` or
+`failed` ends the session.
+
+**Only the worker's report finishes a dispatch.** A turn can end with no report
+while the worker is still mid-task: it started a push behind a slow pre-push gate
+and ended the turn to be woken when it lands, which is how the harness asks a
+model to wait. Ending the session there kills the push. So a quiet turn is held
+open while the harness reports live background work (ambient watchers excluded),
+up to `[limits].backgroundWaitSecs`, with the same heartbeats as a question wait;
+the harness wakes the worker when the work settles. With nothing live, or once
+the window passes, the worker is asked once to report. Silence after that is
+`failed`, as is a run that stops on its own without a report. Stamping `done` on
+silence turned a question never asked, two in-flight pushes, and a conclusion
+nobody saw into finished work.
 
 **The session's own harness resumes it.** A session only resumes under the
 harness that wrote it: a Codex thread id handed to Claude Code is "No

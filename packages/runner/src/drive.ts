@@ -26,6 +26,28 @@ export interface DriveOpts {
   pollMs?: number;
   /** True once the run is being torn down externally (wall clock). */
   stopped?: () => boolean;
+  /**
+   * How long a turn that ends without a report is held open while background
+   * work is live (`[limits].backgroundWaitSecs`, default 30 minutes).
+   */
+  backgroundWaitMs?: number;
+  /** Once background work settles, how long to wait for the harness to wake the worker. */
+  settleGraceMs?: number;
+}
+
+/**
+ * What a worker hears when a turn ends without a report. Only the worker's own
+ * report finishes a dispatch: a quiet turn has meant a question never asked, a
+ * push still running when the session was ended, and a conclusion no one saw.
+ */
+export function unreportedNudge(id: string): string {
+  return (
+    `Your turn ended without a status report, so this dispatch is not finished. ` +
+    `If the work is complete, run \`lobstah report ${id} done "<what you did>"\`, adding \`--pr <url>\` if you opened a PR. ` +
+    `If no change was needed, report \`done\` with a note saying why. ` +
+    `If a human has to answer a question, or you are blocked, report \`needs-decision\` or \`blocked\` with it. ` +
+    `If you are waiting on something, run it in the background: you are woken when it finishes.`
+  );
 }
 
 export interface DriveResult {
@@ -50,11 +72,20 @@ function deliver(run: AdapterRun, id: string, lane: Lane): number {
 /**
  * Pump the adapter's events into the dispatch's stream and decide, at every
  * turn end, whether the run continues: queued operator messages go into the
- * next turn; a worker waiting on a question is held open until answered;
- * otherwise input ends and the harness finishes.
+ * next turn; a worker waiting on a question is held open until answered; a
+ * worker that reported done or failed is finished. A turn that ends with no
+ * report is not finished: it is held open while its background work runs, then
+ * the worker is asked once to report, and silence after that fails the run.
  */
 export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResult> {
-  const { id, lane, pollMs = 3000, stopped = () => false } = opts;
+  const {
+    id,
+    lane,
+    pollMs = 3000,
+    stopped = () => false,
+    backgroundWaitMs = 30 * 60_000,
+    settleGraceMs = 120_000,
+  } = opts;
   let cancelled = false;
   let activity = 0;
   // A harness that exits on its own (crash, external kill) ends any wait.
@@ -86,8 +117,64 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     }
   };
 
+  let liveBackground = 0;
+  let nudged = false;
+  let hold: { heartbeat: ReturnType<typeof setInterval>; expiry: ReturnType<typeof setTimeout> } | undefined;
+  const runnerEvent = (data: Record<string, unknown>) =>
+    appendEvent(id, lane, { at: new Date().toISOString(), type: 'runner', data });
+
+  const releaseHold = () => {
+    if (!hold) return;
+    clearInterval(hold.heartbeat);
+    clearTimeout(hold.expiry);
+    hold = undefined;
+  };
+
+  /** A turn ended with no report and nothing to wait on: ask once, then fail. */
+  const unreported = () => {
+    if (!nudged) {
+      nudged = true;
+      runnerEvent({ nudged: 'unreported' });
+      run.send(unreportedNudge(id));
+      return;
+    }
+    appendStatus(id, lane, 'failed', 'ended without reporting a result, after being asked to');
+    run.end();
+  };
+
+  /**
+   * Hold a quiet turn open while background work runs: the harness wakes the
+   * worker when it settles. Heartbeats keep the wedge detector off it; the
+   * window bounds work that never settles, such as a dev server.
+   */
+  const holdOpen = (ms: number) => {
+    releaseHold();
+    const heartbeat = setInterval(() => {
+      if (cancelRequested(id, lane)) {
+        releaseHold();
+        cancel();
+        return;
+      }
+      touchEvents(id, lane);
+    }, pollMs);
+    const expiry = setTimeout(() => {
+      releaseHold();
+      runnerEvent({ backgroundWait: 'expired', live: liveBackground });
+      unreported();
+    }, ms);
+    hold = { heartbeat, expiry };
+  };
+
   for await (const ev of run.events) {
     appendEvent(id, lane, ev);
+    if (ev.type === 'background') {
+      liveBackground = Number(ev.data?.live ?? 0);
+      // The work settled: the harness should wake the worker now, so stop
+      // waiting out the whole window for it.
+      if (hold && liveBackground === 0) holdOpen(settleGraceMs);
+      continue;
+    }
+    releaseHold(); // any other event means the worker is awake
     if (ev.type === 'tool-start' || ev.type === 'text') activity++;
     if (ev.type === 'session' && ev.data?.sessionId) {
       mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId) });
@@ -107,11 +194,30 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
       await awaitAnswer(lastVerb);
       continue;
     }
-    // `done`/`failed`: the worker is finished. `working` (or no report) with
-    // an empty inbox is the "brief fulfilled but forgot to report" case — end
-    // the session and let settle() stamp done.
-    run.end();
+    // `done`/`failed`: the worker said it is finished.
+    if (lastVerb !== undefined && TERMINAL_VERBS.includes(lastVerb)) {
+      run.end();
+      continue;
+    }
+    // A turn the harness ended in error (a refused resume, the turn limit)
+    // cannot take another turn, so asking it to report is pointless: end it
+    // and let the runner's error handling and settle() say why.
+    const subtype = ev.data?.subtype;
+    if (subtype !== undefined && subtype !== 'success') {
+      run.end();
+      continue;
+    }
+    // No report. The worker may be waiting on background work it started —
+    // a push behind a slow pre-push gate — and the harness wakes it when that
+    // settles; ending the session here would kill the work.
+    if (liveBackground > 0) {
+      runnerEvent({ holding: 'background', live: liveBackground, forSecs: Math.round(backgroundWaitMs / 1000) });
+      holdOpen(backgroundWaitMs);
+      continue;
+    }
+    unreported();
   }
+  releaseHold();
   return { cancelled, activity };
 }
 
@@ -127,5 +233,7 @@ export function settle(id: string, lane: Lane, r: SettleInput): void {
   if (r.cancelled) appendStatus(id, lane, 'failed', 'cancelled by operator');
   else if (r.wallClockHit) appendStatus(id, lane, 'failed', 'wall-clock limit exceeded');
   else if (r.error) appendStatus(id, lane, 'failed', r.error.slice(0, 500));
-  else if (!lastVerb || !TERMINAL_VERBS.includes(lastVerb)) appendStatus(id, lane, 'done');
+  // Only the worker's own report is `done`. A run that stopped without one —
+  // a harness that exited on its own, a turn limit — did not say it finished.
+  else if (!lastVerb || !TERMINAL_VERBS.includes(lastVerb)) appendStatus(id, lane, 'failed', 'stopped without reporting a result');
 }

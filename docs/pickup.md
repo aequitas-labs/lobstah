@@ -43,11 +43,8 @@ reference, never the secret.
 
 **Notifications are a hook, not a vendor.** `notifyCommand` under `[pickup]`
 is exec'd on every verb transition with `LOBSTAH_KEY`, `LOBSTAH_UUID`,
-`LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`, and `LOBSTAH_REASON` in the
-environment — fire-and-forget, never blocking the loop. `LOBSTAH_REASON` says
-why pickup reported a verb other than the dispatch's own — `no-pr` or
-`no-changes` for an issue that ended done without a PR — so a hook routes on
-the fact rather than parsing the note. Point it at whatever the host
+`LOBSTAH_VERB`, `LOBSTAH_NOTE`, and `LOBSTAH_PR_URL` in the environment —
+fire-and-forget, never blocking the loop. Point it at whatever the host
 already has (a Slack helper, `openclaw message send`); lobstah stays free of
 messaging vendors.
 
@@ -166,13 +163,6 @@ verb with no mapping is a config error at startup, not a silent drop.
 | `paused` | comment | comment |
 | `done` | attach PR link, move to In Review | comment with PR link |
 | `failed` | comment with evidence, back to Todo | comment with evidence |
-
-An issue dispatch that ends `done` with no PR attached is reported as
-`needs-decision` instead, with a note naming its commits and branch. The brief
-asks for a PR, so a run without one did not finish — most often a push that
-died in the background when the session ended. It stays in the claimed state
-for a human, and reports `done` if the PR is attached later. Review rounds push
-to an existing PR and are exempt.
 
 ### Inbox bridging
 
@@ -321,8 +311,7 @@ restarts: one initial attempt plus `[limits].maxRestartAttempts` retries
 (default two). Legacy entries count as one attempt. At the cap, the issue stays
 in the start state for human attention; polling does not claim it again.
 Successful dispatches and review-round keys remain deduplicated. A `done`
-report is never a failure verdict: an issue that ends done without a PR is
-held for a human as `needs-decision`, not released for retry.
+report alone is not a failure verdict, regardless of commit count.
 
 **Residual, by honesty:** same-machine reconciliation cannot detect
 whole-machine death — the reconciler dies with the laptop. The stale

@@ -35,7 +35,6 @@ function makeNotifier(command: string | undefined, log: (m: string) => void): (n
         LOBSTAH_VERB: n.verb,
         LOBSTAH_NOTE: n.note ?? '',
         LOBSTAH_PR_URL: n.prUrl ?? '',
-        LOBSTAH_REASON: n.reason ?? '',
       },
       stdio: 'ignore',
       detached: true,
