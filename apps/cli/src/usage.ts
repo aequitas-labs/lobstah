@@ -63,7 +63,16 @@ export const COMMANDS: Record<string, CommandSpec> = {
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' } }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
-  report: { flags: { '--pr': { value: '<url>' }, '--no-watch': {} }, positionals: '<uuid> <verb> [note...]' },
+  report: {
+    flags: {
+      '--pr': { value: '<url>' },
+      '--no-watch': {},
+      '--waiting-on': { value: 'review|pr|deploy|person|external' },
+      '--link': { value: '<url>' },
+      '--until': { value: '<iso|30m|4h|2d>' },
+    },
+    positionals: '<uuid> <verb> [note...]',
+  },
   watch: {
     subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'release'],
     flags: {
@@ -79,6 +88,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<key>]',
   },
   soak: {
+    subverbs: ['beat'],
     flags: {
       '--session': { value: '<id>' },
       '--one': {},
@@ -164,9 +174,10 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `The validated status write path: working | needs-decision | blocked |
-paused | done | failed. --pr goes anywhere; after \`--\` every word is note.
-\`done --pr <github PR url>\` also registers the PR's pr: watch, owned by this
-dispatch (idempotent; --no-watch opts out).`,
+paused | done | failed. After \`--\` every word is note. \`done --pr <PR url>\`
+registers the PR's pr: watch (--no-watch opts out). --waiting-on and --link
+(paused, needs-decision, blocked) say what the worker waits on outside
+lobstah; --until (paused) sets when the pause expires.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
@@ -174,10 +185,10 @@ installs the shipped PR check; with --for, a check that fails after the first
 \`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
   soak: `Volunteer this session as a worker. Identity is the worktree: sign-on
 anchors a trap id (.lobstah-trap) and prints its wt:<trap> address; re-runs
-here need no flags (--session only on first sign-on). Refused from a
-primary checkout. --one signs off after the first completed assignment.
---wait listens in the foreground right now (for sessions without Stop
-hooks): work prints plain, a quiet timeout exits 3 — run it again.`,
+need no flags. Refused from a primary checkout. --one signs off after the
+first catch. --wait listens in the foreground (no Stop hook): a quiet timeout
+exits 3 — run it again. \`soak beat\` is the post-tool hook: trap liveness
+and catch activity; inert off a trap or with [soak].beat = false; exits 0.`,
   stow: `Sign the worktree's trap off (run it there, or pass --wt/--session); an
 unfinished assignment requeues and unread messages bounce to the helm.
 Stowing another session's trap is steering — with a claimed helm, only the

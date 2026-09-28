@@ -36,6 +36,7 @@ import {
   releaseDispatchLock,
   daemonSkip,
   sweepGhostTraps,
+  pausedWaiting,
 } from '@lobstah/core';
 import type { Config, Descriptor, FreeBytesReader, Lane, RunnerInfo } from '@lobstah/core';
 import { classify, killGroup, pidAlive, processStartTime } from './liveness.js';
@@ -187,6 +188,8 @@ export function reconcileOne(st: ActiveState, cfg: Config, log: (m: string) => v
     hasRunner: st.runner !== undefined,
     alive,
     lastVerb,
+    // Paused on something external (--waiting-on): silence is expected.
+    pausedWaiting: pausedWaiting(statusLog.at(-1)),
     lastEventAt: lastEventAt(st.id, st.lane),
     startedAt: st.runner ? Date.parse(st.runner.startedAt) : undefined,
     now: Date.now(),
@@ -412,11 +415,12 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   ensureLayout();
   writeHeartbeat(cfg);
 
-  for (const action of sweepGhostTraps(cfg.soak.ttlSecs * 1000)) {
+  for (const action of sweepGhostTraps(cfg.soak.ttlSecs * 1000, Date.now(), cfg.soak.pausedTtlSecs * 1000)) {
     log(
       action.defective
         ? `trap wt:${action.trapId} never parked — defective enlistment noticed to the helm`
         : `ghost trap wt:${action.trapId} swept` +
+            (action.pauseExpired ? ' (pause expired)' : '') +
             (action.requeued ? ` — work ${action.requeued} back in the queue` : ''),
     );
   }

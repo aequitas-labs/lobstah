@@ -56,9 +56,9 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 |---|---|---|
 | `maxConcurrent` | `2` | Work-lane dispatches running at once. |
 | `choreConcurrent` | `1` | Chore-lane ceiling (rebases and other machine-originated runs). |
-| `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. |
+| `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. Also the age past which `status`, `ls`, `man tend`, and the glass show a dispatch's activity line as stale. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
-| `wallClockSecs` | `3600` | Hard per-dispatch ceiling, enforced by the runner. |
+| `wallClockSecs` | `3600` | Hard per-dispatch ceiling, enforced by the runner. Time paused with `report paused --waiting-on` does not count. A paused runner still holds its `maxConcurrent` slot while its process is alive. |
 | `backgroundWaitSecs` | `1800` | A turn that ends without a report is held open this long while background work the worker started is still running (a push behind a slow pre-push gate); the harness wakes the worker when it settles. Heartbeats keep the wedge detector off the wait. Keep it below `wallClockSecs`, which still ends the run. |
 | `choreRetentionDays` | `7` | Completed chores age out of `chores/done/`. |
 | `attachmentMaxBytes` | `26214400` (25 MiB) | Maximum size of each file supplied with repeatable `dispatch --attach` or `send --attach`. |
@@ -72,7 +72,9 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | Key | Default | Meaning |
 |---|---|---|
 | `deferSecs` | `90` | A soaking session whose park heartbeat is this fresh holds unaddressed matching bait — the daemon waits instead of spawning. Addressed bait (`--for session:<id>`) waits regardless, until the registration is gone. |
-| `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues its open catch (or finalizes a cancelled one as failed). A fresh `lobstah report` on the catch counts as liveness too. |
+| `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues its open catch (or finalizes a cancelled one as failed). A fresh `lobstah report` on the catch counts as liveness too, and so does a fresh beat. |
+| `beat` | `true` | The post-tool hook (`lobstah soak beat`) refreshes a soaking session's liveness and writes its catch's activity, at most once per 30 seconds per trap. With `false` the hook does nothing, and a trap's liveness comes from its reports and its park only. |
+| `pausedTtlSecs` | `86400` (24 hours) | A trap whose catch last reported `paused` is kept out of the ghost sweep this long after the report. `report paused --until <iso|duration>` sets the expiry instead. After it, the sweep removes the trap as usual, and the notice says the pause expired. |
 
 ## `[helm]` — the orchestrator seat (`lobstah man helm`)
 

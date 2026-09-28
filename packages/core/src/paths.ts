@@ -51,6 +51,10 @@ export function statusPath(id: string, lane: Lane): string {
 export function eventsPath(id: string, lane: Lane): string {
   return path.join(laneDirs(lane).state, `${id}.events`);
 }
+/** The dispatch's current activity record (activity.ts). */
+export function activityPath(id: string, lane: Lane): string {
+  return path.join(laneDirs(lane).state, `${id}.activity`);
+}
 export function evidencePath(id: string, lane: Lane): string {
   return path.join(laneDirs(lane).state, `${id}.evidence`);
 }

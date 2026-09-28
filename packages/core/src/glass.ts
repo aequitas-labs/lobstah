@@ -4,7 +4,9 @@ import type { Notice } from './notices.js';
 import type { PrBadge, PrEvidence } from './pr.js';
 import type { TrapRegistration } from './soak.js';
 import type { Attachment, Evidence, Lane, StatusEntry, Verb } from './types.js';
+import type { WaitingView } from './status.js';
 import type { Watch } from './watch.js';
+import type { ActivityView } from './activity.js';
 
 /**
  * The spyglass's data contract: the JSON `lobstah glass` serves at /data.
@@ -152,6 +154,10 @@ export interface GlassDispatch {
   verb: Verb | 'unknown' | 'queued';
   note?: string;
   verbAt?: string;
+  /** What the worker is doing now, from its event stream or its post-tool hook. Stale past wedgeThresholdSecs. */
+  activity?: ActivityView;
+  /** What a paused (or questioning) worker waits on outside lobstah (`report --waiting-on`). */
+  waiting?: WaitingView;
   claimedBy?: string;
   log: StatusEntry[];
   inbox: string[];

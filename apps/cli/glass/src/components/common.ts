@@ -20,6 +20,30 @@ export const ageText = (iso: string | undefined | null): string => {
 /** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
 export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
 
+/** The activity line under a dispatch's verb and note: what it is doing now, and how long ago. Stale shows dim. */
+export const ActivityLine = (x: Pick<GlassDispatch, 'activity'>) =>
+  x.activity &&
+  html`<div class=${'activity' + (x.activity.stale ? ' stale' : '')} title=${x.activity.stale ? 'no activity past the wedge threshold' : x.activity.kind}>${x.activity.stale ? 'stale · ' : ''}${x.activity.summary} · ${Age(x.activity.at)} ago</div>`;
+
+/** An http(s) link, or undefined: the page never renders any other scheme as a link. */
+const safeHref = (u: string | undefined): string | undefined => (u && /^https?:\/\//i.test(u) ? u : undefined);
+
+/** `paused: waiting on review · 12m · <link>`: what the worker waits on outside lobstah, and for how long. */
+export const WaitingLine = (x: Pick<GlassDispatch, 'waiting' | 'verb'>) => {
+  const w = x.waiting;
+  if (!w) return undefined;
+  const href = safeHref(w.link);
+  let label = href;
+  try {
+    if (href) label = new URL(href).host + new URL(href).pathname.replace(/\/$/, '');
+  } catch {
+    label = href;
+  }
+  return html`<div class="waiting">${x.verb}: waiting on ${w.on} · ${Age(w.since)}${
+    href && [' · ', html`<a href=${href} target="_blank" rel="noopener noreferrer" onClick=${stop}>${label}</a>`]
+  }</div>`;
+};
+
 /** A click handler that opens a modal (and never bubbles to a row that opens another). */
 export const opener = (type: ModalType, key: string) => () => showModal(type, key);
 export const stop = (e: Event) => e.stopPropagation();
@@ -49,7 +73,7 @@ export const logText = (x: Pick<GlassDispatch, 'log'>): string =>
   x.log.map((e) => e.at + '  ' + e.verb + (e.note ? '  ' + e.note : '')).join('\n');
 
 export function detailBody(x: GlassDispatch) {
-  return html`<div class="sec">brief</div><pre>${x.brief}</pre>${
+  return html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}<div class="sec">brief</div><pre>${x.brief}</pre>${
     x.attachments.length > 0 && [html`<div class="sec">attachments (${x.attachments.length})</div>`, attachmentRows(x.attachments)]
   }${
     x.messageAttachments.length > 0 && [

@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { codexInvocation, lobstahHome } from '@lobstah/core';
+import { codexInvocation, lobstahHome, toolTarget } from '@lobstah/core';
 import type { NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
@@ -37,7 +37,7 @@ function isolatedCodexHome(): string {
 interface CodexEvent {
   type?: string;
   thread_id?: string;
-  item?: { type?: string; text?: string };
+  item?: { type?: string; text?: string; command?: unknown; changes?: unknown; server?: unknown; tool?: unknown };
   error?: { message?: string };
 }
 
@@ -57,8 +57,15 @@ export function pumpCodexEvent(
     push({ at, type: 'session', data: { sessionId: ev.thread_id } });
   } else if (ev.type === 'turn.started') {
     push({ at, type: 'turn-start', data: {} });
+  } else if (ev.type === 'item.started' && ev.item?.type === 'reasoning') {
+    push({ at, type: 'thinking', data: {} });
   } else if (ev.type === 'item.started') {
-    push({ at, type: 'tool-start', data: { name: ev.item?.type } });
+    // The primary target only (a command's first word, a changed file's
+    // path, an MCP tool's name): the input itself never enters the stream.
+    const item = ev.item ?? {};
+    const target =
+      toolTarget(item) ?? (typeof item.tool === 'string' ? (typeof item.server === 'string' ? `${item.server}.${item.tool}` : item.tool) : undefined);
+    push({ at, type: 'tool-start', data: { name: item.type, ...(target ? { target } : {}) } });
   } else if (ev.type === 'item.completed') {
     if (ev.item?.type === 'agent_message' && ev.item?.text) {
       push({ at, type: 'text', data: { text: String(ev.item.text).slice(0, 2000) } });

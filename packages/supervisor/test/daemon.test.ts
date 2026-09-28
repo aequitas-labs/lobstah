@@ -139,3 +139,23 @@ describe('reconcileOne — a headless runner waiting on a question is not a wedg
     expect(readStatusLog('wq', 'work').at(-1)?.verb).toBe('needs-decision');
   });
 });
+
+describe('reconcileOne — a runner paused on something external is not a wedge', () => {
+  it('a live runner paused --waiting-on review with a stale stream is left alone', () => {
+    const st = claimed('wp');
+    appendStatus('wp', 'work', 'working');
+    appendStatus('wp', 'work', 'paused', 'in review', undefined, { waitingOn: 'review', link: 'https://ume.test/s/1' });
+    appendEvent('wp', 'work', { at: new Date().toISOString(), type: 'turn-end', data: {} });
+    // No heartbeat at all for an hour: past the wedge threshold.
+    const stale = new Date(Date.now() - 3_600_000);
+    fs.utimesSync(eventsPath('wp', 'work'), stale, stale);
+    // Our own pid stands in for the live runner; a wedge verdict would SIGKILL it.
+    st.runner = { pid: process.pid, startedAt: stale.toISOString(), attempts: 1 };
+    const logs: string[] = [];
+
+    reconcileOne(st, cfg, (m) => logs.push(m));
+
+    expect(logs).toEqual([]);
+    expect(readStatusLog('wp', 'work').at(-1)?.verb).toBe('paused');
+  });
+});

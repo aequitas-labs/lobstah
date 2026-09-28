@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { onPath } from '@lobstah/core';
+import { onPath, toolTarget } from '@lobstah/core';
 import type { NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
@@ -26,7 +26,7 @@ interface StreamMessage {
   subtype?: string;
   session_id?: string;
   total_cost_usd?: number;
-  message?: { content?: Array<{ type?: string; name?: string; text?: string }> };
+  message?: { content?: Array<{ type?: string; name?: string; text?: string; input?: unknown }> };
   /** `background_tasks_changed`: every live background task, replacing the last set. */
   tasks?: Array<{ task_id?: string; ambient?: boolean }>;
 }
@@ -54,7 +54,12 @@ export function pumpClaudeMessage(
   } else if (msg.type === 'assistant') {
     for (const block of msg.message?.content ?? []) {
       if (block.type === 'tool_use') {
-        push({ at, type: 'tool-start', data: { name: block.name } });
+        // The primary target only (a path, a command's first word, a URL's
+        // host): the input itself never enters the stream.
+        const target = toolTarget(block.input);
+        push({ at, type: 'tool-start', data: { name: block.name, ...(target ? { target } : {}) } });
+      } else if (block.type === 'thinking' || block.type === 'redacted_thinking') {
+        push({ at, type: 'thinking', data: {} });
       } else if (block.type === 'text' && block.text) {
         push({ at, type: 'text', data: { text: String(block.text).slice(0, 2000) } });
       }

@@ -2,6 +2,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   activeIds,
+  waitingText,
+  waitingView,
+  activityLine,
+  activityView,
+  readActivity,
   answeredAt,
   displayState,
   executorPath,
@@ -32,7 +37,7 @@ import {
   holdReason,
   readHold,
 } from '@lobstah/core';
-import type { DiskHold, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
+import type { ActivityView, WaitingView, DiskHold, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
@@ -64,6 +69,10 @@ export interface TendDispatch {
   worktreeOf?: string;
   /** Why releaseOnMerge kept its worktree after the PR merged. */
   worktreeKept?: string;
+  /** What the worker is doing now (active dispatches only). Stale past wedgeThresholdSecs. */
+  activity?: ActivityView;
+  /** What a paused (or questioning) worker waits on outside lobstah (`report --waiting-on`). */
+  waiting?: WaitingView;
 }
 
 export interface TendStory {
@@ -418,7 +427,7 @@ export function heldReason(id: string, lane: Lane, hold = readHold()): string | 
   return d && d.for === undefined ? holdReason(hold) : undefined;
 }
 
-function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']): TendDispatch {
+function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket'], staleSecs: number): TendDispatch {
   const log = readStatusLog(id, lane);
   const last = log.at(-1);
   // A trap's claim with no report yet is `working`, dated from the claim.
@@ -444,6 +453,8 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     prUrl: evidence.prUrl,
     pr: evidence.pr,
     ...(bucket === 'queued' ? {} : worktreeView(id, lane)),
+    ...(bucket === 'active' ? { activity: activityView(readActivity(id, lane), staleSecs) } : {}),
+    ...(bucket === 'active' && waitingView(last) ? { waiting: waitingView(last) } : {}),
   };
 }
 
@@ -601,13 +612,14 @@ export function buildTendReport(now = Date.now()): TendReport {
     return recent?.disposition;
   };
 
+  const staleSecs = cfg.limits.wedgeThresholdSecs;
   const storied = new Set<string>();
   const stories: TendStory[] = [];
   for (const [key, entry] of Object.entries(readPickupMap())) {
     const bucket = bucketOf(entry.uuid);
     if (!bucket) continue; // culled or never landed locally
-    const chain = [describeDispatch(entry.uuid, 'work', bucket)];
-    for (const f of followUps(entry.uuid)) chain.push(describeDispatch(f.id, 'work', f.bucket));
+    const chain = [describeDispatch(entry.uuid, 'work', bucket, staleSecs)];
+    for (const f of followUps(entry.uuid)) chain.push(describeDispatch(f.id, 'work', f.bucket, staleSecs));
     for (const d of chain) storied.add(d.id);
     // A story ages out once every dispatch in it is terminal and stale — the
     // mapping is forever, the tend view is about now and the last day.
@@ -627,13 +639,13 @@ export function buildTendReport(now = Date.now()): TendReport {
   });
   for (const id of [...active, ...queued]) {
     if (storied.has(id)) continue;
-    stories.push(direct(describeDispatch(id, 'work', bucketOf(id) ?? 'active')));
+    stories.push(direct(describeDispatch(id, 'work', bucketOf(id) ?? 'active', staleSecs)));
   }
   // A direct dispatch that landed a PR in the last day stays a story: its PR
   // is still moving (CI, review, merge) after the dispatch reported done.
   for (const id of doneIds('work')) {
     if (storied.has(id)) continue;
-    const d = describeDispatch(id, 'work', 'done');
+    const d = describeDispatch(id, 'work', 'done', staleSecs);
     if (d.prUrl && d.at !== undefined && now - Date.parse(d.at) < DAY_MS) stories.push(direct(d));
   }
 
@@ -761,14 +773,20 @@ export function renderTend(r: TendReport): string {
               (d) =>
                 `${d.id.slice(0, 8)}:${d.state}` +
                 (d.state === 'held' && d.note ? ` (${d.note.replace(/^held: /, '')})` : '') +
-                (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : ''),
+                (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
+                (d.waiting ? ` (${waitingText(d.waiting)})` : ''),
             )
             .join(' → '),
           pr: s.prState ? `${s.prState} ${s.prUrl ?? ''}`.trim() : (s.prUrl ?? ''),
           gate: s.gate ?? '',
           watch: s.watch ?? '',
+          // Under the verb and note: what the live dispatch is doing now.
+          activity: s.dispatches
+            .filter((d) => d.activity)
+            .map((d) => (s.dispatches.length > 1 ? `${d.id.slice(0, 8)}: ` : '') + activityLine(d.activity!))
+            .join('; '),
         })),
-        ['key', 'dispatches', 'pr', 'gate', 'watch'],
+        ['key', 'dispatches', 'pr', 'gate', 'watch', 'activity'],
       ),
     );
   }

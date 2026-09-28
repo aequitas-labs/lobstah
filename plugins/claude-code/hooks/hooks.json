@@ -1,5 +1,5 @@
 {
-  "description": "At turn end, block with standing attention or the command to arm a watcher while work is in flight; allow the stop when a watcher is live. man haul --park waits in the hook. Inert unless the helm or trap is signed on or the directory opts in. SessionStart announces the session id; SessionEnd stows a soaking session.",
+  "description": "At turn end, block with standing attention or the command to arm a watcher while work is in flight; allow the stop when a watcher is live. man haul --park waits in the hook. Inert unless the helm or trap is signed on or the directory opts in. SessionStart announces the session id; SessionEnd stows a soaking session. PostToolUse runs `lobstah soak beat`: a soaking session's liveness and activity, throttled, inert elsewhere.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,17 @@
             "type": "command",
             "command": "lobstah man brief",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lobstah soak beat",
+            "timeout": 5
           }
         ]
       }

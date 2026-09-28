@@ -7,6 +7,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   acknowledge,
+  isVerb,
+  waitingFields,
+  waitingText,
+  waitingView,
+  activityLine,
+  activityView,
+  DEFAULT_LIMITS,
+  readActivity,
   attachmentBlock,
   AttachmentError,
   addWatch,
@@ -111,6 +119,7 @@ import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from '.
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
 import { addPrWatch, autoRegisterPrWatch, backfillPrWatches, observeDispatchPrWatches, pollSecs, runPrCheck, syncPrWatches } from './pr-watch.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
+import { runBeat } from './beat.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
@@ -479,6 +488,7 @@ function inheritedAttachments(id: string | undefined): Descriptor['attachments']
 
 function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<string, unknown>> {
   const dir = laneDirs(lane)[bucket];
+  const staleSecs = wedgeSecs();
   const entries = fs
     .readdirSync(dir)
     .filter((f) => !f.startsWith('.'))
@@ -491,16 +501,41 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
     const log = readStatusLog(id, lane);
     const claimedAt = bucket === 'active' ? readSessionClaim(id, lane)?.at : undefined;
     const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued, claimedAt });
+    const activity = bucket === 'active' ? activityView(readActivity(id, lane), staleSecs) : undefined;
+    const waiting = bucket === 'active' ? waitingView(log.at(-1)) : undefined;
     const updated =
       (queued && state === 'queued' ? queuedAt(id, lane) : undefined) ??
       (log.length === 0 ? claimedAt : undefined) ??
       new Date(m).toISOString();
-    return { id, lane, bucket, state, updated };
+    return {
+      id,
+      lane,
+      bucket,
+      state,
+      updated,
+      waiting: waiting ? waitingText(waiting) : '',
+      activity: activity ? activityLine(activity) : '',
+    };
   });
+}
+
+/** Activity past the wedge threshold shows stale. */
+function wedgeSecs(): number {
+  try {
+    return loadConfig().limits.wedgeThresholdSecs;
+  } catch {
+    return DEFAULT_LIMITS.wedgeThresholdSecs;
+  }
 }
 
 async function mainCli(): Promise<void> {
   let [cmd, ...args] = process.argv.slice(2);
+  // The post-tool hook: before any layout or parsing work, and it never
+  // fails. Errors go to the log; the exit code is always 0.
+  if (cmd === 'soak' && args[0] === 'beat') {
+    runBeat();
+    return;
+  }
   const ALIASES: Record<string, string> = { set: 'dispatch', buoys: 'ls', buoy: 'status' };
   cmd = cmd !== undefined ? (ALIASES[cmd] ?? cmd) : cmd;
   // Lobstah man (orchestrator) commands live under their own namespace;
@@ -633,7 +668,7 @@ async function mainCli(): Promise<void> {
       const rows = lanes.flatMap((lane) =>
         (['queue', 'active', 'done'] as const).flatMap((b) => rowsFor(lane, b)),
       );
-      console.log(toonTable('dispatches', rows, ['id', 'lane', 'bucket', 'state', 'updated']));
+      console.log(toonTable('dispatches', rows, ['id', 'lane', 'bucket', 'state', 'updated', 'waiting', 'activity']));
       console.log(toonHelp(['lobstah status <id>', 'lobstah man tend   (verdict + stories + gates)']));
       break;
     }
@@ -641,7 +676,7 @@ async function mainCli(): Promise<void> {
       const id = pos[0];
       if (!id) {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
-        console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated']));
+        console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'waiting', 'activity']));
         break;
       }
       const lane = findLane(id);
@@ -649,7 +684,24 @@ async function mainCli(): Promise<void> {
       const since = queuedAt(id, lane);
       const claimedAt = readSessionClaim(id, lane)?.at;
       const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined, claimedAt });
-      console.log(toonKV({ id, lane, state, ...(state === 'queued' ? { queued: since } : {}), lastNote: log.at(-1)?.note, entries: log.length, attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0 }));
+      // Activity only while the dispatch is live: a finished one did its last thing.
+      const live = fs.existsSync(path.join(laneDirs(lane).active, id));
+      const activity = live ? activityView(readActivity(id, lane), wedgeSecs()) : undefined;
+      const waitingNow = live ? waitingView(log.at(-1)) : undefined;
+      console.log(
+        toonKV({
+          id,
+          lane,
+          state,
+          ...(state === 'queued' ? { queued: since } : {}),
+          lastNote: log.at(-1)?.note,
+          ...(waitingNow ? { [log.at(-1)!.verb]: waitingText(waitingNow) } : {}),
+          ...(waitingNow?.until ? { until: waitingNow.until } : {}),
+          ...(activity ? { activity: activityLine(activity) } : {}),
+          entries: log.length,
+          attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0,
+        }),
+      );
       console.log(
         toonHelp(
           state === 'needs-decision' || state === 'blocked'
@@ -750,13 +802,31 @@ async function mainCli(): Promise<void> {
       const note = rest.join(' ') || undefined;
       const prUrl = opt('--pr');
       const noWatch = has('--no-watch');
-      const entry = appendStatus(id, lane, verb, note);
+      const waiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
+      const saysWaiting = waiting.waitingOn !== undefined || waiting.link !== undefined || waiting.until !== undefined;
+      if (saysWaiting && isVerb(verb)) {
+        try {
+          waitingFields(verb, waiting);
+        } catch (err) {
+          throw new UsageError(`${err instanceof Error ? err.message : String(err)}\n\n${usageFor('report')!}`);
+        }
+      }
+      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined);
       if (prUrl) mergeEvidence(id, lane, { prUrl });
       // A done PR stays observed: CI, review, and merge flow back through its
       // pr: watch instead of lobstah going blind at "PR open".
       const prWatch = verb === 'done' && prUrl && !noWatch ? autoRegisterPrWatch(id, prUrl) : undefined;
       console.log(
-        toonKV({ id, verb: entry.verb, at: entry.at, ...(prUrl ? { prUrl } : {}), ...(prWatch ? { watch: prWatch.key } : {}) }),
+        toonKV({
+          id,
+          verb: entry.verb,
+          at: entry.at,
+          ...(entry.waitingOn ? { waitingOn: entry.waitingOn } : {}),
+          ...(entry.link ? { link: entry.link } : {}),
+          ...(entry.until ? { until: entry.until } : {}),
+          ...(prUrl ? { prUrl } : {}),
+          ...(prWatch ? { watch: prWatch.key } : {}),
+        }),
       );
       // Self-instructive next step, right where the reporter reads it: an
       // instruction that lives only in session memory decays over a long
