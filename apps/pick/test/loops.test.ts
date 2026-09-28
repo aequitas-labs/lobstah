@@ -123,6 +123,57 @@ describe('dispatch loop', () => {
 });
 
 describe('report loop', () => {
+  it('keeps one editable live comment, throttles routine changes, and announces terminal verbs', async () => {
+    const src = new FakeSource() as FakeSource & {
+      createLiveComment: (key: string, body: string) => Promise<string>;
+      editLiveComment: (key: string, id: string, body: string) => Promise<void>;
+    };
+    const created: string[] = [];
+    const edits: string[] = [];
+    src.createLiveComment = async (_key, body) => { created.push(body); return 'comment-1'; };
+    src.editLiveComment = async (_key, _id, body) => { edits.push(body); };
+    src.items = [item('fake:live')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get('fake:live')!.uuid;
+    claimNext('work');
+    appendStatus(uuid, 'work', 'working');
+    await reportLoop(src, st);
+    await reportLoop(src, st);
+    expect(created).toHaveLength(1);
+    expect(edits).toHaveLength(0);
+    expect(src.reports).toHaveLength(0);
+    expect(created[0]).toContain('elapsed:');
+    expect(created[0]).toContain('updated ');
+
+    appendStatus(uuid, 'work', 'done');
+    await reportLoop(src, st);
+    expect(created).toHaveLength(1);
+    expect(edits).toHaveLength(1);
+    expect(edits[0]).toContain('**done**');
+    expect(src.reports.map((r) => r.verb)).toEqual(['done']);
+    await reportLoop(src, st);
+    expect(edits).toHaveLength(1);
+  });
+
+  it('falls back to transition comments when live editing fails', async () => {
+    const src = new FakeSource() as FakeSource & {
+      createLiveComment: (key: string, body: string) => Promise<string>;
+      editLiveComment: (key: string, id: string, body: string) => Promise<void>;
+    };
+    src.createLiveComment = async () => { throw new Error('no edit permission'); };
+    src.editLiveComment = async () => {};
+    src.items = [item('fake:fallback')];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const uuid = st.get('fake:fallback')!.uuid;
+    claimNext('work');
+    appendStatus(uuid, 'work', 'working');
+    await reportLoop(src, st);
+    expect(st.get('fake:fallback')!.liveCommentUnavailable).toBe(true);
+    expect(src.reports.map((r) => r.verb)).toEqual(['working']);
+  });
+
   it('replays verb changes and advances lastReported only on success', async () => {
     const src = new FakeSource();
     src.items = [item('fake:4')];

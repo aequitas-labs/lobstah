@@ -168,6 +168,13 @@ export interface GlassDispatch {
   worktreeOf?: string;
   /** Why releaseOnMerge kept its worktree after the PR merged. */
   worktreeKept?: string;
+  elapsed?: string;
+  attempt?: number;
+  branch?: string;
+  lastCommit?: string;
+  aheadTrunk?: string;
+  draftPr?: string;
+  updated?: string;
   transcript?: string;
   /** Newest first: queue/active/done mtime. */
   sort: number;

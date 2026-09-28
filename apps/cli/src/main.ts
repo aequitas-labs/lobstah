@@ -107,6 +107,7 @@ import { buildBriefContext } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { runCull } from './cull.js';
 import { worktreeView } from './worktree-view.js';
+import { livenessView } from './liveness-view.js';
 import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
@@ -739,6 +740,7 @@ async function mainCli(): Promise<void> {
           ...(waitingNow ? { [log.at(-1)!.verb]: waitingText(waitingNow) } : {}),
           ...(waitingNow?.until ? { until: waitingNow.until } : {}),
           ...(activity ? { activity: activityLine(activity) } : {}),
+          ...livenessView(id, lane),
           entries: log.length,
           attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0,
         }),

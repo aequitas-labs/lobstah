@@ -42,6 +42,7 @@ import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { worktreeView } from './worktree-view.js';
+import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import type { GlassStack } from './glass-prs.js';
 
@@ -69,6 +70,13 @@ export interface TendDispatch {
   worktreeOf?: string;
   /** Why releaseOnMerge kept its worktree after the PR merged. */
   worktreeKept?: string;
+  elapsed?: string;
+  attempt?: number;
+  branch?: string;
+  lastCommit?: string;
+  aheadTrunk?: string;
+  draftPr?: string;
+  updated?: string;
   /** What the worker is doing now (active dispatches only). Stale past wedgeThresholdSecs. */
   activity?: ActivityView;
   /** What a paused (or questioning) worker waits on outside lobstah (`report --waiting-on`). */
@@ -453,6 +461,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     prUrl: evidence.prUrl,
     pr: evidence.pr,
     ...(bucket === 'queued' ? {} : worktreeView(id, lane)),
+    ...(bucket === 'queued' ? {} : livenessView(id, lane)),
     ...(bucket === 'active' ? { activity: activityView(readActivity(id, lane), staleSecs) } : {}),
     ...(bucket === 'active' && waitingView(last) ? { waiting: waitingView(last) } : {}),
   };
@@ -785,8 +794,12 @@ export function renderTend(r: TendReport): string {
             .filter((d) => d.activity)
             .map((d) => (s.dispatches.length > 1 ? `${d.id.slice(0, 8)}: ` : '') + activityLine(d.activity!))
             .join('; '),
+          progress: s.dispatches
+            .map((d) => [d.elapsed, d.attempt ? `attempt ${d.attempt}` : '', d.branch, d.lastCommit, d.aheadTrunk, d.draftPr]
+              .filter(Boolean).join(' · '))
+            .filter(Boolean).join('; '),
         })),
-        ['key', 'dispatches', 'pr', 'gate', 'watch', 'activity'],
+        ['key', 'dispatches', 'pr', 'gate', 'watch', 'activity', 'progress'],
       ),
     );
   }

@@ -116,6 +116,7 @@ repos = ["lobstah", "lavish"]
 | Key | Default | Meaning |
 |---|---|---|
 | `pollSecs` | `45` | Poll cadence. Outbound only — no webhooks, ever. |
+| `liveComment` | `true` | Keep one editable, marked status comment per dispatch. Routine edits are capped at once per minute; human-needed and terminal transitions still post a fresh notification comment. Falls back to transition comments if editing is unavailable. |
 | `notifyCommand` | — | Pickup's own hook, fired on tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`. |
 
 ### Token sources (both trackers)
