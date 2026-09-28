@@ -23,7 +23,8 @@ export function buildPrompt(brief: string, opts: { id: string; nudge?: string; a
       `New operator messages may arrive between your turns as user messages; treat them as instructions from the dispatcher.`,
     `Before you wait on something outside lobstah (a human review, a PR review, a deploy), report ` +
       `\`lobstah report ${opts.id} paused "<note>" --waiting-on ${WAITING_ON.join('|')} --link <url>\`. Report \`working\` when you resume.`,
-    `Commit your work with clear messages. Do not merge anything.`,
+    `Commit your work with clear messages. The runner pushes committed HEAD early and opens or adopts one draft PR for the branch when available; do not create a duplicate PR. ` +
+      `When finished, mark the draft ready for review if appropriate, then report done with its URL. Do not merge anything.`,
     `--- BRIEF ---`,
     brief,
   ];

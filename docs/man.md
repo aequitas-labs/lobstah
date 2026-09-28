@@ -17,6 +17,11 @@ you ⇄ liaison (interactive Claude Code / Codex session)
 The liaison never watches the workers — the daemon does that with no model in
 the loop. The liaison reads `lobstah status` when you ask, which is the
 token-efficiency point: supervision is a filesystem read, not a conversation.
+Headless runners preserve committed work on `origin` as HEAD moves and open
+one draft PR when `gh` is available. On a nonterminal stop they checkpoint
+eligible worktree files and push once more; the final status note names the
+saved branch, commit, and PR, so the man can send a continuation without
+losing work.
 
 **The helm is harness-agnostic: drive the fleet from whichever session you
 prefer.** The contract is the CLI, not the harness — a Claude Code session,

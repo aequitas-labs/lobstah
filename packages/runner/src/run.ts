@@ -30,6 +30,7 @@ import { buildPrompt } from './contract.js';
 import { drive, settle } from './drive.js';
 import { planStart } from './plan.js';
 import { startWallClock } from './wallclock.js';
+import { keepRemote } from './remote.js';
 import type { StartPlan } from './plan.js';
 
 /** Seams for tests: the harness, and the git work around it. */
@@ -157,6 +158,18 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   const worktreeOf = (JSON.parse(fs.readFileSync(wtFile, 'utf8')) as { of?: string }).of;
   mergeEvidence(id, lane, { worktree: cwd, worktreeOf });
 
+  const remotePolicy = {
+    pushEarly: repo.pushEarly ?? cfg.limits.pushEarly,
+    draftPr: repo.draftPr ?? cfg.limits.draftPr,
+    checkpointOnStop: repo.checkpointOnStop ?? cfg.limits.checkpointOnStop,
+  };
+  const remoteEnabled = Object.values(remotePolicy).some(Boolean);
+  const remote = keepRemote({
+    id, lane, cwd, trunk: repo.trunk,
+    title: descriptor.brief.split('\n')[0]?.trim() || `Lobstah dispatch ${short(id)}`,
+    policy: remotePolicy,
+  });
+
   const envNudge = process.env.LOBSTAH_NUDGE;
   // A swap's handoff (arriving as the nudge) already carries the progress note.
   const planNudge = plan.cold && !envNudge ? coldNote(plan.cold, cwd, repo.trunk) : undefined;
@@ -256,6 +269,14 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   wallTimer?.stop();
   const { cancelled, result } = outcome;
+
+  const terminal = ['done', 'failed'].includes(readStatusLog(id, lane).at(-1)?.verb ?? '');
+  if (remoteEnabled && (wallClockHit || cancelled || !!result.error || !terminal)) {
+    const saved = await remote.saveBeforeStop();
+    status('working', `work saved before stop: ${saved}`);
+  } else {
+    await remote.stop();
+  }
 
   try {
     const gitEvidence = await deps.collectEvidence(repo, cwd);
