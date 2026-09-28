@@ -140,6 +140,7 @@ function draftPr(over: Partial<PrEvidence> = {}): void {
 const petPayload = () => buildTendReport().attention.filter((a) => !a.acked);
 
 describe('part 2: click-to-ack, display-only', () => {
+  beforeEach(() => fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["question", "pr:draft", "pr:ready"]\n'));
   it('ack hides the item from the pet payload but it stays in --json attention, marked acked', () => {
     draftPr();
     expect(petPayload().map((a) => a.key)).toEqual(['pr:acme/web#9']);

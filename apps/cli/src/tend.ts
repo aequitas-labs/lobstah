@@ -26,6 +26,7 @@ import {
   prStandingKinds,
   queuedDescriptor,
   readEvidence,
+  readPr,
   readPrs,
   readSessionClaim,
   readStatusLog,
@@ -192,6 +193,22 @@ const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
   'pr:ready': (pr) => `#${pr.number} ready to merge`,
 };
 
+/** Keep repairable PR work off the human queue until repair is disabled or gives up. */
+export function humanPrAttention(pr: PrEvidence, kind: TendAttentionKind, cfg: Config, watchAvailable = true): { show: boolean; reason?: string } {
+  if (kind !== 'pr:conflict' && kind !== 'pr:checks' && kind !== 'pr:review') return { show: true };
+  const repairableReview = kind === 'pr:review' && pr.review?.changesRequested === true;
+  if (kind === 'pr:review' && !repairableReview) return { show: true }; // unresolved question for a person
+  const enabled = cfg.watch.autoRepair && (kind !== 'pr:conflict' || cfg.watch.conflicts) && (kind !== 'pr:checks' || cfg.watch.checks);
+  if (!enabled) return { show: true, reason: 'auto-repair is off' };
+  const owned = 'dispatches' in pr && Array.isArray(pr.dispatches) && pr.dispatches.length > 0;
+  if (!owned) return { show: true, reason: 'not owned by lobstah' };
+  const matchingRepair = pr.repair?.headSha === pr.headSha && pr.repair.kind === (kind === 'pr:review' ? 'review' : kind === 'pr:conflict' ? 'conflict' : 'checks');
+  if (matchingRepair && (pr.repair!.status === 'blocked' || pr.repair!.status === 'gave-up')) return { show: true, reason: pr.repair!.reason };
+  if (!watchAvailable) return { show: true, reason: 'no active PR watch' };
+  if (!matchingRepair) return { show: false };
+  return { show: false };
+}
+
 /** A dispatch and every follow-up descending from it (work lane), with buckets. */
 function chainOf(root: string): ChainMember[] {
   const out: ChainMember[] = [];
@@ -256,7 +273,7 @@ function observedPrs(records = readPrs(), legacy = evidencePrs()): Array<{ id: s
   return out;
 }
 
-function prAttention(now: number, observed = observedPrs()): TendAttention[] {
+function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()): TendAttention[] {
   const reviewRounds = new Set(
     Object.values(readPickupMap())
       .filter((e) => e.kind === 'review')
@@ -267,9 +284,12 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
     const kinds = prKinds(pr).filter((kind) => kind !== 'pr:ready' || !readyBlockedByStack(pr, observed.map((x) => x.pr)));
     if (kinds.length === 0) continue;
     const ref = parsePrRef(pr.url);
-    const watchFollowUp = ref ? readWatch(ref.key)?.lastFollowUpId : undefined;
+    const prWatch = ref ? readWatch(ref.key) : undefined;
+    const watchFollowUp = prWatch?.lastFollowUpId;
     const chain = dispatch ? chainOf(id) : [];
     for (const kind of kinds) {
+      const human = humanPrAttention(pr, kind, cfg, !!prWatch && !prWatch.done);
+      if (!human.show) continue;
       if (onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
       // Older dispatch evidence has no record; its observation is the best
       // available approximation until a PR record is written.
@@ -284,7 +304,7 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
         ageSecs: Math.max(0, Math.round((now - Date.parse(standingSince)) / 1000)),
         at: standingSince,
         standingSince,
-        note: PR_KIND_NOTE[kind]!(pr),
+        note: `${PR_KIND_NOTE[kind]!(pr)}${human.reason ? ` — ${human.reason}` : ''}`,
         repo: dispatch ? repoOf(id, lane) : (ref ? `${ref.owner}/${ref.repo}` : undefined),
         prUrl: pr.url,
         number: pr.number,
@@ -462,6 +482,12 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
 
 /** The chain's newest observed PR state as a badge — the one derivation tend, catch, and glass share. */
 function prStateOf(chain: TendDispatch[]): string | undefined {
+  const record = chain.map((d) => parsePrRef(d.prUrl ?? d.pr?.url ?? ''))
+    .filter((ref) => ref !== undefined)
+    .map((ref) => readPr(ref.key))
+    .filter((pr) => pr !== undefined)
+    .sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
+  if (record) return prBadge(record).text;
   const observed = chain
     .map((d) => d.pr)
     .filter((p): p is PrEvidence => p !== undefined)
@@ -673,7 +699,7 @@ export function buildTendReport(now = Date.now()): TendReport {
   let prIndex = 0;
   stories.forEach((s, i) => { if (s.prUrl) stories[i] = prStories[prIndex++]!; });
   const stacks = deriveGlassPrs(legacy.map(({ id, pr }) => ({ id, pr })), [], records).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed));
+  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg));
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);

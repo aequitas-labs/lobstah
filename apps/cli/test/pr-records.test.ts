@@ -66,6 +66,7 @@ describe('PR records (core prs.ts)', () => {
   });
 
   it('keeps attention in standing order when observation times swap, then clears and restarts a kind', () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["pr:ready", "pr:draft", "pr:review"]\n');
     const first = '2026-09-24T10:00:00.000Z';
     const second = '2026-09-24T10:01:00.000Z';
     const third = '2026-09-24T10:02:00.000Z';
@@ -111,6 +112,7 @@ describe('stacks and kinds from records alone (no dispatch evidence)', () => {
   });
 
   it('tend: the stack line, pr:draft for #36, pr:ready only for #26, verdict not needs-attention', () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["pr:ready", "pr:draft"]\n');
     realStack();
     const r = buildTendReport();
     expect(renderTend(r)).toContain('stack #26 → #27 → #29 → #32 → #33: next #26');

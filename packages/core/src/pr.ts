@@ -97,6 +97,7 @@ export interface GhPrView {
 
 type Outcome = 'passed' | 'failed' | 'pending' | 'unknown';
 interface Check {
+  key: string;
   name: string;
   /** Completed conclusion (upper-case), or '' while pending. */
   conclusion: string;
@@ -109,7 +110,7 @@ const PENDING = new Set(['', 'PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WA
 const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR']);
 
 function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
-  const latest = new Map<string, { check: Check; completedAt: string; startedAt: string; index: number }>();
+  const latest = new Map<string, { check: Check; at: string; startedAt: string; index: number }>();
   for (const [index, c] of (rollup ?? []).entries()) {
     const name = c.name ?? c.context ?? '?';
     const key = [name, c.app?.slug ?? c.app?.name ?? '', c.workflowName ?? ''].join('\0');
@@ -122,11 +123,11 @@ function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
           : (c.conclusion ?? '')
     ).toUpperCase();
     const outcome: Outcome = PENDING.has(conclusion) ? 'pending' : PASSED.has(conclusion) ? 'passed' : FAILED.has(conclusion) ? 'failed' : 'unknown';
-    const completedAt = c.completedAt ?? '';
     const startedAt = c.startedAt ?? c.createdAt ?? '';
+    const at = c.completedAt ?? startedAt;
     const old = latest.get(key);
-    if (!old || completedAt > old.completedAt || (completedAt === old.completedAt && (startedAt > old.startedAt || (startedAt === old.startedAt && index > old.index)))) {
-      latest.set(key, { check: { name, conclusion: outcome === 'pending' ? '' : conclusion, outcome, detailsUrl: c.detailsUrl ?? c.targetUrl }, completedAt, startedAt, index });
+    if (!old || at > old.at || (at === old.at && (startedAt > old.startedAt || (startedAt === old.startedAt && index > old.index)))) {
+      latest.set(key, { check: { key, name, conclusion: outcome === 'pending' ? '' : conclusion, outcome, detailsUrl: c.detailsUrl ?? c.targetUrl }, at, startedAt, index });
     }
   }
   return [...latest.values()].map((v) => v.check).sort((a, b) => a.name.localeCompare(b.name));
@@ -191,7 +192,7 @@ export function prStandingKinds(pr: PrEvidence): PrStandingKind[] {
   if (failed > 0) out.push('pr:checks');
   if (isConflicting(pr.mergeStateStatus)) out.push('pr:conflict');
   // Unknown checks (no permission to read them) never stand as ready.
-  if (!pr.checks.unknown && !pr.draft && !review && isMergeable(pr.mergeStateStatus) && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
+  if (!pr.checks.unknown && !pr.draft && !review && isMergeable(pr.mergeStateStatus) && failed === 0 && pending === 0 && (pr.reviewDecision === 'APPROVED' || total > 0)) out.push('pr:ready');
   return out;
 }
 
@@ -338,7 +339,7 @@ export function derivePrEvents(
     d: view.isDraft,
     r: view.reviewDecision ?? '',
     m: view.mergeStateStatus ?? '',
-    c: Object.fromEntries(checks.map((c) => [c.name, c.conclusion])),
+    c: Object.fromEntries(checks.map((c) => [c.key, c.conclusion])),
   };
   const next = encodeCursor(now);
   const epoch = createHash('sha1').update(cursor ?? '0').digest('hex').slice(0, 10);
@@ -356,11 +357,11 @@ export function derivePrEvents(
   // The first observation of an open PR is the check baseline; a terminal PR has nothing to fix.
   for (const c of prev === undefined || done ? [] : checks) {
     if (c.outcome === 'pending' || c.outcome === 'unknown') continue;
-    if (sameHead && prev!.c[c.name] === c.conclusion) continue;
+    if (sameHead && (prev!.c[c.key] ?? prev!.c[c.name]) === c.conclusion) continue;
     const failed = c.outcome === 'failed';
     push(
       'check-completed',
-      `${c.name}:${c.conclusion}`,
+      `${c.key}:${c.conclusion}`,
       `check ${c.name} ${c.conclusion} at ${sha7}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`,
       { name: c.name, conclusion: c.conclusion, detailsUrl: c.detailsUrl },
       !failed,

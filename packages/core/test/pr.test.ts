@@ -184,6 +184,10 @@ describe('latest check run', () => {
     ];
     expect(prEvidence(ref, { ...open, statusCheckRollup: checks }, '2026-09-28T01:00:00Z').checks)
       .toEqual({ total: 2, passed: 1, failed: 1, pending: 0 });
+    const first = derivePrEvents(ref, { ...open, statusCheckRollup: checks }, '0');
+    const flipped = checks.map((check) => check.app.slug === 'other' ? { ...check, conclusion: 'SUCCESS', completedAt: '2026-09-28T00:04:00Z' } : check);
+    expect(derivePrEvents(ref, { ...open, statusCheckRollup: flipped }, first.cursor).events.filter((e) => e.kind === 'check-completed'))
+      .toMatchObject([{ name: 'ci', conclusion: 'SUCCESS' }]);
   });
 
   it('treats cancelled and stale latest runs as unknown, never as failures or ready', () => {
@@ -201,6 +205,16 @@ describe('latest check run', () => {
       expect(isFailingConclusion(conclusion)).toBe(true);
     }
     for (const conclusion of ['SUCCESS', 'NEUTRAL', 'SKIPPED']) expect(isFailingConclusion(conclusion)).toBe(false);
+  });
+
+  it('a newer in-progress run supersedes an older completed run', () => {
+    const view = { ...open, mergeStateStatus: 'CLEAN', statusCheckRollup: [
+      timed('ci', 'SUCCESS', 2),
+      { ...run('ci', null, 'IN_PROGRESS'), startedAt: '2026-09-28T00:03:00Z' },
+    ] };
+    const evidence = prEvidence(ref, view, '2026-09-28T01:00:00Z');
+    expect(evidence.checks).toEqual({ total: 1, passed: 0, failed: 0, pending: 1 });
+    expect(prStandingKinds(evidence)).not.toContain('pr:ready');
   });
 });
 

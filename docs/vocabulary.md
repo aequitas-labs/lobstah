@@ -269,19 +269,22 @@ evidence).
 | ---- | ------- |
 | `pr:` key | `pr:<owner>/<repo>#<n>` — one watch per PR. |
 | cursor | The last observation (head sha, per-check conclusions, review decision, merge state, draft, state), base64url-encoded. An unchanged PR re-emits nothing and returns the same cursor. A new head sha resets check memory. |
-| first observation | Cursor `0`. It is the baseline. An open PR emits no `check-completed` events: a check that already failed shows in the PR record and tend but forks nothing. A merged or closed PR emits nothing, records its state, and the watch retires; the notice is posted only when the PR ended in the last 24 hours. |
+| first observation | Cursor `0`. It is the baseline. An open PR records checks and merge state but starts no repair. A merged or closed PR emits nothing, records its state, and the watch retires; the notice is posted only when the PR ended in the last 24 hours. |
 | `check-completed` | A check reached a conclusion on the current head after the baseline (`name`, `conclusion`, `detailsUrl`). Failing → work; passing → evidence only. Never emitted for a merged or closed PR. |
 | `review-decision` | The review decision changed (`value`). Work, unless `[pickup.github]` covers the repo — then pickup's feedback rule owns it ([pickup.md](pickup.md), "Feedback pickup"). |
-| `merge-state` | `mergeStateStatus` changed (`value`). Evidence only. |
+| `merge-state` | `mergeStateStatus` changed (`value`). The PR record carries conflicts into the repair planner. |
 | `draft` | Draft flipped (`value`). Evidence only. |
 | `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. Emitted only on an open → terminal change, never on the first observation. |
-| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending, unknown? }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. `review.changesRequested` comes from `reviewDecision` or any reviewer's latest decisive review; `unresolvedThreads` from the GraphQL query, omitted for an observation where that query failed. Comment bodies are never stored. The object is merged into the owning dispatch's evidence on every observation. `prBadge` derives the one-word state that tend, `catch`, and the glass show: `merged`, `closed`, `draft`, `conflicts` (`DIRTY`, filled GitHub red, ahead of checks and review), `checks n/m failed`, `changes requested`, `n unresolved`, `checks n/m` (pending), `behind` (`BEHIND`, grey; not an attention kind), `checks unknown` (the watch may not read check results; never ready), `review`, `green` (only for a mergeable merge state), `blocked`, `merge unknown`. |
+| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending, unknown? }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. Check counts use only the latest run per check name and app/workflow. `CANCELLED` and `STALE` latest runs are unknown, not failed. The PR record also stores repair status, attempts, and reason. `prBadge` shows `repairing: conflict (attempt 1 of 2)` while a repair is in flight; tend, `catch`, and the glass share the badge. |
 | checks unknown | Without `Checks: read`, the check re-reads the PR without `statusCheckRollup`: the PR state is recorded, `checks.unknown` is `no permission`, and the check's output carries the permission `error`. `pr:ready` never stands on unknown checks. |
 | PR record | `~/.lobstah/prs/<owner>__<repo>__<n>.json` — the PR's latest observation keyed by the PR, not by a dispatch: the evidence `pr` object plus `key`, `repo` (`<owner>/<repo>`), and `dispatches` (the ids whose watch observed it; empty for a human's or a culled PR). **Owner:** `packages/core/src/prs.ts` (`upsertPr`, `readPrs`); the one writer is the preset's observation path (`observePr`), on every observation, man-owned or dispatch-owned — a dispatch-owned one also stamps that dispatch's evidence, which stays the per-dispatch view. Tend's `pr:*` kinds and `pr:ready` stack suppression, the glass PRs tab and stacks, the merged/closed notice, and PR acks read records first and fall back to dispatch evidence only for a PR with no record yet. `cull` removes records merged or closed longer than its window, never open ones. |
 
-Every event carries `headSha`. A dispatch-owned PR watch emits only work
-events (a failing check; a review decision pickup doesn't own), so the
-`owner` row is unchanged: its events always fork. The rest is evidence.
+Every event carries `headSha`. A dispatch-owned PR watch records work events,
+then the repair planner decides whether to follow up. One repair runs per PR
+at a time. A first observation starts none. Repairs use the newest owning
+dispatch and the PR's observed base branch. The watch checks commit ownership
+before enqueueing. It stops after `[watch].maxRepairsPerPr` attempts per head
+SHA. The rest is evidence.
 Merged and closed reach the helm as a `pr-merged` / `pr-closed` notice,
 posted once by whichever process first records the open → terminal
 transition on the **PR record** — not by event routing. A PR whose first
@@ -289,9 +292,8 @@ record is already terminal gets the notice only when it ended in the last
 24 hours.
 
 One pick watch cycle forks at most `[watch].maxForksPerCycle`
-continuations (default 3). Each watch over the cap is held (`heldAt` on the
-watch): tend and `lobstah watch` list it as `held`, a `watch-held` notice
-names it, and it forks nothing until `lobstah watch release`.
+continuations (default 3). Generic watches over the cap are held (`heldAt`
+on the watch); PR repairs wait for the next cycle.
 
 A man-owned PR watch (no `--for`) delivers as attention only what needs a
 human (`manEvents`, beside `workEvents` in `apps/cli/src/pr-watch.ts`): a
@@ -304,8 +306,8 @@ One carrier per event kind:
 
 | Event | Carrier |
 | ----- | ------- |
-| `check-completed`, failing | dispatch-owned: a continuation (pick); man-owned: a `watch` attention event |
-| `review-decision` | dispatch-owned: a continuation unless pickup owns review feedback; man-owned: a `watch` event only for `CHANGES_REQUESTED` |
+| `check-completed`, failing | dispatch-owned: the PR repair planner; man-owned: a `watch` attention event |
+| `review-decision` | dispatch-owned: the PR repair planner for requested changes; man-owned: a `watch` event only for `CHANGES_REQUESTED` |
 | `check-completed` green, `draft`, `merge-state`, approvals | the PR record (and the owner's evidence) only |
 | `merged`, `closed` | a `pr-merged` / `pr-closed` notice from the record transition only |
 
@@ -383,11 +385,11 @@ never until someone acknowledges it.
 | ---- | ------------ | ----------- |
 | `question` | The dispatch's last status is `needs-decision` or `blocked`. | Any newer status entry. |
 | `landed` | The dispatch is `done` or `failed` after its grounds' reported-through cursor (the grounds listing the repo, else `fleet`; at most 24 h back). Opt-in. | `man report` (or the helm park's digest) advances the cursor. |
-| `pr:draft` | Evidence `pr` is open and draft. | Ready for review, merged, or closed. |
-| `pr:review` | Evidence `pr` is open with `review.unresolvedThreads > 0` or `review.changesRequested`. | Every thread resolved and no changes requested, or merged / closed. |
-| `pr:checks` | Evidence `pr` is open with a failed check on the observed head. | Green on the head, or merged / closed. |
-| `pr:conflict` | Evidence `pr` is open and `mergeStateStatus` is `DIRTY` (GitHub: conflicting with its base). | The merge state leaves `DIRTY` (rebased or merged clean), or merged / closed. |
-| `pr:ready` | Evidence `pr` is open, not draft, no `pr:review` condition holds, `mergeStateStatus` is mergeable (`CLEAN`, `HAS_HOOKS`, or `UNSTABLE` — the last only means non-required checks are red, which `pr:checks` already carries), and it is approved — or every check passed with none pending. `DIRTY`, `BEHIND`, `BLOCKED`, and `UNKNOWN` never yield ready. | Merged or closed (or a review condition arises, or the merge state stops being mergeable). |
+| `pr:draft` | An open PR is a draft, and the user opted into this kind. | Ready for review, merged, or closed. |
+| `pr:review` | An open PR has unresolved review questions, or requested changes that lobstah cannot repair, has exhausted, or is configured not to repair. | Every thread resolved and no changes requested, or merged / closed. |
+| `pr:checks` | An open PR has a failed latest check, and lobstah cannot repair it, has exhausted attempts, or is configured not to repair. | Green on the head, or merged / closed. |
+| `pr:conflict` | An open PR conflicts with its base, and lobstah cannot repair it, has exhausted attempts, or is configured not to repair. | The merge state leaves `DIRTY`, or merged / closed. |
+| `pr:ready` | An open, non-draft PR has no review condition, a mergeable state (`CLEAN`, `HAS_HOOKS`, or `UNSTABLE`), and no failed, pending, or unknown latest checks. It is approved or has at least one check. | Merged or closed, or the ready conditions stop holding. |
 
 `pr:*` kinds read only the `pr:` watch's evidence — never a forge call —
 and carry `prUrl`, `number`, and the fields they derive from. Unconsumed
@@ -395,15 +397,12 @@ man-owned watch events also list, as `watch`: machinery wakes, always on.
 Only `question` and `watch` make the verdict `needs-attention` or arise in
 the digest; the rest are things to look at, not stalls.
 
-**The on-the-hook rule.** A `pr:review` or `pr:checks` item is suppressed
-while a worker owns the problem: a queued or active dispatch in the PR's
-chain (the evidence owner and its `followUp` descendants) that is a pickup
-feedback round — pickup's map records it with kind `review` — or the `pr:`
-watch's fix continuation — the watch records it as `lastFollowUpId`. It
-reappears when that dispatch finishes without clearing the condition.
-`question`, `landed`, `pr:draft`, `pr:conflict`, and `pr:ready` are never
-suppressed — a rebase is the human's or the helm's call, never assumed to be
-the fix continuation's.
+**The on-the-hook rule.** Repairable conflict, check, and requested-review
+conditions on an owned PR stay off attention while lobstah can act. A
+queued or active pickup feedback round or watch continuation also suppresses
+its review or check item. A blocked or exhausted repair raises attention
+with its reason. `pr:draft` is opt-in; an explicit `attentionKinds` list is
+used unchanged.
 
 **Answered questions.** A `question` stands only while no message to the
 dispatch is newer than its latest `needs-decision` / `blocked` entry. A

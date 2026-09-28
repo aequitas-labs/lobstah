@@ -283,7 +283,7 @@ export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPer
   const autoRepair = loadConfig().watch.autoRepair;
   const held: string[] = [];
   for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
-    if (autoRepair && watch.key.startsWith('pr:')) {
+    if (autoRepair && watch.key.startsWith('pr:') && readPr(watch.key)) {
       markWatchSeen(watch.key);
       continue;
     }

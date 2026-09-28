@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, ensureLayout, laneDirs, mergeEvidence, readPr, upsertPr } from '@lobstah/core';
+import { addWatch, appendStatus, enqueue, ensureLayout, laneDirs, mergeEvidence, readPr, upsertPr } from '@lobstah/core';
 import type { Descriptor, PrEvidence } from '@lobstah/core';
 import { branchOwnership, deliverPrRepairs, repairBrief } from '../src/loops/watch.js';
 
@@ -89,6 +89,17 @@ describe('PR watch repairs', () => {
     expect(queued()).toHaveLength(0);
   });
 
+  it('can turn conflict repair off while leaving check repair on', () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nconflicts = false\nchecks = true\n');
+    upsertPr(pr(), OWNER);
+    upsertPr(pr(), OWNER);
+    expect(deliverPrRepairs(() => {}, 3)).toBe(0);
+    const failed = pr({ mergeStateStatus: 'BLOCKED', checks: { total: 1, passed: 0, failed: 1, pending: 0 }, failingChecks: [{ name: 'test' }] });
+    upsertPr(failed, OWNER);
+    expect(deliverPrRepairs(() => {}, 3)).toBe(1);
+    expect(readPr(KEY)?.repair?.kind).toBe('checks');
+  });
+
   it('does not repair when a person committed after the last dispatch commit', () => {
     const known = { sha: SHA, author: { login: 'lobstah' }, committer: { login: 'lobstah' } };
     const person = { sha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', author: { login: 'person' }, committer: { login: 'person' } };
@@ -125,6 +136,15 @@ describe('PR watch repairs', () => {
     upsertPr(pr(), OWNER);
     expect(deliverPrRepairs(() => {}, 0)).toBe(0);
     expect(queued()).toHaveLength(0);
+  });
+
+  it('does not fork beside a queued member of the owning chain', () => {
+    upsertPr(pr(), OWNER);
+    upsertPr(pr(), OWNER);
+    enqueue({ id: '22222222-2222-2222-2222-222222222222', repo: 'web', brief: 'manual follow-up', followUp: OWNER }, 'work');
+    expect(deliverPrRepairs(() => {}, 3)).toBe(0);
+    expect(queued()).toHaveLength(1);
+    expect(readPr(KEY)?.repair).toBeUndefined();
   });
 
   it('uses the requested review changes as work, but not approval', () => {

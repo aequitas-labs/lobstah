@@ -182,18 +182,27 @@ watches that already exist. `prs sync` refreshes existing PR watches only.
 
 The first check of a new watch is a baseline:
 
-- An open PR: checks that already failed show in the PR record and in tend,
-  but they fork no CI-fix dispatch. Only a check that fails after the
-  baseline, or a failed check on a new head sha, forks one.
+- An open PR: the first observation records its checks and merge state, but
+  starts no repair. Later observations may start a bounded repair on a PR
+  lobstah owns.
 - A merged or closed PR: the check records `MERGED` or `CLOSED` in the PR
   record and retires the watch. It forks nothing and raises no attention. A
   `pr-merged` / `pr-closed` notice is posted once only when the PR ended in
   the last 24 hours.
 
 One watch cycle forks at most `[watch].maxForksPerCycle` continuations
-(default 3). Watches over the cap are held and listed as `held` in
-`man tend` and `lobstah watch`. `lobstah watch release <key>` (or `--all`)
-lets them fork again.
+(default 3). Generic watches over the cap are held and listed as `held` in
+`man tend` and `lobstah watch`. PR repairs wait for the next cycle.
+`lobstah watch release <key>` (or `--all`) releases held watches.
+
+For a dispatch-owned PR, the watch repairs conflicts, failed current checks,
+and requested review changes. It follows up the newest dispatch in the PR's
+chain. A conflict brief names the PR's base branch, including a stacked
+base. A check brief names each failed check and its details URL. The watch
+records each attempt and stops at `[watch].maxRepairsPerPr` per head SHA.
+It does not repair a PR with a person's newer commits or uncertain commit
+ownership, a terminal PR, or a PR whose chain already has queued or active
+work. `[watch].autoRepair`, `conflicts`, and `checks` control this behavior.
 
 Watching a PR nobody dispatched — `lobstah watch add pr:<owner>/<repo>#<n>`
 with no `--for` — is how a helm follows a human's PR, or one whose
@@ -203,15 +212,14 @@ attention kinds exactly like a dispatched PR (its dispatch chain column is
 empty). It stays quiet while it's fine: only a failing check or a changes
 request surfaces as a watch event; a merge or close arrives as a notice.
 
-An observed PR joins tend's attention list by kind — `pr:draft`,
-`pr:review` (unresolved threads or changes requested), `pr:checks` (a red
-head), `pr:conflict` (GitHub reports it conflicting with its base),
-`pr:ready` (approved or all green, and GitHub says it can merge) — so it crawls in the glass and
-the desktop pet until its clear condition holds; clicking it opens the PR.
-`pr:review` and `pr:checks` stay off the screen while a worker already owns
-them (a pickup feedback round or the watch's fix continuation in flight).
-`attentionKinds` in `config.toml` picks the kinds; `landed` is opt-in. See
-the [attention contract](vocabulary.md#attention-contract). A PR is
+An observed PR joins tend's attention list by kind. `pr:ready` needs a
+mergeable, non-draft PR with no failed, pending, or unknown current checks.
+`pr:conflict` and `pr:checks` appear for an owned PR only when repair is off,
+blocked, or exhausted; their notes say why. Requested review changes on an
+owned PR follow the same repair rule. Unresolved review questions remain
+`pr:review` attention. Drafts are not attention by default; users can add
+`pr:draft` to `attentionKinds`. The glass and desktop pet use the same list.
+See the [attention contract](vocabulary.md#attention-contract). A PR is
 something to look at, not a stall: it never flips the verdict to
 `needs-attention` and stays out of the digest.
 
