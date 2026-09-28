@@ -102,7 +102,7 @@ repos = ["lobstah", "lavish"]
 | Key | Default | Meaning |
 |---|---|---|
 | `pollSecs` | `45` | Poll cadence. Outbound only — no webhooks, ever. |
-| `notifyCommand` | — | Pickup's own hook, fired on tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`. |
+| `notifyCommand` | — | Pickup's own hook, fired on tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`, and `LOBSTAH_REASON` — why pickup reported a verb other than the dispatch's own (`no-pr`, `no-changes`), empty otherwise. |
 
 ### Token sources (both trackers)
 
