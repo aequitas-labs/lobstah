@@ -13,6 +13,31 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - run: git --version
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+
+  # The runner images ship an older git. Git's wording for a lost ref race
+  # changed in 2.51, so run the suite once on current git from the git-core
+  # PPA; the concurrent allocate test covers the race. A separate job, not a
+  # matrix key, so the required check names above stay the same.
+  test-git-latest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo add-apt-repository -y ppa:git-core/ppa
+          sudo apt-get update -q
+          sudo apt-get install -y -q git
+      - run: git --version
       - uses: pnpm/action-setup@v4
         with:
           version: 10
