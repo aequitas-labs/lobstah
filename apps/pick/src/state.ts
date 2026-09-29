@@ -14,6 +14,14 @@ export interface MapEntry {
   attempts?: number;
   /** A finalized failure was reported; the tracker may offer this issue again. */
   released?: boolean;
+  /** One editable status comment, with the last successful update for throttling. */
+  liveCommentId?: string;
+  liveCommentAt?: string;
+  liveCommentBody?: string;
+  liveCommentFingerprint?: string;
+  liveCommentVerb?: Verb;
+  /** This source refused an edit; use transition comments for this item. */
+  liveCommentUnavailable?: boolean;
 }
 
 interface StateFile {

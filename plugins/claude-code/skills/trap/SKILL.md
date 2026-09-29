@@ -20,6 +20,7 @@ lobstah stow                  # sign off
 
 - Run `soak` from a linked worktree, never the repo's primary checkout —
   it refuses there. Create one with `git worktree add ../<name> -b <branch>`.
+Invoke `/lobstah:trap` to load this skill.
 - No flag is needed inside Claude Code: the CLI reads
   `$CLAUDE_CODE_SESSION_ID`. If it refuses, pass `--session <id>` from the
   session-start brief. Re-runs in the same worktree need no flags.

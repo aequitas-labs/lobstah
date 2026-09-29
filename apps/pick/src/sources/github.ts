@@ -190,6 +190,16 @@ export class GithubSource implements Source, MergeSource {
     await this.api('POST', `/repos/${this.cfg.repo}/issues/${n}/comments`, { body: lines.join('\n') });
   }
 
+  async createLiveComment(key: string, body: string): Promise<string> {
+    const n = this.numberOf(key.replace(/@.*$/, '').replace('#pr', '#'));
+    const result = await this.api<{ id: number }>('POST', `/repos/${this.cfg.repo}/issues/${n}/comments`, { body });
+    return String(result.id);
+  }
+
+  async editLiveComment(_key: string, commentId: string, body: string): Promise<void> {
+    await this.api('PATCH', `/repos/${this.cfg.repo}/issues/comments/${commentId}`, { body });
+  }
+
   async inbound(key: string, since?: string): Promise<string[]> {
     if (key.includes('#pr')) return []; // review dispatches read the PR thread themselves
     const n = this.numberOf(key);

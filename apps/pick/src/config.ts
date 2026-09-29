@@ -10,6 +10,7 @@ import type { LinearConfig } from './sources/linear.js';
 
 export interface PickupConfig {
   pollSecs: number;
+  liveComment: boolean;
   /** Exec'd on every verb transition with LOBSTAH_* env vars; never blocks the loop. */
   notifyCommand?: string;
   github: Array<GithubConfig & { merge: MergePolicy }>;
@@ -71,6 +72,7 @@ export function loadPickupConfig(): PickupConfig {
   const p = (raw.pickup ?? {}) as Record<string, unknown>;
   const out: PickupConfig = {
     pollSecs: Number(p.pollSecs ?? 45),
+    liveComment: p.liveComment === undefined ? true : Boolean(p.liveComment),
     notifyCommand: p.notifyCommand ? String(p.notifyCommand) : undefined,
     github: [],
   };

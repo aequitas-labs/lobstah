@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   appendEvent,
@@ -8,12 +9,14 @@ import {
   droppedModelNote,
   handoffNote,
   isUnresumable,
+  isTrapCatch,
   loadConfig,
   lobstahHome,
   mergeEvidence,
   modelForHarness,
   originProgress,
   pausedWaiting,
+  readActivity,
   readEvidence,
   readStatusLog,
   releaseWorktreeLock,
@@ -30,6 +33,7 @@ import { buildPrompt } from './contract.js';
 import { drive, settle } from './drive.js';
 import { planStart } from './plan.js';
 import { startWallClock } from './wallclock.js';
+import { keepRemote } from './remote.js';
 import type { StartPlan } from './plan.js';
 
 /** Seams for tests: the harness, and the git work around it. */
@@ -57,6 +61,9 @@ function coldNote(cold: NonNullable<StartPlan['cold']>, cwd: string, trunk: stri
 export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerDeps> = {}): Promise<void> {
   const deps: RunnerDeps = { ...defaultDeps, ...seams };
   const id = path.basename(activeDir);
+  // The daemon excludes trap catches from headless slots. A directly invoked
+  // runner must apply the same rule before starting a clock or touching work.
+  if (isTrapCatch(id, lane)) throw new Error(`refusing headless runner for trap catch ${id}`);
   const status = (verb: Verb, note?: string) => appendStatus(id, lane, verb, note);
 
   const cfg = loadConfig();
@@ -157,6 +164,18 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   const worktreeOf = (JSON.parse(fs.readFileSync(wtFile, 'utf8')) as { of?: string }).of;
   mergeEvidence(id, lane, { worktree: cwd, worktreeOf });
 
+  const remotePolicy = {
+    pushEarly: repo.pushEarly ?? cfg.limits.pushEarly,
+    draftPr: repo.draftPr ?? cfg.limits.draftPr,
+    checkpointOnStop: repo.checkpointOnStop ?? cfg.limits.checkpointOnStop,
+  };
+  const remoteEnabled = Object.values(remotePolicy).some(Boolean);
+  const remote = keepRemote({
+    id, lane, cwd, trunk: repo.trunk,
+    title: descriptor.brief.split('\n')[0]?.trim() || `Lobstah dispatch ${short(id)}`,
+    policy: remotePolicy,
+  });
+
   const envNudge = process.env.LOBSTAH_NUDGE;
   // A swap's handoff (arriving as the nudge) already carries the progress note.
   const planNudge = plan.cold && !envNudge ? coldNote(plan.cold, cwd, repo.trunk) : undefined;
@@ -173,18 +192,67 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   let wallClockHit = false;
   let current: AdapterRun | undefined;
+  const wallFile = path.join(activeDir, 'wallclock.json');
+  const wallState = (() => {
+    try {
+      return JSON.parse(fs.readFileSync(wallFile, 'utf8')) as {
+        elapsedMs: number; windowMs: number; lastProgressAt?: string; lastHead?: string;
+      };
+    } catch { return { elapsedMs: 0, windowMs: resolved.limits.wallClockSecs! * 1000 }; }
+  })();
+  const head = () => {
+    try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+    catch { return undefined; }
+  };
+  wallState.lastHead ??= head();
+  const maxWallMs = Math.max(resolved.limits.wallClockSecs ?? 0,
+    cfg.limits.maxWallClockSecs ?? (resolved.limits.wallClockSecs ?? 0) * 4) * 1000;
+  const persistWall = (elapsedMs: number, windowMs: number) => {
+    const tmp = `${wallFile}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify({ ...wallState, elapsedMs, windowMs }));
+    fs.renameSync(tmp, wallFile);
+  };
+  const madeProgress = () => {
+    const activity = readActivity(id, lane);
+    const recent = activity && Date.now() - Date.parse(activity.at) <= cfg.limits.wedgeThresholdSecs * 1000;
+    if (recent && activity.at !== wallState.lastProgressAt) {
+      wallState.lastProgressAt = activity.at;
+      wallState.lastHead = head();
+      return true;
+    }
+    const currentHead = head();
+    if (currentHead && currentHead !== wallState.lastHead) {
+      wallState.lastHead = currentHead;
+      return true;
+    }
+    return false;
+  };
   // The wall clock does not run while the worker is paused on something
   // external (`report paused --waiting-on`): waiting on a review is not work.
   const wallTimer = resolved.limits.wallClockSecs
     ? startWallClock({
         limitMs: resolved.limits.wallClockSecs * 1000,
+        maxMs: maxWallMs,
+        initialElapsedMs: wallState.elapsedMs,
+        initialWindowMs: wallState.windowMs,
         paused: () => pausedWaiting(readStatusLog(id, lane).at(-1)),
+        progress: madeProgress,
+        onTick: persistWall,
         onExpire: () => {
           wallClockHit = true;
           current?.kill();
         },
       })
     : undefined;
+
+  if (wallTimer && wallState.elapsedMs >= maxWallMs) {
+    wallTimer.stop();
+    const saved = remoteEnabled ? await remote.saveBeforeStop() : undefined;
+    settle(id, lane, { cancelled: false, wallClockHit: true, budgetNote: saved });
+    releaseWorktreeLock(cwd, id);
+    complete(id, lane);
+    return;
+  }
 
   const runOnce = async (harness: string, prompt: string, resumeSession: string | undefined) => {
     const run = await deps.loadAdapter(harness).start({
@@ -257,6 +325,15 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   wallTimer?.stop();
   const { cancelled, result } = outcome;
 
+  const terminal = ['done', 'failed'].includes(readStatusLog(id, lane).at(-1)?.verb ?? '');
+  let savedNote: string | undefined;
+  if (remoteEnabled && (wallClockHit || cancelled || !!result.error || !terminal)) {
+    savedNote = await remote.saveBeforeStop();
+    status('working', `work saved before stop: ${savedNote}`);
+  } else {
+    await remote.stop();
+  }
+
   try {
     const gitEvidence = await deps.collectEvidence(repo, cwd);
     console.log(`[runner] git evidence: ${JSON.stringify(gitEvidence)}`);
@@ -269,7 +346,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     });
   }
 
-  settle(id, lane, { cancelled, wallClockHit, error: result.error });
+  settle(id, lane, { cancelled, wallClockHit, error: result.error, budgetNote: savedNote });
 
   releaseWorktreeLock(cwd, id);
   complete(id, lane);

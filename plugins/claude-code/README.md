@@ -12,6 +12,7 @@ hand, plus the skills and commands.
 | Piece | What it does |
 | ----- | ------------ |
 | SessionStart hook (`lobstah man brief`) | Announces the session's id and a one-line fleet state into the conversation, so every session starts oriented. A session that is neither helm nor trap gets the two copy-paste sign-on commands. |
+| PostToolUse hook (`lobstah soak beat`) | Refreshes a soaking trap's liveness and records redacted activity after tool calls. |
 | Stop hook (`lobstah man haul`) | Checks for an armed watcher while work is in flight; `--park` waits in the hook. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends. |
 | `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
@@ -48,6 +49,10 @@ Claude Code CLI and desktop app differ are in
 [docs/harness/claude-code.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/claude-code.md). The quickstart, the same
 in every harness, is in the
 [README](https://github.com/aequitas-labs/lobstah#quickstart-the-lobstah-man-).
+
+`lobstah send <id> "<instruction>"` steers live or queued work and wakes a
+finished dispatch as a follow-up. The trap skill reports `paused --waiting-on`
+before external waits.
 
 Manual fallbacks without the helm: `touch .lobstah-man` in a project (every
 session there parks as the lobstah man), or `LOBSTAH_MAN=1` for one launch.

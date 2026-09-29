@@ -57,6 +57,7 @@ import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { worktreeView } from './worktree-view.js';
+import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import { liveRepairer } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
@@ -72,6 +73,8 @@ export interface TendDispatch {
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';
   state: string;
+  /** Budget exhaustion is work saved for continuation, not a worker error. */
+  outOfTimeWorkSaved?: boolean;
   note?: string;
   at?: string;
   /** A needs-decision / blocked the helm (or anyone) has answered but the worker hasn't acted on yet. */
@@ -85,6 +88,13 @@ export interface TendDispatch {
   worktreeOf?: string;
   /** Why releaseOnMerge kept its worktree after the PR merged. */
   worktreeKept?: string;
+  elapsed?: string;
+  attempt?: number;
+  branch?: string;
+  lastCommit?: string;
+  aheadTrunk?: string;
+  draftPr?: string;
+  updated?: string;
   /** What the worker is doing now (active dispatches only). Stale past wedgeThresholdSecs. */
   activity?: ActivityView;
   /** What a paused (or questioning) worker waits on outside lobstah (`report --waiting-on`). */
@@ -525,6 +535,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     lane,
     bucket,
     state,
+    ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
     note: held ?? last?.note,
     // Queued work has no log yet; its time is when it entered the queue.
     at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),
@@ -532,6 +543,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     prUrl: evidence.prUrl,
     pr: evidence.pr,
     ...(bucket === 'queued' ? {} : worktreeView(id, lane)),
+    ...(bucket === 'queued' ? {} : livenessView(id, lane)),
     ...(bucket === 'active' ? { activity: activityView(readActivity(id, lane), staleSecs) } : {}),
     ...(bucket === 'active' && waitingView(last) ? { waiting: waitingView(last) } : {}),
   };
@@ -881,7 +893,7 @@ export function renderTend(r: TendReport): string {
           dispatches: s.dispatches
             .map(
               (d) =>
-                `${d.id.slice(0, 8)}:${d.state}` +
+                `${d.id.slice(0, 8)}:${d.outOfTimeWorkSaved ? 'out of time, work saved' : d.state}` +
                 (d.state === 'held' && d.note ? ` (${d.note.replace(/^held: /, '')})` : '') +
                 (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
                 (d.waiting ? ` (${waitingText(d.waiting)})` : ''),
@@ -895,8 +907,12 @@ export function renderTend(r: TendReport): string {
             .filter((d) => d.activity)
             .map((d) => (s.dispatches.length > 1 ? `${d.id.slice(0, 8)}: ` : '') + activityLine(d.activity!))
             .join('; '),
+          progress: s.dispatches
+            .map((d) => [d.elapsed, d.attempt ? `attempt ${d.attempt}` : '', d.branch, d.lastCommit, d.aheadTrunk, d.draftPr]
+              .filter(Boolean).join(' · '))
+            .filter(Boolean).join('; '),
         })),
-        ['key', 'dispatches', 'pr', 'gate', 'watch', 'activity'],
+        ['key', 'dispatches', 'pr', 'gate', 'watch', 'activity', 'progress'],
       ),
     );
   }

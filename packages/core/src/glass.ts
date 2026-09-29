@@ -152,6 +152,8 @@ export interface GlassDispatch {
   attachments: Attachment[];
   messageAttachments: Attachment[];
   verb: Verb | 'unknown' | 'queued';
+  /** A budget stop: work is saved for continuation, distinct from a worker failure. */
+  outOfTimeWorkSaved?: boolean;
   note?: string;
   verbAt?: string;
   /** What the worker is doing now, from its event stream or its post-tool hook. Stale past wedgeThresholdSecs. */
@@ -168,6 +170,13 @@ export interface GlassDispatch {
   worktreeOf?: string;
   /** Why releaseOnMerge kept its worktree after the PR merged. */
   worktreeKept?: string;
+  elapsed?: string;
+  attempt?: number;
+  branch?: string;
+  lastCommit?: string;
+  aheadTrunk?: string;
+  draftPr?: string;
+  updated?: string;
   transcript?: string;
   /** Newest first: queue/active/done mtime. */
   sort: number;

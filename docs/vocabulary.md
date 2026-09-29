@@ -417,6 +417,7 @@ reminder loop apply the same predicate.
 | Word | Meaning |
 | ---- | ------- |
 | ack | `~/.lobstah/acks/<item-key>.json` — `{ key, kind, stateHash, at, by }`, written only by `lobstah attention ack` (removed by `unack`, by the CLI's `man tend` / `attention` when its `stateHash` goes stale, and by `cull` when the item is gone). **Display-only**: it hides the item from the desktop pet and the glass lobs while the item's `stateHash` is unchanged; `man tend --json` keeps the item with `acked: { at, by }`, and `man wait`, the park, reminders, and `notifyCommand` never read acks. Item keys: `<lane>:<uuid>` (question, landed), `pr:<owner>/<repo>#<n>` (all of a PR's `pr:*` kinds — one ack covers them), `watch:<key>`. `stateHash` covers the status entry (question, landed) or the PR's head sha plus every evidence field a `pr:*` kind stands on (not `observedAt`). |
+| budget stop | A headless runner's `failed` verb with a `budget:` note means its progress-extended active-work window reached the hard ceiling. This is out of time, not a code failure: the runner checkpoints eligible changes, pushes when enabled, names the saved branch/commit/draft PR, and invites `lobstah send <id> "continue"`. Paused `--waiting-on` time is excluded. |
 
 ## Exit codes
 

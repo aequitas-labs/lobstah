@@ -73,7 +73,18 @@ export const logText = (x: Pick<GlassDispatch, 'log'>): string =>
   x.log.map((e) => e.at + '  ' + e.verb + (e.note ? '  ' + e.note : '')).join('\n');
 
 export function detailBody(x: GlassDispatch) {
-  return html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}<div class="sec">brief</div><pre>${x.brief}</pre>${
+  const progress = [
+    x.elapsed && `elapsed: ${x.elapsed}`,
+    x.attempt && `attempt: ${x.attempt}`,
+    x.branch && `branch: ${x.branch}`,
+    x.lastCommit && `last commit: ${x.lastCommit}`,
+    x.aheadTrunk && `commits: ${x.aheadTrunk}`,
+    x.draftPr && `draft PR: ${x.draftPr}`,
+    x.updated && `updated: ${x.updated}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}${progress && [html`<div class="sec">progress</div>`, html`<pre>${progress}</pre>`]}<div class="sec">brief</div><pre>${x.brief}</pre>${
     x.attachments.length > 0 && [html`<div class="sec">attachments (${x.attachments.length})</div>`, attachmentRows(x.attachments)]
   }${
     x.messageAttachments.length > 0 && [

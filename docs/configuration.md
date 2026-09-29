@@ -30,6 +30,7 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 | `scratch` | no | Repo-relative paths (e.g. `["tmp", ".cache"]`) whose untracked files do not count as uncommitted changes when a follow-up decides whether to reuse its origin's worktree. Tracked changes anywhere, and untracked files elsewhere, still do. |
 | `env` | no | Environment merged into every dispatch for this repo. |
 | `pickup` | no (`false`) | Opt this repo into `[pickup.github]` multi-repo mode. Explicit per repo — nothing becomes pickable by being configured. |
+| `pushEarly`, `draftPr`, `checkpointOnStop` | no (inherit `[limits]`) | Override remote preservation for this repo's headless dispatches. |
 
 `[repos.<key>.harness]` — per-repo harness defaults: `default` (`claude` \|
 `codex`), `model`, `effort`.
@@ -58,7 +59,18 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | `choreConcurrent` | `1` | Headless chore-lane runner ceiling (rebases and other machine-originated runs). |
 | `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. Also the age past which `status`, `ls`, `man tend`, and the glass show a dispatch's activity line as stale. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
-| `wallClockSecs` | `3600` | Hard per-dispatch ceiling, enforced by the runner. Time paused with `report paused --waiting-on` does not count. A paused runner still holds its `maxConcurrent` slot while its process is alive. |
+| `wallClockSecs` | `3600` | Initial active-work window. Progress extends it, up to `maxWallClockSecs`; time paused with `report paused --waiting-on` does not count. |
+| `maxWallClockSecs` | `4 × wallClockSecs` | Hard active-work ceiling across restarts. |
+| `pushEarly` | `true` | Push each new committed HEAD to its non-trunk branch on `origin` within 10 seconds. A rejected push is noted and retried only after HEAD moves. |
+| `draftPr` | `true` | After first push, adopt an existing PR or open one draft PR when `gh` is available. |
+| `checkpointOnStop` | `true` | Before a nonterminal stop, checkpoint eligible tracked and untracked files, then push. Ignored files and secret/build denylist paths are excluded. Set all three switches to `false` for prior runner behavior. |
+
+A runner extends its active-work window when a fresh activity event or new HEAD
+shows progress at the boundary. The elapsed budget and current window are
+persisted across restarts; a pause with `--waiting-on` does not spend active
+time. At the hard ceiling, the status verb remains `failed` for compatibility,
+but its note starts `budget:` and tells the man what work was saved and to
+send a continuation.
 | `backgroundWaitSecs` | `1800` | A turn that ends without a report is held open this long while background work the worker started is still running (a push behind a slow pre-push gate); the harness wakes the worker when it settles. Heartbeats keep the wedge detector off the wait. Keep it below `wallClockSecs`, which still ends the run. |
 | `choreRetentionDays` | `7` | Completed chores age out of `chores/done/`. |
 | `attachmentMaxBytes` | `26214400` (25 MiB) | Maximum size of each file supplied with repeatable `dispatch --attach` or `send --attach`. |
@@ -120,6 +132,7 @@ repos = ["lobstah", "lavish"]
 | Key | Default | Meaning |
 |---|---|---|
 | `pollSecs` | `45` | Poll cadence. Outbound only — no webhooks, ever. |
+| `liveComment` | `true` | Keep one editable, marked status comment per dispatch. Routine edits are capped at once per minute; human-needed and terminal transitions still post a fresh notification comment. Falls back to transition comments if editing is unavailable. |
 | `notifyCommand` | — | Pickup's own hook, fired on tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`. |
 
 ### Token sources (both trackers)
