@@ -473,6 +473,7 @@ lobstah stow                    # sign off; an open catch requeues, unread
                                 # messages bounce back to the helm; removes
                                 # the worktree when soak created it
 lobstah stow --keep             # sign off and keep the worktree
+lobstah soak --name amber-gull  # choose or change this trap's two-word name
 ```
 
 **Soak can create the worktree.** From a repo's primary checkout, or with
@@ -516,11 +517,18 @@ otherwise it prints `branchKept: <branch> (<reason>)`. A deleted branch
 prints as `branchDeleted:`. `stow --wt <id>` follows the same rules. The
 SessionEnd hook (`lobstah stow --quiet`) signs off and keeps the worktree.
 
-**Identity is the worktree.** Sign-on anchors a short trap id in
-`.lobstah-trap` and prints the trap's address (`wt:<id>`); the address
+**Identity is the worktree.** Sign-on anchors a short trap id and two-word
+name in `.lobstah-trap` and prints both, such as `amber-gull (wt:c32a245d)`; the address
 survives session restarts — a new session in the same worktree resumes the
 same trap (a *live* foreign session is refused: the session lock). The
-session id (from the plugin's session-start brief) lives inside the
+name is reserved across all traps known to this lobstah home, including
+stowed and swept traps. `--name` sets or changes it; malformed and taken
+names are refused. The bare name, `wt:<name>`, and `wt:<id>` all address the
+same live trap in `dispatch --for`, `send`, and `stow --wt`. Unknown names
+list known names and never turn addressed bait into headless work. The id
+remains the key in dispatch and claim records.
+
+The session id (from the plugin's session-start brief) lives inside the
 registration as the liveness principal. The harness (claude or codex) is
 inferred — from `CLAUDE*` / `CODEX*` in the environment, and when both are
 set (one harness launched inside the other) from the session id's format:

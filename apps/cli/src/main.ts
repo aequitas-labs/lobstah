@@ -27,6 +27,10 @@ import {
   heartbeatTrap,
   listTraps,
   readTrap,
+  trapByAddress,
+  trapIdForName,
+  trapLabel,
+  unknownTrapMessage,
   readSessionClaim,
   releaseCatch,
   signOnTrap,
@@ -157,7 +161,7 @@ const HELP = `lobstah — supervision framework for coding agents
 work (humans and agents):
   dispatch --repo <key> (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
-           [--follow-up <uuid>] [--attach <file> ...] [--for wt:<trap>] [--chore] [--id <uuid>]
+           [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap>] [--chore] [--id <uuid>]
                                   queue a supervised dispatch; prints the id.
                                   --for addresses the work to a signed-on
                                   worktree (sticky: waits for that trap,
@@ -169,10 +173,10 @@ work (humans and agents):
                                   hides an item from the pet and glass lobs
                                   until its state changes (display-only —
                                   never from the helm's wakes)
-  status [<uuid>]                 reconciled state                (alias: buoy)
+  status [<uuid>|<trap-name>]     reconciled state or live trap   (alias: buoy)
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|wt:<trap> [--attach <file> ...] [--] <message>
+  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--] <message>
                                   steer a live chain, queue for its pending
                                   member, or wake finished work as a follow-up;
                                   --no-wake leaves finished mail unread
@@ -296,11 +300,11 @@ workers (dispatched agents; injected into every brief):
                                   chain; --no-watch opts out.
 
 soaking (interactive sessions volunteering as workers):
-  soak [--session <id>] [--repo <key>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
+  soak [--session <id>] [--repo <key>] [--name <word-word>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
                                   volunteer this session as a worker.
                                   Identity is the worktree: sign-on anchors a
-                                  trap id (.lobstah-trap) and prints its
-                                  wt:<trap> address; re-runs here need no
+                                  trap id and two-word name (.lobstah-trap).
+                                  --name sets or changes the name; re-runs need no
                                   flags. From a primary checkout (or with
                                   --repo <key>) it creates a worktree and
                                   prints it: cd there and work in it. A
@@ -672,16 +676,14 @@ async function mainCli(): Promise<void> {
         if (!trap) throw new Error(`session ${sid.slice(0, 8)} is not signed on anywhere — have it run \`lobstah soak\` first`);
         address = `wt:${trap.trapId}`;
       }
-      if (!address.startsWith('wt:')) {
-        throw new Error('dispatch --for takes a trap address: --for wt:<trap-id> (or session:<id>, resolved to its trap)');
-      }
-      const trap = readTrap(address.slice('wt:'.length));
-      if (!trap) throw new Error(`no trap ${address} is signed on — \`lobstah man tend\` lists live traps`);
+      const trap = trapByAddress(address);
+      if (!trap) throw new Error(`${unknownTrapMessage(address)} — \`lobstah man tend\` lists live traps`);
+      address = `wt:${trap.trapId}`;
       const hbAgeSecs = Math.round((Date.now() - (Date.parse(trap.heartbeatAt) || 0)) / 1000);
       if (trap.firstParkedAt === undefined) {
-        warnings.push(`trap ${address} has never listened (signed on, no park yet) — delivery waits until its session parks`);
+        warnings.push(`trap ${trapLabel(trap)} has never listened (signed on, no park yet) — delivery waits until its session parks`);
       } else if (hbAgeSecs > cfgDispatch.soak.deferSecs) {
-        warnings.push(`trap ${address} is not currently parked (heartbeat ${hbAgeSecs}s ago) — delivery waits for its next park.`);
+        warnings.push(`trap ${trapLabel(trap)} is not currently parked (heartbeat ${hbAgeSecs}s ago) — delivery waits for its next park.`);
       }
     }
     d.for = address;
@@ -739,6 +741,14 @@ async function mainCli(): Promise<void> {
         console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'waiting', 'activity']));
         break;
       }
+      const namedTrap = trapByAddress(id);
+      if (namedTrap) {
+        console.log(toonKV({ trap: `wt:${namedTrap.trapId}`, name: namedTrap.name, label: trapLabel(namedTrap),
+          session: namedTrap.sessionId, repo: namedTrap.repo ?? '(addressed only)', worktree: namedTrap.worktree,
+          claimed: namedTrap.claimed, heartbeatAt: namedTrap.heartbeatAt }));
+        break;
+      }
+      if (id.startsWith('wt:') || /^[a-z]+-[a-z]+$/.test(id)) throw new Error(unknownTrapMessage(id));
       const lane = findLane(id);
       const log = readStatusLog(id, lane);
       const since = queuedAt(id, lane);
@@ -828,9 +838,9 @@ async function mainCli(): Promise<void> {
       gateHelm(sender);
       const from = sid !== undefined && helmOf(sid) !== undefined ? 'helm' : sid !== undefined ? `session:${sid.slice(0, 8)}` : 'terminal';
       const text = rest.join(' ');
-      if (target.startsWith('wt:') || target.startsWith('session:')) {
-        let trapId = target.startsWith('wt:') ? target.slice('wt:'.length) : undefined;
-        if (!trapId) {
+      if (target.startsWith('wt:') || target.startsWith('session:') || trapByAddress(target) || /^[a-z]+-[a-z]+$/.test(target)) {
+        let trapId = target.startsWith('session:') ? undefined : trapByAddress(target)?.trapId;
+        if (!trapId && target.startsWith('session:')) {
           const t = trapBySession(target.slice('session:'.length));
           if (!t)
             throw new Error(
@@ -838,13 +848,14 @@ async function mainCli(): Promise<void> {
             );
           trapId = t.trapId;
         }
+        if (!trapId) throw new Error(unknownTrapMessage(target));
         const reg = readTrap(trapId);
-        if (!reg) throw new Error(`no trap wt:${trapId} is signed on — \`lobstah man tend\` lists live traps`);
+        if (!reg) throw new Error(`${unknownTrapMessage(target)} — \`lobstah man tend\` lists live traps`);
         const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
         const block = attachmentBlock(attachments);
         const name = sendTrapMessage(trapId, from, [text, block].filter(Boolean).join('\n\n'), attachments);
         const hbAgeSecs = Math.round((Date.now() - (Date.parse(reg.heartbeatAt) || 0)) / 1000);
-        console.log(toonKV({ to: `wt:${trapId}`, from, queued: name }));
+        console.log(toonKV({ name: reg.name, to: `wt:${trapId}`, from, queued: name }));
         if (reg.firstParkedAt === undefined || hbAgeSecs > cfgSend.soak.deferSecs) {
           console.log(
             toonKV({
@@ -1793,6 +1804,7 @@ async function mainCli(): Promise<void> {
           harness: resolved.harness,
           sessionId,
           one: has('--one') || undefined,
+          name: opt('--name'),
           window: captureWindow(),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
@@ -1816,7 +1828,9 @@ async function mainCli(): Promise<void> {
       const sessionFlag = inside ? '' : ` --session ${sessionId}`;
       console.log(
         toonKV({
+          name: reg.name,
           trap: `wt:${reg.trapId}`,
+          label: trapLabel(reg),
           session: sessionId,
           harness: `${reg.harness} (${resolved.source === 'flag' ? '--harness' : resolved.source === 'prior' ? 'as signed on' : resolved.source === 'env' ? 'from the environment' : 'from the session id format'})`,
           ...(harnessChanged ? { harnessChanged: `${harnessChanged} → ${reg.harness} (registration updated)` } : {}),
@@ -1874,11 +1888,12 @@ async function mainCli(): Promise<void> {
       const sessionEnd = hookRead && hook?.hook_event_name === 'SessionEnd';
       const site = inspectSoakSite(process.cwd(), loadConfig().repos);
       const trapId =
-        wtFlag ??
+        (wtFlag ? trapIdForName(wtFlag.startsWith('wt:') ? wtFlag.slice(3) : wtFlag) ?? (/^(?:wt:)?[0-9a-f]{8}$/.test(wtFlag) ? wtFlag.replace(/^wt:/, '') : undefined) : undefined) ??
         (site && !site.primary ? trapIdAt(site.worktree) : undefined) ??
         (sessionId !== undefined ? trapBySession(sessionId)?.trapId : undefined);
       if (trapId === undefined) {
         if (quiet) break;
+        if (wtFlag) throw new Error(unknownTrapMessage(wtFlag));
         throw new Error("nothing to stow here — run from the trap's worktree, or pass --wt <trap-id> / --session <id>");
       }
       // A trap always signs itself off from its own worktree (or its own
@@ -1933,6 +1948,7 @@ async function mainCli(): Promise<void> {
       if (!quiet) {
         console.log(
           toonKV({
+            ...(reg?.name ? { name: reg.name, label: trapLabel(reg) } : {}),
             ...(reg ? { stowed: `wt:${trapId}` } : { trap: `wt:${trapId}`, soaking: false }),
             ...(released.requeued ? { requeued: released.requeued } : {}),
             ...(released.finalized ? { finalized: released.finalized } : {}),

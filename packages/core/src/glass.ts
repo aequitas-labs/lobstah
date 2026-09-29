@@ -210,6 +210,7 @@ export interface GlassMessage {
 /** A trap: live (a registration) or historical (only receipts, mail, and notices survive). */
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   trapId: string;
+  label?: string;
   live: boolean;
   messages: GlassMessage[];
   /** This trap's notices, newest first. */

@@ -16,6 +16,7 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  trapLabel,
   listWatches,
   watchErrorCell,
   loadConfig,
@@ -128,6 +129,8 @@ export interface TendWatch {
 
 export interface TendTrap {
   trap: string;
+  name?: string;
+  label: string;
   session: string;
   repo: string;
   worktree: string;
@@ -251,7 +254,7 @@ export function humanPrAttention(
   if (queued?.for?.startsWith('wt:')) {
     const trap = readTrap(queued.for.slice(3));
     if (!trap || !!trap.claimed || !trap.firstParkedAt || now - Date.parse(trap.heartbeatAt) > cfg.soak.deferSecs * 1000) {
-      return { show: true, reason: `trap ${queued.for} not listening` };
+      return { show: true, reason: `trap ${trap ? trapLabel(trap) : queued.for} not listening` };
     }
   }
   return { show: false };
@@ -711,7 +714,10 @@ export function buildTendReport(now = Date.now()): TendReport {
       const reg = registered.find((r) => address === `wt:${r.trapId}`);
       return !reg || !!reg.claimed || !reg.firstParkedAt || now - Date.parse(reg.heartbeatAt) > cfg.soak.deferSecs * 1000;
     });
-    if (notListening.length) queueWait = `queued work waits: trap ${notListening.join(', ')} not listening`;
+    if (notListening.length) queueWait = `queued work waits: trap ${notListening.map((address) => {
+      const reg = registered.find((r) => address === `wt:${r.trapId}`);
+      return reg ? trapLabel(reg) : address;
+    }).join(', ')} not listening`;
   }
 
   const merge = readMergeView();
@@ -811,6 +817,8 @@ export function buildTendReport(now = Date.now()): TendReport {
     const hbAgeSecs = Math.max(0, Math.round((now - (Date.parse(r.heartbeatAt) || 0)) / 1000));
     return {
       trap: `wt:${r.trapId}`,
+      name: r.name,
+      label: trapLabel(r),
       session: r.sessionId.slice(0, 8),
       repo: r.repo ?? '(addressed only)',
       worktree: r.worktree,
@@ -948,6 +956,7 @@ export function renderTend(r: TendReport): string {
       toonTable(
         'traps',
         r.traps.map((s) => ({
+          name: s.name ?? '',
           trap: s.trap,
           session: s.session,
           repo: s.repo,
@@ -955,7 +964,7 @@ export function renderTend(r: TendReport): string {
           listening: s.listening,
           worktree: s.worktree,
         })),
-        ['trap', 'session', 'repo', 'claimed', 'listening', 'worktree'],
+        ['name', 'trap', 'session', 'repo', 'claimed', 'listening', 'worktree'],
       ),
     );
   }

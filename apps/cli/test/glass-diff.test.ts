@@ -38,6 +38,13 @@ const snapshot = () => ({
 const ui = (over: Partial<Ui> = {}): Ui => ({ st: { view: 'table', lane: '', repo: '', verb: '', q: '' }, open: new Set(), modal: null, ...over });
 
 describe('glass section selectors', () => {
+  it('finds a trap by its two-word name in the deck and Traps tab', () => {
+    const s = { ...snapshot(), traps: [{ ...snapshot().traps[0]!, name: 'amber-gull', label: 'amber-gull (wt:aa)' }] };
+    const input = diff.sectionInputs(s, ui({ st: { view: 'table', lane: '', repo: '', verb: '', q: 'AMBER-GULL' } }), NOW);
+    expect(input.deck.traps.map((seat: { x: { trapId: string } }) => seat.x.trapId)).toEqual(['aa']);
+    expect(input.traps.list.map((seat: { x: { trapId: string } }) => seat.x.trapId)).toEqual(['aa']);
+  });
+
   it('routes the URL hash to a tab, deck by default', () => {
     expect(diff.tabFromHash('')).toBe('deck');
     expect(diff.tabFromHash('#dispatches')).toBe('dispatches');

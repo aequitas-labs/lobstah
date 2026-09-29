@@ -15,6 +15,8 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  trapLabel,
+  trapNameForId,
   listWatches,
   watchErrorCell,
   loadConfig,
@@ -288,8 +290,10 @@ export function buildGlassSnapshot(): GlassSnapshot {
   for (const n of allNotices) {
     if (n.kind.startsWith('trap-') && n.refId) seenIds.add(n.refId);
   }
-  const attach = (t: { trapId: string; repo?: string; worktree?: string; harness?: string; sessionId?: string }, liveNow: boolean): GlassTrap => ({
+  const attach = (t: { trapId: string; name?: string; repo?: string; worktree?: string; harness?: string; sessionId?: string }, liveNow: boolean): GlassTrap => ({
     ...t,
+    name: t.name ?? trapNameForId(t.trapId),
+    label: trapLabel({ trapId: t.trapId, name: t.name ?? trapNameForId(t.trapId) }),
     live: liveNow,
     messages: trapMessages(t.trapId),
     notices: allNotices.filter((n) => n.refId === t.trapId).reverse(),

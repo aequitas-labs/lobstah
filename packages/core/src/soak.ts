@@ -11,6 +11,7 @@ import type { WindowRef } from './window.js';
 import { TERMINAL_VERBS } from './types.js';
 import { attachmentBlock } from './attachments.js';
 import { toolSummary, toolTarget, writeActivity } from './activity.js';
+import { knownTrapNames, reserveTrapName, trapIdForName, trapNameForId } from './trap-names.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -22,6 +23,8 @@ import { toolSummary, toolTarget, writeActivity } from './activity.js';
  */
 export interface TrapRegistration {
   trapId: string;
+  /** Stable, human-friendly address; absent only on older registrations. */
+  name?: string;
   /** Canonical worktree root the trap is anchored to — never a primary checkout. */
   worktree: string;
   cwd: string;
@@ -77,6 +80,7 @@ function atomicWrite(file: string, content: string): void {
  */
 export interface TrapAnchor {
   trapId: string;
+  name?: string;
   createdBy?: 'soak';
   sessionId?: string;
   repo?: string;
@@ -164,6 +168,22 @@ export function readTrap(trapId: string): TrapRegistration | undefined {
   }
 }
 
+/** Human label shared by terminal, TOON, web, pet, and notices. */
+export function trapLabel(reg: Pick<TrapRegistration, 'trapId' | 'name'>): string {
+  return reg.name ? `${reg.name} (wt:${reg.trapId})` : `wt:${reg.trapId}`;
+}
+
+/** Resolve a bare name, wt:name, bare id, or wt:id to the live registration. */
+export function trapByAddress(address: string): TrapRegistration | undefined {
+  const value = address.startsWith('wt:') ? address.slice(3) : address;
+  if (!/^[a-z0-9-]+$/.test(value)) return undefined;
+  return readTrap(trapIdForName(value) ?? value);
+}
+
+export function unknownTrapMessage(address: string): string {
+  return `unknown trap ${address} (known names: ${knownTrapNames().join(', ') || 'none'})`;
+}
+
 export function listTraps(): TrapRegistration[] {
   try {
     return fs
@@ -196,6 +216,7 @@ export function signOnTrap(opts: {
   harness: string;
   sessionId: string;
   one?: boolean;
+  name?: string;
   window?: WindowRef;
   ttlMs: number;
   now?: number;
@@ -208,10 +229,14 @@ export function signOnTrap(opts: {
     const fresh = now - trapLastSeen(prior) <= opts.ttlMs;
     if (fresh) return { held: prior };
   }
+  const anchor = readTrapAnchor(opts.worktree)!;
+  const name = reserveTrapName(trapId, opts.name ?? prior?.name ?? anchor.name);
+  if (anchor.name !== name) writeTrapAnchor(opts.worktree, { ...anchor, name });
   const iso = new Date(now).toISOString();
   const sameSession = prior?.sessionId === opts.sessionId;
   const reg: TrapRegistration = {
     trapId,
+    name,
     worktree: opts.worktree,
     cwd: opts.cwd,
     repo: opts.repo,
@@ -229,7 +254,7 @@ export function signOnTrap(opts: {
   if (!prior) {
     postNotice({
       kind: 'trap-signed-on',
-      text: `trap wt:${trapId} signed on (${opts.harness}, ${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for wt:${trapId}\``,
+      text: `trap ${trapLabel(reg)} signed on (${opts.harness}, ${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for ${name}\``,
       refId: trapId,
       repo: opts.repo,
       by: opts.sessionId,
@@ -250,7 +275,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   fs.rmSync(beatPath(trapId), { force: true });
   postNotice({
     kind: 'trap-stowed',
-    text: `trap wt:${trapId} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
+    text: `trap ${trapLabel(reg)} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
     refId: trapId,
     repo: reg.repo,
     by,
@@ -280,7 +305,7 @@ export function heartbeatTrap(
   if (firstPark) {
     postNotice({
       kind: 'trap-listening',
-      text: `trap wt:${trapId} is listening — addressed work now delivers within seconds`,
+      text: `trap ${trapLabel(next)} is listening — addressed work now delivers within seconds`,
       refId: trapId,
       repo: reg.repo,
       by: reg.sessionId,
@@ -434,7 +459,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
       const posted = postNotice({
         kind: 'trap-defective',
         text:
-          `trap wt:${reg.trapId} signed on but never listened (no park in ${Math.round(ttlMs / 60000)}m) — ` +
+          `trap ${trapLabel(reg)} signed on but never listened (no park in ${Math.round(ttlMs / 60000)}m) — ` +
           `likely no Stop hook. Have its session run \`lobstah soak --wait\`; its addressed bait waits meanwhile.`,
         refId: reg.trapId,
         repo: reg.repo,
@@ -467,8 +492,8 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     postNotice({
       kind: 'trap-ghosted',
       text: pauseExpired
-        ? `trap wt:${reg.trapId} ghosted: its pause expired (paused on ${reg.claimed!.slice(0, 8)} past --until or [soak].pausedTtlSecs, and quiet since) — registration removed, catch requeued; re-soaking the worktree restores the same address`
-        : `trap wt:${reg.trapId} ghosted (went quiet mid-watch) — registration removed; re-soaking the worktree restores the same address`,
+        ? `trap ${trapLabel(reg)} ghosted: its pause expired (paused on ${reg.claimed!.slice(0, 8)} past --until or [soak].pausedTtlSecs, and quiet since) — registration removed, catch requeued; re-soaking the worktree restores the same address`
+        : `trap ${trapLabel(reg)} ghosted (went quiet mid-watch) — registration removed; re-soaking the worktree restores the same address`,
       refId: reg.trapId,
       repo: reg.repo,
     });
@@ -492,7 +517,7 @@ export function noticeOrphanedBait(now = Date.now()): void {
     postNotice({
       kind: 'bait-orphaned',
       text:
-        `dispatch ${id.slice(0, 8)} is addressed to ${d.for} but no such trap is signed on — it waits. ` +
+        `dispatch ${id.slice(0, 8)} is addressed to ${to ? trapLabel({ trapId: to, name: trapNameForId(to) }) : d.for} but no such trap is signed on — it waits. ` +
         `Decide: re-address (\`lobstah cancel ${id}\` + re-dispatch), release to the daemon (cancel + dispatch without --for), or cancel.`,
       refId: id,
       repo: d.repo,

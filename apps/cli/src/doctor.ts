@@ -10,6 +10,8 @@ import {
   formatGB,
   GB,
   loadConfig,
+  listTraps,
+  trapLabel,
   lobstahHome,
   lobstahVersion,
   onPath,
@@ -301,7 +303,8 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   const hb = executorPath();
   const workSlots = slotUsage('work');
   const choreSlots = slotUsage('chore');
-  const slots = `headless: ${workSlots.headless} of ${cfg.limits.maxConcurrent} work, ${choreSlots.headless} of ${cfg.limits.choreConcurrent} chore; traps: ${workSlots.traps + choreSlots.traps}`;
+  const trapNames = listTraps().map(trapLabel);
+  const slots = `headless: ${workSlots.headless} of ${cfg.limits.maxConcurrent} work, ${choreSlots.headless} of ${cfg.limits.choreConcurrent} chore; traps: ${workSlots.traps + choreSlots.traps}${trapNames.length ? ` (${trapNames.join(', ')})` : ''}`;
   if (!fs.existsSync(hb)) {
     push('daemon', 'warn', `no heartbeat — daemon not running (\`lobstah daemon install\`); ${slots}`);
   } else {
