@@ -83,13 +83,11 @@ with work in flight:
 
 A trap arms `lobstah soak --wait --timeout 900` the same way.
 
-`lobstah soak title` prints the trap's name, followed by its short current
-work while a claim is open. The trap skill uses `set_session_title` for
-literal `self` in the desktop Code tab
-at sign-on, claim, and completion when that tool is available. A refusal
-or approval request is not retried. The CLI title hook is not enabled in
-this release; it does not rename a running CLI session.
-`[soak].sessionTitle = false` disables title setting.
+`lobstah soak` prints a title at sign-on, `soak --wait` prints one with
+the claimed work, and `report done` or `report failed` prints the trap
+name again. The trap skill uses `set_session_title` for literal `self`
+in the desktop Code tab when available. It does not retry a refusal or
+approval request. The CLI title hook does not rename a running CLI session.
 `lobstah man haul --park` or `[helm].park = "block"` in `config.toml`
 switches to the blocking park instead: the hook itself waits (up to its
 4-hour timeout) for something to need attention.

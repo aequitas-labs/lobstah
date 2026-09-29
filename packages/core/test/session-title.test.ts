@@ -48,12 +48,6 @@ describe('trap session title', () => {
     expect(trapSessionTitle({ sessionId: 'own-session', cwd: worktree })?.title).toBe('amber-gull');
   });
 
-  it('obeys the switch', () => {
-    signOn();
-    fs.writeFileSync(path.join(home, 'config.toml'), '[soak]\nsessionTitle = false\n');
-    expect(trapSessionTitle({ sessionId: 'own-session', cwd: worktree })).toBeUndefined();
-  });
-
   it('strips terminal sequences and controls, keeps shell punctuation as text, and caps the title', () => {
     const brief = `## \u001b[31mShip "quoted" \`backtick\` $(echo danger) ${'long '.repeat(100)}\u001b[0m\nsecond line`;
     const title = titleFromBrief(brief);

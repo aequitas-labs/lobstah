@@ -326,7 +326,6 @@ soaking (interactive sessions volunteering as workers):
                                   --wait listens in the foreground now (for
                                   sessions without Stop hooks): work prints
                                   plain, a quiet timeout exits 3 — re-run it.
-  soak title [--session <id>] [--json]
                                   print this session's trap title, or nothing when off.
   stow [--wt <trap>|--session <id>] [--keep] [--quiet]
                                   sign the trap off; an unfinished
@@ -450,6 +449,10 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
       }
       const caught = claimBait(reg);
       if (caught) {
+        if (plain) {
+          const title = trapSessionTitle({ sessionId: reg.sessionId, cwd: reg.worktree })?.title;
+          if (title) console.log(toonKV({ title }));
+        }
         block(baitBrief(caught.id, caught.descriptor));
         return true;
       }
@@ -969,6 +972,8 @@ async function mainCli(): Promise<void> {
           throw new UsageError(`${err instanceof Error ? err.message : String(err)}\n\n${usageFor('report')!}`);
         }
       }
+      const titleClaim = verb === 'done' || verb === 'failed' ? readSessionClaim(id, lane) : undefined;
+      const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
       if (verb === 'failed') recordPushFailure(id, lane, note);
@@ -1008,6 +1013,7 @@ async function mainCli(): Promise<void> {
           id,
           verb: entry.verb,
           at: entry.at,
+          ...(titleTrap?.name ? { title: titleTrap.name } : {}),
           ...(entry.waitingOn ? { waitingOn: entry.waitingOn } : {}),
           ...(entry.link ? { link: entry.link } : {}),
           ...(entry.until ? { until: entry.until } : {}),
@@ -1737,12 +1743,6 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'soak': {
-      if (pos[0] === 'title') {
-        if (pos.length !== 1) throw new UsageError(usageFor('soak')!);
-        const title = trapSessionTitle({ sessionId: opt('--session') ?? resolveSessionId({ env: process.env })?.id, cwd: process.cwd() });
-        if (title) console.log(has('--json') ? JSON.stringify(title) : title.title);
-        break;
-      }
       if (opt('--link') !== undefined && !validSessionLink(opt('--link'))) {
         throw new UsageError('invalid --link: use a supported claude://, vscode://, or codex:// session URL');
       }
@@ -1886,6 +1886,7 @@ async function mainCli(): Promise<void> {
       console.log(
         toonKV({
           name: reg.name,
+          title: reg.name,
           trap: `wt:${reg.trapId}`,
           label: trapLabel(reg),
           session: sessionId,

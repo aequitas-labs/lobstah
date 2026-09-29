@@ -85,7 +85,6 @@ send a continuation.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `sessionTitle` | `true` | Enables `lobstah soak title` and the plugin's session title instructions. With `false`, the command prints nothing and no title is set. |
 | `deferSecs` | `90` | A soaking session whose park heartbeat is this fresh holds unaddressed matching bait — the daemon waits instead of spawning. Addressed bait (`--for session:<id>`) waits regardless, until the registration is gone. |
 | `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues its open catch (or finalizes a cancelled one as failed). A fresh `lobstah report` on the catch counts as liveness too, and so does a fresh beat. |
 | `beat` | `true` | The post-tool hook (`lobstah soak beat`) refreshes a soaking session's liveness and writes its catch's activity, at most once per 30 seconds per trap. With `false` the hook does nothing, and a trap's liveness comes from its reports and its park only. |

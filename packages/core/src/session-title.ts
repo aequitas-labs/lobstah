@@ -1,4 +1,3 @@
-import { loadConfig } from './config.js';
 import { storedDescriptor } from './queue.js';
 import { hasOpenCatch, readTrap, trapBySession, trapIdAbove } from './soak.js';
 
@@ -40,7 +39,6 @@ export function titleFromBrief(brief: string): string {
 
 /** The title only for the caller's signed-on trap. Never reads a transcript. */
 export function trapSessionTitle(input: { sessionId?: string; cwd: string }): TrapSessionTitle | undefined {
-  if (loadConfig().soak.sessionTitle === false) return undefined;
   const reg = input.sessionId ? trapBySession(input.sessionId) : readTrap(trapIdAbove(input.cwd) ?? '');
   if (!reg || (input.sessionId && reg.sessionId !== input.sessionId)) return undefined;
   const name = Array.from(cleanTitleText(reg.name ?? `wt:${reg.trapId}`)).slice(0, 40).join('');

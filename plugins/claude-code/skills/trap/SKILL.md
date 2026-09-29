@@ -45,13 +45,11 @@ Invoke `/lobstah:trap` to load this skill.
   `--name <word-word>` chooses or changes it. The name survives stow and a
   ghost sweep; `wt:<name>` and `wt:<id>` also remain valid addresses.
 
-In the Claude desktop Code tab, run `lobstah soak title` after sign-on,
-after each claim, and after reporting `done` or `failed`. If it prints a
-title and this session has `set_session_title`, set the title of literal
-`self` to that text. If the tool refuses or asks the person to approve, do
-not retry that title. An empty result means title setting is off. Claude
-Code CLI has no automatic title setter in this release; do not claim that
-a running CLI session was renamed.
+When `lobstah soak`, `soak --wait`, or `report done`/`failed` prints a
+`title` field, set this session's title to that text if the Claude desktop
+Code tab offers `set_session_title` for literal `self`. Never retry a
+title the tool refused or asked the person to approve. Claude Code CLI
+has no automatic title setter in this release.
 
 ## Taking bait
 

@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { claimBait, enqueue, ensureLayout, signOnTrap } from '@lobstah/core';
+import { enqueue, ensureLayout, signOnTrap } from '@lobstah/core';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 let home: string;
@@ -37,35 +37,43 @@ function run(args: string[], cwd = worktree, stdin?: string) {
   return result.stdout.trim();
 }
 
-describe('soak title and SessionStart output', () => {
-  it('prints nothing without a trap or with the switch off', () => {
-    expect(run(['soak', 'title', '--json'])).toBe('');
+describe('title fields on trap commands', () => {
+  it('rejects the removed title subcommand and its JSON flag', () => {
+    const env = { ...process.env, LOBSTAH_HOME: home };
+    for (const args of [['soak', 'title'], ['soak', '--json', '--session', 'own-session']]) {
+      const result = spawnSync(process.execPath, [cli, ...args], { cwd: worktree, env, encoding: 'utf8' });
+      expect(result.status).toBe(2);
+    }
+  });
+
+  it('prints the name at sign-on, work on delivery, and the name after done or failed', () => {
     signOn();
-    fs.writeFileSync(path.join(home, 'config.toml'), '[soak]\nsessionTitle = false\n');
-    expect(run(['soak', 'title', '--session', 'own-session'])).toBe('');
-  });
-
-  it('prints plain and JSON titles for its own session', () => {
-    const reg = signOn();
-    expect(run(['soak', 'title', '--session', 'own-session'])).toBe('amber-gull');
-    expect(JSON.parse(run(['soak', 'title', '--json', '--session', 'own-session']))).toEqual({ title: 'amber-gull', name: 'amber-gull', work: null });
+    expect(run(['soak', '--session', 'own-session'])).toContain('title: amber-gull');
     enqueue({ id: 'title-work', repo: 'web', brief: '# Ship a short feature\nIgnore this line' });
-    claimBait(reg);
-    expect(JSON.parse(run(['soak', 'title', '--json', '--session', 'own-session']))).toEqual({
-      title: 'amber-gull · Ship a short feature', name: 'amber-gull', work: 'Ship a short feature',
-    });
-    expect(run(['soak', 'title', '--session', 'other-session'])).toBe('');
+    expect(run(['soak', '--wait', '--timeout', '0', '--session', 'own-session'])).toContain('title: amber-gull · Ship a short feature');
+    expect(run(['report', 'title-work', 'done', 'finished'])).toContain('title: amber-gull');
+
+    enqueue({ id: 'second-work', repo: 'web', brief: '# Another feature' });
+    expect(run(['soak', '--wait', '--timeout', '0', '--session', 'own-session'])).toContain('title: amber-gull · Another feature');
+    expect(run(['report', 'second-work', 'failed', 'cannot finish'])).toContain('title: amber-gull');
   });
 
-  it('leaves the existing SessionStart brief unchanged for traps and other sessions', () => {
+  it('prints the cleaned, capped first brief line when work is delivered', () => {
+    signOn();
+    enqueue({ id: 'clean-work', repo: 'web', brief: '## \u001b[31mShip safe work\u001b[0m ' + 'long '.repeat(100) + '\nignore this' });
+    const output = run(['soak', '--wait', '--timeout', '0', '--session', 'own-session']);
+    const title = output.split('\n').filter((line) => line.startsWith('title: ')).at(-1)?.slice(7) ?? '';
+    expect(title).toContain('amber-gull · Ship safe work');
+    expect(title).not.toContain('\u001b');
+    expect(title).not.toContain('ignore this');
+    expect(Array.from(title.split(' · ')[1] ?? '').length).toBeLessThanOrEqual(40);
+  });
+
+  it('leaves the SessionStart brief unchanged', () => {
     signOn();
     const input = JSON.stringify({ session_id: 'own-session', cwd: worktree, hook_event_name: 'SessionStart' });
     const ordinary = JSON.parse(run(['man', 'brief'], worktree, input));
     expect(ordinary.hookSpecificOutput.sessionTitle).toBeUndefined();
     expect(ordinary.hookSpecificOutput.additionalContext).toContain('own-session');
-
-    const foreign = JSON.parse(run(['man', 'brief'], home, JSON.stringify({ session_id: 'foreign', cwd: home })));
-    expect(foreign.hookSpecificOutput.sessionTitle).toBeUndefined();
-    expect(foreign.hookSpecificOutput.additionalContext).toContain('foreign');
   });
 });
