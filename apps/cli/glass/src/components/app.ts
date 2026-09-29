@@ -11,6 +11,7 @@ import { Lobs } from './lobs.js';
 import { Modal } from './modals.js';
 import { Notices } from './notices.js';
 import { PRs } from './prs.js';
+import { Reports } from './reports.js';
 import { Traps } from './traps.js';
 
 /**
@@ -28,6 +29,7 @@ export function App({ state }: { state: GlassState }) {
     if (t === 'dispatches') return html`<${Dispatches} inp=${inp.dispatches} />`;
     if (t === 'traps') return html`<${Traps} inp=${inp.traps} />`;
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} />`;
+    if (t === 'reports') return html`<${Reports} inp=${inp.reports} />`;
     return html`<${Notices} inp=${inp.notices} />`;
   };
   const onOverlay = (e: Event) => {
@@ -41,6 +43,6 @@ export function App({ state }: { state: GlassState }) {
     ),
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
-    html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} snapshot=${d} modal=${state.modal} prefs=${state.prefs} /></div></div>`,
+    html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} snapshot=${d} modal=${state.modal} prefs=${state.prefs} reportText=${state.reportText} /></div></div>`,
   ];
 }

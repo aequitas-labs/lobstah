@@ -15,7 +15,7 @@ public struct AttentionItem: Decodable, Equatable {
   public var key: String? = nil
   /** Acknowledged for display: the pet skips it (the helm's wakes never do). */
   public var acked: AckInfo? = nil
-  /** question | landed | watch | pr:draft | pr:review | pr:checks | pr:conflict | pr:ready — absent from an older lobstah. */
+  /** question | landed | watch | pr:draft | pr:review | pr:checks | pr:conflict | pr:ready | report — absent from an older lobstah. */
   public var kind: String? = nil
   /** pr:* kinds: the PR this pet walks for. */
   public var prUrl: String? = nil
@@ -36,6 +36,12 @@ public struct AttentionItem: Decodable, Equatable {
   /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
   public var prLink: URL? { (kind?.hasPrefix("pr:") ?? false) ? prUrl.flatMap(URL.init(string:)) : nil }
 
+  /** A report pet clicks through to the spyglass at the report's modal (#report/<key>). */
+  public func reportLink(glass: URL) -> URL? {
+    guard kind == "report", let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
+    return URL(string: "\(glass.absoluteString)/#report/\(encoded)")
+  }
+
   /** The short kind label shown before the note; nothing for a question. */
   public var kindLabel: String? {
     switch kind {
@@ -46,6 +52,7 @@ public struct AttentionItem: Decodable, Equatable {
     case "pr:ready": return "ready"
     case "landed": return "landed"
     case "watch": return "watch"
+    case "report": return "report"
     default: return nil
     }
   }

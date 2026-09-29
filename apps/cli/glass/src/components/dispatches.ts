@@ -1,7 +1,7 @@
 import type { GlassDispatch } from '@lobstah/core';
 import type { SectionInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
-import { ActivityLine, Age, WaitingLine, Table, addrCell, opener, prCell } from './common.js';
+import { ActivityLine, Age, WaitingLine, Table, addrCell, badgeTitle, opener, prCell } from './common.js';
 
 /** The Dispatches tab: every dispatch, filtered, as a table or cards; optionally grouped by follow-up chain. Rows are keyed by lane:id. */
 
@@ -36,7 +36,7 @@ function row(x: GlassDispatch, chain: boolean | undefined) {
 
 function card(x: GlassDispatch) {
   const key = x.lane + ':' + x.id;
-  return html`<div key=${key} class="card" onClick=${opener('dispatch', key)}><div class="top"><b>${x.id.slice(0, 8)}</b><span class=${'badge v-' + x.verb}>${x.verb}</span></div><div class="meta">${x.repo} · ${x.lane} ${x.bucket}${x.verbAt && [' · ', Age(x.verbAt)]}</div>${x.note && html`<div class="note">${x.note}</div>`}${WaitingLine(x)}${ActivityLine(x)}<div class="foot">${addrCell(x)} ${prCell(x)}</div></div>`;
+  return html`<div key=${key} class="card" onClick=${opener('dispatch', key)}><div class="top"><b>${x.id.slice(0, 8)}</b><span class=${'badge v-' + x.verb} title=${badgeTitle(x.verb)}>${x.verb}</span></div><div class="meta" title=${`${x.repo} · ${x.lane} ${x.bucket}`}>${x.repo} · ${x.lane} ${x.bucket}${x.verbAt && [' · ', Age(x.verbAt)]}</div>${x.note && html`<div class="note" title=${x.note}>${x.note}</div>`}${WaitingLine(x)}${ActivityLine(x)}<div class="foot">${addrCell(x)} ${prCell(x)}</div></div>`;
 }
 
 export function Dispatches({ inp }: { inp: SectionInputs['dispatches'] }) {

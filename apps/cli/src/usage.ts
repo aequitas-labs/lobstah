@@ -65,6 +65,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { flags: {}, maxPositionals: 0 },
+  reports: { flags: { '--json': {} } },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
@@ -76,6 +77,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--link': { value: '<url>' },
       '--until': { value: '<iso|30m|4h|2d>' },
       '--human-gate': { value: '<check>', repeatable: true },
+      '--report': { value: '<file.md>' },
+      '--attach': { value: '<file>', repeatable: true },
       '--session': { value: '<id>' },
     },
     positionals: '<uuid> <verb> [note...]',
@@ -143,6 +146,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
   'man:brief': { flags: {} },
+  'man:file': {
+    flags: { '--attach': { value: '<file>', repeatable: true }, '--title': { value: '<text>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } },
+    positionals: '<file.md>',
+  },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
 };
 
@@ -179,8 +186,8 @@ current state seen (--by names who), \`unack\` clears it. Display-only: an ack
 hides the item from the desktop pet and the glass lobs until its state
 changes — never from man tend --json, man wait, the park, or reminders.
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
-watch:<key>. An unknown key exits 2. --json prints { "attention": [...] },
-the same items and fields as man tend --json (the desktop pet reads it).`,
+watch:<key>, report:<lane>:<uuid> or report:helm:<grounds>:<rid> (report). An unknown key exits 2. --json prints { "attention": [...] },
+the same items and fields as man tend --json (the desktop pet reads it), less questions held on the helm's turn (the held column).`,
   cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
 without --apply (default 14 days): it measures each target (one du per
 worktree). --apply measures nothing; it deletes and prints the count and the
@@ -189,11 +196,13 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
   cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
-  report: `Status write path: working | needs-decision | blocked | paused | done | failed;
-after \`--\` all is note. \`--pr <url>\` on any verb but failed records the PR and,
-like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
---waiting-on, --link, --until: what a pause waits on, and when it ends. A trap's done
-records its HEAD (--session). --human-gate <check>: repairs skip a check only a person passes.`,
+  report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note.
+\`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
+--waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes.
+A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page as the report; --attach adds the images it names.`,
+  reports: `Every filed report, newest first: key, title, author (trap name, headless,
+or helm), the dispatch or helm grounds, when it was filed, and whether it is
+acked. \`lobstah attention ack <key>\` acks one.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
@@ -261,6 +270,9 @@ blocks: it shows standing events unconsumed, else \`standing: none\`, exit 0
   'man:haul': `Stop-hook entry: standing attention blocks immediately. In arm mode,
 work in flight requires a live watcher or the hook blocks with the arm command.
 --park or [helm].park = "block" waits in the hook instead.`,
+  'man:file': `File a markdown page as the helm's own report, under its grounds (reports/<grounds>/<rid>/).
+--attach copies images the page names by bare filename; --title overrides its first # heading.
+The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs

@@ -379,6 +379,15 @@ See the [attention contract](vocabulary.md#attention-contract). A PR is
 something to look at, not a stall: it never flips the verdict to
 `needs-attention` and stays out of the digest.
 
+A question is held while a helm is signed on for its grounds and has not
+ended a turn since the question was filed. A held question is in `man tend`,
+`man wait`, the park, and reminders, and `lobstah attention` and `man tend`
+mark it `held`. It is not in `attention --json` (the pet), the glass, or
+notifyCommand. The question walks when the helm ends a turn (`man haul`)
+without answering it; the release is recorded in `releases/<key>.json`. With
+no helm signed on, or a helm relieved or stale past `[helm].ttlSecs`, a
+question walks at once.
+
 ### The spyglass
 
 The lobstah man skill brings up the glass when it takes the helm.
@@ -392,8 +401,11 @@ detached glass (stop, then `--detach`).
 dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
-and the helm identified by name. Reading the glass consumes no cursor. Each
-live trap has an **Open window** button. It asks the local server to focus
+and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
+PRs, Reports, and Notices. The Reports tab lists every report, unacked first,
+then newest first, and the repo filter and the search box (title, author,
+dispatch id, repo) apply to it. Reading the glass consumes no cursor. Each
+live trap has a **↗ open** button at the end of its foot line. It asks the local server to focus
 that trap's reported session link, iTerm2 session, Terminal tab, editor
 worktree, or recorded app, in that order. The result names the step that
 worked; app-only activation says the exact window is not known. On other
@@ -403,6 +415,11 @@ only a trap id in a same-origin, token-protected POST. The ⚙ popover's two
 preferences — table or cards, and whether lobsters crawl the page — are
 per-browser, kept in that browser's localStorage and never on disk.
 
+On a card, the title and the badge share one line. A title truncates with an
+ellipsis. A badge longer than about 24 characters truncates too. The meta
+line and the note show at most two lines. The full text of each is in its
+hover title.
+
 The On deck tab shows up to 8 traps. Signed-on traps come first, oldest
 sign-on first, with name breaking ties. Traps stowed or ghosted in the last
 hour follow, most recent sign-off first, with name breaking ties. A "+N more"
@@ -411,6 +428,50 @@ trap's current dispatch, last activity, or idle and waiting state.
 
 This is where "is the agent alive?" belongs: the helm's heartbeat age on a
 page, not periodic proof-of-life turns in a transcript.
+
+### Reports
+
+A report is a markdown page of findings, with images, that a dispatch or
+the helm files to keep.
+
+- **Filing a worker report.** `lobstah report <id> done "<one-line note>"
+  --report <file.md> [--attach <file> ...]` (also `failed`). The page is
+  copied to the dispatch's state directory as `state/<id>/report.md`, beside
+  `attachments/`. `--attach` copies each file into that `attachments/`. An
+  image the page names by bare filename (`![tray](tray.png)`) resolves to
+  that directory. The note stays one line.
+- **Filing a helm report.** `lobstah man file <file.md> [--attach <file> ...]
+  [--title <text>]`. It is stored under the helm's grounds,
+  `reports/<grounds>/<rid>/`, with the same layout, and the author is `helm`.
+- **Title and author.** The title is `--title`, else the page's first `#`
+  heading, else the dispatch's brief title. The author is the trap name, or
+  `headless`, or `helm`. A file larger than `[limits].attachmentMaxBytes` is
+  refused, and nothing is filed.
+- **Finding one.** `lobstah reports` lists every report, newest first: key,
+  title, author, the dispatch or helm grounds, when it was filed, and
+  whether it is acked. `lobstah status <id>` and `lobstah catch <id>` print
+  `report: <path>` when the dispatch has one.
+- **In the glass.** The deck has a reports block after Landed: newest first,
+  unacked first, up to 8, then "+N more", which opens the Reports tab. A
+  report's card or row shows its title, then who filed it (a trap's name, a
+  headless dispatch's id, nothing for the helm), its age, and `acked`. A
+  dispatch's report renders as a
+  page at the top of its dispatch modal. A helm report opens in a modal of
+  its own; `#report/<key>` links to it. The page shows headings, lists,
+  tables, fenced code, links (in a new tab), bold, italics, and images.
+  Raw HTML in the markdown shows as text. The glass serves the markdown and
+  the images read-only, and an image only by basename from that report's
+  own attachments.
+- **Attention.** A filed report with no ack stands as the `report` attention
+  kind. Add `report` to `attentionKinds` to walk it. The desktop pet shows
+  the report's title; a click opens the glass at the report and does not
+  ack it. `lobstah attention ack <key>` acks a report, whether or not
+  `report` is in `attentionKinds`. Nothing else acks it, and opening it in
+  the glass does not. A report filed by a follow-up dispatch acks the report
+  of each dispatch before it in the chain.
+- **Cull.** `lobstah cull` removes a dispatch's report with the rest of its
+  state. A helm report is culled when it is older than the retention window,
+  counted from when it was filed.
 
 ### The periodic report
 
@@ -639,7 +700,7 @@ lobstah soak --wait             # hookless sessions: listen in the foreground
                                 # (re-runs need no flags — identity is the
                                 # worktree, else the session id); exit 3 =
                                 # quiet, run it again
-lobstah soak --link <url>       # store this session's link for Open window
+lobstah soak --link <url>       # store this session's link for the glass's ↗ open button
 lobstah focus <trap>           # focus a live trap from the CLI
 lobstah stow                    # sign off; an open catch requeues, unread
                                 # messages bounce back to the helm; removes

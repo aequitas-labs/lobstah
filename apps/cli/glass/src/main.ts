@@ -1,9 +1,9 @@
 import { h, render } from 'preact';
-import { closeModal } from './actions.js';
+import { closeModal, loadOpenReport } from './actions.js';
 import { App } from './components/app.js';
 import { startPolling } from './poll.js';
 import { loadLobHidden, loadPrefs } from './prefs.js';
-import { currentRoute, onRoute } from './route.js';
+import { currentModal, currentRoute, onRoute } from './route.js';
 import { getState, initState, setState, subscribe } from './store.js';
 
 /**
@@ -15,12 +15,13 @@ initState({
   snapshot: undefined,
   route: currentRoute(),
   prefs: loadPrefs(),
-  modal: null,
+  modal: currentModal(),
   stale: false,
   lobHidden: loadLobHidden(),
   spriteOk: null,
   focusResults: {},
   preview: new URLSearchParams(location.search).has('lob'),
+  reportText: {},
 });
 
 let paintedRoute: ReturnType<typeof currentRoute> | undefined;
@@ -44,7 +45,11 @@ sprite.onload = () => setState({ spriteOk: true });
 sprite.onerror = () => setState({ spriteOk: false });
 sprite.src = '/lob-sprite.png';
 
-onRoute((route) => setState({ route }));
+onRoute((route) => {
+  const modal = currentModal();
+  setState(modal ? { route, modal } : { route });
+  if (modal) loadOpenReport();
+});
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeModal();
 });

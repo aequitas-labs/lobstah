@@ -26,12 +26,25 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * - only the active tab's section is compared: the old page left a hidden
  *   tab's last render in place, the new one does not render hidden tabs;
  * - likewise the modal box only while the overlay is open: the old page
- *   left a closed modal's markup behind the hidden overlay.
+ *   left a closed modal's markup behind the hidden overlay;
+ * - reports are not in the compared snapshots: the old page had no reports
+ *   (glass-page.test.ts covers the reports block and the report modals);
+ * - the Reports tab (its nav link and its page) is removed before comparing,
+ *   and `title` attributes (hover text for clamped card text) are dropped:
+ *   glass-reports.test.ts covers both;
+ * - the card overflow rules (badge truncation, two-line meta, the card's own
+ *   overflow) changed on purpose, so the computed-style check compares the
+ *   table views only; glass-reports.test.ts checks the card rules.
  * The glass also grew PR titles on purpose (glass-page.test.ts tests them):
  * a card's `<span class="prname"><b>#n</b> title</span>` folds back to the
  * old `<b>#n title</b>`, and a stack line's per-number `<span title>#n</span>`
  * folds back to plain text (foldPrTitles).
  */
+/** Take the Reports tab out of a live page, so the page compares with the old one. */
+function withoutReportsTab(g: GlassDom): void {
+  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports')) el.remove();
+}
+const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
 // The exact bytes served, whatever line endings the checkout gave the fixture.
 const LEGACY = fs.readFileSync(new URL('./fixtures/glass-legacy.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
@@ -66,7 +79,7 @@ function canon(node: Node, skeletonOnly = false): string {
     const el = c as Element;
     if (el.tagName === 'SCRIPT') continue;
     const attrs = [...el.attributes]
-      .filter((a) => !a.name.startsWith('on') && a.name !== 'selected')
+      .filter((a) => !a.name.startsWith('on') && a.name !== 'selected' && a.name !== 'title')
       .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.value] as const)
       .filter(([n, v]) => !((n === 'class' || n === 'style') && v === ''))
       .sort(([a], [b]) => a.localeCompare(b))
@@ -102,6 +115,7 @@ const activeTab = (g: GlassDom) => (g.$('.tabpage.on')?.id ?? 'page-deck').slice
 
 /** The static skeleton: every region, tab page, and select emptied, then canonical. */
 function skeleton(g: GlassDom): string {
+  withoutReportsTab(g);
   const body = g.document.body.cloneNode(true) as unknown as HTMLElement;
   for (const id of [...REGIONS, ...TABS]) {
     const el = body.querySelector('#' + id);
@@ -113,6 +127,7 @@ function skeleton(g: GlassDom): string {
 
 /** Everything the reader can see in the page right now, section by section. */
 function capture(g: GlassDom): Record<string, string> {
+  withoutReportsTab(g);
   const out: Record<string, string> = {};
   for (const id of REGIONS) {
     const el = g.$('#' + id);
@@ -245,7 +260,7 @@ async function trace(page: string, d: GlassSnapshot, search = '') {
 describe('glass fidelity: the built page renders the legacy page’s DOM', () => {
   for (const [name, make] of Object.entries(FIXTURES)) {
     it(`${name} fleet: every tab, view, filter, and modal`, async () => {
-      const [legacy, built] = [await trace(LEGACY, make()), await trace(GLASS_PAGE, make())];
+      const [legacy, built] = [await trace(LEGACY, legacyShape(make())), await trace(GLASS_PAGE, legacyShape(make()))];
       expect(built.skeleton).toBe(legacy.skeleton);
       expect(built.views.map(([n]) => n)).toEqual(legacy.views.map(([n]) => n));
       for (let i = 0; i < legacy.views.length; i++) {
@@ -260,9 +275,10 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
   // properties): every visible element's computed style must come out the same.
   it('every visible element computes the same style under glass.css as under the legacy stylesheet', async () => {
     const computed = async (page: string) => {
-      const g = await loadGlass(page, FIXTURES['every-attention']!(), { now: NOW });
+      const g = await loadGlass(page, legacyShape(FIXTURES['every-attention']!()), { now: NOW });
       const out: string[] = [];
       const snap = (label: string) => {
+        withoutReportsTab(g);
         const hidden = [...g.$$('.tabpage:not(.on)'), ...(g.$('#overlay')!.className === 'open' ? [] : [g.$('#modalbox')!])];
         g.$$('body *')
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
@@ -295,7 +311,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
     // Prettier writes glass.css numbers with a leading zero (.55 → 0.55), which
     // happy-dom reports verbatim; the value is the same.
     const norm = (s: string) => s.replace(/(?<![\d.])0\.(\d)/g, '.$1');
-    const unaffected = (s: string) => /^(?:table|cards)#(?:dispatches|prs|notices) /.test(s);
+    const unaffected = (s: string) => /^table#(?:dispatches|prs|notices) /.test(s);
     const [legacy, built] = [(await computed(LEGACY)).map(norm).filter(unaffected), (await computed(GLASS_PAGE)).map(norm).filter(unaffected)];
     expect(built.length).toBe(legacy.length);
     for (let i = 0; i < legacy.length; i++) expect(built[i]).toBe(legacy[i]);

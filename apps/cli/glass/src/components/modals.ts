@@ -1,8 +1,10 @@
-import type { GlassDispatch, GlassHelm, GlassSnapshot, GlassTrap } from '@lobstah/core';
-import { modalItem, prBadgeClass, prModalView } from '../../../src/glass-diff.js';
+import type { GlassDispatch, GlassHelm, GlassReport, GlassSnapshot, GlassTrap } from '@lobstah/core';
+import { dispatchReport, modalItem, prBadgeClass, prModalView } from '../../../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal } from '../actions.js';
 import { html } from '../html.js';
+import type { ReportText } from '../store.js';
+import { ReportSection } from './report.js';
 import {
   Age,
   addrCell,
@@ -20,7 +22,7 @@ import {
   windowAction,
 } from './common.js';
 
-/** The overlay's one modal: dispatch, trap, helm, PR, or ⚙ settings. */
+/** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
 const close = html`<span class="x" onClick=${closeModal}>×</span>`;
 
@@ -115,7 +117,12 @@ function helmModal(h: GlassHelm) {
   ];
 }
 
-function dispatchModal(x: GlassDispatch) {
+/** A helm's report: a modal of its own (#report/<key>). */
+function reportModal(r: GlassReport, text: ReportText | undefined) {
+  return [close, html`<h3>📄 ${r.title}</h3>`, html`<${ReportSection} r=${r} text=${text} />`];
+}
+
+function dispatchModal(x: GlassDispatch, report: GlassReport | undefined, text: ReportText | undefined) {
   const session =
     x.claimedBy && x.claimedBy.startsWith('wt:')
       ? [
@@ -135,6 +142,7 @@ function dispatchModal(x: GlassDispatch) {
       x.worktreeKept && html`<div class="dim" style="font-size:11px">kept: ${x.worktreeKept}</div>`,
     ],
     x.transcript && [html`<div class="sec">transcript</div>`, cmdRow(x.transcript)],
+    report && html`<${ReportSection} r=${report} text=${text} heading=${true} />`,
     detailBody(x),
   ];
 }
@@ -192,13 +200,27 @@ function trapModal(t: GlassTrap) {
 }
 
 /** The open modal's body, or nothing. Preact keeps every unchanged node across ticks. */
-export function Modal({ snapshot, modal, prefs }: { snapshot: GlassSnapshot | undefined; modal: ModalRef | null; prefs: GlassPrefs }) {
+export function Modal({
+  snapshot,
+  modal,
+  prefs,
+  reportText,
+}: {
+  snapshot: GlassSnapshot | undefined;
+  modal: ModalRef | null;
+  prefs: GlassPrefs;
+  reportText: Record<string, ReportText>;
+}) {
   if (!snapshot || !modal) return null;
   const item = modalItem(snapshot, modal);
   if (!item) return null;
   if (modal.type === 'settings') return settingsModal(item as SettingsItem, prefs);
   if (modal.type === 'pr') return prModal(snapshot, modal.key);
   if (modal.type === 'helm') return helmModal(item as GlassHelm);
-  if (modal.type === 'dispatch') return dispatchModal(item as GlassDispatch);
+  if (modal.type === 'report') return reportModal(item as GlassReport, reportText[modal.key]);
+  if (modal.type === 'dispatch') {
+    const report = dispatchReport(snapshot, item as GlassDispatch);
+    return dispatchModal(item as GlassDispatch, report, report && reportText[report.key]);
+  }
   return trapModal(item as GlassTrap);
 }

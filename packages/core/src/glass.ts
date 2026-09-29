@@ -27,6 +27,12 @@ export interface TendAttention {
   stateHash: string;
   /** A human acknowledged this state (display-only: the pet and glass lobs skip it; nothing else does). */
   acked?: { at: string; by: string };
+  /**
+   * question: held on the helm's turn (question-hold.ts). `man tend` lists it;
+   * the pet, the glass, and notifyCommand do not, until the helm ends a turn
+   * without answering it.
+   */
+  held?: boolean;
   id: string;
   lane: Lane;
   /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
@@ -201,6 +207,32 @@ export interface GlassHelm extends HelmRegistration {
   transcript?: string;
 }
 
+/**
+ * A filed report (reports.ts), without its markdown: the page fetches the
+ * page from /report/<key>/md when a modal opens, and its images from
+ * /report/<key>/files/<name>.
+ */
+export interface GlassReport {
+  key: string;
+  title: string;
+  /** The trap name, `headless`, or `helm`. */
+  author: string;
+  filedAt: string;
+  stateHash: string;
+  /** A human acked this filing (`lobstah attention ack <key>`). */
+  acked?: { at: string; by: string };
+  dispatch?: string;
+  lane?: Lane;
+  /** The trap name, when a trap filed it. */
+  trap?: string;
+  grounds?: string;
+  repo?: string;
+  bytes: number;
+  attachments: Attachment[];
+  /** Attached basename → stored name, where a name was already taken. */
+  renamed?: Record<string, string>;
+}
+
 /** A trap's mail, pending or delivered. */
 export interface GlassMessage {
   file: string;
@@ -247,6 +279,8 @@ export interface GlassSnapshot {
   stacks: GlassStack[];
   attention: TendAttention[];
   landed: LandedCatch[];
+  /** Every filed report, newest first. */
+  reports: GlassReport[];
   attentionKinds: string[];
   /** A config error, surfaced on the page instead of failing /data. */
   attentionError?: string;
