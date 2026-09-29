@@ -14,11 +14,11 @@ hand, plus the skills and commands.
 | SessionStart hook (`lobstah man brief`) | Announces the session's id and a one-line fleet state into the conversation, so every session starts oriented. A session that is neither helm nor trap gets the two copy-paste sign-on commands. |
 | PostToolUse hook (`lobstah soak beat`) | Refreshes a soaking trap's liveness and records redacted activity after tool calls. |
 | Stop hook (`lobstah man haul`) | Checks for an armed watcher while work is in flight; `--park` waits in the hook. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
-| SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends. |
+| SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends and keeps its worktree. |
 | `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
-| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, inbox, stowing. |
+| `trap` skill | The worker: soaking (in a linked worktree, or in one that soak creates), the `wt:` address, the six report verbs, inbox, stowing. |
 | `/lobstah:helm` · `/lobstah:relieve` | Take the helm (optionally for a named grounds) and step down. |
-| `/lobstah:soak` · `/lobstah:stow` | Volunteer this session as a trap from a linked worktree, and sign it off. |
+| `/lobstah:soak` · `/lobstah:stow` | Volunteer this session as a trap, and sign it off. |
 | `/lobstah:tend` command | Fleet status at a keystroke. |
 
 ## Requirements
@@ -43,8 +43,10 @@ behind.
 ## Using it
 
 The hooks never conscript a session: they stay inert until a session signs
-on as the helm (`lobstah man helm`) or as a trap (`lobstah soak`, from a
-linked worktree). Signing on, the session id, getting woken, and how the
+on as the helm (`lobstah man helm`) or as a trap (`lobstah soak`). In a
+repo's primary checkout, `lobstah soak` creates a linked worktree for the
+trap; `lobstah stow` removes it unless it holds work that exists nowhere
+else or `--keep` is passed. Signing on, the session id, getting woken, and how the
 Claude Code CLI and desktop app differ are in
 [docs/harness/claude-code.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/claude-code.md). The quickstart, the same
 in every harness, is in the

@@ -138,7 +138,8 @@ writes a standalone brief, dispatches it, answers workers' questions, and
 brings you the catch.
 
 Use `/lobstah:trap` in Claude Code or `$lobstah:trap` in Codex to turn another
-live session in a linked worktree into a worker. The skill runs `lobstah soak`;
+live session into a worker. The skill runs `lobstah soak`, which creates a
+linked worktree when the session is in a repo's primary checkout;
 the helm addresses bait to its `wt:<trap>` address, and `lobstah stow` signs
 it off.
 

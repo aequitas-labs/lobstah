@@ -1,20 +1,21 @@
 ---
-description: Volunteer this session as a trap — take work assigned by the helm, from a linked worktree
+description: Volunteer this session as a trap — take work assigned by the helm, in a worktree (soak creates one from a primary checkout)
 ---
 
 Volunteer this session as a worker (a trap).
 
-1. Check where you stand: compare `git rev-parse --git-dir` with
-   `git rev-parse --git-common-dir`. If they are the same path, this is the
-   repo's primary checkout. Refuse: explain that traps never work in the
-   primary checkout, and tell the user to create a linked worktree
-   (`git worktree add ../<name> -b <branch>`) and start a session there.
-   Stop.
-2. Otherwise run `lobstah soak`. No session flag is needed: the CLI reads
+1. Run `lobstah soak`. No session flag is needed: the CLI reads
    `$CLAUDE_CODE_SESSION_ID`. If it refuses for a missing session, re-run
    with `--session $CLAUDE_CODE_SESSION_ID`.
-3. Print the `wt:<trap>` address from its output — the helm addresses work
-   here with `--for wt:<trap>`.
+   - In a linked worktree, it signs on there.
+   - In the repo's primary checkout, it creates a new worktree and signs on
+     in it.
+   - Outside any configured repo, it asks for `--repo <key>`. Ask the user
+     which repo (`lobstah repos` lists them), then re-run with `--repo <key>`.
+2. If the output has an `instruction:` line, run `cd <worktree>` now. Do all
+   work in that directory from here on.
+3. Print the `wt:<trap>` address and the worktree path from its output — the
+   helm addresses work here with `--for wt:<trap>`.
 4. State the worker rules and follow them from here on:
    - Report only with `lobstah report <id> <verb> "<note>"`, using the six
      verbs: working, needs-decision, blocked, paused, done, failed.

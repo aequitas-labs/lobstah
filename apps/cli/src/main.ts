@@ -289,26 +289,31 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   man wait (lobstah man).
 
 workers (dispatched agents; injected into every brief):
-  report <uuid> <verb> [--pr <url>] [--no-watch] [--] [note]
+  report <uuid> <verb> [--pr <url>] [--no-watch] [--session <id>] [--] [note]
                                   the validated status write path
                                   (${VERBS.join(' | ')}). done --pr
                                   registers the PR's pr: watch for this
                                   chain; --no-watch opts out.
 
 soaking (interactive sessions volunteering as workers):
-  soak [--session <id>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
+  soak [--session <id>] [--repo <key>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
                                   volunteer this session as a worker.
                                   Identity is the worktree: sign-on anchors a
                                   trap id (.lobstah-trap) and prints its
                                   wt:<trap> address; re-runs here need no
-                                  flags. Refused from a primary checkout.
+                                  flags. From a primary checkout (or with
+                                  --repo <key>) it creates a worktree and
+                                  prints it: cd there and work in it. A
+                                  session that mans a trap re-uses it.
                                   --wait listens in the foreground now (for
                                   sessions without Stop hooks): work prints
                                   plain, a quiet timeout exits 3 — re-run it.
-  stow [--wt <trap>|--session <id>] [--quiet]
-                                  sign the worktree's trap off (run it
-                                  there); an unfinished assignment requeues,
-                                  unread messages bounce to the helm.
+  stow [--wt <trap>|--session <id>] [--keep] [--quiet]
+                                  sign the trap off; an unfinished
+                                  assignment requeues, unread messages
+                                  bounce to the helm. Removes a worktree
+                                  soak created unless --keep or it holds
+                                  unpushed work (then kept, with the reason).
 
 setup:
   init [--scan <dir>... [--pickup]]

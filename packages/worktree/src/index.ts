@@ -317,7 +317,7 @@ export async function remove(repo: RepoConfig, id: string): Promise<void> {
 async function tryGit(cwd: string, ...args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
   try {
     const { stdout, stderr } = await run('git', args, { cwd, env: process.env });
-    return { ok: true, out: stdout.trim(), err: stderr.trim() };
+    return { ok: true, out: stdout.trimEnd(), err: stderr.trim() };
   } catch (e) {
     return { ok: false, out: ((e as { stdout?: string }).stdout ?? '').trim(), err: gitStderr(e) };
   }

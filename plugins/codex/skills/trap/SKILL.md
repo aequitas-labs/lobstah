@@ -1,6 +1,6 @@
 ---
 name: trap
-description: Volunteer this live session as a lobstah worker (a trap) — soak from a linked worktree, take bait assigned by the helm, report with the six verbs, and stow when done. Use when the user asks to work as a trap, soak, volunteer this session, take bait, or pick up lobstah work in this session.
+description: Volunteer this live session as a lobstah worker (a trap) — soak in a worktree (soak creates one from a primary checkout), take bait assigned by the helm, report with the six verbs, and stow when done. Use when the user asks to work as a trap, soak, volunteer this session, take bait, or pick up lobstah work in this session.
 ---
 
 # The trap
@@ -12,17 +12,26 @@ work; the helm judges the catch.
 ## Signing on
 
 ```
-lobstah soak                  # sign on; prints your wt:<trap> address
+lobstah soak                  # sign on; prints your wt:<trap> address and worktree
+lobstah soak --repo <key>     # outside any repo: create a worktree for that repo
 lobstah soak --one            # sign off after the first finished catch
 lobstah soak --wait           # hookless: listen now; exit 3 = quiet, run again
-lobstah stow                  # sign off
+lobstah stow                  # sign off; removes the worktree soak created
+lobstah stow --keep           # sign off; keep the worktree
 ```
 
-- Run `soak` from a linked worktree, never the repo's primary checkout —
-  it refuses there. Create one with `git worktree add ../<name> -b <branch>`.
+- In a linked worktree, `soak` signs on there. In the repo's primary
+  checkout, it creates a new worktree (`~/.lobstah/worktrees/soak-<trap>`,
+  branch `lobstah/soak-<trap>`, from trunk, with the repo's setup) and signs
+  on in it. Outside any repo, pass `--repo <key>`.
+- When the output has `instruction: cd <path> ...`, run `cd <path>` before
+  you take work. Work in that directory from now on: every task runs there.
+- Running `soak` again re-uses your trap. It never creates a second worktree.
 Invoke `$lobstah:trap` to load this skill; Codex has no `/lobstah:*` commands.
 Codex exports no session variable: pass `--session <task-id>` from the
-session-start brief on first sign-on. Re-runs in the worktree need no flags.
+session-start brief on first sign-on, and on every `soak`, `soak --wait`,
+`report`, and `stow` you run outside the trap's worktree. Re-runs in the
+worktree need no flags.
 - The harness (claude or codex) is inferred from the environment and the
   session id; `--harness claude|codex` overrides.
 - Your address is `wt:<trap>`. It belongs to the worktree and survives
@@ -64,6 +73,14 @@ naming a dispatch id. Then:
 
 ## Signing off
 
-`lobstah stow` in the worktree signs the trap off. An unfinished catch
-requeues; unread messages bounce back to the helm. The plugin's SessionEnd
-hook stows for you when the session ends.
+`lobstah stow` signs the trap off. An unfinished catch requeues; unread
+messages bounce back to the helm.
+
+- When soak created the worktree, stow removes it and prints `returnTo:`.
+  Run `cd` to that path and work from there.
+- Stow keeps the worktree, and prints the reason, when it holds uncommitted
+  changes, untracked files that are not ignored, or commits on no remote
+  branch. `stow --keep` always keeps it.
+- Stow never removes a worktree that soak did not create.
+- The plugin's SessionEnd hook stows for you when the session ends. It keeps
+  the worktree.

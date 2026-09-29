@@ -35,9 +35,9 @@ says when the plugin is behind.
 | SessionStart hook (`lobstah man brief`) | Prints the session id and a one-line fleet state. A session that is neither helm nor trap gets the two sign-on commands, with the id filled in. |
 | Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it when something needs attention. Inert unless the session holds the helm or is soaking. |
 | PostToolUse hook (`lobstah soak beat`) | After a tool call in a soaking session: refreshes the trap's liveness and writes its catch's activity. Needs Codex 0.117.0+ (see [below](#post-tool-hook-what-codex-has)). Older Codex ignores the event, and a trap's liveness then comes from its reports and its park only. |
-| SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends. |
+| SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends and keeps its worktree. |
 | `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken, and sending a follow-up to finished work. |
-| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, and `paused --waiting-on` before external waits. |
+| `trap` skill | The worker: soaking (in a linked worktree, or in one that soak creates), the `wt:` address, the six report verbs, and `paused --waiting-on` before external waits. |
 
 There are no slash commands: the Codex plugin layout has no commands
 directory. The skills run the same `lobstah` commands as the README
@@ -104,11 +104,13 @@ brief prints the task id. Pass it on first sign-on:
 
 ```bash
 lobstah man helm --session <task-id>      # the helm
-lobstah soak --session <task-id>          # a trap, from a linked worktree
+lobstah soak --session <task-id>          # a trap
 ```
 
 After sign-on, the Stop hook gets the id from Codex on stdin. A trap's
-identity is its worktree, so `lobstah soak --wait` needs no flags. Outside
+identity is its worktree, so `lobstah soak --wait` in that worktree needs no
+flags. Outside the trap's worktree, `soak --wait`, `report`, and `stow`
+take `--session <task-id>`. Outside
 the hook, `man wait`, `man report`, and `man relieve` still take
 `--session <task-id>`.
 

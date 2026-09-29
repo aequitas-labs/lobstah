@@ -14,7 +14,7 @@ import { inspectSoakSite } from './soak-site.js';
 import { buildTendReport } from './tend.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 
-const SOAK_WHERE = '(from a linked worktree, never the primary checkout)';
+const SOAK_WHERE = '(in a linked worktree; from a primary checkout it creates one)';
 
 /**
  * The sign-on offer for a session that holds no helm and is not soaking:
@@ -89,7 +89,7 @@ export async function buildBriefContext(sessionId: string, cwd?: string): Promis
   }
   const workerTrap = trapBySession(sessionId);
   if (workerTrap) {
-    return `lobstah: session id ${sessionId} — this session mans trap wt:${workerTrap.trapId} (it takes assigned work at turn end); \`lobstah stow\` in the worktree signs it off.${fleet}`;
+    return `lobstah: session id ${sessionId} — this session mans trap wt:${workerTrap.trapId} (it takes assigned work at turn end) and works in ${workerTrap.worktree}; \`lobstah stow\` signs it off.${fleet}`;
   }
   let help: string;
   try {
