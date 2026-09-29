@@ -303,19 +303,28 @@ tr.rowhead:hover {
   align-items: center;
   min-height: 22px;
 }
-/* The title's identity (#99999, an 8-character id) never truncates: the badge gives way first. */
+/*
+ * The title shrinks first, down to a minimum that keeps its identity whole
+ * with its ellipsis (#99999…, an 8-character id…). Its shrink factor dwarfs a
+ * long badge's, so the badge's share rounds to nothing and it gives up space
+ * only after the title has reached that minimum.
+ */
 .card .top > b,
 .card .top > .prname {
-  flex: 1 1 auto;
-  min-width: min(9ch, 100%);
+  flex: 1 1000000 auto;
+  min-width: min(10ch, 100%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The badge keeps its text up to about 24 characters, then truncates; it never leaves the card. */
+/* A badge of up to 12 characters (done, claude, working) never shrinks. */
 .card .top .badge {
-  flex: 0 4 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+}
+/* A longer badge (class `long`, full text in its title) truncates, but never below 12 characters or past the card. */
+.card .top .badge.long {
+  flex: 0 1 auto;
+  min-width: min(12ch, 100%);
   max-width: min(26ch, 100%);
   overflow: hidden;
   text-overflow: ellipsis;

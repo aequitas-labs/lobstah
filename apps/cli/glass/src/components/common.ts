@@ -45,10 +45,16 @@ export const WaitingLine = (x: Pick<GlassDispatch, 'waiting' | 'verb'>) => {
   }</div>`;
 };
 
-/** A card badge longer than this truncates with an ellipsis; its title carries the full text. */
-export const BADGE_MAX_CHARS = 24;
-export const badgeTitle = (text: string | undefined): string | undefined =>
-  text !== undefined && text.length > BADGE_MAX_CHARS ? text : undefined;
+/**
+ * A card badge of up to this many characters always shows whole. A longer one
+ * carries the `long` class, may truncate with an ellipsis once the title has
+ * reached its minimum, and keeps its full text in its title attribute.
+ */
+export const BADGE_WHOLE_CHARS = 12;
+const longBadge = (text: string | undefined): boolean => text !== undefined && text.length > BADGE_WHOLE_CHARS;
+export const badgeTitle = (text: string | undefined): string | undefined => (longBadge(text) ? text : undefined);
+/** ' long' for a badge that may truncate, else ''. */
+export const badgeLong = (text: string | undefined): string => (longBadge(text) ? ' long' : '');
 
 /** A click handler that opens a modal (and never bubbles to a row that opens another). */
 export const opener = (type: ModalType, key: string) => () => showModal(type, key);

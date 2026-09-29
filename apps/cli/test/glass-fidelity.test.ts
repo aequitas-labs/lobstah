@@ -35,6 +35,8 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * - the card overflow rules (badge truncation, two-line meta, the card's own
  *   overflow) changed on purpose, so the computed-style check compares the
  *   table views only; glass-reports.test.ts checks the card rules.
+ * - a card badge longer than 12 characters carries a `long` class (it may
+ *   truncate); the class is dropped before comparing.
  * The glass also grew PR titles on purpose (glass-page.test.ts tests them):
  * a card's `<span class="prname"><b>#n</b> title</span>` folds back to the
  * old `<b>#n title</b>`, and a stack line's per-number `<span title>#n</span>`
@@ -80,7 +82,7 @@ function canon(node: Node, skeletonOnly = false): string {
     if (el.tagName === 'SCRIPT') continue;
     const attrs = [...el.attributes]
       .filter((a) => !a.name.startsWith('on') && a.name !== 'selected' && a.name !== 'title')
-      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.value] as const)
+      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )long(?= |$)/, '').trim() : a.value] as const)
       .filter(([n, v]) => !((n === 'class' || n === 'style') && v === ''))
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([n, v]) => `${n}=${JSON.stringify(v)}`);

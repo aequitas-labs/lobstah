@@ -11,7 +11,7 @@ import { parseMarkdown, parseInline } from '../src/glass-markdown.js';
 import { lobItems } from '../src/glass-lobs.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
-import { NOW, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
+import { NOW, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
 
 /**
  * Reports in the spyglass: the deck's reports block, the report page in the
@@ -225,8 +225,10 @@ describe('glass: cards keep their text inside', () => {
     expect(style(card)).toMatchObject({ overflow: 'hidden' });
     expect(style(card).getPropertyValue('overflow-wrap')).toBe('anywhere');
     expect(style(badge)).toMatchObject({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+    expect(badge.className).toContain('long');
     expect(style(badge).getPropertyValue('max-width').replace(/\s/g, '')).toBe('min(26ch,100%)');
-    expect(style(badge).getPropertyValue('flex')).toMatch(/^0 4 auto$/);
+    expect(style(badge).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
+    expect(style(badge).getPropertyValue('flex')).toMatch(/^0 1 auto$/);
     expect(style(meta)).toMatchObject({ overflow: 'hidden' });
     // happy-dom does not compute line clamping: read the rule itself.
     const css = fs.readFileSync(new URL('../glass/glass.css', import.meta.url), 'utf8');
@@ -237,7 +239,7 @@ describe('glass: cards keep their text inside', () => {
     }
     expect(style(card.querySelector('.top > b')!)).toMatchObject({ textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
     // The title keeps room for its identity (#99999, an 8-character id); the badge gives way first.
-    expect(style(card.querySelector('.top > b')!).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(9ch,100%)');
+    expect(style(card.querySelector('.top > b')!).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(10ch,100%)');
     // A short badge carries no title.
     const short = g.$$('#deck .card .top .badge').find((b) => text(b) === 'working');
     expect(short?.getAttribute('title') ?? null).toBeNull();
@@ -257,11 +259,44 @@ describe('glass: a PR card with a long badge', () => {
     const badge = card.querySelector('.top .badge')!;
     expect(badge.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
     const style = (el: Element) => g.window.getComputedStyle(el as never);
-    expect(style(title).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(9ch,100%)');
-    // '#99999' is six characters: 9ch holds it and the ellipsis after it.
-    expect('#99999'.length).toBeLessThanOrEqual(9 - 2);
-    expect(style(badge).getPropertyValue('flex-shrink')).toBe('4');
-    expect(style(badge).getPropertyValue('min-width')).toMatch(/^0(px)?$/);
+    expect(style(title).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(10ch,100%)');
+    // '#99999' and an 8-character id are at most eight characters: 10ch holds either and the ellipsis after it.
+    expect('dddddddd'.length + 1).toBeLessThanOrEqual(10 - 1);
+    // The title shrinks first (1000000 to the badge's 1); the long badge then truncates, never below 12ch.
+    expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
+    expect(badge.className).toContain('long');
+    expect(style(badge).getPropertyValue('flex-shrink')).toBe('1');
+    expect(style(badge).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
+  });
+});
+
+describe('glass: short card badges stay whole', () => {
+  it('a done badge beside a long title and a trap harness badge never shrink; only a badge over 12 characters is long', async () => {
+    const d = everyAttentionFleet();
+    d.landed[0] = { ...d.landed[0]!, repo: 'a-repository-name-long-enough-to-crowd-the-badge', verb: 'done', at: ago(60_000) };
+    const g = await page(d, { prefs: { view: 'cards' } });
+    const style = (el: Element) => g.window.getComputedStyle(el as never);
+    const landed = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('a-repository-name-long'))!;
+    const done = landed.querySelector('.top > .badge')!;
+    expect(text(done)).toBe('done');
+    expect(done.className).not.toContain('long');
+    expect(done.getAttribute('title')).toBeNull();
+    expect(style(done).getPropertyValue('flex')).toBe('0 0 auto');
+    const title = landed.querySelector('.top > b')!;
+    expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
+    const trap = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
+    const claude = trap.querySelector('.top > .badge')!;
+    expect(text(claude)).toBe('claude');
+    expect(claude.className).not.toContain('long');
+    expect(style(claude).getPropertyValue('flex')).toBe('0 0 auto');
+    // Twelve characters is still whole; thirteen is long.
+    for (const [verb, long] of [['twelve-chars', false], ['thirteen-char', true]] as const) {
+      const e = everyAttentionFleet();
+      e.dispatches.find((v) => v.bucket !== 'done')!.verb = verb as never;
+      const p = await page(e, { hash: '#dispatches', prefs: { view: 'cards' } });
+      const badge = p.$$('#dispatches .card .top .badge').find((b) => text(b) === verb)!;
+      expect(badge.className.includes('long'), verb).toBe(long);
+    }
   });
 });
 

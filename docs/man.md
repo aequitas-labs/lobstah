@@ -415,10 +415,12 @@ only a trap id in a same-origin, token-protected POST. The ⚙ popover's two
 preferences — table or cards, and whether lobsters crawl the page — are
 per-browser, kept in that browser's localStorage and never on disk.
 
-On a card, the title and the badge share one line. A title truncates with an
-ellipsis. A badge longer than about 24 characters truncates too. The meta
-line and the note show at most two lines. The full text of each is in its
-hover title.
+On a card, the title and the badge share one line. The title shrinks first,
+with an ellipsis, but always keeps its PR number or 8-character id. A badge of
+12 characters or fewer always shows whole. A longer badge truncates only
+after the title is at its minimum, never below 12 characters. The meta line
+and the note show at most two lines. The full text of each is in its hover
+title.
 
 The On deck tab shows up to 8 traps. Signed-on traps come first, oldest
 sign-on first, with name breaking ties. Traps stowed or ghosted in the last
