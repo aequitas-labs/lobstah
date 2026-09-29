@@ -11,15 +11,20 @@ import {
   listWatches,
   loadConfig,
   lobstahHome,
+  holdWatch,
+  latestCheckOutcomes,
   markFollowUp,
   mergeEvidence,
+  parsePrRef,
   readEvidence,
   readPr,
+  readPrs,
   readSessionClaim,
   readStatusLog,
   readTrap,
   readWatchEvents,
   reconcile,
+  releaseHeldWatches,
   repairBrief,
   repairKind,
   repairLimit,
@@ -27,7 +32,9 @@ import {
   withPrLock,
   writePr,
 } from '@lobstah/core';
-import type { Descriptor, Lane, PrCommit, PrRecord, Watch } from '@lobstah/core';
+import type { Descriptor, GhPrView, Lane, Outcome, PrCommit, PrRecord, PrRepair, Watch } from '@lobstah/core';
+import { readWorkerHolds, repairHold } from './repair-holds.js';
+import type { RepairHold, WorkerHold } from './repair-holds.js';
 
 export interface RepairerBeat {
   process: string;
@@ -147,28 +154,124 @@ function repairOwnership(pr: PrRecord, w: Watch, latest: string): { safe: boolea
   }
 }
 
-/** Claim and enqueue a repair under the PR record lock, once per head and observation. */
-export function deliverPrRepairs(log: (message: string) => void, cap = 3): number {
+/** The latest run of each check on the PR's current head. */
+export interface LatestChecks {
+  headSha: string;
+  checks: Array<{ name: string; outcome: Outcome }>;
+}
+
+/** One `gh pr view` for the head and the check runs only. Undefined when it cannot be read. */
+export function ghLatestChecks(pr: PrRecord): LatestChecks | undefined {
+  const ref = parsePrRef(pr.key);
+  if (!ref) return undefined;
+  const res = spawnSync(
+    'gh',
+    ['pr', 'view', String(ref.number), '--repo', `${ref.owner}/${ref.repo}`, '--json', 'headRefOid,statusCheckRollup'],
+    { encoding: 'utf8', timeout: 60_000 },
+  );
+  if (res.error || res.status !== 0) return undefined;
+  try {
+    const view = JSON.parse(res.stdout) as Pick<GhPrView, 'headRefOid' | 'statusCheckRollup'>;
+    return typeof view.headRefOid === 'string' ? { headSha: view.headRefOid, checks: latestCheckOutcomes(view.statusCheckRollup) } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the failing checks again. A check is still failing only when a latest
+ * run with its name failed. Returns why no repair is due, or undefined when
+ * the checks still fail.
+ */
+export function checksStillFailing(pr: PrRecord, latest: LatestChecks | undefined): string | undefined {
+  if (!latest) return 'the latest check runs could not be read';
+  if (latest.headSha !== pr.headSha) return `the head moved to ${latest.headSha.slice(0, 7)}; waiting for the next observation`;
+  const names = (pr.failingChecks ?? []).map((c) => c.name);
+  let failing = 0;
+  for (const name of names) {
+    const runs = latest.checks.filter((c) => c.name === name);
+    if (runs.some((c) => c.outcome === 'failed')) {
+      failing++;
+      continue;
+    }
+    if (runs.some((c) => c.outcome === 'pending')) return `the latest run of ${name} is in progress`;
+    if (runs.length > 0 && runs.every((c) => c.outcome === 'passed')) return `the latest run of ${name} passed`;
+  }
+  return failing > 0 || names.length === 0 ? undefined : 'no failing check on the latest runs';
+}
+
+export interface RepairOptions {
+  now?: number;
+  /** Read the latest check runs of a PR before a checks repair (default: gh). */
+  readChecks?: (pr: PrRecord) => LatestChecks | undefined;
+  /** Live workers and what they hold (default: read from disk and git). */
+  workerHolds?: () => WorkerHold[];
+}
+
+/** The watch hold on a PR, as the PR record shows it. */
+function watchHold(w: Watch): RepairHold {
+  const heldBy = w.heldBy ?? (w.heldFor ? `dispatch:${w.heldFor.slice(0, 8)}` : 'hold');
+  const reason = w.heldReason ?? `held since ${w.heldAt}`;
+  return { heldBy, reason: `${reason}; \`lobstah watch release ${w.key}\` frees it` };
+}
+
+/**
+ * When the helm cancels a repair dispatch, hold its PR's watch: no new
+ * repair is queued for that PR until `lobstah watch release`. Returns the
+ * held keys.
+ */
+export function holdCancelledRepair(id: string, now = new Date()): string[] {
+  const held: string[] = [];
+  for (const pr of readPrs()) {
+    if (pr.repair?.dispatchId !== id) continue;
+    if (holdWatch(pr.key, now, { reason: `the helm cancelled repair ${id.slice(0, 8)}`, by: 'helm' })) held.push(pr.key);
+  }
+  return held;
+}
+
+/**
+ * Claim and enqueue a repair under the PR record lock, once per head and
+ * observation. A repair that is due but must not start yet is recorded as
+ * `waiting` with the reason: the watch is held, a live worker holds the PR
+ * or a PR below it, the PR has not settled, or the failing checks no longer
+ * fail. A wait is not an attempt.
+ */
+export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: RepairOptions = {}): number {
   const cfg = loadConfig().watch;
   if (!cfg.autoRepair) return 0;
+  const now = opts.now ?? Date.now();
   const limit = repairLimit(cfg.maxRepairsPerPr);
+  const settleMs = Math.max(0, Number.isFinite(cfg.repairSettleSecs) ? cfg.repairSettleSecs : 600) * 1000;
   const budget = Number.isFinite(cap) && cap >= 0 ? Math.floor(cap) : 3;
+  let workers: WorkerHold[] | undefined;
+  let records: PrRecord[] | undefined;
   let started = 0;
-  for (const w of listWatches()) {
+  for (let w of listWatches()) {
     if (started >= budget) break;
-    if (!w.key.startsWith('pr:') || !w.owner.startsWith('dispatch:') || w.done || w.heldAt) continue;
-    withPrLock(w.key, () => {
-      const pr = readPr(w.key);
+    if (!w.key.startsWith('pr:') || !w.owner.startsWith('dispatch:') || w.done) continue;
+    // A hold for one dispatch ends when that dispatch ends.
+    if (w.heldAt && w.heldFor && isTerminal(w.heldFor)) {
+      releaseHeldWatches(w.key);
+      log(`repair ${w.key}: hold ended with dispatch ${w.heldFor.slice(0, 8)}`);
+      w = { ...w, heldAt: undefined, heldReason: undefined, heldFor: undefined, heldBy: undefined };
+    }
+    const watch = w;
+    withPrLock(watch.key, () => {
+      const pr = readPr(watch.key);
       if (!pr || pr.state !== 'OPEN' || pr.dispatches.length === 0 || (pr.observations ?? 0) <= 1) return;
       // A repair's stray PR must not become a second repair chain. Its
       // ancestor chain already owns a different PR.
-      const owner = w.owner.slice('dispatch:'.length);
+      const owner = watch.owner.slice('dispatch:'.length);
       const origin = storedDescriptor(owner, 'work')?.followUp;
       const ancestorPr = origin && chainPr(origin, 'work');
       if (ancestorPr && ancestorPr.url !== pr.url) return;
       const kind = repairKind(pr);
-      if (!kind || (kind === 'conflict' && !cfg.conflicts) || (kind === 'checks' && !cfg.checks)) return;
       const previous = pr.repair?.headSha === pr.headSha ? pr.repair : undefined;
+      if (!kind || (kind === 'conflict' && !cfg.conflicts) || (kind === 'checks' && !cfg.checks)) {
+        // Nothing to repair: a wait from before ends.
+        if (previous?.status === 'waiting') writePr({ ...pr, repair: endWait(previous) });
+        return;
+      }
       if (previous?.status === 'repairing' && previous.dispatchId && !isTerminal(previous.dispatchId)) return;
       if (previous?.status === 'blocked' || previous?.status === 'gave-up') return;
       if (previous?.observationsAtRepair !== undefined && (pr.observations ?? 0) <= previous.observationsAtRepair) return;
@@ -187,9 +290,44 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3): numbe
         });
         return;
       }
-      const chain = chainState(w.owner.slice('dispatch:'.length));
+      const wait = (hold: RepairHold, until?: string): void => {
+        if (previous?.status === 'waiting' && previous.kind === kind && previous.heldBy === hold.heldBy &&
+          previous.reason === hold.reason && previous.until === until) return;
+        writePr({
+          ...pr,
+          repair: {
+            ...(previous?.dispatchId ? { dispatchId: previous.dispatchId } : {}),
+            ...(previous?.observationsAtRepair !== undefined ? { observationsAtRepair: previous.observationsAtRepair } : {}),
+            headSha: pr.headSha,
+            kind,
+            attempts,
+            maxAttempts: limit,
+            status: 'waiting',
+            heldBy: hold.heldBy,
+            reason: hold.reason,
+            ...(until ? { until } : {}),
+          },
+        });
+      };
+      if (watch.heldAt) return wait(watchHold(watch));
+      const held = repairHold(pr, (records ??= readPrs()), (workers ??= (opts.workerHolds ?? readWorkerHolds)()));
+      if (held) return wait(held);
+      const changed = Math.max(
+        Date.parse(pr.headSince ?? pr.observedAt) || now,
+        Date.parse(pr.baseSince ?? pr.observedAt) || now,
+        kind === 'checks' ? Date.parse(pr.failingSince ?? pr.observedAt) || now : 0,
+      );
+      if (now < changed + settleMs) {
+        const until = new Date(changed + settleMs).toISOString();
+        return wait({ heldBy: 'settle', reason: `settling: the head, base, or failing checks changed at ${new Date(changed).toISOString()}` }, until);
+      }
+      const chain = chainState(owner);
       if (chain.busy) return;
-      const ownership = repairOwnership(pr, w, chain.latest);
+      if (kind === 'checks') {
+        const why = checksStillFailing(pr, (opts.readChecks ?? ghLatestChecks)(pr));
+        if (why) return wait({ heldBy: 'checks', reason: why });
+      }
+      const ownership = repairOwnership(pr, watch, chain.latest);
       if (!ownership.safe) {
         writePr({
           ...pr,
@@ -214,16 +352,16 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3): numbe
           status: 'repairing',
           dispatchId: id,
           observationsAtRepair: pr.observations,
-          startedAt: new Date().toISOString(),
+          startedAt: new Date(now).toISOString(),
           by: 'daemon',
         },
       });
       try {
         enqueue({ id, repo: target.repo, brief: repairBrief(pr, kind), followUp: chain.latest, ...(trap ? { for: address } : {}) }, 'work');
         mergeEvidence(id, 'work', { prUrl: pr.url, pr });
-        markFollowUp(w.key, id, readWatchEvents(w.key).length);
+        markFollowUp(watch.key, id, readWatchEvents(watch.key).length);
         started++;
-        log(`repair ${w.key}: ${kind} -> ${id}${trap ? ` (addressed to ${address})` : ''}`);
+        log(`repair ${watch.key}: ${kind} -> ${id}${trap ? ` (addressed to ${address})` : ''}`);
       } catch (err) {
         writePr({
           ...pr,
@@ -240,4 +378,16 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3): numbe
     });
   }
   return started;
+}
+
+/** A wait that ends with nothing to repair: the record before the wait. */
+function endWait(previous: PrRepair): PrRepair | undefined {
+  if (!previous.dispatchId) return undefined;
+  const { heldBy: _heldBy, until: _until, reason: _reason, ...rest } = previous;
+  return { ...rest, status: 'repairing' };
+}
+
+/** PRs whose repair waits, for tend, the glass, and doctor. */
+export function waitingRepairs(records: readonly PrRecord[] = readPrs()): PrRecord[] {
+  return records.filter((pr) => pr.state === 'OPEN' && pr.repair?.status === 'waiting' && pr.repair.headSha === pr.headSha);
 }

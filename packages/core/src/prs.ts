@@ -34,6 +34,29 @@ export interface PrRecord extends PrEvidence {
    * record written before this field existed until its next observation.
    */
   firstSeenAt?: string;
+  /** When the current head sha was first observed. */
+  headSince?: string;
+  /** When the current base branch and base head were first observed. */
+  baseSince?: string;
+  /** When the current set of failing check runs was first observed; absent when no check fails. */
+  failingSince?: string;
+}
+
+/** The failing check runs as one comparable string: names and run URLs. */
+function failingKey(pr: PrEvidence): string {
+  return (pr.failingChecks ?? [])
+    .map((c) => `${c.name}\0${c.detailsUrl ?? ''}`)
+    .sort()
+    .join('\n');
+}
+
+/**
+ * When the value last changed. A value equal to the previous observation's
+ * keeps the previous time. A record written before the time existed takes
+ * the previous observation's time.
+ */
+function sinceOf(same: boolean, before: string | undefined, previousObservation: string | undefined, now: string): string {
+  return same ? (before ?? previousObservation ?? now) : now;
 }
 
 /** What the stable PR order reads. */
@@ -160,6 +183,16 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
       standingSince,
       observations: (before?.observations ?? 0) + 1,
       firstSeenAt,
+      headSince: sinceOf(before?.headSha === pr.headSha, before?.headSince, before?.observedAt, pr.observedAt),
+      baseSince: sinceOf(
+        !!before && before.baseRefName === pr.baseRefName && before.baseSha === (pr.baseSha ?? before.baseSha),
+        before?.baseSince,
+        before?.observedAt,
+        pr.observedAt,
+      ),
+      ...(pr.failingChecks?.length
+        ? { failingSince: sinceOf(!!before && failingKey(before) === failingKey(pr), before?.failingSince, before?.observedAt, pr.observedAt) }
+        : { failingSince: undefined }),
       repair: before?.headSha === pr.headSha ? before?.repair : undefined,
     };
     writePr(after);

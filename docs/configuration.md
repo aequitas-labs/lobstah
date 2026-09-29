@@ -106,11 +106,12 @@ send a continuation.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `maxForksPerCycle` | `3` | The most continuation (CI-fix) dispatches one watch cycle of `lobstah pick` may fork. Each watch over the cap is held: its events stay buffered, `man tend` and `lobstah watch` list it as `held`, one `watch-held` notice names the held watches, and it forks nothing until `lobstah watch release <key>` (or `--all`). |
+| `maxForksPerCycle` | `3` | The most continuation (CI-fix) dispatches one watch cycle of `lobstah pick` may fork. Each watch over the cap is held: its events stay buffered, `man tend` and `lobstah watch` list it as `held`, one `watch-held` notice names the held watches, and it forks nothing until `lobstah watch release <key>` (or `--all`). A held PR watch also queues no repair; see [the man page](man.md) for `watch hold` and cancelled repairs. |
 | `autoRepair` | `true` | On a dispatch-owned PR, fork a repair follow-up for a conflict, failed current check, or requested review changes. `false` leaves check-event delivery and attention as before. |
 | `conflicts` | `true` | Repair conflicts when `autoRepair` is on. Set `false` to show conflict attention without a repair. |
 | `checks` | `true` | Repair failed current checks when `autoRepair` is on. Set `false` to show check attention without a repair. |
-| `maxRepairsPerPr` | `2` | Maximum repair follow-ups for one PR head SHA. When the limit is reached and the issue remains, `pr:conflict`, `pr:checks`, or `pr:review` attention names the limit. |
+| `maxRepairsPerPr` | `2` | Maximum repair follow-ups for one PR head SHA. When the limit is reached and the issue remains, `pr:conflict`, `pr:checks`, or `pr:review` attention names the limit. A repair that waits is not an attempt. |
+| `repairSettleSecs` | `600` | A repair is queued only after the PR's head, its base branch's head, and its failing checks have been unchanged for this many seconds. Until then the PR record shows `repair.status: waiting` with `heldBy: settle` and `until`. |
 
 ## `[grounds.*]` — helm territories
 

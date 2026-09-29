@@ -31,6 +31,12 @@ your working set:
                                                 external (a review session, a
                                                 CI run) — its events wake you
                                                 like any dispatch would
+  lobstah watch hold <key> [--for <id>]         hold PR repairs for one PR;
+                                                --for ends the hold when that
+                                                dispatch ends. Cancelling a
+                                                repair holds its PR too.
+                                                \`lobstah watch release <key>\`
+                                                ends a hold
   lobstah set ... --for <name>                  address work to a signed-on
                                                 worktree: the live session
                                                 manning it (\`lobstah soak\`)

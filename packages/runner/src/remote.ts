@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { isTrapCatch, mergeEvidence, parsePrRef, readEvidence, readWatch, resolveOnPath } from '@lobstah/core';
+import { isTrapCatch, mergeEvidence, parsePrRef, readEvidence, readWatch, recordPush, resolveOnPath } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 
 const exec = promisify(execFile);
@@ -129,6 +129,7 @@ export function keepRemote(opts: {
       pushedHead = head;
       pushProblem = undefined;
       mergeEvidence(id, lane, { branch });
+      recordPush(id, lane, [branch]);
       note(`remote saved: ${branch}@${head.slice(0, 12)}`);
       if (!opening) opening = draft(branch).finally(() => { opening = undefined; });
     } catch (err) {

@@ -34,7 +34,7 @@ export function parsePrRef(s: string): PrRef | undefined {
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
-  'state,isDraft,headRefOid,baseRefName,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
+  'state,isDraft,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
 
 /** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
 export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',')
@@ -74,6 +74,8 @@ export interface GhPrView {
   isDraft: boolean;
   headRefOid: string;
   baseRefName?: string;
+  /** The base branch's head commit. Absent when this gh cannot return it. */
+  baseRefOid?: string;
   headRefName?: string;
   mergeStateStatus?: string;
   reviewDecision?: string | null;
@@ -97,7 +99,7 @@ export interface GhPrView {
   checksError?: string;
 }
 
-type Outcome = 'passed' | 'failed' | 'pending' | 'unknown';
+export type Outcome = 'passed' | 'failed' | 'pending' | 'unknown';
 interface Check {
   key: string;
   name: string;
@@ -110,6 +112,11 @@ interface Check {
 const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const PENDING = new Set(['', 'PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED']);
 const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR']);
+
+/** The latest run of each check, by name: its outcome. */
+export function latestCheckOutcomes(rollup: GhRollupItem[] | null | undefined): Array<{ name: string; outcome: Outcome }> {
+  return normalizeChecks(rollup).map((c) => ({ name: c.name, outcome: c.outcome }));
+}
 
 function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
   const latest = new Map<string, { check: Check; at: string; startedAt: string; index: number }>();
@@ -154,8 +161,16 @@ export interface PrRepair {
   kind: 'conflict' | 'checks' | 'review';
   attempts: number;
   maxAttempts?: number;
-  status: 'repairing' | 'gave-up' | 'blocked';
+  /**
+   * `waiting`: a repair is due but is not queued yet. `reason` says why and
+   * `heldBy` names the holder. A wait is not an attempt.
+   */
+  status: 'repairing' | 'gave-up' | 'blocked' | 'waiting';
   reason?: string;
+  /** Who holds a waiting repair: `wt:<trap>`, `dispatch:<id>`, `helm`, or `settle`. */
+  heldBy?: string;
+  /** A settle wait: the earliest time the repair can be queued (ISO). */
+  until?: string;
   dispatchId?: string;
   observationsAtRepair?: number;
   /** Atomic claim metadata for one repairer. */
@@ -175,6 +190,8 @@ export interface PrEvidence {
   headSha: string;
   /** Current GitHub branch relation; the base may retarget after a lower PR merges. */
   baseRefName?: string;
+  /** The base branch's head commit, when the forge supplied it. */
+  baseSha?: string;
   headRefName?: string;
   /**
    * Check counts. `unknown` is set when the check results could not be read
@@ -263,6 +280,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
     mergeStateStatus: view.mergeStateStatus ?? '',
     headSha: view.headRefOid,
     ...(view.baseRefName ? { baseRefName: view.baseRefName } : {}),
+    ...(view.baseRefOid ? { baseSha: view.baseRefOid } : {}),
     ...(view.headRefName ? { headRefName: view.headRefName } : {}),
     checks: {
       total: checks.length,
@@ -433,12 +451,17 @@ export function ghPrView(ref: PrRef): GhPrView {
       timeout: 60_000,
     });
   const reason = (r: ReturnType<typeof view1>) => firstMeaningfulLine(r.stderr) ?? `gh exited ${r.status}`;
-  let res = view1(PR_VIEW_FIELDS);
+  // An older gh does not know baseRefOid: read the view without it.
+  const unknownBase = (r: ReturnType<typeof view1>) => r.status !== 0 && /unknown json field.*baseRefOid/i.test(r.stderr ?? '');
+  const withoutBase = (fields: string) => fields.split(',').filter((f) => f !== 'baseRefOid').join(',');
+  let fields = PR_VIEW_FIELDS;
+  let res = view1(fields);
+  if (unknownBase(res)) res = view1((fields = withoutBase(fields)));
   if (res.error) throw new Error(`gh: ${res.error.message}`);
   let checksError: string | undefined;
   if (res.status !== 0 && FORBIDDEN.test(res.stderr ?? '')) {
     checksError = reason(res);
-    const retry = view1(PR_VIEW_FIELDS_NO_CHECKS);
+    const retry = view1(fields === PR_VIEW_FIELDS ? PR_VIEW_FIELDS_NO_CHECKS : withoutBase(PR_VIEW_FIELDS_NO_CHECKS));
     if (retry.error) throw new Error(`gh: ${retry.error.message}`);
     if (retry.status !== 0) {
       throw new Error(FORBIDDEN.test(retry.stderr ?? '') ? `${reason(retry)} (fails even without check results)` : reason(retry));
@@ -525,14 +548,22 @@ export interface PrBadge {
  * pr:ready would not stand.
  */
 export function prBadge(pr: PrEvidence): PrBadge {
-  const { total, failed, pending, passed } = pr.checks;
-  const merge = (pr.mergeStateStatus ?? '').toUpperCase();
   if (pr.state === 'MERGED') return { text: 'merged', tone: 'ok', state: 'merged' };
   if (pr.state === 'CLOSED') return { text: 'closed', tone: 'bad', state: 'closed' };
   if (pr.repair?.status === 'repairing' && pr.repair.headSha === pr.headSha) {
     const { kind, attempts, maxAttempts } = pr.repair;
     return { text: `repairing: ${kind} (attempt ${attempts} of ${maxAttempts ?? 2})`, tone: 'warn', state: 'open' };
   }
+  const badge = openBadge(pr);
+  if (pr.repair?.status === 'waiting' && pr.repair.headSha === pr.headSha && badge.state === 'open') {
+    return { ...badge, text: `${badge.text} · repair waits: ${pr.repair.heldBy ?? 'held'}` };
+  }
+  return badge;
+}
+
+function openBadge(pr: PrEvidence): PrBadge {
+  const { total, failed, pending, passed } = pr.checks;
+  const merge = (pr.mergeStateStatus ?? '').toUpperCase();
   if (pr.draft) return { text: 'draft', tone: 'dim', state: 'draft' };
   if (merge === 'DIRTY') return { text: 'conflicts', tone: 'bad', state: 'open', merge: 'conflicts' };
   if (failed > 0) return { text: `checks ${failed}/${total} failed`, tone: 'bad', state: 'open' };

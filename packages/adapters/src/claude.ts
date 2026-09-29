@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { onPath, toolTarget } from '@lobstah/core';
+import { gitPushTargets, onPath, toolTarget } from '@lobstah/core';
 import type { NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
@@ -57,7 +57,10 @@ export function pumpClaudeMessage(
         // The primary target only (a path, a command's first word, a URL's
         // host): the input itself never enters the stream.
         const target = toolTarget(block.input);
-        push({ at, type: 'tool-start', data: { name: block.name, ...(target ? { target } : {}) } });
+        // A git push names its branches, never the rest of the command.
+        const command = (block.input as { command?: unknown } | undefined)?.command;
+        const pushes = typeof command === 'string' ? gitPushTargets(command) : undefined;
+        push({ at, type: 'tool-start', data: { name: block.name, ...(target ? { target } : {}), ...(pushes ? { pushes } : {}) } });
       } else if (block.type === 'thinking' || block.type === 'redacted_thinking') {
         push({ at, type: 'thinking', data: {} });
       } else if (block.type === 'text' && block.text) {

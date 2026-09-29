@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { codexInvocation, lobstahHome, toolTarget } from '@lobstah/core';
+import { codexInvocation, gitPushTargets, lobstahHome, toolTarget } from '@lobstah/core';
 import type { NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
@@ -65,7 +65,13 @@ export function pumpCodexEvent(
     const item = ev.item ?? {};
     const target =
       toolTarget(item) ?? (typeof item.tool === 'string' ? (typeof item.server === 'string' ? `${item.server}.${item.tool}` : item.tool) : undefined);
-    push({ at, type: 'tool-start', data: { name: item.type, ...(target ? { target } : {}) } });
+    // A git push names its branches, never the rest of the command.
+    const command = item.command;
+    const pushes =
+      typeof command === 'string' || (Array.isArray(command) && command.every((c) => typeof c === 'string'))
+        ? gitPushTargets(command as string | string[])
+        : undefined;
+    push({ at, type: 'tool-start', data: { name: item.type, ...(target ? { target } : {}), ...(pushes ? { pushes } : {}) } });
   } else if (ev.type === 'item.completed') {
     if (ev.item?.type === 'agent_message' && ev.item?.text) {
       push({ at, type: 'text', data: { text: String(ev.item.text).slice(0, 2000) } });

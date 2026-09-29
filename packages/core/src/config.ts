@@ -119,6 +119,11 @@ export interface WatchConfig {
   checks: boolean;
   /** Maximum repair follow-ups on one PR head sha. */
   maxRepairsPerPr: number;
+  /**
+   * Seconds the PR's head, its base branch's head, and its failing checks
+   * must stay unchanged before a repair is queued.
+   */
+  repairSettleSecs: number;
 }
 
 export interface GlassConfig {
@@ -187,7 +192,7 @@ export const DEFAULT_HELM: HelmConfig = {
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
-export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2 };
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, repairSettleSecs: 600 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,

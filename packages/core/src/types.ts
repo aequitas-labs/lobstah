@@ -1,4 +1,5 @@
 import type { PrEvidence } from './pr.js';
+import type { PushRecord } from './pushes.js';
 export const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed'] as const;
 export type Verb = (typeof VERBS)[number];
 export const TERMINAL_VERBS: readonly Verb[] = ['done', 'failed'];
@@ -87,6 +88,8 @@ export interface Evidence {
   worktreeOf?: string;
   /** When `[limits].releaseOnMerge` removed the worktree after the PR merged (ISO). */
   worktreeReleased?: string;
+  /** Branches this dispatch pushed, as lobstah saw it (pushes.ts). */
+  pushes?: PushRecord[];
 }
 
 export type EventType =

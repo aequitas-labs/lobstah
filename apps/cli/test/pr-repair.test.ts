@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { addWatch, appendStatus, appendWatchEvents, enqueue, ensureLayout, laneDirs, mergeEvidence, readEvidence, readPr, upsertPr } from '@lobstah/core';
-import type { Descriptor, PrEvidence } from '@lobstah/core';
+import type { Descriptor, PrEvidence, PrRecord } from '@lobstah/core';
 import { branchOwnership, repairBrief } from '@lobstah/core';
 import { tick } from '@lobstah/supervisor';
 import { deliverDispatchOwned } from '../../pick/src/loops/watch.js';
@@ -16,6 +16,9 @@ const OWNER = '11111111-1111-1111-1111-111111111111';
 const SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const URL = 'https://github.com/acme/web/pull/17';
 const KEY = 'pr:acme/web#17';
+const SETTLED = '[watch]\nrepairSettleSecs = 0\n';
+/** The latest runs still fail: what the check re-read sees for these tests. */
+const stillFailing = { readChecks: (p: PrRecord) => ({ headSha: p.headSha, checks: (p.failingChecks ?? []).map((c) => ({ name: c.name, outcome: 'failed' as const })) }) };
 let dir: string;
 
 const pr = (over: Partial<PrEvidence> = {}): PrEvidence => ({
@@ -53,6 +56,8 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-pr-repair-'));
   process.env.LOBSTAH_HOME = dir;
   ensureLayout();
+  // These tests cover the repair itself; pr-repair-holds.test.ts covers the settle time.
+  fs.writeFileSync(path.join(dir, 'config.toml'), SETTLED);
   owner();
 });
 afterEach(() => {
@@ -226,7 +231,7 @@ describe('PR watch repairs', () => {
     });
     upsertPr(bad, OWNER);
     upsertPr(bad, OWNER);
-    expect(deliverPrRepairs(() => {}, 3)).toBe(1);
+    expect(deliverPrRepairs(() => {}, 3, stillFailing)).toBe(1);
     expect(queued()[0]!.brief).toContain('test — https://ci/run/1');
     expect(queued()[0]!.brief).toContain('rerun it at most once');
   });
@@ -245,7 +250,7 @@ describe('PR watch repairs', () => {
   });
 
   it('autoRepair off leaves the old watch behavior', () => {
-    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nautoRepair = false\n');
+    fs.writeFileSync(path.join(dir, 'config.toml'), `${SETTLED}autoRepair = false\n`);
     upsertPr(pr(), OWNER);
     upsertPr(pr(), OWNER);
     expect(deliverPrRepairs(() => {}, 3)).toBe(0);
@@ -253,7 +258,7 @@ describe('PR watch repairs', () => {
   });
 
   it('can turn conflict repair off while leaving check repair on', () => {
-    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nconflicts = false\nchecks = true\n');
+    fs.writeFileSync(path.join(dir, 'config.toml'), `${SETTLED}conflicts = false\nchecks = true\n`);
     upsertPr(pr(), OWNER);
     upsertPr(pr(), OWNER);
     expect(deliverPrRepairs(() => {}, 3)).toBe(0);
@@ -263,7 +268,7 @@ describe('PR watch repairs', () => {
       failingChecks: [{ name: 'test' }],
     });
     upsertPr(failed, OWNER);
-    expect(deliverPrRepairs(() => {}, 3)).toBe(1);
+    expect(deliverPrRepairs(() => {}, 3, stillFailing)).toBe(1);
     expect(readPr(KEY)?.repair?.kind).toBe('checks');
   });
 

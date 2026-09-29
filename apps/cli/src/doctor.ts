@@ -28,7 +28,7 @@ import { planPressureCull } from './cull.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
-import { liveRepairer } from './pr-repair.js';
+import { liveRepairer, waitingRepairs } from './pr-repair.js';
 import { petRow } from './pet.js';
 
 export interface DoctorRow {
@@ -337,6 +337,16 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
         : 'no repairer is running'
       : 'auto-repair is off',
   );
+
+  // A waiting repair is information, not a failure: nothing here needs a person.
+  const waiting = cfg.watch.autoRepair ? waitingRepairs() : [];
+  if (waiting.length > 0) {
+    push(
+      'PR repairs waiting',
+      'ok',
+      waiting.map((pr) => `${pr.key} ${pr.repair!.kind}: ${pr.repair!.heldBy ?? 'held'} — ${pr.repair!.reason ?? ''}`).join('; '),
+    );
+  }
 
   const disk = diskRow(cfg);
   push(disk.check, disk.status, disk.detail);
