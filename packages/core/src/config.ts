@@ -29,6 +29,11 @@ export interface RepoConfig {
   pushEarly?: boolean;
   draftPr?: boolean;
   checkpointOnStop?: boolean;
+  /**
+   * Check names that fail until a person approves. They never start a PR
+   * repair or a CI-fix continuation. `*` matches any run of characters.
+   */
+  humanGateChecks?: string[];
 }
 
 export interface LimitsConfig {
@@ -245,6 +250,7 @@ export function loadConfig(): Config {
       pushEarly: r.pushEarly === undefined ? undefined : Boolean(r.pushEarly),
       draftPr: r.draftPr === undefined ? undefined : Boolean(r.draftPr),
       checkpointOnStop: r.checkpointOnStop === undefined ? undefined : Boolean(r.checkpointOnStop),
+      humanGateChecks: Array.isArray(r.humanGateChecks) ? r.humanGateChecks.map(String).filter(Boolean) : undefined,
     };
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;

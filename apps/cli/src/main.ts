@@ -149,7 +149,7 @@ import {
   runPrCheck,
   syncPrWatches,
 } from './pr-watch.js';
-import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, stampRepairerBeat } from './pr-repair.js';
+import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { runBeat } from './beat.js';
@@ -987,6 +987,7 @@ async function mainCli(): Promise<void> {
         }
       }
       if (prUrl) mergeEvidence(id, lane, { prUrl });
+      const gatesNamed = recordReportedGates(id, lane, values('--human-gate'), prUrl);
       // A done PR stays observed: CI, review, and merge flow back through its
       // pr: watch instead of lobstah going blind at "PR open".
       const prWatch = verb === 'done' && prUrl && !noWatch ? autoRegisterPrWatch(id, prUrl) : undefined;
@@ -1000,6 +1001,7 @@ async function mainCli(): Promise<void> {
           ...(entry.until ? { until: entry.until } : {}),
           ...(prUrl ? { prUrl } : {}),
           ...(prWatch ? { watch: prWatch.key } : {}),
+          ...(gatesNamed.length ? { humanGates: gatesNamed.join(', ') } : {}),
         }),
       );
       // Self-instructive next step, right where the reporter reads it: an

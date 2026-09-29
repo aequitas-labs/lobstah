@@ -71,6 +71,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--waiting-on': { value: 'review|pr|deploy|person|external' },
       '--link': { value: '<url>' },
       '--until': { value: '<iso|30m|4h|2d>' },
+      '--human-gate': { value: '<check>', repeatable: true },
       '--session': { value: '<id>' },
     },
     positionals: '<uuid> <verb> [note...]',
@@ -186,8 +187,10 @@ claimed helm this requires --session <helm-id>.`,
   report: `The validated status write path: working | needs-decision | blocked |
 paused | done | failed. After \`--\` every word is note. \`done --pr <url>\`
 registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
---until: what a waiting worker waits on, and when a pause expires. A trap's
-done records its worktree's HEAD, run there or with the trap's --session.`,
+--until: what a waiting worker waits on, and when a pause expires.
+--human-gate <check>: a check that passes only when a person approves; PR
+repairs and CI-fix continuations skip it. A trap's done records its
+worktree's HEAD, run there or with the trap's --session.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
