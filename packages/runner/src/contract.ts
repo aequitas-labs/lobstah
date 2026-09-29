@@ -10,6 +10,7 @@ export function buildPrompt(brief: string, opts: { id: string; nudge?: string; a
   const reporting =
     `Report status by running \`lobstah report ${opts.id} <verb> [note]\` (verbs: ${VERBS.join(', ')}). ` +
     `Attach a PR URL to your final report with \`--pr <url>\`. ` +
+    `If your output is findings rather than code, end with \`done "<one-line note>" --report <file.md>\` and add its images with \`--attach <file>\`. ` +
     `Only your report finishes this dispatch: ending a turn without \`done\` or \`failed\` does not. ` +
     `If you start background work and end your turn to wait for it, you are woken when it finishes. ` +
     `At natural checkpoints, check for operator messages with \`lobstah inbox ${opts.id}\` — ` +

@@ -6,6 +6,8 @@ import {
   followUpAncestors,
   formatGB,
   laneDirs,
+  listReleases,
+  listReports,
   listTraps,
   loadConfig,
   lobstahHome,
@@ -14,7 +16,10 @@ import {
   readEvidence,
   readPr,
   readPrs,
+  removeHelmReport,
+  removeRelease,
   removePr,
+  reportDir,
   statfsFreeBytes,
   storedDescriptor,
   toonKV,
@@ -25,7 +30,7 @@ import type { FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
 
 export interface CullItem {
-  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr';
+  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report' | 'release';
   id: string;
   target: string;
   ageDays: number;
@@ -143,7 +148,7 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     for (const f of fs.readdirSync(d.state)) {
       const target = path.join(d.state, f);
       const directory = fs.statSync(target).isDirectory();
-      if (directory && !fs.existsSync(path.join(target, 'attachments'))) continue;
+      if (directory && !fs.existsSync(path.join(target, 'attachments')) && !fs.existsSync(path.join(target, 'report.json'))) continue;
       const id = directory ? f : f.replace(/\.(status|events|evidence|attn|notified|runner\.log)$/, '');
       if (id === f && !directory) continue;
       if (live.has(id) || (doneMtimes.get(id) ?? 0) >= cutoff || referencedAttachmentState.has(path.join(d.state, id))) continue;
@@ -168,14 +173,29 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     if (seen < cutoff) items.push({ kind: 'pr', id: r.key, target: r.key, ageDays: Math.floor((now - seen) / DAY), bytes: size(prRecordFile(r.key)), ageFrom: seen });
   }
 
+  // Helm reports age like a done dispatch: from when they were filed. A
+  // dispatch's report goes with its state above.
+  for (const r of listReports()) {
+    if (!r.key.startsWith('report:helm:')) continue;
+    const filed = Date.parse(r.filedAt) || now;
+    const dir = reportDir(r.key)!;
+    if (filed < cutoff) items.push({ kind: 'report', id: r.key, target: dir, ageDays: Math.floor((now - filed) / DAY), bytes: size(dir), ageFrom: filed });
+  }
+
   // Orphaned acks: the item is gone (dispatch culled — including by this
   // very sweep — PR merged or closed, watch removed). Acks never age out
   // on their own, so no cutoff applies here.
-  const culling = new Set(items.filter((i) => i.kind === 'done' || i.kind === 'state').map((i) => i.id));
+  const culling = new Set(items.filter((i) => i.kind === 'done' || i.kind === 'state' || i.kind === 'report').map((i) => i.id));
   for (const a of listAcks()) {
     if (ackItemExists(a.key, culling)) continue;
     const at = Date.parse(a.at) || now;
     items.push({ kind: 'ack', id: a.key, target: a.key, ageDays: Math.floor((now - at) / DAY), bytes: size(ackFile(a.key)), ageFrom: at });
+  }
+  // Question releases go the same way as acks: when their dispatch does.
+  for (const r of listReleases()) {
+    if (ackItemExists(r.key, culling)) continue;
+    const at = Date.parse(r.releasedAt) || now;
+    items.push({ kind: 'release', id: r.key, target: r.key, ageDays: Math.floor((now - at) / DAY), bytes: 0, ageFrom: at });
   }
   return items;
 }
@@ -360,6 +380,8 @@ export function applyCull(items: CullItem[]): void {
   for (const item of items.filter((i) => i.kind === 'done')) fs.rmSync(item.target, { recursive: true, force: true });
   for (const item of items.filter((i) => i.kind === 'ack')) removeAck(item.target);
   for (const item of items.filter((i) => i.kind === 'pr')) removePr(item.target);
+  for (const item of items.filter((i) => i.kind === 'report')) removeHelmReport(item.id);
+  for (const item of items.filter((i) => i.kind === 'release')) removeRelease(item.id);
   for (const item of items.filter((i) => i.kind === 'state')) {
     const dir = path.dirname(item.target);
     for (const f of fs.readdirSync(dir)) {
