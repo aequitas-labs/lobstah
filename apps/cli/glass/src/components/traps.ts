@@ -13,7 +13,8 @@ function row(t: GlassTrap) {
 function card(t: GlassTrap) {
   const r = trapRow(t);
   const mail = mailCell(t);
-  return html`<div key=${t.trapId} class=${'card' + (t.live ? '' : ' dim')} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 ${t.label ?? `wt:${t.trapId}`}</b><span class="badge">${t.harness ?? (t.live ? '' : 'signed off')}</span></div><div class="meta">${t.repo ?? (t.live ? 'addressed bait only' : 'history')}${t.sessionId && ' · session ' + t.sessionId.slice(0, 8)}</div>${t.worktree && html`<div class="note">${t.worktree}</div>`}<div class="foot">${r.listen}${t.live && [' · heartbeat ', r.hb]} · ${t.catches.length} catch${t.catches.length === 1 ? '' : 'es'}${mail && [' · ', mail]} · ${windowAction(t)}</div></div>`;
+  const meta = `${t.repo ?? (t.live ? 'addressed bait only' : 'history')}${t.sessionId ? ' · session ' + t.sessionId.slice(0, 8) : ''}`;
+  return html`<div key=${t.trapId} class=${'card' + (t.live ? '' : ' dim')} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 ${t.label ?? `wt:${t.trapId}`}</b><span class="badge">${t.harness ?? (t.live ? '' : 'signed off')}</span></div><div class="meta" title=${meta}>${meta}</div>${t.worktree && html`<div class="note" title=${t.worktree}>${t.worktree}</div>`}<div class="foot"><span>${r.listen}${t.live && [' · heartbeat ', r.hb]} · ${t.catches.length} catch${t.catches.length === 1 ? '' : 'es'}${mail && [' · ', mail]}</span><span class="footact">${windowAction(t)}</span></div></div>`;
 }
 
 export function Traps({ inp }: { inp: SectionInputs['traps'] }) {

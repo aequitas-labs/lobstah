@@ -1,7 +1,7 @@
 import type { GlassReport } from '@lobstah/core';
 import { bareImageName, parseMarkdown, safeHref } from '../../../src/glass-markdown.js';
 import type { MdBlock, MdInline } from '../../../src/glass-markdown.js';
-import { reportFileUrl } from '../../../src/glass-diff.js';
+import { reportFileUrl, reportFrom } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 import { Age, attachmentRows, cmdRow } from './common.js';
@@ -84,16 +84,10 @@ export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string;
   return html`<div class="mdpage" data-report=${r.key}>${body}</div>`;
 }
 
-/** The report's heading line: author, when it was filed, and its ack. */
+/** The report's heading line: who it is from (a trap, a headless dispatch's id, nothing for the helm), its age, and `acked`. */
 export function reportByline(r: GlassReport): Children {
-  return [
-    r.author,
-    r.grounds && ' · grounds ' + r.grounds,
-    ' · filed ',
-    Age(r.filedAt),
-    ' ago · ',
-    r.acked ? html`<span class="ok">acked by ${r.acked.by}</span>` : html`<span class="warn">not acked</span>`,
-  ];
+  const from = reportFrom(r);
+  return [from && from + ' · ', Age(r.filedAt), ' ago', r.acked && [' · ', html`<span class="ok">acked</span>`]];
 }
 
 /** The report section a modal shows: byline, page, its own attachments, and the ack command. */

@@ -7,7 +7,14 @@ import { Age, opener } from './common.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
-const TAB_LABEL: Record<GlassTab, string> = { deck: 'On deck', dispatches: 'Dispatches', traps: 'Traps', prs: 'PRs', notices: 'Notices' };
+const TAB_LABEL: Record<GlassTab, string> = {
+  deck: 'On deck',
+  dispatches: 'Dispatches',
+  traps: 'Traps',
+  prs: 'PRs',
+  reports: 'Reports',
+  notices: 'Notices',
+};
 const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed', 'unknown'];
 
 function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {

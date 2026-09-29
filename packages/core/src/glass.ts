@@ -221,6 +221,8 @@ export interface GlassReport {
   acked?: { at: string; by: string };
   dispatch?: string;
   lane?: Lane;
+  /** The trap name, when a trap filed it. */
+  trap?: string;
   grounds?: string;
   repo?: string;
   bytes: number;

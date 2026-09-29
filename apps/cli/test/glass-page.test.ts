@@ -64,7 +64,7 @@ async function mutations(g: GlassDom, fn: () => Promise<void>): Promise<Mutation
 }
 
 describe('glass page: tabs and hash routing', () => {
-  it('shows Open window on live traps in the table, cards, deck, and modal only', async () => {
+  it('shows the ↗ open button on live traps in the table, cards, deck, and modal only', async () => {
     const d = acceptanceFleet();
     d.focusSupported = true;
     d.focusToken = 'fixture-token';
@@ -73,19 +73,19 @@ describe('glass page: tabs and hash routing', () => {
     const g = await page(d, { hash: '#traps' });
     const t1 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1'))!;
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
-    expect(text(t1)).toContain('Open window');
-    expect(text(t2)).not.toContain('Open window');
+    expect(text(t1)).toContain('↗ open');
+    expect(text(t2)).not.toContain('↗ open');
     expect(text(t2)).toContain('codex resume past-session');
     await click(g, t1.querySelector('button'));
     expect(g.$('#overlay')!.className).toBe('');
     await click(g, t1);
-    expect(text(g.$('#modalbox'))).toContain('Open window');
+    expect(text(g.$('#modalbox'))).toContain('↗ open');
     await escape(g);
     await g.go('#deck');
-    expect(text(g.$('#deck'))).toContain('Open window');
+    expect(text(g.$('#deck'))).toContain('↗ open');
     await g.go('#traps');
     const cardPage = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
-    expect(text(cardPage.$('#traps'))).toContain('Open window');
+    expect(text(cardPage.$('#traps'))).toContain('↗ open');
   });
   it('opens On deck by default and follows the hash to each tab', async () => {
     const g = await page(acceptanceFleet());
@@ -401,7 +401,7 @@ describe('glass page: On deck', () => {
   it('shows attention (no pr:* kinds), in flight, landed, reports, traps, and PR stacks as six full-width sections', async () => {
     const g = await page(everyAttentionFleet());
     const sections = g.$$('#deck .deckgrid > section');
-    expect(sections.map((s) => text(s.querySelector('h2')))).toEqual(['attention →', 'in flight →', 'Landed · 24h →', 'reports', 'traps →', 'PRs →']);
+    expect(sections.map((s) => text(s.querySelector('h2')))).toEqual(['attention →', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →', 'PRs →']);
     const kinds = [...sections[0]!.querySelectorAll('tr.rowhead td:first-child')].map(text);
     expect(kinds.every((k) => !k.startsWith('pr:') && !['draft', 'review', 'checks', 'conflicts', 'ready'].includes(k))).toBe(true);
     expect(text(sections[0]!.querySelector('.deckmore'))).toMatch(/^\+\d+ more →$/);

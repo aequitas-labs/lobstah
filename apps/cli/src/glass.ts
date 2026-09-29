@@ -263,6 +263,7 @@ function reportRows(): GlassReport[] {
       ...(acked ? { acked } : {}),
       ...(r.dispatch ? { dispatch: r.dispatch } : {}),
       ...(r.lane ? { lane: r.lane } : {}),
+      ...(r.trap ? { trap: r.trap } : {}),
       ...(r.grounds ? { grounds: r.grounds } : {}),
       ...(r.repo ? { repo: r.repo } : {}),
       bytes: r.bytes,

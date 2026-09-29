@@ -341,8 +341,8 @@ export function everyAttentionFleet(): GlassSnapshot {
     glassPr(behind, { stackId: 'pr:acme/web#61', position: 0 }),
     glassPr(merged, { stackId: 'pr:acme/web#30', position: 0 }),
   );
-  // Two reports to read: a trap's with an image, and the helm's. A third,
-  // newer but acked, sorts after both.
+  // Reports to read: a trap's with an image, a headless dispatch's, and the
+  // helm's. A fourth, newer but acked, sorts after the rest.
   d.reports = [
     {
       key: 'report:helm:fleet:99990000',
@@ -368,14 +368,27 @@ export function everyAttentionFleet(): GlassSnapshot {
     {
       key: 'report:work:cccccccc-0000-4000-8000-000000000003',
       title: 'Tray findings',
-      author: 'quiet-reef',
+      author: 'kind-crab',
       filedAt: ago(20 * MIN),
       stateHash: 'r1',
       dispatch: 'cccccccc-0000-4000-8000-000000000003',
       lane: 'work',
+      trap: 'kind-crab',
       repo: 'web',
       bytes: 120,
       attachments: [{ name: 'tray.png', path: '/tmp/lobstah/state/cccccccc/attachments/tray.png', bytes: 2048, type: 'image/png' }],
+    },
+    {
+      key: 'report:work:aaaaaaaa-0000-4000-8000-000000000001',
+      title: 'Build timings',
+      author: 'headless',
+      filedAt: ago(40 * MIN),
+      stateHash: 'r4',
+      dispatch: 'aaaaaaaa-0000-4000-8000-000000000001',
+      lane: 'work',
+      repo: 'web',
+      bytes: 60,
+      attachments: [],
     },
   ];
   d.attentionError = undefined;

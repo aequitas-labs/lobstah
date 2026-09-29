@@ -45,6 +45,11 @@ export const WaitingLine = (x: Pick<GlassDispatch, 'waiting' | 'verb'>) => {
   }</div>`;
 };
 
+/** A card badge longer than this truncates with an ellipsis; its title carries the full text. */
+export const BADGE_MAX_CHARS = 24;
+export const badgeTitle = (text: string | undefined): string | undefined =>
+  text !== undefined && text.length > BADGE_MAX_CHARS ? text : undefined;
+
 /** A click handler that opens a modal (and never bubbles to a row that opens another). */
 export const opener = (type: ModalType, key: string) => () => showModal(type, key);
 export const stop = (e: Event) => e.stopPropagation();
@@ -66,7 +71,7 @@ export function windowAction(t: GlassTrap): Children {
     stop(e);
     void openTrapWindow(t.trapId);
   };
-  return html`<span><button onClick=${clicked}>Open window</button>${t.link && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
+  return html`<span class="winaction"><button class="btn open" title="open this trap's window" onClick=${clicked}>↗ open</button>${t.link && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
     state.focusResults[t.trapId] && [' ', html`<span class="dim">${state.focusResults[t.trapId]}</span>`]
   }</span>`;
 }

@@ -300,8 +300,11 @@ detached glass (stop, then `--detach`).
 dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
-and the helm identified by name. Reading the glass consumes no cursor. Each
-live trap has an **Open window** button. It asks the local server to focus
+and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
+PRs, Reports, and Notices. The Reports tab lists every report, unacked first,
+then newest first, and the repo filter and the search box (title, author,
+dispatch id, repo) apply to it. Reading the glass consumes no cursor. Each
+live trap has a **↗ open** button at the end of its foot line. It asks the local server to focus
 that trap's reported session link, iTerm2 session, Terminal tab, editor
 worktree, or recorded app, in that order. The result names the step that
 worked; app-only activation says the exact window is not known. On other
@@ -310,6 +313,11 @@ page shows its resume command as text to copy. The focus endpoint accepts
 only a trap id in a same-origin, token-protected POST. The ⚙ popover's two
 preferences — table or cards, and whether lobsters crawl the page — are
 per-browser, kept in that browser's localStorage and never on disk.
+
+On a card, the title and the badge share one line. A title truncates with an
+ellipsis. A badge longer than about 24 characters truncates too. The meta
+line and the note show at most two lines. The full text of each is in its
+hover title.
 
 The On deck tab shows up to 8 traps. Live traps come first, most recent
 heartbeat first. Traps stowed or ghosted in the last hour follow, most recent
@@ -342,7 +350,10 @@ the helm files to keep.
   whether it is acked. `lobstah status <id>` and `lobstah catch <id>` print
   `report: <path>` when the dispatch has one.
 - **In the glass.** The deck has a reports block after Landed: newest first,
-  unacked first, up to 8, then "+N more". A dispatch's report renders as a
+  unacked first, up to 8, then "+N more", which opens the Reports tab. A
+  report's card or row shows its title, then who filed it (a trap's name, a
+  headless dispatch's id, nothing for the helm), its age, and `acked`. A
+  dispatch's report renders as a
   page at the top of its dispatch modal. A helm report opens in a modal of
   its own; `#report/<key>` links to it. The page shows headings, lists,
   tables, fenced code, links (in a new tab), bold, italics, and images.
@@ -581,7 +592,7 @@ lobstah soak --wait             # hookless sessions: listen in the foreground
                                 # (re-runs need no flags — identity is the
                                 # worktree, else the session id); exit 3 =
                                 # quiet, run it again
-lobstah soak --link <url>       # store this session's link for Open window
+lobstah soak --link <url>       # store this session's link for the glass's ↗ open button
 lobstah focus <trap>           # focus a live trap from the CLI
 lobstah stow                    # sign off; an open catch requeues, unread
                                 # messages bounce back to the helm; removes
