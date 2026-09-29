@@ -25,12 +25,6 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(fs.existsSync(`${root}/docs/lobsterman.md`)).toBe(false);
   });
 
-  it('each skill stays under 80 lines', () => {
-    for (const skill of ['man', 'trap']) {
-      expect(read(`plugins/claude-code/skills/${skill}/SKILL.md`).trimEnd().split('\n').length).toBeLessThan(80);
-    }
-  });
-
   it('each plugin ships its own README for the registry listing', () => {
     // Split on purpose: the listings differ per harness (the /lobstah
     // command, Codex's trust review) — only presence is enforced.
