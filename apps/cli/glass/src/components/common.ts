@@ -56,7 +56,9 @@ const resumeCmd = (t: GlassTrap): string | undefined =>
 export function windowAction(t: GlassTrap): Children {
   if (!t.live) {
     const command = resumeCmd(t);
-    return command ? html`<span class="dim">Resume: <code onClick=${stop}>${command}</code></span>` : html`<span class="dim">Resume command unavailable</span>`;
+    return command
+      ? html`<span class="dim">Resume: <code onClick=${stop}>${command}</code></span>`
+      : html`<span class="dim">Resume command unavailable</span>`;
   }
   const state = getState();
   if (!state.snapshot?.focusSupported && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;

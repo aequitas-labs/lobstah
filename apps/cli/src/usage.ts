@@ -192,12 +192,11 @@ installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
 \`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
-  soak: `Volunteer this session as a worker; prints its name and wt:<trap> address. In a
-linked worktree it signs on there. From a primary checkout (or with --repo
-from anywhere) it creates worktrees/soak-<trap> (branch lobstah/soak-<trap>,
-from trunk, with setup): cd there. A session's trap is re-used. --one stows
-after one catch. --name sets or changes its two-word name. --wait listens in the foreground; exit 3 = run it again.
---link stores this session's validated deep link for exact reopening.
+  soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
+Primary checkout or --repo creates worktrees/soak-<trap> from trunk
+(branch lobstah/soak-<trap>, with setup): cd there. Sessions reuse traps.
+--one stows after a catch; --name sets its name; --link sets a validated URL.
+--wait listens; quiet exit 3 means re-run.
 \`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
   stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
 requeues, unread messages bounce to the helm. Removes the worktree soak
