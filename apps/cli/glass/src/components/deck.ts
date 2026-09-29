@@ -3,7 +3,7 @@ import { DECK_TRAPS_MAX, LANDED_MAX, prBadgeClass } from '../../../src/glass-dif
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
-import { Age, KIND_TONE, Table, kindCell, kindLabel, opener, trapRow, windowAction } from './common.js';
+import { Age, KIND_TONE, Table, kindCell, kindLabel, opener, trapNow, windowAction } from './common.js';
 
 /**
  * On deck: attention, in flight, landed in the last 24h, traps, and open PR
@@ -118,7 +118,7 @@ export function Deck({ inp }: { inp: DeckInputs }) {
     key: t.trapId,
     title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
     badge: { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
-    meta: [t.repo || '', ' · ', t.live ? trapRow(t).listen : 'stowed / ghosted', ' · ', windowAction(t)],
+    meta: [t.repo || '', ' · ', trapNow(t), ' · ', windowAction(t)],
     open: opener('trap', t.trapId),
   }));
   return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view)}${deckPrs(inp, view)}</div>`;

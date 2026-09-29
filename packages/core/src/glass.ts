@@ -213,7 +213,10 @@ export interface GlassMessage {
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   trapId: string;
   label?: string;
+  /** Signed on now (the registration exists), including when its beat is stale. */
   live: boolean;
+  /** Parked and recently beating; false for a stale or never-parked registration. */
+  listening?: boolean;
   messages: GlassMessage[];
   /** This trap's notices, newest first. */
   notices: Notice[];
