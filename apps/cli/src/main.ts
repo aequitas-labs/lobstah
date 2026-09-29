@@ -94,7 +94,7 @@ import {
   VERBS,
   parsePrRef,
   prBadge,
-  prSortAt,
+  prNewestFirst,
   readPrs,
   handoffNote,
   resolveSessionHarness,
@@ -1152,13 +1152,14 @@ async function mainCli(): Promise<void> {
       }
       const now = Date.now();
       const watches = new Map(listWatches().map((w) => [w.key, w]));
-      const rows = readPrs().sort((a, b) => prSortAt(b).localeCompare(prSortAt(a)) || a.key.localeCompare(b.key));
+      const records = readPrs();
+      const rows = records.sort(prNewestFirst(records));
       console.log(
         toonTable(
           'prs',
           rows.map((r) => {
             const watch = watches.get(r.key);
-            const ageMins = Math.max(0, Math.floor((now - Date.parse(prSortAt(r))) / 60_000));
+            const ageMins = Math.max(0, Math.floor((now - Date.parse(r.observedAt)) / 60_000));
             return {
               number: `#${r.number}`,
               repo: r.repo,

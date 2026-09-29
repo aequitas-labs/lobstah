@@ -116,7 +116,10 @@ export interface GlassPr {
   mergeStateStatus: string;
   baseRefName?: string;
   headRefName?: string;
+  /** Last check against the forge. Shown, never sorted on. */
   observedAt: string;
+  /** From the PR record; the order key (core prs.ts prNewestFirst). */
+  firstSeenAt?: string;
   updatedAt?: string;
   mergedAt?: string;
   closedAt?: string;

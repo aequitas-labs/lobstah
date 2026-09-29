@@ -29,11 +29,40 @@ export interface PrRecord extends PrEvidence {
   standingSince: Partial<Record<PrStandingKind, string>>;
   /** Number of observations. The first is a baseline, never a repair trigger. */
   observations?: number;
+  /**
+   * The first observation's time. Written once, never rewritten. Absent on a
+   * record written before this field existed until its next observation.
+   */
+  firstSeenAt?: string;
 }
 
-/** Records sort by observation time; older shapes can fall back to forge update time. */
-export function prSortAt(pr: Pick<PrEvidence, 'observedAt' | 'updatedAt'>): string {
-  return pr.observedAt || pr.updatedAt || '';
+/** What the stable PR order reads. */
+export interface PrOrderable {
+  url: string;
+  number: number;
+  firstSeenAt?: string;
+}
+
+/**
+ * The first-seen time a PR without one sorts at: the earliest first-seen
+ * time in the set, or '' when no PR in the set has one.
+ */
+export function prFirstSeenFloor(prs: readonly PrOrderable[]): string {
+  let floor = '';
+  for (const p of prs) if (p.firstSeenAt && (!floor || p.firstSeenAt < floor)) floor = p.firstSeenAt;
+  return floor;
+}
+
+/**
+ * The PR order every list shares: newest first-seen time first, then the
+ * higher number, then the url. A PR without a first-seen time sorts at the
+ * set's floor (prFirstSeenFloor), so it orders by number among the oldest.
+ * Observation time is never part of the key.
+ */
+export function prNewestFirst(prs: readonly PrOrderable[]): (a: PrOrderable, b: PrOrderable) => number {
+  const floor = prFirstSeenFloor(prs);
+  const at = (p: PrOrderable) => p.firstSeenAt || floor;
+  return (a, b) => at(b).localeCompare(at(a)) || b.number - a.number || a.url.localeCompare(b.url);
 }
 
 export function prsDir(): string {
@@ -113,6 +142,9 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
   if (!ref) throw new Error(`not a PR url: ${pr.url}`);
   return withPrLock(ref.key, () => {
     const before = readPr(ref.key);
+    // A new record is first seen now. A record from before firstSeenAt takes
+    // the floor it already sorts at, so its place does not move.
+    const firstSeenAt = before?.firstSeenAt ?? (before ? prFirstSeenFloor(readPrs()) || pr.observedAt : pr.observedAt);
     const dispatches = [...(before?.dispatches ?? [])];
     if (dispatchId && !dispatches.includes(dispatchId)) dispatches.push(dispatchId);
     const merged = { ...(before ?? {}), ...pr, failingChecks: pr.failingChecks } as PrEvidence;
@@ -127,6 +159,7 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
       dispatches,
       standingSince,
       observations: (before?.observations ?? 0) + 1,
+      firstSeenAt,
       repair: before?.headSha === pr.headSha ? before?.repair : undefined,
     };
     writePr(after);

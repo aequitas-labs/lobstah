@@ -283,6 +283,36 @@ describe('glass page: PRs', () => {
     expect(g.$$('#prs h2').map(text)).toContain('#30 · floor main · history');
   });
 
+  it('a poll with new observation times keeps every PR row node in its place and the open modal', async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#prs' });
+    const before = g.$$('#prs tr');
+    await click(g, g.$$('#prs tr.rowhead')[0]!);
+    const modal = g.$('#modalbox');
+    expect(modal).toBeTruthy();
+    const d = everyAttentionFleet();
+    for (const p of d.prs) p.observedAt = ago(1000);
+    g.serve(d);
+    await g.poll();
+    expect(g.$$('#prs tr')).toEqual(before);
+    expect(g.$('#modalbox')).toBe(modal);
+  });
+
+  it('cards: a new stack at the top keeps every existing stack heading and card node', async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
+    const cards = g.$$('#prs .card');
+    const heads = g.$$('#prs h2');
+    const d = everyAttentionFleet();
+    const id = 'pr:acme/web#99';
+    d.stacks.unshift({ id, floor: 'main', repo: d.stacks[0]!.repo, numbers: [99], open: true, nextNumber: 99, behind: 0 });
+    d.prs.unshift({ ...d.prs[0]!, key: id, url: 'https://github.com/acme/web/pull/99', number: 99, title: 'fresh', stackId: id, position: 0 });
+    g.serve(d);
+    await g.poll();
+    const after = g.$$('#prs .card');
+    expect(text(after[0]!.querySelector('b'))).toBe('#99 fresh');
+    expect(after.slice(1)).toEqual(cards);
+    expect(g.$$('#prs h2').slice(1)).toEqual(heads);
+  });
+
   it('the PRs table groups by stack and never shows a watch cursor', async () => {
     const g = await page(acceptanceFleet(), { hash: '#prs' });
     expect(g.$$('#prs th[colspan]').map(text)).toEqual(['#41 → #42 → #43 · floor main · open']);

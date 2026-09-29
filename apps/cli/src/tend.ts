@@ -22,7 +22,7 @@ import {
   parsePrRef,
   pendingIds,
   prBadge,
-  prSortAt,
+  prNewestFirst,
   prStandingKinds,
   queuedDescriptor,
   readEvidence,
@@ -549,19 +549,22 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
   };
 }
 
-/** The chain's newest observed PR state as a badge — the one derivation tend, catch, and glass share. */
+/**
+ * The chain's PR state as a badge — the one derivation tend, catch, and glass
+ * share. A chain with several PRs shows the one first seen last.
+ */
 function prStateOf(chain: TendDispatch[]): string | undefined {
-  const record = chain
+  const records = chain
     .map((d) => parsePrRef(d.prUrl ?? d.pr?.url ?? ''))
     .filter((ref) => ref !== undefined)
     .map((ref) => readPr(ref.key))
-    .filter((pr) => pr !== undefined)
-    .sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
+    .filter((pr) => pr !== undefined);
+  const record = records.sort(prNewestFirst(records))[0];
   if (record) return prBadge(record).text;
   const observed = chain
     .map((d) => d.pr)
     .filter((p): p is PrEvidence => p !== undefined)
-    .sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
+    .sort((a, b) => b.number - a.number || b.observedAt.localeCompare(a.observedAt))[0];
   return observed ? prBadge(observed).text : undefined;
 }
 
@@ -759,8 +762,14 @@ export function buildTendReport(now = Date.now()): TendReport {
   const records = readPrs();
   const legacy = evidencePrs();
   const observed = observedPrs(records, legacy);
-  const byPrUrl = new Map(observed.map(({ pr }) => [pr.url, prSortAt(pr)]));
-  const prStories = stories.filter((s) => s.prUrl).sort((a, b) => (byPrUrl.get(b.prUrl!) ?? '').localeCompare(byPrUrl.get(a.prUrl!) ?? ''));
+  // Stories with a PR take the shared PR order (first seen, newest first) in
+  // the slots PR stories hold; a story whose PR has no observation goes last.
+  const byPrUrl = new Map(observed.map(({ pr }) => [pr.url, pr]));
+  const newestFirst = prNewestFirst(observed.map(({ pr }) => pr));
+  const prStories = stories.filter((s) => s.prUrl).sort((a, b) => {
+    const pa = byPrUrl.get(a.prUrl!), pb = byPrUrl.get(b.prUrl!);
+    return pa && pb ? newestFirst(pa, pb) : Number(!pa) - Number(!pb);
+  });
   let prIndex = 0;
   stories.forEach((s, i) => {
     if (s.prUrl) stories[i] = prStories[prIndex++]!;

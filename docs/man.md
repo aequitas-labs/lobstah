@@ -217,6 +217,17 @@ attention kinds exactly like a dispatched PR (its dispatch chain column is
 empty). It stays quiet while it's fine: only a failing check or a changes
 request surfaces as a watch event; a merge or close arrives as a notice.
 
+**PR order.** Every PR list uses one order: the glass PRs tab, the On deck
+PR stacks, `lobstah prs`, and the `stack #…` lines and the `work` table of
+`man tend`. Open stacks come first, then finished ones. Within each group, the
+stack whose newest PR was first seen last is on top. Within a stack, PRs are
+in stack position. A PR sorts by its record's `firstSeenAt`, then by number.
+A new observation does not change the order. The order changes when a PR
+opens, merges, closes, or changes its base so that it joins or leaves a
+stack. When two PRs share a head branch, the parent is the one first seen
+last. The attention list is in standing order: the time each condition
+started. `observedAt` is shown as the time of the last check.
+
 An observed PR joins tend's attention list by kind. `pr:ready` needs a
 mergeable, non-draft PR with no failed, pending, or unknown current checks.
 `pr:conflict` and `pr:checks` appear for an owned PR only when repair is off,
