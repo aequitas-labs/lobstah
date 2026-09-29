@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { enqueue, laneDirs, readStatusLog } from '@lobstah/core';
+import { enqueue, laneDirs, pushRule, readStatusLog } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { MergePolicy, MergeSource, PrCandidate } from '../types.js';
@@ -35,12 +35,12 @@ export function approvalDedupKey(pr: PrCandidate, review: { id: number }): strin
   return `${pr.number}#${review.id}@${pr.headSha}`;
 }
 
-function rebaseBrief(pr: PrCandidate): string {
+export function rebaseBrief(pr: PrCandidate, id: string): string {
   return [
     `Rebase the branch ${pr.headRef} of ${pr.url} onto its base branch, resolving any conflicts`,
-    `in a way that preserves the intent of both sides. Then push the rebased branch with`,
-    `\`git push --force-with-lease\`. Do not merge the PR. Do not change anything beyond conflict`,
-    `resolution. When pushed, report status done.`,
+    `in a way that preserves the intent of both sides.`,
+    pushRule(pr.headRef, id),
+    `Do not merge the PR. Do not change anything beyond conflict resolution. When pushed, report status done.`,
   ].join(' ');
 }
 
@@ -143,7 +143,16 @@ export async function mergeLoop(
         break;
       case 'dirty': {
         const uuid = randomUUID();
-        enqueue({ id: uuid, repo: ms.repoKey(), brief: rebaseBrief(pr) }, 'chore');
+        enqueue(
+          {
+            id: uuid,
+            repo: ms.repoKey(),
+            brief: rebaseBrief(pr, uuid),
+            // The chore works on this PR: the runner pushes no other branch and opens no PR.
+            pr: { url: pr.url, headRefName: pr.headRef, headSha: pr.headSha },
+          },
+          'chore',
+        );
         state.setRebase(prKey, uuid);
         log(`${prKey}: real conflict — wrote rebase chore ${uuid}`);
         observe(pr, `conflict-chore:${uuid}`);

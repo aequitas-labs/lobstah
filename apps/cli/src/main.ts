@@ -150,6 +150,7 @@ import {
   syncPrWatches,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, stampRepairerBeat } from './pr-repair.js';
+import { runPush } from './push.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { runBeat } from './beat.js';
@@ -308,6 +309,11 @@ workers (dispatched agents; injected into every brief):
                                   (${VERBS.join(' | ')}). done --pr
                                   registers the PR's pr: watch for this
                                   chain; --no-watch opts out.
+  push <uuid>                     push a repair or rebase to its existing PR's
+                                  head branch; a push rejected because the
+                                  branch moved is fetched, replayed, and
+                                  retried ([watch].pushRetries). Never a new
+                                  branch or PR; spent retries fail the dispatch
 
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
@@ -1020,6 +1026,27 @@ async function mainCli(): Promise<void> {
               ? [`lobstah soak --wait   (re-park after reporting so answers and messages reach you)`]
               : [];
       if (next.length > 0) console.log(toonHelp(next));
+      break;
+    }
+    case 'push': {
+      const [id] = pos;
+      if (!id) throw new UsageError(`push requires a dispatch id\n\n${usageFor('push')!}`);
+      const { result, prUrl, failed } = runPush(id, findLane(id));
+      if (result.kind === 'pushed') {
+        console.log(toonKV({ id, pushed: result.branch, head: result.head, attempts: result.attempts, prUrl }));
+        break;
+      }
+      process.exitCode = 1;
+      if (result.kind === 'refused') {
+        console.log(toonKV({ id, refused: result.branch, attempts: result.attempts, prUrl }));
+        console.log(result.output);
+        console.log(toonHelp([`a push hook or the remote refused the push; it is not retried. Fix the error, commit, then: lobstah push ${id}`]));
+      } else if (result.kind === 'not-ready') {
+        console.log(toonKV({ id, error: result.reason, branch: result.branch, prUrl }));
+      } else {
+        console.log(toonKV({ id, verb: 'failed', note: failed ?? result.reason, prUrl }));
+        console.log(toonHelp([`the dispatch is failed and the PR is left as it was: stop here`]));
+      }
       break;
     }
     case 'inbox': {

@@ -19,6 +19,13 @@ export interface Attachment {
   type: string;
 }
 
+/** The PR a dispatch works on: its URL, head branch, and the head it starts from. */
+export interface DescriptorPr {
+  url: string;
+  headRefName?: string;
+  headSha?: string;
+}
+
 export interface Descriptor {
   id: string;
   repo: string;
@@ -36,6 +43,12 @@ export interface Descriptor {
   flags?: string[];
   env?: Record<string, string>;
   followUp?: string;
+  /**
+   * The existing PR this dispatch works on (a repair or a rebase). The
+   * runner pushes no branch and opens no PR for it; the worker pushes to
+   * the PR's head branch with `lobstah push`.
+   */
+  pr?: DescriptorPr;
   attachments?: Attachment[];
   /** Address this bait to a specific claimant (`session:<id>`). A live
    * soaking session claims it; once its registration is gone the daemon

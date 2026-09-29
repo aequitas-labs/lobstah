@@ -266,7 +266,8 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       const ancestorPr = origin && chainPr(origin, 'work');
       if (ancestorPr && ancestorPr.url !== pr.url) return;
       const kind = repairKind(pr);
-      const previous = pr.repair?.headSha === pr.headSha ? pr.repair : undefined;
+      // A failed push marks the moved head and still covers the head it started from.
+      const previous = pr.repair && (pr.repair.headSha === pr.headSha || pr.repair.fromHeadSha === pr.headSha) ? pr.repair : undefined;
       if (!kind || (kind === 'conflict' && !cfg.conflicts) || (kind === 'checks' && !cfg.checks)) {
         // Nothing to repair: a wait from before ends.
         if (previous?.status === 'waiting') writePr({ ...pr, repair: endWait(previous) });
@@ -357,7 +358,14 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         },
       });
       try {
-        enqueue({ id, repo: target.repo, brief: repairBrief(pr, kind), followUp: chain.latest, ...(trap ? { for: address } : {}) }, 'work');
+        enqueue({
+          id,
+          repo: target.repo,
+          brief: repairBrief(pr, kind),
+          followUp: chain.latest,
+          pr: { url: pr.url, headRefName: pr.headRefName, headSha: pr.headSha },
+          ...(trap ? { for: address } : {}),
+        }, 'work');
         mergeEvidence(id, 'work', { prUrl: pr.url, pr });
         markFollowUp(watch.key, id, readWatchEvents(watch.key).length);
         started++;

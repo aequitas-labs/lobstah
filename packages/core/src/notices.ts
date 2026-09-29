@@ -26,7 +26,8 @@ export type NoticeKind =
   | 'watch-recovered'
   | 'disk-held'
   | 'disk-cleared'
-  | 'worktree-released';
+  | 'worktree-released'
+  | 'push-failed';
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */

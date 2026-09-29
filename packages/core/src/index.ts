@@ -24,6 +24,7 @@ export * from './prs.js';
 export * from './chain-pr.js';
 export * from './pushes.js';
 export * from './pr-repair.js';
+export * from './pr-push.js';
 export * from './resume.js';
 export * from './glass.js';
 export * from './models.js';

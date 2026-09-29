@@ -130,6 +130,11 @@ export interface WatchConfig {
    * must stay unchanged before a repair is queued.
    */
   repairSettleSecs: number;
+  /**
+   * How many times `lobstah push` retries a push to a PR's branch that was
+   * rejected because the branch moved.
+   */
+  pushRetries: number;
 }
 
 export interface GlassConfig {
@@ -198,7 +203,7 @@ export const DEFAULT_HELM: HelmConfig = {
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
-export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, repairSettleSecs: 600 };
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, repairSettleSecs: 600, pushRetries: 3 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,
