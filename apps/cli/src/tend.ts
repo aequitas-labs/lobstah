@@ -260,6 +260,8 @@ export function humanPrAttention(
     return { show: true, reason: pr.repair!.reason };
   if (!watchAvailable) return { show: true, reason: 'no active PR watch' };
   if (!liveRepairer(now)) return { show: true, reason: 'no repairer is running' };
+  // A check that had its round at this head and still fails needs a person.
+  if (matchingRepair && pr.repair!.status === 'waiting' && pr.repair!.heldBy === 'repaired') return { show: true, reason: pr.repair!.reason };
   // A waiting repair needs no person: it is shown in the repairs-waiting table instead.
   if (matchingRepair && pr.repair!.status === 'waiting') return { show: false, reason: `repair waits: ${pr.repair!.reason ?? ''}` };
   if (!matchingRepair || pr.repair?.status !== 'repairing' || !pr.repair.dispatchId)

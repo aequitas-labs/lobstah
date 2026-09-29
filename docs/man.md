@@ -288,7 +288,9 @@ work. `[watch].autoRepair`, `conflicts`, and `checks` control this behavior.
 A waiting repair is recorded on the PR record as `repair.status: waiting`,
 with `heldBy` (`wt:<trap>`, `dispatch:<id8>`, `helm`, `hold`, `settle`,
 `checks`, `human-gate`, or `repaired`) and `reason`. `repaired` means each
-failing check already had its round at this head; a new commit ends it. A wait is not an attempt: it does not count against
+failing check already had its round at this head; a new commit ends it.
+Unlike the other waits, `repaired` also raises `pr:checks` attention with
+its reason: the round did not fix the check. A wait is not an attempt: it does not count against
 `[watch].maxRepairsPerPr`. It raises no attention item. `man tend` lists it
 in the `repairs waiting` table, the PR badge ends in `repair waits: <heldBy>`,
 the glass PR modal shows the reason, and `lobstah doctor` lists it. When the

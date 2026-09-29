@@ -12,13 +12,15 @@ import {
   mergeEvidence,
   readEvidence,
   readPr,
+  loadConfig,
   readWatch,
   repairBrief,
   upsertPr,
 } from '@lobstah/core';
 import type { Descriptor, PrEvidence, PrRecord } from '@lobstah/core';
 import { deliverDispatchOwned } from '../../pick/src/loops/watch.js';
-import { deliverPrRepairs, recordReportedGates } from '../src/pr-repair.js';
+import { deliverPrRepairs, recordReportedGates, stampRepairerBeat } from '../src/pr-repair.js';
+import { humanPrAttention } from '../src/tend.js';
 
 const OWNER = '11111111-1111-1111-1111-111111111111';
 const SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -153,6 +155,18 @@ describe('human gates in the daemon repair path', () => {
     // The per-head limit (2) is spent. A new commit starts over.
     expect(observeAndRepair(red(['test', 'lint']), 3)).toBe(0);
     expect(observeAndRepair(red(['test'], NEXT), 2)).toBe(1);
+  });
+
+  it('a floor wait still raises checks attention; a human-gate wait does not', () => {
+    stampRepairerBeat();
+    expect(observeAndRepair(red(['test']), 2)).toBe(1);
+    finishRepair();
+    observeAndRepair(red(['test']), 1);
+    expect(humanPrAttention(readPr(KEY)!, 'pr:checks', loadConfig())).toMatchObject({ show: true });
+    config(`[repos.web]\npath = "/tmp/web"\nhumanGateChecks = ["${GATE}"]\n`);
+    observeAndRepair(red([GATE], NEXT), 2);
+    expect(readPr(KEY)?.repair?.heldBy).toBe('human-gate');
+    expect(humanPrAttention(readPr(KEY)!, 'pr:checks', loadConfig())).toMatchObject({ show: false });
   });
 
   it('matches gate patterns exactly or with *', () => {
