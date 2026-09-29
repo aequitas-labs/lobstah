@@ -333,7 +333,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     }
     // After a final report, a harness that never settles cannot hold the run.
     const result = driven.final ? await within(run.done, DONE_WAIT_MS, {}) : await run.done;
-    return { cancelled, activity, result, final: driven.final };
+    return { cancelled, activity, result };
   };
 
   // Every exit path releases the worktree lock and completes the active
