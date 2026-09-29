@@ -306,6 +306,24 @@ export function everyAttentionFleet(): GlassSnapshot {
   d.landed = landed;
   for (let i = 0; i < 5; i++) d.dispatches.push(dispatch(`9${i}999999-0000-4000-8000-000000000000`, { verb: i % 2 ? 'blocked' : 'working', sort: NOW - (40 + i) * MIN }));
   d.traps.push(trap('t3', { heartbeatAt: ago(2 * HOUR), firstParkedAt: undefined, harness: 'codex' }), trap('t4'));
+  // More traps than the deck shows, out of order: live ones by heartbeat,
+  // signed-off ones by their stow or ghost, and one stowed too long ago.
+  const signedOff = (id: string, kind: 'trap-stowed' | 'trap-ghosted', at: string): GlassTrap => ({
+    trapId: id,
+    repo: 'web',
+    live: false,
+    messages: [],
+    notices: [{ seq: `s-${id}`, kind, at, text: `wt:${id} ${kind.slice(5)}`, refId: id, repo: 'web' }],
+    catches: [],
+  });
+  d.traps.push(
+    signedOff('t7', 'trap-stowed', ago(10 * MIN)),
+    trap('t5', { heartbeatAt: ago(5 * MIN) }),
+    signedOff('t8', 'trap-ghosted', ago(45 * MIN)),
+    trap('t6', { heartbeatAt: ago(30_000) }),
+    signedOff('t9', 'trap-stowed', ago(2 * HOUR)),
+    trap('t10', { heartbeatAt: ago(20 * MIN) }),
+  );
   d.stacks.push(
     { id: 'pr:acme/web#50', floor: 'main', repo: 'web', numbers: [50], open: true, nextNumber: 50, behind: 0 },
     { id: 'pr:acme/web#60', floor: 'main', repo: 'web', numbers: [60], open: true, behind: 0 },

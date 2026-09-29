@@ -442,6 +442,38 @@ describe('glass page: On deck', () => {
     expect(landed.querySelector('.deckmore')).toBeNull();
   });
 
+  it('traps: eight at most, live first by newest heartbeat, then recently signed off, the rest in "+N more"', async () => {
+    for (const view of ['table', 'cards'] as const) {
+      const g = await page(everyAttentionFleet(), { prefs: { view } });
+      const traps = g.$$('#deck section')[3]!;
+      const items = [...traps.querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
+      expect(items.map((l) => text(l.querySelector('b')))).toEqual([
+        '🪤 wt:t6',
+        '🪤 wt:t1',
+        '🪤 wt:t4',
+        '🪤 wt:t5',
+        '🪤 wt:t10',
+        '🪤 wt:t3',
+        '🪤 wt:t7',
+        '🪤 wt:t2',
+      ]);
+      expect(items.map((l) => text(l.querySelector('.badge')))).toEqual([
+        'claude',
+        'claude',
+        'claude',
+        'claude',
+        'claude',
+        'codex',
+        'signed off',
+        'signed off',
+      ]);
+      // t8 (ghosted 45m ago) is the ninth; t9 stowed two hours ago is off the deck.
+      expect(text(traps.querySelector('.deckmore'))).toBe('+1 more →');
+      expect(traps.querySelector('.deckmore')!.getAttribute('href')).toBe('#traps');
+      expect(text(traps)).not.toContain('wt:t9');
+    }
+  });
+
   it('an empty window says none', async () => {
     const d = acceptanceFleet();
     d.landed = [{ ...d.landed[0]!, at: ago(25 * 3600_000) }];

@@ -26,6 +26,8 @@ import type {
 // within the last LANDED_WINDOW_MS, whatever the report cursor says.
 export const LANDED_MAX = 8;
 export const LANDED_WINDOW_MS = 86400000;
+// On deck's traps section: at most DECK_TRAPS_MAX traps, then "+N more".
+export const DECK_TRAPS_MAX = 8;
 export const STALE_DAEMON_MS = 90000;
 export const STALE_SEAT_MS = 1800000;
 
@@ -152,11 +154,19 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   const seat = <T>(x: T): Seat<T> => ({ x, stale: isStale((x as { heartbeatAt?: string }).heartbeatAt, STALE_SEAT_MS, now) });
   const item = modalItem(d, ui.modal);
   const recent = (iso: string | undefined, ms: number) => !!iso && now - Date.parse(iso) <= ms;
-  const deckTraps = (d.traps || []).filter(
-    (t) =>
-      (t.live || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000))) &&
-      hasQuery(t.name, t.trapId, t.repo, t.worktree),
-  );
+  // On deck: live traps, newest heartbeat first, then the ones stowed or
+  // ghosted in the last hour, newest first. The traps tab keeps its order.
+  const signedOffAt = (t: GlassTrap) =>
+    Math.max(0, ...(t.notices || []).filter((n) => n.kind === 'trap-stowed' || n.kind === 'trap-ghosted').map((n) => Date.parse(n.at) || 0));
+  const deckTraps = (d.traps || [])
+    .filter(
+      (t) =>
+        (t.live || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000))) &&
+        hasQuery(t.name, t.trapId, t.repo, t.worktree),
+    )
+    .map((t) => ({ t, at: t.live ? Date.parse(t.heartbeatAt || '') || 0 : signedOffAt(t) }))
+    .sort((a, b) => Number(b.t.live) - Number(a.t.live) || b.at - a.at)
+    .map(({ t }) => t);
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
   return {
     chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat) },

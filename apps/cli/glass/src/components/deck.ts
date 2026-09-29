@@ -1,5 +1,5 @@
 import type { GlassPr, GlassStack } from '@lobstah/core';
-import { LANDED_MAX, prBadgeClass } from '../../../src/glass-diff.js';
+import { DECK_TRAPS_MAX, LANDED_MAX, prBadgeClass } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -121,5 +121,5 @@ export function Deck({ inp }: { inp: DeckInputs }) {
     meta: [t.repo || '', ' · ', t.live ? trapRow(t).listen : 'stowed / ghosted', ' · ', windowAction(t)],
     open: opener('trap', t.trapId),
   }));
-  return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('traps', traps, 'traps', 3, view)}${deckPrs(inp, view)}</div>`;
+  return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view)}${deckPrs(inp, view)}</div>`;
 }

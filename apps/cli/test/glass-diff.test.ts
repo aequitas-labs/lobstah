@@ -45,6 +45,22 @@ describe('glass section selectors', () => {
     expect(input.traps.list.map((seat: { x: { trapId: string } }) => seat.x.trapId)).toEqual(['aa']);
   });
 
+  it('orders deck traps live first by newest heartbeat, then signed off by newest stow; the Traps tab keeps its order', () => {
+    const off = (trapId: string, kind: string, agoMs: number) => ({
+      trapId,
+      live: false,
+      messages: [],
+      notices: [{ kind, at: iso(agoMs), text: kind }],
+      catches: [],
+    });
+    const live = (trapId: string, agoMs: number) => ({ trapId, live: true, heartbeatAt: iso(agoMs), messages: [], notices: [], catches: [] });
+    const traps = [off('s1', 'trap-stowed', 50 * 60_000), live('l1', 5 * 60_000), off('g1', 'trap-ghosted', 60_000), live('l2', 10_000)];
+    const input = diff.sectionInputs({ ...snapshot(), traps }, ui(), NOW);
+    const ids = (seats: Array<{ x: { trapId: string } }>) => seats.map((seat) => seat.x.trapId);
+    expect(ids(input.deck.traps)).toEqual(['l2', 'l1', 'g1', 's1']);
+    expect(ids(input.traps.list)).toEqual(['s1', 'l1', 'g1', 'l2']);
+  });
+
   it('routes the URL hash to a tab, deck by default', () => {
     expect(diff.tabFromHash('')).toBe('deck');
     expect(diff.tabFromHash('#dispatches')).toBe('dispatches');
