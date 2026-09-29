@@ -1,12 +1,12 @@
 import { attachmentBlock, VERBS, WAITING_ON } from '@lobstah/core';
-import type { Attachment } from '@lobstah/core';
+import type { Attachment, ChainPr } from '@lobstah/core';
 
 /**
  * The status/inbox contract every dispatch learns. Injected by the runner
  * into the prompt it composes — nothing is installed repo-side, and the
  * contract versions with the daemon instead of drifting per repo.
  */
-export function buildPrompt(brief: string, opts: { id: string; nudge?: string; attachments?: Attachment[] }): string {
+export function buildPrompt(brief: string, opts: { id: string; nudge?: string; attachments?: Attachment[]; existingPr?: ChainPr }): string {
   const reporting =
     `Report status by running \`lobstah report ${opts.id} <verb> [note]\` (verbs: ${VERBS.join(', ')}). ` +
     `Attach a PR URL to your final report with \`--pr <url>\`. ` +
@@ -23,10 +23,16 @@ export function buildPrompt(brief: string, opts: { id: string; nudge?: string; a
       `New operator messages may arrive between your turns as user messages; treat them as instructions from the dispatcher.`,
     `Before you wait on something outside lobstah (a human review, a PR review, a deploy), report ` +
       `\`lobstah report ${opts.id} paused "<note>" --waiting-on ${WAITING_ON.join('|')} --link <url>\`. Report \`working\` when you resume.`,
-    `Commit your work with clear messages. The runner pushes committed HEAD early and opens or adopts one draft PR for the branch when available; do not create a duplicate PR. ` +
-      `When finished, mark the draft ready for review if appropriate, then report done with its URL. Do not merge anything.`,
+    opts.existingPr
+      ? `Commit your work with clear messages. This chain already has PR ${opts.existingPr.url}. The runner does not push or open another PR. ` +
+        `Push your changes to its existing head branch${opts.existingPr.headRefName ? ` ${opts.existingPr.headRefName}` : ' (inspect the PR to find it)'}; do not create a duplicate PR. ` +
+        `Report done with the same PR URL. Do not merge anything.`
+      : `Commit your work with clear messages. The runner pushes committed HEAD early and opens or adopts one draft PR for the branch when available; do not create a duplicate PR. ` +
+        `When finished, mark the draft ready for review if appropriate, then report done with its URL. Do not merge anything.`,
     `--- BRIEF ---`,
-    brief,
+    opts.existingPr
+      ? `${brief}\n\nExisting chain PR: ${opts.existingPr.url}. Head branch: ${opts.existingPr.headRefName ?? 'inspect the PR'}. The runner will not push this follow-up.`
+      : brief,
   ];
   if (opts.attachments?.length) parts.push(attachmentBlock(opts.attachments));
   if (opts.nudge) parts.push(`--- SUPERVISOR NOTE ---`, opts.nudge);

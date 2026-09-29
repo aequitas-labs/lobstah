@@ -61,9 +61,9 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
 | `wallClockSecs` | `3600` | Initial active-work window. Progress extends it, up to `maxWallClockSecs`; time paused with `report paused --waiting-on` does not count. |
 | `maxWallClockSecs` | `4 × wallClockSecs` | Hard active-work ceiling across restarts. |
-| `pushEarly` | `true` | Push each new committed HEAD to its non-trunk branch on `origin` within 10 seconds. A rejected push is noted and retried only after HEAD moves. |
-| `draftPr` | `true` | After first push, adopt an existing PR or open one draft PR when `gh` is available. |
-| `checkpointOnStop` | `true` | Before a nonterminal stop, checkpoint eligible tracked and untracked files, then push. Ignored files and secret/build denylist paths are excluded. Set all three switches to `false` for prior runner behavior. |
+| `pushEarly` | `true` | For a new chain, push each new committed HEAD to its non-trunk branch on `origin` within 10 seconds. A rejected push is noted and retried only after HEAD moves. A follow-up whose chain already has a PR does not push automatically; its worker pushes to the existing PR's head branch. |
+| `draftPr` | `true` | For a new chain, after first push, adopt an existing PR or open one draft PR when `gh` is available. A follow-up with a chain PR keeps that PR and its watch; it does not open another. |
+| `checkpointOnStop` | `true` | Before a nonterminal stop, checkpoint eligible tracked and untracked files. A new chain then pushes; a follow-up with a chain PR leaves the checkpoint local for its worker to push. Ignored files and secret/build denylist paths are excluded. Set all three switches to `false` for prior runner behavior. |
 
 A runner extends its active-work window when a fresh activity event or new HEAD
 shows progress at the boundary. The elapsed budget and current window are

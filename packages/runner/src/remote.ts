@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { isTrapCatch, mergeEvidence, readEvidence, resolveOnPath } from '@lobstah/core';
+import { isTrapCatch, mergeEvidence, parsePrRef, readEvidence, readWatch, resolveOnPath } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 
 const exec = promisify(execFile);
@@ -42,11 +42,13 @@ export function keepRemote(opts: {
   trunk: string;
   title: string;
   policy: RemotePolicy;
+  /** The origin chain's PR. Its head branch is worker-managed. */
+  existingPrUrl?: string;
   intervalMs?: number;
 }): RemoteRun {
-  const { id, lane, cwd, trunk, policy } = opts;
+  const { id, lane, cwd, trunk, policy, existingPrUrl } = opts;
   const command = async (bin: string, args: string[], timeout = 120_000): Promise<string> => {
-    const file = bin === 'gh' ? (resolveOnPath('gh') ?? bin) : bin;
+    const file = bin === 'gh' || bin === 'lobstah' ? (resolveOnPath(bin) ?? bin) : bin;
     return (await exec(file, args, {
       cwd, encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024,
       shell: process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(file),
@@ -54,6 +56,14 @@ export function keepRemote(opts: {
   };
   const git = (...args: string[]) => command('git', args);
   const note = (message: string) => mergeEvidence(id, lane, { note: message.slice(0, 300) });
+  if (existingPrUrl) mergeEvidence(id, lane, { prUrl: existingPrUrl });
+  const registerWatch = async (url: string): Promise<void> => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    const localCli = path.join(root, 'apps', 'cli', 'dist', 'main.js');
+    const args = ['watch', 'add', url, '--for', id];
+    if (fs.existsSync(localCli)) await command(process.execPath, [localCli, ...args], 15_000);
+    else await command('lobstah', args, 15_000);
+  };
   let lastSeenHead: string | undefined;
   let pushedHead: string | undefined;
   let busy: Promise<void> | undefined;
@@ -63,6 +73,16 @@ export function keepRemote(opts: {
   let pushProblem: string | undefined;
   let draftProblem: string | undefined;
   const trapClaimed = () => isTrapCatch(id, lane);
+
+  // Reuse the PR's existing watch. If it is missing, register that same PR,
+  // never a PR inferred from this worktree's local branch.
+  const existingWatch = existingPrUrl && parsePrRef(existingPrUrl);
+  const watching = existingWatch && !readWatch(existingWatch.key)
+    ? (async () => {
+      await registerWatch(existingWatch.url)
+        .catch((err) => note(`PR watch unavailable: ${firstLine(err)}`));
+    })()
+    : undefined;
 
   const branchName = async (): Promise<string | undefined> => {
     const branch = await git('symbolic-ref', '--quiet', '--short', 'HEAD').catch(() => '');
@@ -90,12 +110,11 @@ export function keepRemote(opts: {
     draftProblem = undefined;
     mergeEvidence(id, lane, { prUrl: match[0] });
     // The CLI owns PR-watch formatting. An absent CLI must not block pushes.
-    const bin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'bin', 'lobstah');
-    await command(fs.existsSync(bin) ? bin : 'lobstah', ['watch', 'add', match[0], '--for', id], 15_000).catch(() => {});
+    await registerWatch(match[0]).catch(() => {});
   };
 
   const check = async (): Promise<void> => {
-    if (!policy.pushEarly || trapClaimed()) return;
+    if (!policy.pushEarly || trapClaimed() || existingPrUrl) return;
     const branch = await branchName();
     if (!branch) return;
     const head = await git('rev-parse', 'HEAD');
@@ -133,6 +152,7 @@ export function keepRemote(opts: {
       await busy;
       await check().catch((err) => note(`final push unavailable: ${firstLine(err)}`));
       await opening;
+      await watching;
     },
     saveBeforeStop: async () => {
       stopped = true;
@@ -160,13 +180,14 @@ export function keepRemote(opts: {
           }
         } catch (err) { saved = `checkpoint unavailable: ${firstLine(err)}`; }
       }
-      // A checkpoint changes HEAD, so check() will retry naturally; a rejected
-      // push of the same HEAD must not be retried on this stop path.
+      // A checkpoint changes HEAD. New chains retry the push naturally;
+      // chains with a PR leave the push to the worker.
       await check().catch((err) => note(`final push unavailable: ${firstLine(err)}`));
       await opening;
+      await watching;
       const head = await git('rev-parse', '--short', 'HEAD').catch(() => 'unknown');
       const pr = readEvidence(id, lane).prUrl;
-      const message = `${saved}; ${branch}@${head}${pr ? `; draft PR ${pr}` : ''}${pushProblem ? `; ${pushProblem}` : ''}${draftProblem ? `; ${draftProblem}` : ''}`;
+      const message = `${saved}; ${branch}@${head}${pr ? `; ${existingPrUrl ? 'existing' : 'draft'} PR ${pr}` : ''}${pushProblem ? `; ${pushProblem}` : ''}${draftProblem ? `; ${draftProblem}` : ''}`;
       note(message);
       return message;
     },
