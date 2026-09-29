@@ -200,12 +200,15 @@ export interface ChooseInput {
 
 const short = (s: string) => s.slice(0, 8);
 
+/** Canonical path: native realpath (expands Windows 8.3 names), lowercased on Windows. */
 function realpath(p: string): string {
+  let r: string;
   try {
-    return fs.realpathSync(p);
+    r = fs.realpathSync.native(p);
   } catch {
-    return path.resolve(p);
+    r = path.resolve(p);
   }
+  return process.platform === 'win32' ? r.toLowerCase() : r;
 }
 
 /** A path from `git status --porcelain`, normalized for comparison with scratch paths. */

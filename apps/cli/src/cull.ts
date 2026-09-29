@@ -244,12 +244,16 @@ export function worktreeUsage(openPr?: Set<string>): { live: Set<string>; newest
  */
 export function trapWorktreeIds(wtRoot: string): Set<string> {
   const ids = new Set<string>();
+  // Native realpath expands Windows 8.3 names (RUNNER~1); registrations
+  // store that form, lowercased on Windows.
   const real = (p: string) => {
+    let r: string;
     try {
-      return fs.realpathSync(p);
+      r = fs.realpathSync.native(p);
     } catch {
-      return path.resolve(p);
+      r = path.resolve(p);
     }
+    return process.platform === 'win32' ? r.toLowerCase() : r;
   };
   const root = real(wtRoot);
   for (const t of listTraps()) {
