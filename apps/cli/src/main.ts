@@ -114,6 +114,7 @@ import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, 
 import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
+import { readCursor } from './reported.js';
 import { charter } from './charter.js';
 import { buildBriefContext } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
@@ -1413,6 +1414,14 @@ async function mainCli(): Promise<void> {
         };
         const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
         const consume = !has('--peek');
+        // A watcher delivery is a report through the newest event it printed.
+        // Reminders can be older than the cursor, so never move it backwards.
+        const delivered = (...times: string[]) => {
+          if (!consume || !callerHelm) return;
+          const through = Math.max(0, ...times.map((at) => Date.parse(at) || 0));
+          if (through > (Date.parse(readCursor(callerHelm.grounds) ?? '') || 0))
+            advanceCursor(callerHelm.grounds, new Date(through).toISOString());
+        };
         // Grounds-scoped consumption: a helm's wait touches only its own
         // repos' events and notices — the rest stand for their owner.
         const groundsScope = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
@@ -1440,10 +1449,11 @@ async function mainCli(): Promise<void> {
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
           if (standingNotices.length > 0) emitNotices(standingNotices, sid);
+          delivered(...standing.map((e) => e.entry.at), ...standingWatches.flatMap((a) => a.events.map((e) => e.at)), ...standingNotices.map((n) => n.at));
           break;
         }
-        // The periodic report as a peek — the cursor moves only on `man
-        // report`. Silent when nothing changed.
+        // The periodic timeout report is a peek: only event delivery or
+        // `man report` advances the cursor. Silent when nothing changed.
         const peekDigest = () => {
           const grounds = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
           const digest = buildDigest({ cursor: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
@@ -1464,23 +1474,26 @@ async function mainCli(): Promise<void> {
           const fresh = freshWakeEvents(baseline, undefined, matchGrounds);
           if (fresh.length > 0) {
             emit(fresh);
+            delivered(...fresh.map((e) => e.entry.at));
             return;
           }
           runDueManWatches(); // no pick running? this loop is the poller
           const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
           if (watched.length > 0) {
             emitWatchAttention(watched, sid);
+            delivered(...watched.flatMap((a) => a.events.map((e) => e.at)));
             return;
           }
           const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
           if (freshNotices.length > 0) {
             emitNotices(freshNotices, sid);
+            delivered(...freshNotices.map((n) => n.at));
             return;
           }
         }
         // A quiet timeout still shows the delta since the last report, so a
         // `man wait` loop doubles as the periodic fleet report. It is a PEEK —
-        // the cursor moves only on `man report`, the explicit acknowledgment —
+        // only event delivery or `man report` moves the cursor —
         // so a digest lost with a dead background task resurfaces on the next
         // timeout instead of being marked delivered to nobody. Silent when
         // nothing changed — the loop should not train its reader to skim.

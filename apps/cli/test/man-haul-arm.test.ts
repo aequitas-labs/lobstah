@@ -4,7 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimNext, enqueue, ensureLayout, signOnTrap, takeHelm } from '@lobstah/core';
+import { appendStatus, claimNext, complete, enqueue, ensureLayout, loadConfig, signOnTrap, takeHelm } from '@lobstah/core';
+import { readCursor } from '../src/reported.js';
+import { landedCatches } from '../src/tend.js';
 import { liveWatcher } from '../src/watchers.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -69,6 +71,21 @@ describe('man haul arm mode', () => {
     const res = haul();
     expect(res.stdout).toContain('which color?');
     expect(res.stdout).not.toContain('Arm the watcher');
+  });
+
+  it('printing standing attention does not report a landed catch', () => {
+    const landedId = '88888888-8888-4888-8888-888888888888';
+    enqueue({ id: landedId, repo: 'web', brief: 'land' });
+    claimNext('work');
+    appendStatus(landedId, 'work', 'done', 'landed');
+    complete(landedId, 'work');
+    enqueue({ id: dispatchId, repo: 'web', brief: 'question' });
+    claimNext('work');
+    appendStatus(dispatchId, 'work', 'needs-decision', 'which color?');
+    const res = haul();
+    expect(res.stdout).toContain('which color?');
+    expect(readCursor('fleet')).toBeUndefined();
+    expect(landedCatches(loadConfig()).find((c) => c.id === landedId)?.unreported).toBe(true);
   });
 
   it('asks a Claude trap to arm soak --wait, then allows its live watcher', () => {

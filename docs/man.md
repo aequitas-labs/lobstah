@@ -323,23 +323,23 @@ page, not periodic proof-of-life turns in a transcript.
 `lobstah man tend` is the full picture on demand; `lobstah man report` is the
 **delta** since the last acknowledged report — catches landed (with their
 notes and PRs), attention newly arisen, what still waits, and the fleet
-verdict. It advances a "reported through" cursor when it prints — the
-explicit acknowledgment — so nothing is ever reported twice, and it says
+verdict. It advances a "reported through" cursor when it prints, so nothing
+is ever reported twice, and it says
 `no change` when the delta is empty rather than re-dumping state. Standing
 unanswered questions appear under `still-waiting` without counting as
 change — reminders (`remindSecs`) own re-firing those.
 
-Delivery is at-least-once by construction: the carriers that might not be
-read (a `man wait` timeout in a background task) only **peek** at the delta,
-so a digest lost with a dead task re-surfaces on the next timeout; only
-`man report` (or a hook-delivered park digest, which lands in-context by
-construction) marks it handled.
+A catch is reported once the helm's `man wait` watcher delivers its event or
+`man report` prints it. The glass's `unreported` badge means no helm received
+that catch. A `man wait` timeout and `man wait --peek` only peek at the delta;
+a digest lost with a dead background task re-surfaces on the next timeout.
+The Stop-hook's standing-attention reminder does not mark a catch reported.
 
 Every carrier shares the cursor (per grounds, for a helm):
 
-- **The wait loop.** A `man wait` timeout (exit 3) prints the delta when
-  something changed, so a looping session gets periodic fleet reports for
-  free — see the loop idiom below.
+- **The wait loop.** A delivered `man wait` event (exit 0) advances the helm's
+  cursor through the event time. A timeout (exit 3) prints the delta when
+  something changed without advancing the cursor — see the loop idiom below.
 - **The blocking park.** A helm session's Stop-hook park delivers the digest as a wake
   at `[helm].reportSecs` cadence — including the landed-then-idle case, where
   the last catches finish and nothing is left in flight to wake for.
