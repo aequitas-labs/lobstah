@@ -130,6 +130,25 @@ export class LinearSource implements Source {
     );
   }
 
+  async createLiveComment(key: string, body: string): Promise<string> {
+    const issue = await this.issueByKey(key);
+    const result = await this.gql<{ commentCreate: { comment: { id: string } | null; success: boolean } }>(
+      `mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success comment { id } } }`,
+      { id: issue.id, body },
+    );
+    const id = result.commentCreate.comment?.id;
+    if (!result.commentCreate.success || !id) throw new Error('linear: live comment creation returned no id');
+    return id;
+  }
+
+  async editLiveComment(_key: string, commentId: string, body: string): Promise<void> {
+    const result = await this.gql<{ commentUpdate: { success: boolean } }>(
+      `mutation($id: String!, $body: String!) { commentUpdate(id: $id, input: { body: $body }) { success } }`,
+      { id: commentId, body },
+    );
+    if (!result.commentUpdate.success) throw new Error(`linear: could not edit live comment ${commentId}`);
+  }
+
   async poll(): Promise<WorkItem[]> {
     const state = this.cfg.startStateTypes?.length
       ? { type: { in: this.cfg.startStateTypes } }

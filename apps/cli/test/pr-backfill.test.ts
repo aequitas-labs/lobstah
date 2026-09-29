@@ -9,6 +9,7 @@ import type { PrEvidence } from '@lobstah/core';
 import { backfillPrWatches } from '../src/pr-watch.js';
 import { buildTendReport } from '../src/tend.js';
 import { buildGlassSnapshot } from '../src/glass.js';
+import { processTest } from '../../../test/process-test.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const url = (n: number) => `https://github.com/acme/web/pull/${n}`;
@@ -31,7 +32,7 @@ afterEach(() => {
   delete process.env.LOBSTAH_HOME;
 });
 const lobstah = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], {
-  encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home, PATH: `${home}:${process.env.PATH}` }, timeout: 10_000,
+  encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home, PATH: `${home}${path.delimiter}${process.env.PATH}` }, timeout: 10_000,
 });
 const dispatch = (id: string, followUp?: string) => {
   const dir = path.join(laneDirs('work').done, id);
@@ -46,7 +47,7 @@ const files = (dir: string): string[] => {
 };
 
 describe('read commands never register PR watches', () => {
-  it('catch, man tend, the glass snapshot, status, ls, and prs over 20 done dispatches with PR evidence create no watch and no dispatch', () => {
+  processTest('catch, man tend, the glass snapshot, status, ls, and prs over 20 done dispatches with PR evidence create no watch and no dispatch', () => {
     for (let n = 1; n <= 20; n++) {
       const id = `dispatch-${String(n).padStart(2, '0')}`;
       dispatch(id);
@@ -70,7 +71,7 @@ describe('read commands never register PR watches', () => {
 });
 
 describe('watch backfill (explicit migration)', () => {
-  it('is a dry run by default and registers only with --apply', () => {
+  processTest('is a dry run by default and registers only with --apply', () => {
     dispatch('dispatch-a');
     mergeEvidence('dispatch-a', 'work', { prUrl: url(1), pr: pr(1) });
     const dry = lobstah('watch', 'backfill');
@@ -121,7 +122,7 @@ describe('watch backfill (explicit migration)', () => {
 });
 
 describe('prs', () => {
-  it('lists three records newest first, with state and watch status', () => {
+  processTest('lists three records newest first, with state and watch status', () => {
     upsertPr(pr(1)); upsertPr(pr(3)); upsertPr(pr(2));
     addWatch(key(3), 'echo custom');
     const res = lobstah('prs');
@@ -133,7 +134,7 @@ describe('prs', () => {
     expect(res.stdout).toContain('passed');
   });
 
-  it('lists the prBadge state: a conflicting PR reads conflicts, never green', () => {
+  processTest('lists the prBadge state: a conflicting PR reads conflicts, never green', () => {
     upsertPr(pr(1, { mergeStateStatus: 'DIRTY' })); upsertPr(pr(2, { mergeStateStatus: 'BEHIND' }));
     const res = lobstah('prs');
     expect(res.status).toBe(0);
@@ -143,7 +144,7 @@ describe('prs', () => {
     expect(res.stdout).not.toContain('green');
   });
 
-  it('prs sync checks a due PR once, refreshes its record, retires its terminal watch, and registers nothing', () => {
+  processTest('prs sync checks a due PR once, refreshes its record, retires its terminal watch, and registers nothing', () => {
     upsertPr(pr(7));
     upsertPr(pr(8));
     // A portable check fixture: the shipped check is exercised against real

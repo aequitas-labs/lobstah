@@ -12,17 +12,20 @@ work, and you never poll on a loop.
 
 ## Taking the helm
 
+Invoke `$lobstah:man` to load this skill; Codex has no `/lobstah:*` commands.
 ```
 lobstah man helm --session <id>      # sign on; prints the charter
 lobstah man helm --session <id> --grounds <name>  # when several grounds are configured
 lobstah man helm --session <id> --take            # displace a live holder — deliberate only
-lobstah man relieve                  # step down
+lobstah man relieve --session <id>   # step down outside the hook
 ```
 
-Use the session id from the session-start brief for `<id>`. After sign-on,
-run `lobstah glass --detach`. It starts or finds the glass and prints its URL.
-Open that URL in the desktop browser pane when one is available; otherwise
-tell the person the URL.
+Codex exports no session variable. Use the task id from the session-start
+brief for first sign-on and for `man wait`, `man report`, and `man relieve`
+outside the hook. Then run `lobstah glass --detach`; it starts or finds the
+glass and prints its URL. Open it in the desktop browser pane if available;
+otherwise tell the person the URL.
+
 The charter is re-injected at every session start. Keep inside its fences:
 
 - Triage, dispatch, review each catch. Do not do the work yourself.
@@ -34,7 +37,8 @@ The charter is re-injected at every session start. Keep inside its fences:
 ```
 lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
 lobstah dispatch ... --for wt:<trap>              # address it to one trap
-lobstah send <id>|wt:<trap> "<instruction>"       # steer, delivered between turns
+lobstah send <id>|wt:<trap> "<instruction>"       # steer live/queued work; wake
+                                                  # finished work as a follow-up
 lobstah status <id>                               # reconciled state + last note
 lobstah catch <id>                                # evidence: branch, commits, PR
 lobstah cancel <id>                               # cut one away
@@ -44,8 +48,7 @@ lobstah man report                                # the delta since your last re
 lobstah man wait --peek                           # standing events, not consumed
 ```
 
-Repo keys come from `~/.lobstah/config.toml`; `lobstah repos` lists them.
-All output is TOON — parse it directly.
+Repo keys: `~/.lobstah/config.toml` (`lobstah repos`). All output is TOON.
 Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 
 ## Rules
@@ -56,6 +59,10 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   falls back to a headless worker. `man tend` lists live traps.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
+- `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long.
+- Before you wait on something external yourself, say what.
+For ume, push with its non-blocking form; Codex cannot run an await as a
+tracked background task. End the turn while the external operation runs.
 - `done` means the brief is fulfilled — report the catch. Never merge.
 - `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; a PR a worker already owns stays off.
@@ -63,14 +70,13 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 
 ## Getting woken instead of polling
 
-- At the helm, the Stop hook (`lobstah man haul`) parks you at turn end
-  while work is in flight and wakes you with events and periodic digests.
-  Nothing to arm.
-- Hookless? Loop `lobstah man wait --timeout 900`: exit 0 is an event,
-  exit 3 a timeout carrying the digest when something changed. Acknowledge
-  a digest with `lobstah man report`.
+- The Stop hook (`lobstah man haul`) blocks in park mode while work is in
+  flight; there is no watcher to arm.
+- Hookless? Run `lobstah man wait --session <id> --timeout 900` in the
+  foreground: exit 0 is an event, exit 3 a timeout carrying a changed digest.
+  Acknowledge a digest with `lobstah man report --session <id>`.
+
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
-without the plugin; see docs/man.md. `lobstah man` prints the full
-manual; `lobstah doctor` diagnoses a broken setup.
+without the plugin; see docs/man.md. `lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken setup.

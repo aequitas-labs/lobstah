@@ -54,6 +54,16 @@ fire-and-forget, never blocking the loop. Point it at whatever the host
 already has (a Slack helper, `openclaw message send`); lobstah stays free of
 messaging vendors.
 
+**Live status.** With `[pickup].liveComment = true` (the default), pickup
+creates one marked, editable comment per dispatch on Linear or GitHub. It
+shows the current verb, waiting reason/link, latest activity and staleness,
+elapsed time, attempt, branch, last commit, commits ahead of trunk, and draft
+PR when known. Pickup edits it at most once per minute unless the verb changes,
+and does not rewrite it when the underlying status is unchanged. A
+`needs-decision`, `blocked`, `failed`, or `done` transition also gets a new
+comment so humans are notified. If the tracker cannot edit the live comment,
+pickup continues with the older transition-comment behavior.
+
 **No LLM in the loop.** Issue-to-descriptor translation is mechanical. Judgment
 about an ambiguous issue belongs to the dispatched agent, which reports
 `needs-decision` — not to pickup. Fleet setups that wake an LLM to poll a

@@ -5,6 +5,7 @@ import type { Lane, Verb } from '@lobstah/core';
 import { sendMessage } from '@lobstah/core';
 import type { Source } from '../types.js';
 import type { PickupState } from '../state.js';
+import { liveStatus } from '../live-status.js';
 
 export function dispatchLane(uuid: string): Lane | undefined {
   for (const lane of ['work', 'chore'] as Lane[]) {
@@ -41,6 +42,7 @@ export async function reportLoop(
   state: PickupState,
   log: (m: string) => void = () => {},
   notify: (n: ReportNotification) => void = () => {},
+  liveComment = true,
 ): Promise<void> {
   // One unreachable item must not starve the rest of the ledger: visit every
   // entry, then reject with what failed so the cycle still logs it.
@@ -55,18 +57,48 @@ export async function reportLoop(
         log: readStatusLog(entry.uuid, lane),
         lastEventAt: lastEventAt(entry.uuid, lane),
       });
-      if (verb !== 'unknown' && verb !== entry.lastReported) {
+      if (verb !== 'unknown') {
+        const changed = verb !== entry.lastReported;
         const evidence = readEvidence(entry.uuid, lane);
-        await source.report(key, verb as Verb, { ...evidence, uuid: entry.uuid });
-        state.update(key, { lastReported: verb as Verb });
-        log(`${key}: reported ${verb}`);
-        notify({
-          key,
-          uuid: entry.uuid,
-          verb: verb as Verb,
-          note: readStatusLog(entry.uuid, lane).at(-1)?.note,
-          prUrl: evidence.prUrl,
-        });
+        let editing = liveComment && !entry.liveCommentUnavailable && !!source.createLiveComment && !!source.editLiveComment;
+        if (editing) {
+          const now = Date.now();
+          const snapshot = liveStatus(entry.uuid, lane, verb as Verb, entry.createdAt, now);
+          const due = !entry.liveCommentId || changed || now - (Date.parse(entry.liveCommentAt ?? '') || 0) >= 60_000;
+          if (due && (changed || snapshot.fingerprint !== entry.liveCommentFingerprint)) {
+            try {
+              const id = entry.liveCommentId ?? await source.createLiveComment!(key, snapshot.body);
+              if (entry.liveCommentId) await source.editLiveComment!(key, id, snapshot.body);
+              state.update(key, {
+                liveCommentId: id,
+                liveCommentAt: new Date(now).toISOString(),
+                liveCommentBody: snapshot.body,
+                liveCommentFingerprint: snapshot.fingerprint,
+                liveCommentVerb: verb as Verb,
+              });
+            } catch (err) {
+              state.update(key, { liveCommentUnavailable: true });
+              editing = false;
+              log(`${key}: live comment edit unavailable; using transition comments (${err instanceof Error ? err.message : String(err)})`);
+            }
+          }
+        }
+        if (changed) {
+          // Edits do not notify people. A question or terminal result still
+          // posts a new comment, and Linear applies its state transition there.
+          if (!editing || ['needs-decision', 'blocked', 'failed', 'done'].includes(verb)) {
+            await source.report(key, verb as Verb, { ...evidence, uuid: entry.uuid });
+          }
+          state.update(key, { lastReported: verb as Verb });
+          log(`${key}: reported ${verb}`);
+          notify({
+            key,
+            uuid: entry.uuid,
+            verb: verb as Verb,
+            note: readStatusLog(entry.uuid, lane).at(-1)?.note,
+            prUrl: evidence.prUrl,
+          });
+        }
       }
       // A terminal verb can precede process exit. Wait for the daemon to move
       // the dispatch to done before allowing another attempt at the same issue.

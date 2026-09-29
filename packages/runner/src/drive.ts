@@ -244,13 +244,14 @@ export interface SettleInput {
   cancelled: boolean;
   wallClockHit: boolean;
   error?: string;
+  budgetNote?: string;
 }
 
 /** Stamp the final verb for a run that has fully stopped. */
 export function settle(id: string, lane: Lane, r: SettleInput): void {
   const lastVerb = readStatusLog(id, lane).at(-1)?.verb;
   if (r.cancelled) appendStatus(id, lane, 'failed', 'cancelled by operator');
-  else if (r.wallClockHit) appendStatus(id, lane, 'failed', 'wall-clock limit exceeded');
+  else if (r.wallClockHit) appendStatus(id, lane, 'failed', `budget: out of time${r.budgetNote ? `; ${r.budgetNote}` : ''}; send continue to resume`);
   else if (r.error) appendStatus(id, lane, 'failed', r.error.slice(0, 500));
   // Only the worker's own report is `done`. A run that stopped without one —
   // a harness that exited on its own, a turn limit — did not say it finished.

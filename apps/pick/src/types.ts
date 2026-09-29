@@ -37,6 +37,9 @@ export interface Source {
   claim(item: WorkItem): Promise<boolean>;
   /** Report embeds the dispatch UUID in the tracker trail, making the mapping reconstructible. */
   report(key: string, verb: Verb, evidence: Evidence & { uuid: string }): Promise<void>;
+  /** Sources without comment editing omit these and keep transition comments. */
+  createLiveComment?(key: string, body: string): Promise<string>;
+  editLiveComment?(key: string, commentId: string, body: string): Promise<void>;
   inbound(key: string, since?: string): Promise<string[]>;
   /** Items the tracker currently attributes to pickup — the reconcile surface. */
   inProgress(): Promise<TrackedItem[]>;

@@ -12,6 +12,7 @@ work, and you never poll on a loop.
 
 ## Taking the helm
 
+Invoke `/lobstah:man` to load this skill.
 ```
 lobstah man helm                     # sign on; prints the charter
 lobstah man helm --grounds <name>    # when several grounds are configured
@@ -60,7 +61,9 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
 - `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long.
-- Before you wait on something external yourself, say what (for ume: push with ume's non-blocking form unless the await runs as a tracked background task).
+- Before you wait on something external yourself, say what.
+For ume, push with its non-blocking form unless the await runs as a tracked
+background task.
 - `done` means the brief is fulfilled — report the catch. Never merge.
 - `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; a PR a worker already owns stays off.
@@ -73,8 +76,8 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   with standing attention or the arm command when no watcher is live.
 - A timeout (exit 3) carries the digest when something changed; acknowledge
   it with `lobstah man report`. `man haul --park` waits in the hook.
+
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
-without the plugin; see docs/man.md. `lobstah man` prints the full
-manual; `lobstah doctor` diagnoses a broken setup.
+without the plugin; see docs/man.md. `lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken setup.

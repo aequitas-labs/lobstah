@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -20,6 +20,7 @@ import type { NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue } from '@lobstah/adapters';
 import type { Adapter, AdapterRun, AdapterStartOpts } from '@lobstah/adapters';
 import { main } from '../src/run.js';
+import { processTest as it } from '../../../test/process-test.js';
 
 /**
  * Follow-ups reuse the origin chain's worktree. Real git throughout: a local

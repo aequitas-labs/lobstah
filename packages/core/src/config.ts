@@ -25,6 +25,10 @@ export interface RepoConfig {
    * for reuse by a follow-up (build output, caches, scratch notes).
    */
   scratch?: string[];
+  /** Override the headless runner's remote-preservation policies. */
+  pushEarly?: boolean;
+  draftPr?: boolean;
+  checkpointOnStop?: boolean;
 }
 
 export interface LimitsConfig {
@@ -35,6 +39,11 @@ export interface LimitsConfig {
   wedgeThresholdSecs: number;
   maxRestartAttempts: number;
   wallClockSecs: number;
+  /** Hard ceiling for progress-extended wall-clock time (default 4× wallClockSecs). */
+  maxWallClockSecs?: number;
+  pushEarly: boolean;
+  draftPr: boolean;
+  checkpointOnStop: boolean;
   /**
    * How long a turn that ends without a report is held open while background
    * work the worker started is still running. The harness wakes the worker
@@ -178,6 +187,9 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   wedgeThresholdSecs: 600,
   maxRestartAttempts: 2,
   wallClockSecs: 3600,
+  pushEarly: true,
+  draftPr: true,
+  checkpointOnStop: true,
   backgroundWaitSecs: 1800,
   choreRetentionDays: 7,
   attachmentMaxBytes: 25 * 1024 * 1024,
@@ -210,6 +222,9 @@ export function loadConfig(): Config {
       harness: (r.harness as HarnessDefaults) ?? undefined,
       pickup: r.pickup === undefined ? undefined : Boolean(r.pickup),
       scratch: Array.isArray(r.scratch) ? r.scratch.map(String) : undefined,
+      pushEarly: r.pushEarly === undefined ? undefined : Boolean(r.pushEarly),
+      draftPr: r.draftPr === undefined ? undefined : Boolean(r.draftPr),
+      checkpointOnStop: r.checkpointOnStop === undefined ? undefined : Boolean(r.checkpointOnStop),
     };
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;

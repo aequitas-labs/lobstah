@@ -155,8 +155,10 @@ describe('drive — a headless worker waiting on a question stays alive', () => 
     stopped = true;
     f.run.kill(); // what the runner's wall timer does
     await driving;
-    settle('w4', 'work', { cancelled: false, wallClockHit: true });
-    expect(readStatusLog('w4', 'work').at(-1)?.note).toBe('wall-clock limit exceeded');
+    settle('w4', 'work', { cancelled: false, wallClockHit: true,
+      budgetNote: 'checkpoint committed (2 files); lobstah/w4@abc123; draft PR https://github.com/example/repo/pull/7' });
+    expect(readStatusLog('w4', 'work').at(-1)?.note).toBe(
+      'budget: out of time; checkpoint committed (2 files); lobstah/w4@abc123; draft PR https://github.com/example/repo/pull/7; send continue to resume');
   });
 
   it('an answered question whose next turn ends without a report is asked to report, not waited on again', async () => {

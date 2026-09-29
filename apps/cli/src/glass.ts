@@ -39,6 +39,7 @@ import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE } from './glass-page.generated.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import { worktreeView } from './worktree-view.js';
+import { livenessView } from './liveness-view.js';
 
 /**
  * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
@@ -196,6 +197,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
           r.bucket === 'queued' && log.length === 0
             ? ('queued' as const)
             : (last?.verb ?? (claim ? ('working' as const) : ('unknown' as const))),
+        ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
         // Held for free space: the note carries the reason.
         note: (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
         verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
@@ -209,6 +211,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
           .map((f) => fs.readFileSync(path.join(inboxDir, f), 'utf8').trim()),
         evidence: Object.keys(evidence).length > 0 ? evidence : undefined,
         ...(r.bucket === 'queued' ? {} : worktreeView(id, r.lane)),
+        ...(r.bucket === 'queued' ? {} : livenessView(id, r.lane)),
         // A trap's catch: the trap's own checkout. A headless dispatch: the
         // worktree it ran in, the origin's for a follow-up that reused it.
         transcript: claim
