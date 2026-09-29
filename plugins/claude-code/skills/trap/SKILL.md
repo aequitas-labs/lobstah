@@ -45,6 +45,12 @@ Invoke `/lobstah:trap` to load this skill.
   `--name <word-word>` chooses or changes it. The name survives stow and a
   ghost sweep; `wt:<name>` and `wt:<id>` also remain valid addresses.
 
+When `lobstah soak`, `soak --wait`, or `report done`/`failed` prints a
+`title` field, set this session's title to that text if the Claude desktop
+Code tab offers `set_session_title` for literal `self`. Never retry a
+title the tool refused or asked the person to approve. Claude Code CLI
+has no automatic title setter in this release.
+
 ## Taking bait
 
 Work arrives at turn end (the Stop hook) or from `soak --wait`, as a brief

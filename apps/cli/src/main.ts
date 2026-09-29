@@ -31,6 +31,7 @@ import {
   trapByAddress,
   trapIdForName,
   trapLabel,
+  trapSessionTitle,
   unknownTrapMessage,
   readSessionClaim,
   releaseCatch,
@@ -347,6 +348,7 @@ soaking (interactive sessions volunteering as workers):
                                   --wait listens in the foreground now (for
                                   sessions without Stop hooks): work prints
                                   plain, a quiet timeout exits 3 — re-run it.
+                                  prints this session's trap title.
   stow [--wt <trap>|--session <id>] [--keep] [--quiet]
                                   sign the trap off; an unfinished
                                   assignment requeues, unread messages
@@ -469,6 +471,10 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
       }
       const caught = claimBait(reg);
       if (caught) {
+        if (plain) {
+          const title = trapSessionTitle({ sessionId: reg.sessionId, cwd: reg.worktree })?.title;
+          if (title) console.log(toonKV({ title }));
+        }
         block(baitBrief(caught.id, caught.descriptor));
         return true;
       }
@@ -1030,6 +1036,8 @@ async function mainCli(): Promise<void> {
           throw err;
         }
       }
+      const titleClaim = verb === 'done' || verb === 'failed' ? readSessionClaim(id, lane) : undefined;
+      const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
       if (verb === 'failed') recordPushFailure(id, lane, note);
@@ -1071,13 +1079,14 @@ async function mainCli(): Promise<void> {
           id,
           verb: entry.verb,
           at: entry.at,
+          ...(titleTrap?.name ? { title: titleTrap.name } : {}),
           ...(entry.waitingOn ? { waitingOn: entry.waitingOn } : {}),
           ...(entry.link ? { link: entry.link } : {}),
           ...(entry.until ? { until: entry.until } : {}),
           ...(prUrl ? { prUrl } : {}),
           ...(prWatch ? { watch: prWatch.key } : {}),
           ...(gatesNamed.length ? { humanGates: gatesNamed.join(', ') } : {}),
-          ...(filed ? { report: reportMarkdownPath(filed.key), reportKey: filed.key, title: filed.title } : {}),
+          ...(filed ? { report: reportMarkdownPath(filed.key), reportKey: filed.key, reportTitle: filed.title } : {}),
         }),
       );
       // Self-instructive next step, right where the reporter reads it: an
@@ -2015,6 +2024,7 @@ async function mainCli(): Promise<void> {
       console.log(
         toonKV({
           name: reg.name,
+          title: reg.name,
           trap: `wt:${reg.trapId}`,
           label: trapLabel(reg),
           session: sessionId,

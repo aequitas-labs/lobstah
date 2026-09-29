@@ -16,6 +16,7 @@ export * from './gh-errors.js';
 export * from './watch.js';
 export * from './soak.js';
 export * from './session-link.js';
+export * from './session-title.js';
 export * from './trap-names.js';
 export * from './notices.js';
 export * from './window.js';

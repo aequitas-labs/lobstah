@@ -784,6 +784,14 @@ resolves the trap from the working directory, else from the session id. A
 trap that works for an hour without reporting is not swept while it beats.
 `[soak].beat = false` turns the hook off.
 
+`lobstah soak` prints `title: <trap name>` at sign-on. When `soak --wait`
+delivers work, it prints `title: <name> · <short first brief line>`.
+`report done` and `report failed` print `title: <trap name>` again. The
+brief text has control and terminal escape sequences removed and is capped
+at 40 characters. A trap skill sets an available session-title tool to each
+printed title, without retrying a refusal. Stow leaves the current title
+in place.
+
 Liveness has two failure shapes with two remedies: a registration that
 parked before and went quiet (no park, report, or beat) past `[soak].ttlSecs` is a **ghost trap** —
 swept, catch requeued, noticed, its worktree kept; one that **never parked** is a **defective
