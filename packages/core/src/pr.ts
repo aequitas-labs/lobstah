@@ -34,7 +34,7 @@ export function parsePrRef(s: string): PrRef | undefined {
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
-  'state,isDraft,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
+  'title,state,isDraft,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
 
 /** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
 export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',')
@@ -70,6 +70,7 @@ export interface GhReview {
 }
 
 export interface GhPrView {
+  title?: string;
   state: string;
   isDraft: boolean;
   headRefOid: string;
@@ -193,7 +194,7 @@ export interface PrRepair {
 export interface PrEvidence {
   url: string;
   number: number;
-  /** Optional in externally stamped evidence; the shipped check does not fetch it. */
+  /** The PR's title as last observed. Not part of the PR's state: a change is never news. */
   title?: string;
   state: string;
   draft: boolean;
@@ -286,6 +287,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
   return {
     url: ref.url,
     number: ref.number,
+    ...(view.title ? { title: view.title } : {}),
     state: view.state,
     draft: view.isDraft,
     reviewDecision: view.reviewDecision ?? '',
@@ -488,6 +490,19 @@ export function ghPrView(ref: PrRef): GhPrView {
     if (threads !== undefined) view.unresolvedThreads = threads;
   }
   return view;
+}
+
+/** The PR's title alone: one `gh pr view --json title`. Throws gh's reason on failure. */
+export function ghPrTitle(ref: PrRef): string {
+  const res = spawnSync('gh', ['pr', 'view', String(ref.number), '--repo', `${ref.owner}/${ref.repo}`, '--json', 'title'], {
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  if (res.error) throw new Error(`gh: ${res.error.message}`);
+  if (res.status !== 0) throw new Error(firstMeaningfulLine(res.stderr) ?? `gh exited ${res.status}`);
+  const title = (JSON.parse(res.stdout) as { title?: unknown }).title;
+  if (typeof title !== 'string') throw new Error('gh returned no title');
+  return title;
 }
 
 const THREADS_QUERY =

@@ -168,6 +168,8 @@ export interface GlassDispatch {
   claimedBy?: string;
   log: StatusEntry[];
   inbox: string[];
+  /** A send to it still waiting on the worker's next note. */
+  awaitingReply?: { sentAt: string; from: string; line: string };
   evidence?: Evidence;
   /** The checkout it ran in (the origin's, for a follow-up that reused it); `(removed)` once culled. */
   worktree?: string;
@@ -213,7 +215,10 @@ export interface GlassMessage {
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   trapId: string;
   label?: string;
+  /** Signed on now (the registration exists), including when its beat is stale. */
   live: boolean;
+  /** Parked and recently beating; false for a stale or never-parked registration. */
+  listening?: boolean;
   messages: GlassMessage[];
   /** This trap's notices, newest first. */
   notices: Notice[];

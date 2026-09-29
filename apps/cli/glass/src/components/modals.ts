@@ -15,6 +15,7 @@ import {
   prLink,
   prMerge,
   prReview,
+  stackNumbers,
   trapRow,
   windowAction,
 } from './common.js';
@@ -53,7 +54,7 @@ function settingsModal(item: SettingsItem, prefs: GlassPrefs) {
 }
 
 function stackLine(p: PrModalView['pr'], s: NonNullable<PrModalView['stack']>) {
-  const numbers = s.numbers.flatMap((n, i) => [i ? ' → ' : '', n === p.number ? html`<b>#${n}</b>` : '#' + n]);
+  const numbers = stackNumbers(s.numbers, new Map(s.numbers.map((n, i) => [n, s.titles[i]])), p.number);
   const next = s.nextMergeable
     ? [' · ', html`<span class="ok">next mergeable</span>`]
     : s.blockedBy

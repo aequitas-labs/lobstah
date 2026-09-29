@@ -45,6 +45,33 @@ describe('glass section selectors', () => {
     expect(input.traps.list.map((seat: { x: { trapId: string } }) => seat.x.trapId)).toEqual(['aa']);
   });
 
+  it('keeps sign-on order across heartbeats and state changes, then signed-off order in both views', () => {
+    const off = (trapId: string, kind: string, agoMs: number) => ({
+      trapId,
+      live: false,
+      messages: [],
+      notices: [{ kind, at: iso(agoMs), text: kind }],
+      catches: [],
+    });
+    const live = (trapId: string, signedMs: number, beatMs: number) => ({
+      trapId, name: trapId, live: true, signedOnAt: iso(signedMs), heartbeatAt: iso(beatMs),
+      messages: [], notices: [], catches: [],
+    });
+    const traps = [off('s1', 'trap-stowed', 50 * 60_000), live('l2', 20 * 60_000, 10_000),
+      off('g1', 'trap-ghosted', 60_000), live('l1', 30 * 60_000, 5 * 60_000),
+      live('l3', 10 * 60_000, 2 * 60_000)];
+    const ids = (seats: Array<{ x: { trapId: string } }>) => seats.map((seat) => seat.x.trapId);
+    const ordered = (items: typeof traps) => {
+      const input = diff.sectionInputs({ ...snapshot(), traps: items }, ui(), NOW);
+      return [ids(input.deck.traps), ids(input.traps.list)];
+    };
+    const expected = ['l1', 'l2', 'l3', 'g1', 's1'];
+    expect(ordered(traps)).toEqual([expected, expected]);
+    expect(ordered(traps.map((t) => t.live ? { ...t, heartbeatAt: iso(t.trapId === 'l1' ? 2_000 : 2 * 60_000),
+      claimed: t.trapId === 'l1' ? 'dispatch' : undefined, firstParkedAt: t.trapId === 'l2' ? undefined : iso(20 * 60_000) } : t)))
+      .toEqual([expected, expected]);
+  });
+
   it('routes the URL hash to a tab, deck by default', () => {
     expect(diff.tabFromHash('')).toBe('deck');
     expect(diff.tabFromHash('#dispatches')).toBe('dispatches');

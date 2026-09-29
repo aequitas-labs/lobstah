@@ -283,6 +283,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   if (!reg) return undefined;
   fs.rmSync(regPath(trapId), { force: true });
   fs.rmSync(beatPath(trapId), { force: true });
+  fs.rmSync(prProbePath(trapId), { force: true });
   postNotice({
     kind: 'trap-stowed',
     text: `trap ${trapLabel(reg)} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
@@ -503,6 +504,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     }
     fs.rmSync(regPath(reg.trapId), { force: true });
     fs.rmSync(beatPath(reg.trapId), { force: true });
+    fs.rmSync(prProbePath(reg.trapId), { force: true });
     postNotice({
       kind: 'trap-ghosted',
       text: pauseExpired
@@ -580,6 +582,38 @@ export function readBeat(trapId: string): TrapBeat | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The beat's last PR lookup for a trap's catch (`soaking/<trapId>.prprobe`).
+ * Like the beat, it lives beside the registration, never in it. A beat reads
+ * it to skip git and gh when it checked recently or already found the PR.
+ */
+export interface TrapPrProbe {
+  /** The dispatch the lookup was for. */
+  dispatch: string;
+  /** The worktree's branch at the lookup. */
+  branch: string;
+  checkedAt: string;
+  /** The PR found for this dispatch and branch. */
+  prUrl?: string;
+}
+
+function prProbePath(trapId: string): string {
+  return path.join(soakingDir(), `${trapId}.prprobe`);
+}
+
+export function readTrapPrProbe(trapId: string): TrapPrProbe | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(prProbePath(trapId), 'utf8')) as TrapPrProbe;
+    return typeof parsed.dispatch === 'string' && typeof parsed.checkedAt === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeTrapPrProbe(trapId: string, probe: TrapPrProbe): void {
+  atomicWrite(prProbePath(trapId), JSON.stringify(probe));
 }
 
 /** The newest liveness signal a trap has given: its park heartbeat or its tool beat. */
