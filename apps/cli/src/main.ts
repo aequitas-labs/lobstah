@@ -107,8 +107,12 @@ import {
   CODEX_DESKTOP_THREAD,
   worktreeProgress,
   validSessionLink,
+  ReportError,
+  reportMarkdownPath,
+  dispatchReportKey,
+  readReport,
 } from '@lobstah/core';
-import type { Descriptor, Lane, Notice, RepoConfig, WatchAttention } from '@lobstah/core';
+import type { Descriptor, Lane, Notice, RepoConfig, ReportMeta, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
@@ -153,6 +157,7 @@ import { deliverPrRepairs, holdCancelledRepair, stampRepairerBeat } from './pr-r
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { runBeat } from './beat.js';
+import { fileDispatchReport, fileHelmReport, reportRows } from './report-file.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
@@ -197,6 +202,8 @@ work (humans and agents):
                                   same worktree and brief plus a git progress
                                   note; conversations don't cross harnesses
   catch <uuid>                    the evidence: branch, commits, PR, session
+  reports [--json]                every filed report, newest first: key,
+                                  title, author, source, acked
   prs [sync]                      list known PRs, or refresh due PR watches
   cull [--older-than <days>] [--apply]
                                   sweep aged catch and lost gear — old done/
@@ -277,6 +284,9 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   landed, attention arisen, still-waiting, and
                                   the fleet verdict; advances the reported-
                                   through cursor. "no change" when quiet.
+  man file <file.md> [--attach <file> ...] [--title <text>]
+                                  file the helm's own report under its
+                                  grounds; the glass renders it on the deck.
   man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
                                   take the helm: one orchestrator per grounds
                                   (a named repo set from [grounds.*], or the
@@ -303,11 +313,13 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   man wait (lobstah man).
 
 workers (dispatched agents; injected into every brief):
-  report <uuid> <verb> [--pr <url>] [--no-watch] [--session <id>] [--] [note]
+  report <uuid> <verb> [--pr <url>] [--no-watch] [--report <file.md> [--attach <file> ...]] [--session <id>] [--] [note]
                                   the validated status write path
                                   (${VERBS.join(' | ')}). done --pr
                                   registers the PR's pr: watch for this
-                                  chain; --no-watch opts out.
+                                  chain; --no-watch opts out. done|failed
+                                  --report files a markdown page as the
+                                  dispatch's report, images --attach'ed.
 
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
@@ -791,6 +803,7 @@ async function mainCli(): Promise<void> {
           ...livenessView(id, lane),
           entries: log.length,
           attachments: storedDescriptor(id, lane)?.attachments?.length ?? 0,
+          ...(reportMarkdownPath(dispatchReportKey(id, lane)) ? { report: reportMarkdownPath(dispatchReportKey(id, lane)) } : {}),
         }),
       );
       console.log(
@@ -962,6 +975,22 @@ async function mainCli(): Promise<void> {
           throw new UsageError(`${err instanceof Error ? err.message : String(err)}\n\n${usageFor('report')!}`);
         }
       }
+      // A report page files before the status: a refused file changes nothing.
+      const reportFile = opt('--report');
+      const attachFiles = values('--attach');
+      if (reportFile !== undefined && verb !== 'done' && verb !== 'failed')
+        throw new UsageError(`--report goes with done or failed\n\n${usageFor('report')!}`);
+      if (attachFiles.length > 0 && reportFile === undefined)
+        throw new UsageError(`--attach goes with --report\n\n${usageFor('report')!}`);
+      let filed: ReportMeta | undefined;
+      if (reportFile !== undefined) {
+        try {
+          filed = fileDispatchReport(id, lane, reportFile, attachFiles);
+        } catch (err) {
+          if (err instanceof ReportError) throw new UsageError(err.message);
+          throw err;
+        }
+      }
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined);
       // A trap reports from its own checkout, or names its session from
       // anywhere else (a primary checkout): keep its last commit as the
@@ -998,6 +1027,7 @@ async function mainCli(): Promise<void> {
           ...(entry.until ? { until: entry.until } : {}),
           ...(prUrl ? { prUrl } : {}),
           ...(prWatch ? { watch: prWatch.key } : {}),
+          ...(filed ? { report: reportMarkdownPath(filed.key), reportKey: filed.key, title: filed.title } : {}),
         }),
       );
       // Self-instructive next step, right where the reporter reads it: an
@@ -1134,6 +1164,7 @@ async function mainCli(): Promise<void> {
           sessionId: ev.sessionId,
           ...worktreeView(id, lane),
           note: log.at(-1)?.note,
+          ...(reportMarkdownPath(dispatchReportKey(id, lane)) ? { report: reportMarkdownPath(dispatchReportKey(id, lane)) } : {}),
         }),
       );
       if (ev.pr) {
@@ -1215,6 +1246,30 @@ async function mainCli(): Promise<void> {
       console.log(MANUAL);
       break;
     }
+    case 'reports': {
+      const rows = reportRows();
+      console.log(has('--json') ? JSON.stringify({ reports: rows }) : toonTable('reports', rows, ['key', 'title', 'author', 'from', 'filedAt', 'acked']));
+      break;
+    }
+    case 'man:file': {
+      const file = pos[0];
+      if (!file) throw new UsageError(`man file requires a markdown file\n\n${usageFor('man:file')!}`);
+      const caller = callerSession(opt('--session'));
+      let groundsName = opt('--grounds');
+      gateHelm(caller, groundsName);
+      if (groundsName === undefined && caller?.id !== undefined) groundsName = helmOf(caller.id)?.grounds;
+      const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName).name : 'fleet';
+      let filed: ReportMeta;
+      try {
+        filed = fileHelmReport(grounds, file, values('--attach'), opt('--title'));
+      } catch (err) {
+        if (err instanceof ReportError) throw new UsageError(err.message);
+        throw err;
+      }
+      console.log(toonKV({ key: filed.key, title: filed.title, author: filed.author, grounds, report: reportMarkdownPath(filed.key), attachments: filed.attachments.length }));
+      console.log(toonHelp([`lobstah attention ack ${filed.key}   (when the human has read it)`]));
+      break;
+    }
     case 'attention': {
       const sub = pos[0];
       const report = buildTendReport();
@@ -1227,7 +1282,9 @@ async function mainCli(): Promise<void> {
           console.log(toonKV({ key, acked: false }));
           break;
         }
-        const item = report.attention.find((a) => a.key === key);
+        // A report acks by its key whether or not attentionKinds walks reports.
+        const filed = key.startsWith('report:') ? readReport(key) : undefined;
+        const item = report.attention.find((a) => a.key === key) ?? (filed && { kind: 'report', stateHash: filed.stateHash });
         if (!item) throw new UsageError(`no standing attention item "${key}" — \`lobstah attention\` lists the keys`);
         const ack = { key, kind: item.kind, stateHash: item.stateHash, at: new Date().toISOString(), by: opt('--by') ?? 'terminal' };
         writeAck(ack);

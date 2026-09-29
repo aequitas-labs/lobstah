@@ -61,6 +61,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { subverbs: ['sync'], flags: {} },
+  reports: { flags: { '--json': {} } },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
@@ -71,6 +72,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--waiting-on': { value: 'review|pr|deploy|person|external' },
       '--link': { value: '<url>' },
       '--until': { value: '<iso|30m|4h|2d>' },
+      '--report': { value: '<file.md>' },
+      '--attach': { value: '<file>', repeatable: true },
       '--session': { value: '<id>' },
     },
     positionals: '<uuid> <verb> [note...]',
@@ -138,6 +141,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
   'man:brief': { flags: {} },
+  'man:file': {
+    flags: { '--attach': { value: '<file>', repeatable: true }, '--title': { value: '<text>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } },
+    positionals: '<file.md>',
+  },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
 };
 
@@ -173,7 +180,7 @@ current state seen (--by names who), \`unack\` clears it. Display-only: an ack
 hides the item from the desktop pet and the glass lobs until its state
 changes — never from man tend --json, man wait, the park, or reminders.
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
-watch:<key>. An unknown key exits 2. --json prints { "attention": [...] },
+watch:<key>, report:<lane>:<uuid> or report:helm:<grounds>:<rid> (report). An unknown key exits 2. --json prints { "attention": [...] },
 the same items and fields as man tend --json (the desktop pet reads it).`,
   cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
 without --apply (default 14 days): it measures each target (one du per
@@ -187,7 +194,12 @@ claimed helm this requires --session <helm-id>.`,
 paused | done | failed. After \`--\` every word is note. \`done --pr <url>\`
 registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
 --until: what a waiting worker waits on, and when a pause expires. A trap's
-done records its worktree's HEAD, run there or with the trap's --session.`,
+done records its worktree's HEAD, run there or with the trap's --session.
+done|failed --report <file.md> files a page of findings as the dispatch's
+report; --attach <file> adds images it names by bare filename.`,
+  reports: `Every filed report, newest first: key, title, author (trap name, headless,
+or helm), the dispatch or helm grounds, when it was filed, and whether it is
+acked. \`lobstah attention ack <key>\` acks one.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

@@ -73,6 +73,10 @@ getting woken instead of asking:
                             still-waiting, verdict. A man wait timeout carries
                             it too, so a wait loop doubles as the periodic
                             fleet report
+  lobstah man file <f.md>   file your own report (findings worth keeping) under
+                            your grounds; --attach images it names, --title.
+                            \`lobstah reports\` lists every report;
+                            \`lobstah attention ack <key>\` acks one
   lobstah man helm          take the helm: sign on as the one lobstah man for
                             your grounds. The charter prints (and re-injects
                             at every session start) and the Stop hook applies.

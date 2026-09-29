@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readWatch } from '@lobstah/core';
+import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readReport, readWatch } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
 
 /**
@@ -120,11 +120,15 @@ export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string 
 
 /**
  * Whether an ack's item still exists, for cull: the dispatch is still on
- * disk (and not being culled), the PR is still open in some evidence, or
- * the watch is still registered.
+ * disk (and not being culled), the PR is still open in some evidence, the
+ * watch is still registered, or the report is still filed.
  */
 export function ackItemExists(key: string, culling: ReadonlySet<string> = new Set()): boolean {
   if (key.startsWith('watch:')) return readWatch(key.slice('watch:'.length)) !== undefined;
+  if (key.startsWith('report:')) {
+    const r = readReport(key);
+    return r !== undefined && !culling.has(key) && !(r.dispatch !== undefined && culling.has(r.dispatch));
+  }
   const ref = key.startsWith('pr:') ? parsePrRef(key) : undefined;
   if (ref) {
     // The PR record decides when there is one; evidence only for a PR without.
