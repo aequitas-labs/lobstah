@@ -59,6 +59,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   falls back to a headless worker. `man tend` lists live traps.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
+- A question you do not answer walks to the human when your turn ends.
 - `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long.
 - Before you wait on something external yourself, say what.
 For ume, push with its non-blocking form; Codex cannot run an await as a

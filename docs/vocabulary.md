@@ -417,7 +417,7 @@ never until someone acknowledges it.
 
 | Kind | Stands while | Clears when |
 | ---- | ------------ | ----------- |
-| `question` | The dispatch's last status is `needs-decision` or `blocked`. | Any newer status entry. |
+| `question` | The dispatch's last status is `needs-decision` or `blocked`. Held (`held: true`; not in the pet, the glass, or notifyCommand) while a live helm for its grounds has not ended a turn since it was filed. | Any newer status entry, or a message newer than it. |
 | `landed` | The dispatch is `done` or `failed` after its grounds' reported-through cursor (the grounds listing the repo, else `fleet`; at most 24 h back). Opt-in. | `man report` (or the helm park's digest) advances the cursor. |
 | `pr:draft` | An open PR is a draft, and the user opted into this kind. | Ready for review, merged, or closed. |
 | `pr:review` | An open PR has unresolved review questions, or requested changes that lobstah cannot repair, has exhausted, or is configured not to repair. | Every thread resolved and no changes requested, or merged / closed. |
