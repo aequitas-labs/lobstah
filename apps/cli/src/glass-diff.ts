@@ -220,6 +220,8 @@ export interface PrModalView {
   pr: GlassPr;
   stack: {
     numbers: number[];
+    /** Each number's PR title, index for index; '' when a PR has none. */
+    titles: string[];
     position: number;
     size: number;
     floor: string;
@@ -251,6 +253,7 @@ export function prModalView(d: Pick<GlassSnapshot, 'prs' | 'stacks' | 'dispatche
     stack: s
       ? {
           numbers: s.numbers,
+          titles: s.numbers.map((n) => (d.prs || []).find((x) => x.stackId === s.id && x.number === n)?.title || ''),
           position: p.position + 1,
           size: s.numbers.length,
           floor: s.floor,

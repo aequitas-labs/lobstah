@@ -42,10 +42,20 @@ export function emptyFleet(): GlassSnapshot {
   return base();
 }
 
+/** Fixture PR titles. A number with no entry has no title. */
+export const PR_TITLES: Record<number, string> = {
+  30: 'Retire the legacy poller',
+  41: "Question hold: walk a question only after the helm's turn",
+  42: 'The glass shows each PR title in the deck, the PRs tab, and the modal header',
+  50: 'Merge conflict fixture',
+  60: 'Failing checks fixture',
+  61: 'Behind main fixture',
+};
+
 const evidencePr = (n: number, over: Partial<PrEvidence> = {}): PrEvidence => ({
   url: `https://github.com/acme/web/pull/${n}`,
   number: n,
-  title: `PR ${n}`,
+  ...(PR_TITLES[n] ? { title: PR_TITLES[n] } : {}),
   state: 'OPEN',
   draft: false,
   reviewDecision: 'REVIEW_REQUIRED',
