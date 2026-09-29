@@ -267,6 +267,8 @@ The loop's doctrine, in full:
   drift from the forge's own rules.
 - **Dedup by approval, not by PR.** A specific approval merges at most once; a
   new push invalidates it and the gate waits for a fresh one.
+  When an approval no longer covers the head, pickup re-requests review from
+  that approver once per push.
 - **Stacks merge through the forge's stack-aware path.** A PR in a native
   stack goes through GitHub's asynchronous stack merge API; a standalone PR
   through the ordinary merge call. `method` is per repo and applies to both.
@@ -347,7 +349,7 @@ cron-script fleets it replaces, whose watchers also died with their host.
 
 The merge loop is already fetching the forge's view of every candidate PR each
 tick — so it persists what it saw (`pickup/merge-view.json`): per open PR the
-head sha, mergeable state, and gate verdict (`waiting-approval`,
+head sha, mergeable state, and gate verdict (`waiting-approval`, `stale-approval`,
 `behind-updated`, `conflict-chore:<uuid>`, `rebase-failed`, `blocked`,
 `draft`), and per PR that *left* the open set, its disposition — one extra
 lookup answers whether it merged or closed, so "merged in the last 24h" is

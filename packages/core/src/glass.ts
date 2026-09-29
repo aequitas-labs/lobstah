@@ -71,7 +71,7 @@ export interface MergeViewPr {
   headRef: string;
   headSha: string;
   mergeableState: string;
-  /** waiting-approval | behind-updated | conflict-chore:<uuid> | rebase-failed | blocked | draft | merged */
+  /** waiting-approval | stale-approval | behind-updated | conflict-chore:<uuid> | rebase-failed | blocked | draft | merged */
   gate: string;
   /** Dispatch UUID when the branch is lobstah-made (lobstah/<uuid>). */
   uuid?: string;

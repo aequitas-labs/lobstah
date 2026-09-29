@@ -186,3 +186,21 @@ describe('key ownership', () => {
     expect(s.owns('gh:o/r2#12')).toBe(false); // a second repo's source
   });
 });
+
+describe('review re-request', () => {
+  it('posts requested reviewers for the PR and drops its author', async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+    vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      calls.push({ method: init?.method ?? 'GET', path, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
+      return new Response(JSON.stringify(path.endsWith('/requested_reviewers') ? {} : { user: { login: 'Author' } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+    await source().requestReview(17, ['alice', 'Author', 'bob', 'alice']);
+    expect(calls).toEqual([
+      { method: 'GET', path: '/repos/o/r/pulls/17' },
+      { method: 'POST', path: '/repos/o/r/pulls/17/requested_reviewers', body: { reviewers: ['alice', 'bob'] } },
+    ]);
+  });
+});

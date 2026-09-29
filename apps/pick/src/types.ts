@@ -72,6 +72,8 @@ export interface MergeSource {
   /** "owner/name" for the persisted merge view. */
   forgeRepo(): string;
   updateBranch(number: number): Promise<void>;
+  /** Ask previous approvers to review the current head again. */
+  requestReview(number: number, reviewers: string[]): Promise<void>;
   merge(number: number, method: string): Promise<void>;
   comment(number: number, text: string): Promise<void>;
   addLabel(number: number, label: string): Promise<void>;
