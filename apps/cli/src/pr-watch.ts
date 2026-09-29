@@ -6,6 +6,7 @@ import {
   configPath,
   derivePrEvents,
   evidencePath,
+  ghPrTitle,
   ghPrView,
   isFailingConclusion,
   laneDirs,
@@ -23,6 +24,7 @@ import {
   readWatch,
   removeWatch,
   runWatchCheck,
+  setPrTitle,
   storedDescriptor,
   upsertPr,
   watchDue,
@@ -33,7 +35,7 @@ import { repoOf } from './digest.js';
 
 /**
  * The CLI half of the `pr:` watch preset (the pure half is core's pr.ts):
- * the check subcommand, auto-registration from `report done --pr`, evidence
+ * the check subcommand, auto-registration from `report --pr` and the trap beat, evidence
  * stamping, and observe-only polling for the inline poller.
  *
  * The daemon observes dispatch-owned PRs even without pickup or a helm.
@@ -66,10 +68,10 @@ export function addPrWatch(ref: PrRef, opts: { forId?: string; everySecs?: numbe
 }
 
 /**
- * `report done --pr <url>` registers the PR's watch, owned by the reporting
- * dispatch's chain. Idempotent: an existing watch for the PR (a continuation
+ * `report --pr <url>` and the trap beat register the PR's watch, owned by
+ * the reporting dispatch's chain. Idempotent: an existing watch for the PR (a continuation
  * re-reporting the same PR, or a hand-registered one) is left alone. A URL
- * that is not a GitHub PR registers nothing. Never throws — a done report
+ * that is not a GitHub PR registers nothing. Never throws — a report
  * must not fail over observation.
  */
 export function autoRegisterPrWatch(id: string, prUrl: string): Watch | undefined {
@@ -82,25 +84,30 @@ export function autoRegisterPrWatch(id: string, prUrl: string): Watch | undefine
   }
 }
 
-/** One PR the backfill would register (or retire). */
+/** One PR the backfill would register, retire, or give a title. */
 export interface BackfillRow {
   key: string;
-  action: 'register' | 'retire';
+  action: 'register' | 'retire' | 'title';
   owner: string;
+  /** Why an applied title fetch failed. */
+  error?: string;
 }
 
 /**
- * `lobstah watch backfill`: find PRs in dispatch history that have no watch.
- * This is an explicit migration command. No read command calls it. Without
- * `apply` it only lists what it would do. With `apply` it registers a watch
- * for each PR not known to be terminal, and removes the watch of a PR known
- * to be MERGED or CLOSED. It reads local state only and never calls GitHub.
- * A PR record takes precedence over older dispatch evidence when deciding
- * terminal state. A new watch starts at cursor "0", so its first check is a
- * baseline and forks nothing (derivePrEvents).
+ * `lobstah watch backfill`: find PRs in dispatch history that have no watch,
+ * and PR records that have no title. This is an explicit migration command.
+ * No read command calls it. Without `apply` it only lists what it would do.
+ * With `apply` it registers a watch for each PR not known to be terminal,
+ * removes the watch of a PR known to be MERGED or CLOSED, and fetches the
+ * title of each record without one (one `gh pr view --json title` per
+ * record; the only GitHub call backfill makes). A PR record takes precedence
+ * over older dispatch evidence when deciding terminal state. A new watch
+ * starts at cursor "0", so its first check is a baseline and forks nothing
+ * (derivePrEvents).
  */
-export function backfillPrWatches(opts: { apply?: boolean } = {}): BackfillRow[] {
+export function backfillPrWatches(opts: { apply?: boolean; fetchTitle?: (ref: PrRef) => string } = {}): BackfillRow[] {
   const apply = opts.apply === true;
+  const fetchTitle = opts.fetchTitle ?? ghPrTitle;
   const rows: BackfillRow[] = [];
   type Member = { id: string; followUp?: string; at: string };
   const members = new Map<string, Member>();
@@ -189,6 +196,20 @@ export function backfillPrWatches(opts: { apply?: boolean } = {}): BackfillRow[]
       .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))[0];
     rows.push({ key, action: 'register', owner: owner ? `dispatch:${owner.id}` : 'man' });
     if (apply) addPrWatch(ref, owner ? { forId: owner.id } : {});
+  }
+  for (const r of records) {
+    if (r.title) continue;
+    const ref = parsePrRef(r.key);
+    if (!ref) continue;
+    const row: BackfillRow = { key: r.key, action: 'title', owner: readWatch(r.key)?.owner ?? '' };
+    if (apply) {
+      try {
+        setPrTitle(r.key, fetchTitle(ref));
+      } catch (err) {
+        row.error = (err as Error).message;
+      }
+    }
+    rows.push(row);
   }
   return rows;
 }
@@ -369,4 +390,10 @@ export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Da
       // gh missing, unauthenticated, or forbidden: pick's real check records the streak
     }
   }
+}
+
+/** A PR title for `lobstah prs`: at most `max` characters, the last an ellipsis when cut; '' when absent. */
+export function cutTitle(title: string | undefined, max = 60): string {
+  const chars = Array.from((title ?? '').replace(/\s+/g, ' ').trim());
+  return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('')}…`;
 }

@@ -18,6 +18,7 @@ export * from './trap-names.js';
 export * from './notices.js';
 export * from './window.js';
 export * from './helm.js';
+export * from './sent.js';
 export * from './compiled.js';
 export * from './pr.js';
 export * from './prs.js';
