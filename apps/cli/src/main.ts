@@ -779,7 +779,6 @@ async function mainCli(): Promise<void> {
       const live = fs.existsSync(path.join(laneDirs(lane).active, id));
       const activity = live ? activityView(readActivity(id, lane), wedgeSecs()) : undefined;
       const waitingNow = live ? waitingView(log.at(-1)) : undefined;
-      const prUrl = readEvidence(id, lane).prUrl;
       console.log(
         toonKV({
           id,
@@ -787,7 +786,6 @@ async function mainCli(): Promise<void> {
           state,
           ...(state === 'queued' ? { queued: since } : {}),
           lastNote: log.at(-1)?.note,
-          ...(prUrl ? { prUrl } : {}),
           ...(waitingNow ? { [log.at(-1)!.verb]: waitingText(waitingNow) } : {}),
           ...(waitingNow?.until ? { until: waitingNow.until } : {}),
           ...(activity ? { activity: activityLine(activity) } : {}),
