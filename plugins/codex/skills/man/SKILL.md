@@ -66,7 +66,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 For ume, push with its non-blocking form; Codex cannot run an await as a
 tracked background task. End the turn while the external operation runs.
 - `done` means the brief is fulfilled — report the catch. Never merge.
-- `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
+- `report --pr` (any verb but failed) and a trap's first push register a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; lobstah repairs conflicts and failed checks on its own PRs, and attention means it gave up or cannot act.
 - Each failing check gets at most one repair round per PR and commit. A human gate (a check only a person's approval passes) gets none: list it in `[repos.<key>].humanGateChecks`, or a worker names it with `report --human-gate "<check>"`. `man tend` shows it under `repairs waiting`.
 - A repair waits while a live worker holds the PR's branch or a branch below it in the stack, until the PR is unchanged for `[watch].repairSettleSecs`, and while the PR's watch is held. A wait raises no attention; `man tend` lists it under `repairs waiting`. `lobstah cancel` on a repair holds its PR until `lobstah watch release <key>`. A brief whose worker will push to other PRs can tell it to run `lobstah watch hold <key> --for <its dispatch id>` first.
@@ -83,6 +83,7 @@ tracked background task. End the turn while the external operation runs.
   Acknowledge a digest with `lobstah man report --session <id>`.
 
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
+- A send is answered by the worker's next note, which wakes you; use `--no-reply` for a steer that needs no answer.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
 without the plugin; see docs/man.md. `lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken setup.

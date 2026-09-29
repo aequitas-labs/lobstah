@@ -61,6 +61,13 @@ describe('PR stack branch evidence', () => {
     expect(pr).toMatchObject({ baseRefName: 'main', headRefName: 'glass' });
   });
 
+  it('reads the title in the same view call and stamps it; no title stamps none', () => {
+    expect(PR_VIEW_FIELDS.split(',')).toContain('title');
+    expect(PR_VIEW_FIELDS_NO_CHECKS.split(',')).toContain('title');
+    expect(prEvidence(ref, { ...open, title: 'Question hold' }, '2026-09-23T13:00:00Z').title).toBe('Question hold');
+    expect(prEvidence(ref, open, '2026-09-23T13:00:00Z')).not.toHaveProperty('title');
+  });
+
   it('keeps forge update and merge times from that same view call', () => {
     expect(PR_VIEW_FIELDS.split(',')).toContain('updatedAt');
     const pr = prEvidence(ref, { ...merged, updatedAt: '2026-09-23T04:00:00Z' }, '2026-09-23T05:00:00Z');
