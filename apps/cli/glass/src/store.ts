@@ -25,6 +25,14 @@ export interface GlassState {
   focusResults: Record<string, string>;
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */
   preview: boolean;
+  /** Report markdown fetched for an open modal, by key, for the filing (stateHash) it was fetched at. */
+  reportText: Record<string, ReportText>;
+}
+
+export interface ReportText {
+  hash: string;
+  text?: string;
+  error?: string;
 }
 
 let current: GlassState;

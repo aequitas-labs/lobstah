@@ -1,13 +1,14 @@
 import type { GlassPr, GlassStack } from '@lobstah/core';
-import { DECK_TRAPS_MAX, LANDED_MAX, prBadgeClass } from '../../../src/glass-diff.js';
+import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, prBadgeClass, reportModal } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
+import { showModal } from '../actions.js';
 import { Age, KIND_TONE, Table, kindCell, kindLabel, opener, prName, stackNumbers, trapNow, windowAction } from './common.js';
 
 /**
- * On deck: attention, in flight, landed in the last 24h, traps, and open PR
- * stacks. The dispatch, trap, and landed items follow the site-wide view;
+ * On deck: attention, in flight, landed in the last 24h, reports, traps,
+ * and open PR stacks. The dispatch, trap, and landed items follow the site-wide view;
  * attention is always a notices table; PRs have their own stack presentation.
  */
 
@@ -36,6 +37,15 @@ function deckBlock(title: string, items: DeckItem[], tab: string, max: number, v
   const lines = shown.map((i) => deckItem(i, view));
   const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
   return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${body}${more(items.length - shown.length, tab)}</section>`;
+}
+
+/** Reports have no tab: the heading is plain, and the rest are in `lobstah reports`. */
+function deckReports(items: DeckItem[], view: View) {
+  const shown = items.slice(0, REPORTS_MAX);
+  const lines = shown.map((i) => deckItem(i, view));
+  const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
+  const rest = items.length - shown.length;
+  return html`<section class="deckreports"><h2>reports</h2>${body}${rest > 0 && html`<span class="deckmore">+${rest} more · lobstah reports</span>`}</section>`;
 }
 
 function deckNotices(list: DeckAttention[]) {
@@ -114,6 +124,17 @@ export function Deck({ inp }: { inp: DeckInputs }) {
     meta: [(x.note || '').slice(0, 90), ' · ', Age(x.at), ' ago'],
     open: opener('dispatch', x.lane + ':' + x.id),
   }));
+  const reports = inp.reports.map((r): DeckItem => {
+    const modal = reportModal(r.key);
+    return {
+      key: r.key,
+      title: r.title,
+      badge: { text: r.author, tone: r.author === 'helm' ? 'ok' : 'dim' },
+      meta: [Age(r.filedAt), ' ago', r.acked ? ' · acked' : ''],
+      open: () => showModal(modal.type, modal.key),
+      acked: !!r.acked,
+    };
+  });
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
     title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
@@ -121,5 +142,5 @@ export function Deck({ inp }: { inp: DeckInputs }) {
     meta: [t.repo || '', ' · ', trapNow(t), ' · ', windowAction(t)],
     open: opener('trap', t.trapId),
   }));
-  return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view)}${deckPrs(inp, view)}</div>`;
+  return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckReports(reports, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view)}${deckPrs(inp, view)}</div>`;
 }

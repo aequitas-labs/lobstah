@@ -26,12 +26,15 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * - only the active tab's section is compared: the old page left a hidden
  *   tab's last render in place, the new one does not render hidden tabs;
  * - likewise the modal box only while the overlay is open: the old page
- *   left a closed modal's markup behind the hidden overlay.
+ *   left a closed modal's markup behind the hidden overlay;
+ * - reports are not in the compared snapshots: the old page had no reports
+ *   (glass-page.test.ts covers the reports block and the report modals).
  * The glass also grew PR titles on purpose (glass-page.test.ts tests them):
  * a card's `<span class="prname"><b>#n</b> title</span>` folds back to the
  * old `<b>#n title</b>`, and a stack line's per-number `<span title>#n</span>`
  * folds back to plain text (foldPrTitles).
  */
+const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
 // The exact bytes served, whatever line endings the checkout gave the fixture.
 const LEGACY = fs.readFileSync(new URL('./fixtures/glass-legacy.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
@@ -245,7 +248,7 @@ async function trace(page: string, d: GlassSnapshot, search = '') {
 describe('glass fidelity: the built page renders the legacy page’s DOM', () => {
   for (const [name, make] of Object.entries(FIXTURES)) {
     it(`${name} fleet: every tab, view, filter, and modal`, async () => {
-      const [legacy, built] = [await trace(LEGACY, make()), await trace(GLASS_PAGE, make())];
+      const [legacy, built] = [await trace(LEGACY, legacyShape(make())), await trace(GLASS_PAGE, legacyShape(make()))];
       expect(built.skeleton).toBe(legacy.skeleton);
       expect(built.views.map(([n]) => n)).toEqual(legacy.views.map(([n]) => n));
       for (let i = 0; i < legacy.views.length; i++) {
@@ -260,7 +263,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
   // properties): every visible element's computed style must come out the same.
   it('every visible element computes the same style under glass.css as under the legacy stylesheet', async () => {
     const computed = async (page: string) => {
-      const g = await loadGlass(page, FIXTURES['every-attention']!(), { now: NOW });
+      const g = await loadGlass(page, legacyShape(FIXTURES['every-attention']!()), { now: NOW });
       const out: string[] = [];
       const snap = (label: string) => {
         const hidden = [...g.$$('.tabpage:not(.on)'), ...(g.$('#overlay')!.className === 'open' ? [] : [g.$('#modalbox')!])];

@@ -201,6 +201,30 @@ export interface GlassHelm extends HelmRegistration {
   transcript?: string;
 }
 
+/**
+ * A filed report (reports.ts), without its markdown: the page fetches the
+ * page from /report/<key>/md when a modal opens, and its images from
+ * /report/<key>/files/<name>.
+ */
+export interface GlassReport {
+  key: string;
+  title: string;
+  /** The trap name, `headless`, or `helm`. */
+  author: string;
+  filedAt: string;
+  stateHash: string;
+  /** A human acked this filing (`lobstah attention ack <key>`). */
+  acked?: { at: string; by: string };
+  dispatch?: string;
+  lane?: Lane;
+  grounds?: string;
+  repo?: string;
+  bytes: number;
+  attachments: Attachment[];
+  /** Attached basename → stored name, where a name was already taken. */
+  renamed?: Record<string, string>;
+}
+
 /** A trap's mail, pending or delivered. */
 export interface GlassMessage {
   file: string;
@@ -246,6 +270,8 @@ export interface GlassSnapshot {
   stacks: GlassStack[];
   attention: TendAttention[];
   landed: LandedCatch[];
+  /** Every filed report, newest first. */
+  reports: GlassReport[];
   attentionKinds: string[];
   /** A config error, surfaced on the page instead of failing /data. */
   attentionError?: string;

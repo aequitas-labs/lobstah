@@ -329,6 +329,47 @@ trap's current dispatch, last activity, or idle and waiting state.
 This is where "is the agent alive?" belongs: the helm's heartbeat age on a
 page, not periodic proof-of-life turns in a transcript.
 
+### Reports
+
+A report is a markdown page of findings, with images, that a dispatch or
+the helm files to keep.
+
+- **Filing a worker report.** `lobstah report <id> done "<one-line note>"
+  --report <file.md> [--attach <file> ...]` (also `failed`). The page is
+  copied to the dispatch's state directory as `state/<id>/report.md`, beside
+  `attachments/`. `--attach` copies each file into that `attachments/`. An
+  image the page names by bare filename (`![tray](tray.png)`) resolves to
+  that directory. The note stays one line.
+- **Filing a helm report.** `lobstah man file <file.md> [--attach <file> ...]
+  [--title <text>]`. It is stored under the helm's grounds,
+  `reports/<grounds>/<rid>/`, with the same layout, and the author is `helm`.
+- **Title and author.** The title is `--title`, else the page's first `#`
+  heading, else the dispatch's brief title. The author is the trap name, or
+  `headless`, or `helm`. A file larger than `[limits].attachmentMaxBytes` is
+  refused, and nothing is filed.
+- **Finding one.** `lobstah reports` lists every report, newest first: key,
+  title, author, the dispatch or helm grounds, when it was filed, and
+  whether it is acked. `lobstah status <id>` and `lobstah catch <id>` print
+  `report: <path>` when the dispatch has one.
+- **In the glass.** The deck has a reports block after Landed: newest first,
+  unacked first, up to 8, then "+N more". A dispatch's report renders as a
+  page at the top of its dispatch modal. A helm report opens in a modal of
+  its own; `#report/<key>` links to it. The page shows headings, lists,
+  tables, fenced code, links (in a new tab), bold, italics, and images.
+  Raw HTML in the markdown shows as text. The glass serves the markdown and
+  the images read-only, and an image only by basename from that report's
+  own attachments.
+- **Attention.** A filed report with no ack stands as the `report` attention
+  kind. Add `report` to `attentionKinds` to walk it. The desktop pet shows
+  the report's title; a click opens the glass at the report and does not
+  ack it. `lobstah attention ack <key>` acks a report, whether or not
+  `report` is in `attentionKinds`. Nothing else acks it, and opening it in
+  the glass does not. A report filed by a follow-up dispatch acks the report
+  of each dispatch before it in the chain.
+- **Cull.** `lobstah cull` removes a dispatch's report with the rest of its
+  state. A helm report is culled when it is older than the retention window,
+  counted from when it was filed.
+
 ### The periodic report
 
 `lobstah man tend` is the full picture on demand; `lobstah man report` is the

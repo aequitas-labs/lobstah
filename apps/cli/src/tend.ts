@@ -60,6 +60,7 @@ import type {
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
+import { reportAttention } from './report-file.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
@@ -815,7 +816,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     [],
     records,
   ).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg));
+  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now));
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
