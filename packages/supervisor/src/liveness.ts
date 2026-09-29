@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { TERMINAL_VERBS } from '@lobstah/core';
 import type { Verb } from '@lobstah/core';
 
-export type Classification = 'terminal' | 'busy' | 'wedged' | 'dead' | 'unclaimed' | 'unknown';
+export type Classification = 'terminal' | 'busy' | 'wedged' | 'dead' | 'parked' | 'unclaimed' | 'unknown';
 
 export interface ClassifyInput {
   hasRunner: boolean;
@@ -26,7 +26,8 @@ export function classify(input: ClassifyInput): Classification {
   if (lastVerb && TERMINAL_VERBS.includes(lastVerb)) return 'terminal';
   if (!hasRunner) return 'unclaimed';
   if (alive === undefined) return 'unknown';
-  if (!alive) return 'dead';
+  // A runner exits when its worker pauses: the dispatch is parked, not dead.
+  if (!alive) return lastVerb === 'paused' ? 'parked' : 'dead';
   if (input.pausedWaiting) return 'busy';
   const baseline = lastEventAt ?? startedAt;
   if (baseline === undefined) return 'unknown';

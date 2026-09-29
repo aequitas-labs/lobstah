@@ -18,8 +18,11 @@ import type { AdapterRun } from '@lobstah/adapters';
 
 /**
  * Verbs a worker reports when it stops to wait on a human. A turn that ends
- * on one of these keeps the run open until the inbox answers, a cancel, or
- * the wall clock — the contract tells the worker it will be resumed.
+ * on `needs-decision` or `blocked` keeps the run open until the inbox
+ * answers, a cancel, or the wall clock. A turn that ends on `paused` parks
+ * the dispatch: the runner ends the session and exits, and the daemon
+ * resumes the session when the wait ends. The contract tells the worker it
+ * will be resumed.
  */
 export const WAITING_VERBS: readonly Verb[] = ['needs-decision', 'blocked', 'paused'];
 
@@ -49,6 +52,8 @@ export interface DriveOpts {
   exitGraceMs?: number;
   /** Called once, when a turn ends on the worker's `done` or `failed`. */
   onFinal?: () => void;
+  /** Called once, when a turn ends on the worker's `paused` and the run parks. */
+  onPark?: () => void;
 }
 
 /**
@@ -73,6 +78,11 @@ export interface DriveResult {
   activity: number;
   /** The turn ended on the worker's `done` or `failed`. */
   final: boolean;
+  /**
+   * The turn ended on the worker's `paused`: the session was ended so the
+   * dispatch can park without a harness process.
+   */
+  parked?: boolean;
   /**
    * Set when the runner stopped the harness after that final report: the
    * stream did not close within the exit grace, or a cancel arrived. The
@@ -178,11 +188,21 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     kill();
     abandon();
   };
-  const finish = () => {
-    if (final) return;
-    final = true;
+  // A pause parks the run: the session ends the same way a final report
+  // ends it, but the dispatch stays active for the daemon to resume.
+  let parked = false;
+  const finish = (park = false) => {
+    if (final || parked) return;
+    if (park) {
+      parked = true;
+      const on = readStatusLog(id, lane).at(-1)?.waitingOn;
+      record({ at: new Date().toISOString(), type: 'runner', data: { parked: 'paused', ...(on ? { on } : {}) } });
+      opts.onPark?.();
+    } else {
+      final = true;
+      opts.onFinal?.();
+    }
     finalAt = Date.now();
-    opts.onFinal?.();
     run.end();
     // A cancel after the final report has nothing to cancel: it stops the
     // harness now instead of at the end of the grace. The result stands.
@@ -279,7 +299,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     if (ev.type === 'session' && ev.data?.sessionId) {
       mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId) });
     }
-    if (ev.type !== 'turn-end' || cancelled || stopped() || final) continue;
+    if (ev.type !== 'turn-end' || cancelled || stopped() || final || parked) continue;
     const lastVerb = readStatusLog(id, lane).at(-1)?.verb;
     // `done`/`failed`: the worker said it is finished. Its report is final.
     if (lastVerb !== undefined && TERMINAL_VERBS.includes(lastVerb)) {
@@ -293,6 +313,12 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     const waiting = lastVerb !== undefined && WAITING_VERBS.includes(lastVerb);
     if (deliver(run, id, lane) > 0) {
       if (waiting) answered(lastVerb);
+      continue;
+    }
+    // Paused: nothing for the harness to do until the wait ends. The
+    // session ends and the dispatch holds no slot while it waits.
+    if (lastVerb === 'paused') {
+      finish(true);
       continue;
     }
     if (waiting) {
@@ -321,7 +347,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
   clearExit();
   tracker.flush();
   tracker.stop();
-  return { cancelled, activity, final, ...(stoppedHarness ? { stopped: stoppedHarness } : {}) };
+  return { cancelled, activity, final, ...(parked ? { parked } : {}), ...(stoppedHarness ? { stopped: stoppedHarness } : {}) };
 }
 
 export interface SettleInput {

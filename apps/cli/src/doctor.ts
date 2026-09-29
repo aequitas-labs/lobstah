@@ -25,6 +25,7 @@ import {
 import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
 import { planPressureCull } from './cull.js';
+import { parkedSummary } from './parked-view.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
@@ -308,7 +309,8 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   const workSlots = slotUsage('work');
   const choreSlots = slotUsage('chore');
   const trapNames = listTraps().map(trapLabel);
-  const slots = `headless: ${workSlots.headless} of ${cfg.limits.maxConcurrent} work, ${choreSlots.headless} of ${cfg.limits.choreConcurrent} chore; traps: ${workSlots.traps + choreSlots.traps}${trapNames.length ? ` (${trapNames.join(', ')})` : ''}`;
+  const parked = parkedSummary();
+  const slots = `headless: ${workSlots.headless} of ${cfg.limits.maxConcurrent} work, ${choreSlots.headless} of ${cfg.limits.choreConcurrent} chore; traps: ${workSlots.traps + choreSlots.traps}${trapNames.length ? ` (${trapNames.join(', ')})` : ''}${parked ? `; ${parked}` : ''}`;
   if (!fs.existsSync(hb)) {
     push('daemon', 'warn', `no heartbeat — daemon not running (\`lobstah daemon install\`); ${slots}`);
   } else {

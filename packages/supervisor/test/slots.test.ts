@@ -40,7 +40,7 @@ describe('only daemon-spawned work spends headless slots', () => {
     for (const id of ['head1', 'head2']) enqueue({ id, repo: 'demo', brief: 'headless work' });
     const spawned: string[] = [];
     tick(() => {}, { spawnRunner: (st) => { spawned.push(st.id); } });
-    expect(slotUsage('work')).toEqual({ headless: 2, traps: 3 });
+    expect(slotUsage('work')).toEqual({ headless: 2, traps: 3, parked: 0 });
     expect(spawned).toEqual(['head1', 'head2']);
     expect(activeIds('work')).toHaveLength(5);
   });
@@ -71,7 +71,7 @@ describe('only daemon-spawned work spends headless slots', () => {
     enqueue({ id: 'headless-chore', repo: 'demo', brief: 'chore' }, 'chore');
     const spawned: string[] = [];
     tick(() => {}, { spawnRunner: (st) => { spawned.push(st.id); } });
-    expect(slotUsage('chore')).toEqual({ headless: 1, traps: 1 });
+    expect(slotUsage('chore')).toEqual({ headless: 1, traps: 1, parked: 0 });
     expect(spawned).toEqual(['headless-chore']);
   });
 
@@ -97,18 +97,18 @@ describe('a finished dispatch holds no slot', () => {
     appendStatus('fin1', 'work', 'done', 'finished');
     activeHeadless('head2');
     enqueue({ id: 'head3', repo: 'demo', brief: 'queued work' });
-    expect(slotUsage('work')).toEqual({ headless: 1, traps: 0 });
+    expect(slotUsage('work')).toEqual({ headless: 1, traps: 0, parked: 0 });
     const spawned: string[] = [];
     tick(() => {}, { spawnRunner: (st) => { spawned.push(st.id); } });
     expect(spawned).toEqual(['head3']);
     // The finished dispatch is left to its runner, which is still exiting.
     expect(activeIds('work')).toContain('fin1');
-    expect(slotUsage('work')).toEqual({ headless: 2, traps: 0 });
+    expect(slotUsage('work')).toEqual({ headless: 2, traps: 0, parked: 0 });
   });
 
   it('failed by the worker counts the same way', () => {
     activeHeadless('fin2');
     appendStatus('fin2', 'work', 'failed', 'could not');
-    expect(slotUsage('work')).toEqual({ headless: 0, traps: 0 });
+    expect(slotUsage('work')).toEqual({ headless: 0, traps: 0, parked: 0 });
   });
 });

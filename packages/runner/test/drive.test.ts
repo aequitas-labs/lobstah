@@ -121,14 +121,44 @@ describe('drive — a headless worker waiting on a question stays alive', () => 
     expect(log.at(-1)?.note).toBe('proceeded');
   });
 
-  it.each(['blocked', 'paused'] as const)('%s also holds the run open', async (verb) => {
+  it('blocked also holds the run open', async () => {
     claimed('w2');
-    const f = fakeRun([() => appendStatus('w2', 'work', verb)]);
+    const f = fakeRun([() => appendStatus('w2', 'work', 'blocked')]);
     const driving = drive(f.run, { id: 'w2', lane: 'work', pollMs: 10 });
     await sleep(80);
     expect(f.state().ended).toBe(false);
     f.run.kill();
     await driving;
+  });
+
+  it('paused parks the run: the session ends at turn end, no verb is added, and the result says parked', async () => {
+    claimed('w2p');
+    let parkedCalls = 0;
+    const f = fakeRun([() => appendStatus('w2p', 'work', 'paused', 'waiting on review', undefined, { waitingOn: 'review' })]);
+    const result = await drive(f.run, { id: 'w2p', lane: 'work', pollMs: 10, onPark: () => parkedCalls++ });
+    expect(result).toMatchObject({ parked: true, final: false, cancelled: false });
+    expect(f.state().ended).toBe(true);
+    expect(f.state().killed).toBe(false);
+    expect(parkedCalls).toBe(1);
+    expect(verbs('w2p')).toEqual(['working', 'paused']);
+    const events = fs.readFileSync(eventsPath('w2p', 'work'), 'utf8');
+    expect(events).toContain('"parked":"paused"');
+    expect(events).toContain('"on":"review"');
+  });
+
+  it('a message already queued at a paused turn end is delivered instead of parking', async () => {
+    claimed('w2m');
+    const f = fakeRun([
+      () => {
+        appendStatus('w2m', 'work', 'paused');
+        sendMessage('w2m', 'work', 'the review is in');
+      },
+      () => appendStatus('w2m', 'work', 'done', 'finished'),
+    ]);
+    const result = await drive(f.run, { id: 'w2m', lane: 'work', pollMs: 10 });
+    expect(result.parked).toBeUndefined();
+    expect(result.final).toBe(true);
+    expect(f.sent).toEqual(['the review is in']);
   });
 
   it('a cancel during the wait finalizes as failed with the cancel note', async () => {

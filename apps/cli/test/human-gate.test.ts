@@ -145,8 +145,9 @@ describe('human gates in the daemon repair path', () => {
     expect(readPr(KEY)?.repair?.reason).toContain(`one repair round per check and commit: test had a round at ${SHA.slice(0, 7)}`);
     // Another check fails on the same commit: it gets its own round.
     expect(observeAndRepair(red(['test', 'lint']), 1)).toBe(1);
-    expect(queued().at(-1)!.brief).toContain('- lint');
-    expect(queued().at(-1)!.brief).not.toContain('- test —');
+    const latest = queued().find((d) => d.id === readPr(KEY)?.repair?.dispatchId)!;
+    expect(latest.brief).toContain('- lint');
+    expect(latest.brief).not.toContain('- test —');
     expect(readPr(KEY)?.repair?.checks).toEqual(['test', 'lint']);
     finishRepair();
     // The per-head limit (2) is spent. A new commit starts over.

@@ -319,7 +319,7 @@ export function buildGlassSnapshot(): GlassSnapshot {
     version: lobstahVersion(),
     repoUrl: REPO_URL,
     daemon: executor ? { version: executor.version, heartbeat: executor.heartbeat } : undefined,
-    slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps },
+    slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
     helms,
     traps: [
       ...live.map((t) => attach(t as GlassTrap, Date.now() - trapLastSeen(t) <= loadConfig().soak.ttlSecs * 1000)),

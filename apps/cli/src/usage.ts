@@ -184,13 +184,11 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
   cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
-  report: `The validated status write path: working | needs-decision | blocked |
-paused | done | failed. After \`--\` every word is note. \`done --pr <url>\`
-registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
---until: what a waiting worker waits on, and when a pause expires.
---human-gate <check>: a check that passes only when a person approves; PR
-repairs and CI-fix continuations skip it. A trap's done records its
-worktree's HEAD, run there or with the trap's --session.`,
+  report: `Status write path: working | needs-decision | blocked | paused | done |
+failed; after \`--\` all is note. \`done --pr\` and \`paused --waiting-on pr|review\`
+register the PR's watch (--no-watch opts out). --waiting-on, --link, --until:
+what a pause waits on, and when it ends. --human-gate <check>: repairs skip a
+check only a person's approval passes. A trap's done records its HEAD (--session).`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

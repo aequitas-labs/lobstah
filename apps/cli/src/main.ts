@@ -150,6 +150,7 @@ import {
   syncPrWatches,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
+import { finishResolvedWaits, registerWaitWatch } from './pr-waits.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { runBeat } from './beat.js';
@@ -990,7 +991,12 @@ async function mainCli(): Promise<void> {
       const gatesNamed = recordReportedGates(id, lane, values('--human-gate'), prUrl);
       // A done PR stays observed: CI, review, and merge flow back through its
       // pr: watch instead of lobstah going blind at "PR open".
-      const prWatch = verb === 'done' && prUrl && !noWatch ? autoRegisterPrWatch(id, prUrl) : undefined;
+      const prWatch =
+        verb === 'done' && prUrl && !noWatch
+          ? autoRegisterPrWatch(id, prUrl)
+          : verb === 'paused' && !noWatch
+            ? registerWaitWatch(id, lane, entry)
+            : undefined;
       console.log(
         toonKV({
           id,
@@ -2052,6 +2058,8 @@ async function mainCli(): Promise<void> {
           culler: cliCuller,
           prWatches: (now, log) => {
             observeDispatchPrWatches(pollSecs(), now);
+            // Before the cull pass: a merged PR's release needs the chain finished.
+            finishResolvedWaits(log);
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
             stampRepairerBeat(now);
           },

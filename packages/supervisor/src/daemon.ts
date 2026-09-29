@@ -36,7 +36,9 @@ import {
   readSessionClaim,
   isTrapCatch,
   isFinished,
+  isParked,
   slotUsage,
+  unhandled,
   readStatusLog,
   releaseDispatchLock,
   daemonSkip,
@@ -100,7 +102,7 @@ function finalize(st: ActiveState): void {
   }
 }
 
-export function spawnRunner(st: ActiveState, opts: { attempts: number; resume?: string; nudge?: string }): void {
+export function spawnRunner(st: ActiveState, opts: { attempts: number; resume?: string; nudge?: string; wake?: string }): void {
   // A handoff note (written by `lobstah swap`) becomes the nudge for the next
   // incarnation — consumed exactly once.
   let nudge = opts.nudge;
@@ -122,6 +124,7 @@ export function spawnRunner(st: ActiveState, opts: { attempts: number; resume?: 
       LOBSTAH_ATTEMPTS: String(opts.attempts),
       ...(opts.resume ? { LOBSTAH_RESUME: opts.resume } : {}),
       ...(nudge ? { LOBSTAH_NUDGE: nudge } : {}),
+      ...(opts.wake ? { LOBSTAH_WAKE: opts.wake } : {}),
     },
   });
   fs.closeSync(log);
@@ -228,6 +231,9 @@ export function reconcileOne(
     }
     case 'busy':
       break;
+    case 'parked':
+      // No harness runs and no slot is held. wakeParked resumes it.
+      break;
     case 'dead': {
       // Positively agent-free (pid verified dead). Auto-restart within bounds.
       const attempts = (st.runner?.attempts ?? 0) + 1;
@@ -264,6 +270,46 @@ export function reconcileOne(
       log(`${st.id}: state unknown — leaving untouched`);
       break;
   }
+}
+
+/**
+ * Why a parked dispatch wakes now, or undefined while it keeps waiting: an
+ * operator message in its inbox, or the end of its `--until`.
+ */
+export function wakeReason(id: string, lane: Lane, now = Date.now()): string | undefined {
+  const messages = unhandled(id, lane).length;
+  if (messages > 0) return `${messages} operator message(s) arrived`;
+  const until = Date.parse(readStatusLog(id, lane).at(-1)?.until ?? '');
+  if (Number.isFinite(until) && now >= until) return 'the pause reached its --until time';
+  return undefined;
+}
+
+/**
+ * Resume parked headless dispatches that have a reason to wake, while the
+ * lane has a free slot: the same session, the same attempt count. Returns
+ * how many it woke. A wake spends a slot, as a claim does.
+ */
+export function wakeParked(
+  lane: Lane,
+  free: number,
+  log: (m: string) => void,
+  spawnHeadless: typeof spawnRunner = spawnRunner,
+  now = Date.now(),
+): number {
+  let woke = 0;
+  const parked = listActive(lane).filter(
+    (st) => st.runner && !isTrapCatch(st.id, lane) && isParked(st.id, lane) && !cancelRequested(st.id, lane) &&
+      !pidAlive(st.runner.pid, st.runner.processStartTime),
+  );
+  for (const st of parked) {
+    if (woke >= free) break;
+    const why = wakeReason(st.id, lane, now);
+    if (!why) continue;
+    spawnHeadless(st, { attempts: st.runner?.attempts ?? 1, resume: sessionOf(st), wake: why });
+    woke++;
+    log(`${st.id}: parked, woke (${why})`);
+  }
+  return woke;
 }
 
 function writeHeartbeat(cfg: Config): void {
@@ -458,11 +504,13 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   noticeOrphanedBait();
   const workSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
 
-  retentionPass(cfg, hooks, log);
   const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : undefined);
   for (const lane of ['chore', 'work'] as Lane[]) {
     for (const st of listActive(lane)) reconcileOne(st, cfg, log, hooks.spawnRunner);
   }
+  // After reconcile: a dispatch the PR pass finished is in done/ before a
+  // merged PR's worktree release looks at its chain.
+  retentionPass(cfg, hooks, log);
   // Only a headless claim creates a worktree. Trap catches do not spend slots
   // or require space, so avoid a disk hold when no headless slot is open.
   const hasHeadlessSlot = (lane: Lane) =>
@@ -472,11 +520,16 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     : (liftHold(log, 'free-space hold cleared: no headless slot has claimable work'), true);
 
   for (const lane of ['chore', 'work'] as Lane[]) {
-    if (!roomy) continue;
-
     const ceiling = lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent;
-    // A finished dispatch whose runner is still exiting holds no slot.
-    let inFlight = listActive(lane).filter((st) => !isTrapCatch(st.id, lane) && !isFinished(st.id, lane)).length;
+    // A finished dispatch whose runner is still exiting holds no slot, and
+    // neither does a parked one.
+    let inFlight = listActive(lane).filter(
+      (st) => !isTrapCatch(st.id, lane) && !isFinished(st.id, lane) && !isParked(st.id, lane),
+    ).length;
+    // A parked dispatch with a reason to wake goes before new work. Its
+    // worktree exists already, so the free-space guard does not hold it.
+    if (inFlight < ceiling) inFlight += wakeParked(lane, ceiling - inFlight, log, hooks.spawnRunner, hooks.now?.() ?? Date.now());
+    if (!roomy) continue;
     while (inFlight < ceiling) {
       const id = claimNext(lane, skipFor(lane));
       if (!id) break;

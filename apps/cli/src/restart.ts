@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
-import { executorPath, slotUsage } from '@lobstah/core';
+import { executorPath, loadConfig, parkedDispatches, slotUsage } from '@lobstah/core';
 import type { ServiceKind } from './service.js';
+import { parkedText } from './parked-view.js';
 
 /** How long a restart waits for the new process to show itself. */
 export const RESTART_WAIT_MS = 10_000;
@@ -91,11 +92,18 @@ export function daemonStatus(installed: boolean, now = Date.now()): Record<strin
   const ageSecs = hb ? Math.max(0, Math.round((now - (Date.parse(hb.heartbeat) || 0)) / 1000)) : undefined;
   const fresh = ageSecs !== undefined && ageSecs * 1000 < HEARTBEAT_STALE_MS;
   const running = fresh && (hb?.pid === undefined || pidAlive(hb.pid));
+  const parked = parkedDispatches(now);
+  const cfg = loadConfig();
+  const work = slotUsage('work');
   return {
     daemon: running ? 'running' : 'stopped',
     installed,
     headless: usage.headless,
     trapCatches: usage.traps,
+    // Parked dispatches hold no slot: the slots line is real capacity.
+    slots: `${work.headless} of ${cfg.limits.maxConcurrent} work in use, ${Math.max(0, cfg.limits.maxConcurrent - work.headless)} free`,
+    parked: parked.length,
+    ...(parked.length ? { parkedOn: parked.map(parkedText).join('; ') } : {}),
     ...(hb?.pid !== undefined ? { pid: hb.pid } : {}),
     ...(hb?.version ? { version: hb.version } : {}),
     heartbeat: ageSecs === undefined ? 'never' : `${ageSecs}s ago`,
