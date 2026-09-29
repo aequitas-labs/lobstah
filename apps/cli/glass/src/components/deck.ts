@@ -4,7 +4,7 @@ import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-d
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 import { showModal } from '../actions.js';
-import { Age, KIND_TONE, Table, kindCell, kindLabel, opener, trapRow, windowAction } from './common.js';
+import { Age, KIND_TONE, Table, kindCell, kindLabel, opener, prName, stackNumbers, trapNow, windowAction } from './common.js';
 
 /**
  * On deck: attention, in flight, landed in the last 24h, reports, traps,
@@ -59,7 +59,7 @@ function deckNotices(list: DeckAttention[]) {
 
 function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, DeckAttention[]>, view: View) {
   const next = members.find((p) => p.number === s.nextNumber) || members[0];
-  const chain = s.numbers.map((n) => '#' + n).join(' → ');
+  const chain = stackNumbers(s.numbers, new Map(members.map((p) => [p.number, p.title])));
   const nextText = next ? 'next #' + next.number : 'nothing mergeable';
   if (view === 'cards') {
     const card = (p: GlassPr) => {
@@ -68,7 +68,7 @@ function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, Deck
       const badges = kinds.length
         ? kinds.map((a) => html`<span class=${'badge ' + (KIND_TONE[a.kind] || 'dim')}>${kindLabel(a.kind)}</span>`)
         : html`<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>`;
-      return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top"><b>#${p.number} ${p.title || ''}</b>${badges}</div><div class="meta">${p.repo} · ${p.badge.text}${acked && ' · acked'}</div></div>`;
+      return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta">${p.repo} · ${p.badge.text}${acked && ' · acked'}</div></div>`;
     };
     return html`<div key=${s.id} class="deckstack"><div class="dim">${chain} · ${nextText}</div><div class="cards">${members.map(card)}</div></div>`;
   }
@@ -139,7 +139,7 @@ export function Deck({ inp }: { inp: DeckInputs }) {
     key: t.trapId,
     title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
     badge: { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
-    meta: [t.repo || '', ' · ', t.live ? trapRow(t).listen : 'stowed / ghosted', ' · ', windowAction(t)],
+    meta: [t.repo || '', ' · ', trapNow(t), ' · ', windowAction(t)],
     open: opener('trap', t.trapId),
   }));
   return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckReports(reports, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view)}${deckPrs(inp, view)}</div>`;

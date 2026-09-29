@@ -6,7 +6,7 @@ import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
-import { NOW, acceptanceFleet, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
+import { NOW, PR_TITLES, acceptanceFleet, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
 
 /**
  * The spyglass page, tested as a page: the built HTML loads into happy-dom,
@@ -64,6 +64,38 @@ async function mutations(g: GlassDom, fn: () => Promise<void>): Promise<Mutation
 }
 
 describe('glass page: tabs and hash routing', () => {
+  it('shows working, idle, and parked traps on deck and tab, with a dispatch link', async () => {
+    const d = acceptanceFleet();
+    const working = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
+    working.verb = 'working';
+    working.brief = 'Polish the glass trap deck\nMore detail';
+    working.activity = { at: ago(12_000), kind: 'tool', summary: 'Bash', ageSecs: 12, stale: false };
+    const parked = {
+      ...working,
+      id: 'eeeeeeee-0000-4000-8000-000000000005',
+      verb: 'paused' as const,
+      waiting: { on: 'review', since: ago(3 * 60_000), waitedSecs: 180 },
+    };
+    d.dispatches.push(parked);
+    const live = d.traps[0]!;
+    live.listening = true;
+    const idle = { ...live, trapId: 'idle', label: 'idle trap', claimed: undefined, catches: [], listening: false, heartbeatAt: ago(45 * 60_000) };
+    const waiting = { ...live, trapId: 'parked', label: 'parked trap', claimed: parked.id, catches: [parked] };
+    d.traps = [live, idle, waiting];
+    const g = await page(d, { hash: '#deck', prefs: { view: 'table' } });
+    const deck = g.$$('#deck section')[4]!;
+    expect(text(deck)).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
+    expect(text(deck)).toContain('idle · not listening');
+    expect(text(deck)).toContain('parked · waiting on review');
+    await click(g, deck.querySelector('a[href="#dispatches"]'));
+    expect(text(g.$('#modalbox h3'))).toBe('cccccccc working');
+    await g.go('#traps');
+    const rows = g.$$('#traps tr.rowhead');
+    expect(rows.map(text).join(' ')).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
+    expect(rows.map(text).join(' ')).toContain('idle · not listening');
+    expect(rows.map(text).join(' ')).toContain('parked · waiting on review');
+  });
+
   it('shows Open window on live traps in the table, cards, deck, and modal only', async () => {
     const d = acceptanceFleet();
     d.focusSupported = true;
@@ -303,7 +335,7 @@ describe('glass page: modals', () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#prs', '#42');
     const box = g.$('#modalbox')!;
-    expect(text(box.querySelector('h3'))).toBe('#42 PR 42 checks 3/4');
+    expect(text(box.querySelector('h3'))).toBe(`#42 ${PR_TITLES[42]} checks 3/4`);
     expect(text(box)).toContain('#41 → #42 → #43 · 2 of 3 · floor main · blocked by #41');
     expect(box.querySelector('b')?.textContent).toBe('#42');
     expect(g.$$('#modalbox .cmd code').map(text)).toEqual(['eyJoIjoiYWJjIn0-a-long-opaque-cursor']);
@@ -366,7 +398,7 @@ describe('glass page: PRs', () => {
     g.serve(d);
     await g.poll();
     const after = g.$$('#prs .card');
-    expect(text(after[0]!.querySelector('b'))).toBe('#99 fresh');
+    expect(text(after[0]!.querySelector('.prname'))).toBe('#99 fresh');
     expect(after.slice(1)).toEqual(cards);
     expect(g.$$('#prs h2').slice(1)).toEqual(heads);
   });
@@ -383,6 +415,60 @@ describe('glass page: PRs', () => {
     // Other (non-PR) watches list below, cursor shortened.
     expect(g.$$('#prs h2').map(text)).toEqual(['other watches']);
     expect(text(g.$$('#prs table')[1]!)).toContain('ci-nightly');
+  });
+
+  it('titles: the PRs table has a title column after the number; a PR without one leaves it empty', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#prs' });
+    expect(g.$$('#prs table')[0]!.querySelectorAll('th:not([colspan])')[1]!.textContent).toBe('title');
+    const rows = g.$$('#prs tr.rowhead').map((tr) => [...tr.querySelectorAll('td')].map(text));
+    expect(rows.map((r) => r.slice(0, 2))).toEqual([
+      ['#41', PR_TITLES[41]],
+      ['#42', PR_TITLES[42]],
+      ['#43', ''],
+    ]);
+  });
+
+  it('titles: a PR card shows the number bold and the title after it on one line; no title shows the number alone', async () => {
+    for (const hash of ['#deck', '#prs']) {
+      const g = await page(everyAttentionFleet(), { hash, prefs: { view: 'cards' } });
+      const names = g.$$(`${hash} .card .prname`);
+      const byNumber = Object.fromEntries(names.map((n) => [text(n.querySelector('b')), n]));
+      expect(text(byNumber['#41'])).toBe(`#41 ${PR_TITLES[41]}`);
+      expect(byNumber['#41']!.getAttribute('title')).toBe(PR_TITLES[41]);
+      expect(byNumber['#41']!.querySelectorAll('b')).toHaveLength(1);
+      expect(text(byNumber['#43'])).toBe('#43');
+      expect(byNumber['#43']!.hasAttribute('title')).toBe(false);
+    }
+  });
+
+  it('titles: the stack line stays numbers only, and each number carries its title', async () => {
+    const titled = (els: Element[]) => els.map((e) => [text(e), e.getAttribute('title')]);
+    const want = [
+      ['#41', PR_TITLES[41]],
+      ['#42', PR_TITLES[42]],
+      ['#43', null],
+    ];
+    const cards = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
+    const head = cards.$$('#prs h2').find((h) => text(h).startsWith('#41'))!;
+    expect(text(head)).toBe('#41 → #42 → #43 · floor main');
+    expect(titled([...head.querySelectorAll('span')])).toEqual(want);
+    const deck = await page(everyAttentionFleet());
+    const line = deck.$$('#deck .deckline').find((l) => text(l).startsWith('#41 →'))!;
+    expect(titled([...line.querySelectorAll('b > span')])).toEqual(want);
+    const modal = await page(acceptanceFleet());
+    await openRow(modal, '#prs', '#42');
+    const nums = [...modal.$('#modalbox')!.querySelectorAll('[title]')].filter((e) => /^#\d+$/.test(text(e)));
+    expect(titled(nums)).toEqual(want.slice(0, 2));
+    expect(nums[1]!.tagName).toBe('B');
+  });
+
+  it('titles: the PR modal header shows the title; a PR without one shows the number alone', async () => {
+    const g = await page(acceptanceFleet());
+    await openRow(g, '#prs', '#41');
+    expect(text(g.$('#modalbox h3'))).toBe(`#41 ${PR_TITLES[41]} green`);
+    await escape(g);
+    await openRow(g, '#prs', '#43');
+    expect(text(g.$('#modalbox h3'))).toBe('#43 draft');
   });
 
   it('a dispatch row carries its PR link, evidence badge, and merge gate', async () => {
@@ -442,28 +528,28 @@ describe('glass page: On deck', () => {
     expect(landed.querySelector('.deckmore')).toBeNull();
   });
 
-  it('traps: eight at most, live first by newest heartbeat, then recently signed off, the rest in "+N more"', async () => {
+  it('traps: eight at most, live by sign-on then recently signed off, the rest in "+N more"', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
       const traps = g.$$('#deck section')[4]!;
       const items = [...traps.querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
       expect(items.map((l) => text(l.querySelector('b')))).toEqual([
-        '🪤 wt:t6',
         '🪤 wt:t1',
-        '🪤 wt:t4',
-        '🪤 wt:t5',
         '🪤 wt:t10',
         '🪤 wt:t3',
+        '🪤 wt:t4',
+        '🪤 wt:t5',
+        '🪤 wt:t6',
         '🪤 wt:t7',
         '🪤 wt:t2',
       ]);
       expect(items.map((l) => text(l.querySelector('.badge')))).toEqual([
         'claude',
         'claude',
-        'claude',
-        'claude',
-        'claude',
         'codex',
+        'claude',
+        'claude',
+        'claude',
         'signed off',
         'signed off',
       ]);

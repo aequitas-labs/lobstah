@@ -175,6 +175,19 @@ export function kindCell(x: Pick<TendAttention, 'kind' | 'verb'>) {
 export const prLink = (p: Pick<GlassPr, 'url' | 'number'>) =>
   html`<a href=${p.url} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`;
 
+/** A PR card's name: the number bold, then the title; the number alone when there is no title. One line, cut with an ellipsis. */
+export const prName = (p: Pick<GlassPr, 'number' | 'title'>) =>
+  html`<span class="prname" title=${p.title || undefined}><b>#${p.number}</b>${p.title && [' ', p.title]}</span>`;
+
+/** A stack's numbers, `#98 → #101`, each carrying its PR's title as a title attribute. `bold` marks one number. */
+export function stackNumbers(numbers: number[], titles: Map<number, string | undefined>, bold?: number) {
+  return numbers.flatMap((n, i) => {
+    const t = titles.get(n) || undefined;
+    const num = n === bold ? html`<b title=${t}>#${n}</b>` : html`<span title=${t}>#${n}</span>`;
+    return i ? [' → ', num] : [num];
+  });
+}
+
 export function prChecks(p: Pick<GlassPr, 'checks'>): string {
   const c = p.checks;
   return (
@@ -222,11 +235,38 @@ export function trapRow(t: GlassTrap): TrapRowView {
       hb: html`<span class="dim">—</span>`,
     };
   const stale = Date.now() - Date.parse(t.heartbeatAt!) > 1800000;
+  const listening = t.listening ?? (!!t.firstParkedAt && !stale);
   return {
     stale,
-    listen: t.firstParkedAt ? [html`<span class="dot ok"></span>`, 'listening'] : [html`<span class="dot warn"></span>`, 'never parked'],
+    listen: listening ? [html`<span class="dot ok"></span>`, 'listening'] : [html`<span class="dot warn"></span>`, 'not listening'],
     hb: html`<span class=${stale ? 'bad' : 'ok'}>${stale && 'stale '}${Age(t.heartbeatAt)} ago</span>`,
   };
+}
+
+/** One current activity line for deck and traps tab, from the shared snapshot. */
+export function trapNow(t: GlassTrap): Children {
+  if (!t.live) return html`<span class="dim">signed off</span>`;
+  const current = t.claimed && t.catches.find((c) => c.id === t.claimed && c.bucket === 'active');
+  if (!current)
+    return [
+      'idle · ',
+      (t.listening ?? (!!t.firstParkedAt && Date.now() - Date.parse(t.heartbeatAt ?? '') <= 1800000)) ? 'listening' : 'not listening',
+    ];
+  if (current.waiting || current.verb === 'paused')
+    return ['parked · ', current.waiting ? `waiting on ${current.waiting.on}` : current.note || 'waiting'];
+  const openDispatch = (event: MouseEvent) => {
+    event.preventDefault();
+    stop(event);
+    showModal('dispatch', `${current.lane}:${current.id}`);
+  };
+  const title = current.brief.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '(no title)';
+  return [
+    'working · ',
+    html`<a href="#dispatches" onClick=${openDispatch}>${current.id.slice(0, 8)}</a>`,
+    ' · ',
+    title,
+    current.activity && [' · ', current.activity.summary, ' ', Age(current.activity.at), ' ago'],
+  ];
 }
 
 /** A trap's mail count, or null when it has none. */

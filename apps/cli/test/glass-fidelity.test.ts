@@ -29,6 +29,10 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  *   left a closed modal's markup behind the hidden overlay;
  * - reports are not in the compared snapshots: the old page had no reports
  *   (glass-page.test.ts covers the reports block and the report modals).
+ * The glass also grew PR titles on purpose (glass-page.test.ts tests them):
+ * a card's `<span class="prname"><b>#n</b> title</span>` folds back to the
+ * old `<b>#n title</b>`, and a stack line's per-number `<span title>#n</span>`
+ * folds back to plain text (foldPrTitles).
  */
 const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
 // The exact bytes served, whatever line endings the checkout gave the fixture.
@@ -76,6 +80,27 @@ function canon(node: Node, skeletonOnly = false): string {
   return out;
 }
 
+const STACK_NUMBER = /^#\d+$/;
+
+/** A copy of el with the PR-title markup in its pre-title form (see the header). */
+function foldPrTitles(el: Element): Node {
+  const copy = el.cloneNode(true) as Element;
+  const doc = el.ownerDocument;
+  for (const name of copy.querySelectorAll('.prname')) {
+    const b = doc.createElement('b');
+    b.textContent = name.textContent;
+    name.replaceWith(b);
+  }
+  // The old card wrote `#n ${title || ''}`: a PR without a title left a trailing space.
+  for (const b of copy.querySelectorAll('.card .top > b')) b.textContent = (b.textContent ?? '').trimEnd();
+  for (const n of copy.querySelectorAll('span, b')) {
+    if (!STACK_NUMBER.test(n.textContent ?? '') || [...n.attributes].some((a) => a.name !== 'title')) continue;
+    if (n.tagName === 'B') n.removeAttribute('title');
+    else n.replaceWith(doc.createTextNode(n.textContent ?? ''));
+  }
+  return copy as unknown as Node;
+}
+
 const activeTab = (g: GlassDom) => (g.$('.tabpage.on')?.id ?? 'page-deck').slice(5);
 
 /** The static skeleton: every region, tab page, and select emptied, then canonical. */
@@ -94,7 +119,7 @@ function capture(g: GlassDom): Record<string, string> {
   const out: Record<string, string> = {};
   for (const id of REGIONS) {
     const el = g.$('#' + id);
-    out[id] = el ? canon(el as unknown as Node) : '<missing>';
+    out[id] = el ? canon(foldPrTitles(el)) : '<missing>';
   }
   // A closed modal is hidden: the old page left its last markup behind the closed overlay, the new one unmounts it.
   if (g.$('#overlay')!.className !== 'open') out.modalbox = '(closed)';
@@ -103,7 +128,7 @@ function capture(g: GlassDom): Record<string, string> {
   // The glass intentionally grew a trap-window action in these two views.
   // Their new affordance has its own DOM tests; keep comparing all other
   // regions against the frozen pre-action page.
-  out.page = tab === 'deck' || tab === 'traps' ? '(trap window action changed)' : canon(g.$('#' + tab) as unknown as Node);
+  out.page = tab === 'deck' || tab === 'traps' ? '(trap window action changed)' : canon(foldPrTitles(g.$('#' + tab)!));
   if (text(g.$('#modalbox h3')).startsWith('🪤')) out.modalbox = '(trap window action changed)';
   for (const id of CONTROLS) {
     const el = g.$('#' + id) as HTMLElement | null;
@@ -243,6 +268,8 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
       const snap = (label: string) => {
         const hidden = [...g.$$('.tabpage:not(.on)'), ...(g.$('#overlay')!.className === 'open' ? [] : [g.$('#modalbox')!])];
         g.$$('body *')
+          // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
+          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);
