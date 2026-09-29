@@ -303,16 +303,18 @@ tr.rowhead:hover {
   align-items: center;
   min-height: 22px;
 }
+/* The title's identity (#99999, an 8-character id) never truncates: the badge gives way first. */
 .card .top > b {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: min(9ch, 100%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* The badge keeps its text up to about 24 characters, then truncates; it never leaves the card. */
 .card .top .badge {
-  flex: 0 0 auto;
+  flex: 0 4 auto;
+  min-width: 0;
   max-width: min(26ch, 100%);
   overflow: hidden;
   text-overflow: ellipsis;

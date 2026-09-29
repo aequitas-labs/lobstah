@@ -226,7 +226,7 @@ describe('glass: cards keep their text inside', () => {
     expect(style(card).getPropertyValue('overflow-wrap')).toBe('anywhere');
     expect(style(badge)).toMatchObject({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
     expect(style(badge).getPropertyValue('max-width').replace(/\s/g, '')).toBe('min(26ch,100%)');
-    expect(style(badge).getPropertyValue('flex')).toMatch(/^0 0 auto$/);
+    expect(style(badge).getPropertyValue('flex')).toMatch(/^0 4 auto$/);
     expect(style(meta)).toMatchObject({ overflow: 'hidden' });
     // happy-dom does not compute line clamping: read the rule itself.
     const css = fs.readFileSync(new URL('../glass/glass.css', import.meta.url), 'utf8');
@@ -236,9 +236,31 @@ describe('glass: cards keep their text inside', () => {
       expect(rule, sel).toMatch(/overflow: hidden;/);
     }
     expect(style(card.querySelector('.top > b')!)).toMatchObject({ textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+    // The title keeps room for its identity (#99999, an 8-character id); the badge gives way first.
+    expect(style(card.querySelector('.top > b')!).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(9ch,100%)');
     // A short badge carries no title.
     const short = g.$$('#deck .card .top .badge').find((b) => text(b) === 'working');
     expect(short?.getAttribute('title') ?? null).toBeNull();
+  });
+});
+
+describe('glass: a PR card with a long badge', () => {
+  it('keeps the whole PR number: the title holds room for #99999, the badge truncates', async () => {
+    const d = everyAttentionFleet();
+    const p = d.prs.find((x) => x.state === 'OPEN')!;
+    p.number = 1826;
+    p.badge = { ...p.badge, text: 'repairing: checks (attempt 1 of 2)' };
+    const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
+    const card = g.$$('#prs .card').find((c) => text(c.querySelector('b')).startsWith('#1826'))!;
+    const title = card.querySelector('.top > b')!;
+    const badge = card.querySelector('.top .badge')!;
+    expect(badge.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
+    const style = (el: Element) => g.window.getComputedStyle(el as never);
+    expect(style(title).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(9ch,100%)');
+    // '#99999' is six characters: 9ch holds it and the ellipsis after it.
+    expect('#99999'.length).toBeLessThanOrEqual(9 - 2);
+    expect(style(badge).getPropertyValue('flex-shrink')).toBe('4');
+    expect(style(badge).getPropertyValue('min-width')).toMatch(/^0(px)?$/);
   });
 });
 
