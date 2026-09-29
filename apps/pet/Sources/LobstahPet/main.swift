@@ -6,60 +6,14 @@
 // already keeps: exact iTerm pane -> Terminal tab by tty -> VS Code window
 // by cwd -> app by bundle id -> resume-if-stale -> the spyglass. Clicking a
 // draft-PR pet opens the PR. The pet only ever reads lobstah state
-// (`man tend --json` + helm files); it steers nothing.
+// (`attention --json`, or `man tend --json` from an older lobstah, plus the
+// helm files); it steers nothing. Its one write is ~/.lobstah/pet/state.json,
+// the last read's result, for `lobstah doctor`.
 
 import AppKit
+import LobstahPetCore
 
 // MARK: - lobstah state
-
-struct AckInfo: Decodable, Equatable {
-  let at: String
-  let by: String
-}
-
-struct AttentionItem: Decodable, Equatable {
-  let id: String
-  let verb: String
-  let note: String?
-  /** The stable item key `lobstah attention ack` takes — absent from an older lobstah. */
-  var key: String? = nil
-  /** Acknowledged for display: the pet skips it (the helm's wakes never do). */
-  var acked: AckInfo? = nil
-  /** question | landed | watch | pr:draft | pr:review | pr:checks | pr:conflict | pr:ready — absent from an older lobstah. */
-  var kind: String? = nil
-  /** pr:* kinds: the PR this pet walks for. */
-  var prUrl: String? = nil
-
-  /** The identity stays fixed when labels, order, or acknowledgements change. */
-  var identity: String { "\(kind ?? "question"):\(key ?? id)" }
-
-  /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
-  var prLink: URL? { (kind?.hasPrefix("pr:") ?? false) ? prUrl.flatMap(URL.init(string:)) : nil }
-
-  /** The short kind label shown before the note; nothing for a question. */
-  var kindLabel: String? {
-    switch kind {
-    case "pr:draft": return "draft"
-    case "pr:review": return "review"
-    case "pr:checks": return "checks"
-    case "pr:conflict": return "conflicts"
-    case "pr:ready": return "ready"
-    case "landed": return "landed"
-    case "watch": return "watch"
-    default: return nil
-    }
-  }
-
-  /** Bubble text: the label, then the note. */
-  var bubbleText: String {
-    let body = note ?? verb
-    return kindLabel.map { "\($0) · \(body)" } ?? body
-  }
-}
-
-struct TendReport: Decodable {
-  let attention: [AttentionItem]
-}
 
 struct WindowRef: Decodable {
   let bundleId: String?
@@ -83,38 +37,6 @@ let glassURL: URL = {
   return URL(string: "http://127.0.0.1:\(port)")!
 }()
 
-func lobstahHome() -> URL {
-  if let home = ProcessInfo.processInfo.environment["LOBSTAH_HOME"] {
-    return URL(fileURLWithPath: home)
-  }
-  return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".lobstah")
-}
-
-func runCommand(_ launch: String, _ args: [String], timeout: TimeInterval = 10) -> String? {
-  let p = Process()
-  p.executableURL = URL(fileURLWithPath: launch)
-  p.arguments = args
-  let out = Pipe()
-  p.standardOutput = out
-  p.standardError = Pipe()
-  do { try p.run() } catch { return nil }
-  let deadline = Date().addingTimeInterval(timeout)
-  while p.isRunning && Date() < deadline { usleep(50_000) }
-  if p.isRunning { p.terminate(); return nil }
-  let data = out.fileHandleForReading.readDataToEndOfFile()
-  return String(data: data, encoding: .utf8)
-}
-
-func tendAttention() -> [AttentionItem]? {
-  guard let json = runCommand("/usr/bin/env", ["lobstah", "man", "tend", "--json"]),
-        let data = json.data(using: .utf8),
-        let report = try? JSONDecoder().decode(TendReport.self, from: data)
-  else { return nil }
-  // Acks are display-only: an acked item stays in tend's attention (the helm
-  // still needs it) but no longer walks.
-  return report.attention.filter { $0.acked == nil }
-}
-
 /**
  * Acknowledge through lobstah's own write path — the pet never writes
  * ~/.lobstah itself. Off the main thread; a failure is logged, never shown
@@ -123,8 +45,8 @@ func tendAttention() -> [AttentionItem]? {
 func ackItem(_ item: AttentionItem) {
   guard let key = item.key else { return }
   DispatchQueue.global().async {
-    if runCommand("/usr/bin/env", ["lobstah", "attention", "ack", key, "--by", "pet"]) == nil {
-      NSLog("lobstah pet: ack failed for %@", key)
+    if case let .failure(why) = ackOutcome(defaultRunner(["attention", "ack", key, "--by", "pet"])) {
+      petLog("ack failed for \(key): `lobstah attention ack` \(why)")
     }
   }
 }
@@ -463,6 +385,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var preview = ProcessInfo.processInfo.environment["LOBSTAH_PET_PREVIEW"] != nil
   let diagnostics = ProcessInfo.processInfo.environment["LOBSTAH_PET_DIAGNOSTICS"] != nil
   var polling = false
+  /** Logs repeated read failures and writes the state file `lobstah doctor` reads. */
+  let monitor = ReadMonitor()
 
   var activity: NSObjectProtocol?
 
@@ -517,7 +441,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     guard !polling else { return }
     polling = true
     DispatchQueue.global().async {
-      let snapshot = tendAttention()
+      // One read at a time (the polling flag), so the monitor needs no lock.
+      let read = readAttention()
+      self.monitor.record(read)
+      let snapshot = read.items
       DispatchQueue.main.async {
         self.polling = false
         // A failed read is not an empty attention queue. Keep every current

@@ -168,8 +168,9 @@ work (humans and agents):
                                   never falls back headless; session:<id>
                                   resolves to its trap)
   ls [--all]                      queue, active, recent done      (alias: buoys)
-  attention [ack <item-key> [--by <label>] | unack <item-key>]
-                                  standing attention with ack state; an ack
+  attention [--json | ack <item-key> [--by <label>] | unack <item-key>]
+                                  standing attention with ack state (--json:
+                                  { attention } as in man tend --json); an ack
                                   hides an item from the pet and glass lobs
                                   until its state changes (display-only —
                                   never from the helm's wakes)
@@ -1212,6 +1213,12 @@ async function mainCli(): Promise<void> {
         const ack = { key, kind: item.kind, stateHash: item.stateHash, at: new Date().toISOString(), by: opt('--by') ?? 'terminal' };
         writeAck(ack);
         console.log(toonKV({ key, kind: item.kind, acked: true, by: ack.by, stateHash: ack.stateHash }));
+        break;
+      }
+      if (has('--json')) {
+        // The pet's read: the same items and fields as `man tend --json`
+        // puts under `attention`, without the rest of the report.
+        console.log(JSON.stringify({ attention: report.attention }));
         break;
       }
       console.log(

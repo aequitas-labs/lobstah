@@ -60,7 +60,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { subverbs: ['sync'], flags: {} },
-  attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' } }, positionals: '[<item-key>]' },
+  attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
   report: {
@@ -166,7 +166,8 @@ current state seen (--by names who), \`unack\` clears it. Display-only: an ack
 hides the item from the desktop pet and the glass lobs until its state
 changes — never from man tend --json, man wait, the park, or reminders.
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
-watch:<key>. An unknown key exits 2.`,
+watch:<key>. An unknown key exits 2. --json prints { "attention": [...] },
+the same items and fields as man tend --json (the desktop pet reads it).`,
   cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
 without --apply (default 14 days): it measures each target (one du per
 worktree). --apply measures nothing; it deletes and prints the count and the
@@ -203,8 +204,9 @@ waits for the new heartbeat (refused while dispatches are active, unless
 --force); status shows installed, running, pid, version, heartbeat age.`,
   pick: `Tracker loops: poll Linear/GitHub, dispatch assigned work, report back,
 reconcile, merge. install, uninstall, and restart manage its user service.`,
-  doctor: `Check binaries, config, repos, harnesses, and the daemon heartbeat; exit 1
-on failures.`,
+  doctor: `Check binaries, config, repos, harnesses, the daemon heartbeat, and the
+desktop pet (installed, running, whether its last read worked); exit 1 on
+failures.`,
   pet: `The desktop pet (macOS): attention questions crawl across the screen as
 the lobster, each with its question in a speech bubble; clicking one opens
 the helm. install copies the built binary under ~/.lobstah/bin and writes a
