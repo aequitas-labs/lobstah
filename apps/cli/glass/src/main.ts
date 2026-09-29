@@ -19,6 +19,7 @@ initState({
   stale: false,
   lobHidden: loadLobHidden(),
   spriteOk: null,
+  focusResults: {},
   preview: new URLSearchParams(location.search).has('lob'),
 });
 

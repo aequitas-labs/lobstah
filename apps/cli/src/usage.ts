@@ -45,6 +45,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>]' },
+  focus: { flags: {}, positionals: '<trap>' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--harness': { value: HARNESS }, '--model': { value: '<m>' }, '--for': { value: 'wt:<trap>' }, '--no-wake': {} }, positionals: '<uuid>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
@@ -97,6 +98,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--wait': {},
       '--timeout': { value: '<secs>' },
       '--repo': { value: '<key>' },
+      '--link': { value: '<url>' },
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
@@ -145,6 +147,10 @@ export const PROSE: Record<string, string> = {
 Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. Alias: buoy.`,
+  focus: `Bring a live trap's recorded session or window forward on this machine.
+Accepts its id with or without wt:. Reports the focus step, or why it could
+not focus. A session link can open on any supported platform; native window
+focus requires macOS.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
   send: `Steer a live chain, queue for pending work, or wake a finished chain
@@ -188,6 +194,7 @@ linked worktree it signs on there. From a primary checkout (or with --repo
 from anywhere) it creates worktrees/soak-<trap> (branch lobstah/soak-<trap>,
 from trunk, with setup): cd there. A session's trap is re-used. --one stows
 after one catch. --wait listens in the foreground; exit 3 = run it again.
+--link stores this session's validated deep link for exact reopening.
 \`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
   stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
 requeues, unread messages bounce to the helm. Removes the worktree soak

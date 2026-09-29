@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as http from 'node:http';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   activeIds,
@@ -15,6 +16,8 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  trapLastSeen,
+  validSessionLink,
   listWatches,
   watchErrorCell,
   loadConfig,
@@ -40,14 +43,15 @@ import { GLASS_PAGE } from './glass-page.generated.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
+import { focusTrap } from './focus.js';
 
 /**
- * The spyglass: a read-only localhost dashboard over ~/.lobstah — the same
+ * The spyglass: a localhost dashboard over ~/.lobstah — the same
  * observational stance as `man tend`, with room for detail a terminal
  * can't afford. It binds 127.0.0.1 only; /data registers no watch, never
  * advances a cursor, and never consumes attention.
- * Look freely, steer only from the helm — links out are copyable commands,
- * never exec endpoints (localhost HTTP is reachable by any webpage). The
+ * Look freely, steer only from the helm. The sole desktop action is a
+ * same-origin, token-gated request to focus a live trap. The
  * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
  * own, kept in its localStorage — the server has nothing to write.
  */
@@ -288,15 +292,22 @@ export function buildGlassSnapshot(): GlassSnapshot {
   for (const n of allNotices) {
     if (n.kind.startsWith('trap-') && n.refId) seenIds.add(n.refId);
   }
-  const attach = (t: { trapId: string; repo?: string; worktree?: string; harness?: string; sessionId?: string }, liveNow: boolean): GlassTrap => ({
-    ...t,
-    live: liveNow,
-    messages: trapMessages(t.trapId),
-    notices: allNotices.filter((n) => n.refId === t.trapId).reverse(),
-    catches: dispatches.filter(
-      (x) => x.claimedBy === `wt:${t.trapId}` || x.evidence?.deliveredTo === `wt:${t.trapId}` || x.for === `wt:${t.trapId}`,
-    ),
-  });
+  const attach = (t: GlassTrap, liveNow: boolean): GlassTrap => {
+    const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
+    const signed = notices.find((n) => n.kind === 'trap-signed-on');
+    return {
+      ...t,
+      link: validSessionLink(t.link) ? t.link : undefined,
+      sessionId: t.sessionId ?? signed?.by,
+      harness: t.harness ?? (/\((claude|codex),/.exec(signed?.text ?? '')?.[1]),
+      live: liveNow,
+      messages: trapMessages(t.trapId),
+      notices,
+      catches: dispatches.filter(
+        (x) => x.claimedBy === `wt:${t.trapId}` || x.evidence?.deliveredTo === `wt:${t.trapId}` || x.for === `wt:${t.trapId}`,
+      ),
+    };
+  };
   return {
     now: new Date().toISOString(),
     version: lobstahVersion(),
@@ -305,8 +316,8 @@ export function buildGlassSnapshot(): GlassSnapshot {
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps },
     helms,
     traps: [
-      ...live.map((t) => attach(t, true)),
-      ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id }, false)),
+      ...live.map((t) => attach(t as GlassTrap, Date.now() - trapLastSeen(t) <= loadConfig().soak.ttlSecs * 1000)),
+      ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
     ],
     notices: allNotices.slice().reverse(),
     watches,
@@ -327,6 +338,7 @@ const PAGE = GLASS_PAGE;
 
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(port: number): http.Server {
+  const focusToken = randomBytes(32).toString('hex');
   const icon = assetPath('favicon.png') ?? assetPath('lob-star.png');
   const lob = assetPath('lob.png');
   const sprite = assetPath('lob-sprite.png');
@@ -336,6 +348,35 @@ export function serveGlass(port: number): http.Server {
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
   const server = http.createServer((req, res) => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
+    if (req.url?.startsWith('/api/focus/')) {
+      res.setHeader('cache-control', 'no-store');
+      const reply = (status: number, result: unknown) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      };
+      if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required.' });
+      const address = server.address();
+      const ownHost = `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
+      const supplied = req.headers['x-lobstah-focus-token'];
+      const token = typeof supplied === 'string' ? supplied : '';
+      const validToken =
+        token.length === focusToken.length && timingSafeEqual(Buffer.from(token), Buffer.from(focusToken));
+      if (
+        req.headers.host !== ownHost ||
+        req.headers.origin !== `http://${ownHost}` ||
+        !validToken ||
+        (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
+        req.headers['transfer-encoding'] !== undefined
+      ) {
+        return reply(403, { focused: false, reason: 'Focus request was not authorized.' });
+      }
+      const trapId = req.url.slice('/api/focus/'.length);
+      if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id.' });
+      void focusTrap(trapId)
+        .then((result) => reply(result.focused ? 200 : 409, result))
+        .catch(() => reply(500, { focused: false, reason: 'Window focus failed.' }));
+      return;
+    }
     if (req.url === '/api/version' && req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ service: 'lobstah-glass', version: lobstahVersion(), pid: process.pid }));
@@ -359,8 +400,8 @@ export function serveGlass(port: number): http.Server {
         res.end(fallbackIcon);
       }
     } else if (req.url === '/data') {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(buildGlassSnapshot()));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ ...buildGlassSnapshot(), focusToken, focusSupported: process.platform === 'darwin' }));
     } else {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(PAGE);

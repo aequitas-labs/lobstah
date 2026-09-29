@@ -2,7 +2,8 @@ import type { Attachment, GlassDispatch, GlassPr, GlassTrap, TendAttention } fro
 import { useState } from 'preact/hooks';
 import { prBadgeClass, watchState } from '../../../src/glass-diff.js';
 import type { ModalType } from '../../../src/glass-diff.js';
-import { copyText, showModal } from '../actions.js';
+import { copyText, openTrapWindow, showModal } from '../actions.js';
+import { getState } from '../store.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 
@@ -47,6 +48,26 @@ export const WaitingLine = (x: Pick<GlassDispatch, 'waiting' | 'verb'>) => {
 /** A click handler that opens a modal (and never bubbles to a row that opens another). */
 export const opener = (type: ModalType, key: string) => () => showModal(type, key);
 export const stop = (e: Event) => e.stopPropagation();
+
+const resumeCmd = (t: GlassTrap): string | undefined =>
+  t.sessionId ? (t.harness === 'codex' ? 'codex resume ' : 'claude --resume ') + t.sessionId : undefined;
+
+/** The same live-trap action and honest result wherever a trap is shown. */
+export function windowAction(t: GlassTrap): Children {
+  if (!t.live) {
+    const command = resumeCmd(t);
+    return command ? html`<span class="dim">Resume: ${cmdRow(command)}</span>` : html`<span class="dim">Resume command unavailable</span>`;
+  }
+  const state = getState();
+  if (!state.snapshot?.focusSupported && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;
+  const clicked = (e: Event) => {
+    stop(e);
+    void openTrapWindow(t.trapId);
+  };
+  return html`<span><button onClick=${clicked}>Open window</button>${t.link && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
+    state.focusResults[t.trapId] && [' ', html`<span class="dim">${state.focusResults[t.trapId]}</span>`]
+  }</span>`;
+}
 
 export function Table(headers: readonly string[], rows: Children[], empty: string) {
   if (!rows.length) return html`<div class="empty">${empty}</div>`;

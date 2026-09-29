@@ -22,6 +22,22 @@ export function showModal(type: ModalType, key: string): void {
 
 export const closeModal = (): void => setState({ modal: null });
 
+/** Ask the local server to focus one live trap; it accepts no path, URL, or command. */
+export async function openTrapWindow(trapId: string): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) return;
+  try {
+    const response = await fetch(`/api/focus/${encodeURIComponent(trapId)}`, {
+      method: 'POST',
+      headers: { 'x-lobstah-focus-token': token },
+    });
+    const result = (await response.json()) as { message?: string; reason?: string };
+    setState({ focusResults: { ...getState().focusResults, [trapId]: result.message ?? result.reason ?? 'Window focus failed.' } });
+  } catch {
+    setState({ focusResults: { ...getState().focusResults, [trapId]: 'Window focus failed.' } });
+  }
+}
+
 export function setPrefs(patch: Partial<GlassPrefs>): void {
   const prefs = { ...getState().prefs, ...patch };
   savePrefs(prefs);

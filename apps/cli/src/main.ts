@@ -101,6 +101,7 @@ import {
   codexDesktopThread,
   CODEX_DESKTOP_THREAD,
   worktreeProgress,
+  validSessionLink,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice, RepoConfig, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
@@ -118,6 +119,7 @@ import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
+import { focusTrap } from './focus.js';
 import {
   glassLines,
   glassPort,
@@ -170,6 +172,7 @@ work (humans and agents):
                                   until its state changes (display-only —
                                   never from the helm's wakes)
   status [<uuid>]                 reconciled state                (alias: buoy)
+  focus <trap>                    bring a live trap's recorded window forward
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
   send <uuid>|wt:<trap> [--attach <file> ...] [--] <message>
@@ -245,7 +248,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   glass [--port <n>] [--detach]   the spyglass: tend as a live localhost web
                                   page — attention, dispatches, traps with
                                   their lifecycle and mail, notices, merge
-                                  view. Read-only; consumes no cursor.
+                                  view. Open window focuses a live trap here.
                                   stop | status | install | uninstall |
                                   restart manage it.
                                   Port: --port, else $LOBSTAH_GLASS_PORT,
@@ -296,7 +299,7 @@ workers (dispatched agents; injected into every brief):
                                   chain; --no-watch opts out.
 
 soaking (interactive sessions volunteering as workers):
-  soak [--session <id>] [--repo <key>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
+  soak [--session <id>] [--repo <key>] [--link <url>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
                                   volunteer this session as a worker.
                                   Identity is the worktree: sign-on anchors a
                                   trap id (.lobstah-trap) and prints its
@@ -695,6 +698,15 @@ async function mainCli(): Promise<void> {
   };
 
   switch (cmd) {
+    case 'focus': {
+      const address = pos[0];
+      if (!address || pos.length !== 1) throw new UsageError(usageFor('focus')!);
+      const trapId = address.startsWith('wt:') ? address.slice(3) : address;
+      const result = await focusTrap(trapId);
+      console.log(toonKV(result.focused ? { trap: `wt:${trapId}`, focused: result.step, result: result.message } : { trap: `wt:${trapId}`, focused: false, reason: result.reason }));
+      if (!result.focused) process.exitCode = 1;
+      break;
+    }
     case 'dispatch': {
       const repo = opt('--repo');
       const briefFile = opt('--brief') ?? opt('--bait');
@@ -1679,6 +1691,9 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'soak': {
+      if (opt('--link') !== undefined && !validSessionLink(opt('--link'))) {
+        throw new UsageError('invalid --link: use a supported claude://, vscode://, or codex:// session URL');
+      }
       const cfg = loadConfig();
       const site = inspectSoakSite(process.cwd(), cfg.repos);
       const repoFlag = opt('--repo');
@@ -1794,6 +1809,7 @@ async function mainCli(): Promise<void> {
           sessionId,
           one: has('--one') || undefined,
           window: captureWindow(),
+          link: opt('--link'),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
       } catch (err) {
