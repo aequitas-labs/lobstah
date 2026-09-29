@@ -161,7 +161,12 @@ describe('releaseOnMerge', () => {
     pr(1, 'MERGED', ['d1'], 'lobstah/d1');
     const log = pass();
     expect(fs.existsSync(wtOf('d1'))).toBe(false);
-    expect(git(repo, 'worktree', 'list')).not.toContain('d1');
+    // Compare worktree paths, not the list text: a short commit hash can contain "d1".
+    const paths = git(repo, 'worktree', 'list', '--porcelain')
+      .split('\n')
+      .filter((l) => l.startsWith('worktree '))
+      .map((l) => path.basename(l.slice('worktree '.length)));
+    expect(paths).not.toContain('d1');
     expect(git(repo, 'branch', '--list', 'lobstah/d1')).toContain('lobstah/d1');
     expect(git(origin, 'branch', '--list', 'lobstah/d1')).toContain('lobstah/d1');
     expect(fs.existsSync(path.join(laneDirs('work').done, 'd1', 'descriptor.json'))).toBe(true);

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  acknowledge,
   appendEvent,
   appendStatus,
   complete,
@@ -24,6 +25,7 @@ import {
   releaseWorktreeLock,
   acquireWorktreeLock,
   resolveDispatch,
+  unhandled,
   worktreeProgress,
 } from '@lobstah/core';
 import type { ChainPr, Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
@@ -114,6 +116,8 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   const brief = fs.readFileSync(briefFile, 'utf8');
 
   const attempts = Number(process.env.LOBSTAH_ATTEMPTS ?? '1');
+  // The daemon resumes a parked dispatch when its wait ends: why it woke.
+  const wake = process.env.LOBSTAH_WAKE;
   const runnerInfo: RunnerInfo = {
     pid: process.pid,
     startedAt: new Date().toISOString(),
@@ -156,7 +160,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   // dropped for the adapter's default rather than failing the dispatch.
   const firstModel = modelForHarness(plan.harness, resolved.model);
   const firstNote = [
-    attempts > 1 ? `attempt ${attempts}` : undefined,
+    wake ? `woke from pause: ${wake}` : attempts > 1 ? `attempt ${attempts}` : undefined,
     plan.note,
     firstModel.dropped ? droppedModelNote(plan.harness, firstModel.dropped) : undefined,
     worktreeNote,
@@ -220,7 +224,18 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     existingPrUrl: existingPr?.url,
   });
 
-  const envNudge = process.env.LOBSTAH_NUDGE;
+  // A wake hands the waiting worker what ended its wait: the reason, and the
+  // operator messages that arrived while it was parked.
+  const wakeNote = (): string | undefined => {
+    if (!wake) return undefined;
+    const msgs = unhandled(id, lane);
+    for (const m of msgs) acknowledge(id, lane, m.file);
+    return [
+      `You were paused and this dispatch was parked. The wait ended: ${wake}. Continue the work, and report as before.`,
+      ...msgs.map((m) => m.text),
+    ].join('\n\n');
+  };
+  const envNudge = [process.env.LOBSTAH_NUDGE, wakeNote()].filter(Boolean).join('\n\n') || undefined;
   // A swap's handoff (arriving as the nudge) already carries the progress note.
   const planNudge = plan.cold && !envNudge ? coldNote(plan.cold, cwd, repo.trunk) : undefined;
   const promptWith = (nudge: string | undefined) =>
@@ -329,8 +344,9 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
       backgroundWaitMs: cfg.limits.backgroundWaitSecs * 1000,
       exitGraceMs: (cfg.limits.exitGraceSecs ?? 30) * 1000,
       onFinal: () => wallTimer?.stop(),
+      onPark: () => wallTimer?.stop(),
     });
-    const { cancelled, activity } = driven;
+    const { cancelled, activity, parked } = driven;
     if (driven.stopped) {
       // The harness was killed; now its process group, so nothing it
       // started outlives it.
@@ -345,13 +361,15 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
       });
     }
     // After a final report, a harness that never settles cannot hold the run.
-    const result = driven.final ? await within(run.done, DONE_WAIT_MS, {}) : await run.done;
-    return { cancelled, activity, result };
+    const result = driven.final || parked ? await within(run.done, DONE_WAIT_MS, {}) : await run.done;
+    return { cancelled, activity, parked: parked === true, result };
   };
 
   // Every exit path releases the worktree lock and completes the active
   // record, including a run whose harness had to be killed.
   let finalReport = false;
+  // Parked: the dispatch stays active with its worktree lock, for the wake.
+  let parkedExit = false;
   try {
     let outcome = await runOnce(plan.harness, promptWith(envNudge ?? planNudge), plan.resume?.sessionId);
 
@@ -396,6 +414,19 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     wallTimer?.stop();
     const { cancelled, result } = outcome;
 
+    // The worker paused: the session has ended, and the dispatch parks. No
+    // verb is added, the worktree stays locked to it, and it stays active.
+    // The daemon resumes the session when a message, the --until time, or
+    // the end of its PR ends the wait.
+    if (outcome.parked && !cancelled && !wallClockHit && readStatusLog(id, lane).at(-1)?.verb === 'paused') {
+      parkedExit = true;
+      await remote.stop();
+      const gitEvidence = await deps.collectEvidence(repo, cwd).catch(() => ({}));
+      mergeEvidence(id, lane, { ...gitEvidence, sessionId: result.sessionId ?? readEvidence(id, lane).sessionId });
+      console.log('[runner] worker paused: session ended, dispatch parked');
+      return;
+    }
+
     // The worker's own `done` or `failed` is final: its work is not saved as
     // an interrupted run, and nothing after it adds a verb.
     const terminal = isFinished(id, lane);
@@ -423,12 +454,14 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     settle(id, lane, { cancelled, wallClockHit, error: result.error, budgetNote: savedNote });
   } finally {
     wallTimer?.stop();
-    // After a final report, nothing the harness started outlives the run.
-    if (finalReport) {
+    // After a final report or a park, nothing the harness started outlives the run.
+    if (finalReport || parkedExit) {
       const reaped = await deps.reap().catch(() => 0);
       if (reaped > 0) console.log(`[runner] ${reaped} leftover process(es) stopped`);
     }
-    releaseWorktreeLock(cwd, id);
-    complete(id, lane);
+    if (!parkedExit) {
+      releaseWorktreeLock(cwd, id);
+      complete(id, lane);
+    }
   }
 }

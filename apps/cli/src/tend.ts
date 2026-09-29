@@ -43,6 +43,7 @@ import {
   holdReason,
   readHold,
   slotUsage,
+  parkedDispatches,
   isFinished,
 } from '@lobstah/core';
 import type {
@@ -264,6 +265,8 @@ export function humanPrAttention(
     return { show: true, reason: pr.repair!.reason };
   if (!watchAvailable) return { show: true, reason: 'no active PR watch' };
   if (!liveRepairer(now)) return { show: true, reason: 'no repairer is running' };
+  // A check that had its round at this head and still fails needs a person.
+  if (matchingRepair && pr.repair!.status === 'waiting' && pr.repair!.heldBy === 'repaired') return { show: true, reason: pr.repair!.reason };
   // A waiting repair needs no person: it is shown in the repairs-waiting table instead.
   if (matchingRepair && pr.repair!.status === 'waiting') return { show: false, reason: `repair waits: ${pr.repair!.reason ?? ''}` };
   if (!matchingRepair || pr.repair?.status !== 'repairing' || !pr.repair.dispatchId)
@@ -496,6 +499,8 @@ export interface TendReport {
     headlessActive: number;
     trapActive: number;
     headlessLimit: number;
+    /** Dispatches parked on `paused`: they hold no slot. */
+    parked?: number;
     choresActive: number;
     done24h: number;
     failed24h: number;
@@ -511,6 +516,8 @@ export interface TendReport {
   helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number }>;
   merge?: MergeView;
   stacks: GlassStack[];
+  /** Dispatches parked on `paused`, oldest first: what each waits on, and for how long. They hold no slot. */
+  parked?: Array<{ id: string; lane: Lane; trap: boolean; since: string; parkedSecs: number; note?: string; waiting?: WaitingView }>;
   /** PR repairs that are due but wait: who holds each and why. Not attention. */
   repairsWaiting: TendRepairWaiting[];
   /** A free-space hold: the daemon leaves unaddressed queued work in the queue. */
@@ -633,6 +640,8 @@ export function buildTendReport(now = Date.now()): TendReport {
   // A finished dispatch whose runner is still exiting is done, not in flight.
   const inFlight = active.filter((id) => !isFinished(id, 'work'));
   const slots = slotUsage('work');
+  // Parked on `paused`: listed with what they wait on, and they hold no slot.
+  const parked = parkedDispatches(now);
   const choresActive = activeIds('chore').length + pendingIds('chore').length;
 
   let done24h = 0;
@@ -887,6 +896,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       headlessActive: slots.headless,
       trapActive: slots.traps,
       headlessLimit: cfg.limits.maxConcurrent,
+      parked: parked.length,
       choresActive,
       done24h,
       failed24h,
@@ -901,6 +911,15 @@ export function buildTendReport(now = Date.now()): TendReport {
     helms,
     merge,
     stacks,
+    parked: parked.map((p) => ({
+      id: p.id,
+      lane: p.lane,
+      trap: p.trap,
+      since: p.since,
+      parkedSecs: p.parkedSecs,
+      ...(p.note ? { note: p.note } : {}),
+      ...(p.waiting ? { waiting: p.waiting } : {}),
+    })),
     repairsWaiting: waitingRepairs(records).map((pr) => ({
       key: pr.key,
       url: pr.url,
@@ -920,7 +939,7 @@ export function renderTend(r: TendReport): string {
       verdict: r.verdict,
       daemon: r.daemon.up ? 'up' : `down (last heartbeat ${r.daemon.lastHeartbeat ?? 'never'})`,
       queued: r.counts.queued,
-      active: `headless: ${r.counts.headlessActive} of ${r.counts.headlessLimit}; traps: ${r.counts.trapActive}`,
+      active: `headless: ${r.counts.headlessActive} of ${r.counts.headlessLimit}; traps: ${r.counts.trapActive}${r.counts.parked ? `; parked: ${r.counts.parked} (no slot)` : ''}`,
       chores: r.counts.choresActive,
       done24h: r.counts.done24h,
       failed24h: r.counts.failed24h,
@@ -978,6 +997,22 @@ export function renderTend(r: TendReport): string {
             .filter(Boolean).join('; '),
         })),
         ['key', 'dispatches', 'pr', 'gate', 'watch', 'activity', 'progress'],
+      ),
+    );
+  }
+  if (r.parked?.length) {
+    lines.push('');
+    lines.push(
+      toonTable(
+        'parked (no slot)',
+        r.parked.map((p) => ({
+          id: p.id.slice(0, 8),
+          waitingOn: p.waiting?.on ?? '',
+          for: ageLabel(p.parkedSecs * 1000),
+          link: p.waiting?.link ?? '',
+          note: `${p.note ?? ''}${p.trap ? ' (trap)' : ''}`.trim(),
+        })),
+        ['id', 'waitingOn', 'for', 'link', 'note'],
       ),
     );
   }

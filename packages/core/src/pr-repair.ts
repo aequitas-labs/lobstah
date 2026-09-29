@@ -1,4 +1,8 @@
+import { loadConfig } from './config.js';
+import { readEvidence } from './evidence.js';
+import { readPr, withPrLock, writePr } from './prs.js';
 import type { PrRecord } from './prs.js';
+import type { Lane } from './types.js';
 
 export type RepairKind = 'conflict' | 'checks' | 'review';
 export type PrCommit = {
@@ -29,9 +33,61 @@ export function branchOwnership(commits: PrCommit[], knownShas: ReadonlySet<stri
   return { safe: true };
 }
 
-export function repairKind(pr: PrRecord): RepairKind | undefined {
+/** Whether a check name matches a human-gate pattern. `*` matches any run of characters. */
+export function matchesGate(name: string, patterns: readonly string[]): boolean {
+  return patterns.some((p) =>
+    p.includes('*') ? new RegExp(`^${p.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`).test(name) : p === name,
+  );
+}
+
+/**
+ * The human gates of one PR: `[repos.<key>].humanGateChecks` of the repo
+ * the owning dispatch ran in, the gates recorded on the PR record, and the
+ * gates named in the evidence of the given dispatches.
+ */
+export function humanGatesFor(pr: Pick<PrRecord, 'humanGates'> | undefined, repoKey: string | undefined, ids: Iterable<string> = []): string[] {
+  const out = new Set<string>();
+  const configured = repoKey ? loadConfig().repos[repoKey]?.humanGateChecks : undefined;
+  for (const name of configured ?? []) out.add(name);
+  for (const name of pr?.humanGates ?? []) out.add(name);
+  for (const id of ids) for (const lane of ['work', 'chore'] as Lane[]) for (const name of readEvidence(id, lane).humanGates ?? []) out.add(name);
+  return [...out];
+}
+
+/** Record checks a worker named as human gates on the PR record. Returns the record's gates, or undefined without a record. */
+export function recordHumanGates(key: string, names: readonly string[]): string[] | undefined {
+  if (names.length === 0) return readPr(key)?.humanGates;
+  return withPrLock(key, () => {
+    const pr = readPr(key);
+    if (!pr) return undefined;
+    const humanGates = [...new Set([...(pr.humanGates ?? []), ...names])];
+    writePr({ ...pr, humanGates });
+    return humanGates;
+  });
+}
+
+/** Names of the failing checks on the PR's current head. */
+export function failingCheckNames(pr: Pick<PrRecord, 'failingChecks' | 'checks'>): string[] {
+  return [...new Set((pr.failingChecks ?? []).map((c) => c.name))];
+}
+
+/** Failing checks a repair may work on: every failing check that is not a human gate. */
+export function repairableChecks(pr: Pick<PrRecord, 'failingChecks' | 'checks'>, gates: readonly string[] = []): string[] {
+  return failingCheckNames(pr).filter((name) => !matchesGate(name, gates));
+}
+
+/**
+ * The floor: one repair round per PR, check name, and commit. The checks
+ * of `candidates` that have not had their round at this head.
+ */
+export function unrepairedChecks(candidates: readonly string[], repairedAtHead: readonly string[] | undefined): string[] {
+  return candidates.filter((name) => !(repairedAtHead ?? []).includes(name));
+}
+
+export function repairKind(pr: PrRecord, gates: readonly string[] = []): RepairKind | undefined {
   if (pr.mergeStateStatus === 'DIRTY') return 'conflict';
-  if (pr.checks.failed > 0) return 'checks';
+  // Counts without names (an older record) are still a failure to repair.
+  if (pr.checks.failed > 0 && (!pr.failingChecks?.length || repairableChecks(pr, gates).length > 0)) return 'checks';
   if (pr.review?.changesRequested) return 'review';
   return undefined;
 }
@@ -63,14 +119,24 @@ export function pushRule(branch: string | undefined, id = '<dispatch id>'): stri
 }
 
 /** The repair prompt uses the PR's actual base branch, including stacked PRs. */
-export function repairBrief(pr: PrRecord, kind: RepairKind, id?: string): string {
+export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?: string; checks?: readonly string[]; gates?: readonly string[] } = {}): string {
+  const opts = typeof arg === 'string' ? { id: arg } : arg;
   const intro = `Repair ${pr.url} on its existing branch ${pr.headRefName ?? '(see PR)'} at ${pr.headSha}. Do not open a new PR.`;
-  const finish = `Run the relevant tests. ${pushRule(pr.headRefName, id)} Report done with the same PR URL.`;
+  const finish = `Run the relevant tests. ${pushRule(pr.headRefName, opts.id)} Report done with the same PR URL.`;
   if (kind === 'conflict')
     return `${intro}\nFetch the PR's base branch ${pr.baseRefName ?? '(read from PR)'}. Bring the PR branch up to date with that base by this repo's convention. Resolve conflicts while keeping both sides' intent. ${finish}`;
   if (kind === 'checks') {
-    const checks = (pr.failingChecks ?? []).map((c) => `- ${c.name}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`).join('\n');
-    return `${intro}\nLatest failing checks:\n${checks || '- Read the failing check from GitHub'}\nRead each check log. Fix a real failure. If it is a flake, rerun it at most once. ${finish}`;
+    const failing = (pr.failingChecks ?? []).filter((c) => !opts.checks || opts.checks.includes(c.name));
+    const checks = failing.map((c) => `- ${c.name}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`).join('\n');
+    const gated = failingCheckNames(pr).filter((name) => matchesGate(name, opts.gates ?? []));
+    const gates = gated.length
+      ? `\nThese failing checks are human gates. They pass only when a person approves. Do not work on them: ${gated.join(', ')}.`
+      : '';
+    return (
+      `${intro}\nLatest failing checks:\n${checks || '- Read the failing check from GitHub'}${gates}\n` +
+      `Read each check log. Fix a real failure. If it is a flake, rerun it at most once. ` +
+      `If a check cannot pass until a person approves the change, it is a human gate: do not change code for it, and name it on your report with --human-gate "<check name>", once per check. ${finish}`
+    );
   }
   return `${intro}\nRead the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish}`;
 }

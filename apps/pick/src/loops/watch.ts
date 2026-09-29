@@ -3,7 +3,12 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   appendWatchEvents,
+  checkRoundKey,
   enqueue,
+  humanGatesFor,
+  isFailingConclusion,
+  matchesGate,
+  recordCheckRounds,
   holdWatch,
   laneDirs,
   loadConfig,
@@ -117,6 +122,40 @@ function spawnContinuation(
   return id;
 }
 
+/**
+ * The events of a PR watch that may start a CI-fix continuation. A failed
+ * check that is a human gate (the repo's `humanGateChecks`, the PR record's
+ * gates, or a gate the chain's workers named) starts nothing. Neither does a
+ * check that already had its one round at this head. Returns the events to
+ * deliver and the rounds they take.
+ */
+export function ciFixWork(w: Watch, events: WatchEvent[]): { work: WatchEvent[]; rounds: string[]; skipped: string[] } {
+  if (!w.key.startsWith('pr:') || !w.owner.startsWith('dispatch:')) return { work: events, rounds: [], skipped: [] };
+  const owner = w.owner.slice('dispatch:'.length);
+  const ownerLane = laneOf(owner);
+  const repo = ownerLane ? descriptorOf(owner, ownerLane)?.repo : undefined;
+  const gates = humanGatesFor(readPr(w.key), repo, [owner, ...(w.lastFollowUpId ? [w.lastFollowUpId] : [])]);
+  const done = new Set(w.checkRounds ?? []);
+  const rounds: string[] = [];
+  const skipped: string[] = [];
+  const work = events.filter((e) => {
+    if (e.kind !== 'check-completed' || !isFailingConclusion(e.conclusion as string | undefined) || typeof e.name !== 'string') return true;
+    if (matchesGate(e.name, gates)) {
+      skipped.push(`${e.name} (human gate)`);
+      return false;
+    }
+    const round = checkRoundKey(String(e.headSha ?? ''), e.name);
+    if (done.has(round)) {
+      skipped.push(`${e.name} (had its round at ${String(e.headSha ?? '').slice(0, 7)})`);
+      return false;
+    }
+    done.add(round);
+    rounds.push(round);
+    return true;
+  });
+  return { work, rounds, skipped };
+}
+
 /** [watch].maxForksPerCycle; a bad value falls back to the default of 3. */
 function maxForksPerCycle(): number {
   try {
@@ -156,12 +195,21 @@ export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPer
     }
     if (watch.heldAt) continue; // waits for `lobstah watch release`
     if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // one continuation in flight
+    const { work, rounds, skipped } = ciFixWork(watch, events);
+    if (work.length === 0) {
+      markWatchSeen(watch.key);
+      log(`watch ${watch.key}: no continuation for ${skipped.join(', ')}`);
+      continue;
+    }
     if (forks >= cap) {
       holdWatch(watch.key, new Date(), { reason: 'fork cap reached ([watch].maxForksPerCycle)' });
       held.push(watch.key);
       continue;
     }
-    if (spawnContinuation(watch, events, log)) forks++;
+    if (spawnContinuation(watch, work, log)) {
+      recordCheckRounds(watch.key, rounds);
+      forks++;
+    }
   }
   if (held.length > 0) {
     log(`watch: fork cap ${cap} reached — held ${held.join(', ')}`);

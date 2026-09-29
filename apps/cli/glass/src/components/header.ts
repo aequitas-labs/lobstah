@@ -28,7 +28,8 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
     : html`<span class="bad">down</span>`;
   return [
     html`<span class="chip">daemon ${daemon}</span>`,
-    d.slots && html`<span class="chip">active headless: ${d.slots.headless} of ${d.slots.limit}; traps: ${d.slots.traps}</span>`,
+    d.slots &&
+      html`<span class="chip">active headless: ${d.slots.headless} of ${d.slots.limit}; traps: ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
         html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <b>${h.man}</b> <span class="dim">helm ${h.grounds}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,

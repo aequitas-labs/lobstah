@@ -16,7 +16,7 @@ anything else. The status log is append-only; the last entry wins.
 | `working` | Making progress; nothing needed. | Nobody. |
 | `needs-decision` | Blocked on a judgment call only a human (or the orchestrator) can make. The note carries the question. A headless worker waiting on a question stays alive until answered (`lobstah send`), cancelled, or the wall clock. | Human — re-fires every `remindSecs` until answered. |
 | `blocked` | Cannot proceed for an external reason (missing access, broken dependency). | Human. |
-| `paused` | Intentionally idle; resume is expected. With `--waiting-on`, the worker says what it waits on outside lobstah (see [Waiting on](#waiting-on)). A state, not a question: it raises no attention and does not walk the pet. | Whoever paused it, or the thing it waits on. |
+| `paused` | Intentionally idle; resume is expected. With `--waiting-on`, the worker says what it waits on outside lobstah (see [Waiting on](#waiting-on)). A state, not a question: it raises no attention and does not walk the pet. A paused headless dispatch is **parked**: no process and no slot (see [Parked](#parked)). | Whoever paused it, or the thing it waits on. |
 | `done` | The brief is fulfilled. Terminal. Merging is never the dispatch's job. | Merge loop / reviewer. |
 | `failed` | Cannot fulfill the brief; work preserved in the worktree. Terminal. | Human. |
 
@@ -78,11 +78,60 @@ Effects of `paused` with `--waiting-on`:
   that it sweeps as before, and the `trap-ghosted` notice says the pause
   expired.
 - A **headless** worker is not classified `wedged`, however long it is
-  silent, and its `wallClockSecs` limit does not run while it is paused. It
-  still holds its slot: a live paused runner counts against `maxConcurrent`.
+  silent, and its `wallClockSecs` limit does not run while it is paused.
+  It is parked and holds no slot (see [Parked](#parked)).
+- With `--waiting-on pr` or `--waiting-on review`: when the PR it waits on
+  merges, the daemon finishes the dispatch `done` (`the PR merged: <url>`);
+  closed without merge, `failed`. The PR is the `--link` when it names a
+  GitHub PR, else the dispatch's own PR, else its chain's PR. Every paused
+  dispatch in the chain that waits on the PR is finished. The report
+  registers the watch of the dispatch's own PR when it has none.
 - No attention, no notice, no pet. It is a state, not a question.
 
 Source of truth: `WAITING_ON` in `packages/core/src/types.ts`.
+
+## Parked
+
+A headless dispatch whose worker's last report is `paused`. At the end of
+that turn the runner ends the session, stops the processes the harness
+started, and exits without adding a verb. The dispatch stays in `active/`
+and keeps its worktree lock.
+
+- It holds no slot: it does not count toward `maxConcurrent` or
+  `choreConcurrent`, and `lobstah daemon restart` needs no `--force` for it.
+- It wakes when a message reaches its inbox (`lobstah send <id>`), or when
+  its `--until` time passes. The daemon then starts a runner that resumes
+  the same session, when a slot is free, before it claims queued work. The
+  first prompt says why it woke and carries the messages; the first status
+  note is `woke from pause: <why>`.
+- A cancel finalizes it `failed` without a runner. A merged or closed PR
+  it waits on finishes it (see [Waiting on](#waiting-on)).
+- `man tend` lists it in the `parked (no slot)` table and counts
+  `parked: N (no slot)` beside the slots; `lobstah daemon status` prints
+  `slots`, `parked`, and `parkedOn`; `lobstah doctor`'s `daemon` row and the
+  glass header show it too.
+
+A trap's paused catch keeps its session: a trap never holds a headless
+slot.
+
+Source of truth: `isParked` and `parkedDispatches` in
+`packages/core/src/slots.ts`; the runner's park in
+`packages/runner/src/drive.ts`.
+
+## Human gate
+
+A CI check that fails by design until a person approves the change. No
+code change turns it green. A human gate starts no PR repair and no CI-fix
+continuation on its PR. The gates of a PR come from
+`[repos.<key>].humanGateChecks` (names; `*` matches any run of characters)
+and from `lobstah report <id> <verb> --human-gate "<check>"`, which records
+the name in the worker's evidence and on the PR record (`humanGates`).
+Apart from gates, each failing check gets at most one repair round per PR,
+check name, and head commit (`repair.checks` on the PR record;
+`checkRounds` on a pick-delivered PR watch).
+
+Source of truth: `humanGatesFor`, `repairableChecks`, and `unrepairedChecks`
+in `packages/core/src/pr-repair.ts`.
 
 ## Reconciled state
 

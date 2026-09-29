@@ -267,7 +267,8 @@ export interface GlassSnapshot {
   version: string;
   repoUrl: string;
   daemon?: { version?: string; heartbeat?: string };
-  slots?: { headless: number; limit: number; traps: number };
+  /** Work slots. `parked` dispatches (last report `paused`) hold none. */
+  slots?: { headless: number; limit: number; traps: number; parked?: number };
   helms: GlassHelm[];
   traps: GlassTrap[];
   /** Newest first. */

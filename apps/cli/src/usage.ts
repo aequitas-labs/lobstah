@@ -72,6 +72,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--waiting-on': { value: 'review|pr|deploy|person|external' },
       '--link': { value: '<url>' },
       '--until': { value: '<iso|30m|4h|2d>' },
+      '--human-gate': { value: '<check>', repeatable: true },
       '--report': { value: '<file.md>' },
       '--attach': { value: '<file>', repeatable: true },
       '--session': { value: '<id>' },
@@ -191,10 +192,10 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
   cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
-  report: `The validated status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` every word is note.
-\`--pr <url>\` on any verb but failed records the PR and registers its pr: watch (--no-watch opts out). --waiting-on, --link, --until: what a pause waits on.
-A trap's done records its worktree's HEAD, run there or with the trap's --session.
-done|failed --report <file.md> files a findings page as the dispatch's report; --attach adds the images it names by bare filename.`,
+  report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note.
+\`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
+--waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes.
+A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page as the report; --attach adds the images it names.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,

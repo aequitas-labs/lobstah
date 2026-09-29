@@ -12,7 +12,10 @@ import {
   loadConfig,
   lobstahHome,
   holdWatch,
+  failingCheckNames,
+  humanGatesFor,
   latestCheckOutcomes,
+  matchesGate,
   markFollowUp,
   mergeEvidence,
   parsePrRef,
@@ -25,12 +28,15 @@ import {
   readStatusLog,
   readTrap,
   readWatchEvents,
+  recordHumanGates,
   reconcile,
   releaseHeldWatches,
   repairBrief,
   repairKind,
   repairLimit,
+  repairableChecks,
   storedDescriptor,
+  unrepairedChecks,
   withPrLock,
   writePr,
 } from '@lobstah/core';
@@ -185,10 +191,13 @@ export function ghLatestChecks(pr: PrRecord): LatestChecks | undefined {
  * run with its name failed. Returns why no repair is due, or undefined when
  * the checks still fail.
  */
-export function checksStillFailing(pr: PrRecord, latest: LatestChecks | undefined): string | undefined {
+export function checksStillFailing(
+  pr: PrRecord,
+  latest: LatestChecks | undefined,
+  names: readonly string[] = (pr.failingChecks ?? []).map((c) => c.name),
+): string | undefined {
   if (!latest) return 'the latest check runs could not be read';
   if (latest.headSha !== pr.headSha) return `the head moved to ${latest.headSha.slice(0, 7)}; waiting for the next observation`;
-  const names = (pr.failingChecks ?? []).map((c) => c.name);
   let failing = 0;
   for (const name of names) {
     const runs = latest.checks.filter((c) => c.name === name);
@@ -267,9 +276,28 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       const origin = storedDescriptor(owner, 'work')?.followUp;
       const ancestorPr = origin && chainPr(origin, 'work');
       if (ancestorPr && ancestorPr.url !== pr.url) return;
-      const kind = repairKind(pr);
       // A failed push marks the moved head and still covers the head it started from.
       const previous = pr.repair && (pr.repair.headSha === pr.headSha || pr.repair.fromHeadSha === pr.headSha) ? pr.repair : undefined;
+      // Human gates: the repo's list, the PR record's, and what the chain's workers named.
+      const gates = humanGatesFor(pr, storedDescriptor(owner, 'work')?.repo, [
+        ...pr.dispatches,
+        owner,
+        ...(watch.lastFollowUpId ? [watch.lastFollowUpId] : []),
+        ...(pr.repair?.dispatchId ? [pr.repair.dispatchId] : []),
+      ]);
+      const kind = repairKind(pr, gates);
+      const repairable = kind === 'checks' ? repairableChecks(pr, gates) : [];
+      const attempts = previous?.attempts ?? 0;
+      // A PR whose only failing checks are human gates waits for a person. It is not a repair.
+      const gated = !kind && cfg.checks ? failingCheckNames(pr).filter((name) => matchesGate(name, gates)) : [];
+      if (gated.length > 0) {
+        if (previous?.status === 'repairing' && previous.dispatchId && !isTerminal(previous.dispatchId)) return;
+        const reason = `human gate: ${gated.join(', ')} passes only when a person approves`;
+        if (previous?.status === 'waiting' && previous.heldBy === 'human-gate' && previous.reason === reason) return;
+        const { until: _until, ...rest } = previous ?? { headSha: pr.headSha, kind: 'checks' as const, attempts };
+        writePr({ ...pr, repair: { ...rest, headSha: pr.headSha, kind: 'checks', attempts, maxAttempts: limit, status: 'waiting', heldBy: 'human-gate', reason } });
+        return;
+      }
       if (!kind || (kind === 'conflict' && !cfg.conflicts) || (kind === 'checks' && !cfg.checks)) {
         // Nothing to repair: a wait from before ends.
         if (previous?.status === 'waiting') writePr({ ...pr, repair: endWait(previous) });
@@ -278,7 +306,16 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       if (previous?.status === 'repairing' && previous.dispatchId && !isTerminal(previous.dispatchId)) return;
       if (previous?.status === 'blocked' || previous?.status === 'gave-up') return;
       if (previous?.observationsAtRepair !== undefined && (pr.observations ?? 0) <= previous.observationsAtRepair) return;
-      const attempts = previous?.attempts ?? 0;
+      // The floor: one round per PR, check, and commit. A head that has not
+      // moved cannot give a check a new outcome.
+      const fresh = unrepairedChecks(repairable, previous?.checks);
+      if (previous && repairable.length > 0 && fresh.length === 0) {
+        const reason = `one repair round per check and commit: ${repairable.join(', ')} had a round at ${pr.headSha.slice(0, 7)}; waits for a new commit`;
+        if (previous.status === 'waiting' && previous.heldBy === 'repaired' && previous.reason === reason) return;
+        const { until: _until, ...rest } = previous;
+        writePr({ ...pr, repair: { ...rest, kind, status: 'waiting', heldBy: 'repaired', reason } });
+        return;
+      }
       if (attempts >= limit) {
         writePr({
           ...pr,
@@ -301,6 +338,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
           repair: {
             ...(previous?.dispatchId ? { dispatchId: previous.dispatchId } : {}),
             ...(previous?.observationsAtRepair !== undefined ? { observationsAtRepair: previous.observationsAtRepair } : {}),
+            ...(previous?.checks ? { checks: previous.checks } : {}),
             headSha: pr.headSha,
             kind,
             attempts,
@@ -327,7 +365,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       const chain = chainState(owner);
       if (chain.busy) return;
       if (kind === 'checks') {
-        const why = checksStillFailing(pr, (opts.readChecks ?? ghLatestChecks)(pr));
+        const why = checksStillFailing(pr, (opts.readChecks ?? ghLatestChecks)(pr), repairable.length > 0 ? fresh : undefined);
         if (why) return wait({ heldBy: 'checks', reason: why });
       }
       const ownership = repairOwnership(pr, watch, chain.latest);
@@ -354,16 +392,18 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
           maxAttempts: limit,
           status: 'repairing',
           dispatchId: id,
+          ...(fresh.length > 0 || previous?.checks ? { checks: [...(previous?.checks ?? []), ...fresh] } : {}),
           observationsAtRepair: pr.observations,
           startedAt: new Date(now).toISOString(),
           by: 'daemon',
         },
       });
       try {
+        const brief = repairBrief(pr, kind, kind === 'checks' && fresh.length > 0 ? { id, checks: fresh, gates } : { id, gates });
         enqueue({
           id,
           repo: target.repo,
-          brief: repairBrief(pr, kind, id),
+          brief,
           followUp: chain.latest,
           pr: { url: pr.url, headRefName: pr.headRefName, headSha: pr.headSha },
           ...(trap ? { for: address } : {}),
@@ -388,6 +428,23 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
     });
   }
   return started;
+}
+
+/**
+ * `report --human-gate <check>`: the worker names checks that pass only
+ * when a person approves. The names go into its evidence and onto the PR
+ * record of its PR (`--pr`, else its evidence, else its chain's PR), so the
+ * repairer and pickup skip them on that PR. Returns the names recorded.
+ */
+export function recordReportedGates(id: string, lane: Lane, names: readonly string[], prUrl?: string): string[] {
+  const clean = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (clean.length === 0) return [];
+  const evidence = readEvidence(id, lane);
+  mergeEvidence(id, lane, { humanGates: [...new Set([...(evidence.humanGates ?? []), ...clean])] });
+  const url = prUrl ?? evidence.prUrl ?? evidence.pr?.url ?? chainPr(id, lane)?.url;
+  const ref = url ? parsePrRef(url) : undefined;
+  if (ref) recordHumanGates(ref.key, clean);
+  return clean;
 }
 
 /** A wait that ends with nothing to repair: the record before the wait. */

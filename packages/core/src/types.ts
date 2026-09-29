@@ -110,6 +110,11 @@ export interface Evidence {
    * why, and how long after the report.
    */
   harnessStopped?: { reason: 'exit-grace' | 'cancel'; afterSecs: number; at: string };
+  /**
+   * Checks the worker named as human gates (`report --human-gate <check>`):
+   * they fail until a person approves, and no code change turns them green.
+   */
+  humanGates?: string[];
 }
 
 export type EventType =

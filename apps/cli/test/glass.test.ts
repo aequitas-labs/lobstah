@@ -34,7 +34,7 @@ describe('glass snapshot', () => {
     enqueue({ id: 'trap', repo: 'web', brief: 'work' });
     claimNext('work');
     fs.writeFileSync(path.join(laneDirs('work').active, 'trap', 'claim.json'), JSON.stringify({ by: 'wt:trap1' }));
-    expect(buildGlassSnapshot().slots).toEqual({ headless: 1, limit: 2, traps: 1 });
+    expect(buildGlassSnapshot().slots).toEqual({ headless: 1, limit: 2, traps: 1, parked: 0 });
   });
 
   it('reads dispatches, standing questions, and the helm from disk', () => {

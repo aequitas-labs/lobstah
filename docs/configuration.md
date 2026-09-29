@@ -31,6 +31,7 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 | `env` | no | Environment merged into every dispatch for this repo. |
 | `pickup` | no (`false`) | Opt this repo into `[pickup.github]` multi-repo mode. Explicit per repo — nothing becomes pickable by being configured. |
 | `pushEarly`, `draftPr`, `checkpointOnStop` | no (inherit `[limits]`) | Override remote preservation for this repo's headless dispatches. |
+| `humanGateChecks` | no | Check names that fail until a person approves the change (e.g. `["owner approval"]`). `*` matches any run of characters. On a PR of a dispatch in this repo, a failed human gate never starts a PR repair or a CI-fix continuation. A PR whose only failing checks are human gates shows `repair.status: waiting` with `heldBy: human-gate`. A worker adds gates for one PR with `lobstah report --human-gate <check>`. |
 
 `[repos.<key>.harness]` — per-repo harness defaults: `default` (`claude` \|
 `codex`), `model`, `effort`.
@@ -55,7 +56,7 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. A dispatch whose worker reported `done` or `failed` does not spend a slot, even while its runner is still exiting. |
+| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. A dispatch whose worker reported `done` or `failed` does not spend a slot, even while its runner is still exiting. A dispatch whose worker reported `paused` is parked: its runner ends the session and exits, and it spends no slot. An operator message, or the time given with `--until`, wakes it into the same session when a slot is free; a waking dispatch takes the slot before queued work. `man tend`, `daemon status`, `doctor`, and the glass list parked dispatches. |
 | `choreConcurrent` | `1` | Headless chore-lane runner ceiling (rebases and other machine-originated runs). |
 | `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. Also the age past which `status`, `ls`, `man tend`, and the glass show a dispatch's activity line as stale. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
@@ -111,7 +112,7 @@ send a continuation.
 | `autoRepair` | `true` | On a dispatch-owned PR, fork a repair follow-up for a conflict, failed current check, or requested review changes. `false` leaves check-event delivery and attention as before. |
 | `conflicts` | `true` | Repair conflicts when `autoRepair` is on. Set `false` to show conflict attention without a repair. |
 | `checks` | `true` | Repair failed current checks when `autoRepair` is on. Set `false` to show check attention without a repair. |
-| `maxRepairsPerPr` | `2` | Maximum repair follow-ups for one PR head SHA. When the limit is reached and the issue remains, `pr:conflict`, `pr:checks`, or `pr:review` attention names the limit. A repair that waits is not an attempt. |
+| `maxRepairsPerPr` | `2` | Maximum repair follow-ups for one PR head SHA. When the limit is reached and the issue remains, `pr:conflict`, `pr:checks`, or `pr:review` attention names the limit. A repair that waits is not an attempt. Below this limit, each failing check gets at most one repair round per PR and head SHA: a check that had its round and still fails on the same head waits for a new commit, with `repair.status: waiting` and `heldBy: repaired`, and raises `pr:checks` attention. A CI-fix continuation from `lobstah pick` (`autoRepair = false`) follows the same rule. Human gates (`[repos.<key>].humanGateChecks`, `report --human-gate`) get no round. |
 | `repairSettleSecs` | `600` | A repair is queued only after the PR's head, its base branch's head, and its failing checks have been unchanged for this many seconds. Until then the PR record shows `repair.status: waiting` with `heldBy: settle` and `until`. |
 
 ## `[grounds.*]` — helm territories

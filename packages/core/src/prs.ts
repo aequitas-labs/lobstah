@@ -40,6 +40,8 @@ export interface PrRecord extends PrEvidence {
   baseSince?: string;
   /** When the current set of failing check runs was first observed; absent when no check fails. */
   failingSince?: string;
+  /** Checks a worker named as human gates on this PR (`report --human-gate`). */
+  humanGates?: string[];
 }
 
 /** The failing check runs as one comparable string: names and run URLs. */

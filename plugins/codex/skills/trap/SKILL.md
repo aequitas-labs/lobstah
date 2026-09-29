@@ -66,7 +66,12 @@ naming a dispatch id. Then:
 - Before you wait on something outside lobstah (a ume review, a PR review, a
   deploy), report `paused "<note>" --waiting-on review|pr|deploy|person|external
   --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,
-  not a question: nobody is paged. Report `working` when you resume.
+  not a question: nobody is paged. Report `working` when you resume. When the
+  PR you wait on merges, lobstah finishes the dispatch `done`; closed without
+  merge, `failed`.
+- A failing check that passes only when a person approves is a human gate.
+  Do not change code for it. Name it on your report with
+  `--human-gate "<check name>"`, once per check; PR repairs then skip it.
 - For ume: use the ume skill's non-blocking push; Codex cannot run the await
   as a tracked background task. End the turn while it runs.
 - After sign-on and after every completion or report, run one foreground

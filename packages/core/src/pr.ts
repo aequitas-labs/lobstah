@@ -168,7 +168,11 @@ export interface PrRepair {
    */
   status: 'repairing' | 'gave-up' | 'blocked' | 'waiting';
   reason?: string;
-  /** Who holds a waiting repair: `wt:<trap>`, `dispatch:<id>`, `helm`, or `settle`. */
+  /**
+   * Who holds a waiting repair: `wt:<trap>`, `dispatch:<id>`, `helm`,
+   * `settle`, `checks`, `human-gate` (only human gates fail), or `repaired`
+   * (each failing check already had its one round at this head).
+   */
   heldBy?: string;
   /** A settle wait: the earliest time the repair can be queued (ISO). */
   until?: string;
@@ -179,6 +183,8 @@ export interface PrRepair {
    * watch observes the move.
    */
   fromHeadSha?: string;
+  /** Checks that had their one repair round at `headSha`. */
+  checks?: string[];
   observationsAtRepair?: number;
   /** Atomic claim metadata for one repairer. */
   startedAt?: string;
@@ -608,6 +614,7 @@ export function prFixBrief(ref: PrRef): string {
 {summaries}
 
 For a failed check: read its log (the details URL above, or \`gh run view\`), reproduce locally, fix it, and push to the PR's existing branch at the head sha named above — do not open a new PR.
+If a failed check cannot pass until a person approves the change, do not try to fix it: name it with \`--human-gate "<check name>"\` on your report, once per check.
 For a review decision: read the review with \`gh pr view ${ref.number} --repo ${ref.owner}/${ref.repo} --comments\`, address it, and push to the same branch.
 Then report done with the same PR: \`lobstah report <id> done "<note>" --pr ${ref.url}\`.
 

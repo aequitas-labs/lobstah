@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   acknowledge,
+  isParked,
   isVerb,
   waitingFields,
   waitingText,
@@ -160,7 +161,8 @@ import {
   runPrCheck,
   syncPrWatches,
 } from './pr-watch.js';
-import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, stampRepairerBeat } from './pr-repair.js';
+import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
+import { finishResolvedWaits, registerWaitWatch } from './pr-waits.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { runBeat } from './beat.js';
@@ -615,6 +617,8 @@ function liveChainMember(member: ChainMember): boolean {
     const reg = readTrap(claim.by.slice('wt:'.length));
     return reg?.claimed === member.id && Date.now() - (Date.parse(reg.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000;
   }
+  // Parked on `paused`: no runner, but a message wakes it into its session.
+  if (isParked(member.id, member.lane)) return true;
   try {
     const runner = JSON.parse(fs.readFileSync(path.join(dir, 'runner.json'), 'utf8')) as { pid: number; processStartTime?: string };
     return pidAlive(runner.pid, runner.processStartTime);
@@ -1051,10 +1055,17 @@ async function mainCli(): Promise<void> {
         }
       }
       if (prUrl) mergeEvidence(id, lane, { prUrl });
+      const gatesNamed = recordReportedGates(id, lane, values('--human-gate'), prUrl);
       // A PR stays observed from the first report that names it: CI, review,
       // and merge flow back through its pr: watch instead of lobstah going
-      // blind at "PR open". The watch is registered once per PR.
-      const prWatch = verb !== 'failed' && prUrl && !noWatch ? autoRegisterPrWatch(id, prUrl) : undefined;
+      // blind at "PR open". The watch is registered once per PR. A pause on
+      // the dispatch's own PR registers that PR's watch.
+      const prWatch =
+        verb !== 'failed' && prUrl && !noWatch
+          ? autoRegisterPrWatch(id, prUrl)
+          : verb === 'paused' && !noWatch
+            ? registerWaitWatch(id, lane, entry)
+            : undefined;
       console.log(
         toonKV({
           id,
@@ -1065,6 +1076,7 @@ async function mainCli(): Promise<void> {
           ...(entry.until ? { until: entry.until } : {}),
           ...(prUrl ? { prUrl } : {}),
           ...(prWatch ? { watch: prWatch.key } : {}),
+          ...(gatesNamed.length ? { humanGates: gatesNamed.join(', ') } : {}),
           ...(filed ? { report: reportMarkdownPath(filed.key), reportKey: filed.key, title: filed.title } : {}),
         }),
       );
@@ -2187,6 +2199,8 @@ async function mainCli(): Promise<void> {
           culler: cliCuller,
           prWatches: (now, log) => {
             observeDispatchPrWatches(pollSecs(), now);
+            // Before the cull pass: a merged PR's release needs the chain finished.
+            finishResolvedWaits(log);
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
             stampRepairerBeat(now);
           },

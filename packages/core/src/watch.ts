@@ -80,6 +80,11 @@ export interface Watch {
   heldFor?: string;
   /** Who set the hold, as a PR record's waiting repair shows it (`helm` for a cancelled repair). */
   heldBy?: string;
+  /**
+   * A PR watch's CI-fix rounds, as `<head sha>:<check name>`: one round per
+   * check and commit. The newest 100 are kept.
+   */
+  checkRounds?: string[];
 }
 
 export interface WatchEvent {
@@ -167,6 +172,7 @@ export function addWatch(
     heldReason: existing?.heldReason,
     heldFor: existing?.heldFor,
     heldBy: existing?.heldBy,
+    checkRounds: existing?.checkRounds,
   };
   writeWatch(w);
   return w;
@@ -438,5 +444,22 @@ export function markWatchSeen(key: string): void {
   if (!w) return;
   w.seen = readWatchEvents(key).length;
   w.seenAt = Date.now();
+  writeWatch(w);
+}
+
+/** Keep this many CI-fix rounds on a watch. */
+const CHECK_ROUNDS_KEPT = 100;
+
+/** The round key of one check at one head: `<head sha>:<check name>`. */
+export function checkRoundKey(headSha: string, name: string): string {
+  return `${headSha}:${name}`;
+}
+
+/** Record CI-fix rounds a continuation took on a PR watch (see checkRounds). */
+export function recordCheckRounds(key: string, rounds: readonly string[]): void {
+  if (rounds.length === 0) return;
+  const w = readWatch(key);
+  if (!w) return;
+  w.checkRounds = [...new Set([...(w.checkRounds ?? []), ...rounds])].slice(-CHECK_ROUNDS_KEPT);
   writeWatch(w);
 }

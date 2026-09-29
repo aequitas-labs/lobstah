@@ -48,6 +48,12 @@ describe('classify — a worker paused on something external is not wedged', () 
     const base = { hasRunner: true, alive: true, lastVerb: 'paused' as const, lastEventAt: old, now, wedgeThresholdMs: 600_000 };
     expect(classify(base)).toBe('wedged');
     expect(classify({ ...base, pausedWaiting: true })).toBe('busy');
-    expect(classify({ ...base, alive: false, pausedWaiting: true })).toBe('dead');
+    expect(classify({ ...base, alive: false, pausedWaiting: true })).toBe('parked');
+    expect(classify({ ...base, alive: false, lastVerb: 'working' })).toBe('dead');
+  });
+
+  it('a paused dispatch whose runner exited is parked, not dead', () => {
+    const now = 1_000_000_000;
+    expect(classify({ hasRunner: true, alive: false, lastVerb: 'paused', now, wedgeThresholdMs: 600_000 })).toBe('parked');
   });
 });
