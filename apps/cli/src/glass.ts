@@ -18,6 +18,8 @@ import {
   listTraps,
   trapLastSeen,
   validSessionLink,
+  trapLabel,
+  trapNameForId,
   listWatches,
   watchErrorCell,
   loadConfig,
@@ -299,6 +301,8 @@ export function buildGlassSnapshot(): GlassSnapshot {
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
     return {
       ...t,
+      name: t.name ?? trapNameForId(t.trapId),
+      label: trapLabel({ trapId: t.trapId, name: t.name ?? trapNameForId(t.trapId) }),
       link: validSessionLink(t.link) ? t.link : undefined,
       sessionId: t.sessionId ?? signed?.by,
       harness: t.harness ?? (/\((claude|codex),/.exec(signed?.text ?? '')?.[1]),

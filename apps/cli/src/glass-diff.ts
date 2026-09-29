@@ -155,7 +155,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   const deckTraps = (d.traps || []).filter(
     (t) =>
       (t.live || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000))) &&
-      hasQuery(t.trapId, t.repo, t.worktree),
+      hasQuery(t.name, t.trapId, t.repo, t.worktree),
   );
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
   return {
@@ -179,7 +179,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },
     traps: {
       view: st.view,
-      list: d.traps.filter((t) => (!st.repo || t.repo === st.repo) && hasQuery(t.trapId, t.repo, t.worktree, t.harness)).map(seat),
+      list: d.traps.filter((t) => (!st.repo || t.repo === st.repo) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness)).map(seat),
     },
     prs: {
       view: st.view,

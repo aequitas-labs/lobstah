@@ -10,6 +10,8 @@ import {
   formatGB,
   GB,
   loadConfig,
+  listTraps,
+  trapLabel,
   lobstahHome,
   lobstahVersion,
   onPath,
@@ -27,6 +29,7 @@ import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAN
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
 import { liveRepairer } from './pr-repair.js';
+import { petRow } from './pet.js';
 
 export interface DoctorRow {
   check: string;
@@ -251,6 +254,9 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
     push('glass', 'warn', err instanceof Error ? err.message : String(err));
   }
 
+  const pet = petRow({ now });
+  push(pet.check, pet.status, pet.detail);
+
   const cfgFile = configPath();
   if (!fs.existsSync(cfgFile)) {
     push('config', 'fail', `${cfgFile} missing — run \`lobstah init\``);
@@ -301,7 +307,8 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   const hb = executorPath();
   const workSlots = slotUsage('work');
   const choreSlots = slotUsage('chore');
-  const slots = `headless: ${workSlots.headless} of ${cfg.limits.maxConcurrent} work, ${choreSlots.headless} of ${cfg.limits.choreConcurrent} chore; traps: ${workSlots.traps + choreSlots.traps}`;
+  const trapNames = listTraps().map(trapLabel);
+  const slots = `headless: ${workSlots.headless} of ${cfg.limits.maxConcurrent} work, ${choreSlots.headless} of ${cfg.limits.choreConcurrent} chore; traps: ${workSlots.traps + choreSlots.traps}${trapNames.length ? ` (${trapNames.join(', ')})` : ''}`;
   if (!fs.existsSync(hb)) {
     push('daemon', 'warn', `no heartbeat — daemon not running (\`lobstah daemon install\`); ${slots}`);
   } else {

@@ -7,13 +7,13 @@ import { Table, mailCell, opener, trapRow, windowAction } from './common.js';
 
 function row(t: GlassTrap) {
   const r = trapRow(t);
-  return html`<tr key=${t.trapId} class=${'rowhead' + (t.live ? '' : ' dim')} onClick=${opener('trap', t.trapId)}><td><b>wt:${t.trapId}</b></td><td>${t.repo ?? '—'}</td><td class="grow">${t.worktree ?? ''}</td><td>${t.harness ?? ''}</td><td>${(t.sessionId ?? '').slice(0, 8)}</td><td>${r.listen}</td><td>${r.hb}</td><td>${mailCell(t)}</td><td>${t.catches.length}</td><td>${windowAction(t)}</td></tr>`;
+  return html`<tr key=${t.trapId} class=${'rowhead' + (t.live ? '' : ' dim')} onClick=${opener('trap', t.trapId)}><td><b>${t.label ?? `wt:${t.trapId}`}</b></td><td>${t.repo ?? '—'}</td><td class="grow">${t.worktree ?? ''}</td><td>${t.harness ?? ''}</td><td>${(t.sessionId ?? '').slice(0, 8)}</td><td>${r.listen}</td><td>${r.hb}</td><td>${mailCell(t)}</td><td>${t.catches.length}</td><td>${windowAction(t)}</td></tr>`;
 }
 
 function card(t: GlassTrap) {
   const r = trapRow(t);
   const mail = mailCell(t);
-  return html`<div key=${t.trapId} class=${'card' + (t.live ? '' : ' dim')} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 wt:${t.trapId}</b><span class="badge">${t.harness ?? (t.live ? '' : 'signed off')}</span></div><div class="meta">${t.repo ?? (t.live ? 'addressed bait only' : 'history')}${t.sessionId && ' · session ' + t.sessionId.slice(0, 8)}</div>${t.worktree && html`<div class="note">${t.worktree}</div>`}<div class="foot">${r.listen}${t.live && [' · heartbeat ', r.hb]} · ${t.catches.length} catch${t.catches.length === 1 ? '' : 'es'}${mail && [' · ', mail]} · ${windowAction(t)}</div></div>`;
+  return html`<div key=${t.trapId} class=${'card' + (t.live ? '' : ' dim')} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 ${t.label ?? `wt:${t.trapId}`}</b><span class="badge">${t.harness ?? (t.live ? '' : 'signed off')}</span></div><div class="meta">${t.repo ?? (t.live ? 'addressed bait only' : 'history')}${t.sessionId && ' · session ' + t.sessionId.slice(0, 8)}</div>${t.worktree && html`<div class="note">${t.worktree}</div>`}<div class="foot">${r.listen}${t.live && [' · heartbeat ', r.hb]} · ${t.catches.length} catch${t.catches.length === 1 ? '' : 'es'}${mail && [' · ', mail]} · ${windowAction(t)}</div></div>`;
 }
 
 export function Traps({ inp }: { inp: SectionInputs['traps'] }) {

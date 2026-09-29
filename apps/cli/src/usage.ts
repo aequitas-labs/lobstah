@@ -61,7 +61,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { subverbs: ['sync'], flags: {} },
-  attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' } }, positionals: '[<item-key>]' },
+  attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
   report: {
@@ -99,6 +99,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--timeout': { value: '<secs>' },
       '--repo': { value: '<key>' },
       '--link': { value: '<url>' },
+      '--name': { value: '<word-word>' },
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
@@ -141,14 +142,15 @@ export const COMMANDS: Record<string, CommandSpec> = {
 
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
-  dispatch: `Queue supervised work; prints id. --for wt:<trap> targets a signed-on trap
+  dispatch: `Queue supervised work; prints id. --for <name>, wt:<name>, or wt:<id> targets a signed-on trap
 (sticky; session:<id> resolves to it). A claimed helm requires --session
 <helm-id> to address work. Repeat --attach to copy files into owned state.
 Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
-  status: `Reconciled state for one dispatch, or all active without an id. Alias: buoy.`,
+  status: `Reconciled state for one dispatch, or all active without an id. A trap name,
+wt:<name>, or wt:<id> shows its live registration. Alias: buoy.`,
   focus: `Bring a live trap's recorded session or window forward on this machine.
-Accepts its id with or without wt:. Reports the focus step, or why it could
+Accepts its name or id with or without wt:. Reports the focus step, or why it could
 not focus. A session link can open on any supported platform; native window
 focus requires macOS.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
@@ -156,7 +158,7 @@ focus requires macOS.`,
   send: `Steer a live chain, queue for pending work, or wake a finished chain
 as a follow-up. --no-wake leaves finished mail unread. --for, --harness,
 and --model shape a new follow-up; --attach copies files. A claimed helm
-requires --session <helm-id>. wt:<trap> messages arrive at its next park.`,
+requires --session <helm-id>. Trap-name messages arrive at its next park.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -170,7 +172,8 @@ current state seen (--by names who), \`unack\` clears it. Display-only: an ack
 hides the item from the desktop pet and the glass lobs until its state
 changes — never from man tend --json, man wait, the park, or reminders.
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
-watch:<key>. An unknown key exits 2.`,
+watch:<key>. An unknown key exits 2. --json prints { "attention": [...] },
+the same items and fields as man tend --json (the desktop pet reads it).`,
   cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
 without --apply (default 14 days): it measures each target (one du per
 worktree). --apply measures nothing; it deletes and prints the count and the
@@ -189,11 +192,11 @@ installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
 \`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
-  soak: `Volunteer this session as a worker; prints its wt:<trap> address. In a
+  soak: `Volunteer this session as a worker; prints its name and wt:<trap> address. In a
 linked worktree it signs on there. From a primary checkout (or with --repo
 from anywhere) it creates worktrees/soak-<trap> (branch lobstah/soak-<trap>,
 from trunk, with setup): cd there. A session's trap is re-used. --one stows
-after one catch. --wait listens in the foreground; exit 3 = run it again.
+after one catch. --name sets or changes its two-word name. --wait listens in the foreground; exit 3 = run it again.
 --link stores this session's validated deep link for exact reopening.
 \`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
   stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
@@ -208,8 +211,9 @@ waits for the new heartbeat (refused while dispatches are active, unless
 --force); status shows installed, running, pid, version, heartbeat age.`,
   pick: `Tracker loops: poll Linear/GitHub, dispatch assigned work, report back,
 reconcile, merge. install, uninstall, and restart manage its user service.`,
-  doctor: `Check binaries, config, repos, harnesses, and the daemon heartbeat; exit 1
-on failures.`,
+  doctor: `Check binaries, config, repos, harnesses, the daemon heartbeat, and the
+desktop pet (installed, running, whether its last read worked); exit 1 on
+failures.`,
   pet: `The desktop pet (macOS): attention questions crawl across the screen as
 the lobster, each with its question in a speech bubble; clicking one opens
 the helm. install copies the built binary under ~/.lobstah/bin and writes a

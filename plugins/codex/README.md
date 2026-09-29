@@ -15,7 +15,7 @@ Codex with no settings surgery.
 | Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends and keeps its worktree. |
 | `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
-| `trap` skill | The worker: soaking (in a linked worktree, or in one that soak creates), the `wt:` address, the six report verbs, inbox, `paused --waiting-on` before external waits, stowing. |
+| `trap` skill | The worker: soaking, its two-word name and `wt:` id, the six report verbs, inbox, `paused --waiting-on` before external waits, stowing. |
 
 ## Requirements
 
@@ -45,10 +45,15 @@ on as the helm (`lobstah man helm`) or as a trap (`lobstah soak`). In a
 repo's primary checkout, `lobstah soak` creates a linked worktree for the
 trap; `lobstah stow` removes it unless it holds work that exists nowhere
 else or `--keep` is passed.
-
 `lobstah soak --link <url>` records the task's own link for the glass's
 Open window action. `lobstah focus <trap>` runs the same focus steps from the
-CLI. Signing on, the session id, getting woken, and how the
+CLI.
+
+`lobstah soak` prints a two-word name alongside the stable `wt:<id>`.
+`lobstah soak --name <word-word>` chooses or changes it. Use the name, `wt:<name>`,
+or `wt:<id>` with `dispatch --for`, `send`, and `stow --wt`.
+
+Signing on, the session id, getting woken, and how the
 Codex CLI and desktop app differ are in
 [docs/harness/codex.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/codex.md). The quickstart, the same
 in every harness, is in the

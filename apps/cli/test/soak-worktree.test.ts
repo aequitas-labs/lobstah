@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ensureLayout, listTraps, readEvidence, readTrap, readTrapAnchor, type TrapRegistration } from '@lobstah/core';
+import { ensureLayout, listTraps, queuedDescriptor, readEvidence, readTrap, readTrapAnchor, unhandledTrapMessages, type TrapRegistration } from '@lobstah/core';
 import { planCull, planPressureCull } from '../src/cull.js';
 
 // End to end: soak and stow through the built CLI, against throwaway repos
@@ -102,6 +102,53 @@ describe('soak creates a worktree when the session has none', () => {
     expect(res.status).toBe(1);
     expect(res.stdout).toContain('Trap is not live.');
   });
+  processTest('prints and changes a stable name, refusing malformed or taken names', () => {
+    const first = soak(primary, '--name', 'amber-gull');
+    expect(first.status, first.stderr).toBe(0);
+    const reg = only();
+    expect(kv(first.stdout, 'name')).toBe('amber-gull');
+    expect(reg.name).toBe('amber-gull');
+    expect(soak(primary).status).toBe(0);
+    expect(only().name).toBe('amber-gull');
+    expect(soak(primary, '--name', 'Amber Gull').status).not.toBe(0);
+    expect(soak(primary, '--name', 'blue-heron').status).toBe(0);
+    expect(only().name).toBe('blue-heron');
+    expect(readTrapAnchor(reg.worktree)?.name).toBe('blue-heron');
+  });
+
+  processTest('dispatch, send, and stow accept name and id addresses', () => {
+    expect(soak(primary, '--name', 'amber-gull').status).toBe(0);
+    const reg = only();
+    for (const [index, address] of ['amber-gull', 'wt:amber-gull', `wt:${reg.trapId}`].entries()) {
+      const id = `aaaaaaaa-bbbb-4ccc-8ddd-${String(index).padStart(12, '0')}`;
+      const sent = lobstah(primary, 'dispatch', '--repo', 'r', '--id', id, '--brief-text', 'do it', '--for', address);
+      expect(sent.status, sent.stderr).toBe(0);
+      expect(queuedDescriptor(id, 'work')?.for).toBe(`wt:${reg.trapId}`);
+    }
+    for (const address of ['amber-gull', 'wt:amber-gull', `wt:${reg.trapId}`]) {
+      const sent = lobstah(primary, 'send', address, 'hello');
+      expect(sent.status, sent.stderr).toBe(0);
+    }
+    expect(unhandledTrapMessages(reg.trapId)).toHaveLength(3);
+    for (const address of ['amber-gull', 'wt:amber-gull', `wt:${reg.trapId}`]) {
+      const status = lobstah(primary, 'status', address);
+      expect(status.status, status.stderr).toBe(0);
+      expect(kv(status.stdout, 'name')).toBe('amber-gull');
+    }
+    const unknown = lobstah(primary, 'dispatch', '--repo', 'r', '--brief-text', 'do it', '--for', 'missing-gull');
+    expect(unknown.status).not.toBe(0);
+    expect(`${unknown.stdout}${unknown.stderr}`).toContain('amber-gull');
+    const unknownSend = lobstah(primary, 'send', 'missing-gull', 'hello');
+    expect(unknownSend.status).not.toBe(0);
+    expect(`${unknownSend.stdout}${unknownSend.stderr}`).toContain('amber-gull');
+    const unknownStow = lobstah(primary, 'stow', '--wt', 'missing-gull');
+    expect(unknownStow.status).not.toBe(0);
+    expect(`${unknownStow.stdout}${unknownStow.stderr}`).toContain('amber-gull');
+    expect(lobstah(primary, 'stow', '--wt', 'wt:amber-gull', '--keep').status).toBe(0);
+    expect(soak(primary).status).toBe(0);
+    expect(lobstah(primary, 'stow', '--wt', 'amber-gull', '--keep').status).toBe(0);
+  });
+
   processTest('from a primary checkout: one worktree, on its own branch, marked as created by soak', () => {
     const res = soak(primary);
     expect(res.status, res.stderr).toBe(0);

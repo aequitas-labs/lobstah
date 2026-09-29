@@ -18,8 +18,9 @@ Volunteer this session as a worker (a trap).
      which repo (`lobstah repos` lists them), then re-run with `--repo <key>`.
 2. If the output has an `instruction:` line, run `cd <worktree>` now. Do all
    work in that directory from here on.
-3. Print the `wt:<trap>` address and the worktree path from its output — the
-   helm addresses work here with `--for wt:<trap>`.
+3. Print the two-word name, the `wt:<trap>` id, and the worktree path from
+   its output. The lobstah man addresses work with `--for <name>`.
+   `lobstah soak --name <word-word>` chooses or changes the name.
 4. State the worker rules and follow them from here on:
    - Report only with `lobstah report <id> <verb> "<note>"`, using the six
      verbs: working, needs-decision, blocked, paused, done, failed.

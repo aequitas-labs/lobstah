@@ -39,9 +39,10 @@ session-start brief on first sign-on, and on every `soak`, `soak --wait`,
 worktree need no flags.
 - The harness (claude or codex) is inferred from the environment and the
   session id; `--harness claude|codex` overrides.
-- Your address is `wt:<trap>`. It belongs to the worktree and survives
-  session restarts. Tell the helm this address; it dispatches with
-  `--for wt:<trap>`.
+- Soak prints a two-word name such as `amber-gull` and the stable `wt:<trap>`
+  id. Tell the lobstah man the name; `--for <name>` addresses this trap.
+  `--name <word-word>` chooses or changes it. The name survives stow and a
+  ghost sweep; `wt:<name>` and `wt:<id>` also remain valid addresses.
 
 ## Taking bait
 

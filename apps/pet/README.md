@@ -27,9 +27,28 @@ woken for every standing question. Each
 stops walking once its clear condition holds (docs/vocabulary.md,
 "Attention contract").
 
-The pet only ever reads lobstah state — `lobstah man tend --json` every few
-seconds plus the helm registration files. It steers nothing and consumes no
+The pet reads lobstah state: `lobstah attention --json` every six seconds,
+plus the helm registration files. `attention --json` prints only the
+attention list, with the same items and fields as `man tend --json`. When it
+fails (an older CLI does not know `--json` there), the pet runs
+`lobstah man tend --json` instead. The pet steers nothing and consumes no
 cursor; quieting a pet means answering its question.
+
+The pet reads a child's standard output while the child runs, so output of
+any size works. Standard error goes to the null device. A read that takes
+more than 10 seconds is stopped (SIGTERM, then SIGKILL); the pet keeps its
+current windows and tries again on the next poll.
+
+## Diagnose
+
+- `lobstah doctor` prints a `pet` row: installed or not, running or not, and
+  whether the last read worked, with the reason when it did not.
+- After three failed reads in a row the pet writes one line with the reason
+  (timed out, exited with a status, or output that does not decode) to
+  `~/.lobstah/logs/pet.log`. It writes one more line when reads work again,
+  and one line naming the command that works.
+- `~/.lobstah/pet/state.json` holds the last read's result. It is the pet's
+  only write; the CLI writes acknowledgements (`lobstah attention ack`).
 
 ## Install
 
@@ -43,6 +62,18 @@ lobstah pet install        # copies the binary under ~/.lobstah/bin and writes
 A locally built binary needs no signing or notarization — Gatekeeper only
 gates quarantined downloads. Distributing prebuilt pets through GitHub
 releases is what would need a Developer ID signature + notarization.
+
+## Build and test
+
+```bash
+cd apps/pet
+swift build -c release   # the app
+swift test               # LobstahPetCore: runCommand, the attention read, the read monitor
+```
+
+`LobstahPetCore` holds the code that runs without a window: child processes
+(`execute`, `runCommand`), the attention read and its fallback, and the read
+monitor. `LobstahPet` is the app on top of it.
 
 ## Run by hand
 

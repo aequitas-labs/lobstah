@@ -3,6 +3,8 @@ import * as path from 'node:path';
 import type { Attachment, Lane } from './types.js';
 import { laneDirs } from './paths.js';
 import { postNotice } from './notices.js';
+import { trapLabel } from './soak.js';
+import { trapNameForId } from './trap-names.js';
 
 export interface InboxMessage {
   file: string;
@@ -157,7 +159,7 @@ export function bounceTrapMessages(trapId: string): number {
   for (const m of msgs) {
     postNotice({
       kind: 'message-bounced',
-      text: `message to wt:${trapId} never delivered (from ${m.from}): ${m.text}`,
+      text: `message to ${trapLabel({ trapId, name: trapNameForId(trapId) })} never delivered (from ${m.from}): ${m.text}`,
       refId: trapId,
     });
     acknowledgeTrapMessage(trapId, m.file);

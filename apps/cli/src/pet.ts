@@ -113,3 +113,85 @@ export function uninstallPet(): { file: string; removed: boolean } {
   run('pkill', ['-f', 'LobstahPet']);
   return { file, removed };
 }
+
+/**
+ * The pet's one write: the result of its last attention read, rewritten
+ * after every read (about every six seconds). `lobstah doctor` reads it; the
+ * pet itself never reads it back. Fields match PetState in
+ * apps/pet/Sources/LobstahPetCore/ReadMonitor.swift.
+ */
+export interface PetState {
+  pid: number;
+  at: string;
+  ok: boolean;
+  command?: string;
+  reason?: string;
+  consecutiveFailures: number;
+  items?: number;
+  lastOkAt?: string;
+}
+
+export function petStateFile(): string {
+  return path.join(lobstahHome(), 'pet', 'state.json');
+}
+
+export function readPetState(): PetState | undefined {
+  try {
+    const s = JSON.parse(fs.readFileSync(petStateFile(), 'utf8')) as PetState;
+    return typeof s.pid === 'number' && typeof s.at === 'string' ? s : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A running pet rewrites its state at least every ~30 s (6 s polls, two 10 s reads at worst). */
+export const PET_STATE_STALE_MS = 120_000;
+
+function ago(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 120 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * The doctor's pet row: installed or not, running or not, and whether the
+ * last read worked. It reads the state file and signals nothing: running
+ * means the recorded pid is alive and the state is fresh.
+ */
+export function petRow(
+  opts: { now?: number; plist?: string; binary?: string; alive?: (pid: number) => boolean; platform?: NodeJS.Platform } = {},
+): { check: string; status: 'ok' | 'warn' | 'skip'; detail: string } {
+  const now = opts.now ?? Date.now();
+  const alive = opts.alive ?? processAlive;
+  const agent = fs.existsSync(opts.plist ?? petPlistFile());
+  const binary = fs.existsSync(opts.binary ?? petBinaryHome());
+  const installed = agent ? 'installed' : binary ? 'binary installed, no login agent' : 'not installed';
+  const state = readPetState();
+  if (!state) {
+    if ((opts.platform ?? process.platform) !== 'darwin' && !agent && !binary) {
+      return { check: 'pet', status: 'skip', detail: 'macOS only' };
+    }
+    return agent || binary
+      ? { check: 'pet', status: 'warn', detail: `${installed}; not running (no ${petStateFile()} — or a pet older than this CLI)` }
+      : { check: 'pet', status: 'skip', detail: 'not installed (`lobstah pet install`)' };
+  }
+  const age = now - Date.parse(state.at);
+  const running = alive(state.pid) && age < PET_STATE_STALE_MS;
+  const last = state.ok
+    ? `last read worked ${ago(age)} (\`lobstah ${state.command ?? '?'}\`, ${state.items ?? 0} walking)`
+    : `last read failed ${ago(age)}, ${state.consecutiveFailures} in a row: ${state.reason ?? 'unknown'}; ` +
+      (state.lastOkAt ? `last worked ${ago(now - Date.parse(state.lastOkAt))}` : 'never worked');
+  if (!running) {
+    const why = alive(state.pid) ? `pid ${state.pid} has not read for ${ago(age).replace(' ago', '')}` : 'not running';
+    return { check: 'pet', status: agent || binary ? 'warn' : 'skip', detail: `${installed}; ${why}; ${last}` };
+  }
+  return { check: 'pet', status: state.ok ? 'ok' : 'warn', detail: `${installed}; running (pid ${state.pid}); ${last}` };
+}
