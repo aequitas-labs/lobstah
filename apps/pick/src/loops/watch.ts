@@ -10,11 +10,14 @@ import {
   lastEventAt,
   listWatches,
   markFollowUp,
+  markWatchSeen,
   pendingWatchEvents,
   postNotice,
   readWatch,
   readWatchEvents,
   readStatusLog,
+  readEvidence,
+  readPr,
   reconcile,
   removeWatch,
   runWatchCheck,
@@ -70,23 +73,29 @@ function isTerminal(id: string): boolean {
  * the latest session in the chain with the buffered events as its brief. One
  * continuation in flight per watch — further events buffer until it finishes.
  */
-function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => void): boolean {
+function spawnContinuation(
+  w: Watch,
+  pending: WatchEvent[],
+  log: (m: string) => void,
+  fixedBrief?: string,
+  targetOverride?: string,
+): string | undefined {
   const owner = w.owner.slice('dispatch:'.length);
-  const target = w.lastFollowUpId && !laneOf(w.lastFollowUpId) ? owner : (w.lastFollowUpId ?? owner);
+  const target = targetOverride ?? (w.lastFollowUpId && !laneOf(w.lastFollowUpId) ? owner : (w.lastFollowUpId ?? owner));
   const targetLane = laneOf(target);
   if (!targetLane) {
     log(`watch ${w.key}: owner dispatch ${target} is gone — dropping watch`);
     removeWatch(w.key);
-    return false;
+    return undefined;
   }
   const descriptor = descriptorOf(target, targetLane);
   if (!descriptor) {
     log(`watch ${w.key}: no descriptor for ${target} — dropping watch`);
     removeWatch(w.key);
-    return false;
+    return undefined;
   }
   const id = randomUUID();
-  const brief = (w.brief ?? DEFAULT_BRIEF)
+  const brief = (fixedBrief ?? w.brief ?? DEFAULT_BRIEF)
     .replaceAll('{key}', w.key)
     .replaceAll('{summaries}', pending.map((e) => `- ${e.summary ?? `event ${String(e.seq)}`}`).join('\n'))
     .replaceAll('{events}', JSON.stringify(pending, null, 2));
@@ -95,18 +104,17 @@ function spawnContinuation(w: Watch, pending: WatchEvent[], log: (m: string) => 
   // running beside it. Addressed bait is sticky: if the trap ghosts, the
   // orphan surfaces as a helm notice rather than falling to the daemon.
   const claim = readSessionClaim(target, targetLane);
-  const claimant = claim?.by.startsWith('wt:') ? claim.by.slice('wt:'.length) : undefined;
+  const deliveredTo = readEvidence(target, targetLane).deliveredTo;
+  const trapAddress = claim?.by.startsWith('wt:') ? claim.by : deliveredTo?.startsWith('wt:') ? deliveredTo : undefined;
+  const claimant = trapAddress?.slice('wt:'.length);
   const live = claimant !== undefined && readTrap(claimant) !== undefined;
-  enqueue(
-    { id, repo: descriptor.repo, brief, followUp: target, ...(live ? { for: claim!.by } : {}) },
-    'work',
-  );
+  enqueue({ id, repo: descriptor.repo, brief, followUp: target, ...(live ? { for: trapAddress } : {}) }, 'work');
   markFollowUp(w.key, id, readWatchEvents(w.key).length);
   log(
     `watch ${w.key}: ${pending.length} event(s) → continuation ${id} ` +
       (live ? `(addressed to soaking ${claimant!.slice(0, 8)})` : `(forks ${target})`),
   );
-  return true;
+  return id;
 }
 
 /** [watch].maxForksPerCycle; a bad value falls back to the default of 3. */
@@ -137,9 +145,15 @@ function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotifica
  * it forks nothing until `lobstah watch release`. A held watch is skipped.
  */
 export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPerCycle()): void {
+  // The daemon owns PR repair delivery. Pickup only delivers generic watches.
   let forks = 0;
+  const autoRepair = loadConfig().watch.autoRepair;
   const held: string[] = [];
   for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
+    if (autoRepair && watch.key.startsWith('pr:') && readPr(watch.key)) {
+      markWatchSeen(watch.key);
+      continue;
+    }
     if (watch.heldAt) continue; // waits for `lobstah watch release`
     if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // one continuation in flight
     if (forks >= cap) {
@@ -173,7 +187,10 @@ export async function watchLoop(
   log: (m: string) => void,
   notify: (n: ReportNotification) => void = () => {},
 ): Promise<void> {
+  const autoRepair = loadConfig().watch.autoRepair;
   for (const w of listWatches()) {
+    // The daemon observes and repairs dispatch-owned PRs when auto-repair is on.
+    if (autoRepair && w.key.startsWith('pr:') && w.owner.startsWith('dispatch:')) continue;
     if (watchDue(w, defaultEverySecs)) {
       const { watch, fresh } = runWatchCheck(w);
       if (watch.lastError) log(watchFailureLogLine(watch));

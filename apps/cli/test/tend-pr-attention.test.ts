@@ -13,10 +13,15 @@ import {
   loadConfig,
   markFollowUp,
   mergeEvidence,
+  readPr,
+  upsertPr,
+  writePr,
 } from '@lobstah/core';
 import type { PrEvidence } from '@lobstah/core';
-import { buildTendReport, landedCatches, onTheHook, prKinds, readyBlockedByStack, renderTend } from '../src/tend.js';
+import { buildTendReport, humanPrAttention, landedCatches, onTheHook, prKinds, readyBlockedByStack, renderTend } from '../src/tend.js';
 import { advanceCursor } from '../src/reported.js';
+import { deriveGlassPrs } from '../src/glass-prs.js';
+import { stampRepairerBeat } from '../src/pr-repair.js';
 
 let home: string;
 beforeEach(() => {
@@ -73,6 +78,7 @@ describe('attention kinds — stand and clear', () => {
   });
 
   it('pr:draft stands while open and draft; clears on ready for review or merge', () => {
+    config('attentionKinds = ["pr:draft"]\n');
     prDispatch({ draft: true });
     const r = buildTendReport();
     expect(r.attention).toEqual([
@@ -89,7 +95,11 @@ describe('attention kinds — stand and clear', () => {
   it('pr:review stands on unresolved threads or changes requested; clears when both are gone', () => {
     prDispatch({ review: { unresolvedThreads: 1, changesRequested: false } });
     expect(buildTendReport().attention).toEqual([
-      expect.objectContaining({ kind: 'pr:review', note: '#9 review: 1 unresolved', review: { unresolvedThreads: 1, changesRequested: false } }),
+      expect.objectContaining({
+        kind: 'pr:review',
+        note: '#9 review: 1 unresolved',
+        review: { unresolvedThreads: 1, changesRequested: false },
+      }),
     ]);
     restamp({ review: { unresolvedThreads: 0, changesRequested: true } });
     expect(kinds()).toEqual(['pr:review']);
@@ -126,7 +136,12 @@ describe('attention kinds — stand and clear', () => {
     prDispatch({ ...green, mergeStateStatus: 'DIRTY', baseRefName: 'main' });
     const r = buildTendReport();
     expect(r.attention).toEqual([
-      expect.objectContaining({ kind: 'pr:conflict', note: '#9 conflicts with main', mergeStateStatus: 'DIRTY', prUrl: URL_ }),
+      expect.objectContaining({
+        kind: 'pr:conflict',
+        note: '#9 conflicts with main — not owned by lobstah',
+        mergeStateStatus: 'DIRTY',
+        prUrl: URL_,
+      }),
     ]);
     expect(r.verdict).not.toBe('needs-attention');
     restamp({ ...green, mergeStateStatus: 'BEHIND' });
@@ -149,15 +164,22 @@ describe('attention kinds — stand and clear', () => {
     const green = { checks: { total: 1, passed: 1, failed: 0, pending: 0 } };
     expect(prKinds(pr({ ...green, mergeStateStatus: 'HAS_HOOKS' }))).toEqual(['pr:ready']);
     expect(prKinds(pr({ ...green, mergeStateStatus: 'UNSTABLE' }))).toEqual(['pr:ready']);
-    expect(prKinds(pr({ checks: { total: 1, passed: 0, failed: 1, pending: 0 }, mergeStateStatus: 'DIRTY', review: { unresolvedThreads: 1, changesRequested: false } })))
-      .toEqual(['pr:review', 'pr:checks', 'pr:conflict']);
+    expect(
+      prKinds(
+        pr({
+          checks: { total: 1, passed: 0, failed: 1, pending: 0 },
+          mergeStateStatus: 'DIRTY',
+          review: { unresolvedThreads: 1, changesRequested: false },
+        }),
+      ),
+    ).toEqual(['pr:review', 'pr:checks', 'pr:conflict']);
     expect(prKinds(pr({ ...green, draft: true, mergeStateStatus: 'DIRTY' }))).toEqual(['pr:draft', 'pr:conflict']);
   });
 
   it('pr:checks stands on a failed check at the head; clears on green or merge', () => {
     prDispatch({ checks: { total: 2, passed: 1, failed: 1, pending: 0 } });
     expect(buildTendReport().attention).toEqual([
-      expect.objectContaining({ kind: 'pr:checks', note: '#9 checks 1/2 failed', headSha: 'abc1234' }),
+      expect.objectContaining({ kind: 'pr:checks', note: '#9 checks 1/2 failed — not owned by lobstah', headSha: 'abc1234' }),
     ]);
     restamp({ checks: { total: 2, passed: 2, failed: 0, pending: 0 } });
     expect(kinds()).toEqual(['pr:ready']); // green on the head: checks clears, ready stands
@@ -165,15 +187,15 @@ describe('attention kinds — stand and clear', () => {
     expect(kinds()).toEqual([]);
   });
 
-  it('pr:ready stands when approved or all green with none pending; clears on merge or close', () => {
-    prDispatch({ reviewDecision: 'APPROVED' }); // one check still pending — approval suffices
-    expect(kinds()).toEqual(['pr:ready']);
+  it('pr:ready needs all checks complete, even when approved; clears on merge or close', () => {
+    prDispatch({ reviewDecision: 'APPROVED' }); // one check still pending
+    expect(kinds()).toEqual([]);
     restamp({ reviewDecision: '', checks: { total: 2, passed: 1, failed: 0, pending: 1 } });
     expect(kinds()).toEqual([]); // not approved, a check pending
     restamp({ checks: { total: 2, passed: 2, failed: 0, pending: 0 } });
     expect(kinds()).toEqual(['pr:ready']);
     restamp({ checks: { total: 2, passed: 2, failed: 0, pending: 0 }, draft: true });
-    expect(kinds()).toEqual(['pr:draft']); // a draft is never ready
+    expect(kinds()).toEqual([]); // a draft is never ready or attention by default
     restamp({ checks: { total: 2, passed: 2, failed: 0, pending: 0 }, state: 'CLOSED' });
     expect(kinds()).toEqual([]);
   });
@@ -234,6 +256,7 @@ describe('the on-the-hook rule', () => {
   });
 
   it('a watch fix continuation in flight suppresses pr:checks; it reappears when that dispatch finishes unfixed', () => {
+    config('attentionKinds = ["pr:draft", "pr:checks"]\n[watch]\nautoRepair = false\n');
     prDispatch({ checks: { total: 2, passed: 1, failed: 1, pending: 0 }, draft: true });
     addWatch('pr:acme/web#9', 'true', { owner: `dispatch:${P}` });
     enqueue({ id: FIX, repo: 'web', brief: 'fix CI', followUp: P }, 'work');
@@ -263,8 +286,13 @@ describe('the on-the-hook rule', () => {
 });
 
 describe('attentionKinds (config.toml)', () => {
-  it('defaults to everything but landed', () => {
-    expect(loadConfig().attentionKinds).toEqual(['question', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready']);
+  it('defaults to human-actionable kinds, excluding drafts', () => {
+    expect(loadConfig().attentionKinds).toEqual(['question', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks']);
+  });
+
+  it('honors a user list including draft unchanged', () => {
+    config('attentionKinds = ["pr:draft", "question"]\n');
+    expect(loadConfig().attentionKinds).toEqual(['pr:draft', 'question']);
   });
 
   it('filters what tend shows', () => {
@@ -285,5 +313,94 @@ describe('attentionKinds (config.toml)', () => {
   it('prKinds is pure over one observation', () => {
     expect(prKinds(pr({ draft: true, checks: { total: 1, passed: 0, failed: 1, pending: 0 } }))).toEqual(['pr:draft', 'pr:checks']);
     expect(prKinds(pr({ checks: { total: 0, passed: 0, failed: 0, pending: 0 } }))).toEqual([]); // no checks, no approval: not ready
+  });
+});
+
+describe('human-only PR attention', () => {
+  it('shows a conflict until a live repairer claims it, then shows the give-up reason', () => {
+    const conflict = pr({ mergeStateStatus: 'DIRTY' });
+    prDispatch(conflict);
+    upsertPr(conflict, P);
+    addWatch('pr:acme/web#9', 'echo {}', { owner: `dispatch:${P}` });
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:conflict')?.note).toContain('no repairer is running');
+    stampRepairerBeat();
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:conflict')?.note).toContain('repair not yet claimed');
+    const record = readPr('pr:acme/web#9')!;
+    writePr({
+      ...record,
+      repair: { headSha: conflict.headSha, kind: 'conflict', status: 'repairing', attempts: 1, maxAttempts: 2, dispatchId: FIX },
+    });
+    enqueue({ id: FIX, repo: 'web', brief: 'repair', followUp: P }, 'work');
+    expect(kinds()).not.toContain('pr:conflict');
+    expect(renderTend(buildTendReport())).toContain('repairing: conflict (attempt 1 of 2)');
+    expect(deriveGlassPrs([], [], [readPr('pr:acme/web#9')!]).prs[0]?.badge.text).toBe('repairing: conflict (attempt 1 of 2)');
+    appendStatus(FIX, 'work', 'done', 'attempt finished');
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:conflict')?.note).toContain('repair awaiting next observation');
+    writePr({
+      ...record,
+      repair: {
+        headSha: conflict.headSha,
+        kind: 'conflict',
+        status: 'gave-up',
+        attempts: 2,
+        maxAttempts: 2,
+        reason: 'repair limit reached (2 of 2)',
+      },
+    });
+    const attention = buildTendReport().attention.find((a) => a.kind === 'pr:conflict');
+    expect(attention?.note).toContain('repair limit reached (2 of 2)');
+    expect(renderTend(buildTendReport())).toContain('repair limit reached (2 of 2)');
+  });
+
+  it('shows blocked repairs with a person-commit note and old behavior when autoRepair is off', () => {
+    const conflict = pr({ mergeStateStatus: 'DIRTY' });
+    prDispatch(conflict);
+    upsertPr(conflict, P);
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:conflict')?.note).toContain('no active PR watch');
+    const record = readPr('pr:acme/web#9')!;
+    writePr({
+      ...record,
+      repair: {
+        headSha: conflict.headSha,
+        kind: 'conflict',
+        status: 'blocked',
+        attempts: 0,
+        reason: 'person commits since the last lobstah commit',
+      },
+    });
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:conflict')?.note).toContain('person commits');
+    config('[watch]\nautoRepair = false\n');
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:conflict')?.note).toContain('auto-repair is off');
+  });
+
+  it('routes requested changes on an owned PR to repair, but leaves review questions on deck', () => {
+    const requested = pr({ review: { changesRequested: true, unresolvedThreads: 2 } });
+    prDispatch(requested);
+    upsertPr(requested, P);
+    addWatch('pr:acme/web#9', 'echo {}', { owner: `dispatch:${P}` });
+    expect(kinds()).toContain('pr:review');
+    stampRepairerBeat();
+    const record = readPr('pr:acme/web#9')!;
+    writePr({ ...record, repair: { headSha: requested.headSha, kind: 'review', status: 'repairing', attempts: 1, dispatchId: FIX } });
+    enqueue({ id: FIX, repo: 'web', brief: 'repair', followUp: P }, 'work');
+    expect(kinds()).not.toContain('pr:review');
+    const question = { ...readPr('pr:acme/web#9')!, review: { changesRequested: false, unresolvedThreads: 1 } };
+    expect(humanPrAttention(question, 'pr:review', loadConfig())).toEqual({ show: true });
+    writePr(question);
+    expect(kinds()).toContain('pr:review');
+  });
+
+  it('keeps an addressed repair visible when its trap is not listening', () => {
+    const failed = pr({ checks: { total: 1, passed: 0, failed: 1, pending: 0 } });
+    prDispatch(failed);
+    upsertPr(failed, P);
+    addWatch('pr:acme/web#9', 'echo {}', { owner: `dispatch:${P}` });
+    enqueue({ id: FIX, repo: 'web', brief: 'repair', followUp: P, for: 'wt:gone' }, 'work');
+    markFollowUp('pr:acme/web#9', FIX, 0);
+    const record = readPr('pr:acme/web#9')!;
+    writePr({ ...record, repair: { headSha: failed.headSha, kind: 'checks', status: 'repairing', attempts: 1, dispatchId: FIX } });
+    stampRepairerBeat();
+    const attention = buildTendReport().attention.find((a) => a.kind === 'pr:checks');
+    expect(attention?.note).toContain('trap wt:gone not listening');
   });
 });

@@ -37,7 +37,9 @@ export const PR_VIEW_FIELDS =
   'state,isDraft,headRefOid,baseRefName,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
 
 /** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
-export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',').filter((f) => f !== 'statusCheckRollup').join(',');
+export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',')
+  .filter((f) => f !== 'statusCheckRollup')
+  .join(',');
 
 /** GitHub's answer when an App installation (or fine-grained token) lacks a permission. */
 const FORBIDDEN = /resource not accessible by (integration|personal access token)/i;
@@ -53,6 +55,11 @@ export interface GhRollupItem {
   context?: string;
   state?: string;
   targetUrl?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt?: string;
+  workflowName?: string;
+  app?: { name?: string; slug?: string };
 }
 
 /** One entry of `gh pr view --json reviews` — only the fields the check reads (never the body). */
@@ -90,8 +97,9 @@ export interface GhPrView {
   checksError?: string;
 }
 
-type Outcome = 'passed' | 'failed' | 'pending';
+type Outcome = 'passed' | 'failed' | 'pending' | 'unknown';
 interface Check {
+  key: string;
   name: string;
   /** Completed conclusion (upper-case), or '' while pending. */
   conclusion: string;
@@ -101,11 +109,13 @@ interface Check {
 
 const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const PENDING = new Set(['', 'PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED']);
+const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR']);
 
 function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
-  const out: Check[] = [];
-  for (const c of rollup ?? []) {
+  const latest = new Map<string, { check: Check; at: string; startedAt: string; index: number }>();
+  for (const [index, c] of (rollup ?? []).entries()) {
     const name = c.name ?? c.context ?? '?';
+    const key = [name, c.app?.slug ?? c.app?.name ?? '', c.workflowName ?? ''].join('\0');
     // A CheckRun still running has no conclusion; a StatusContext's state is its verdict.
     const conclusion = (
       c.__typename === 'StatusContext' || (c.conclusion === undefined && c.state !== undefined)
@@ -114,14 +124,44 @@ function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
           ? ''
           : (c.conclusion ?? '')
     ).toUpperCase();
-    const outcome: Outcome = PENDING.has(conclusion) ? 'pending' : PASSED.has(conclusion) ? 'passed' : 'failed';
-    out.push({ name, conclusion: outcome === 'pending' ? '' : conclusion, outcome, detailsUrl: c.detailsUrl ?? c.targetUrl });
+    const outcome: Outcome = PENDING.has(conclusion)
+      ? 'pending'
+      : PASSED.has(conclusion)
+        ? 'passed'
+        : FAILED.has(conclusion)
+          ? 'failed'
+          : 'unknown';
+    const startedAt = c.startedAt ?? c.createdAt ?? '';
+    const at = c.completedAt ?? startedAt;
+    const old = latest.get(key);
+    if (!old || at > old.at || (at === old.at && (startedAt > old.startedAt || (startedAt === old.startedAt && index > old.index)))) {
+      latest.set(key, {
+        check: { key, name, conclusion: outcome === 'pending' ? '' : conclusion, outcome, detailsUrl: c.detailsUrl ?? c.targetUrl },
+        at,
+        startedAt,
+        index,
+      });
+    }
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  return [...latest.values()].map((v) => v.check).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** The evidence `pr` object: the PR's state as last observed. */
 export type PrStandingKind = Extract<AttentionKind, `pr:${string}`>;
+
+export interface PrRepair {
+  headSha: string;
+  kind: 'conflict' | 'checks' | 'review';
+  attempts: number;
+  maxAttempts?: number;
+  status: 'repairing' | 'gave-up' | 'blocked';
+  reason?: string;
+  dispatchId?: string;
+  observationsAtRepair?: number;
+  /** Atomic claim metadata for one repairer. */
+  startedAt?: string;
+  by?: string;
+}
 
 export interface PrEvidence {
   url: string;
@@ -140,7 +180,11 @@ export interface PrEvidence {
    * Check counts. `unknown` is set when the check results could not be read
    * (no permission); the counts are then zero and mean nothing.
    */
-  checks: { total: number; passed: number; failed: number; pending: number; unknown?: 'no permission' };
+  checks: { total: number; passed: number; failed: number; pending: number; unknown?: 'no permission' | 'latest run' };
+  /** Latest failing runs, for a repair brief. */
+  failingChecks?: Array<{ name: string; detailsUrl?: string }>;
+  /** Watch repair state, present in persistent PR records. */
+  repair?: PrRepair;
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
   observedAt: string;
@@ -164,7 +208,16 @@ export function prStandingKinds(pr: PrEvidence): PrStandingKind[] {
   if (failed > 0) out.push('pr:checks');
   if (isConflicting(pr.mergeStateStatus)) out.push('pr:conflict');
   // Unknown checks (no permission to read them) never stand as ready.
-  if (!pr.checks.unknown && !pr.draft && !review && isMergeable(pr.mergeStateStatus) && (pr.reviewDecision === 'APPROVED' || (total > 0 && failed === 0 && pending === 0))) out.push('pr:ready');
+  if (
+    !pr.checks.unknown &&
+    !pr.draft &&
+    !review &&
+    isMergeable(pr.mergeStateStatus) &&
+    failed === 0 &&
+    pending === 0 &&
+    (pr.reviewDecision === 'APPROVED' || total > 0)
+  )
+    out.push('pr:ready');
   return out;
 }
 
@@ -216,8 +269,15 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
       passed: count('passed'),
       failed: count('failed'),
       pending: count('pending'),
-      ...(view.checksError ? { unknown: 'no permission' as const } : {}),
+      ...(view.checksError ? { unknown: 'no permission' as const } : count('unknown') > 0 ? { unknown: 'latest run' as const } : {}),
     },
+    ...(count('failed') > 0
+      ? {
+          failingChecks: checks
+            .filter((c) => c.outcome === 'failed')
+            .map((c) => ({ name: c.name, ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}) })),
+        }
+      : {}),
     review: prReview(view),
     observedAt,
     ...(view.updatedAt ? { updatedAt: view.updatedAt } : {}),
@@ -270,7 +330,7 @@ export interface PrEvent {
 }
 
 export function isFailingConclusion(conclusion: string | undefined): boolean {
-  return !!conclusion && !PASSED.has(conclusion) && !PENDING.has(conclusion);
+  return FAILED.has((conclusion ?? '').toUpperCase());
 }
 
 /**
@@ -310,10 +370,13 @@ export function derivePrEvents(
     d: view.isDraft,
     r: view.reviewDecision ?? '',
     m: view.mergeStateStatus ?? '',
-    c: Object.fromEntries(checks.map((c) => [c.name, c.conclusion])),
+    c: Object.fromEntries(checks.map((c) => [c.key, c.conclusion])),
   };
   const next = encodeCursor(now);
-  const epoch = createHash('sha1').update(cursor ?? '0').digest('hex').slice(0, 10);
+  const epoch = createHash('sha1')
+    .update(cursor ?? '0')
+    .digest('hex')
+    .slice(0, 10);
   const sha7 = view.headRefOid.slice(0, 7);
   const base = { pr: ref.key, url: ref.url, headSha: view.headRefOid };
   const events: PrEvent[] = [];
@@ -327,12 +390,12 @@ export function derivePrEvents(
   const sameHead = prev !== undefined && prev.h === now.h;
   // The first observation of an open PR is the check baseline; a terminal PR has nothing to fix.
   for (const c of prev === undefined || done ? [] : checks) {
-    if (c.outcome === 'pending') continue;
-    if (sameHead && prev!.c[c.name] === c.conclusion) continue;
+    if (c.outcome === 'pending' || c.outcome === 'unknown') continue;
+    if (sameHead && (prev!.c[c.key] ?? prev!.c[c.name]) === c.conclusion) continue;
     const failed = c.outcome === 'failed';
     push(
       'check-completed',
-      `${c.name}:${c.conclusion}`,
+      `${c.key}:${c.conclusion}`,
       `check ${c.name} ${c.conclusion} at ${sha7}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`,
       { name: c.name, conclusion: c.conclusion, detailsUrl: c.detailsUrl },
       !failed,
@@ -466,10 +529,15 @@ export function prBadge(pr: PrEvidence): PrBadge {
   const merge = (pr.mergeStateStatus ?? '').toUpperCase();
   if (pr.state === 'MERGED') return { text: 'merged', tone: 'ok', state: 'merged' };
   if (pr.state === 'CLOSED') return { text: 'closed', tone: 'bad', state: 'closed' };
+  if (pr.repair?.status === 'repairing' && pr.repair.headSha === pr.headSha) {
+    const { kind, attempts, maxAttempts } = pr.repair;
+    return { text: `repairing: ${kind} (attempt ${attempts} of ${maxAttempts ?? 2})`, tone: 'warn', state: 'open' };
+  }
   if (pr.draft) return { text: 'draft', tone: 'dim', state: 'draft' };
   if (merge === 'DIRTY') return { text: 'conflicts', tone: 'bad', state: 'open', merge: 'conflicts' };
   if (failed > 0) return { text: `checks ${failed}/${total} failed`, tone: 'bad', state: 'open' };
-  if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested) return { text: 'changes requested', tone: 'bad', state: 'open' };
+  if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.changesRequested)
+    return { text: 'changes requested', tone: 'bad', state: 'open' };
   const threads = pr.review?.unresolvedThreads ?? 0;
   if (threads > 0) return { text: `${threads} unresolved`, tone: 'warn', state: 'open' };
   if (pr.checks.unknown) return { text: 'checks unknown', tone: 'warn', state: 'open' };

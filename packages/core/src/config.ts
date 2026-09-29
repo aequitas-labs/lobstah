@@ -111,6 +111,14 @@ export interface WatchConfig {
    * `lobstah watch release`.
    */
   maxForksPerCycle: number;
+  /** Repair dispatch-owned PRs before raising check or conflict attention. */
+  autoRepair: boolean;
+  /** Repair PR merge conflicts when autoRepair is on. */
+  conflicts: boolean;
+  /** Repair failed PR checks when autoRepair is on. */
+  checks: boolean;
+  /** Maximum repair follow-ups on one PR head sha. */
+  maxRepairsPerPr: number;
 }
 
 export interface GlassConfig {
@@ -148,8 +156,8 @@ export interface Config {
  */
 export const ATTENTION_KINDS = ['question', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready'] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
-/** Everything but landed, which is opt-in: the digest already carries landings. */
-export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready'];
+/** Human-actionable conditions; drafts and landed catches are opt-in. */
+export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks'];
 
 function parseAttentionKinds(raw: unknown): AttentionKind[] {
   if (raw === undefined) return [...DEFAULT_ATTENTION_KINDS];
@@ -179,7 +187,7 @@ export const DEFAULT_HELM: HelmConfig = {
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
-export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3 };
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,

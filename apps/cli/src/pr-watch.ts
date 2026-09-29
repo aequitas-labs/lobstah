@@ -36,11 +36,10 @@ import { repoOf } from './digest.js';
  * the check subcommand, auto-registration from `report done --pr`, evidence
  * stamping, and observe-only polling for the inline poller.
  *
- * Pick stays the single writer of dispatch-owned watch progress: only a
- * real check run (pick's watch loop, or `man wait` for a man-owned watch)
- * advances a cursor and appends events. The inline poller only observes —
- * it stamps the owner's evidence without advancing the watch cursor; a
- * terminal observation may retire the now-spent watch.
+ * The daemon observes dispatch-owned PRs even without pickup or a helm.
+ * With auto-repair on, its observer is the sole PR state writer; pickup
+ * leaves those PR watches alone. It stamps the owner's evidence without
+ * advancing the watch cursor, and retires a terminal PR watch.
  */
 
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -127,7 +126,11 @@ export function backfillPrWatches(opts: { apply?: boolean } = {}): BackfillRow[]
     const dirs = laneDirs(lane);
     for (const bucket of ['active', 'done'] as const) {
       let ids: string[];
-      try { ids = fs.readdirSync(dirs[bucket]).filter((id) => !id.startsWith('.')); } catch { continue; }
+      try {
+        ids = fs.readdirSync(dirs[bucket]).filter((id) => !id.startsWith('.'));
+      } catch {
+        continue;
+      }
       for (const id of ids) {
         const descriptor = storedDescriptor(id, lane);
         const at = readStatusLog(id, lane).at(-1)?.at ?? '';
@@ -135,14 +138,23 @@ export function backfillPrWatches(opts: { apply?: boolean } = {}): BackfillRow[]
       }
     }
     let files: string[];
-    try { files = fs.readdirSync(dirs.state).filter((f) => f.endsWith('.evidence')); } catch { continue; }
+    try {
+      files = fs.readdirSync(dirs.state).filter((f) => f.endsWith('.evidence'));
+    } catch {
+      continue;
+    }
     for (const file of files) {
       const id = file.slice(0, -'.evidence'.length);
       const ev = readEvidence(id, lane);
       add(ev.prUrl, id);
       if (ev.pr) {
         const ref = parsePrRef(ev.pr.url);
-        add(ev.pr.url, id, ref && !recordKeys.has(ref.key) ? ev.pr.state === 'MERGED' || ev.pr.state === 'CLOSED' : undefined, ev.pr.observedAt);
+        add(
+          ev.pr.url,
+          id,
+          ref && !recordKeys.has(ref.key) ? ev.pr.state === 'MERGED' || ev.pr.state === 'CLOSED' : undefined,
+          ev.pr.observedAt,
+        );
       }
     }
   }
@@ -171,7 +183,9 @@ export function backfillPrWatches(opts: { apply?: boolean } = {}): BackfillRow[]
         }
       }
     }
-    const owner = [...chain].map((id) => members.get(id)).filter((m): m is Member => m !== undefined)
+    const owner = [...chain]
+      .map((id) => members.get(id))
+      .filter((m): m is Member => m !== undefined)
       .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))[0];
     rows.push({ key, action: 'register', owner: owner ? `dispatch:${owner.id}` : 'man' });
     if (apply) addPrWatch(ref, owner ? { forId: owner.id } : {});
@@ -279,7 +293,11 @@ export function pickupOwnsReviewFeedback(forgeRepo: string): boolean {
  * checks, draft, merge state, merged, and closed are evidence (merged and
  * closed also a notice) — never a continuation.
  */
-export function workEvents(ref: PrRef, events: PrEvent[], pickupOwnsReview = pickupOwnsReviewFeedback(`${ref.owner}/${ref.repo}`)): PrEvent[] {
+export function workEvents(
+  ref: PrRef,
+  events: PrEvent[],
+  pickupOwnsReview = pickupOwnsReviewFeedback(`${ref.owner}/${ref.repo}`),
+): PrEvent[] {
   return events.filter((e) => !e.notice && (e.kind !== 'review-decision' || !pickupOwnsReview));
 }
 
@@ -326,13 +344,10 @@ export function pollSecs(): number {
 }
 
 /**
- * The inline poller's observe-only pass over dispatch-owned PR watches:
- * with no pick running, the helm park and `man wait` still keep PR state
- * badges fresh and announce merges. It never stamps lastCheckedAt, never
- * advances a cursor, never appends events — pick sees and forks every
- * event exactly as if this pass had not run. Cadence rides the evidence's
- * own observedAt, which pick's check stamps too, so the two share one
- * gh call per PR per cycle.
+ * The daemon's pass over dispatch-owned PR watches. It keeps state badges
+ * and merge notices current without pickup or a helm. It does not advance
+ * a watch cursor or append events. When auto-repair is off, pickup may still
+ * check these watches; observedAt shares the cadence between the two.
  */
 export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Date.now()): void {
   for (const w of listWatches()) {

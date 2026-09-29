@@ -15,6 +15,7 @@ import {
   prEvidence,
   prReview,
   prStandingKinds,
+  isFailingConclusion,
 } from '../src/pr.js';
 import type { GhPrView, PrEvidence } from '../src/pr.js';
 
@@ -151,6 +152,72 @@ describe('derivePrEvents', () => {
   });
 });
 
+describe('latest check run', () => {
+  const timed = (name: string, conclusion: string, time: number) => ({
+    ...run(name, conclusion),
+    completedAt: `2026-09-28T00:${String(time).padStart(2, '0')}:00Z`,
+    startedAt: `2026-09-28T00:${String(time - 1).padStart(2, '0')}:00Z`,
+  });
+
+  it('counts only the latest Approval Gate run, even when rollup order is mixed', () => {
+    const rollup = [
+      timed('Approval Gate', 'CANCELLED', 3),
+      ...['build', 'lint', 'test', 'typecheck', 'security'].map((n) => timed(n, 'SUCCESS', 4)),
+      timed('Approval Gate', 'SUCCESS', 4),
+      timed('Approval Gate', 'FAILURE', 1),
+      timed('Approval Gate', 'CANCELLED', 2),
+    ];
+    const view = { ...open, mergeStateStatus: 'CLEAN', statusCheckRollup: rollup };
+    const evidence = prEvidence(ref, view, '2026-09-28T01:00:00Z');
+    expect(evidence.checks).toEqual({ total: 6, passed: 6, failed: 0, pending: 0 });
+    expect(prStandingKinds(evidence)).toContain('pr:ready');
+    const prior = derivePrEvents(ref, { ...view, statusCheckRollup: [timed('Approval Gate', 'FAILURE', 1)] }, '0');
+    expect(derivePrEvents(ref, view, prior.cursor).events.filter((e) => e.kind === 'check-completed' && e.name === 'Approval Gate'))
+      .toMatchObject([{ conclusion: 'SUCCESS' }]);
+  });
+
+  it('uses completedAt then startedAt and keeps same names from different apps separate', () => {
+    const checks = [
+      { ...timed('ci', 'FAILURE', 1), app: { slug: 'actions' }, startedAt: '2026-09-28T00:59:00Z' },
+      { ...timed('ci', 'SUCCESS', 2), app: { slug: 'actions' } },
+      { ...timed('ci', 'FAILURE', 3), app: { slug: 'other' } },
+    ];
+    expect(prEvidence(ref, { ...open, statusCheckRollup: checks }, '2026-09-28T01:00:00Z').checks)
+      .toEqual({ total: 2, passed: 1, failed: 1, pending: 0 });
+    const first = derivePrEvents(ref, { ...open, statusCheckRollup: checks }, '0');
+    const flipped = checks.map((check) => check.app.slug === 'other' ? { ...check, conclusion: 'SUCCESS', completedAt: '2026-09-28T00:04:00Z' } : check);
+    expect(derivePrEvents(ref, { ...open, statusCheckRollup: flipped }, first.cursor).events.filter((e) => e.kind === 'check-completed'))
+      .toMatchObject([{ name: 'ci', conclusion: 'SUCCESS' }]);
+  });
+
+  it('treats cancelled and stale latest runs as unknown, never as failures or ready', () => {
+    for (const conclusion of ['CANCELLED', 'STALE']) {
+      const view = { ...open, mergeStateStatus: 'CLEAN', statusCheckRollup: [timed('ci', conclusion, 2)] };
+      const evidence = prEvidence(ref, view, '2026-09-28T01:00:00Z');
+      expect(evidence.checks).toEqual({ total: 1, passed: 0, failed: 0, pending: 0, unknown: 'latest run' });
+      expect(prStandingKinds(evidence)).not.toContain('pr:checks');
+      expect(prStandingKinds(evidence)).not.toContain('pr:ready');
+      expect(isFailingConclusion(conclusion)).toBe(false);
+      const cursor = derivePrEvents(ref, open, '0').cursor;
+      expect(derivePrEvents(ref, view, cursor).events.filter((e) => e.kind === 'check-completed')).toEqual([]);
+    }
+    for (const conclusion of ['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']) {
+      expect(isFailingConclusion(conclusion)).toBe(true);
+    }
+    for (const conclusion of ['SUCCESS', 'NEUTRAL', 'SKIPPED']) expect(isFailingConclusion(conclusion)).toBe(false);
+  });
+
+  it('a newer in-progress run supersedes an older completed run', () => {
+    const view = { ...open, mergeStateStatus: 'CLEAN', statusCheckRollup: [
+      timed('ci', 'SUCCESS', 2),
+      { ...run('ci', null, 'IN_PROGRESS'), startedAt: '2026-09-28T00:03:00Z' },
+    ] };
+    const evidence = prEvidence(ref, view, '2026-09-28T01:00:00Z');
+    expect(evidence.checks).toEqual({ total: 1, passed: 0, failed: 0, pending: 1 });
+    expect(prStandingKinds(evidence)).not.toContain('pr:ready');
+  });
+});
+
 describe('prBadge — one derivation for tend, catch, and glass', () => {
   const at = '2026-09-23T03:00:00Z';
   const ev = (v: Partial<GhPrView>): PrEvidence => prEvidence(ref, { ...open, ...v }, at);
@@ -193,6 +260,12 @@ describe('prBadge — one derivation for tend, catch, and glass', () => {
   it('counts checks, with a StatusContext judged by its state', () => {
     const pr = ev({ statusCheckRollup: [run('a', 'SUCCESS'), { __typename: 'StatusContext', context: 'ci/legacy', state: 'PENDING' }, run('c', 'TIMED_OUT')] });
     expect(pr.checks).toEqual({ total: 3, passed: 1, failed: 1, pending: 1 });
+  });
+
+  it('shows the current repair attempt instead of a conflict badge', () => {
+    const evidence = ev({ mergeStateStatus: 'DIRTY' });
+    expect(prBadge({ ...evidence, repair: { headSha: evidence.headSha, kind: 'conflict', attempts: 1, maxAttempts: 2, status: 'repairing' } }).text)
+      .toBe('repairing: conflict (attempt 1 of 2)');
   });
 });
 

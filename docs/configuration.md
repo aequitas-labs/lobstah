@@ -14,7 +14,7 @@ keys of that section.
 |---|---|---|
 | `notifyCommand` | — | Exec'd by the daemon on wake-worthy status transitions with `LOBSTAH_ID`, `LOBSTAH_LANE`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_AT` in the environment. Fire-and-forget; point it at ntfy, a Slack helper, anything. |
 | `notifyVerbs` | `["needs-decision", "blocked", "done", "failed"]` | Which verbs fire `notifyCommand`. |
-| `attentionKinds` | `["question", "pr:draft", "pr:review", "pr:checks", "pr:conflict", "pr:ready"]` | Which attention kinds `man tend` lists — and so what the desktop pet and the glass walk across the screen. Valid kinds: `question`, `landed` (opt-in), `pr:draft`, `pr:review`, `pr:checks`, `pr:conflict`, `pr:ready`; an unknown kind is a config error naming the valid set. Notify is edge-triggered and fires once per transition; attention is level-triggered and stands until its clear condition ([vocabulary.md](vocabulary.md#attention-contract)). |
+| `attentionKinds` | `["question", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` | Which kinds `man tend`, the glass, and the desktop pet show. `pr:draft` and `landed` are valid opt-in kinds. An explicit list is used unchanged. Unknown kinds are errors. See the [attention contract](vocabulary.md#attention-contract). |
 | `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
 
 ## `[repos.<key>]` — workspace definitions
@@ -107,6 +107,10 @@ send a continuation.
 | Key | Default | Meaning |
 |---|---|---|
 | `maxForksPerCycle` | `3` | The most continuation (CI-fix) dispatches one watch cycle of `lobstah pick` may fork. Each watch over the cap is held: its events stay buffered, `man tend` and `lobstah watch` list it as `held`, one `watch-held` notice names the held watches, and it forks nothing until `lobstah watch release <key>` (or `--all`). |
+| `autoRepair` | `true` | On a dispatch-owned PR, fork a repair follow-up for a conflict, failed current check, or requested review changes. `false` leaves check-event delivery and attention as before. |
+| `conflicts` | `true` | Repair conflicts when `autoRepair` is on. Set `false` to show conflict attention without a repair. |
+| `checks` | `true` | Repair failed current checks when `autoRepair` is on. Set `false` to show check attention without a repair. |
+| `maxRepairsPerPr` | `2` | Maximum repair follow-ups for one PR head SHA. When the limit is reached and the issue remains, `pr:conflict`, `pr:checks`, or `pr:review` attention names the limit. |
 
 ## `[grounds.*]` — helm territories
 

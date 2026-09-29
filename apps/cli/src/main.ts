@@ -112,13 +112,31 @@ import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
-import { glassLines, glassPort, glassStatus, glassUrl, probeGlass, readGlassState, startDetachedGlass, stopGlass } from './glass-lifecycle.js';
+import {
+  glassLines,
+  glassPort,
+  glassStatus,
+  glassUrl,
+  probeGlass,
+  readGlassState,
+  startDetachedGlass,
+  stopGlass,
+} from './glass-lifecycle.js';
 import { installPet, uninstallPet } from './pet.js';
 import { installService, restartService, serviceInstalled, uninstallService } from './service.js';
 import { activeDispatchCounts, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
-import { addPrWatch, autoRegisterPrWatch, backfillPrWatches, observeDispatchPrWatches, pollSecs, runPrCheck, syncPrWatches } from './pr-watch.js';
+import {
+  addPrWatch,
+  autoRegisterPrWatch,
+  backfillPrWatches,
+  observeDispatchPrWatches,
+  pollSecs,
+  runPrCheck,
+  syncPrWatches,
+} from './pr-watch.js';
+import { deliverPrRepairs, stampRepairerBeat } from './pr-repair.js';
 import { inspectSoakSite, readHookStdin } from './soak-site.js';
 import { runBeat } from './beat.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
@@ -407,12 +425,7 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
     if (Date.now() >= deadline) {
       if (plain) {
         console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs, stillSignedOn: true }));
-        console.log(
-          toonHelp([
-            `${rearm}   (no work yet — run this again to keep listening)`,
-            `lobstah stow   (sign off instead)`,
-          ]),
-        );
+        console.log(toonHelp([`${rearm}   (no work yet — run this again to keep listening)`, `lobstah stow   (sign off instead)`]));
         process.exitCode = 3;
       }
       return false;
@@ -426,9 +439,7 @@ function runDueManWatches(): void {
   for (const w of listWatches()) {
     if (w.owner === 'man' && watchDue(w, every)) runWatchCheck(w);
   }
-  // Dispatch-owned PR watches: observe only (evidence + merged notices);
-  // their events stay pick's to fork.
-  observeDispatchPrWatches(every);
+  // The daemon observes dispatch-owned PR watches even with no helm signed on.
 }
 
 function emitNotices(notices: Notice[], sessionId?: string): void {
@@ -664,10 +675,7 @@ async function mainCli(): Promise<void> {
     d.for = address;
     if (d.harness) d.harnessExplicit = true;
     if (d.model) d.modelExplicit = true;
-    const attachments = [
-      ...(inheritedAttachments(d.followUp) ?? []),
-      ...(copyFiles(files, dispatchAttachmentsDir(d.id, lane)) ?? []),
-    ];
+    const attachments = [...(inheritedAttachments(d.followUp) ?? []), ...(copyFiles(files, dispatchAttachmentsDir(d.id, lane)) ?? [])];
     if (attachments.length > 0) d.attachments = attachments;
     d.queuedAt = new Date().toISOString();
     enqueue(d, lane);
@@ -707,9 +715,7 @@ async function mainCli(): Promise<void> {
     }
     case 'ls': {
       const lanes: Lane[] = has('--all') ? ['work', 'chore'] : ['work'];
-      const rows = lanes.flatMap((lane) =>
-        (['queue', 'active', 'done'] as const).flatMap((b) => rowsFor(lane, b)),
-      );
+      const rows = lanes.flatMap((lane) => (['queue', 'active', 'done'] as const).flatMap((b) => rowsFor(lane, b)));
       console.log(toonTable('dispatches', rows, ['id', 'lane', 'bucket', 'state', 'updated', 'waiting', 'activity']));
       console.log(toonHelp(['lobstah status <id>', 'lobstah man tend   (verdict + stories + gates)']));
       break;
@@ -750,7 +756,10 @@ async function mainCli(): Promise<void> {
           state === 'needs-decision' || state === 'blocked'
             ? [`lobstah send ${id} "<answer>"`, `lobstah logs ${id} --follow`]
             : state === 'done' || state === 'failed'
-              ? [`lobstah catch ${id}   (branch, commits, PR)`, `lobstah send ${id} "<instruction>"   (wakes it as a follow-up in its worktree)`]
+              ? [
+                  `lobstah catch ${id}   (branch, commits, PR)`,
+                  `lobstah send ${id} "<instruction>"   (wakes it as a follow-up in its worktree)`,
+                ]
               : [`lobstah logs ${id} --follow`, `lobstah send ${id} "<instruction>"`],
         ),
       );
@@ -768,9 +777,7 @@ async function mainCli(): Promise<void> {
         const lines = raw.split('\n').filter((l) => l.length > 0);
         const LIMIT = 50;
         if (!has('--full') && lines.length > LIMIT) {
-          console.log(
-            `(truncated: last ${LIMIT} of ${lines.length} events — \`lobstah logs ${id} --full\` for all)`,
-          );
+          console.log(`(truncated: last ${LIMIT} of ${lines.length} events — \`lobstah logs ${id} --full\` for all)`);
           for (const l of lines.slice(-LIMIT)) console.log(l);
         } else {
           process.stdout.write(raw);
@@ -798,7 +805,8 @@ async function mainCli(): Promise<void> {
       // --session (anywhere) identifies the sender; the positionals after the
       // target are the message.
       const [target, ...rest] = pos;
-      if (!target || (rest.length === 0 && !has('--attach'))) throw new Error('send requires a target (dispatch id, wt:<trap>, or session:<id>) and a message or --attach <file>');
+      if (!target || (rest.length === 0 && !has('--attach')))
+        throw new Error('send requires a target (dispatch id, wt:<trap>, or session:<id>) and a message or --attach <file>');
       // Sending is steering: with a helm claimed, only the helm steers — a
       // worker processing untrusted content must not be able to instruct a
       // sibling through our own delivery machinery.
@@ -812,7 +820,10 @@ async function mainCli(): Promise<void> {
         let trapId = target.startsWith('wt:') ? target.slice('wt:'.length) : undefined;
         if (!trapId) {
           const t = trapBySession(target.slice('session:'.length));
-          if (!t) throw new Error(`session ${target.slice('session:'.length, 'session:'.length + 8)} is not signed on anywhere — no trap to deliver to`);
+          if (!t)
+            throw new Error(
+              `session ${target.slice('session:'.length, 'session:'.length + 8)} is not signed on anywhere — no trap to deliver to`,
+            );
           trapId = t.trapId;
         }
         const reg = readTrap(trapId);
@@ -836,12 +847,18 @@ async function mainCli(): Promise<void> {
       const noWakeFinished = has('--no-wake') && targetMember.bucket === 'done';
       const active = chain.filter(liveChainMember).at(-1);
       const queued = chain.filter((member) => member.bucket === 'queue').at(-1);
-      const recipient = noWakeFinished ? undefined : active ?? queued;
+      const recipient = noWakeFinished ? undefined : (active ?? queued);
       if (recipient || noWakeFinished) {
         const member = recipient ?? targetMember;
         const attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(member.id, member.lane)) ?? [];
         const block = attachmentBlock(attachments);
-        const name = sendMessage(member.id, member.lane, `[from ${from}]\n${[text, block].filter(Boolean).join('\n\n')}`, from, attachments);
+        const name = sendMessage(
+          member.id,
+          member.lane,
+          `[from ${from}]\n${[text, block].filter(Boolean).join('\n\n')}`,
+          from,
+          attachments,
+        );
         console.log(`delivered: inbox of ${member.id}${member.bucket === 'queue' ? ' (queued)' : ''}`);
         console.log(toonKV({ id: member.id, from, queued: name }));
         if (noWakeFinished) console.log('warning: --no-wake left this message in a finished dispatch; nothing will read it.');
@@ -903,6 +920,25 @@ async function mainCli(): Promise<void> {
         }
       }
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined);
+      // A trap reports from its own checkout; keep its last commit as the
+      // ownership anchor for safe PR-watch repairs after the session moves on.
+      if (verb === 'done') {
+        const claim = readSessionClaim(id, lane);
+        let ownCheckout = false;
+        try {
+          ownCheckout =
+            !!claim?.by.startsWith('wt:') && !!claim.worktree && fs.realpathSync(claim.worktree) === fs.realpathSync(process.cwd());
+        } catch {
+          /* removed checkout */
+        }
+        if (ownCheckout) {
+          const git = (args: string[]) => spawnSync('git', args, { cwd: process.cwd(), encoding: 'utf8', timeout: 10_000 });
+          const head = git(['rev-parse', 'HEAD']);
+          const branch = git(['branch', '--show-current']);
+          if (head.status === 0 && branch.status === 0)
+            mergeEvidence(id, lane, { commits: [head.stdout.trim()], branch: branch.stdout.trim() });
+        }
+      }
       if (prUrl) mergeEvidence(id, lane, { prUrl });
       // A done PR stays observed: CI, review, and merge flow back through its
       // pr: watch instead of lobstah going blind at "PR open".
@@ -982,8 +1018,7 @@ async function mainCli(): Promise<void> {
       const worktree = dispatchWorktree(id, lane).path;
       const cwd = fs.existsSync(worktree) ? worktree : process.cwd();
       // codex may exist only as the SDK's vendored CLI, never on PATH.
-      const invocation =
-        harness === 'codex' ? codexInvocation(['resume', sessionId]) : { file: 'claude', argv: ['--resume', sessionId] };
+      const invocation = harness === 'codex' ? codexInvocation(['resume', sessionId]) : { file: 'claude', argv: ['--resume', sessionId] };
       if (!invocation) throw new Error('no codex CLI found — neither on PATH nor vendored by @openai/codex-sdk');
       if (has('--print')) {
         console.log(toonKV({ id, harness, sessionId, cwd, command: `${invocation.file} ${invocation.argv.join(' ')}` }));
@@ -1086,7 +1121,14 @@ async function mainCli(): Promise<void> {
         console.log(toonHelp([`lobstah send ${id} "<instruction>"   (wakes it as a follow-up in its worktree)`]));
       }
       const attachments = storedDescriptor(id, lane)?.attachments ?? [];
-      if (attachments.length > 0) console.log(toonTable('attachments', attachments.map((a) => ({ ...a })), ['name', 'type', 'bytes', 'path']));
+      if (attachments.length > 0)
+        console.log(
+          toonTable(
+            'attachments',
+            attachments.map((a) => ({ ...a })),
+            ['name', 'type', 'bytes', 'path'],
+          ),
+        );
       break;
     }
     case 'prs': {
@@ -1097,16 +1139,26 @@ async function mainCli(): Promise<void> {
       const now = Date.now();
       const watches = new Map(listWatches().map((w) => [w.key, w]));
       const rows = readPrs().sort((a, b) => prSortAt(b).localeCompare(prSortAt(a)) || a.key.localeCompare(b.key));
-      console.log(toonTable('prs', rows.map((r) => {
-        const watch = watches.get(r.key);
-        const ageMins = Math.max(0, Math.floor((now - Date.parse(prSortAt(r))) / 60_000));
-        return {
-          number: `#${r.number}`, repo: r.repo, state: r.state, badge: prBadge(r).text, draft: r.draft,
-          checks: `${r.checks.passed}/${r.checks.total} passed, ${r.checks.failed} failed, ${r.checks.pending} pending`,
-          observed: Number.isFinite(ageMins) ? `${ageMins}m ago` : 'unknown',
-          watch: watch ? (watch.lastError ? 'error' : watch.done ? 'done' : 'watching') : 'no watch',
-        };
-      }), ['number', 'repo', 'state', 'badge', 'draft', 'checks', 'observed', 'watch']));
+      console.log(
+        toonTable(
+          'prs',
+          rows.map((r) => {
+            const watch = watches.get(r.key);
+            const ageMins = Math.max(0, Math.floor((now - Date.parse(prSortAt(r))) / 60_000));
+            return {
+              number: `#${r.number}`,
+              repo: r.repo,
+              state: r.state,
+              badge: prBadge(r).text,
+              draft: r.draft,
+              checks: `${r.checks.passed}/${r.checks.total} passed, ${r.checks.failed} failed, ${r.checks.pending} pending`,
+              observed: Number.isFinite(ageMins) ? `${ageMins}m ago` : 'unknown',
+              watch: watch ? (watch.lastError ? 'error' : watch.done ? 'done' : 'watching') : 'no watch',
+            };
+          }),
+          ['number', 'repo', 'state', 'badge', 'draft', 'checks', 'observed', 'watch'],
+        ),
+      );
       break;
     }
     case 'cull': {
@@ -1214,11 +1266,14 @@ async function mainCli(): Promise<void> {
           helm: grounds.name,
           man: helmLabel(res.ok),
           session: sessionId,
-          ...(res.ok.tookFrom ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` } : {}),
+          ...(res.ok.tookFrom
+            ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` }
+            : {}),
           ...(res.ok.wakesFrom ? { wakesFrom: `${res.ok.wakesFrom} (older notices are not wakes; \`lobstah man tend\` lists them)` } : {}),
-          note: res.ok.harness === 'claude'
-            ? `arm \`lobstah man wait --session ${sessionId} --timeout 900\` as a background task`
-            : 'Stop hook waits at turn end',
+          note:
+            res.ok.harness === 'claude'
+              ? `arm \`lobstah man wait --session ${sessionId} --timeout 900\` as a background task`
+              : 'Stop hook waits at turn end',
         }),
       );
       console.log(toonHelp([`lobstah man relieve --session ${sessionId}   (step down)`]));
@@ -1282,110 +1337,107 @@ async function mainCli(): Promise<void> {
         groundsName ??= callerHelm.grounds;
       }
       try {
-      const timeoutSecs = Number(opt('--timeout') ?? '0');
-      const deadline = timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : Number.POSITIVE_INFINITY;
-      const emit = (evs: ReturnType<typeof attentionNow>) => {
-        for (const e of evs) {
-          console.log(toonKV({ id: e.id, lane: e.lane, verb: e.entry.verb, note: e.entry.note, at: e.entry.at }));
+        const timeoutSecs = Number(opt('--timeout') ?? '0');
+        const deadline = timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : Number.POSITIVE_INFINITY;
+        const emit = (evs: ReturnType<typeof attentionNow>) => {
+          for (const e of evs) {
+            console.log(toonKV({ id: e.id, lane: e.lane, verb: e.entry.verb, note: e.entry.note, at: e.entry.at }));
+          }
+          const ev = evs[0]!;
+          console.log(
+            `next: run \`lobstah status ${ev.id}\` for full state` +
+              (ev.entry.verb === 'needs-decision' || ev.entry.verb === 'blocked'
+                ? `, answer with \`lobstah send ${ev.id} "<answer>"\``
+                : `, collect the evidence, then \`lobstah send ${ev.id} "<instruction>"\` to wake a follow-up if needed`) +
+              `, then re-arm a background \`lobstah man wait${sid ? ` --session ${sid}` : ''}\`.`,
+          );
+        };
+        const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
+        const consume = !has('--peek');
+        // Grounds-scoped consumption: a helm's wait touches only its own
+        // repos' events and notices — the rest stand for their owner.
+        const groundsScope = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
+        const groundsRepos = groundsScope ? new Set(groundsScope.repos) : undefined;
+        const matchGrounds =
+          groundsRepos !== undefined
+            ? (id: string, lane: Lane) => {
+                const repo = repoOf(id, lane);
+                return repo === undefined || groundsRepos.has(repo);
+              }
+            : undefined;
+        const noticeFilter = groundsRepos !== undefined ? (n: Notice) => n.repo === undefined || groundsRepos.has(n.repo) : undefined;
+        // A helm's cursor starts at its sign-on: older notices and watch
+        // events are consumed without waking. Standing questions and
+        // standing conditions still wake (attentionNow, noticeWakes).
+        const wakes = noticeWakes(callerHelm);
+        const floorMs = wakeFloorMs(callerHelm);
+        runDueManWatches();
+        const standing = attentionNow(consume, remindMs, Date.now(), matchGrounds);
+        const standingWatches = pendingWatchEvents(consume, 'man', Date.now(), floorMs);
+        // Consumed as usual, but a session is never woken by its own action's
+        // notice — the echo carries no news for its author.
+        const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
+        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0) {
+          if (standing.length > 0) emit(standing);
+          if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
+          if (standingNotices.length > 0) emitNotices(standingNotices, sid);
+          break;
         }
-        const ev = evs[0]!;
+        // The periodic report as a peek — the cursor moves only on `man
+        // report`. Silent when nothing changed.
+        const peekDigest = () => {
+          const grounds = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
+          const digest = buildDigest({ cursor: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
+          if (digest.changed) console.log(renderDigest(digest));
+          return digest;
+        };
+        if (!consume) {
+          // --peek is a session-start check, not a park: nothing standing
+          // means return now (exit 0 — nothing timed out).
+          console.log(toonKV({ standing: 'none' }));
+          peekDigest();
+          break;
+        }
+        const baseline = captureWaitBaseline();
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 1500));
+          if (callerHelm) heartbeatHelm(callerHelm.sessionId); // waiting IS liveness
+          const fresh = freshWakeEvents(baseline, undefined, matchGrounds);
+          if (fresh.length > 0) {
+            emit(fresh);
+            return;
+          }
+          runDueManWatches(); // no pick running? this loop is the poller
+          const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
+          if (watched.length > 0) {
+            emitWatchAttention(watched, sid);
+            return;
+          }
+          const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
+          if (freshNotices.length > 0) {
+            emitNotices(freshNotices, sid);
+            return;
+          }
+        }
+        // A quiet timeout still shows the delta since the last report, so a
+        // `man wait` loop doubles as the periodic fleet report. It is a PEEK —
+        // the cursor moves only on `man report`, the explicit acknowledgment —
+        // so a digest lost with a dead background task resurfaces on the next
+        // timeout instead of being marked delivered to nobody. Silent when
+        // nothing changed — the loop should not train its reader to skim.
+        const digest = peekDigest();
+        console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
+        const flags = `${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${groundsName}` : ''}`;
         console.log(
-          `next: run \`lobstah status ${ev.id}\` for full state` +
-            (ev.entry.verb === 'needs-decision' || ev.entry.verb === 'blocked'
-              ? `, answer with \`lobstah send ${ev.id} "<answer>"\``
-              : `, collect the evidence, then \`lobstah send ${ev.id} "<instruction>"\` to wake a follow-up if needed`) +
-            `, then re-arm a background \`lobstah man wait${sid ? ` --session ${sid}` : ''}\`.`,
+          toonHelp([
+            `lobstah man wait --timeout ${timeoutSecs}${flags}   (re-arm and keep waiting)`,
+            ...(digest.changed
+              ? [`lobstah man report${flags}   (acknowledge the delta above once handled — until then it re-surfaces)`]
+              : []),
+          ]),
         );
-      };
-      const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
-      const consume = !has('--peek');
-      // Grounds-scoped consumption: a helm's wait touches only its own
-      // repos' events and notices — the rest stand for their owner.
-      const groundsScope = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
-      const groundsRepos = groundsScope ? new Set(groundsScope.repos) : undefined;
-      const matchGrounds =
-        groundsRepos !== undefined
-          ? (id: string, lane: Lane) => {
-              const repo = repoOf(id, lane);
-              return repo === undefined || groundsRepos.has(repo);
-            }
-          : undefined;
-      const noticeFilter =
-        groundsRepos !== undefined
-          ? (n: Notice) => n.repo === undefined || groundsRepos.has(n.repo)
-          : undefined;
-      // A helm's cursor starts at its sign-on: older notices and watch
-      // events are consumed without waking. Standing questions and
-      // standing conditions still wake (attentionNow, noticeWakes).
-      const wakes = noticeWakes(callerHelm);
-      const floorMs = wakeFloorMs(callerHelm);
-      runDueManWatches();
-      const standing = attentionNow(consume, remindMs, Date.now(), matchGrounds);
-      const standingWatches = pendingWatchEvents(consume, 'man', Date.now(), floorMs);
-      // Consumed as usual, but a session is never woken by its own action's
-      // notice — the echo carries no news for its author.
-      const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
-      if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0) {
-        if (standing.length > 0) emit(standing);
-        if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
-        if (standingNotices.length > 0) emitNotices(standingNotices, sid);
+        process.exitCode = 3; // 2 means a usage mistake; timeout gets its own code
         break;
-      }
-      // The periodic report as a peek — the cursor moves only on `man
-      // report`. Silent when nothing changed.
-      const peekDigest = () => {
-        const grounds = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
-        const digest = buildDigest({ cursor: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
-        if (digest.changed) console.log(renderDigest(digest));
-        return digest;
-      };
-      if (!consume) {
-        // --peek is a session-start check, not a park: nothing standing
-        // means return now (exit 0 — nothing timed out).
-        console.log(toonKV({ standing: 'none' }));
-        peekDigest();
-        break;
-      }
-      const baseline = captureWaitBaseline();
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 1500));
-        if (callerHelm) heartbeatHelm(callerHelm.sessionId); // waiting IS liveness
-        const fresh = freshWakeEvents(baseline, undefined, matchGrounds);
-        if (fresh.length > 0) {
-          emit(fresh);
-          return;
-        }
-        runDueManWatches(); // no pick running? this loop is the poller
-        const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
-        if (watched.length > 0) {
-          emitWatchAttention(watched, sid);
-          return;
-        }
-        const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
-        if (freshNotices.length > 0) {
-          emitNotices(freshNotices, sid);
-          return;
-        }
-      }
-      // A quiet timeout still shows the delta since the last report, so a
-      // `man wait` loop doubles as the periodic fleet report. It is a PEEK —
-      // the cursor moves only on `man report`, the explicit acknowledgment —
-      // so a digest lost with a dead background task resurfaces on the next
-      // timeout instead of being marked delivered to nobody. Silent when
-      // nothing changed — the loop should not train its reader to skim.
-      const digest = peekDigest();
-      console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
-      const flags = `${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${groundsName}` : ''}`;
-      console.log(
-        toonHelp([
-          `lobstah man wait --timeout ${timeoutSecs}${flags}   (re-arm and keep waiting)`,
-          ...(digest.changed
-            ? [`lobstah man report${flags}   (acknowledge the delta above once handled — until then it re-surfaces)`]
-            : []),
-        ]),
-      );
-      process.exitCode = 3; // 2 means a usage mistake; timeout gets its own code
-      break;
       } finally {
         waiter?.stop();
       }
@@ -1443,10 +1495,15 @@ async function mainCli(): Promise<void> {
             // A soak --wait backgrounded just before the turn ended may still be starting.
             const graceSecs = cfg.helm.armGraceSecs;
             if (await awaitWatcher(trapReg.sessionId, 'trap', graceSecs * 1000, trapReg.trapId)) break;
-            console.log(JSON.stringify({ decision: 'block', reason:
-              `Arm the watcher: run \`lobstah soak --wait --timeout 900\` as a background task ` +
-              `(it wakes this session when the fleet needs you), then end your turn. ` +
-              armGraceNote(graceSecs) }));
+            console.log(
+              JSON.stringify({
+                decision: 'block',
+                reason:
+                  `Arm the watcher: run \`lobstah soak --wait --timeout 900\` as a background task ` +
+                  `(it wakes this session when the fleet needs you), then end your turn. ` +
+                  armGraceNote(graceSecs),
+              }),
+            );
             break;
           }
           await soakPark(trapReg.trapId, opt('--timeout'));
@@ -1517,8 +1574,7 @@ async function mainCli(): Promise<void> {
                 return repo === undefined || helmRepos.has(repo);
               }
             : undefined;
-        const helmNoticeFilter =
-          helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
+        const helmNoticeFilter = helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
         // The helm's cursor starts at its sign-on (see `man wait`).
         const helmWakes = noticeWakes(helm);
         const helmFloorMs = wakeFloorMs(helm);
@@ -1529,20 +1585,25 @@ async function mainCli(): Promise<void> {
           const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
           const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
           if (evs.length || watched.length || notices.length) {
-            emit([
-              'A lobstah dispatch, watched source, or fleet notice needs attention:',
-              ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
-              ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
-              ...notices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
-              'Handle the standing item. The Stop hook will enforce a watcher at the next turn end.',
-            ].join('\n'));
+            emit(
+              [
+                'A lobstah dispatch, watched source, or fleet notice needs attention:',
+                ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
+                ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
+                ...notices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
+                'Handle the standing item. The Stop hook will enforce a watcher at the next turn end.',
+              ].join('\n'),
+            );
             break;
           }
           // A wait backgrounded just before the turn ended may still be starting.
           const graceSecs = cfgHaul.helm.armGraceSecs;
           if (await awaitWatcher(hook.session_id, 'man', graceSecs * 1000)) break;
-          emit(`Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
-            '(it wakes this session when the fleet needs you), then end your turn. ' + armGraceNote(graceSecs));
+          emit(
+            `Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
+              '(it wakes this session when the fleet needs you), then end your turn. ' +
+              armGraceNote(graceSecs),
+          );
           break;
         }
         const timeoutSecs = Number(opt('--timeout') ?? '14000');
@@ -1572,9 +1633,7 @@ async function mainCli(): Promise<void> {
         }
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
-          ...watched.flatMap((a) =>
-            a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`),
-          ),
+          ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
           ...fleetNotices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
         ];
         emit(
@@ -1601,9 +1660,7 @@ async function mainCli(): Promise<void> {
       // One extra line when the loaded plugin lags the CLI; silent otherwise.
       const behind = pluginBehindLine(lobstahVersion());
       const context = (await buildBriefContext(hook.session_id, hook.cwd ?? process.cwd())) + (behind ? `\n${behind}` : '');
-      console.log(
-        JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }),
-      );
+      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }));
       break;
     }
     case 'soak': {
@@ -1612,7 +1669,7 @@ async function mainCli(): Promise<void> {
       if (!site) throw new Error('soak must run from inside a git worktree — your working directory is not one');
       if (site.primary) {
         throw new Error(
-          'this is the repo\'s primary checkout — workers never take work here. Create a worktree ' +
+          "this is the repo's primary checkout — workers never take work here. Create a worktree " +
             '(`git worktree add ../<name> -b <branch>`), cd into it, and run soak again from there.',
         );
       }
@@ -1634,7 +1691,9 @@ async function mainCli(): Promise<void> {
       const sameSession = prior?.sessionId === sessionId;
       const resolved = detectHarness({ flag: opt('--harness'), prior: sameSession ? prior?.harness : undefined, sessionId });
       if (!resolved.harness) {
-        throw new UsageError(`cannot tell which harness this session is: ${resolved.reason}. Pass --harness claude|codex.\n\n${usageFor('soak')!}`);
+        throw new UsageError(
+          `cannot tell which harness this session is: ${resolved.reason}. Pass --harness claude|codex.\n\n${usageFor('soak')!}`,
+        );
       }
       const harnessChanged = prior && prior.harness !== resolved.harness ? prior.harness : undefined;
       const res = signOnTrap({
@@ -1666,7 +1725,7 @@ async function mainCli(): Promise<void> {
           note:
             'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
             'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ' +
-            'Never `man wait` (that is the orchestrator\'s command, not yours).',
+            "Never `man wait` (that is the orchestrator's command, not yours).",
         }),
       );
       console.log(
@@ -1681,8 +1740,11 @@ async function mainCli(): Promise<void> {
       // re-running the same soak --wait command.
       if (has('--wait')) {
         const waiter = armWatcher(reg.sessionId, 'trap', reg.trapId);
-        try { await soakPark(reg.trapId, opt('--timeout'), true); }
-        finally { waiter.stop(); }
+        try {
+          await soakPark(reg.trapId, opt('--timeout'), true);
+        } finally {
+          waiter.stop();
+        }
       }
       break;
     }
@@ -1700,7 +1762,7 @@ async function mainCli(): Promise<void> {
         (sessionId !== undefined ? trapBySession(sessionId)?.trapId : undefined);
       if (trapId === undefined) {
         if (quiet) break;
-        throw new Error('nothing to stow here — run from the trap\'s worktree, or pass --wt <trap-id> / --session <id>');
+        throw new Error("nothing to stow here — run from the trap's worktree, or pass --wt <trap-id> / --session <id>");
       }
       // A trap always signs itself off from its own worktree (or its own
       // session id). Stowing someone ELSE's trap is steering — with a
@@ -1776,7 +1838,15 @@ async function mainCli(): Promise<void> {
         if (!hb) process.exitCode = 1;
         break;
       }
-      if (kind === 'daemon') await daemon(Number(opt('--interval') ?? '5000'), console.log, { culler: cliCuller });
+      if (kind === 'daemon')
+        await daemon(Number(opt('--interval') ?? '5000'), console.log, {
+          culler: cliCuller,
+          prWatches: (now, log) => {
+            observeDispatchPrWatches(pollSecs(), now);
+            deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
+            stampRepairerBeat(now);
+          },
+        });
       else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;
     }
@@ -1806,7 +1876,13 @@ async function mainCli(): Promise<void> {
       }
       if (pos[0] === 'status') {
         const status = await glassStatus(requestedPort ?? glassPort());
-        console.log(toonKV({ glass: status.info ? 'running' : 'stopped', port: status.port, ...(status.info ? { ...(status.info.pid ? { pid: status.info.pid } : {}), version: status.info.version } : {}) }));
+        console.log(
+          toonKV({
+            glass: status.info ? 'running' : 'stopped',
+            port: status.port,
+            ...(status.info ? { ...(status.info.pid ? { pid: status.info.pid } : {}), version: status.info.version } : {}),
+          }),
+        );
         break;
       }
       const port = requestedPort ?? glassPort();
@@ -1827,7 +1903,9 @@ async function mainCli(): Promise<void> {
             toonKV({
               service: 'glass',
               restarted: res.command,
-              ...(fresh ? { glass: glassUrl(port), running: `v${info!.version}` } : { glass: `${glassUrl(port)} not answering within ${RESTART_WAIT_MS / 1000}s` }),
+              ...(fresh
+                ? { glass: glassUrl(port), running: `v${info!.version}` }
+                : { glass: `${glassUrl(port)} not answering within ${RESTART_WAIT_MS / 1000}s` }),
             }),
           );
           if (!fresh) process.exitCode = 1;
@@ -1963,8 +2041,20 @@ async function mainCli(): Promise<void> {
         // Explicit migration for PRs in old dispatch history. Dry run unless --apply.
         const apply = has('--apply');
         const rows = backfillPrWatches({ apply });
-        console.log(toonTable('backfill', rows.map((r) => ({ ...r })), ['key', 'action', 'owner']));
-        console.log(toonKV({ applied: apply, register: rows.filter((r) => r.action === 'register').length, retire: rows.filter((r) => r.action === 'retire').length }));
+        console.log(
+          toonTable(
+            'backfill',
+            rows.map((r) => ({ ...r })),
+            ['key', 'action', 'owner'],
+          ),
+        );
+        console.log(
+          toonKV({
+            applied: apply,
+            register: rows.filter((r) => r.action === 'register').length,
+            retire: rows.filter((r) => r.action === 'retire').length,
+          }),
+        );
         if (!apply && rows.length > 0) console.log('dry run — pass --apply to write');
         break;
       }
@@ -2057,9 +2147,7 @@ wallClockSecs      = 3600
           home: path.dirname(configPath()),
           config: configPath(),
           ...(added.length > 0 ? { added: added.join(', ') } : {}),
-          ...(unmarked.length > 0
-            ? { note: `none marked pickable — set pickup = true per [repos.*] (or rerun with --pickup)` }
-            : {}),
+          ...(unmarked.length > 0 ? { note: `none marked pickable — set pickup = true per [repos.*] (or rerun with --pickup)` } : {}),
           reference,
           initialized: true,
         }),

@@ -26,8 +26,10 @@ import {
   prStandingKinds,
   queuedDescriptor,
   readEvidence,
+  readPr,
   readPrs,
   readSessionClaim,
+  readTrap,
   readStatusLog,
   queuedAt,
   readWatch,
@@ -38,13 +40,26 @@ import {
   readHold,
   slotUsage,
 } from '@lobstah/core';
-import type { ActivityView, WaitingView, DiskHold, Config, Descriptor, LandedCatch, Lane, MergeView, PrEvidence, TendAttention, TendAttentionKind } from '@lobstah/core';
+import type {
+  ActivityView,
+  WaitingView,
+  DiskHold,
+  Config,
+  Descriptor,
+  LandedCatch,
+  Lane,
+  MergeView,
+  PrEvidence,
+  TendAttention,
+  TendAttentionKind,
+} from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
+import { liveRepairer } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
@@ -169,9 +184,7 @@ export function onTheHook(
   owners: { reviewRounds: ReadonlySet<string>; watchFollowUp?: string },
 ): string | undefined {
   if (kind !== 'pr:review' && kind !== 'pr:checks') return undefined;
-  return chain.find(
-    (m) => m.bucket !== 'done' && (owners.reviewRounds.has(m.id) || m.id === owners.watchFollowUp),
-  )?.id;
+  return chain.find((m) => m.bucket !== 'done' && (owners.reviewRounds.has(m.id) || m.id === owners.watchFollowUp))?.id;
 }
 
 /** Which pr:* kinds a PR's evidence stands on right now. Pure. */
@@ -183,8 +196,13 @@ export function readyBlockedByStack(pr: PrEvidence, tracked: readonly PrEvidence
   const ref = parsePrRef(pr.url);
   return tracked.some((other) => {
     const parent = parsePrRef(other.url);
-    return other.url !== pr.url && other.state === 'OPEN' && other.headRefName === pr.baseRefName &&
-      ref?.owner === parent?.owner && ref?.repo === parent?.repo;
+    return (
+      other.url !== pr.url &&
+      other.state === 'OPEN' &&
+      other.headRefName === pr.baseRefName &&
+      ref?.owner === parent?.owner &&
+      ref?.repo === parent?.repo
+    );
   });
 }
 
@@ -201,6 +219,43 @@ const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
   'pr:conflict': (pr) => `#${pr.number} conflicts with ${pr.baseRefName ?? 'its base'}`,
   'pr:ready': (pr) => `#${pr.number} ready to merge`,
 };
+
+/** Hide a repairable problem only after a live repairer has claimed safe work. */
+export function humanPrAttention(
+  pr: PrEvidence,
+  kind: TendAttentionKind,
+  cfg: Config,
+  watchAvailable = true,
+  now = Date.now(),
+): { show: boolean; reason?: string } {
+  if (kind !== 'pr:conflict' && kind !== 'pr:checks' && kind !== 'pr:review') return { show: true };
+  const repairableReview = kind === 'pr:review' && pr.review?.changesRequested === true;
+  if (kind === 'pr:review' && !repairableReview) return { show: true }; // unresolved question for a person
+  const enabled = cfg.watch.autoRepair && (kind !== 'pr:conflict' || cfg.watch.conflicts) && (kind !== 'pr:checks' || cfg.watch.checks);
+  if (!enabled) return { show: true, reason: 'auto-repair is off' };
+  const owned = 'dispatches' in pr && Array.isArray(pr.dispatches) && pr.dispatches.length > 0;
+  if (!owned) return { show: true, reason: 'not owned by lobstah' };
+  const matchingRepair =
+    pr.repair?.headSha === pr.headSha &&
+    pr.repair.kind === (kind === 'pr:review' ? 'review' : kind === 'pr:conflict' ? 'conflict' : 'checks');
+  if (matchingRepair && (pr.repair!.status === 'blocked' || pr.repair!.status === 'gave-up'))
+    return { show: true, reason: pr.repair!.reason };
+  if (!watchAvailable) return { show: true, reason: 'no active PR watch' };
+  if (!liveRepairer(now)) return { show: true, reason: 'no repairer is running' };
+  if (!matchingRepair || pr.repair?.status !== 'repairing' || !pr.repair.dispatchId)
+    return { show: true, reason: 'repair not yet claimed' };
+  const queued = queuedDescriptor(pr.repair.dispatchId, 'work');
+  const active = fs.existsSync(path.join(laneDirs('work').active, pr.repair.dispatchId));
+  const last = readStatusLog(pr.repair.dispatchId, 'work').at(-1)?.verb;
+  if ((!queued && !active) || last === 'done' || last === 'failed') return { show: true, reason: 'repair awaiting next observation' };
+  if (queued?.for?.startsWith('wt:')) {
+    const trap = readTrap(queued.for.slice(3));
+    if (!trap || !!trap.claimed || !trap.firstParkedAt || now - Date.parse(trap.heartbeatAt) > cfg.soak.deferSecs * 1000) {
+      return { show: true, reason: `trap ${queued.for} not listening` };
+    }
+  }
+  return { show: false };
+}
 
 /** A dispatch and every follow-up descending from it (work lane), with buckets. */
 function chainOf(root: string): ChainMember[] {
@@ -260,13 +315,15 @@ function observedPrs(records = readPrs(), legacy = evidencePrs()): Array<{ id: s
   for (const r of records) {
     seen.add(r.url);
     const owner = [...r.dispatches].reverse().find((id) => dispatchLane(id) !== undefined);
-    out.push(owner ? { id: owner, lane: dispatchLane(owner)!, pr: r, dispatch: true } : { id: r.key, lane: 'work', pr: r, dispatch: false });
+    out.push(
+      owner ? { id: owner, lane: dispatchLane(owner)!, pr: r, dispatch: true } : { id: r.key, lane: 'work', pr: r, dispatch: false },
+    );
   }
   for (const e of legacy) if (!seen.has(e.pr.url)) out.push({ ...e, dispatch: true });
   return out;
 }
 
-function prAttention(now: number, observed = observedPrs()): TendAttention[] {
+function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()): TendAttention[] {
   const reviewRounds = new Set(
     Object.values(readPickupMap())
       .filter((e) => e.kind === 'review')
@@ -274,13 +331,25 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
   );
   const out: TendAttention[] = [];
   for (const { id, lane, pr, dispatch } of observed) {
-    const kinds = prKinds(pr).filter((kind) => kind !== 'pr:ready' || !readyBlockedByStack(pr, observed.map((x) => x.pr)));
+    const kinds = prKinds(pr).filter(
+      (kind) =>
+        kind !== 'pr:ready' ||
+        !readyBlockedByStack(
+          pr,
+          observed.map((x) => x.pr),
+        ),
+    );
     if (kinds.length === 0) continue;
     const ref = parsePrRef(pr.url);
-    const watchFollowUp = ref ? readWatch(ref.key)?.lastFollowUpId : undefined;
+    const prWatch = ref ? readWatch(ref.key) : undefined;
+    const watchFollowUp = prWatch?.lastFollowUpId;
     const chain = dispatch ? chainOf(id) : [];
     for (const kind of kinds) {
-      if (onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
+      const human = humanPrAttention(pr, kind, cfg, !!prWatch && !prWatch.done, now);
+      if (!human.show) continue;
+      const repairCannotAct =
+        human.reason !== undefined && !['auto-repair is off', 'not owned by lobstah', 'no active PR watch'].includes(human.reason);
+      if (!repairCannotAct && onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
       // Older dispatch evidence has no record; its observation is the best
       // available approximation until a PR record is written.
       const standingSince = pr.standingSince?.[kind] ?? pr.observedAt;
@@ -294,8 +363,8 @@ function prAttention(now: number, observed = observedPrs()): TendAttention[] {
         ageSecs: Math.max(0, Math.round((now - Date.parse(standingSince)) / 1000)),
         at: standingSince,
         standingSince,
-        note: PR_KIND_NOTE[kind]!(pr),
-        repo: dispatch ? repoOf(id, lane) : (ref ? `${ref.owner}/${ref.repo}` : undefined),
+        note: `${PR_KIND_NOTE[kind]!(pr)}${human.reason ? ` — ${human.reason}` : ''}`,
+        repo: dispatch ? repoOf(id, lane) : ref ? `${ref.owner}/${ref.repo}` : undefined,
         prUrl: pr.url,
         number: pr.number,
         state: pr.state,
@@ -397,7 +466,16 @@ export function repoOf(id: string, lane: Lane): string | undefined {
 export interface TendReport {
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
   daemon: { up: boolean; lastHeartbeat?: string };
-  counts: { queued: number; active: number; headlessActive: number; trapActive: number; headlessLimit: number; choresActive: number; done24h: number; failed24h: number };
+  counts: {
+    queued: number;
+    active: number;
+    headlessActive: number;
+    trapActive: number;
+    headlessLimit: number;
+    choresActive: number;
+    done24h: number;
+    failed24h: number;
+  };
   queueWait?: string;
   attention: TendAttention[];
   stories: TendStory[];
@@ -451,8 +529,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
       ? 'queued'
       : displayState({ log, lastEventAt: lastEventAt(id, lane), queued: false, claimedAt });
   const evidence = readEvidence(id, lane);
-  const answered =
-    last && (last.verb === 'needs-decision' || last.verb === 'blocked') ? answeredAt(id, lane, last.at) : undefined;
+  const answered = last && (last.verb === 'needs-decision' || last.verb === 'blocked') ? answeredAt(id, lane, last.at) : undefined;
   return {
     id,
     lane,
@@ -474,6 +551,13 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
 
 /** The chain's newest observed PR state as a badge — the one derivation tend, catch, and glass share. */
 function prStateOf(chain: TendDispatch[]): string | undefined {
+  const record = chain
+    .map((d) => parsePrRef(d.prUrl ?? d.pr?.url ?? ''))
+    .filter((ref) => ref !== undefined)
+    .map((ref) => readPr(ref.key))
+    .filter((pr) => pr !== undefined)
+    .sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
+  if (record) return prBadge(record).text;
   const observed = chain
     .map((d) => d.pr)
     .filter((p): p is PrEvidence => p !== undefined)
@@ -613,11 +697,7 @@ export function buildTendReport(now = Date.now()): TendReport {
   const hold = readHold();
   // A hold is the daemon choosing not to claim, not claiming broken.
   const stalled =
-    !hold &&
-    daemonUp &&
-    unaddressedQueued.length > 0 &&
-    slots.headless < cfg.limits.maxConcurrent &&
-    oldestQueuedAge > CLAIM_STALE_MS;
+    !hold && daemonUp && unaddressedQueued.length > 0 && slots.headless < cfg.limits.maxConcurrent && oldestQueuedAge > CLAIM_STALE_MS;
 
   let queueWait: string | undefined;
   if (unaddressedQueued.length > 0 && slots.headless >= cfg.limits.maxConcurrent) {
@@ -680,12 +760,17 @@ export function buildTendReport(now = Date.now()): TendReport {
   const legacy = evidencePrs();
   const observed = observedPrs(records, legacy);
   const byPrUrl = new Map(observed.map(({ pr }) => [pr.url, prSortAt(pr)]));
-  const prStories = stories.filter((s) => s.prUrl).sort((a, b) =>
-    (byPrUrl.get(b.prUrl!) ?? '').localeCompare(byPrUrl.get(a.prUrl!) ?? ''));
+  const prStories = stories.filter((s) => s.prUrl).sort((a, b) => (byPrUrl.get(b.prUrl!) ?? '').localeCompare(byPrUrl.get(a.prUrl!) ?? ''));
   let prIndex = 0;
-  stories.forEach((s, i) => { if (s.prUrl) stories[i] = prStories[prIndex++]!; });
-  const stacks = deriveGlassPrs(legacy.map(({ id, pr }) => ({ id, pr })), [], records).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed));
+  stories.forEach((s, i) => {
+    if (s.prUrl) stories[i] = prStories[prIndex++]!;
+  });
+  const stacks = deriveGlassPrs(
+    legacy.map(({ id, pr }) => ({ id, pr })),
+    [],
+    records,
+  ).stacks.filter((s) => s.open);
+  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg));
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
@@ -701,8 +786,7 @@ export function buildTendReport(now = Date.now()): TendReport {
   );
   // Attention is a queue of standing conditions. Observation recency only
   // orders the separate PR views, never the pets or this queue.
-  attention.sort((a, b) => (a.standingSince ?? a.at ?? '').localeCompare(b.standingSince ?? b.at ?? '') ||
-    a.key.localeCompare(b.key));
+  attention.sort((a, b) => (a.standingSince ?? a.at ?? '').localeCompare(b.standingSince ?? b.at ?? '') || a.key.localeCompare(b.key));
 
   const verdict: TendReport['verdict'] = !daemonUp
     ? 'daemon-down'
@@ -742,8 +826,16 @@ export function buildTendReport(now = Date.now()): TendReport {
   return {
     verdict,
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
-    counts: { queued: queued.length, active: active.length, headlessActive: slots.headless, trapActive: slots.traps,
-      headlessLimit: cfg.limits.maxConcurrent, choresActive, done24h, failed24h },
+    counts: {
+      queued: queued.length,
+      active: active.length,
+      headlessActive: slots.headless,
+      trapActive: slots.traps,
+      headlessLimit: cfg.limits.maxConcurrent,
+      choresActive,
+      done24h,
+      failed24h,
+    },
     queueWait,
     attention,
     stories,

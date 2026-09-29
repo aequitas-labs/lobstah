@@ -405,3 +405,12 @@ export function markFollowUp(key: string, followUpId: string, deliveredThrough: 
   if (w.done) removeWatch(w.key);
   else writeWatch(w);
 }
+
+/** Consume PR watch events handled by the repair planner without a generic continuation. */
+export function markWatchSeen(key: string): void {
+  const w = readWatch(key);
+  if (!w) return;
+  w.seen = readWatchEvents(key).length;
+  w.seenAt = Date.now();
+  writeWatch(w);
+}
