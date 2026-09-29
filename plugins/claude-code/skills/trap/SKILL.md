@@ -14,7 +14,7 @@ work; the helm judges the catch.
 ```
 lobstah soak                  # sign on; prints your wt:<trap> address and worktree
 lobstah soak --repo <key>     # outside any repo: create a worktree for that repo
-lobstah soak --link <url>     # record this session's link for Open window
+lobstah soak --link <url>     # record this session's link for the glass's ↗ open button
 lobstah soak --one            # sign off after the first finished catch
 lobstah soak --wait           # hookless: listen now; exit 3 = quiet, run again
 lobstah stow                  # sign off; removes the worktree soak created

@@ -83,7 +83,7 @@ export function prBadgeClass(b: Partial<PrBadge> | undefined | null): string {
   return state === 'open' && b.tone && b.tone !== 'ok' ? b.tone : 'pr-' + state;
 }
 
-export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'prs', 'notices'] as const;
+export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'prs', 'reports', 'notices'] as const;
 export type GlassTab = (typeof GLASS_TABS)[number];
 
 export function tabFromHash(hash: string | undefined | null): GlassTab {
@@ -115,6 +115,21 @@ export function modalFromHash(hash: string | undefined | null): ModalRef | null 
 export function dispatchReport(d: Pick<GlassSnapshot, 'reports'>, x: Pick<GlassDispatch, 'lane' | 'id'>): GlassReport | undefined {
   return (d.reports || []).find((r) => r.key === `report:${x.lane}:${x.id}`);
 }
+
+/**
+ * Who a report is from, as its meta line says it: a trap's name, a headless
+ * dispatch's id (first 8), or nothing for the helm's own report.
+ */
+export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>): string {
+  if (r.author === 'helm') return '';
+  if (r.trap) return r.trap;
+  if (r.author === 'headless') return r.dispatch ? r.dispatch.slice(0, 8) : '';
+  return r.author;
+}
+
+/** Reports in list order: unacked first, then newest first. */
+export const reportOrder = (a: GlassReport, b: GlassReport): number =>
+  Number(!!a.acked) - Number(!!b.acked) || b.filedAt.localeCompare(a.filedAt);
 
 /** Where a report's markdown and images are served (glass.ts serveReport). */
 export const reportMarkdownUrl = (key: string): string => `/report/${encodeURIComponent(key)}/md`;
@@ -177,6 +192,7 @@ export interface SectionInputs {
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatch[] };
   traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrap>[] };
   prs: PrsInputs;
+  reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
   notices: { list: Notice[] };
   foot: { version: string; repoUrl: string };
   modal: { modal: ModalRef | null; item: Seat<ModalItem> | null; prefs: { view: GlassPrefs['view'] | undefined; lobs: boolean | undefined } | undefined };
@@ -217,9 +233,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
         .filter((a) => recent(a.at, LANDED_WINDOW_MS) && hasQuery(a.repo, a.note, a.id))
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, LANDED_MAX),
-      reports: (d.reports || [])
-        .filter((r) => hasQuery(r.title, r.author, r.key, r.repo))
-        .sort((a, b) => Number(!!a.acked) - Number(!!b.acked) || b.filedAt.localeCompare(a.filedAt)),
+      reports: (d.reports || []).filter((r) => hasQuery(r.title, r.author, r.dispatch, r.repo)).sort(reportOrder),
       inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', repo: '', verb: '' })),
       traps: deckTraps.map(seat),
       stacks: (d.stacks || []).filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
@@ -238,6 +252,12 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
         (p) => (!st.repo || p.repo === st.repo) && hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName),
       ),
       watches: (d.watches || []).filter((w) => !String(w.key).startsWith('pr:')),
+    },
+    reports: {
+      view: st.view,
+      list: (d.reports || [])
+        .filter((r) => (!st.repo || r.repo === st.repo) && hasQuery(r.title, r.author, r.dispatch, r.repo))
+        .sort(reportOrder),
     },
     notices: {
       list: (d.notices || []).filter(

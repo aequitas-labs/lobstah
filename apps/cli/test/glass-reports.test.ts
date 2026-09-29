@@ -67,29 +67,41 @@ const click = async (g: GlassDom, el: Element | null) => {
   (el as HTMLElement).click();
   await g.settle();
 };
-const reportsSection = (g: GlassDom) => g.$$('#deck .deckgrid > section').find((s) => text(s.querySelector('h2')) === 'reports')!;
+const escape = async (g: GlassDom) => {
+  g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
+  await g.settle();
+};
+const reportsSection = (g: GlassDom) => g.$$('#deck .deckgrid > section').find((s) => text(s.querySelector('h2')) === 'reports →')!;
 
 describe('glass: the deck reports block', () => {
-  it('lists reports after Landed, unacked first then newest, with title, author, and age', async () => {
+  it('lists reports after Landed, unacked first then newest: title, then who filed it, the age, and acked; no badge', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
       const headings = g.$$('#deck .deckgrid > section').map((s) => text(s.querySelector('h2')));
-      expect(headings.indexOf('reports')).toBe(headings.indexOf('Landed · 24h →') + 1);
+      expect(headings.indexOf('reports →')).toBe(headings.indexOf('Landed · 24h →') + 1);
       const rows = [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
-      expect(rows.map((r) => text(r.querySelector('b')))).toEqual(['Fleet notes', 'Tray findings', 'Old fleet notes']);
-      expect(rows.map((r) => text(r.querySelector('.badge')))).toEqual(['helm', 'quiet-reef', 'helm']);
-      expect(text(rows[0])).toContain('5m ago');
-      expect(rows[2]!.className).toContain('acked');
+      expect(rows.map((r) => text(r.querySelector('b')))).toEqual(['Fleet notes', 'Tray findings', 'Build timings', 'Old fleet notes']);
+      expect(reportsSection(g).querySelectorAll('.badge')).toHaveLength(0);
+      const metas = rows.map((r) => text(view === 'cards' ? r.querySelector('.meta') : r.querySelector('.dim')));
+      expect(metas).toEqual([
+        view === 'cards' ? '5m ago' : '· 5m ago',
+        (view === 'cards' ? '' : '· ') + 'kind-crab · 20m ago',
+        (view === 'cards' ? '' : '· ') + 'aaaaaaaa · 40m ago',
+        (view === 'cards' ? '' : '· ') + '60s ago · acked',
+      ]);
+      expect(rows[3]!.className).toContain('acked');
     }
   });
 
-  it('shows eight at most, then "+N more"', async () => {
+  it('shows eight at most, then "+N more" opens the Reports tab', async () => {
     const d = everyAttentionFleet();
     const base = d.reports[1]!;
     d.reports = Array.from({ length: 10 }, (_, i) => ({ ...base, key: `report:helm:fleet:0000000${i}`, title: `notes ${i}` }));
     const g = await page(d);
     expect(reportsSection(g).querySelectorAll('.deckline')).toHaveLength(8);
-    expect(text(reportsSection(g).querySelector('.deckmore'))).toBe('+2 more · lobstah reports');
+    const more = reportsSection(g).querySelector('.deckmore')!;
+    expect(text(more)).toBe('+2 more →');
+    expect(more.getAttribute('href')).toBe('#reports');
   });
 
   it('an empty fleet says none', async () => {
@@ -142,7 +154,9 @@ describe('glass: report modals', () => {
     const g = await page(everyAttentionFleet(), { hash: '#report/' + encodeURIComponent(HELM_KEY) });
     expect(g.$('#overlay')!.className).toBe('open');
     expect(text(g.$('#modalbox h3'))).toBe('📄 Fleet notes');
-    expect(text(g.$('#modalbox'))).toContain('not acked');
+    // The helm's own report: no "from", the age, and no "acked".
+    expect(text(g.$('#modalbox .sub'))).toBe('5m ago');
+    expect(text(g.$('#modalbox'))).toContain('lobstah attention ack ' + HELM_KEY);
     await g.poll();
     expect(g.reportFetches()).toEqual([md(HELM_KEY)]);
   });
@@ -151,6 +165,124 @@ describe('glass: report modals', () => {
     const g = await page(everyAttentionFleet(), { hash: '#report/' + encodeURIComponent(TRAP_KEY) });
     expect(text(g.$('#modalbox h3'))).toContain('cccccccc');
     expect(text(g.$('#modalbox .mdpage h1'))).toBe('Tray findings');
+  });
+});
+
+describe('glass: the Reports tab', () => {
+  it('lists every report, unacked first then newest, in the table and cards; no author badge', async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#reports' });
+    const rows = g.$$('#reports tr.rowhead');
+    expect(g.$$('#reports th').map(text)).toEqual(['title', 'from', 'filed', 'acked']);
+    expect(rows.map((r) => [...r.querySelectorAll('td')].map(text))).toEqual([
+      ['Fleet notes', '', '5m', ''],
+      ['Tray findings', 'kind-crab', '20m', ''],
+      ['Build timings', 'aaaaaaaa', '40m', ''],
+      ['Old fleet notes', '', '60s', 'acked'],
+    ]);
+    const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
+    expect(cards.$$('#reports .card b').map(text)).toEqual(['Fleet notes', 'Tray findings', 'Build timings', 'Old fleet notes']);
+    expect(cards.$$('#reports .card .meta').map(text)).toEqual(['5m ago', 'kind-crab · 20m ago', 'aaaaaaaa · 40m ago', '60s ago · acked']);
+    expect(cards.$$('#reports .badge')).toHaveLength(0);
+  });
+
+  it('search matches the title, author, dispatch id, and repo; the repo filter applies', async () => {
+    const byQuery = await page(everyAttentionFleet(), { hash: '#reports', prefs: { q: 'aaaaaaaa' } });
+    expect(byQuery.$$('#reports tr.rowhead').map((r) => text(r.querySelector('td')))).toEqual(['Build timings']);
+    const byAuthor = await page(everyAttentionFleet(), { hash: '#reports', prefs: { q: 'kind-crab' } });
+    expect(byAuthor.$$('#reports tr.rowhead').map((r) => text(r.querySelector('td')))).toEqual(['Tray findings']);
+    const byRepo = await page(everyAttentionFleet(), { hash: '#reports', prefs: { repo: 'web' } });
+    expect(byRepo.$$('#reports tr.rowhead').map((r) => text(r.querySelector('td')))).toEqual(['Tray findings', 'Build timings']);
+  });
+
+  it('a row opens its report: a dispatch report its dispatch, a helm report its own modal', async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#reports' });
+    await click(g, g.$$('#reports tr.rowhead').find((r) => text(r).includes('Build timings')) ?? null);
+    expect(text(g.$('#modalbox h3'))).toContain('aaaaaaaa');
+    expect(g.$$('#modalbox .sub').map(text)).toContain('aaaaaaaa · 40m ago');
+    await escape(g);
+    await click(g, g.$$('#reports tr.rowhead').find((r) => text(r).includes('Fleet notes')) ?? null);
+    expect(text(g.$('#modalbox h3'))).toBe('📄 Fleet notes');
+  });
+});
+
+describe('glass: cards keep their text inside', () => {
+  const longBadge = 'repairing: conflict (attempt 1 of 2) now'; // 40 characters
+  const longMeta = 'implemented: migration_0136_form_outreach_reply_identity,submit/attribution/approval/outbound '.repeat(4).slice(0, 300);
+
+  it('a 40-character badge truncates with its text in the title; a 300-character meta clamps to two lines with its text in the title', async () => {
+    expect(longBadge).toHaveLength(40);
+    const d = everyAttentionFleet();
+    const x = d.dispatches.find((v) => v.bucket !== 'done')!;
+    x.verb = longBadge as never;
+    x.note = longMeta;
+    const g = await page(d, { prefs: { view: 'cards' } });
+    const card = g.$$('#deck .card').find((c) => text(c).includes(x.id.slice(0, 8)))!;
+    const badge = card.querySelector('.top .badge')!;
+    const meta = card.querySelector('.meta')!;
+    expect(badge.getAttribute('title')).toBe(longBadge);
+    expect(meta.getAttribute('title')).toContain(longMeta);
+    const style = (el: Element) => g.window.getComputedStyle(el as never);
+    expect(style(card)).toMatchObject({ overflow: 'hidden' });
+    expect(style(card).getPropertyValue('overflow-wrap')).toBe('anywhere');
+    expect(style(badge)).toMatchObject({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+    expect(style(badge).getPropertyValue('max-width').replace(/\s/g, '')).toBe('min(26ch,100%)');
+    expect(style(badge).getPropertyValue('flex')).toMatch(/^0 4 auto$/);
+    expect(style(meta)).toMatchObject({ overflow: 'hidden' });
+    // happy-dom does not compute line clamping: read the rule itself.
+    const css = fs.readFileSync(new URL('../glass/glass.css', import.meta.url), 'utf8');
+    for (const sel of ['.card .meta', '.card .note']) {
+      const rule = css.slice(css.indexOf(`${sel} {`), css.indexOf('}', css.indexOf(`${sel} {`)));
+      expect(rule, sel).toMatch(/-webkit-line-clamp: 2;/);
+      expect(rule, sel).toMatch(/overflow: hidden;/);
+    }
+    expect(style(card.querySelector('.top > b')!)).toMatchObject({ textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+    // The title keeps room for its identity (#99999, an 8-character id); the badge gives way first.
+    expect(style(card.querySelector('.top > b')!).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(9ch,100%)');
+    // A short badge carries no title.
+    const short = g.$$('#deck .card .top .badge').find((b) => text(b) === 'working');
+    expect(short?.getAttribute('title') ?? null).toBeNull();
+  });
+});
+
+describe('glass: a PR card with a long badge', () => {
+  it('keeps the whole PR number: the title holds room for #99999, the badge truncates', async () => {
+    const d = everyAttentionFleet();
+    const p = d.prs.find((x) => x.state === 'OPEN')!;
+    p.number = 1826;
+    p.badge = { ...p.badge, text: 'repairing: checks (attempt 1 of 2)' };
+    const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
+    const card = g.$$('#prs .card').find((c) => text(c.querySelector('.prname')).startsWith('#1826'))!;
+    const title = card.querySelector('.top > .prname')!;
+    expect(text(title.querySelector('b'))).toBe('#1826');
+    const badge = card.querySelector('.top .badge')!;
+    expect(badge.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
+    const style = (el: Element) => g.window.getComputedStyle(el as never);
+    expect(style(title).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(9ch,100%)');
+    // '#99999' is six characters: 9ch holds it and the ellipsis after it.
+    expect('#99999'.length).toBeLessThanOrEqual(9 - 2);
+    expect(style(badge).getPropertyValue('flex-shrink')).toBe('4');
+    expect(style(badge).getPropertyValue('min-width')).toMatch(/^0(px)?$/);
+  });
+});
+
+describe('glass: the open-window button', () => {
+  it('is a themed ↗ open button at the end of the foot line, and its click does not open the trap modal', async () => {
+    const d = everyAttentionFleet();
+    d.focusSupported = true;
+    d.focusToken = 'fixture-token';
+    for (const view of ['cards', 'table'] as const) {
+      const g = await page(d, { hash: '#traps', prefs: { view } });
+      const button = g.$(view === 'cards' ? '#traps .card .foot .footact button' : '#traps tr.rowhead td:last-child button')!;
+      expect(text(button)).toBe('↗ open');
+      expect(button.className).toBe('btn open');
+      await click(g, button);
+      expect(g.$('#overlay')!.className).toBe('');
+    }
+    const deck = await page(d, { prefs: { view: 'cards' } });
+    const button = deck.$('#deck .card .foot .footact button')!;
+    expect(text(button)).toBe('↗ open');
+    await click(deck, button);
+    expect(deck.$('#overlay')!.className).toBe('');
   });
 });
 
