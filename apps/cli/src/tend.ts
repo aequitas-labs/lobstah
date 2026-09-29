@@ -60,7 +60,7 @@ import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
-import { liveRepairer } from './pr-repair.js';
+import { liveRepairer, waitingRepairs } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
@@ -120,11 +120,23 @@ export interface TendWatch {
   owner: string;
   cursor: string;
   pendingEvents: number;
-  /** Set when the fork cap held this watch; its events wait for `lobstah watch release`. */
+  /** Set when the watch is held (fork cap, `watch hold`, a cancelled repair); `lobstah watch release` ends it. */
   heldAt?: string;
+  /** Why the watch is held. */
+  heldReason?: string;
   lastSummary?: string;
   lastAt?: string;
   error?: string;
+}
+
+export interface TendRepairWaiting {
+  key: string;
+  url: string;
+  kind: string;
+  heldBy: string;
+  reason: string;
+  /** A settle wait: the earliest time the repair can be queued. */
+  until?: string;
 }
 
 export interface TendTrap {
@@ -245,6 +257,8 @@ export function humanPrAttention(
     return { show: true, reason: pr.repair!.reason };
   if (!watchAvailable) return { show: true, reason: 'no active PR watch' };
   if (!liveRepairer(now)) return { show: true, reason: 'no repairer is running' };
+  // A waiting repair needs no person: it is shown in the repairs-waiting table instead.
+  if (matchingRepair && pr.repair!.status === 'waiting') return { show: false, reason: `repair waits: ${pr.repair!.reason ?? ''}` };
   if (!matchingRepair || pr.repair?.status !== 'repairing' || !pr.repair.dispatchId)
     return { show: true, reason: 'repair not yet claimed' };
   const queued = queuedDescriptor(pr.repair.dispatchId, 'work');
@@ -490,6 +504,8 @@ export interface TendReport {
   helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number }>;
   merge?: MergeView;
   stacks: GlassStack[];
+  /** PR repairs that are due but wait: who holds each and why. Not attention. */
+  repairsWaiting: TendRepairWaiting[];
   /** A free-space hold: the daemon leaves unaddressed queued work in the queue. */
   hold?: DiskHold & { reason: string };
 }
@@ -657,6 +673,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       cursor: w.cursor,
       pendingEvents: pending.length,
       ...(w.heldAt ? { heldAt: w.heldAt } : {}),
+      ...(w.heldAt && w.heldReason ? { heldReason: w.heldReason } : {}),
       lastSummary: last?.summary,
       lastAt: last?.at,
       error: w.lastError ? watchErrorCell(w) : undefined,
@@ -863,6 +880,14 @@ export function buildTendReport(now = Date.now()): TendReport {
     helms,
     merge,
     stacks,
+    repairsWaiting: waitingRepairs(records).map((pr) => ({
+      key: pr.key,
+      url: pr.url,
+      kind: pr.repair!.kind,
+      heldBy: pr.repair!.heldBy ?? '',
+      reason: pr.repair!.reason ?? '',
+      ...(pr.repair!.until ? { until: pr.repair!.until } : {}),
+    })),
     ...(hold ? { hold: { ...hold, reason: holdReason(hold) } } : {}),
   };
 }
@@ -933,6 +958,16 @@ export function renderTend(r: TendReport): string {
       ),
     );
   }
+  if (r.repairsWaiting?.length) {
+    lines.push('');
+    lines.push(
+      toonTable(
+        'repairs waiting',
+        r.repairsWaiting.map((w) => ({ pr: w.key, kind: w.kind, heldBy: w.heldBy, reason: w.reason, until: w.until ?? '' })),
+        ['pr', 'kind', 'heldBy', 'reason', 'until'],
+      ),
+    );
+  }
   if (r.watches.length > 0) {
     lines.push('');
     lines.push(
@@ -942,7 +977,7 @@ export function renderTend(r: TendReport): string {
           key: w.key,
           owner: w.owner,
           pending: w.pendingEvents,
-          held: w.heldAt ? 'held' : '',
+          held: w.heldAt ? `held: ${w.heldReason ?? 'held'}` : '',
           last: w.lastSummary ?? '',
           error: w.error ?? '',
         })),

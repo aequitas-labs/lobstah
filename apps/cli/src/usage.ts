@@ -185,7 +185,10 @@ done records its worktree's HEAD, run there or with the trap's --session.`,
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
-\`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
+\`watch hold <key> [--for <id>] [--reason <text>]\` holds PR repairs for one PR;
+with --for the hold ends when that dispatch ends. Cancelling a repair holds
+its PR the same way. \`watch release <key>|--all\` ends a hold, including one
+set by [watch].maxForksPerCycle.`,
   soak: `Volunteer this session as a worker; prints its name and wt:<trap> address. In a
 linked worktree it signs on there. From a primary checkout (or with --repo
 from anywhere) it creates worktrees/soak-<trap> (branch lobstah/soak-<trap>,

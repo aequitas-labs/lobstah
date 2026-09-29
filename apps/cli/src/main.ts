@@ -65,6 +65,7 @@ import {
   watchErrorCell,
   pendingWatchEvents,
   readWatchEvents,
+  holdWatch,
   releaseHeldWatches,
   readEvidence,
   removeWatch,
@@ -146,7 +147,7 @@ import {
   runPrCheck,
   syncPrWatches,
 } from './pr-watch.js';
-import { deliverPrRepairs, stampRepairerBeat } from './pr-repair.js';
+import { deliverPrRepairs, holdCancelledRepair, stampRepairerBeat } from './pr-repair.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { runBeat } from './beat.js';
@@ -222,8 +223,12 @@ work (humans and agents):
   watch backfill [--apply]        list PRs in dispatch history with no watch
                                   (dry run); --apply registers them. Read
                                   commands never register a watch.
-  watch release <key>|--all       let a watch held by the per-cycle fork
-                                  cap ([watch].maxForksPerCycle) fork again
+  watch hold <key> [--for <id>] [--reason <text>]
+                                  hold PR repairs for one PR; with --for the
+                                  hold ends when that dispatch ends
+  watch release <key>|--all       end a hold: a watch held by the per-cycle
+                                  fork cap ([watch].maxForksPerCycle), by
+                                  watch hold, or by a cancelled repair
 
 host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
@@ -1327,20 +1332,25 @@ async function mainCli(): Promise<void> {
         gateHelm(callerSession(opt('--session')));
       }
       const lane = findLane(id);
+      // A cancelled PR repair holds its PR: no new repair until `watch release`.
+      const repairHeld = () => {
+        const keys = holdCancelledRepair(id);
+        return keys.length > 0 ? { repairHeld: `${keys.join(', ')} (lobstah watch release <key> frees it)` } : {};
+      };
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
         requestCancel(id, lane);
-        console.log(toonKV({ id, cancel: 'requested', note: 'the claimant (daemon or trap) winds it down at its next check' }));
+        console.log(toonKV({ id, cancel: 'requested', note: 'the claimant (daemon or trap) winds it down at its next check', ...repairHeld() }));
         break;
       }
       // Unclaimed: finalize with a record — never a silent delete. The
       // rename losing to a concurrent claim falls through to the flag path.
       if (cancelQueued(id, lane)) {
-        console.log(toonKV({ id, cancel: 'finalized', note: 'cancelled before claim — recorded as failed in done/' }));
+        console.log(toonKV({ id, cancel: 'finalized', note: 'cancelled before claim — recorded as failed in done/', ...repairHeld() }));
         break;
       }
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
         requestCancel(id, lane);
-        console.log(toonKV({ id, cancel: 'requested', note: 'claimed while cancelling — the claimant winds it down' }));
+        console.log(toonKV({ id, cancel: 'requested', note: 'claimed while cancelling — the claimant winds it down', ...repairHeld() }));
         break;
       }
       throw new Error(`${id} is neither queued nor active — already finished (\`lobstah catch ${id}\`)`);
@@ -2235,6 +2245,22 @@ async function mainCli(): Promise<void> {
         if (!apply && rows.length > 0) console.log('dry run — pass --apply to write');
         break;
       }
+      if (sub === 'hold') {
+        const raw = pos[1];
+        if (!raw) throw new Error('watch hold requires a key');
+        const key = parsePrRef(raw)?.key ?? raw;
+        const forId = opt('--for');
+        if (forId) findLane(forId); // an unknown dispatch throws
+        const w = holdWatch(key, new Date(), {
+          reason: opt('--reason') ?? (forId ? `held for dispatch ${forId.slice(0, 8)}` : 'held by `lobstah watch hold`'),
+          ...(forId ? { forId } : {}),
+          by: forId ? `dispatch:${forId.slice(0, 8)}` : 'hold',
+        });
+        if (!w) throw new Error(`no watch ${key} (\`lobstah watch\` lists them)`);
+        console.log(toonKV({ key: w.key, heldAt: w.heldAt, reason: w.heldReason, ...(w.heldFor ? { until: `dispatch ${w.heldFor} ends` } : {}) }));
+        console.log(toonHelp([`lobstah watch release ${w.key}   (end the hold)`]));
+        break;
+      }
       if (sub === 'release') {
         const key = pos[1];
         if (!key && !has('--all')) throw new Error('watch release requires a key or --all');
@@ -2254,7 +2280,7 @@ async function mainCli(): Promise<void> {
         cursor: w.cursor,
         pending: readWatchEvents(w.key).length - w.seen,
         lastChecked: w.lastCheckedAt ?? '-',
-        held: w.heldAt ? 'held' : '',
+        held: w.heldAt ? `held: ${w.heldReason ?? 'held'}` : '',
         error: watchErrorCell(w),
       }));
       console.log(toonTable('watches', rows, ['key', 'owner', 'cursor', 'pending', 'lastChecked', 'held', 'error']));

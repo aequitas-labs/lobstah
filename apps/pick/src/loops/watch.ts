@@ -157,7 +157,7 @@ export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPer
     if (watch.heldAt) continue; // waits for `lobstah watch release`
     if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // one continuation in flight
     if (forks >= cap) {
-      holdWatch(watch.key);
+      holdWatch(watch.key, new Date(), { reason: 'fork cap reached ([watch].maxForksPerCycle)' });
       held.push(watch.key);
       continue;
     }

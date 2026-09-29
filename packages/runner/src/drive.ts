@@ -6,6 +6,8 @@ import {
   cancelRequested,
   mergeEvidence,
   readStatusLog,
+  recordPush,
+  resolvePushTargets,
   TERMINAL_VERBS,
   touchEvents,
   unhandled,
@@ -193,6 +195,9 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     }
     releaseHold(); // any other event means the worker is awake
     if (ev.type === 'tool-start' || ev.type === 'text') activity++;
+    if (ev.type === 'tool-start' && Array.isArray(ev.data?.pushes)) {
+      recordPush(id, lane, resolvePushTargets(ev.data.pushes.map(String), opts.cwd), ev.at);
+    }
     if (ev.type === 'session' && ev.data?.sessionId) {
       mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId) });
     }

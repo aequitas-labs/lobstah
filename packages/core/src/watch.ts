@@ -74,6 +74,12 @@ export interface Watch {
    * buffering, but forks nothing until `lobstah watch release` clears it.
    */
   heldAt?: string;
+  /** Why the watch is held: the fork cap, a cancelled repair, or `watch hold --reason`. */
+  heldReason?: string;
+  /** `watch hold --for <id>`: the hold ends when that dispatch ends. */
+  heldFor?: string;
+  /** Who set the hold, as a PR record's waiting repair shows it (`helm` for a cancelled repair). */
+  heldBy?: string;
 }
 
 export interface WatchEvent {
@@ -158,17 +164,34 @@ export function addWatch(
     seenAt: existing?.seenAt ?? 0,
     lastFollowUpId: existing?.lastFollowUpId,
     heldAt: existing?.heldAt,
+    heldReason: existing?.heldReason,
+    heldFor: existing?.heldFor,
+    heldBy: existing?.heldBy,
   };
   writeWatch(w);
   return w;
 }
 
-/** Mark a watch held: its buffered events wait for `lobstah watch release`. */
-export function holdWatch(key: string, now = new Date()): void {
+/**
+ * Mark a watch held: its buffered events and its PR repairs wait for
+ * `lobstah watch release`. A hold that exists keeps its time; a reason or
+ * a dispatch given here replaces the old one. Returns the watch, or
+ * undefined when no watch has this key.
+ */
+export function holdWatch(
+  key: string,
+  now = new Date(),
+  opts: { reason?: string; forId?: string; by?: string } = {},
+): Watch | undefined {
   const w = readWatch(key);
-  if (!w || w.heldAt) return;
-  w.heldAt = now.toISOString();
+  if (!w) return undefined;
+  if (w.heldAt && opts.reason === undefined && opts.forId === undefined && opts.by === undefined) return w;
+  w.heldAt ??= now.toISOString();
+  if (opts.reason !== undefined) w.heldReason = opts.reason;
+  if (opts.forId !== undefined) w.heldFor = opts.forId;
+  if (opts.by !== undefined) w.heldBy = opts.by;
   writeWatch(w);
+  return w;
 }
 
 /** Clear the hold on one watch, or on every held watch when key is undefined. Returns the released keys. */
@@ -177,6 +200,9 @@ export function releaseHeldWatches(key?: string): string[] {
   for (const w of key === undefined ? listWatches() : [readWatch(key)].filter((x): x is Watch => x !== undefined)) {
     if (!w.heldAt) continue;
     w.heldAt = undefined;
+    w.heldReason = undefined;
+    w.heldFor = undefined;
+    w.heldBy = undefined;
     writeWatch(w);
     out.push(w.key);
   }
