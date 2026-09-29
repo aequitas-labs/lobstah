@@ -151,6 +151,33 @@ describe('a live worker holds the branch', () => {
     expect(readPr(key(1))?.repair?.reason).toContain('has b1 checked out');
   });
 
+  it('a worker whose branch tracks the head branch holds it; one in another forge repo does not', () => {
+    stand(STACK[0]!);
+    const repo = (name: string, origin: string): string => {
+      const wt = path.join(dir, name);
+      fs.mkdirSync(wt);
+      const git = (...args: string[]) => {
+        const res = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: wt, encoding: 'utf8' });
+        expect(res.status, res.stderr).toBe(0);
+      };
+      git('init', '-q');
+      git('checkout', '-q', '-b', 'local-work');
+      git('commit', '-q', '--allow-empty', '-m', 'start');
+      git('remote', 'add', 'origin', origin);
+      git('update-ref', 'refs/remotes/origin/b1', 'HEAD');
+      git('branch', '-q', '--set-upstream-to=origin/b1');
+      return wt;
+    };
+    trap('t3', 'quiet-crab', repo('wt-other', 'https://github.com/other/web.git'), uuid('7'));
+    expect(repair()).toBe(1);
+    appendStatus(readPr(key(1))!.repair!.dispatchId!, 'work', 'done', 'repaired');
+    upsertPr(observed(STACK[0]!, { observedAt: iso(T0) }), STACK[0]!.owner);
+    trap('t4', 'slow-gull', repo('wt-same', 'git@github.com:acme/web.git'), uuid('8'));
+    expect(repair()).toBe(0);
+    expect(readPr(key(1))?.repair).toMatchObject({ status: 'waiting', heldBy: 'wt:slow-gull', attempts: 1 });
+    expect(readPr(key(1))?.repair?.reason).toContain('tracks origin/b1');
+  });
+
   it('a trap that is signed on without an open catch holds nothing', () => {
     stand(STACK[0]!);
     trap('t1', 'brave-otter', checkout('wt-trap', 'b1'), uuid('a'));

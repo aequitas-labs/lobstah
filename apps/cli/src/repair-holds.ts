@@ -98,6 +98,24 @@ function git(cwd: string, args: string[]): string | undefined {
   return res.status === 0 && !res.error ? res.stdout.trim() : undefined;
 }
 
+/** The daemon asks every tick; a branch's upstream and a checkout's origin rarely change. */
+const GIT_CACHE_MS = 60_000;
+const gitCache = new Map<string, { at: number; upstream?: string; origin?: string }>();
+
+/** The upstream of the checked-out branch and the origin URL of a worktree, cached per branch. */
+function gitFacts(worktree: string, branch: string, now = Date.now()): { upstream?: string; origin?: string } {
+  const key = `${worktree}\0${branch}`;
+  const hit = gitCache.get(key);
+  if (hit && now - hit.at < GIT_CACHE_MS) return hit;
+  const facts = {
+    at: now,
+    upstream: git(worktree, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']),
+    origin: git(worktree, ['remote', 'get-url', 'origin']),
+  };
+  gitCache.set(key, facts);
+  return facts;
+}
+
 /** What one live worker holds, read from its evidence, its chain, and its worktree. */
 export function workerHold(worker: LiveWorker): WorkerHold {
   const branches = new Map<string, string>();
@@ -107,16 +125,15 @@ export function workerHold(worker: LiveWorker): WorkerHold {
   let forgeRepo = origin ? githubRepoFromOrigin(origin) : undefined;
   if (worker.worktree && fs.existsSync(worker.worktree)) {
     const branch = currentBranchAt(worker.worktree);
-    if (branch) branches.set(branch, `has ${branch} checked out`);
-    const upstream = branch ? git(worker.worktree, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']) : undefined;
-    const slash = upstream?.indexOf('/') ?? -1;
-    if (upstream && slash > 0) {
-      const remoteBranch = upstream.slice(slash + 1);
-      if (!branches.has(remoteBranch)) branches.set(remoteBranch, `tracks ${upstream}`);
-    }
-    if (!forgeRepo) {
-      const url = git(worker.worktree, ['remote', 'get-url', 'origin']);
-      forgeRepo = url ? githubRepoFromOrigin(url) : undefined;
+    if (branch) {
+      branches.set(branch, `has ${branch} checked out`);
+      const { upstream, origin: url } = gitFacts(worker.worktree, branch);
+      const slash = upstream?.indexOf('/') ?? -1;
+      if (upstream && slash > 0) {
+        const remoteBranch = upstream.slice(slash + 1);
+        if (!branches.has(remoteBranch)) branches.set(remoteBranch, `tracks ${upstream}`);
+      }
+      if (!forgeRepo && url) forgeRepo = githubRepoFromOrigin(url);
     }
   }
   for (const push of evidence.pushes ?? []) {
