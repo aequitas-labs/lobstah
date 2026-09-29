@@ -23,6 +23,10 @@ export interface GlassDom {
   poll(): Promise<void>;
   /** Navigate to a tab (#hash) and let it render. */
   go(hash: string): Promise<void>;
+  /** Simulate the window scroll position; happy-dom has no layout engine. */
+  setScroll(y: number): void;
+  /** Calls made by the page to scrollTo, for distinguishing entry from polls. */
+  scrolls(): number[];
   /** Call one of the page's window functions (showModal, closeModal, setView…). */
   call(name: string, ...args: unknown[]): Promise<void>;
   $(sel: string): Element | null;
@@ -36,6 +40,7 @@ export interface GlassDomOptions {
   search?: string;
   prefs?: Record<string, unknown>;
   hidden?: boolean;
+  initialScroll?: number;
 }
 
 export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: GlassDomOptions): Promise<GlassDom> {
@@ -54,6 +59,13 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
   let current = snapshot;
   let count = 0;
   const w = window as unknown as Record<string, unknown> & { Date: DateConstructor; setInterval: unknown };
+  let scrollY = opts.initialScroll ?? 0;
+  const scrolls: number[] = [];
+  Object.defineProperty(window, 'scrollY', { get: () => scrollY, configurable: true });
+  w.scrollTo = (_x: number, y: number) => {
+    scrollY = y;
+    scrolls.push(y);
+  };
   w.fetch = async () => {
     count++;
     const body = JSON.parse(JSON.stringify(current));
@@ -120,6 +132,10 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
       window.location.hash = hash;
       await settle();
     },
+    setScroll: (y) => {
+      scrollY = y;
+    },
+    scrolls: () => [...scrolls],
     call,
     $: (sel) => window.document.querySelector(sel) as unknown as Element | null,
     $$: (sel) => [...window.document.querySelectorAll(sel)] as unknown as Element[],

@@ -22,7 +22,18 @@ initState({
   preview: new URLSearchParams(location.search).has('lob'),
 });
 
-const paint = () => render(h(App, { state: getState() }), document.body);
+let paintedRoute: ReturnType<typeof currentRoute> | undefined;
+let hadSnapshot = false;
+const paint = () => {
+  const state = getState();
+  const enteredTab = state.route !== paintedRoute || (!hadSnapshot && !!state.snapshot);
+  render(h(App, { state }), document.body);
+  paintedRoute = state.route;
+  hadSnapshot ||= !!state.snapshot;
+  // Hash navigation can target a hidden tab before it renders. Reset only on
+  // entry, never on a poll that refreshes the tab someone is reading.
+  if (enteredTab) window.scrollTo(0, 0);
+};
 subscribe(paint);
 paint();
 

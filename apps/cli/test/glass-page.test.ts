@@ -83,6 +83,31 @@ describe('glass page: tabs and hash routing', () => {
     await g.go('#prs');
     expect(g.$$('#prs tr.rowhead')).toHaveLength(3);
   });
+
+  it('opens a deep-linked PR tab and every switched tab at the top', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#prs', initialScroll: 600 });
+    expect(g.$$('.tabpage.on').map((el) => el.id)).toEqual(['page-prs']);
+    expect(g.window.scrollY).toBe(0);
+    for (const tab of ['dispatches', 'traps', 'notices', 'deck', 'prs']) {
+      g.setScroll(600);
+      await click(g, g.$(`#tabs a[data-tab="${tab}"]`));
+      expect(g.$$('.tabpage.on').map((el) => el.id)).toEqual([`page-${tab}`]);
+      expect(g.window.scrollY).toBe(0);
+    }
+  });
+
+  it('a PR poll changes data without moving the reader', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#prs' });
+    g.setScroll(500);
+    const scrolls = g.scrolls();
+    const d = acceptanceFleet();
+    d.prs[0]!.title = 'Updated PR title';
+    g.serve(d);
+    await g.poll();
+    expect(text(g.$('#prs'))).toContain('Updated PR title');
+    expect(g.window.scrollY).toBe(500);
+    expect(g.scrolls()).toEqual(scrolls);
+  });
 });
 
 describe('glass page: per-section change detection', () => {
