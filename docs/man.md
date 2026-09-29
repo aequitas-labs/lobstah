@@ -242,21 +242,20 @@ in the `repairs waiting` table, the PR badge ends in `repair waits: <heldBy>`,
 the glass PR modal shows the reason, and `lobstah doctor` lists it. When the
 wait ends, the normal rules apply again.
 
-**A repair pushes** with `lobstah push <id>`, and so does a rebase chore
+**A repair pushes** to its PR's head branch, and so does a rebase chore
 from pickup's merge loop. The descriptor of each names its PR (`pr`), so
-the runner pushes no branch and opens no PR for it. `lobstah push` pushes
-the checkout's HEAD to the PR's head branch and to no other branch. When
-the push is rejected because the branch moved, it fetches the branch,
-replays the work onto the moved head, and pushes again with
-`--force-with-lease` on the head just fetched. Push hooks run on every
-push. It retries up to `[watch].pushRetries` times (default 3). A push a
-hook refuses for another reason (a failing test, a type error) is not
-retried: the worker fixes the error and runs `lobstah push` again. When the
-retries are spent, `lobstah push` reports the dispatch `failed` with the
-rejection text and the moved head, marks the PR's repair `blocked` at the
-moved head (no new repair starts on that head), and posts a `push-failed`
-notice. The PR is left as it was. It never creates a branch and never opens
-a PR.
+the runner pushes no branch and opens no PR for it. The brief gives the
+worker the push rule: push only to the PR's head branch. On a
+non-fast-forward rejection, fetch the branch, rebase the commits onto the
+moved head again, and push with `--force-with-lease` on the head just
+fetched, at most three times. A push hook that fails with a real test or
+type error is not retried: the worker fixes the error and pushes again.
+When the worker cannot push, it reports
+`failed "push rejected: <rejection text>; moved head <sha>"` and leaves the
+PR as it was. That report marks the PR's repair `blocked` at the moved head
+(no new repair starts on that head, nor on the head the repair started
+from) and posts a `push-failed` notice. A repair never opens a branch or a
+PR.
 
 Lobstah records pushes it sees in the dispatch's evidence (`pushes`): the
 runner's own pushes, a headless worker's `git push` commands, and a trap's

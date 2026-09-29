@@ -280,7 +280,7 @@ A PR behind its base splits deterministically:
 | Condition | Action |
 |---|---|
 | Behind, no conflict | Update the branch through the forge API, re-enter the gate next tick |
-| Behind, real conflict | Write a rebase chore — brief: rebase onto base, resolve, push with `lobstah push` — and re-enter the gate when it completes |
+| Behind, real conflict | Write a rebase chore — brief: rebase onto base, resolve, push to the PR's branch — and re-enter the gate when it completes |
 
 Rebase chores go through the **chore lane** (`~/.lobstah/chores/`, defined in
 the [design's queue contract](design.md#queue-contract)), never the primary queue. Same descriptor schema,
@@ -292,10 +292,11 @@ Chores report to no tracker. The merge loop consumes the chore's status file
 directly, holds its own PR-to-chore mapping, and bounds the attempt at one: a
 failed rebase comments on the PR, applies the `needs-human` label, and stops.
 A rebase chore's descriptor names its PR (`pr`): the runner pushes no branch
-and opens no PR for it. The worker pushes to the PR's head branch with
-`lobstah push`, which fetches, replays, and retries a push rejected because
-the branch moved (`[watch].pushRetries`), and fails the chore when the
-retries are spent.
+and opens no PR for it. The brief tells the worker to push to the PR's head
+branch only and, on a non-fast-forward rejection, to fetch, rebase onto the
+moved head, and push with `--force-with-lease` again, at most three times.
+When it cannot push, the chore reports `failed` with the rejection text and
+the moved head.
 The doctrine stays whole — the deterministic program handles everything
 mechanical, and the moment resolution requires judgment it becomes a
 supervised dispatch. It just doesn't become *work*.

@@ -61,7 +61,7 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
 | `wallClockSecs` | `3600` | Initial active-work window. Progress extends it, up to `maxWallClockSecs`; time paused with `report paused --waiting-on` does not count. |
 | `maxWallClockSecs` | `4 × wallClockSecs` | Hard active-work ceiling across restarts. |
-| `pushEarly` | `true` | For a new chain, push each new committed HEAD to its non-trunk branch on `origin` within 10 seconds. A rejected push is noted and retried only after HEAD moves. A follow-up whose chain already has a PR, and a dispatch whose descriptor names a PR (a repair or a rebase chore), does not push automatically; its worker pushes to the existing PR's head branch with `lobstah push`. |
+| `pushEarly` | `true` | For a new chain, push each new committed HEAD to its non-trunk branch on `origin` within 10 seconds. A rejected push is noted and retried only after HEAD moves. A follow-up whose chain already has a PR, and a dispatch whose descriptor names a PR (a repair or a rebase chore), does not push automatically; its worker pushes to the existing PR's head branch. |
 | `draftPr` | `true` | For a new chain, after first push, adopt an existing PR or open one draft PR when `gh` is available. A follow-up with a chain PR, and a dispatch whose descriptor names a PR, keeps that PR and its watch; it does not open another. |
 | `checkpointOnStop` | `true` | Before a nonterminal stop, checkpoint eligible tracked and untracked files. A new chain then pushes; a follow-up with a chain PR leaves the checkpoint local for its worker to push. Ignored files and secret/build denylist paths are excluded. Set all three switches to `false` for prior runner behavior. |
 
@@ -113,7 +113,6 @@ send a continuation.
 | `checks` | `true` | Repair failed current checks when `autoRepair` is on. Set `false` to show check attention without a repair. |
 | `maxRepairsPerPr` | `2` | Maximum repair follow-ups for one PR head SHA. When the limit is reached and the issue remains, `pr:conflict`, `pr:checks`, or `pr:review` attention names the limit. A repair that waits is not an attempt. |
 | `repairSettleSecs` | `600` | A repair is queued only after the PR's head, its base branch's head, and its failing checks have been unchanged for this many seconds. Until then the PR record shows `repair.status: waiting` with `heldBy: settle` and `until`. |
-| `pushRetries` | `3` | How many times `lobstah push` retries a push to a PR's head branch that was rejected because the branch moved (non-fast-forward, fetch first, or a stale lease). Each retry fetches the branch, replays the work onto the moved head, and pushes again with `--force-with-lease` on the head just fetched; push hooks run again. A push a hook refuses for another reason is not retried. When the retries are spent, the dispatch is `failed`, the PR's repair is `blocked` at the moved head, and the helm gets a `push-failed` notice. |
 
 ## `[grounds.*]` — helm territories
 

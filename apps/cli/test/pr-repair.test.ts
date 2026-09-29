@@ -192,7 +192,7 @@ describe('PR watch repairs', () => {
     expect(dispatch.followUp).toBe(OWNER);
     expect(readEvidence(dispatch.id, 'work').prUrl).toBe(URL);
     expect(dispatch.brief).toContain('base branch stack-parent');
-    expect(dispatch.brief).toContain(`lobstah push`);
+    expect(dispatch.brief).toContain('Push only to the existing branch stack-child.');
     expect(dispatch.pr).toEqual({ url: URL, headRefName: 'stack-child', headSha: SHA });
     expect(readPr(KEY)?.repair).toMatchObject({
       kind: 'conflict',

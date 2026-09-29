@@ -581,9 +581,9 @@ describe('merge loop', () => {
     expect(desc.repo).toBe('demo');
     expect(desc.brief).toMatch(/Rebase the branch/);
     expect(desc.followUp).toBeUndefined(); // rebase chores start cold on purpose
-    // Bound to the PR: the runner pushes no other branch and opens no PR; the worker uses lobstah push.
+    // Bound to the PR: the runner pushes no other branch and opens no PR.
     expect(desc.pr).toEqual({ url: 'https://x/pr/1', headRefName: 'lobstah/33333333-3333-3333-3333-333333333333', headSha: 'abc' });
-    expect(desc.brief).toContain(`lobstah push ${chores[0]}`);
+    expect(desc.brief).toContain(`lobstah report ${chores[0]} failed "push rejected:`);
     expect(desc.brief).toContain('Never open a new PR.');
   });
 

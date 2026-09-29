@@ -10,7 +10,8 @@ describe('runner attachment contract', () => {
     expect(prompt).toContain('Head branch: feature/pr');
     expect(prompt).toContain('The runner will not push this follow-up.');
     expect(prompt).not.toContain('opens or adopts one draft PR');
-    expect(prompt).toContain('Push only to the existing branch feature/pr, with `lobstah push repair`.');
+    expect(prompt).toContain('Push only to the existing branch feature/pr.');
+    expect(prompt).toContain('lobstah report repair failed "push rejected:');
     expect(prompt).toContain('Never open a new PR.');
   });
 

@@ -75,7 +75,6 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
     positionals: '<uuid> <verb> [note...]',
   },
-  push: { flags: {}, positionals: '<uuid>' },
   watch: {
     subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'hold', 'release'],
     flags: {
@@ -189,12 +188,6 @@ paused | done | failed. After \`--\` every word is note. \`done --pr <url>\`
 registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
 --until: what a waiting worker waits on, and when a pause expires. A trap's
 done records its worktree's HEAD, run there or with the trap's --session.`,
-  push: `Push a repair or rebase to its existing PR's head branch only; run it in
-the checkout. A push rejected because the branch moved is fetched, replayed
-onto the moved head, and pushed again with --force-with-lease, up to
-[watch].pushRetries times. A hook failure is not retried (exit 1). Spent
-retries fail the dispatch, mark the PR record, and post a push-failed
-notice; the PR is left as it was. Never a new branch or PR.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

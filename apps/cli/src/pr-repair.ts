@@ -16,6 +16,8 @@ import {
   markFollowUp,
   mergeEvidence,
   parsePrRef,
+  postNotice,
+  PUSH_REJECTED,
   readEvidence,
   readPr,
   readPrs,
@@ -361,7 +363,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         enqueue({
           id,
           repo: target.repo,
-          brief: repairBrief(pr, kind),
+          brief: repairBrief(pr, kind, id),
           followUp: chain.latest,
           pr: { url: pr.url, headRefName: pr.headRefName, headSha: pr.headSha },
           ...(trap ? { for: address } : {}),
@@ -398,4 +400,49 @@ function endWait(previous: PrRepair): PrRepair | undefined {
 /** PRs whose repair waits, for tend, the glass, and doctor. */
 export function waitingRepairs(records: readonly PrRecord[] = readPrs()): PrRecord[] {
   return records.filter((pr) => pr.state === 'OPEN' && pr.repair?.status === 'waiting' && pr.repair.headSha === pr.headSha);
+}
+
+/**
+ * A worker on an existing PR reported `failed "push rejected: ..."`: it
+ * could not push to the PR's branch. Mark the PR's repair `blocked` at the
+ * moved head named in the note (and at the head it started from, until the
+ * watch observes the move), so no repair starts on that head, and post a
+ * `push-failed` notice. The PR itself is not touched. Returns the PR key,
+ * or undefined when the report is not a push failure of a PR-bound dispatch.
+ */
+export function recordPushFailure(id: string, lane: Lane, note: string | undefined): string | undefined {
+  if (!note || !note.trim().toLowerCase().startsWith(PUSH_REJECTED)) return undefined;
+  const descriptor = storedDescriptor(id, lane);
+  if (!descriptor) return undefined;
+  const url = descriptor.pr?.url ?? (descriptor.followUp ? chainPr(descriptor.followUp, lane)?.url : undefined);
+  const ref = url ? parsePrRef(url) : undefined;
+  if (!ref) return undefined;
+  const moved = /\b[0-9a-f]{40}\b/.exec(note)?.[0];
+  const reason = `push failed (dispatch ${id.slice(0, 8)}): ${note.trim().slice(0, 300)}`;
+  withPrLock(ref.key, () => {
+    const pr = readPr(ref.key);
+    if (!pr) return;
+    const head = moved ?? pr.headSha;
+    writePr({
+      ...pr,
+      repair: {
+        headSha: head,
+        ...(head !== pr.headSha ? { fromHeadSha: pr.headSha } : {}),
+        kind: pr.repair?.kind ?? repairKind(pr) ?? 'conflict',
+        attempts: pr.repair?.attempts ?? 1,
+        ...(pr.repair?.maxAttempts !== undefined ? { maxAttempts: pr.repair.maxAttempts } : {}),
+        status: 'blocked',
+        reason,
+        dispatchId: id,
+      },
+    });
+  });
+  postNotice({
+    kind: 'push-failed',
+    text: `${ref.url}: dispatch ${id.slice(0, 8)} could not push${moved ? `; moved head ${moved.slice(0, 12)}` : ''}. The PR is left as it was.`,
+    refId: id,
+    repo: descriptor.repo,
+    dedupeKey: `push-failed-${id}`,
+  });
+  return ref.key;
 }

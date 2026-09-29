@@ -46,7 +46,7 @@ export interface Descriptor {
   /**
    * The existing PR this dispatch works on (a repair or a rebase). The
    * runner pushes no branch and opens no PR for it; the worker pushes to
-   * the PR's head branch with `lobstah push`.
+   * the PR's head branch.
    */
   pr?: DescriptorPr;
   attachments?: Attachment[];
