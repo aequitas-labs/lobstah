@@ -96,6 +96,11 @@ finished member. If that member was last claimed by a trap still signed on,
 the follow-up returns to that trap unless `--for` overrides it. Otherwise it
 is unaddressed for a headless worker.
 
+A send to a dispatch expects a reply. The worker's next note after the send
+wakes `man wait`: a `working` or `paused` note arrives once as a `reply` event
+with the note and the sent instruction's first line, and any other verb wakes
+as itself. `--no-reply` sends without expecting a reply.
+
 Attach refuses while a dispatch is `working` (two writers, one session);
 follow the logs or `send` instead, or cancel and then attach.
 
@@ -195,10 +200,11 @@ dispatch's own PR when it has none, so the merge is observed.
 
 ### PR state after done
 
-A dispatch reports `done` when its PR opens; `report done --pr <url>`
+A dispatch reports its PR with `report <id> <verb> --pr <url>`, which
 registers a `pr:` watch for the chain so the PR stays observed (see the
 PR preset in [vocabulary.md](vocabulary.md#the-pr-preset); `--no-watch`
-opts out). What you get depends on what runs:
+opts out). A trap's PR is tracked from its first push. What you get
+depends on what runs:
 
 - **Only the helm park or `man wait`** (no service): PR state badges in
   `man tend`, `lobstah catch`, and the glass (`merged`, `draft`, `review`,
@@ -216,13 +222,21 @@ succeeds and the watch's check records `lastError`.
 
 Which commands register a watch. Only these write points register one:
 
-- `lobstah report <id> done --pr <url>` registers the watch for the PR the
-  worker just opened.
+- `lobstah report <id> <verb> --pr <url>` registers the watch for the PR the
+  worker opened. Any verb but `failed` does this. A PR already watched is
+  not registered again.
 - `lobstah report <id> paused --waiting-on pr|review` registers the watch
   for the dispatch's own PR. A `--link` to another PR registers nothing.
+- `lobstah soak beat` registers the watch for a trap's PR from its first
+  push. At most once a minute, it reads the trap's branch. When the branch
+  is not trunk and has an upstream, it asks `gh pr view <branch>` for the PR.
+  It records a new PR in the dispatch's evidence, where `lobstah catch` and
+  `lobstah status <id>` show it.
 - `lobstah watch add <key>` registers the watch you name.
 - `lobstah watch backfill --apply` registers watches for PRs in old dispatch
-  history. Without `--apply` it only lists them. Nothing runs it for you.
+  history, and fetches the title of each PR record that has none (one
+  `gh pr view --json title` per record). Without `--apply` it only lists
+  them. Nothing runs it for you.
 
 Read commands never register a watch: `catch`, `man tend`, `status`, `ls`,
 `prs`, `prs sync`, `attention`, and the glass. They read PR records and
@@ -322,7 +336,11 @@ with no `--for` — is how a helm follows a human's PR, or one whose
 dispatch chain was culled. Every observation lands in a PR record keyed by
 the PR, so it shows in the glass PRs tab and stacks and in tend's `pr:*`
 attention kinds exactly like a dispatched PR (its dispatch chain column is
-empty). It stays quiet while it's fine: only a failing check or a changes
+empty). Each PR card, PRs tab row, and PR modal header shows the PR's title
+after its number; a stack line shows numbers only, with each title on hover.
+`lobstah prs` prints the title, cut to 60 characters. Every check reads the
+title again, so a rename on GitHub shows on the next check and is never
+attention. It stays quiet while it's fine: only a failing check or a changes
 request surfaces as a watch event; a merge or close arrives as a notice.
 
 **PR order.** Every PR list uses one order: the glass PRs tab, the On deck
@@ -371,6 +389,12 @@ only a trap id in a same-origin, token-protected POST. The ⚙ popover's two
 preferences — table or cards, and whether lobsters crawl the page — are
 per-browser, kept in that browser's localStorage and never on disk.
 
+The On deck tab shows up to 8 traps. Signed-on traps come first, oldest
+sign-on first, with name breaking ties. Traps stowed or ghosted in the last
+hour follow, most recent sign-off first, with name breaking ties. A "+N more"
+link opens the traps tab for the rest, in the same order. Both views show each
+trap's current dispatch, last activity, or idle and waiting state.
+
 This is where "is the agent alive?" belongs: the helm's heartbeat age on a
 page, not periodic proof-of-life turns in a transcript.
 
@@ -379,23 +403,23 @@ page, not periodic proof-of-life turns in a transcript.
 `lobstah man tend` is the full picture on demand; `lobstah man report` is the
 **delta** since the last acknowledged report — catches landed (with their
 notes and PRs), attention newly arisen, what still waits, and the fleet
-verdict. It advances a "reported through" cursor when it prints — the
-explicit acknowledgment — so nothing is ever reported twice, and it says
+verdict. It advances a "reported through" cursor when it prints, so nothing
+is ever reported twice, and it says
 `no change` when the delta is empty rather than re-dumping state. Standing
 unanswered questions appear under `still-waiting` without counting as
 change — reminders (`remindSecs`) own re-firing those.
 
-Delivery is at-least-once by construction: the carriers that might not be
-read (a `man wait` timeout in a background task) only **peek** at the delta,
-so a digest lost with a dead task re-surfaces on the next timeout; only
-`man report` (or a hook-delivered park digest, which lands in-context by
-construction) marks it handled.
+A catch is reported once the helm's `man wait` watcher delivers its event or
+`man report` prints it. The glass's `unreported` badge means no helm received
+that catch. A `man wait` timeout and `man wait --peek` only peek at the delta;
+a digest lost with a dead background task re-surfaces on the next timeout.
+The Stop-hook's standing-attention reminder does not mark a catch reported.
 
 Every carrier shares the cursor (per grounds, for a helm):
 
-- **The wait loop.** A `man wait` timeout (exit 3) prints the delta when
-  something changed, so a looping session gets periodic fleet reports for
-  free — see the loop idiom below.
+- **The wait loop.** A delivered `man wait` event (exit 0) advances the helm's
+  cursor through the event time. A timeout (exit 3) prints the delta when
+  something changed without advancing the cursor — see the loop idiom below.
 - **The blocking park.** A helm session's Stop-hook park delivers the digest as a wake
   at `[helm].reportSecs` cadence — including the landed-then-idle case, where
   the last catches finish and nothing is left in flight to wake for.
@@ -465,6 +489,12 @@ before the worker reads it; `man tend` then shows the dispatch as
 `needs-decision (answered <n>m ago)` instead of listing it under attention.
 A newer `needs-decision` from the worker stands again. Set `remindSecs = 0`
 for pure at-most-once.
+
+A send still waiting on its reply stands in the `man haul` block as
+`sent · <id> · <first line> · <age>`. It is listed once, then every
+`remindSecs` until the worker's next note answers it. `man tend` shows it on
+the dispatch as `awaiting reply · <age>`, and the glass dispatch modal shows
+it under the inbox.
 
 **Acknowledging, display-only.** Clicking a desktop pet opens its target and
 runs `lobstah attention ack <item-key> --by pet`, so that pet stops walking

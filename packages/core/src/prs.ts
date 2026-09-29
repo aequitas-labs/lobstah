@@ -157,7 +157,7 @@ export function withPrLock<T>(key: string, action: () => T): T {
 
 /**
  * Write one observation. Fields come from the new observation (an absent
- * optional field keeps the previous value, e.g. a title set elsewhere);
+ * optional field keeps the previous value; a new title replaces the old one);
  * `dispatchId`, when the observing watch is dispatch-owned, is appended once.
  * Returns the record before and after, so the caller can act on the
  * open → merged/closed transition.
@@ -199,6 +199,19 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
     };
     writePr(after);
     return { before, after };
+  });
+}
+
+/**
+ * Set a record's title without an observation (`lobstah watch backfill`).
+ * Returns false when the record does not exist.
+ */
+export function setPrTitle(key: string, title: string): boolean {
+  return withPrLock(key, () => {
+    const record = readPr(key);
+    if (!record) return false;
+    writePr({ ...record, title });
+    return true;
   });
 }
 

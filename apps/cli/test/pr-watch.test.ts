@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, derivePrEvents, enqueue, ensureLayout, listNotices, parsePrRef, readEvidence, readPr, readStatusLog, readWatch, runWatchCheck } from '@lobstah/core';
+import { appendStatus, derivePrEvents, enqueue, ensureLayout, listNotices, listWatches, parsePrRef, readEvidence, readPr, readStatusLog, readWatch, runWatchCheck } from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
 import { pickupOwnsReviewFeedback, stampPrEvidence, workEvents } from '../src/pr-watch.js';
 
@@ -60,10 +60,10 @@ describe('report done --pr registers the PR watch', () => {
     expect(note).toBe('shipped');
   });
 
-  it('a non-GitHub PR URL or a non-done verb registers nothing and never fails the report', () => {
+  it('a non-GitHub PR URL or a failed report registers nothing and never fails the report', () => {
     enqueue({ id: ID, repo: 'web', brief: 'b' }, 'work');
-    expect(lobstah('report', ID, 'working', '--pr', URL_).status).toBe(0);
     expect(lobstah('report', ID, 'done', '--pr', 'https://gitlab.com/a/b/-/merge_requests/1').status).toBe(0);
+    expect(lobstah('report', ID, 'failed', '--pr', URL_).status).toBe(0);
     expect(fs.existsSync(path.join(home, 'watches')) ? fs.readdirSync(path.join(home, 'watches')) : []).toEqual([]);
   });
 
@@ -71,6 +71,47 @@ describe('report done --pr registers the PR watch', () => {
     const res = lobstah('watch', 'add', URL_, '--for', ID);
     expect(res.status).toBe(0);
     expect(readWatch('pr:acme/web#7')!.check).toContain('watch check-pr');
+  });
+});
+
+describe('report --pr before done records the PR', () => {
+  const watchKeys = () => listWatches().map((w) => w.key);
+
+  it('working --pr records the PR and registers one watch; status and catch show it', () => {
+    enqueue({ id: ID, repo: 'web', brief: 'b' }, 'work');
+    const res = lobstah('report', ID, 'working', 'pushed', '--pr', URL_);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('watch: pr:acme/web#7');
+    expect(readEvidence(ID, 'work').prUrl).toBe(URL_);
+    expect(readWatch('pr:acme/web#7')!.owner).toBe(`dispatch:${ID}`);
+    expect(lobstah('status', ID).stdout).toContain(`draftPr: ${URL_}`);
+    expect(lobstah('catch', ID).stdout).toContain(`prUrl: ${URL_}`);
+  });
+
+  it('a second working --pr with the same URL registers nothing new', () => {
+    enqueue({ id: ID, repo: 'web', brief: 'b' }, 'work');
+    lobstah('report', ID, 'working', '--pr', URL_);
+    const before = readWatch('pr:acme/web#7')!;
+    const res = lobstah('report', ID, 'working', 'still going', '--pr', URL_);
+    expect(res.status).toBe(0);
+    expect(res.stdout).not.toContain('watch:');
+    expect(watchKeys()).toEqual(['pr:acme/web#7']);
+    expect(readWatch('pr:acme/web#7')).toEqual(before);
+  });
+
+  it('--no-watch records the PR without a watch', () => {
+    enqueue({ id: ID, repo: 'web', brief: 'b' }, 'work');
+    expect(lobstah('report', ID, 'working', '--pr', URL_, '--no-watch').status).toBe(0);
+    expect(readEvidence(ID, 'work').prUrl).toBe(URL_);
+    expect(watchKeys()).toEqual([]);
+  });
+
+  it('needs-decision, blocked, and paused --pr register the watch too', () => {
+    enqueue({ id: ID, repo: 'web', brief: 'b' }, 'work');
+    ['needs-decision', 'blocked', 'paused'].forEach((verb, i) => {
+      expect(lobstah('report', ID, verb, 'waiting', '--pr', `https://github.com/acme/web/pull/${20 + i}`).status).toBe(0);
+    });
+    expect(watchKeys().sort()).toEqual(['pr:acme/web#20', 'pr:acme/web#21', 'pr:acme/web#22']);
   });
 });
 

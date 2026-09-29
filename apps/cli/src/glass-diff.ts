@@ -26,6 +26,8 @@ import type {
 // within the last LANDED_WINDOW_MS, whatever the report cursor says.
 export const LANDED_MAX = 8;
 export const LANDED_WINDOW_MS = 86400000;
+// On deck's traps section: at most DECK_TRAPS_MAX traps, then "+N more".
+export const DECK_TRAPS_MAX = 8;
 export const STALE_DAEMON_MS = 90000;
 export const STALE_SEAT_MS = 1800000;
 
@@ -152,11 +154,21 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   const seat = <T>(x: T): Seat<T> => ({ x, stale: isStale((x as { heartbeatAt?: string }).heartbeatAt, STALE_SEAT_MS, now) });
   const item = modalItem(d, ui.modal);
   const recent = (iso: string | undefined, ms: number) => !!iso && now - Date.parse(iso) <= ms;
-  const deckTraps = (d.traps || []).filter(
-    (t) =>
-      (t.live || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000))) &&
-      hasQuery(t.name, t.trapId, t.repo, t.worktree),
-  );
+  // A signed-on trap keeps its seat through heartbeat, claim, and listening
+  // changes. Signed-off traps follow in most-recently-signed-off order.
+  const signedOffAt = (t: GlassTrap) =>
+    Math.max(0, ...(t.notices || []).filter((n) => n.kind === 'trap-stowed' || n.kind === 'trap-ghosted').map((n) => Date.parse(n.at) || 0));
+  const orderedTraps = [...(d.traps || [])].sort((a, b) =>
+    Number(b.live) - Number(a.live) ||
+    (a.live ? (Date.parse(a.signedOnAt || '') || 0) - (Date.parse(b.signedOnAt || '') || 0)
+      : signedOffAt(b) - signedOffAt(a)) ||
+    (a.name ?? a.trapId).localeCompare(b.name ?? b.trapId));
+  const deckTraps = orderedTraps
+    .filter(
+      (t) =>
+        (t.live || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000))) &&
+        hasQuery(t.name, t.trapId, t.repo, t.worktree),
+    );
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
   return {
     chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat) },
@@ -179,7 +191,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },
     traps: {
       view: st.view,
-      list: d.traps.filter((t) => (!st.repo || t.repo === st.repo) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness)).map(seat),
+      list: orderedTraps.filter((t) => (!st.repo || t.repo === st.repo) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness)).map(seat),
     },
     prs: {
       view: st.view,
@@ -208,6 +220,8 @@ export interface PrModalView {
   pr: GlassPr;
   stack: {
     numbers: number[];
+    /** Each number's PR title, index for index; '' when a PR has none. */
+    titles: string[];
     position: number;
     size: number;
     floor: string;
@@ -239,6 +253,7 @@ export function prModalView(d: Pick<GlassSnapshot, 'prs' | 'stacks' | 'dispatche
     stack: s
       ? {
           numbers: s.numbers,
+          titles: s.numbers.map((n) => (d.prs || []).find((x) => x.stackId === s.id && x.number === n)?.title || ''),
           position: p.position + 1,
           size: s.numbers.length,
           floor: s.floor,

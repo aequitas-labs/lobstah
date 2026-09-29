@@ -54,6 +54,10 @@ import {
   groundsErrors,
   captureWindow,
   heartbeatHelm,
+  expectReply,
+  takeReplies,
+  dueUnanswered,
+  ageLabel,
   helmGate,
   helmLabel,
   helmOf,
@@ -110,12 +114,13 @@ import {
   worktreeProgress,
   validSessionLink,
 } from '@lobstah/core';
-import type { Descriptor, Lane, Notice, RepoConfig, WatchAttention } from '@lobstah/core';
+import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, SentExpectation, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
+import { readCursor } from './reported.js';
 import { charter } from './charter.js';
 import { buildBriefContext } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
@@ -146,6 +151,7 @@ import {
   addPrWatch,
   autoRegisterPrWatch,
   backfillPrWatches,
+  cutTitle,
   observeDispatchPrWatches,
   pollSecs,
   runPrCheck,
@@ -184,12 +190,14 @@ work (humans and agents):
   focus <trap>                    bring a live trap's recorded window forward
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--] <message>
+  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--] <message>
                                   steer a live chain, queue for its pending
                                   member, or wake finished work as a follow-up;
                                   --no-wake leaves finished mail unread
                                   (arrives at its next park; undeliverable
-                                  messages bounce to the helm)
+                                  messages bounce to the helm). The worker's
+                                  next note wakes man wait as a reply;
+                                  --no-reply expects none
   inbox <uuid>                    read and acknowledge pending messages
                                   (workers: check at natural checkpoints)
   attach <uuid> [--print] [--force]
@@ -226,7 +234,7 @@ work (humans and agents):
                                   first check is a baseline: it forks
                                   nothing, and a PR already merged or
                                   closed is recorded and retired.
-  watch backfill [--apply]        list PRs in dispatch history with no watch
+  watch backfill [--apply]        list PRs in dispatch history with no watch or no title
                                   (dry run); --apply registers them. Read
                                   commands never register a watch.
   watch hold <key> [--for <id>] [--reason <text>]
@@ -308,9 +316,10 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
 workers (dispatched agents; injected into every brief):
   report <uuid> <verb> [--pr <url>] [--no-watch] [--session <id>] [--] [note]
                                   the validated status write path
-                                  (${VERBS.join(' | ')}). done --pr
-                                  registers the PR's pr: watch for this
-                                  chain; --no-watch opts out.
+                                  (${VERBS.join(' | ')}). --pr on any
+                                  verb but failed records the PR and
+                                  registers its pr: watch for this chain;
+                                  --no-watch opts out.
 
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
@@ -487,6 +496,28 @@ function emitNotices(notices: Notice[], sessionId?: string): void {
       '`lobstah man tend` keeps the recent tail visible either way.',
   );
 }
+
+function emitReplies(replies: ReplyEvent[], sessionId?: string): void {
+  for (const r of replies) {
+    console.log(toonKV({ event: 'reply', id: r.id, verb: r.entry.verb, note: r.entry.note, at: r.entry.at, sent: r.sent }));
+  }
+  console.log(
+    'next: the worker answered your send — act on its note, ' +
+      `then re-arm a background \`lobstah man wait${sessionId ? ` --session ${sessionId}` : ''}\`.`,
+  );
+}
+
+/** A haul line for a send's answer. */
+function replyLine(r: ReplyEvent): string {
+  return `- reply ${r.id} (${r.entry.verb})${r.entry.note ? ` — ${r.entry.note}` : ''} · sent: ${r.sent}`;
+}
+
+/** A haul standing item for a send still waiting on its reply. */
+function sentLine(e: SentExpectation, now = Date.now()): string {
+  return `- sent · ${e.dispatchId} · ${e.line} · ${ageLabel(now - (Date.parse(e.sentAt) || now))}`;
+}
+
+const SENT_HINT = "A reply line is the worker's answer to your send. A sent line still waits on one; its next note wakes man wait.";
 
 function emitWatchAttention(attns: WatchAttention[], sessionId?: string): void {
   for (const a of attns) {
@@ -913,7 +944,9 @@ async function mainCli(): Promise<void> {
           attachments,
         );
         console.log(`delivered: inbox of ${member.id}${member.bucket === 'queue' ? ' (queued)' : ''}`);
-        console.log(toonKV({ id: member.id, from, queued: name }));
+        const expects = !noWakeFinished && !has('--no-reply');
+        if (expects) expectReply({ dispatchId: member.id, lane: member.lane, from, text });
+        console.log(toonKV({ id: member.id, from, queued: name, ...(expects ? { reply: 'expected' } : {}) }));
         if (noWakeFinished) console.log('warning: --no-wake left this message in a finished dispatch; nothing will read it.');
         break;
       }
@@ -946,6 +979,7 @@ async function mainCli(): Promise<void> {
         for: address,
       };
       const warnings = startDispatch(followUp, origin.lane, values('--attach'), sender);
+      if (!has('--no-reply')) expectReply({ dispatchId: followUp.id, lane: origin.lane, from, text });
       // A vanished worker's question is answered by this follow-up. Keep
       // provenance in the old inbox so answeredAt clears the standing gate.
       if (lastVerb === 'needs-decision' || lastVerb === 'blocked') {
@@ -974,7 +1008,7 @@ async function mainCli(): Promise<void> {
       }
       const titleClaim = verb === 'done' || verb === 'failed' ? readSessionClaim(id, lane) : undefined;
       const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
-      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined);
+      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
       if (verb === 'failed') recordPushFailure(id, lane, note);
       // A trap reports from its own checkout, or names its session from
@@ -1000,10 +1034,12 @@ async function mainCli(): Promise<void> {
       }
       if (prUrl) mergeEvidence(id, lane, { prUrl });
       const gatesNamed = recordReportedGates(id, lane, values('--human-gate'), prUrl);
-      // A done PR stays observed: CI, review, and merge flow back through its
-      // pr: watch instead of lobstah going blind at "PR open".
+      // A PR stays observed from the first report that names it: CI, review,
+      // and merge flow back through its pr: watch instead of lobstah going
+      // blind at "PR open". The watch is registered once per PR. A pause on
+      // the dispatch's own PR registers that PR's watch.
       const prWatch =
-        verb === 'done' && prUrl && !noWatch
+        verb !== 'failed' && prUrl && !noWatch
           ? autoRegisterPrWatch(id, prUrl)
           : verb === 'paused' && !noWatch
             ? registerWaitWatch(id, lane, entry)
@@ -1215,6 +1251,7 @@ async function mainCli(): Promise<void> {
             const ageMins = Math.max(0, Math.floor((now - Date.parse(r.observedAt)) / 60_000));
             return {
               number: `#${r.number}`,
+              title: cutTitle(r.title),
               repo: r.repo,
               state: r.state,
               badge: prBadge(r).text,
@@ -1224,7 +1261,7 @@ async function mainCli(): Promise<void> {
               watch: watch ? (watch.lastError ? 'error' : watch.done ? 'done' : 'watching') : 'no watch',
             };
           }),
-          ['number', 'repo', 'state', 'badge', 'draft', 'checks', 'observed', 'watch'],
+          ['number', 'title', 'repo', 'state', 'badge', 'draft', 'checks', 'observed', 'watch'],
         ),
       );
       break;
@@ -1433,6 +1470,14 @@ async function mainCli(): Promise<void> {
         };
         const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
         const consume = !has('--peek');
+        // A watcher delivery is a report through the newest event it printed.
+        // Reminders can be older than the cursor, so never move it backwards.
+        const delivered = (...times: string[]) => {
+          if (!consume || !callerHelm) return;
+          const through = Math.max(0, ...times.map((at) => Date.parse(at) || 0));
+          if (through > (Date.parse(readCursor(callerHelm.grounds) ?? '') || 0))
+            advanceCursor(callerHelm.grounds, new Date(through).toISOString());
+        };
         // Grounds-scoped consumption: a helm's wait touches only its own
         // repos' events and notices — the rest stand for their owner.
         const groundsScope = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
@@ -1456,14 +1501,23 @@ async function mainCli(): Promise<void> {
         // Consumed as usual, but a session is never woken by its own action's
         // notice — the echo carries no news for its author.
         const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
-        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0) {
+        // A send's answer: a working or paused note delivered once.
+        const standingReplies = takeReplies(consume, matchGrounds);
+        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0) {
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
           if (standingNotices.length > 0) emitNotices(standingNotices, sid);
+          if (standingReplies.length > 0) emitReplies(standingReplies, sid);
+          delivered(
+            ...standing.map((e) => e.entry.at),
+            ...standingWatches.flatMap((a) => a.events.map((e) => e.at)),
+            ...standingNotices.map((n) => n.at),
+            ...standingReplies.map((r) => r.entry.at),
+          );
           break;
         }
-        // The periodic report as a peek — the cursor moves only on `man
-        // report`. Silent when nothing changed.
+        // The periodic timeout report is a peek: only event delivery or
+        // `man report` advances the cursor. Silent when nothing changed.
         const peekDigest = () => {
           const grounds = groundsName !== undefined ? resolveGrounds(cfgWait, groundsName) : undefined;
           const digest = buildDigest({ cursor: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
@@ -1482,25 +1536,32 @@ async function mainCli(): Promise<void> {
           await new Promise((r) => setTimeout(r, 1500));
           if (callerHelm) heartbeatHelm(callerHelm.sessionId); // waiting IS liveness
           const fresh = freshWakeEvents(baseline, undefined, matchGrounds);
-          if (fresh.length > 0) {
-            emit(fresh);
+          // Taken after the wake scan: a send answered by a waking verb is
+          // cleared here, and that verb is the wake.
+          const replies = takeReplies(true, matchGrounds);
+          if (fresh.length > 0 || replies.length > 0) {
+            if (fresh.length > 0) emit(fresh);
+            if (replies.length > 0) emitReplies(replies, sid);
+            delivered(...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at));
             return;
           }
           runDueManWatches(); // no pick running? this loop is the poller
           const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
           if (watched.length > 0) {
             emitWatchAttention(watched, sid);
+            delivered(...watched.flatMap((a) => a.events.map((e) => e.at)));
             return;
           }
           const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
           if (freshNotices.length > 0) {
             emitNotices(freshNotices, sid);
+            delivered(...freshNotices.map((n) => n.at));
             return;
           }
         }
         // A quiet timeout still shows the delta since the last report, so a
         // `man wait` loop doubles as the periodic fleet report. It is a PEEK —
-        // the cursor moves only on `man report`, the explicit acknowledgment —
+        // only event delivery or `man report` moves the cursor —
         // so a digest lost with a dead background task resurfaces on the next
         // timeout instead of being marked delivered to nobody. Silent when
         // nothing changed — the loop should not train its reader to skim.
@@ -1663,13 +1724,19 @@ async function mainCli(): Promise<void> {
           const evs = attentionNow(false, remindMs, Date.now(), matchHelm);
           const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
           const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
-          if (evs.length || watched.length || notices.length) {
+          const replies = takeReplies(false, matchHelm);
+          // Listing an unanswered send is its reminder: paced like a question.
+          const unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
+          if (evs.length || watched.length || notices.length || replies.length || unanswered.length) {
             emit(
               [
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
                 ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
                 ...notices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
+                ...replies.map(replyLine),
+                ...unanswered.map(sentLine),
+                ...(replies.length || unanswered.length ? [SENT_HINT] : []),
                 'Handle the standing item. The Stop hook will enforce a watcher at the next turn end.',
               ].join('\n'),
             );
@@ -1692,7 +1759,11 @@ async function mainCli(): Promise<void> {
         let watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
         const notEcho = (n: Notice) => n.by === undefined || n.by !== hook?.session_id;
         let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
-        if (evs.length === 0 && watched.length === 0 && fleetNotices.length === 0) {
+        let replies = takeReplies(true, matchHelm);
+        let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
+        const quiet = () =>
+          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0;
+        if (quiet()) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 1500));
@@ -1702,10 +1773,12 @@ async function mainCli(): Promise<void> {
             runDueManWatches();
             watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
             fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
-            if (evs.length > 0 || watched.length > 0 || fleetNotices.length > 0) break;
+            replies = takeReplies(true, matchHelm);
+            unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
+            if (!quiet()) break;
           }
         }
-        if (evs.length === 0 && watched.length === 0 && fleetNotices.length === 0) {
+        if (quiet()) {
           const d = dueDigest();
           if (d) blockDigest(d);
           break; // timeout — allow the stop; tier 1 covers the horizon
@@ -1714,6 +1787,9 @@ async function mainCli(): Promise<void> {
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
           ...fleetNotices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
+          ...replies.map(replyLine),
+          ...unanswered.map(sentLine),
+          ...(replies.length || unanswered.length ? [SENT_HINT] : []),
         ];
         emit(
           [
@@ -2275,7 +2351,7 @@ async function mainCli(): Promise<void> {
           toonTable(
             'backfill',
             rows.map((r) => ({ ...r })),
-            ['key', 'action', 'owner'],
+            rows.some((r) => r.error) ? ['key', 'action', 'owner', 'error'] : ['key', 'action', 'owner'],
           ),
         );
         console.log(
@@ -2283,6 +2359,7 @@ async function mainCli(): Promise<void> {
             applied: apply,
             register: rows.filter((r) => r.action === 'register').length,
             retire: rows.filter((r) => r.action === 'retire').length,
+            title: rows.filter((r) => r.action === 'title' && !r.error).length,
           }),
         );
         if (!apply && rows.length > 0) console.log('dry run — pass --apply to write');
