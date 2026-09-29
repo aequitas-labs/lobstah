@@ -5,6 +5,7 @@ import * as http from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
+  awaitingReply,
   activeIds,
   activityView,
   waitingView,
@@ -217,6 +218,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
           .filter((f) => f.endsWith('.msg'))
           .sort()
           .map((f) => fs.readFileSync(path.join(inboxDir, f), 'utf8').trim()),
+        ...awaitingOf(id),
         evidence: Object.keys(evidence).length > 0 ? evidence : undefined,
         ...(r.bucket === 'queued' ? {} : worktreeView(id, r.lane)),
         ...(r.bucket === 'queued' ? {} : livenessView(id, r.lane)),
@@ -229,6 +231,11 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
       };
     })
     .sort((a, b) => b.sort - a.sort);
+}
+
+function awaitingOf(id: string): Pick<GlassDispatch, 'awaitingReply'> {
+  const e = awaitingReply(id);
+  return e ? { awaitingReply: { sentAt: e.sentAt, from: e.from, line: e.line } } : {};
 }
 
 /**
