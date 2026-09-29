@@ -41,6 +41,14 @@ export interface DriveOpts {
   cwd?: string;
   /** Minimum interval between activity writes of the same kind (default 10s). */
   activityThrottleMs?: number;
+  /**
+   * After a `done` or `failed` report at turn end, how long to wait for the
+   * event stream to close before stopping the harness
+   * (`[limits].exitGraceSecs`, default 30 seconds).
+   */
+  exitGraceMs?: number;
+  /** Called once, when a turn ends on the worker's `done` or `failed`. */
+  onFinal?: () => void;
 }
 
 /**
@@ -63,6 +71,31 @@ export interface DriveResult {
   /** Tool calls and assistant text seen — zero means the session never did
    * any work (a resume the harness refused ends this way). */
   activity: number;
+  /** The turn ended on the worker's `done` or `failed`. */
+  final: boolean;
+  /**
+   * Set when the runner stopped the harness after that final report: the
+   * stream did not close within the exit grace, or a cancel arrived. The
+   * harness was killed and the stream abandoned.
+   */
+  stopped?: { reason: 'exit-grace' | 'cancel'; afterMs: number };
+}
+
+/**
+ * The items of `source` until `stop` resolves. On stop, iteration ends at
+ * once, even when `source` is waiting for an item that never comes.
+ */
+async function* until<T>(source: AsyncIterable<T>, stop: Promise<void>): AsyncGenerator<T> {
+  const it = source[Symbol.asyncIterator]();
+  const stopped = stop.then((): IteratorResult<T> => ({ done: true, value: undefined }));
+  while (true) {
+    const next = await Promise.race([it.next(), stopped]);
+    if (next.done) {
+      void it.return?.()?.catch?.(() => {});
+      return;
+    }
+    yield next.value;
+  }
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -93,6 +126,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     stopped = () => false,
     backgroundWaitMs = 30 * 60_000,
     settleGraceMs = 120_000,
+    exitGraceMs = 30_000,
   } = opts;
   // Activity comes from the stream, never from the model: every event the
   // runner sees can update what the dispatch is doing now.
@@ -110,9 +144,53 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
   let finished = false;
   void run.done.then(() => (finished = true));
 
+  // The harness is killed at most once, whichever path gets there first.
+  let killed = false;
+  const kill = () => {
+    if (killed) return;
+    killed = true;
+    run.kill();
+  };
   const cancel = () => {
     cancelled = true;
-    run.kill();
+    kill();
+  };
+
+  // After the worker's final report the run is over: the session is ended,
+  // and a stream that does not close within the grace is abandoned.
+  let final = false;
+  let stoppedHarness: DriveResult['stopped'];
+  let finalAt = 0;
+  let exit: { poll: ReturnType<typeof setInterval>; expiry: ReturnType<typeof setTimeout> } | undefined;
+  let abandon!: () => void;
+  const abandoned = new Promise<void>((resolve) => (abandon = resolve));
+  const clearExit = () => {
+    if (!exit) return;
+    clearInterval(exit.poll);
+    clearTimeout(exit.expiry);
+    exit = undefined;
+  };
+  const stopHarness = (reason: 'exit-grace' | 'cancel') => {
+    clearExit();
+    const afterMs = Date.now() - finalAt;
+    stoppedHarness = { reason, afterMs };
+    record({ at: new Date().toISOString(), type: 'runner', data: { stopped: reason, afterSecs: Math.round(afterMs / 1000) } });
+    kill();
+    abandon();
+  };
+  const finish = () => {
+    if (final) return;
+    final = true;
+    finalAt = Date.now();
+    opts.onFinal?.();
+    run.end();
+    // A cancel after the final report has nothing to cancel: it stops the
+    // harness now instead of at the end of the grace. The result stands.
+    const poll = setInterval(() => {
+      if (cancelRequested(id, lane)) stopHarness('cancel');
+    }, Math.min(pollMs, exitGraceMs));
+    const expiry = setTimeout(() => stopHarness('exit-grace'), exitGraceMs);
+    exit = { poll, expiry };
   };
 
   // The answer supersedes the standing question: it ends reminders, and a
@@ -184,7 +262,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     hold = { heartbeat, expiry };
   };
 
-  for await (const ev of run.events) {
+  for await (const ev of until(run.events, abandoned)) {
     record(ev);
     if (ev.type === 'background') {
       liveBackground = Number(ev.data?.live ?? 0);
@@ -201,12 +279,17 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     if (ev.type === 'session' && ev.data?.sessionId) {
       mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId) });
     }
-    if (ev.type !== 'turn-end' || cancelled || stopped()) continue;
+    if (ev.type !== 'turn-end' || cancelled || stopped() || final) continue;
+    const lastVerb = readStatusLog(id, lane).at(-1)?.verb;
+    // `done`/`failed`: the worker said it is finished. Its report is final.
+    if (lastVerb !== undefined && TERMINAL_VERBS.includes(lastVerb)) {
+      finish();
+      continue;
+    }
     if (cancelRequested(id, lane)) {
       cancel();
       continue;
     }
-    const lastVerb = readStatusLog(id, lane).at(-1)?.verb;
     const waiting = lastVerb !== undefined && WAITING_VERBS.includes(lastVerb);
     if (deliver(run, id, lane) > 0) {
       if (waiting) answered(lastVerb);
@@ -214,11 +297,6 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     }
     if (waiting) {
       await awaitAnswer(lastVerb);
-      continue;
-    }
-    // `done`/`failed`: the worker said it is finished.
-    if (lastVerb !== undefined && TERMINAL_VERBS.includes(lastVerb)) {
-      run.end();
       continue;
     }
     // A turn the harness ended in error (a refused resume, the turn limit)
@@ -240,9 +318,10 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     unreported();
   }
   releaseHold();
+  clearExit();
   tracker.flush();
   tracker.stop();
-  return { cancelled, activity };
+  return { cancelled, activity, final, ...(stoppedHarness ? { stopped: stoppedHarness } : {}) };
 }
 
 export interface SettleInput {
@@ -252,13 +331,18 @@ export interface SettleInput {
   budgetNote?: string;
 }
 
-/** Stamp the final verb for a run that has fully stopped. */
+/**
+ * Stamp the final verb for a run that has fully stopped. The worker's own
+ * `done` or `failed` is final: no later time limit, error, kill, or cancel
+ * adds a verb after it.
+ */
 export function settle(id: string, lane: Lane, r: SettleInput): void {
   const lastVerb = readStatusLog(id, lane).at(-1)?.verb;
+  if (lastVerb !== undefined && TERMINAL_VERBS.includes(lastVerb)) return;
   if (r.cancelled) appendStatus(id, lane, 'failed', 'cancelled by operator');
   else if (r.wallClockHit) appendStatus(id, lane, 'failed', `budget: out of time${r.budgetNote ? `; ${r.budgetNote}` : ''}; send continue to resume`);
   else if (r.error) appendStatus(id, lane, 'failed', r.error.slice(0, 500));
   // Only the worker's own report is `done`. A run that stopped without one —
   // a harness that exited on its own, a turn limit — did not say it finished.
-  else if (!lastVerb || !TERMINAL_VERBS.includes(lastVerb)) appendStatus(id, lane, 'failed', 'stopped without reporting a result');
+  else appendStatus(id, lane, 'failed', 'stopped without reporting a result');
 }

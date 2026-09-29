@@ -90,6 +90,11 @@ export interface Evidence {
   worktreeReleased?: string;
   /** Branches this dispatch pushed, as lobstah saw it (pushes.ts). */
   pushes?: PushRecord[];
+  /**
+   * Set when the runner stopped the harness after the worker's final report:
+   * why, and how long after the report.
+   */
+  harnessStopped?: { reason: 'exit-grace' | 'cancel'; afterSecs: number; at: string };
 }
 
 export type EventType =

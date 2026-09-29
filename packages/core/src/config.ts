@@ -50,6 +50,12 @@ export interface LimitsConfig {
    * when that work settles; past this window the worker is asked to report.
    */
   backgroundWaitSecs: number;
+  /**
+   * After the worker reports `done` or `failed` at turn end, how long the
+   * runner waits for the harness to close its event stream. Past this, the
+   * runner stops the harness and its process group, and finishes.
+   */
+  exitGraceSecs: number;
   choreRetentionDays: number;
   attachmentMaxBytes: number;
   /**
@@ -204,6 +210,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   draftPr: true,
   checkpointOnStop: true,
   backgroundWaitSecs: 1800,
+  exitGraceSecs: 30,
   choreRetentionDays: 7,
   attachmentMaxBytes: 25 * 1024 * 1024,
   retentionDays: 0,
