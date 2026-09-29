@@ -44,6 +44,13 @@ worktree need no flags.
   `--name <word-word>` chooses or changes it. The name survives stow and a
   ghost sweep; `wt:<name>` and `wt:<id>` also remain valid addresses.
 
+In the Codex app, run `lobstah soak title` after sign-on, after each claim,
+and after reporting `done` or `failed`. If it prints a title and this
+session has `set_thread_title`, set this thread's title to that text. If
+the tool refuses or asks the person to approve, do not retry that title.
+An empty result means title setting is off. The Codex CLI has no live
+title-setting hook; do not claim that a running CLI session was renamed.
+
 ## Taking bait
 
 Work arrives at turn end (the Stop hook) or from `soak --wait`, as a brief

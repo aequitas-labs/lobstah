@@ -326,6 +326,8 @@ soaking (interactive sessions volunteering as workers):
                                   --wait listens in the foreground now (for
                                   sessions without Stop hooks): work prints
                                   plain, a quiet timeout exits 3 — re-run it.
+  soak title [--session <id>] [--json]
+                                  print this session's trap title, or nothing when off.
   stow [--wt <trap>|--session <id>] [--keep] [--quiet]
                                   sign the trap off; an unfinished
                                   assignment requeues, unread messages

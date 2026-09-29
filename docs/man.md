@@ -693,6 +693,15 @@ resolves the trap from the working directory, else from the session id. A
 trap that works for an hour without reporting is not swept while it beats.
 `[soak].beat = false` turns the hook off.
 
+`lobstah soak title` prints the calling trap's two-word name while idle, or
+`name · <short first brief line>` while it has an open claim. `--json` prints
+`title`, `name`, and `work` fields. The command prints nothing outside that
+trap or when `[soak].sessionTitle = false`. It strips control and terminal
+escape sequences and caps the brief text before a plugin uses it. The trap
+skills update an available session-title tool at sign-on, after a claim,
+and after `done` or `failed`; a refused title is not retried. Stow leaves
+the current title in place.
+
 Liveness has two failure shapes with two remedies: a registration that
 parked before and went quiet (no park, report, or beat) past `[soak].ttlSecs` is a **ghost trap** —
 swept, catch requeued, noticed, its worktree kept; one that **never parked** is a **defective

@@ -39,6 +39,12 @@ says when the plugin is behind.
 | `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken, and sending a follow-up to finished work. |
 | `trap` skill | The worker: soaking (in a linked worktree, or in one that soak creates), the `wt:` address, the six report verbs, and `paused --waiting-on` before external waits. |
 
+`lobstah soak title` prints a signed-on trap's name and short current work.
+The trap skill uses `set_thread_title` for the current thread in the Codex
+app, when that tool is available, at sign-on, claim, and completion. A
+refusal or approval request is not retried. The CLI has no live title
+setter. `[soak].sessionTitle = false` disables title setting.
+
 There are no slash commands: the Codex plugin layout has no commands
 directory. The skills run the same `lobstah` commands as the README
 quickstart.

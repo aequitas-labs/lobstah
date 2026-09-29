@@ -15,7 +15,7 @@ Codex with no settings surgery.
 | Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends and keeps its worktree. |
 | `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
-| `trap` skill | The worker: soaking, its two-word name and `wt:` id, the six report verbs, inbox, `paused --waiting-on` before external waits, stowing. |
+| `trap` skill | The worker: soaking, its two-word name and `wt:` id, the six report verbs, inbox, optional session title, `paused --waiting-on` before external waits, stowing. |
 
 ## Requirements
 

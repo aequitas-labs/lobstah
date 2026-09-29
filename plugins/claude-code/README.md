@@ -16,7 +16,7 @@ hand, plus the skills and commands.
 | Stop hook (`lobstah man haul`) | Checks for an armed watcher while work is in flight; `--park` waits in the hook. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends and keeps its worktree. |
 | `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
-| `trap` skill | The worker: soaking, its two-word name and `wt:` id, the six report verbs, inbox, stowing. |
+| `trap` skill | The worker: soaking, its two-word name and `wt:` id, the six report verbs, inbox, session title, stowing. |
 | `/lobstah:helm` · `/lobstah:relieve` | Take the helm (optionally for a named grounds) and step down. |
 | `/lobstah:soak` · `/lobstah:stow` | Volunteer this session as a trap, and sign it off. |
 | `/lobstah:tend` command | Fleet status at a keystroke. |
