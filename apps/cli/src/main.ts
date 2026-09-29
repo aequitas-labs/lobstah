@@ -33,6 +33,11 @@ import {
   stowTrap,
   trapBySession,
   trapIdAt,
+  anchoredWorktree,
+  readTrapAnchor,
+  soakWorktreeFor,
+  TRAP_ANCHOR_FILE,
+  worktreesDir,
   sendTrapMessage,
   unhandledTrapMessages,
   acknowledgeTrapMessage,
@@ -97,7 +102,8 @@ import {
   CODEX_DESKTOP_THREAD,
   worktreeProgress,
 } from '@lobstah/core';
-import type { Descriptor, Lane, Notice, WatchAttention } from '@lobstah/core';
+import type { Descriptor, Lane, Notice, RepoConfig, WatchAttention } from '@lobstah/core';
+import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
@@ -137,7 +143,8 @@ import {
   syncPrWatches,
 } from './pr-watch.js';
 import { deliverPrRepairs, stampRepairerBeat } from './pr-repair.js';
-import { inspectSoakSite, readHookStdin } from './soak-site.js';
+import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
+import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { runBeat } from './beat.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
@@ -920,19 +927,21 @@ async function mainCli(): Promise<void> {
         }
       }
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined);
-      // A trap reports from its own checkout; keep its last commit as the
+      // A trap reports from its own checkout, or names its session from
+      // anywhere else (a primary checkout): keep its last commit as the
       // ownership anchor for safe PR-watch repairs after the session moves on.
       if (verb === 'done') {
         const claim = readSessionClaim(id, lane);
         let ownCheckout = false;
-        try {
-          ownCheckout =
-            !!claim?.by.startsWith('wt:') && !!claim.worktree && fs.realpathSync(claim.worktree) === fs.realpathSync(process.cwd());
-        } catch {
-          /* removed checkout */
+        if (claim?.by.startsWith('wt:') && claim.worktree && fs.existsSync(claim.worktree)) {
+          const rel = path.relative(canon(claim.worktree), canon(process.cwd()));
+          const inside = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+          const who = callerSession(opt('--session'))?.id;
+          const manning = readTrap(claim.by.slice('wt:'.length))?.sessionId;
+          ownCheckout = inside || (who !== undefined && (who === claim.sessionId || who === manning));
         }
         if (ownCheckout) {
-          const git = (args: string[]) => spawnSync('git', args, { cwd: process.cwd(), encoding: 'utf8', timeout: 10_000 });
+          const git = (args: string[]) => spawnSync('git', args, { cwd: claim!.worktree, encoding: 'utf8', timeout: 10_000 });
           const head = git(['rev-parse', 'HEAD']);
           const branch = git(['branch', '--show-current']);
           if (head.status === 0 && branch.status === 0)
@@ -1666,24 +1675,91 @@ async function mainCli(): Promise<void> {
     case 'soak': {
       const cfg = loadConfig();
       const site = inspectSoakSite(process.cwd(), cfg.repos);
-      if (!site) throw new Error('soak must run from inside a git worktree — your working directory is not one');
-      if (site.primary) {
+      const repoFlag = opt('--repo');
+      if (repoFlag !== undefined && !cfg.repos[repoFlag]) {
         throw new Error(
-          "this is the repo's primary checkout — workers never take work here. Create a worktree " +
-            '(`git worktree add ../<name> -b <branch>`), cd into it, and run soak again from there.',
+          `no repo "${repoFlag}" is configured (configured: ${Object.keys(cfg.repos).join(', ') || 'none'}) — \`lobstah repos\` lists them`,
         );
       }
-      // Identity is the worktree; the session id inside is the liveness
-      // principal. First sign-on needs it (flag or hook stdin); a re-run in
-      // the same worktree infers everything from the anchor file.
-      const priorId = trapIdAt(site.worktree);
-      const prior = priorId !== undefined ? readTrap(priorId) : undefined;
-      const sessionId = callerSession(opt('--session'), true)?.id ?? prior?.sessionId;
-      if (!sessionId) {
-        throw new Error(
-          'first sign-on needs --session <id> — the harness session id, announced at session start ' +
-            'by the lobstah plugin (`lobstah man brief`). Re-runs in this worktree need no flags.',
-        );
+      // Where the trap lives. A linked worktree is its own site: sign on
+      // there. Anywhere else (a primary checkout, a directory outside any
+      // repo), the session's own trap is re-used, else soak creates a
+      // worktree for the repo and signs on in it.
+      let worktree: string | undefined;
+      let repoKey: string | undefined;
+      let prior: ReturnType<typeof readTrap>;
+      let sessionId: string | undefined;
+      let create: { key: string; repo: RepoConfig } | undefined;
+      if (site && !site.primary) {
+        if (repoFlag !== undefined && repoFlag !== site.repoKey) {
+          throw new Error(
+            `--repo ${repoFlag} does not match this linked worktree (repo ${site.repoKey ?? 'not configured'}). ` +
+              'In a linked worktree soak signs on right here: drop --repo.',
+          );
+        }
+        worktree = site.worktree;
+        repoKey = site.repoKey;
+        // Identity is the worktree; the session id inside is the liveness
+        // principal. First sign-on needs it (flag or hook stdin); a re-run in
+        // the same worktree infers everything from the anchor file.
+        const priorId = trapIdAt(site.worktree);
+        prior = priorId !== undefined ? readTrap(priorId) : undefined;
+        sessionId = callerSession(opt('--session'), true)?.id ?? prior?.sessionId;
+        if (!sessionId) {
+          throw new Error(
+            'first sign-on needs --session <id> — the harness session id, announced at session start ' +
+              'by the lobstah plugin (`lobstah man brief`). Re-runs in this worktree need no flags.',
+          );
+        }
+      } else {
+        sessionId = callerSession(opt('--session'), true)?.id;
+        if (!sessionId) {
+          throw new Error(
+            'soak outside a linked worktree needs --session <id> — the harness session id, announced at session start ' +
+              'by the lobstah plugin (`lobstah man brief`).',
+          );
+        }
+        const mine = trapBySession(sessionId);
+        if (mine) {
+          // Idempotent: the session's trap, wherever this runs from.
+          if (repoFlag !== undefined && repoFlag !== mine.repo) {
+            throw new Error(
+              `this session already mans trap wt:${mine.trapId} (repo ${mine.repo ?? 'none'}) at ${mine.worktree}. ` +
+                `Sign it off with \`lobstah stow\` before you soak for repo ${repoFlag}.`,
+            );
+          }
+          if (!fs.existsSync(mine.worktree)) {
+            throw new Error(
+              `this session's trap wt:${mine.trapId} is anchored at ${mine.worktree}, which no longer exists. ` +
+                'Run `lobstah stow`, then soak again.',
+            );
+          }
+          worktree = mine.worktree;
+          repoKey = mine.repo;
+          prior = mine;
+        } else {
+          const key = repoFlag ?? (site?.primary ? site.repoKey : undefined);
+          if (key === undefined) {
+            throw new Error(
+              site
+                ? `this primary checkout belongs to no configured repo — pass --repo <key> to name the repo soak creates a worktree for ` +
+                    `(configured: ${Object.keys(cfg.repos).join(', ') || 'none'}), or add it with \`lobstah repos add\``
+                : `this directory is not inside a configured repo — pass --repo <key> to name the repo soak creates a worktree for ` +
+                    `(configured: ${Object.keys(cfg.repos).join(', ') || 'none'})`,
+            );
+          }
+          repoKey = key;
+          // A worktree soak already created for this session (its trap was
+          // swept, say) is re-used, never duplicated.
+          const existing = soakWorktreeFor(worktreesDir(), sessionId, key);
+          if (existing) {
+            worktree = canon(existing);
+            const id = trapIdAt(existing);
+            prior = id !== undefined ? readTrap(id) : undefined;
+          } else {
+            create = { key, repo: cfg.repos[key]! };
+          }
+        }
       }
       // The harness: --harness, else what this same session signed on with,
       // else the environment (session id format breaks a CLAUDE*/CODEX* tie).
@@ -1696,16 +1772,28 @@ async function mainCli(): Promise<void> {
         );
       }
       const harnessChanged = prior && prior.harness !== resolved.harness ? prior.harness : undefined;
-      const res = signOnTrap({
-        worktree: site.worktree,
-        cwd: process.cwd(),
-        repo: site.repoKey,
-        harness: resolved.harness,
-        sessionId,
-        one: has('--one') || undefined,
-        window: captureWindow(),
-        ttlMs: cfg.soak.ttlSecs * 1000,
-      });
+      // Created last, after every check that can refuse: a refusal leaves
+      // nothing behind.
+      const made = create
+        ? await createSoakWorktree({ repoKey: create.key, repo: create.repo, sessionId, minFreeGB: cfg.limits.minFreeGB })
+        : undefined;
+      if (made) worktree = canon(made.dir);
+      let res: ReturnType<typeof signOnTrap>;
+      try {
+        res = signOnTrap({
+          worktree: worktree!,
+          cwd: made || !site || site.primary ? worktree! : process.cwd(),
+          repo: repoKey,
+          harness: resolved.harness,
+          sessionId,
+          one: has('--one') || undefined,
+          window: captureWindow(),
+          ttlMs: cfg.soak.ttlSecs * 1000,
+        });
+      } catch (err) {
+        if (made && create) await discardSoakWorktree(create.repo, made);
+        throw err;
+      }
       if ('held' in res) {
         throw new Error(
           `another session (${res.held.sessionId.slice(0, 8)}) is manning this worktree's trap and is live — ` +
@@ -1713,6 +1801,13 @@ async function mainCli(): Promise<void> {
         );
       }
       const reg = res.ok;
+      // A command cannot move the session: a session outside the trap's
+      // worktree is told to change into it.
+      const inside = (() => {
+        const rel = path.relative(reg.worktree, canon(process.cwd()));
+        return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+      })();
+      const sessionFlag = inside ? '' : ` --session ${sessionId}`;
       console.log(
         toonKV({
           trap: `wt:${reg.trapId}`,
@@ -1721,7 +1816,9 @@ async function mainCli(): Promise<void> {
           ...(harnessChanged ? { harnessChanged: `${harnessChanged} → ${reg.harness} (registration updated)` } : {}),
           repo: reg.repo ?? '(none configured — addressed work only)',
           worktree: reg.worktree,
+          ...(made ? { created: true, branch: made.branch } : {}),
           ...(reg.one ? { one: true } : {}),
+          ...(inside ? {} : { instruction: `cd ${reg.worktree} and work in that directory from now on` }),
           note:
             'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
             'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ' +
@@ -1730,8 +1827,9 @@ async function mainCli(): Promise<void> {
       );
       console.log(
         toonHelp([
-          `lobstah soak --wait --timeout 600   (no Stop hook: listen now; work prints here, exit 3 = run it again)`,
-          `lobstah stow   (sign off)`,
+          ...(inside ? [] : [`cd ${reg.worktree}   (do this first: every task runs in the trap's worktree)`]),
+          `lobstah soak --wait --timeout 600${sessionFlag}   (no Stop hook: listen now; work prints here, exit 3 = run it again)`,
+          `lobstah stow${sessionFlag}   (sign off${reg.createdWorktree ? '; removes this worktree when it holds no unpushed work, --keep keeps it' : ''})`,
         ]),
       );
       // The hookless park: same soakPark as the Stop hook drives, as a plain
@@ -1751,10 +1849,23 @@ async function mainCli(): Promise<void> {
     case 'stow': {
       const quiet = has('--quiet');
       // Resolve the trap from where we stand, from the session (flag or
-      // hook stdin), or from an explicit wt: id.
+      // hook stdin), or from an explicit wt: id. Hook stdin is read at most
+      // once, and only when no --session was given.
+      let hook: ReturnType<typeof readHookStdin>;
+      let hookRead = false;
+      const hookInput = () => {
+        if (!hookRead) {
+          hook = readHookStdin();
+          hookRead = true;
+        }
+        return hook;
+      };
       const wtFlag = opt('--wt');
-      const caller = callerSession(opt('--session'), true);
+      const caller = resolveSessionId({ flag: opt('--session'), stdin: () => hookInput()?.session_id });
       const sessionId = caller?.id;
+      // A session that ends (or clears) may go on in the same directory:
+      // the SessionEnd hook signs off and keeps the worktree.
+      const sessionEnd = hookRead && hook?.hook_event_name === 'SessionEnd';
       const site = inspectSoakSite(process.cwd(), loadConfig().repos);
       const trapId =
         wtFlag ??
@@ -1774,21 +1885,58 @@ async function mainCli(): Promise<void> {
         gateHelm(caller);
       }
       const reg = stowTrap(trapId, own ? 'signed off' : 'stowed by the helm', sessionId);
-      if (!reg) {
-        if (!quiet) console.log(toonKV({ trap: `wt:${trapId}`, soaking: false }));
-        break;
+      const released = reg ? releaseCatch(reg) : {};
+      const bounced = reg ? bounceTrapMessages(trapId) : 0;
+      // The trap's worktree: removed only when soak created it and it holds
+      // no work that exists nowhere else.
+      const wtDir =
+        reg?.worktree ??
+        (site && !site.primary && trapIdAt(site.worktree) === trapId ? site.worktree : undefined) ??
+        anchoredWorktree(worktreesDir(), trapId);
+      const anchor = wtDir !== undefined ? readTrapAnchor(wtDir) : undefined;
+      const created = reg?.createdWorktree === true || anchor?.createdBy === 'soak';
+      let worktreeOut: Record<string, unknown> = {};
+      if (wtDir !== undefined && fs.existsSync(wtDir)) {
+        const keepReason = has('--keep')
+          ? '--keep'
+          : sessionEnd
+            ? 'the session ended; the SessionEnd hook keeps the worktree'
+            : !created
+              ? 'soak did not create this worktree; stow leaves it in place'
+              : undefined;
+        if (keepReason) {
+          worktreeOut = { worktree: 'kept', path: wtDir, reason: keepReason };
+        } else {
+          const removal = await removeIfSafe(wtDir, {
+            ignore: [TRAP_ANCHOR_FILE],
+            branches: anchor?.branch ? [anchor.branch] : [],
+          });
+          worktreeOut = removal.removed
+            ? {
+                worktree: 'removed',
+                path: wtDir,
+                returnTo: removal.primary,
+                ...(removal.deletedBranches.length > 0 ? { branchDeleted: removal.deletedBranches.join(', ') } : {}),
+                ...(removal.keptBranches.length > 0
+                  ? { branchKept: removal.keptBranches.map((b) => `${b.branch} (${b.reason})`).join('; ') }
+                  : {}),
+              }
+            : { worktree: 'kept', path: wtDir, reason: removal.reason };
+        }
       }
-      const released = releaseCatch(reg);
-      const bounced = bounceTrapMessages(trapId);
       if (!quiet) {
         console.log(
           toonKV({
-            stowed: `wt:${trapId}`,
+            ...(reg ? { stowed: `wt:${trapId}` } : { trap: `wt:${trapId}`, soaking: false }),
             ...(released.requeued ? { requeued: released.requeued } : {}),
             ...(released.finalized ? { finalized: released.finalized } : {}),
             ...(bounced > 0 ? { bounced: `${bounced} undelivered message(s) — returned to the helm as notices` } : {}),
+            ...worktreeOut,
           }),
         );
+        if (worktreeOut.worktree === 'removed') {
+          console.log(toonHelp([`cd ${String(worktreeOut.returnTo)}   (the worktree is gone: work from here)`]));
+        }
       }
       break;
     }

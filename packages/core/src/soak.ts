@@ -40,6 +40,12 @@ export interface TrapRegistration {
   window?: WindowRef;
   /** The active dispatch this trap currently works, if any. */
   claimed?: string;
+  /**
+   * True when `lobstah soak` created the worktree for this trap. `stow`
+   * removes only such a worktree. Read from the anchor file on every
+   * sign-on, so it survives a ghost sweep and a re-soak.
+   */
+  createdWorktree?: boolean;
 }
 
 /** Claim marker for a trap-claimed active dispatch (`claim.json`). */
@@ -63,23 +69,91 @@ function atomicWrite(file: string, content: string): void {
   fs.renameSync(tmp, file);
 }
 
-/** The trap id anchored in a worktree, if one was ever created there. */
-export function trapIdAt(worktree: string): string | undefined {
+/**
+ * The anchor file's content. `createdBy: 'soak'` marks a worktree that
+ * `lobstah soak` created; `sessionId` and `repo` name the session and repo it
+ * was created for, so the same session re-uses it instead of creating a
+ * second one.
+ */
+export interface TrapAnchor {
+  trapId: string;
+  createdBy?: 'soak';
+  sessionId?: string;
+  repo?: string;
+  /** The branch soak created with the worktree. */
+  branch?: string;
+}
+
+/** The anchor file of a worktree, if one was ever written there. */
+export function readTrapAnchor(worktree: string): TrapAnchor | undefined {
   try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(worktree, TRAP_FILE), 'utf8')) as { trapId?: string };
-    return typeof parsed.trapId === 'string' ? parsed.trapId : undefined;
+    const parsed = JSON.parse(fs.readFileSync(path.join(worktree, TRAP_FILE), 'utf8')) as TrapAnchor;
+    return typeof parsed.trapId === 'string' ? parsed : undefined;
   } catch {
     return undefined;
   }
+}
+
+/** Write a worktree's anchor file. */
+export function writeTrapAnchor(worktree: string, anchor: TrapAnchor): void {
+  atomicWrite(path.join(worktree, TRAP_FILE), `${JSON.stringify(anchor, null, 2)}\n`);
+}
+
+/** The anchor file's path in a worktree. */
+export function trapAnchorPath(worktree: string): string {
+  return path.join(worktree, TRAP_FILE);
+}
+
+/** The anchor file's name, relative to the worktree root. */
+export const TRAP_ANCHOR_FILE = TRAP_FILE;
+
+/** The trap id anchored in a worktree, if one was ever created there. */
+export function trapIdAt(worktree: string): string | undefined {
+  return readTrapAnchor(worktree)?.trapId;
 }
 
 /** Read the worktree's trap id, creating the anchor file on first sign-on. */
 export function ensureTrapId(worktree: string): string {
   const existing = trapIdAt(worktree);
   if (existing) return existing;
-  const trapId = randomBytes(4).toString('hex');
-  atomicWrite(path.join(worktree, TRAP_FILE), `${JSON.stringify({ trapId }, null, 2)}\n`);
+  const trapId = newTrapId();
+  writeTrapAnchor(worktree, { trapId });
   return trapId;
+}
+
+/** A fresh short trap id. */
+export function newTrapId(): string {
+  return randomBytes(4).toString('hex');
+}
+
+/** The first worktree directly under `root` whose anchor file satisfies `match`. */
+function findAnchored(root: string, match: (anchor: TrapAnchor) => boolean): string | undefined {
+  let names: string[];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return undefined;
+  }
+  for (const name of names.sort()) {
+    const dir = path.join(root, name);
+    const anchor = readTrapAnchor(dir);
+    if (anchor && match(anchor)) return dir;
+  }
+  return undefined;
+}
+
+/**
+ * The worktree `lobstah soak` created for this session and repo, if it
+ * still exists under `root` (lobstah's worktree root). Found through the
+ * anchor files, so it is found after a ghost sweep removed the registration.
+ */
+export function soakWorktreeFor(root: string, sessionId: string, repo: string): string | undefined {
+  return findAnchored(root, (a) => a.createdBy === 'soak' && a.sessionId === sessionId && a.repo === repo);
+}
+
+/** The worktree under `root` that anchors `trapId`, if any. */
+export function anchoredWorktree(root: string, trapId: string): string | undefined {
+  return findAnchored(root, (a) => a.trapId === trapId);
 }
 
 export function readTrap(trapId: string): TrapRegistration | undefined {
@@ -128,6 +202,7 @@ export function signOnTrap(opts: {
 }): SignOnResult {
   const now = opts.now ?? Date.now();
   const trapId = ensureTrapId(opts.worktree);
+  const createdWorktree = readTrapAnchor(opts.worktree)?.createdBy === 'soak' || undefined;
   const prior = readTrap(trapId);
   if (prior && prior.sessionId !== opts.sessionId) {
     const fresh = now - trapLastSeen(prior) <= opts.ttlMs;
@@ -148,6 +223,7 @@ export function signOnTrap(opts: {
     firstParkedAt: sameSession ? prior.firstParkedAt : undefined,
     window: opts.window ?? (sameSession ? prior.window : undefined),
     claimed: prior?.claimed,
+    ...(createdWorktree ? { createdWorktree } : {}),
   };
   atomicWrite(regPath(trapId), JSON.stringify(reg, null, 2));
   if (!prior) {
@@ -501,14 +577,16 @@ export type BeatResult =
   | { beat: true; trapId: string; activityFor?: string };
 
 /**
- * One post-tool beat. Resolves the trap from the working directory, then
+ * One post-tool beat. Resolves the trap from the working directory, else
+ * from the session id (a session still outside its trap's worktree), then
  * refreshes the trap's beat and, when it holds an open catch, writes that
  * catch's activity. Inert when the directory is not a signed-on trap's
  * worktree. Throttled per trap. Files only: no network, no git.
  */
 export function beatTrap(input: BeatInput): BeatResult {
   const now = input.now ?? Date.now();
-  const trapId = trapIdAbove(input.cwd);
+  const trapId =
+    trapIdAbove(input.cwd) ?? (input.sessionId ? trapBySession(input.sessionId)?.trapId : undefined);
   const reg = trapId !== undefined ? readTrap(trapId) : undefined;
   if (!trapId || !reg) return { beat: false, reason: 'not-soaking' };
   if (input.sessionId && input.sessionId !== reg.sessionId) return { beat: false, reason: 'other-session' };
