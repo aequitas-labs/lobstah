@@ -76,7 +76,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '<uuid> <verb> [note...]',
   },
   watch: {
-    subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'release'],
+    subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'hold', 'release'],
     flags: {
       '--check': { value: '<cmd>' },
       '--for': { value: '<uuid>' },
@@ -84,6 +84,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--every': { value: '<s>' },
       '--brief': { value: '<template>' },
       '--stream': { value: '<cmd>' },
+      '--reason': { value: '<text>' },
       '--apply': {},
       '--all': {},
     },
@@ -191,7 +192,7 @@ done records its worktree's HEAD, run there or with the trap's --session.`,
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
-\`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
+\`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
   soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
 Primary checkout or --repo creates worktrees/soak-<trap> from trunk
 (branch lobstah/soak-<trap>, with setup): cd there. Sessions reuse traps.

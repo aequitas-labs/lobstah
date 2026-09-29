@@ -50,6 +50,12 @@ export interface LimitsConfig {
    * when that work settles; past this window the worker is asked to report.
    */
   backgroundWaitSecs: number;
+  /**
+   * After the worker reports `done` or `failed` at turn end, how long the
+   * runner waits for the harness to close its event stream. Past this, the
+   * runner stops the harness and its process group, and finishes.
+   */
+  exitGraceSecs: number;
   choreRetentionDays: number;
   attachmentMaxBytes: number;
   /**
@@ -119,6 +125,11 @@ export interface WatchConfig {
   checks: boolean;
   /** Maximum repair follow-ups on one PR head sha. */
   maxRepairsPerPr: number;
+  /**
+   * Seconds the PR's head, its base branch's head, and its failing checks
+   * must stay unchanged before a repair is queued.
+   */
+  repairSettleSecs: number;
 }
 
 export interface GlassConfig {
@@ -187,7 +198,7 @@ export const DEFAULT_HELM: HelmConfig = {
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
-export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2 };
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, repairSettleSecs: 600 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,
@@ -199,6 +210,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   draftPr: true,
   checkpointOnStop: true,
   backgroundWaitSecs: 1800,
+  exitGraceSecs: 30,
   choreRetentionDays: 7,
   attachmentMaxBytes: 25 * 1024 * 1024,
   retentionDays: 0,

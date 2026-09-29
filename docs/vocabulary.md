@@ -23,6 +23,25 @@ anything else. The status log is append-only; the last entry wins.
 `done` and `failed` are the **terminal verbs** (`TERMINAL_VERBS`): once
 logged, process state stops mattering and the daemon finalizes.
 
+A terminal verb from the worker is final. No later time limit, harness
+error, kill, cancel, or daemon restart adds a verb after it. From the
+moment the worker reports it:
+
+- the wall clock stops for that dispatch;
+- the dispatch holds no headless slot and does not count toward
+  `maxConcurrent`;
+- `lobstah daemon status` and `lobstah daemon restart` do not count it as
+  active, so a restart needs no `--force`;
+- `man tend`, the glass, and `lobstah doctor` show it as done.
+
+At the end of that turn the runner ends the session and waits
+`[limits].exitGraceSecs` (30 seconds) for the harness to exit. Then it
+stops the harness and the processes it started, releases the worktree lock,
+and moves the dispatch to `done/`. A cancel that arrives after the report
+stops the harness at once and leaves the verb as reported. The daemon stops
+a runner that is still alive `exitGraceSecs` plus `wedgeThresholdSecs` after
+the report; it does not restart the dispatch.
+
 Source of truth: `VERBS` in `packages/core/src/types.ts`.
 
 ## Waiting on
@@ -133,7 +152,7 @@ daemon — it never reaches a tracker.
 | --- | --- | --- |
 | `unclaimed` | Descriptor present, no runner yet. | Spawn a runner. |
 | `busy` | Runner alive, activity within the wedge threshold. | Nothing. |
-| `terminal` | Terminal verb logged. | Finalize once the process is gone. |
+| `terminal` | Terminal verb logged. | Finalize once the process is gone. A runner still alive `exitGraceSecs` + `wedgeThresholdSecs` after the report: stop its group (SIGTERM, then SIGKILL past twice that). Never restart. |
 | `dead` | Pid verified gone (pid + process-start-time, so pid reuse can't lie). | Respawn with session resume, bounded by `maxRestartAttempts`; then `failed`. |
 | `wedged` | Alive but no activity past `wedgeThresholdSecs`. Never a worker whose last report is `paused` with `--waiting-on` (that is `busy`). | SIGKILL the group, fork the session with a nudge, same bound. |
 | `unknown` | Contradictory or missing evidence. | Touch nothing; log it. |
@@ -141,7 +160,9 @@ daemon — it never reaches a tracker.
 Dead and wedged get opposite treatment on purpose: a dead process is safe to
 respawn; a wedged one must be killed first or two writers share a worktree. A
 pending cancel preempts all of this — a cancelled dispatch finalizes as
-`failed` ("cancelled by request") and never re-enters the ladder.
+`failed` ("cancelled by request") and never re-enters the ladder. A cancel
+of a dispatch whose worker already reported `done` or `failed` stops the
+runner and keeps the reported verb.
 
 Source of truth: `Classification` in `packages/supervisor/src/liveness.ts`.
 
@@ -275,7 +296,10 @@ evidence).
 | `merge-state` | `mergeStateStatus` changed (`value`). The PR record carries conflicts into the repair planner. |
 | `draft` | Draft flipped (`value`). Evidence only. |
 | `merged` / `closed` | Terminal; the check sets `done`, and the watch retires once delivered. Emitted only on an open → terminal change, never on the first observation. |
-| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending, unknown? }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. Check counts use only the latest run per check name and app/workflow. `CANCELLED` and `STALE` latest runs are unknown, not failed. The PR record also stores repair status, attempts, and reason. `prBadge` shows `repairing: conflict (attempt 1 of 2)` while a repair is in flight; tend, `catch`, and the glass share the badge. |
+| evidence `pr` | `{ url, number, state, draft, reviewDecision, mergeStateStatus, headSha, checks: { total, passed, failed, pending, unknown? }, review: { unresolvedThreads, changesRequested, lastReviewAt }, observedAt }`. Check counts use only the latest run per check name and app/workflow. `CANCELLED` and `STALE` latest runs are unknown, not failed. The PR record also stores repair status, attempts, and reason. `prBadge` shows `repairing: conflict (attempt 1 of 2)` while a repair is in flight, and ends in `repair waits: <heldBy>` while a repair waits; tend, `catch`, and the glass share the badge. |
+| waiting repair | `repair.status: waiting` on a PR record: a repair is due but is not queued. `heldBy` names the holder: `wt:<trap>` or `dispatch:<id8>` (a live worker holds the PR's head branch or the head branch of a PR below it in the stack), `helm` (the helm cancelled a repair of this PR), `hold` or `dispatch:<id8>` (`watch hold`), `settle` (the head, base head, or failing checks changed less than `[watch].repairSettleSecs` ago; `until` says when), or `checks` (the latest run of a failing check is in progress or passed). `reason` says what holds it. A wait is not an attempt and raises no attention item. |
+| live worker | An active headless dispatch, or a trap with an open catch. It holds a branch that its worktree has checked out, that its current branch tracks, or that it pushed during its current dispatch (evidence `pushes`). It holds a PR that its evidence names or that its chain owns. |
+| evidence `pushes` | `[{ branch, at }]`: the branches a dispatch pushed, as lobstah saw them. The runner records its own pushes; the runner records a headless worker's `git push` from the harness event stream (branch names only); `soak beat` records a trap's `git push`. |
 | checks unknown | Without `Checks: read`, the check re-reads the PR without `statusCheckRollup`: the PR state is recorded, `checks.unknown` is `no permission`, and the check's output carries the permission `error`. `pr:ready` never stands on unknown checks. |
 | PR record | `~/.lobstah/prs/<owner>__<repo>__<n>.json` — the PR's latest observation keyed by the PR, not by a dispatch: the evidence `pr` object plus `key`, `repo` (`<owner>/<repo>`), `dispatches` (the ids whose watch observed it; empty for a human's or a culled PR), and `firstSeenAt` (the time of the first observation; written once, never rewritten). `firstSeenAt`, then the PR number, is the order of every PR list. A record from before `firstSeenAt` existed sorts by number at the earliest `firstSeenAt` in the set, and its next observation writes that time as its `firstSeenAt`. **Owner:** `packages/core/src/prs.ts` (`upsertPr`, `readPrs`); the one writer is the preset's observation path (`observePr`), on every observation, man-owned or dispatch-owned — a dispatch-owned one also stamps that dispatch's evidence, which stays the per-dispatch view. Tend's `pr:*` kinds and `pr:ready` stack suppression, the glass PRs tab and stacks, the merged/closed notice, and PR acks read records first and fall back to dispatch evidence only for a PR with no record yet. `cull` removes records merged or closed longer than its window, never open ones. |
 
@@ -284,7 +308,11 @@ then the repair planner decides whether to follow up. One repair runs per PR
 at a time. A first observation starts none. Repairs use the newest owning
 dispatch and the PR's observed base branch. The watch checks commit ownership
 before enqueueing. It stops after `[watch].maxRepairsPerPr` attempts per head
-SHA. The rest is evidence.
+SHA. A repair waits (`repair.status: waiting`) while a live worker holds the
+PR's head branch or a branch below it in the stack, until the PR has settled
+for `[watch].repairSettleSecs`, while a failing check's latest run is in
+progress or passed, and while the PR's watch is held. A wait is not an
+attempt. The rest is evidence.
 Merged and closed reach the helm as a `pr-merged` / `pr-closed` notice,
 posted once by whichever process first records the open → terminal
 transition on the **PR record** — not by event routing. A PR whose first
@@ -293,7 +321,11 @@ record is already terminal gets the notice only when it ended in the last
 
 One pick watch cycle forks at most `[watch].maxForksPerCycle`
 continuations (default 3). Generic watches over the cap are held (`heldAt`
-on the watch); PR repairs wait for the next cycle.
+on the watch); PR repairs wait for the next cycle. A watch hold also comes
+from `lobstah watch hold <key> [--for <id>] [--reason <text>]` and from
+`lobstah cancel` on a repair dispatch. The watch then carries `heldReason`,
+`heldBy`, and, for `--for`, `heldFor`: the hold ends when that dispatch ends.
+`lobstah watch release` ends any hold.
 
 A man-owned PR watch (no `--for`) delivers as attention only what needs a
 human (`manEvents`, beside `workEvents` in `apps/cli/src/pr-watch.ts`): a
@@ -403,7 +435,7 @@ the digest; the rest are things to look at, not stalls.
 conditions on an owned PR stay off attention while lobstah can act. A
 queued or active pickup feedback round or watch continuation also suppresses
 its review or check item. A blocked or exhausted repair raises attention
-with its reason. `pr:draft` is opt-in; an explicit `attentionKinds` list is
+with its reason. A waiting repair raises none. `pr:draft` is opt-in; an explicit `attentionKinds` list is
 used unchanged.
 
 **Answered questions.** A `question` stands only while no message to the

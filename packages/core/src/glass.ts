@@ -132,6 +132,8 @@ export interface GlassPr {
   dispatchIds: string[];
   gate?: string;
   watch?: GlassPrWatch;
+  /** A PR repair that is due but waits: who holds it and why. */
+  repairWait?: { heldBy: string; reason: string; until?: string };
 }
 
 export interface GlassStack {

@@ -35,6 +35,7 @@ import {
   noticeOrphanedBait,
   readSessionClaim,
   isTrapCatch,
+  isFinished,
   slotUsage,
   readStatusLog,
   releaseDispatchLock,
@@ -208,9 +209,23 @@ export function reconcileOne(
       spawnHeadless(st, { attempts: 1 });
       log(`${st.id}: spawned runner`);
       break;
-    case 'terminal':
-      if (!alive) finalize(st);
+    case 'terminal': {
+      if (!alive) {
+        finalize(st);
+        break;
+      }
+      // The worker's report is final and the runner should be gone: it gets
+      // the exit grace, then as long as a wedge. Past that it is stopped, with
+      // everything in its process group. The result stands; nothing restarts.
+      const finishedAt = Date.parse(statusLog.at(-1)?.at ?? '') || 0;
+      const limitMs = ((cfg.limits.exitGraceSecs ?? 30) + cfg.limits.wedgeThresholdSecs) * 1000;
+      const lateMs = Date.now() - finishedAt;
+      if (st.runner && finishedAt > 0 && lateMs > limitMs) {
+        killGroup(st.runner.pid, lateMs > 2 * limitMs ? 'SIGKILL' : 'SIGTERM');
+        log(`${st.id}: ${lastVerb} ${Math.round(lateMs / 1000)}s ago but its runner is alive — stopping group ${st.runner.pid}`);
+      }
       break;
+    }
     case 'busy':
       break;
     case 'dead': {
@@ -460,7 +475,8 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     if (!roomy) continue;
 
     const ceiling = lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent;
-    let inFlight = listActive(lane).filter((st) => !isTrapCatch(st.id, lane)).length;
+    // A finished dispatch whose runner is still exiting holds no slot.
+    let inFlight = listActive(lane).filter((st) => !isTrapCatch(st.id, lane) && !isFinished(st.id, lane)).length;
     while (inFlight < ceiling) {
       const id = claimNext(lane, skipFor(lane));
       if (!id) break;

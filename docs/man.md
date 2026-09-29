@@ -150,7 +150,10 @@ before it waits. Tend, `status`, `ls`, and the glass then show
 `paused: waiting on review` with the link and the time waited. It is a
 state, not a question: nothing to answer, no attention, no pet. A paused
 headless worker is never counted as wedged and its wall clock stops, but it
-still holds a `maxConcurrent` slot while its process is alive. A paused
+still holds a `maxConcurrent` slot while its process is alive. A worker
+that reported `done` or `failed` holds no slot: its runner exits within
+`[limits].exitGraceSecs`, and a restart of the daemon does not wait for it
+(see [status verbs](vocabulary.md#status-verbs)). A paused
 trap is kept out of the ghost sweep until `--until` or
 `[soak].pausedTtlSecs` (24 hours). See [Waiting on](vocabulary.md#waiting-on).
 
@@ -210,6 +213,40 @@ records each attempt and stops at `[watch].maxRepairsPerPr` per head SHA.
 It does not repair a PR with a person's newer commits or uncertain commit
 ownership, a terminal PR, or a PR whose chain already has queued or active
 work. `[watch].autoRepair`, `conflicts`, and `checks` control this behavior.
+
+**A repair waits** while any of these is true:
+
+- A live worker holds the PR's head branch. A live worker is an active
+  headless dispatch, or a trap with an open catch. It holds a branch when
+  its worktree has the branch checked out, when its current branch tracks
+  the branch on the remote, or when it pushed the branch during its current
+  dispatch. It holds a PR when its evidence names the PR or its chain owns
+  the PR.
+- A live worker holds the head branch of an open PR below this PR in the
+  same stack. The stack is the one the glass shows: a PR's parent is the
+  PR whose head branch is its base branch.
+- The PR's head, its base branch's head, or its failing checks changed less
+  than `[watch].repairSettleSecs` ago (default 600).
+- For a checks repair: a fresh read of the latest run of each failing check
+  shows that run in progress or passed.
+- The PR's watch is held. `lobstah cancel` on a repair dispatch holds its
+  PR's watch. `lobstah watch hold <key> [--for <id>] [--reason <text>]`
+  holds one PR's watch; with `--for`, the hold ends when that dispatch
+  ends. `lobstah watch release <key>` ends any hold.
+
+A waiting repair is recorded on the PR record as `repair.status: waiting`,
+with `heldBy` (`wt:<trap>`, `dispatch:<id8>`, `helm`, `hold`, `settle`, or
+`checks`) and `reason`. A wait is not an attempt: it does not count against
+`[watch].maxRepairsPerPr`. It raises no attention item. `man tend` lists it
+in the `repairs waiting` table, the PR badge ends in `repair waits: <heldBy>`,
+the glass PR modal shows the reason, and `lobstah doctor` lists it. When the
+wait ends, the normal rules apply again.
+
+Lobstah records pushes it sees in the dispatch's evidence (`pushes`): the
+runner's own pushes, a headless worker's `git push` commands, and a trap's
+`git push` commands (from its post-tool beat). It does not read GitHub to
+guess who pushed. A worker that is about to push to other PRs can hold them
+first with `lobstah watch hold <key> --for <its dispatch id>`.
 
 Watching a PR nobody dispatched — `lobstah watch add pr:<owner>/<repo>#<n>`
 with no `--for` — is how a helm follows a human's PR, or one whose

@@ -55,7 +55,7 @@ Same three keys as the per-repo block. Precedence for every harness setting:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. |
+| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. A dispatch whose worker reported `done` or `failed` does not spend a slot, even while its runner is still exiting. |
 | `choreConcurrent` | `1` | Headless chore-lane runner ceiling (rebases and other machine-originated runs). |
 | `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. Also the age past which `status`, `ls`, `man tend`, and the glass show a dispatch's activity line as stale. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
@@ -72,6 +72,7 @@ time. At the hard ceiling, the status verb remains `failed` for compatibility,
 but its note starts `budget:` and tells the man what work was saved and to
 send a continuation.
 | `backgroundWaitSecs` | `1800` | A turn that ends without a report is held open this long while background work the worker started is still running (a push behind a slow pre-push gate); the harness wakes the worker when it settles. Heartbeats keep the wedge detector off the wait. Keep it below `wallClockSecs`, which still ends the run. |
+| `exitGraceSecs` | `30` | After the worker reports `done` or `failed` at the end of a turn, the runner ends the session and waits this long for the harness to close its event stream. If the stream is still open, the runner kills the harness, then stops every process the runner started (its process group on Linux and macOS, its process tree on Windows), and finishes. The report stands: the status stays `done` or `failed`, and evidence records `harnessStopped` with how many seconds after the report the harness was stopped. When the stream closes in time, the runner stops any background processes the harness left running on its way out. |
 | `choreRetentionDays` | `7` | Completed chores age out of `chores/done/`. |
 | `attachmentMaxBytes` | `26214400` (25 MiB) | Maximum size of each file supplied with repeatable `dispatch --attach` or `send --attach`. |
 | `retentionDays` | `0` (off) | The daemon culls finished dispatches (done and failed) older than this many days: their `done/` entries, worktrees, state files, and stale PR records and acks. Branches are kept. A dispatch whose PR is still open is kept. Queued and active dispatches are never culled. The pass runs at most once per hour and culls at most 10 dispatches per pass, so it cannot stall the claim loop. Suggested: `14`, the same window as `lobstah cull`. |
@@ -106,11 +107,12 @@ send a continuation.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `maxForksPerCycle` | `3` | The most continuation (CI-fix) dispatches one watch cycle of `lobstah pick` may fork. Each watch over the cap is held: its events stay buffered, `man tend` and `lobstah watch` list it as `held`, one `watch-held` notice names the held watches, and it forks nothing until `lobstah watch release <key>` (or `--all`). |
+| `maxForksPerCycle` | `3` | The most continuation (CI-fix) dispatches one watch cycle of `lobstah pick` may fork. Each watch over the cap is held: its events stay buffered, `man tend` and `lobstah watch` list it as `held`, one `watch-held` notice names the held watches, and it forks nothing until `lobstah watch release <key>` (or `--all`). A held PR watch also queues no repair; see [the man page](man.md) for `watch hold` and cancelled repairs. |
 | `autoRepair` | `true` | On a dispatch-owned PR, fork a repair follow-up for a conflict, failed current check, or requested review changes. `false` leaves check-event delivery and attention as before. |
 | `conflicts` | `true` | Repair conflicts when `autoRepair` is on. Set `false` to show conflict attention without a repair. |
 | `checks` | `true` | Repair failed current checks when `autoRepair` is on. Set `false` to show check attention without a repair. |
-| `maxRepairsPerPr` | `2` | Maximum repair follow-ups for one PR head SHA. When the limit is reached and the issue remains, `pr:conflict`, `pr:checks`, or `pr:review` attention names the limit. |
+| `maxRepairsPerPr` | `2` | Maximum repair follow-ups for one PR head SHA. When the limit is reached and the issue remains, `pr:conflict`, `pr:checks`, or `pr:review` attention names the limit. A repair that waits is not an attempt. |
+| `repairSettleSecs` | `600` | A repair is queued only after the PR's head, its base branch's head, and its failing checks have been unchanged for this many seconds. Until then the PR record shows `repair.status: waiting` with `heldBy: settle` and `until`. |
 
 ## `[grounds.*]` — helm territories
 

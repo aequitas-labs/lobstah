@@ -88,25 +88,16 @@ export function deriveGlassPrs(
       dispatchIds: ids,
       gate: latest?.prGate ?? sources.find((d) => d.prGate)?.prGate,
       watch: watchByKey.get(ref.key),
+      ...(pr.state === 'OPEN' && pr.repair?.status === 'waiting' && pr.repair.headSha === pr.headSha
+        ? { repairWait: { heldBy: pr.repair.heldBy ?? 'held', reason: pr.repair.reason ?? '', ...(pr.repair.until ? { until: pr.repair.until } : {}) } }
+        : {}),
     });
   }
 
   // One order for every list: first seen, newest first (core prs.ts). A
   // refresh never changes it.
   const newestFirst = prNewestFirst(rows);
-  // A parent must be in the same forge repo. Duplicate head branch names are
-  // resolved by that order: the PR first seen last wins. Malformed cycles
-  // become independent floors.
-  const byHead = new Map<string, GlassPr>();
-  for (const row of [...rows].sort(newestFirst)) {
-    const head = `${row.forgeRepo}:${row.headRefName}`;
-    if (row.headRefName && !byHead.has(head)) byHead.set(head, row);
-  }
-  const parent = new Map<string, GlassPr>();
-  for (const row of rows) {
-    const candidate = byHead.get(`${row.forgeRepo}:${row.baseRefName ?? ''}`);
-    if (candidate && candidate.key !== row.key) parent.set(row.key, candidate);
-  }
+  const parent = stackParents(rows);
   const rootOfPr = (row: GlassPr): GlassPr => {
     let at = row;
     const seen = new Set([at.key]);
@@ -158,4 +149,37 @@ export function deriveGlassPrs(
   const newest = (s: GlassStack) => [...groupedStacks.get(s.id)!].sort(newestFirst)[0]!;
   stacks.sort((a, b) => Number(b.open) - Number(a.open) || newestFirst(newest(a), newest(b)) || a.id.localeCompare(b.id));
   return { prs: stacks.flatMap((s) => groupedStacks.get(s.id)!.sort((a, b) => a.position - b.position)), stacks };
+}
+
+/**
+ * Each PR's parent in its stack: the PR in the same forge repo whose head
+ * branch is its base. Duplicate head branch names are resolved by the
+ * stable order: the PR first seen last wins. Malformed cycles become
+ * independent floors (deriveGlassPrs).
+ */
+export function stackParents(rows: readonly GlassPr[]): Map<string, GlassPr> {
+  const byHead = new Map<string, GlassPr>();
+  for (const row of [...rows].sort(prNewestFirst(rows))) {
+    const head = `${row.forgeRepo}:${row.headRefName}`;
+    if (row.headRefName && !byHead.has(head)) byHead.set(head, row);
+  }
+  const parent = new Map<string, GlassPr>();
+  for (const row of rows) {
+    const candidate = byHead.get(`${row.forgeRepo}:${row.baseRefName ?? ''}`);
+    if (candidate && candidate.key !== row.key) parent.set(row.key, candidate);
+  }
+  return parent;
+}
+
+/** The PRs below one PR in its stack, nearest first, from PR records alone. */
+export function prsBelow(records: readonly PrRecord[], key: string): GlassPr[] {
+  const { prs } = deriveGlassPrs([], [], records);
+  const parent = stackParents(prs);
+  const out: GlassPr[] = [];
+  const seen = new Set([key]);
+  for (let at = parent.get(key); at && !seen.has(at.key); at = parent.get(at.key)) {
+    seen.add(at.key);
+    out.push(at);
+  }
+  return out;
 }

@@ -7,6 +7,7 @@ import { validSessionLink } from './session-link.js';
 import { cancelRequested, claimNext, complete, queuedDescriptor, pendingIds, requeue } from './queue.js';
 import { appendStatus, readStatusLog } from './status.js';
 import { mergeEvidence } from './evidence.js';
+import { gitPushTargets, recordPush, resolvePushTargets } from './pushes.js';
 import { postNotice } from './notices.js';
 import type { WindowRef } from './window.js';
 import { TERMINAL_VERBS } from './types.js';
@@ -623,6 +624,10 @@ export function beatTrap(input: BeatInput): BeatResult {
   const reg = trapId !== undefined ? readTrap(trapId) : undefined;
   if (!trapId || !reg) return { beat: false, reason: 'not-soaking' };
   if (input.sessionId && input.sessionId !== reg.sessionId) return { beat: false, reason: 'other-session' };
+  // A push is recorded on every beat: the throttle never drops one.
+  const command = (input.toolInput as { command?: unknown } | undefined)?.command;
+  const pushes = typeof command === 'string' || Array.isArray(command) ? gitPushTargets(command as string | string[]) : undefined;
+  if (pushes && hasOpenCatch(reg)) recordPush(reg.claimed!, 'work', resolvePushTargets(pushes, input.cwd), new Date(now).toISOString());
   const last = msOf(readBeat(trapId)?.at ?? '');
   if (now - last < (input.throttleMs ?? 30_000)) return { beat: false, reason: 'throttled' };
   const at = new Date(now).toISOString();

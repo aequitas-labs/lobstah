@@ -90,3 +90,25 @@ describe('only daemon-spawned work spends headless slots', () => {
     expect(readStatusLog('protected', 'work').at(-1)?.verb).toBe('working');
   });
 });
+
+describe('a finished dispatch holds no slot', () => {
+  it('done with its runner still alive: not counted, and the slot goes to queued work', () => {
+    activeHeadless('fin1'); // runner pid: this test process, alive
+    appendStatus('fin1', 'work', 'done', 'finished');
+    activeHeadless('head2');
+    enqueue({ id: 'head3', repo: 'demo', brief: 'queued work' });
+    expect(slotUsage('work')).toEqual({ headless: 1, traps: 0 });
+    const spawned: string[] = [];
+    tick(() => {}, { spawnRunner: (st) => { spawned.push(st.id); } });
+    expect(spawned).toEqual(['head3']);
+    // The finished dispatch is left to its runner, which is still exiting.
+    expect(activeIds('work')).toContain('fin1');
+    expect(slotUsage('work')).toEqual({ headless: 2, traps: 0 });
+  });
+
+  it('failed by the worker counts the same way', () => {
+    activeHeadless('fin2');
+    appendStatus('fin2', 'work', 'failed', 'could not');
+    expect(slotUsage('work')).toEqual({ headless: 0, traps: 0 });
+  });
+});
