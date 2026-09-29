@@ -75,6 +75,8 @@ export interface StatusEntry {
   link?: string;
   /** When a pause expires (ISO). paused only; the ghost sweep honors it. */
   until?: string;
+  /** Written by `lobstah report`: the worker's own note, not one lobstah wrote. */
+  reported?: true;
 }
 
 export interface Evidence {

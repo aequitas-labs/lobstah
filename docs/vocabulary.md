@@ -277,10 +277,13 @@ normalized to that key) installs the shipped check, `lobstah watch
 check-pr`: one read-only `gh pr view` per cycle, diffed against the
 previous observation that the cursor carries, plus — while the PR is open —
 one read-only `gh api graphql` query for `reviewThreads { isResolved }`,
-which `gh pr view --json` cannot return (no bodies are requested). `report <id> done --pr
-<url>` registers the same watch owned by `dispatch:<id>` (idempotent;
-`--no-watch` opts out). `lobstah watch backfill --apply` registers watches
-for PRs in old dispatch history; it is a dry run without `--apply`. No other
+which `gh pr view --json` cannot return (no bodies are requested). `report <id> <verb> --pr
+<url>` (any verb but `failed`) registers the same watch owned by
+`dispatch:<id>` (idempotent; `--no-watch` opts out). A trap's beat
+(`lobstah soak beat`) registers it the same way when it finds a PR on the
+trap's branch. `lobstah watch backfill --apply` registers watches
+for PRs in old dispatch history and fills the title of PR records without
+one; it is a dry run without `--apply`. No other
 path registers a PR watch: read commands (`catch`, `man tend`, `status`,
 `ls`, `prs`, the glass) never do. **Owner:** `packages/core/src/pr.ts`
 (derivation, badge) and `apps/cli/src/pr-watch.ts` (check, registration,
@@ -303,7 +306,7 @@ evidence).
 | descriptor `pr` | `{ url, headRefName?, headSha? }`: the existing PR a dispatch works on. A PR repair and a pickup rebase chore carry it. The runner pushes no branch and opens no PR for such a dispatch; its worker pushes to the PR's head branch. |
 | push rule | What a repair or rebase brief tells its worker: push only to the PR's head branch; on a non-fast-forward rejection, fetch, rebase the commits onto the moved head again, and push with `--force-with-lease` on the head just fetched, at most three times; a hook failure from a real test or type error is not retried; when it cannot push, report `failed "push rejected: <rejection text>; moved head <sha>"` and leave the PR as it was. That report marks the PR's repair `blocked` at the moved head and posts a `push-failed` notice. |
 | checks unknown | Without `Checks: read`, the check re-reads the PR without `statusCheckRollup`: the PR state is recorded, `checks.unknown` is `no permission`, and the check's output carries the permission `error`. `pr:ready` never stands on unknown checks. |
-| PR record | `~/.lobstah/prs/<owner>__<repo>__<n>.json` — the PR's latest observation keyed by the PR, not by a dispatch: the evidence `pr` object plus `key`, `repo` (`<owner>/<repo>`), `dispatches` (the ids whose watch observed it; empty for a human's or a culled PR), and `firstSeenAt` (the time of the first observation; written once, never rewritten). `firstSeenAt`, then the PR number, is the order of every PR list. A record from before `firstSeenAt` existed sorts by number at the earliest `firstSeenAt` in the set, and its next observation writes that time as its `firstSeenAt`. **Owner:** `packages/core/src/prs.ts` (`upsertPr`, `readPrs`); the one writer is the preset's observation path (`observePr`), on every observation, man-owned or dispatch-owned — a dispatch-owned one also stamps that dispatch's evidence, which stays the per-dispatch view. Tend's `pr:*` kinds and `pr:ready` stack suppression, the glass PRs tab and stacks, the merged/closed notice, and PR acks read records first and fall back to dispatch evidence only for a PR with no record yet. `cull` removes records merged or closed longer than its window, never open ones. |
+| PR record | `~/.lobstah/prs/<owner>__<repo>__<n>.json` — the PR's latest observation keyed by the PR, not by a dispatch: the evidence `pr` object (with `title`, read on every check; a title change is not a state change) plus `key`, `repo` (`<owner>/<repo>`), `dispatches` (the ids whose watch observed it; empty for a human's or a culled PR), and `firstSeenAt` (the time of the first observation; written once, never rewritten). `firstSeenAt`, then the PR number, is the order of every PR list. A record from before `firstSeenAt` existed sorts by number at the earliest `firstSeenAt` in the set, and its next observation writes that time as its `firstSeenAt`. **Owner:** `packages/core/src/prs.ts` (`upsertPr`, `readPrs`); the one writer is the preset's observation path (`observePr`), on every observation, man-owned or dispatch-owned — a dispatch-owned one also stamps that dispatch's evidence, which stays the per-dispatch view. Tend's `pr:*` kinds and `pr:ready` stack suppression, the glass PRs tab and stacks, the merged/closed notice, and PR acks read records first and fall back to dispatch evidence only for a PR with no record yet. `cull` removes records merged or closed longer than its window, never open ones. |
 
 Every event carries `headSha`. A dispatch-owned PR watch records work events,
 then the repair planner decides whether to follow up. One repair runs per PR
