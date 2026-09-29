@@ -80,6 +80,7 @@ background task.
   it with `lobstah man report`. `man haul --park` waits in the hook.
 
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
+- A send is answered by the worker's next note, which wakes you; use `--no-reply` for a steer that needs no answer.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
 without the plugin; see docs/man.md. `lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken setup.

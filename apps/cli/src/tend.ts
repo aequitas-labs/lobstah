@@ -8,6 +8,8 @@ import {
   activityView,
   readActivity,
   answeredAt,
+  awaitingReply,
+  ageLabel,
   displayState,
   executorPath,
   laneDirs,
@@ -102,6 +104,8 @@ export interface TendDispatch {
   activity?: ActivityView;
   /** What a paused (or questioning) worker waits on outside lobstah (`report --waiting-on`). */
   waiting?: WaitingView;
+  /** A send to it still waiting on the worker's next note. */
+  awaitingReply?: { sentAt: string; from: string; line: string };
 }
 
 export interface TendStory {
@@ -567,7 +571,13 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     ...(bucket === 'queued' ? {} : livenessView(id, lane)),
     ...(bucket === 'active' ? { activity: activityView(readActivity(id, lane), staleSecs) } : {}),
     ...(bucket === 'active' && waitingView(last) ? { waiting: waitingView(last) } : {}),
+    ...awaitingView(id),
   };
+}
+
+function awaitingView(id: string): Pick<TendDispatch, 'awaitingReply'> {
+  const e = awaitingReply(id);
+  return e ? { awaitingReply: { sentAt: e.sentAt, from: e.from, line: e.line } } : {};
 }
 
 /**
@@ -942,7 +952,8 @@ export function renderTend(r: TendReport): string {
                 `${d.id.slice(0, 8)}:${d.outOfTimeWorkSaved ? 'out of time, work saved' : d.state}` +
                 (d.state === 'held' && d.note ? ` (${d.note.replace(/^held: /, '')})` : '') +
                 (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
-                (d.waiting ? ` (${waitingText(d.waiting)})` : ''),
+                (d.waiting ? ` (${waitingText(d.waiting)})` : '') +
+                (d.awaitingReply ? ` (awaiting reply · ${ageLabel(Date.now() - (Date.parse(d.awaitingReply.sentAt) || Date.now()))})` : ''),
             )
             .join(' → '),
           pr: s.prState ? `${s.prState} ${s.prUrl ?? ''}`.trim() : (s.prUrl ?? ''),

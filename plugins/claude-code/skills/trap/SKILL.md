@@ -62,6 +62,8 @@ naming a dispatch id. Then:
 - Check `lobstah inbox <id>` at natural checkpoints.
 - A dispatch whose output is findings rather than code ends with
   `done "<one-line note>" --report <file.md>`, its images added with `--attach`.
+- After you act on a message from the helm, say what you did in your next
+  note. Any verb reaches the helm.
 - Before you wait on something outside lobstah (a ume review, a PR review, a
   deploy), report `paused "<note>" --waiting-on review|pr|deploy|person|external
   --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,
