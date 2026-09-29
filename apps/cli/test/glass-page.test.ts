@@ -64,6 +64,38 @@ async function mutations(g: GlassDom, fn: () => Promise<void>): Promise<Mutation
 }
 
 describe('glass page: tabs and hash routing', () => {
+  it('shows working, idle, and parked traps on deck and tab, with a dispatch link', async () => {
+    const d = acceptanceFleet();
+    const working = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
+    working.verb = 'working';
+    working.brief = 'Polish the glass trap deck\nMore detail';
+    working.activity = { at: ago(12_000), kind: 'tool', summary: 'Bash', ageSecs: 12, stale: false };
+    const parked = {
+      ...working,
+      id: 'eeeeeeee-0000-4000-8000-000000000005',
+      verb: 'paused' as const,
+      waiting: { on: 'review', since: ago(3 * 60_000), waitedSecs: 180 },
+    };
+    d.dispatches.push(parked);
+    const live = d.traps[0]!;
+    live.listening = true;
+    const idle = { ...live, trapId: 'idle', label: 'idle trap', claimed: undefined, catches: [], listening: false, heartbeatAt: ago(45 * 60_000) };
+    const waiting = { ...live, trapId: 'parked', label: 'parked trap', claimed: parked.id, catches: [parked] };
+    d.traps = [live, idle, waiting];
+    const g = await page(d, { hash: '#deck', prefs: { view: 'table' } });
+    const deck = g.$$('#deck section')[4]!;
+    expect(text(deck)).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
+    expect(text(deck)).toContain('idle · not listening');
+    expect(text(deck)).toContain('parked · waiting on review');
+    await click(g, deck.querySelector('a[href="#dispatches"]'));
+    expect(text(g.$('#modalbox h3'))).toBe('cccccccc working');
+    await g.go('#traps');
+    const rows = g.$$('#traps tr.rowhead');
+    expect(rows.map(text).join(' ')).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
+    expect(rows.map(text).join(' ')).toContain('idle · not listening');
+    expect(rows.map(text).join(' ')).toContain('parked · waiting on review');
+  });
+
   it('shows Open window on live traps in the table, cards, deck, and modal only', async () => {
     const d = acceptanceFleet();
     d.focusSupported = true;
@@ -442,28 +474,28 @@ describe('glass page: On deck', () => {
     expect(landed.querySelector('.deckmore')).toBeNull();
   });
 
-  it('traps: eight at most, live first by newest heartbeat, then recently signed off, the rest in "+N more"', async () => {
+  it('traps: eight at most, live by sign-on then recently signed off, the rest in "+N more"', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
       const traps = g.$$('#deck section')[4]!;
       const items = [...traps.querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
       expect(items.map((l) => text(l.querySelector('b')))).toEqual([
-        '🪤 wt:t6',
         '🪤 wt:t1',
-        '🪤 wt:t4',
-        '🪤 wt:t5',
         '🪤 wt:t10',
         '🪤 wt:t3',
+        '🪤 wt:t4',
+        '🪤 wt:t5',
+        '🪤 wt:t6',
         '🪤 wt:t7',
         '🪤 wt:t2',
       ]);
       expect(items.map((l) => text(l.querySelector('.badge')))).toEqual([
         'claude',
         'claude',
-        'claude',
-        'claude',
-        'claude',
         'codex',
+        'claude',
+        'claude',
+        'claude',
         'signed off',
         'signed off',
       ]);
