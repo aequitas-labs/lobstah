@@ -60,6 +60,8 @@ naming a dispatch id. Then:
 - A `needs-decision` or `blocked` report queues your question to the human.
   The answer arrives in the dispatch's inbox: `lobstah inbox <id>`.
 - Check `lobstah inbox <id>` at natural checkpoints.
+- After you act on a message from the helm, say what you did in your next
+  note. Any verb reaches the helm.
 - Before you wait on something outside lobstah (a ume review, a PR review, a
   deploy), report `paused "<note>" --waiting-on review|pr|deploy|person|external
   --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,

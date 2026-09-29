@@ -65,12 +65,26 @@ export function waitingFields(verb: Verb, w: WaitingFields, now = Date.now()): P
 }
 
 /** The write path IS the validation: anything outside the verb set is rejected. */
-export function appendStatus(id: string, lane: Lane, verb: string, note?: string, at?: string, waiting?: WaitingFields): StatusEntry {
+export function appendStatus(
+  id: string,
+  lane: Lane,
+  verb: string,
+  note?: string,
+  at?: string,
+  waiting?: WaitingFields,
+  reported = false,
+): StatusEntry {
   if (!isVerb(verb)) {
     throw new Error(`invalid status verb "${verb}" — must be one of: ${VERBS.join(', ')}`);
   }
   const extra = waiting ? waitingFields(verb, waiting) : {};
-  const entry: StatusEntry = { at: at ?? new Date().toISOString(), verb, ...(note ? { note } : {}), ...extra };
+  const entry: StatusEntry = {
+    at: at ?? new Date().toISOString(),
+    verb,
+    ...(note ? { note } : {}),
+    ...extra,
+    ...(reported ? { reported: true as const } : {}),
+  };
   fs.appendFileSync(statusPath(id, lane), `${JSON.stringify(entry)}\n`);
   return entry;
 }
