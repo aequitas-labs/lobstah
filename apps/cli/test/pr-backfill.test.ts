@@ -15,7 +15,7 @@ const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const url = (n: number) => `https://github.com/acme/web/pull/${n}`;
 const key = (n: number) => `pr:acme/web#${n}`;
 const pr = (n: number, over: Partial<PrEvidence> = {}): PrEvidence => ({
-  url: url(n), number: n, state: 'OPEN', draft: false, reviewDecision: '',
+  url: url(n), number: n, title: `PR ${n}`, state: 'OPEN', draft: false, reviewDecision: '',
   mergeStateStatus: 'CLEAN', headSha: `sha-${n}`,
   checks: { total: 1, passed: 1, failed: 0, pending: 0 },
   observedAt: `2026-09-${String(n).padStart(2, '0')}T00:00:00Z`, ...over,
@@ -121,7 +121,55 @@ describe('watch backfill (explicit migration)', () => {
   });
 });
 
+describe('watch backfill fills PR titles', () => {
+  it('lists records without a title on a dry run and fetches nothing', () => {
+    upsertPr(pr(5, { title: undefined }));
+    upsertPr(pr(6));
+    const fetched: string[] = [];
+    const rows = backfillPrWatches({ fetchTitle: (ref) => (fetched.push(ref.key), 'x') });
+    expect(rows.filter((r) => r.action === 'title')).toEqual([{ key: key(5), action: 'title', owner: '' }]);
+    expect(fetched).toEqual([]);
+    expect(readPr(key(5))?.title).toBeUndefined();
+  });
+
+  it('with apply, stores the fetched title without an observation, and keeps a failure on the row', () => {
+    upsertPr(pr(5, { title: undefined }));
+    upsertPr(pr(7, { title: undefined, state: 'MERGED' }));
+    const before = readPr(key(5))!;
+    const rows = backfillPrWatches({
+      apply: true,
+      fetchTitle: (ref) => {
+        if (ref.number === 7) throw new Error('gh: not found');
+        return 'Fetched title';
+      },
+    });
+    expect(rows.filter((r) => r.action === 'title')).toEqual([
+      { key: key(5), action: 'title', owner: 'man' },
+      { key: key(7), action: 'title', owner: '', error: 'gh: not found' },
+    ]);
+    expect(readPr(key(5))).toEqual({ ...before, title: 'Fetched title' });
+    expect(readPr(key(7))?.title).toBeUndefined();
+    expect(backfillPrWatches({ apply: true, fetchTitle: () => 'again' }).filter((r) => r.action === 'title').map((r) => r.key)).toEqual([key(7)]);
+  });
+});
+
 describe('prs', () => {
+  processTest('prints the title after the number, cut to 60 characters', () => {
+    const long = 'Question hold: walk a question only after the helm has taken its turn at the wheel';
+    upsertPr(pr(1, { title: long }));
+    upsertPr(pr(2, { title: 'Short title' }));
+    upsertPr(pr(3, { title: undefined }));
+    const res = lobstah('prs');
+    expect(res.status).toBe(0);
+    const header = res.stdout.split('\n')[0]!;
+    expect(header).toMatch(/\{number,title,repo,/);
+    const cut = `${Array.from(long).slice(0, 59).join('')}…`;
+    expect(Array.from(cut)).toHaveLength(60);
+    expect(res.stdout).toContain(cut);
+    expect(res.stdout).not.toContain(long);
+    expect(res.stdout).toContain('Short title');
+  });
+
   processTest('lists three records newest first, with state and watch status', () => {
     upsertPr(pr(1)); upsertPr(pr(3)); upsertPr(pr(2));
     addWatch(key(3), 'echo custom');

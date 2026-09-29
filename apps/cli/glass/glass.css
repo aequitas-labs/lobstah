@@ -300,7 +300,8 @@ tr.rowhead:hover {
   align-items: center;
   min-height: 22px;
 }
-.card .top > b {
+.card .top > b,
+.card .top > .prname {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
