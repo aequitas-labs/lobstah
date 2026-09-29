@@ -65,7 +65,7 @@ const defaultDeps: RunnerDeps = {
 };
 
 /** How long a run that ended on a final report waits for the adapter to settle. */
-const DONE_WAIT_MS = 5000;
+const DONE_WAIT_MS = 2000;
 
 /** `p`, or `fallback` when `p` has not settled within `ms`. */
 function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -338,6 +338,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   // Every exit path releases the worktree lock and completes the active
   // record, including a run whose harness had to be killed.
+  let finalReport = false;
   try {
     let outcome = await runOnce(plan.harness, promptWith(envNudge ?? planNudge), plan.resume?.sessionId);
 
@@ -385,6 +386,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     // The worker's own `done` or `failed` is final: its work is not saved as
     // an interrupted run, and nothing after it adds a verb.
     const terminal = isFinished(id, lane);
+    finalReport = terminal;
     let savedNote: string | undefined;
     if (remoteEnabled && !terminal) {
       savedNote = await remote.saveBeforeStop();
@@ -409,7 +411,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   } finally {
     wallTimer?.stop();
     // After a final report, nothing the harness started outlives the run.
-    if (isFinished(id, lane)) {
+    if (finalReport) {
       const reaped = await deps.reap().catch(() => 0);
       if (reaped > 0) console.log(`[runner] ${reaped} leftover process(es) stopped`);
     }
