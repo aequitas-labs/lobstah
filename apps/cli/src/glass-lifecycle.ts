@@ -26,20 +26,67 @@ export function glassPort(): number {
   return value;
 }
 
-export function readGlassState(): GlassState | undefined {
-  const file = stateFile();
+function readStateText(): string | undefined {
+  try {
+    return fs.readFileSync(stateFile(), 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+/** The state in `text` when it parses, is well formed, and names a live pid. */
+function liveState(text: string | undefined): GlassState | undefined {
+  if (text === undefined) return undefined;
   let state: GlassState;
   try {
-    state = JSON.parse(fs.readFileSync(file, 'utf8')) as GlassState;
+    state = JSON.parse(text) as GlassState;
   } catch {
-    if (fs.existsSync(file)) fs.unlinkSync(file);
     return undefined;
   }
-  if (!Number.isInteger(state.pid) || state.pid <= 0 || !Number.isInteger(state.port) || !pidAlive(state.pid)) {
-    fs.unlinkSync(file);
-    return undefined;
+  if (!state || !Number.isInteger(state.pid) || state.pid <= 0 || !Number.isInteger(state.port)) return undefined;
+  return pidAlive(state.pid) ? state : undefined;
+}
+
+/**
+ * The detached glass's state, or undefined when there is no file, it does not
+ * parse, or its pid is dead. A plain read never deletes the file: one bad read
+ * must not destroy state for every reader after it. Deletion belongs to stop,
+ * status, and --detach, which own the lifecycle (see pruneGlassState).
+ */
+export function readGlassState(): GlassState | undefined {
+  return liveState(readStateText());
+}
+
+/**
+ * The read that stop, status, and --detach use. It deletes a state file that
+ * is bad on two reads, 50 ms apart, so a file that a starter is replacing at
+ * that moment survives.
+ */
+async function pruneGlassState(): Promise<GlassState | undefined> {
+  if (readStateText() === undefined) return undefined;
+  const first = readGlassState();
+  if (first) return first;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const second = readGlassState();
+  if (!second) removeGlassState();
+  return second;
+}
+
+/** Writes the state to a temp file, then renames it over the state file, so a reader never sees a partial file. */
+function writeGlassState(state: GlassState): void {
+  const file = stateFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n');
+    fs.renameSync(tmp, file);
+  } finally {
+    fs.rmSync(tmp, { force: true });
   }
-  return state;
+}
+
+function removeGlassState(): void {
+  fs.rmSync(stateFile(), { force: true });
 }
 
 function pidAlive(pid: number): boolean {
@@ -145,14 +192,36 @@ export function glassLines(port: number, info: GlassInfo, already = false): Reco
   };
 }
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Signals `pid` and waits until it has exited. True when it is gone. */
+async function terminate(pid: number, timeoutMs: number): Promise<boolean> {
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // it has already exited
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (pidAlive(pid)) {
+    if (Date.now() >= deadline) return false;
+    await delay(50);
+  }
+  return true;
+}
+
+/**
+ * Starts a detached glass on `port`. It reports success only when the port
+ * answers, the state file is on disk, and the answering pid equals the recorded
+ * pid. On every other outcome, the child it spawned does not outlive it.
+ */
 export async function startDetachedGlass(port: number): Promise<{ info: GlassInfo; already: boolean }> {
-  const tracked = readGlassState();
+  const tracked = await pruneGlassState();
   if (tracked && tracked.port !== port) {
     const owner = await probeGlass(tracked.port);
     if (owner?.pid === tracked.pid) {
       throw new Error(`detached glass is running on ${glassUrl(tracked.port)} — run lobstah glass stop before changing ports`);
     }
-    fs.unlinkSync(stateFile());
+    removeGlassState();
   }
   const existing = await probeGlass(port);
   if (existing) return { info: existing, already: true };
@@ -177,49 +246,56 @@ export async function startDetachedGlass(port: number): Promise<{ info: GlassInf
     childError = error;
   });
   child.unref();
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (childError) throw childError;
-    const info = await probeGlass(port);
-    if (info) {
-      if (info.pid === child.pid) {
-        const state: GlassState = { pid: info.pid!, port, startedAt: new Date().toISOString(), version: info.version };
-        fs.mkdirSync(path.dirname(stateFile()), { recursive: true });
-        fs.writeFileSync(stateFile(), JSON.stringify(state, null, 2) + '\n');
+  let started = false;
+  try {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (childError) throw childError;
+      const info = await probeGlass(port);
+      if (info) {
+        // Another glass holds the port. Ours cannot bind it and is stopped below.
+        if (info.pid !== child.pid) return { info, already: true };
+        writeGlassState({ pid: info.pid!, port, startedAt: new Date().toISOString(), version: info.version });
+        const recorded = readGlassState();
+        const answering = await probeGlass(port);
+        if (!recorded || recorded.pid !== info.pid || answering?.pid !== recorded.pid) {
+          throw new Error(`glass on ${glassUrl(port)} did not match its state file (see ${path.join(logDir, 'glass.log')})`);
+        }
+        started = true;
         return { info, already: false };
       }
-      return { info, already: true }; // another starter won the port
+      if (child.exitCode !== null) break;
+      await delay(100);
     }
-    if (child.exitCode !== null) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    throw new Error(`glass did not answer on ${glassUrl(port)} within 5 seconds (see ${path.join(logDir, 'glass.log')})`);
+  } finally {
+    if (!started && child.pid !== undefined) {
+      await terminate(child.pid, 5000);
+      if (readGlassState()?.pid === child.pid) removeGlassState();
+    }
   }
-  throw new Error(`glass did not answer on ${glassUrl(port)} within 5 seconds (see ${path.join(logDir, 'glass.log')})`);
 }
 
 export async function stopGlass(): Promise<{ stopped: boolean; port?: number; pid?: number }> {
-  const state = readGlassState();
+  const state = await pruneGlassState();
   if (!state) return { stopped: false };
-  const info = await probeGlass(state.port);
+  // A slow glass may miss one probe; do not forget a live glass on a single miss.
+  const info = (await probeGlass(state.port)) ?? (await probeGlass(state.port, 2000));
   if (!info || info.pid !== state.pid) {
-    fs.unlinkSync(stateFile());
+    removeGlassState();
     return { stopped: false };
   }
-  process.kill(state.pid, 'SIGTERM');
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline && (await probeGlass(state.port))) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  if (await probeGlass(state.port)) throw new Error(`glass pid ${state.pid} did not stop`);
-  fs.unlinkSync(stateFile());
+  if (!(await terminate(state.pid, 5000))) throw new Error(`glass pid ${state.pid} did not stop`);
+  removeGlassState();
   return { stopped: true, port: state.port, pid: state.pid };
 }
 
 export async function glassStatus(port = glassPort()): Promise<{ port: number; info?: GlassInfo; state?: GlassState }> {
-  let state = readGlassState();
+  let state = await pruneGlassState();
   const selectedPort = state?.port ?? port;
-  const info = await probeGlass(selectedPort);
+  const info = (await probeGlass(selectedPort)) ?? (state ? await probeGlass(selectedPort, 2000) : undefined);
   if (state && info?.pid !== state.pid) {
-    fs.unlinkSync(stateFile());
+    removeGlassState();
     state = undefined;
   }
   return { port: state || info ? selectedPort : port, info, state };
