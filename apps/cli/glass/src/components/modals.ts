@@ -16,6 +16,7 @@ import {
   prMerge,
   prReview,
   trapRow,
+  windowAction,
 } from './common.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, or ⚙ settings. */
@@ -172,6 +173,8 @@ function trapModal(t: GlassTrap) {
     html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.harness ?? 'signed off'}</span></h3>`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
+    html`<div class="sec">window</div>`,
+    windowAction(t),
     t.live &&
       t.sessionId && [
         html`<div class="sec">open this session</div>`,

@@ -61,6 +61,14 @@ reads it, so no `--session` flag is needed. The session-start brief still
 prints the id, and the sign-on commands with the id filled in, if you want
 to pass `--session` explicitly. Claude Code session ids are UUIDv4.
 
+For the glass Open window action, give the trap its own session link with
+`lobstah soak --link <url>`. A Claude desktop session exposes its own
+`claude://claude.ai/...` link in the app; copy that link from the session.
+Its app id is not the CLI session id. In the VS Code extension, use
+`vscode://anthropic.claude-code/open?session=<session-id>` with the id above.
+The glass checks the stored link before showing it. `lobstah focus <trap>`
+uses the same focus steps from the terminal.
+
 ## Getting woken: arm the watcher
 
 In Claude Code the Stop hook runs in **arm** mode by default. At turn end

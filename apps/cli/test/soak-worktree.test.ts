@@ -89,6 +89,19 @@ const same = (a: string, b: string) => {
 };
 
 describe('soak creates a worktree when the session has none', () => {
+  processTest('stores only a valid --link and never creates a trap for an invalid one', () => {
+    const invalid = soak(primary, '--link', 'javascript:alert(1)');
+    expect(invalid.status).not.toBe(0);
+    expect(invalid.stdout).toContain('invalid --link');
+    expect(listTraps()).toEqual([]);
+    expect(soakDirs()).toEqual([]);
+    const valid = soak(primary, '--link', 'vscode://anthropic.claude-code/open?session=abc-123');
+    expect(valid.status, valid.stderr).toBe(0);
+    expect(only().link).toBe('vscode://anthropic.claude-code/open?session=abc-123');
+    const res = lobstah(primary, 'focus', 'wt:missing');
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain('Trap is not live.');
+  });
   processTest('prints and changes a stable name, refusing malformed or taken names', () => {
     const first = soak(primary, '--name', 'amber-gull');
     expect(first.status, first.stderr).toBe(0);

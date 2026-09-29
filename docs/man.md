@@ -291,11 +291,14 @@ detached glass (stop, then `--detach`).
 dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
-and the helm identified by name. It is strictly read-only and consumes no
-cursor: looking through the glass changes nothing, so it needs no helm and
-threatens nothing. Links out are copyable commands (`lobstah attach`,
-`claude --resume`), never click-to-exec — localhost HTTP is reachable by
-any webpage, so the glass exposes no endpoint that acts. The ⚙ popover's two
+and the helm identified by name. Reading the glass consumes no cursor. Each
+live trap has an **Open window** button. It asks the local server to focus
+that trap's reported session link, iTerm2 session, Terminal tab, editor
+worktree, or recorded app, in that order. The result names the step that
+worked; app-only activation says the exact window is not known. On other
+platforms, only a session link can open. A signed-off trap has no button; the
+page shows its resume command as text to copy. The focus endpoint accepts
+only a trap id in a same-origin, token-protected POST. The ⚙ popover's two
 preferences — table or cards, and whether lobsters crawl the page — are
 per-browser, kept in that browser's localStorage and never on disk.
 
@@ -523,12 +526,22 @@ lobstah soak --wait             # hookless sessions: listen in the foreground
                                 # (re-runs need no flags — identity is the
                                 # worktree, else the session id); exit 3 =
                                 # quiet, run it again
+lobstah soak --link <url>       # store this session's link for Open window
+lobstah focus <trap>           # focus a live trap from the CLI
 lobstah stow                    # sign off; an open catch requeues, unread
                                 # messages bounce back to the helm; removes
                                 # the worktree when soak created it
 lobstah stow --keep             # sign off and keep the worktree
 lobstah soak --name amber-gull  # choose or change this trap's two-word name
 ```
+
+`--link` accepts a Claude desktop session URL under `claude://claude.ai/`,
+a VS Code extension URL of the form
+`vscode://anthropic.claude-code/open?session=<id>`, or a Codex task URL of
+the form `codex://threads/<task-id>`. It rejects all other schemes and
+malformed links. The glass checks a stored link again before rendering it.
+`lobstah focus <trap>` accepts the trap id with or without `wt:` and reports
+the focus step or why it could not focus. It does not revive a signed-off trap.
 
 **Soak can create the worktree.** From a repo's primary checkout, or with
 `--repo <key>` from outside any configured repo, soak creates a linked

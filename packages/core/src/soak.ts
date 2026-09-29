@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { Descriptor, Lane, StatusEntry } from './types.js';
 import { laneDirs, soakingDir } from './paths.js';
+import { validSessionLink } from './session-link.js';
 import { cancelRequested, claimNext, complete, queuedDescriptor, pendingIds, requeue } from './queue.js';
 import { appendStatus, readStatusLog } from './status.js';
 import { mergeEvidence } from './evidence.js';
@@ -42,6 +43,8 @@ export interface TrapRegistration {
   firstParkedAt?: string;
   /** Where the manning session's window lives — a companion's focus target. */
   window?: WindowRef;
+  /** A validated deep link supplied by the session itself. */
+  link?: string;
   /** The active dispatch this trap currently works, if any. */
   claimed?: string;
   /**
@@ -219,9 +222,13 @@ export function signOnTrap(opts: {
   one?: boolean;
   name?: string;
   window?: WindowRef;
+  link?: string;
   ttlMs: number;
   now?: number;
 }): SignOnResult {
+  if (opts.link !== undefined && !validSessionLink(opts.link)) {
+    throw new Error('invalid session link: pass a supported claude://, vscode://, or codex:// session URL');
+  }
   const now = opts.now ?? Date.now();
   const trapId = ensureTrapId(opts.worktree);
   const createdWorktree = readTrapAnchor(opts.worktree)?.createdBy === 'soak' || undefined;
@@ -248,6 +255,7 @@ export function signOnTrap(opts: {
     heartbeatAt: iso,
     firstParkedAt: sameSession ? prior.firstParkedAt : undefined,
     window: opts.window ?? (sameSession ? prior.window : undefined),
+    link: opts.link ?? (sameSession && validSessionLink(prior?.link) ? prior.link : undefined),
     claimed: prior?.claimed,
     ...(createdWorktree ? { createdWorktree } : {}),
   };

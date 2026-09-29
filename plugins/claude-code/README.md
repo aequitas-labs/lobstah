@@ -47,6 +47,10 @@ on as the helm (`lobstah man helm`) or as a trap (`lobstah soak`). In a
 repo's primary checkout, `lobstah soak` creates a linked worktree for the
 trap; `lobstah stow` removes it unless it holds work that exists nowhere
 else or `--keep` is passed.
+`lobstah soak --link <url>` records the session's own link for the glass's
+Open window action. `lobstah focus <trap>` runs the same focus steps from the
+CLI.
+
 `lobstah soak` prints a two-word name alongside the stable `wt:<id>`.
 `lobstah soak --name <word-word>` chooses or changes it. Use the name, `wt:<name>`,
 or `wt:<id>` with `dispatch --for`, `send`, and `stow --wt`.

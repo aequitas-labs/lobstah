@@ -222,6 +222,10 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
 
 /** The /data payload: one disk pass, everything the page renders. */
 export interface GlassSnapshot {
+  /** Per-server secret for the same-origin focus action. */
+  focusToken?: string;
+  /** Native window selection is available on this host. Session links may work elsewhere. */
+  focusSupported?: boolean;
   now: string;
   version: string;
   repoUrl: string;

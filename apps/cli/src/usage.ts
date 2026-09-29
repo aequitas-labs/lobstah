@@ -45,6 +45,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>]' },
+  focus: { flags: {}, positionals: '<trap>' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--harness': { value: HARNESS }, '--model': { value: '<m>' }, '--for': { value: 'wt:<trap>' }, '--no-wake': {} }, positionals: '<uuid>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
@@ -98,6 +99,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--wait': {},
       '--timeout': { value: '<secs>' },
       '--repo': { value: '<key>' },
+      '--link': { value: '<url>' },
       '--name': { value: '<word-word>' },
     },
   },
@@ -148,6 +150,10 @@ Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows its live registration. Alias: buoy.`,
+  focus: `Bring a live trap's recorded session or window forward on this machine.
+Accepts its name or id with or without wt:. Reports the focus step, or why it could
+not focus. A session link can open on any supported platform; native window
+focus requires macOS.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
   send: `Steer a live chain, queue for pending work, or wake a finished chain
@@ -183,15 +189,15 @@ registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
 --until: what a waiting worker waits on, and when a pause expires. A trap's
 done records its worktree's HEAD, run there or with the trap's --session.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
-installs the shipped PR check; with --for, a failing check forks a CI-fix
-continuation (pick only). Only \`watch add\`, \`report done --pr\`, and
-\`watch backfill --apply\` register. \`watch hold <key> [--for <id>]\` holds PR
-repairs; --for ends it with that dispatch. \`watch release\` ends any hold.`,
-  soak: `Volunteer this session as a worker; prints its name and wt:<trap> address. In a
-linked worktree it signs on there. From a primary checkout (or with --repo
-from anywhere) it creates worktrees/soak-<trap> (branch lobstah/soak-<trap>,
-from trunk, with setup): cd there. A session's trap is re-used. --one stows
-after one catch. --name sets or changes its two-word name. --wait listens in the foreground; exit 3 = run it again.
+installs the shipped PR check; with --for, a check that fails after the first
+(baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
+\`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
+\`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
+  soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
+Primary checkout or --repo creates worktrees/soak-<trap> from trunk
+(branch lobstah/soak-<trap>, with setup): cd there. Sessions reuse traps.
+--one stows after a catch; --name sets its name; --link sets a validated URL.
+--wait listens; quiet exit 3 means re-run.
 \`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
   stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
 requeues, unread messages bounce to the helm. Removes the worktree soak

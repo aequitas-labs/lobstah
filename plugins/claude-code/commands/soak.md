@@ -7,6 +7,10 @@ Volunteer this session as a worker (a trap).
 1. Run `lobstah soak`. No session flag is needed: the CLI reads
    `$CLAUDE_CODE_SESSION_ID`. If it refuses for a missing session, re-run
    with `--session $CLAUDE_CODE_SESSION_ID`.
+   If this session has a link, pass `--link <url>`. Copy a Claude desktop
+   session link from that session in the app; its app id is not the CLI
+   session id. In the VS Code extension, use
+   `vscode://anthropic.claude-code/open?session=$CLAUDE_CODE_SESSION_ID`.
    - In a linked worktree, it signs on there.
    - In the repo's primary checkout, it creates a new worktree and signs on
      in it.

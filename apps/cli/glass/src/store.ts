@@ -21,6 +21,8 @@ export interface GlassState {
   lobHidden: Record<string, string>;
   /** The lob sprite loaded (true), failed (false), or is still probing (null). */
   spriteOk: boolean | null;
+  /** Last focus outcome per trap, visible beside the action. */
+  focusResults: Record<string, string>;
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */
   preview: boolean;
 }

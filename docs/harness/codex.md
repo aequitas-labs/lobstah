@@ -118,6 +118,12 @@ Codex task ids are UUIDv7 (for example `01a0ceb8-b9bd-7d42-…`); Claude Code
 session ids are UUIDv4. When both harnesses' variables are set, lobstah uses
 this format to tell which one signed on.
 
+For the glass Open window action, form `codex://threads/<task-id>` from the
+task id in the session-start brief and pass it with
+`lobstah soak --link <url>`. The glass checks the stored link before
+showing it. `lobstah focus <trap>` uses the same focus steps from the
+terminal.
+
 ## Getting woken: the blocking park
 
 In Codex the Stop hook runs in **block** mode by default. At turn end with
