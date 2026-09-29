@@ -3,7 +3,7 @@ import type { GlassPr, GlassStack } from '@lobstah/core';
 import { prBadgeClass } from '../../../src/glass-diff.js';
 import type { PrsInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
-import { Age, Table, opener, prChecks, prLink, prMerge, prName, prReview, stackNumbers, watchCell } from './common.js';
+import { Age, Table, badgeTitle, opener, prChecks, prLink, prMerge, prName, prReview, stackNumbers, watchCell } from './common.js';
 
 /**
  * The PRs tab: PRs grouped by stack, then the watches that are not PR
@@ -51,7 +51,7 @@ function prTable(inp: PrsInputs) {
 function prCards(inp: PrsInputs) {
   const groups = prGroups(inp);
   const card = (p: GlassPr) =>
-    html`<div key=${p.key} class="card" onClick=${opener('pr', p.key)}><div class="top">${prName(p)}<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span></div><div class="meta">${p.repo} · ${stateText(p)} · ${prMerge(p)}</div><div class="foot"><span>${prChecks(p)}</span><span>${watchCell(p.watch)}</span>${p.gate && html`<span>gate ${p.gate}</span>`}</div></div>`;
+    html`<div key=${p.key} class="card" onClick=${opener('pr', p.key)}><div class="top">${prName(p)}<span class=${'badge ' + prBadgeClass(p.badge)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span></div><div class="meta" title=${`${p.repo} · ${stateText(p)}`}>${p.repo} · ${stateText(p)} · ${prMerge(p)}</div><div class="foot"><span>${prChecks(p)}</span><span>${watchCell(p.watch)}</span>${p.gate && html`<span>gate ${p.gate}</span>`}</div></div>`;
   const body = groups.length
     ? groups.map(
         ({ s, prs }) =>

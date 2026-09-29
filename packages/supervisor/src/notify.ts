@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { activeIds, answeredAt, laneDirs, lastEventAt, readStatusLog, reconcile } from '@lobstah/core';
+import { activeIds, answeredAt, laneDirs, lastEventAt, questionHeld, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
 
 export interface NotifyEvent {
@@ -22,6 +22,9 @@ function cursorPath(id: string, lane: Lane): string {
  * between cursor write and exec drops, never duplicates). On first sight of a
  * dispatch (no cursor yet), entries older than `sinceMs` are baselined without
  * emitting, so enabling notifications never replays history.
+ *
+ * A question held on the helm's turn (question-hold.ts) stays past the
+ * cursor until the helm releases it; one answered by then never fires.
  */
 export function pendingNotifications(
   id: string,
@@ -36,13 +39,18 @@ export function pendingNotifications(
   } catch {
     cursor = undefined;
   }
-  if (log.length <= (cursor ?? 0)) return [];
-  let fresh = log.slice(cursor ?? 0);
+  const standing = standingQuestion(id, lane);
+  const end = standing && questionHeld(standing) ? log.length - 1 : log.length;
+  if (end <= (cursor ?? 0)) return [];
+  let fresh = log.slice(cursor ?? 0, end);
   if (cursor === undefined && sinceMs > 0) {
     fresh = fresh.filter((e) => Date.parse(e.at) >= sinceMs);
   }
-  fs.writeFileSync(cursorPath(id, lane), String(log.length));
-  return fresh.filter((e) => verbs.includes(e.verb)).map((entry) => ({ id, lane, entry }));
+  fs.writeFileSync(cursorPath(id, lane), String(end));
+  const question = (e: StatusEntry) => e.verb === 'needs-decision' || e.verb === 'blocked';
+  return fresh
+    .filter((e) => verbs.includes(e.verb) && !(question(e) && answeredAt(id, lane, e.at) !== undefined))
+    .map((entry) => ({ id, lane, entry }));
 }
 
 /** Status files touched recently enough to be worth scanning. */

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readWatch } from '@lobstah/core';
+import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readReport, readWatch, statusStateHash } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
 
 /**
@@ -76,10 +76,8 @@ export function removeAck(key: string): boolean {
 
 const sha = (v: unknown) => createHash('sha1').update(JSON.stringify(v)).digest('hex').slice(0, 16);
 
-/** stateHash for question / landed: the status entry the item stands on. */
-export function statusStateHash(verb: string, at: string | undefined): string {
-  return sha({ verb, at: at ?? '' });
-}
+/** stateHash for question / landed: the status entry the item stands on (core, so the daemon's hold agrees). */
+export { statusStateHash };
 
 /**
  * stateHash for a PR's items: the head plus every evidence field a pr:* kind
@@ -120,11 +118,15 @@ export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string 
 
 /**
  * Whether an ack's item still exists, for cull: the dispatch is still on
- * disk (and not being culled), the PR is still open in some evidence, or
- * the watch is still registered.
+ * disk (and not being culled), the PR is still open in some evidence, the
+ * watch is still registered, or the report is still filed.
  */
 export function ackItemExists(key: string, culling: ReadonlySet<string> = new Set()): boolean {
   if (key.startsWith('watch:')) return readWatch(key.slice('watch:'.length)) !== undefined;
+  if (key.startsWith('report:')) {
+    const r = readReport(key);
+    return r !== undefined && !culling.has(key) && !(r.dispatch !== undefined && culling.has(r.dispatch));
+  }
   const ref = key.startsWith('pr:') ? parsePrRef(key) : undefined;
   if (ref) {
     // The PR record decides when there is one; evidence only for a PR without.

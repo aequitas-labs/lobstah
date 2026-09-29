@@ -187,7 +187,7 @@ describe('part 2: click-to-ack, display-only', () => {
     question();
     lobstah('attention', 'ack', `work:${Q}`, '--by', 'test');
     const out = lobstah('attention').stdout;
-    expect(out).toContain(`work:${Q},question,test 0m ago,which color?`);
+    expect(out).toContain(`work:${Q},question,test 0m ago,,which color?`);
   });
 
   it('cull removes acks whose item is gone (dispatch culled, PR merged); never a live one', () => {

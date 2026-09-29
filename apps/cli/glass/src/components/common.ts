@@ -45,6 +45,11 @@ export const WaitingLine = (x: Pick<GlassDispatch, 'waiting' | 'verb'>) => {
   }</div>`;
 };
 
+/** A card badge longer than this truncates with an ellipsis; its title carries the full text. */
+export const BADGE_MAX_CHARS = 24;
+export const badgeTitle = (text: string | undefined): string | undefined =>
+  text !== undefined && text.length > BADGE_MAX_CHARS ? text : undefined;
+
 /** A click handler that opens a modal (and never bubbles to a row that opens another). */
 export const opener = (type: ModalType, key: string) => () => showModal(type, key);
 export const stop = (e: Event) => e.stopPropagation();
@@ -66,7 +71,7 @@ export function windowAction(t: GlassTrap): Children {
     stop(e);
     void openTrapWindow(t.trapId);
   };
-  return html`<span><button onClick=${clicked}>Open window</button>${t.link && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
+  return html`<span class="winaction"><button class="btn open" title="open this trap's window" onClick=${clicked}>↗ open</button>${t.link && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
     state.focusResults[t.trapId] && [' ', html`<span class="dim">${state.focusResults[t.trapId]}</span>`]
   }</span>`;
 }
@@ -270,6 +275,23 @@ export function trapNow(t: GlassTrap): Children {
     title,
     current.activity && [' · ', current.activity.summary, ' ', Age(current.activity.at), ' ago'],
   ];
+}
+
+/** trapNow as plain text: the hover title of a clamped meta line. */
+export function trapNowText(t: GlassTrap): string {
+  if (!t.live) return 'signed off';
+  const current = t.claimed && t.catches.find((c) => c.id === t.claimed && c.bucket === 'active');
+  if (!current)
+    return `idle · ${(t.listening ?? (!!t.firstParkedAt && Date.now() - Date.parse(t.heartbeatAt ?? '') <= 1800000)) ? 'listening' : 'not listening'}`;
+  if (current.waiting || current.verb === 'paused')
+    return `parked · ${current.waiting ? `waiting on ${current.waiting.on}` : current.note || 'waiting'}`;
+  const title = current.brief.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '(no title)';
+  return [
+    `working · ${current.id.slice(0, 8)} · ${title}`,
+    current.activity && `${current.activity.summary} ${ageText(current.activity.at)} ago`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** A trap's mail count, or null when it has none. */

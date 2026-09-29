@@ -472,13 +472,14 @@ never until someone acknowledges it.
 
 | Kind | Stands while | Clears when |
 | ---- | ------------ | ----------- |
-| `question` | The dispatch's last status is `needs-decision` or `blocked`. | Any newer status entry. |
+| `question` | The dispatch's last status is `needs-decision` or `blocked`. Held (`held: true`; not in the pet, the glass, or notifyCommand) while a live helm for its grounds has not ended a turn since it was filed. | Any newer status entry, or a message newer than it. |
 | `landed` | The dispatch is `done` or `failed` after its grounds' reported-through cursor (the grounds listing the repo, else `fleet`; at most 24 h back). Opt-in. | `man report` (or the helm park's digest) advances the cursor. |
 | `pr:draft` | An open PR is a draft, and the user opted into this kind. | Ready for review, merged, or closed. |
 | `pr:review` | An open PR has unresolved review questions, or requested changes that lobstah cannot repair, has exhausted, or is configured not to repair. | Every thread resolved and no changes requested, or merged / closed. |
 | `pr:checks` | An open PR has a failed latest check, and lobstah cannot repair it, has exhausted attempts, or is configured not to repair. | Green on the head, or merged / closed. |
 | `pr:conflict` | An open PR conflicts with its base, and lobstah cannot repair it, has exhausted attempts, or is configured not to repair. | The merge state leaves `DIRTY`, or merged / closed. |
 | `pr:ready` | An open, non-draft PR has no review condition, a mergeable state (`CLEAN`, `HAS_HOOKS`, or `UNSTABLE`), and no failed, pending, or unknown latest checks. It is approved or has at least one check. | Merged or closed, or the ready conditions stop holding. |
+| `report` | A filed report (`report --report`, `man file`) has no ack for this filing. Opt-in. Key `report:<lane>:<uuid>` or `report:helm:<grounds>:<rid>`. | Not cleared: it stays listed until culled. `lobstah attention ack <key>` acks it, and a newer report in the same chain acks the older; an acked report no longer walks. |
 
 `pr:*` kinds read only the `pr:` watch's evidence — never a forge call —
 and carry `prUrl`, `number`, and the fields they derive from. Unconsumed
