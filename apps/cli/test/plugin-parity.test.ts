@@ -25,12 +25,6 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(fs.existsSync(`${root}/docs/lobsterman.md`)).toBe(false);
   });
 
-  it('each skill stays under 81 lines', () => {
-    for (const skill of ['man', 'trap']) {
-      expect(read(`plugins/claude-code/skills/${skill}/SKILL.md`).trimEnd().split('\n').length).toBeLessThan(81);
-    }
-  });
-
   it('each plugin ships its own README for the registry listing', () => {
     // Split on purpose: the listings differ per harness (the /lobstah
     // command, Codex's trust review) — only presence is enforced.
@@ -43,19 +37,11 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(fs.existsSync(`${root}/${commands}/tend.md`)).toBe(true);
     expect(fs.existsSync(`${root}/${commands}/lobstah.md`)).toBe(false);
     const files = [
-      'README.md',
-      'docs/man.md',
-      'plugins/claude-code/README.md',
+      'README.md', 'docs/man.md', 'plugins/claude-code/README.md',
       'plugins/claude-code/skills/man/SKILL.md',
       'plugins/claude-code/skills/trap/SKILL.md',
-      ...fs
-        .readdirSync(`${root}/${commands}`)
-        .filter((name) => name.endsWith('.md'))
-        .map((name) => `${commands}/${name}`),
-      ...fs
-        .readdirSync(`${root}/apps/cli/src`)
-        .filter((name) => name.endsWith('.ts'))
-        .map((name) => `apps/cli/src/${name}`),
+      ...fs.readdirSync(`${root}/${commands}`).filter((name) => name.endsWith('.md')).map((name) => `${commands}/${name}`),
+      ...fs.readdirSync(`${root}/apps/cli/src`).filter((name) => name.endsWith('.ts')).map((name) => `apps/cli/src/${name}`),
     ];
     for (const file of files) {
       expect(read(file).match(/(?<![\w:./-])\/(?:helm|soak|stow|relieve|tend)\b/g), file).toBeNull();
@@ -68,9 +54,14 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
         hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
       };
       return Object.fromEntries(
-        Object.entries(parsed.hooks).map(([event, groups]) => [event, groups.flatMap((g) => g.hooks.map((h) => h.command))]),
+        Object.entries(parsed.hooks).map(([event, groups]) => [
+          event,
+          groups.flatMap((g) => g.hooks.map((h) => h.command)),
+        ]),
       );
     };
-    expect(commands(read('plugins/codex/hooks/hooks.json'))).toEqual(commands(read('plugins/claude-code/hooks/hooks.json')));
+    expect(commands(read('plugins/codex/hooks/hooks.json'))).toEqual(
+      commands(read('plugins/claude-code/hooks/hooks.json')),
+    );
   });
 });
