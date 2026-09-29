@@ -18,6 +18,7 @@ import {
   pausedWaiting,
   readActivity,
   readEvidence,
+  chainPr,
   readStatusLog,
   releaseWorktreeLock,
   acquireWorktreeLock,
@@ -164,6 +165,11 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   const worktreeOf = (JSON.parse(fs.readFileSync(wtFile, 'utf8')) as { of?: string }).of;
   mergeEvidence(id, lane, { worktree: cwd, worktreeOf });
 
+  // A follow-up belongs to the origin chain's PR even when its checkout has
+  // a different local branch name. Seed evidence before remote polling starts.
+  const existingPr = descriptor.followUp ? chainPr(descriptor.followUp, lane) : undefined;
+  if (existingPr) mergeEvidence(id, lane, { prUrl: existingPr.url });
+
   const remotePolicy = {
     pushEarly: repo.pushEarly ?? cfg.limits.pushEarly,
     draftPr: repo.draftPr ?? cfg.limits.draftPr,
@@ -174,13 +180,14 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     id, lane, cwd, trunk: repo.trunk,
     title: descriptor.brief.split('\n')[0]?.trim() || `Lobstah dispatch ${short(id)}`,
     policy: remotePolicy,
+    existingPrUrl: existingPr?.url,
   });
 
   const envNudge = process.env.LOBSTAH_NUDGE;
   // A swap's handoff (arriving as the nudge) already carries the progress note.
   const planNudge = plan.cold && !envNudge ? coldNote(plan.cold, cwd, repo.trunk) : undefined;
   const promptWith = (nudge: string | undefined) =>
-    buildPrompt(brief, { id, nudge, attachments: descriptor.attachments });
+    buildPrompt(brief, { id, nudge, attachments: descriptor.attachments, existingPr });
 
   // Workers report through the CLI; guarantee it resolves. In the repo layout
   // bin/ sits three levels above the runner's dist — when absent (bundled

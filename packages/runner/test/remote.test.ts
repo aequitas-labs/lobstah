@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { claimNext, enqueue, ensureLayout, laneDirs, readEvidence } from '@lobstah/core';
+import { claimNext, enqueue, ensureLayout, laneDirs, readEvidence, readWatch } from '@lobstah/core';
 import { checkpointAllowed, keepRemote } from '../src/remote.js';
 import { main } from '../src/run.js';
 
@@ -55,10 +55,11 @@ describe('headless remote preservation', () => {
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin);
     const gh = path.join(bin, process.platform === 'win32' ? 'gh.cmd' : 'gh');
+    const calls = path.join(root, 'gh-calls');
     if (process.platform === 'win32') {
-      fs.writeFileSync(gh, '@echo off\r\nif "%2"=="view" exit /b 1\r\necho https://github.com/example/repo/pull/7\r\n');
+      fs.writeFileSync(gh, `@echo off\r\necho %* >> "${calls}"\r\nif "%2"=="view" exit /b 1\r\necho https://github.com/example/repo/pull/7\r\n`);
     } else {
-      fs.writeFileSync(gh, '#!/bin/sh\nif [ "$2" = "view" ]; then exit 1; fi\necho https://github.com/example/repo/pull/7\n');
+      fs.writeFileSync(gh, `#!/bin/sh\necho "$*" >> ${JSON.stringify(calls)}\nif [ "$2" = "view" ]; then exit 1; fi\necho https://github.com/example/repo/pull/7\n`);
       fs.chmodSync(gh, 0o755);
     }
     process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ''}`;
@@ -71,11 +72,61 @@ describe('headless remote preservation', () => {
     expect(saved).toContain('checkpoint committed');
     expect(saved).toContain('draft PR https://github.com/example/repo/pull/7');
     expect(readEvidence(id, 'work').prUrl).toBe('https://github.com/example/repo/pull/7');
+    expect(fs.readFileSync(calls, 'utf8').split('\n').filter((line) => line.includes('pr create'))).toHaveLength(1);
     const files = git(dir, 'show', '--pretty=', '--name-only', 'HEAD').split('\n');
     expect(files).toContain('README.md');
     expect(files).toContain('new.ts');
     expect(files).not.toContain('.env.local');
     expect(git(bare, 'rev-parse', 'refs/heads/lobstah/test')).toBe(git(dir, 'rev-parse', 'HEAD'));
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps a chain PR on another head branch without pushing or creating a draft, including on stop', async () => {
+    const { dir, bare } = repo();
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    const calls = path.join(root, 'gh-calls');
+    const gh = path.join(bin, 'gh');
+    fs.writeFileSync(gh, `#!/bin/sh\necho "$*" >> ${JSON.stringify(calls)}\nexit 1\n`);
+    fs.chmodSync(gh, 0o755);
+    process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ''}`;
+    fs.writeFileSync(path.join(dir, 'change.ts'), 'export const changed = true;\n');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Repair',
+      existingPrUrl: 'https://github.com/example/repo/pull/17',
+      policy: { pushEarly: true, draftPr: true, checkpointOnStop: true }, intervalMs: 1000 });
+    const saved = await remote.saveBeforeStop();
+    expect(saved).toContain('checkpoint committed');
+    expect(saved).toContain('existing PR https://github.com/example/repo/pull/17');
+    expect(readEvidence(id, 'work').prUrl).toBe('https://github.com/example/repo/pull/17');
+    expect(readWatch('pr:example/repo#17')?.key).toBe('pr:example/repo#17');
+    expect(git(bare, 'branch', '--list', 'lobstah/test')).toBe('');
+    expect(fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '').not.toContain('pr create');
+    await remote.stop();
+    expect(git(bare, 'branch', '--list', 'lobstah/test')).toBe('');
+  });
+
+  it('does not retry or force-push a rebased follow-up over a non-fast-forward PR branch', async () => {
+    const { dir, bare } = repo();
+    fs.writeFileSync(path.join(dir, 'local.txt'), 'rebased work\n');
+    git(dir, 'add', 'local.txt');
+    git(dir, 'commit', '-m', 'rebased repair');
+    const rival = path.join(root, 'rival');
+    git(root, 'clone', bare, rival);
+    git(rival, 'config', 'user.name', 'Rival');
+    git(rival, 'config', 'user.email', 'rival@example.test');
+    git(rival, 'switch', '-c', 'feature/pr');
+    fs.writeFileSync(path.join(rival, 'rival.txt'), 'remote head\n');
+    git(rival, 'add', 'rival.txt');
+    git(rival, 'commit', '-m', 'advanced PR');
+    git(rival, 'push', 'origin', 'feature/pr');
+    const remoteHead = git(bare, 'rev-parse', 'refs/heads/feature/pr');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Repair',
+      existingPrUrl: 'https://github.com/example/repo/pull/17',
+      policy: { pushEarly: true, draftPr: true, checkpointOnStop: false }, intervalMs: 1000 });
+    await remote.stop();
+    await remote.saveBeforeStop();
+    expect(git(bare, 'rev-parse', 'refs/heads/feature/pr')).toBe(remoteHead);
+    expect(git(bare, 'branch', '--list', 'lobstah/test')).toBe('');
+    expect(readEvidence(id, 'work').note).not.toContain('push rejected');
   });
 
   it('does not checkpoint or push on trunk', async () => {

@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { addWatch, appendStatus, appendWatchEvents, enqueue, ensureLayout, laneDirs, mergeEvidence, readPr, upsertPr } from '@lobstah/core';
+import { addWatch, appendStatus, appendWatchEvents, enqueue, ensureLayout, laneDirs, mergeEvidence, readEvidence, readPr, upsertPr } from '@lobstah/core';
 import type { Descriptor, PrEvidence } from '@lobstah/core';
 import { branchOwnership, repairBrief } from '@lobstah/core';
 import { tick } from '@lobstah/supervisor';
@@ -185,6 +185,7 @@ describe('PR watch repairs', () => {
     expect(deliverPrRepairs(() => {}, 3)).toBe(1);
     const dispatch = queued()[0]!;
     expect(dispatch.followUp).toBe(OWNER);
+    expect(readEvidence(dispatch.id, 'work').prUrl).toBe(URL);
     expect(dispatch.brief).toContain('base branch stack-parent');
     expect(dispatch.brief).toContain('--force-with-lease only if you rebased');
     expect(readPr(KEY)?.repair).toMatchObject({
@@ -195,6 +196,26 @@ describe('PR watch repairs', () => {
       dispatchId: dispatch.id,
     });
     expect(deliverPrRepairs(() => {}, 3)).toBe(0);
+  });
+
+  it('does not repair a stray PR owned by a repair child of a different PR', () => {
+    upsertPr(pr({ mergeStateStatus: 'CLEAN' }), OWNER);
+    const child = '33333333-3333-3333-3333-333333333333';
+    const done = path.join(laneDirs('work').done, child);
+    fs.mkdirSync(done, { recursive: true });
+    fs.writeFileSync(path.join(done, 'descriptor.json'), JSON.stringify({
+      id: child, repo: 'web', brief: 'repair', followUp: OWNER,
+    } satisfies Descriptor));
+    appendStatus(child, 'work', 'done', 'repair finished');
+    const strayUrl = 'https://github.com/acme/web/pull/18';
+    const strayKey = 'pr:acme/web#18';
+    addWatch(strayKey, 'echo {}', { owner: `dispatch:${child}` });
+    const stray = pr({ url: strayUrl, number: 18, headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' });
+    upsertPr(stray, child);
+    upsertPr(stray, child);
+    expect(deliverPrRepairs(() => {}, 3)).toBe(0);
+    expect(readPr(strayKey)?.repair).toBeUndefined();
+    expect(queued()).toHaveLength(0);
   });
 
   it('includes failing check names and URLs in a single repair follow-up', () => {

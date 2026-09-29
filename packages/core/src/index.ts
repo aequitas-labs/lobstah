@@ -19,6 +19,7 @@ export * from './helm.js';
 export * from './compiled.js';
 export * from './pr.js';
 export * from './prs.js';
+export * from './chain-pr.js';
 export * from './pr-repair.js';
 export * from './resume.js';
 export * from './glass.js';

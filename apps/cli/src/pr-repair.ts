@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   branchOwnership,
+  chainPr,
   enqueue,
   laneDirs,
   lastEventAt,
@@ -11,6 +12,7 @@ import {
   loadConfig,
   lobstahHome,
   markFollowUp,
+  mergeEvidence,
   readEvidence,
   readPr,
   readSessionClaim,
@@ -158,6 +160,12 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3): numbe
     withPrLock(w.key, () => {
       const pr = readPr(w.key);
       if (!pr || pr.state !== 'OPEN' || pr.dispatches.length === 0 || (pr.observations ?? 0) <= 1) return;
+      // A repair's stray PR must not become a second repair chain. Its
+      // ancestor chain already owns a different PR.
+      const owner = w.owner.slice('dispatch:'.length);
+      const origin = storedDescriptor(owner, 'work')?.followUp;
+      const ancestorPr = origin && chainPr(origin, 'work');
+      if (ancestorPr && ancestorPr.url !== pr.url) return;
       const kind = repairKind(pr);
       if (!kind || (kind === 'conflict' && !cfg.conflicts) || (kind === 'checks' && !cfg.checks)) return;
       const previous = pr.repair?.headSha === pr.headSha ? pr.repair : undefined;
@@ -212,6 +220,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3): numbe
       });
       try {
         enqueue({ id, repo: target.repo, brief: repairBrief(pr, kind), followUp: chain.latest, ...(trap ? { for: address } : {}) }, 'work');
+        mergeEvidence(id, 'work', { prUrl: pr.url, pr });
         markFollowUp(w.key, id, readWatchEvents(w.key).length);
         started++;
         log(`repair ${w.key}: ${kind} -> ${id}${trap ? ` (addressed to ${address})` : ''}`);
