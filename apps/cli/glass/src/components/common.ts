@@ -122,8 +122,11 @@ export function detailBody(x: GlassDispatch) {
   }${x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${x.followUp}</pre>`]}<div class="sec">log</div><div class="loglines">${
     x.log.length ? logText(x) : 'no entries yet'
   }</div>${x.inbox.length > 0 && [html`<div class="sec">inbox</div>`, html`<div class="loglines">${x.inbox.join('\n---\n')}</div>`]}${
-    x.evidence && [html`<div class="sec">evidence</div>`, html`<div class="loglines">${JSON.stringify(x.evidence)}</div>`]
-  }`;
+    x.awaitingReply && [
+      html`<div class="sec">awaiting reply</div>`,
+      html`<div>${x.awaitingReply.line} · from ${x.awaitingReply.from} · ${Age(x.awaitingReply.sentAt)} ago</div>`,
+    ]
+  }${x.evidence && [html`<div class="sec">evidence</div>`, html`<div class="loglines">${JSON.stringify(x.evidence)}</div>`]}`;
 }
 
 export function addrCell(x: GlassDispatch) {

@@ -96,6 +96,11 @@ finished member. If that member was last claimed by a trap still signed on,
 the follow-up returns to that trap unless `--for` overrides it. Otherwise it
 is unaddressed for a headless worker.
 
+A send to a dispatch expects a reply. The worker's next note after the send
+wakes `man wait`: a `working` or `paused` note arrives once as a `reply` event
+with the note and the sent instruction's first line, and any other verb wakes
+as itself. `--no-reply` sends without expecting a reply.
+
 Attach refuses while a dispatch is `working` (two writers, one session);
 follow the logs or `send` instead, or cancel and then attach.
 
@@ -476,6 +481,12 @@ before the worker reads it; `man tend` then shows the dispatch as
 `needs-decision (answered <n>m ago)` instead of listing it under attention.
 A newer `needs-decision` from the worker stands again. Set `remindSecs = 0`
 for pure at-most-once.
+
+A send still waiting on its reply stands in the `man haul` block as
+`sent · <id> · <first line> · <age>`. It is listed once, then every
+`remindSecs` until the worker's next note answers it. `man tend` shows it on
+the dispatch as `awaiting reply · <age>`, and the glass dispatch modal shows
+it under the inbox.
 
 **Acknowledging, display-only.** Clicking a desktop pet opens its target and
 runs `lobstah attention ack <item-key> --by pet`, so that pet stops walking
