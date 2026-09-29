@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { appendStatus, claimNext, enqueue, ensureLayout, laneDirs, mergeEvidence, postNotice, takeHelm } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, laneDirs, mergeEvidence, postNotice, takeHelm, writeActivity } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 
@@ -69,6 +69,45 @@ describe('glass snapshot', () => {
     expect(t?.live).toBe(false);
     expect(t?.catches.map((c) => c.id)).toContain(UUID);
     expect(t?.notices.map((n) => n.kind)).toContain('trap-stowed');
+  });
+
+  it('shows working, idle, and parked trap activity from one snapshot', () => {
+    const now = Date.now();
+    const iso = (agoMs: number) => new Date(now - agoMs).toISOString();
+    const traps = [
+      { trapId: 'working', claimed: 'aaaaaaaa-0000-4000-8000-000000000000', heartbeatAt: iso(5_000) },
+      { trapId: 'idle', heartbeatAt: iso(60 * 60_000) },
+      { trapId: 'parked', claimed: 'bbbbbbbb-0000-4000-8000-000000000000', heartbeatAt: iso(5_000) },
+    ];
+    for (const [index, trap] of traps.entries()) {
+      fs.writeFileSync(path.join(home, 'soaking', `${trap.trapId}.json`), JSON.stringify({
+        ...trap, sessionId: `${trap.trapId}-session`, harness: 'codex', repo: 'web',
+        worktree: `/tmp/${trap.trapId}`, cwd: `/tmp/${trap.trapId}`,
+        signedOnAt: iso((3 - index) * 60_000), firstParkedAt: iso(50_000),
+      }));
+    }
+    for (const [id, trapId, brief] of [
+      [traps[0]!.claimed, 'working', 'Build a stable trap view'],
+      [traps[2]!.claimed, 'parked', 'Wait for the review'],
+    ] as const) {
+      enqueue({ id: id!, repo: 'web', brief }, 'work');
+      expect(claimNext('work')).toBe(id);
+      fs.writeFileSync(path.join(laneDirs('work').active, id!, 'claim.json'), JSON.stringify({ by: `wt:${trapId}`, at: iso(10_000) }));
+    }
+    appendStatus(traps[0]!.claimed!, 'work', 'working', 'building');
+    writeActivity(traps[0]!.claimed!, 'work', { at: iso(12_000), kind: 'tool', summary: 'Bash' });
+    appendStatus(traps[2]!.claimed!, 'work', 'paused', 'awaiting review', undefined, { waitingOn: 'review' });
+    const snap = buildGlassSnapshot();
+    const byId = (id: string) => snap.traps.find((t) => t.trapId === id)!;
+    expect(byId('working')).toMatchObject({ live: true, listening: true, claimed: traps[0]!.claimed });
+    expect(byId('working').catches.find((c) => c.id === traps[0]!.claimed)).toMatchObject({
+      brief: 'Build a stable trap view', activity: { summary: 'Bash' }, verb: 'working',
+    });
+    expect(byId('idle')).toMatchObject({ live: true, listening: false, catches: [] });
+    expect(byId('parked')).toMatchObject({ live: true, listening: true, claimed: traps[2]!.claimed });
+    expect(byId('parked').catches.find((c) => c.id === traps[2]!.claimed)).toMatchObject({
+      brief: 'Wait for the review', verb: 'paused', waiting: { on: 'review' },
+    });
   });
 
   it('serves the page, the data, and never anything but GET reads', async () => {
