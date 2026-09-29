@@ -80,14 +80,18 @@ describe('headless remote preservation', () => {
     expect(git(bare, 'rev-parse', 'refs/heads/lobstah/test')).toBe(git(dir, 'rev-parse', 'HEAD'));
   });
 
-  it.skipIf(process.platform === 'win32')('keeps a chain PR on another head branch without pushing or creating a draft, including on stop', async () => {
+  it('keeps a chain PR on another head branch without pushing or creating a draft, including on stop', async () => {
     const { dir, bare } = repo();
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin);
     const calls = path.join(root, 'gh-calls');
-    const gh = path.join(bin, 'gh');
-    fs.writeFileSync(gh, `#!/bin/sh\necho "$*" >> ${JSON.stringify(calls)}\nexit 1\n`);
-    fs.chmodSync(gh, 0o755);
+    const gh = path.join(bin, process.platform === 'win32' ? 'gh.cmd' : 'gh');
+    if (process.platform === 'win32') {
+      fs.writeFileSync(gh, `@echo off\r\necho %* >> "${calls}"\r\nexit /b 1\r\n`);
+    } else {
+      fs.writeFileSync(gh, `#!/bin/sh\necho "$*" >> ${JSON.stringify(calls)}\nexit 1\n`);
+      fs.chmodSync(gh, 0o755);
+    }
     process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ''}`;
     fs.writeFileSync(path.join(dir, 'change.ts'), 'export const changed = true;\n');
     const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Repair',

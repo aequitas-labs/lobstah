@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
+  addWatch,
   appendStatus,
   claimNext,
   dispatchWorktree,
@@ -157,6 +158,9 @@ describe('a follow-up reuses its origin chain’s worktree', () => {
       checks: { total: 0, passed: 0, failed: 0, pending: 0 },
       observedAt: new Date().toISOString(),
     } satisfies PrEvidence, 'origin');
+    // A drafted PR already has a watch; keep this integration test focused on
+    // follow-up reuse rather than launching another CLI process under CI load.
+    addWatch('pr:example/repo#17', 'echo {}', { owner: 'dispatch:origin' });
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin);
     const calls = path.join(root, 'gh-calls');
