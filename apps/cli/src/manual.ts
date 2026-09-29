@@ -27,6 +27,11 @@ your working set:
   lobstah glass stop | status | install | uninstall
                                                 manage the detached glass or
                                                 its user service
+  lobstah focus <trap>                         focus a live trap's session
+                                                link or recorded window;
+                                                reports the step or reason
+  lobstah soak --link <url>                    store this session's validated
+                                                link for glass Open window
   lobstah watch add <key> --check <cmd>         stand watch on something
                                                 external (a review session, a
                                                 CI run) — its events wake you

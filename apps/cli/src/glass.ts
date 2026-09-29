@@ -43,7 +43,9 @@ import { GLASS_PAGE } from './glass-page.generated.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
-import { focusTrap } from './focus.js';
+import { focusRegistration, liveTrap } from './focus.js';
+import type { FocusResult } from './focus.js';
+import type { TrapRegistration } from '@lobstah/core';
 
 /**
  * The spyglass: a localhost dashboard over ~/.lobstah — the same
@@ -337,7 +339,10 @@ export function buildGlassSnapshot(): GlassSnapshot {
 const PAGE = GLASS_PAGE;
 
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
-export function serveGlass(port: number): http.Server {
+export function serveGlass(
+  port: number,
+  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult> } = {},
+): http.Server {
   const focusToken = randomBytes(32).toString('hex');
   const icon = assetPath('favicon.png') ?? assetPath('lob-star.png');
   const lob = assetPath('lob.png');
@@ -372,7 +377,9 @@ export function serveGlass(port: number): http.Server {
       }
       const trapId = req.url.slice('/api/focus/'.length);
       if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id.' });
-      void focusTrap(trapId)
+      const reg = liveTrap(trapId);
+      if (!reg) return reply(409, { focused: false, reason: 'Trap is not live.' });
+      void (options.focus ?? focusRegistration)(reg)
         .then((result) => reply(result.focused ? 200 : 409, result))
         .catch(() => reply(500, { focused: false, reason: 'Window focus failed.' }));
       return;

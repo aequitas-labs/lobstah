@@ -52,8 +52,11 @@ end run`;
 
 const BUNDLE_RE = /^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)+$/;
 const TTY_RE = /^ttys[0-9]{3,5}$/;
-const ITERM_RE = /^w[0-9]+t[0-9]+p[0-9]+:([A-Fa-f0-9-]{36})$/;
+const ITERM_RE = /^w[0-9]+t[0-9]+p[0-9]+:([A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12})$/;
+const TMUX_RE = /^%[1-9][0-9]*$/;
+const PANE_RE = /^[1-9][0-9]*$/;
 const VSCODE_RE = /(?:VSCode|Cursor|windsurf)/;
+const control = (value: string): boolean => /[\x00-\x1f\x7f]/.test(value);
 
 function safeWorktree(reg: TrapRegistration): boolean {
   const folder = reg.worktree;
@@ -80,13 +83,34 @@ export async function focusRegistration(
       return undefined;
     }
   };
+  const win = reg.window;
+  if (reg.link !== undefined && !validSessionLink(reg.link))
+    return { focused: false, reason: 'Invalid recorded session link.' };
+
+  // A registration is writable by local processes. Refuse malformed values
+  // before attempting any action, even one that would use a different
+  // field later in the ladder.
+  if (win?.itermSession !== undefined && (typeof win.itermSession !== 'string' || control(win.itermSession) || !ITERM_RE.test(win.itermSession)))
+    return { focused: false, reason: 'Invalid recorded iTerm2 session id.' };
+  if (win?.tty !== undefined && (typeof win.tty !== 'string' || control(win.tty) || !TTY_RE.test(win.tty)))
+    return { focused: false, reason: 'Invalid recorded tty.' };
+  if (win?.bundleId !== undefined && (typeof win.bundleId !== 'string' || control(win.bundleId) || !BUNDLE_RE.test(win.bundleId)))
+    return { focused: false, reason: 'Invalid recorded bundle id.' };
+  if (win?.tmuxPane !== undefined && (typeof win.tmuxPane !== 'string' || control(win.tmuxPane) || !TMUX_RE.test(win.tmuxPane)))
+    return { focused: false, reason: 'Invalid recorded tmux pane.' };
+  if (win?.kittyWindow !== undefined && (typeof win.kittyWindow !== 'string' || control(win.kittyWindow) || !PANE_RE.test(win.kittyWindow)))
+    return { focused: false, reason: 'Invalid recorded kitty window.' };
+  if (win?.weztermPane !== undefined && (typeof win.weztermPane !== 'string' || control(win.weztermPane) || !PANE_RE.test(win.weztermPane)))
+    return { focused: false, reason: 'Invalid recorded WezTerm pane.' };
+  if (win?.bundleId && VSCODE_RE.test(win.bundleId) && !safeWorktree(reg))
+    return { focused: false, reason: 'Recorded editor worktree does not match this trap.' };
+
   if (validSessionLink(reg.link)) {
     const opener: [string, string[]] = platform === 'darwin' ? ['open', [reg.link]] : platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', reg.link]] : ['xdg-open', [reg.link]];
     const result = await attempt(opener[0], opener[1], 'link', 'Opened the session link.');
     if (result) return result;
   }
   if (platform !== 'darwin') return { focused: false, reason: 'Window focus is not supported on this platform.' };
-  const win = reg.window;
   if (!win) return { focused: false, reason: 'This trap did not record a window.' };
 
   const iterm = typeof win.itermSession === 'string' ? ITERM_RE.exec(win.itermSession) : null;

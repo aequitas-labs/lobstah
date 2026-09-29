@@ -14,6 +14,7 @@ work; the helm judges the catch.
 ```
 lobstah soak                  # sign on; prints your wt:<trap> address and worktree
 lobstah soak --repo <key>     # outside any repo: create a worktree for that repo
+lobstah soak --link <url>     # record this session's link for Open window
 lobstah soak --one            # sign off after the first finished catch
 lobstah soak --wait           # hookless: listen now; exit 3 = quiet, run again
 lobstah stow                  # sign off; removes the worktree soak created
@@ -27,6 +28,11 @@ lobstah stow --keep           # sign off; keep the worktree
 - When the output has `instruction: cd <path> ...`, run `cd <path>` before
   you take work. Work in that directory from now on: every task runs there.
 - Running `soak` again re-uses your trap. It never creates a second worktree.
+- If the session has a link, pass `--link <url>` on sign-on or re-soak. Copy
+  a Claude desktop session link from the session in the app; its app id is
+  not the CLI session id. In the VS Code extension, form
+  `vscode://anthropic.claude-code/open?session=<session-id>` from
+  `$CLAUDE_CODE_SESSION_ID`. The glass checks the link before showing it.
 Invoke `/lobstah:trap` to load this skill.
 - No flag is needed inside Claude Code: the CLI reads
   `$CLAUDE_CODE_SESSION_ID`, from any directory. If it refuses, pass

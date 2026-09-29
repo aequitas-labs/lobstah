@@ -248,7 +248,8 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   glass [--port <n>] [--detach]   the spyglass: tend as a live localhost web
                                   page — attention, dispatches, traps with
                                   their lifecycle and mail, notices, merge
-                                  view. Open window focuses a live trap here.
+                                  view. Open window focuses a live trap here;
+                                  a signed-off trap shows a resume command.
                                   stop | status | install | uninstall |
                                   restart manage it.
                                   Port: --port, else $LOBSTAH_GLASS_PORT,
@@ -300,7 +301,8 @@ workers (dispatched agents; injected into every brief):
 
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--repo <key>] [--link <url>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
-                                  volunteer this session as a worker.
+                                  volunteer this session as a worker;
+                                  --link records a session deep link.
                                   Identity is the worktree: sign-on anchors a
                                   trap id (.lobstah-trap) and prints its
                                   wt:<trap> address; re-runs here need no

@@ -46,7 +46,11 @@ The hooks never conscript a session: they stay inert until a session signs
 on as the helm (`lobstah man helm`) or as a trap (`lobstah soak`). In a
 repo's primary checkout, `lobstah soak` creates a linked worktree for the
 trap; `lobstah stow` removes it unless it holds work that exists nowhere
-else or `--keep` is passed. Signing on, the session id, getting woken, and how the
+else or `--keep` is passed.
+
+`lobstah soak --link <url>` records the session's own link for the glass's
+Open window action. `lobstah focus <trap>` runs the same focus steps from the
+CLI. Signing on, the session id, getting woken, and how the
 Claude Code CLI and desktop app differ are in
 [docs/harness/claude-code.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/claude-code.md). The quickstart, the same
 in every harness, is in the

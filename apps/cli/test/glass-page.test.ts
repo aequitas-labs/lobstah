@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
@@ -11,9 +14,16 @@ import { NOW, acceptanceFleet, ago, emptyFleet, everyAttentionFleet } from './fi
  */
 
 let open: GlassDom[] = [];
+let home: string;
+beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-glass-page-'));
+  process.env.LOBSTAH_HOME = home;
+});
 afterEach(async () => {
   await Promise.all(open.map((g) => g.close()));
   open = [];
+  fs.rmSync(home, { recursive: true, force: true });
+  delete process.env.LOBSTAH_HOME;
 });
 async function page(d: GlassSnapshot, opts: Partial<GlassDomOptions> = {}): Promise<GlassDom> {
   const g = await loadGlass(GLASS_PAGE, d, { now: NOW, ...opts });
@@ -54,6 +64,29 @@ async function mutations(g: GlassDom, fn: () => Promise<void>): Promise<Mutation
 }
 
 describe('glass page: tabs and hash routing', () => {
+  it('shows Open window on live traps in the table, cards, deck, and modal only', async () => {
+    const d = acceptanceFleet();
+    d.focusSupported = true;
+    d.focusToken = 'fixture-token';
+    d.traps.find((t) => t.trapId === 't2')!.sessionId = 'past-session';
+    d.traps.find((t) => t.trapId === 't2')!.harness = 'codex';
+    const g = await page(d, { hash: '#traps' });
+    const t1 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1'))!;
+    const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
+    expect(text(t1)).toContain('Open window');
+    expect(text(t2)).not.toContain('Open window');
+    expect(text(t2)).toContain('codex resume past-session');
+    await click(g, t1.querySelector('button'));
+    expect(g.$('#overlay')!.className).toBe('');
+    await click(g, t1);
+    expect(text(g.$('#modalbox'))).toContain('Open window');
+    await escape(g);
+    await g.go('#deck');
+    expect(text(g.$('#deck'))).toContain('Open window');
+    await g.go('#traps');
+    const cardPage = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
+    expect(text(cardPage.$('#traps'))).toContain('Open window');
+  });
   it('opens On deck by default and follows the hash to each tab', async () => {
     const g = await page(acceptanceFleet());
     const on = () => g.$$('.tabpage.on').map((el) => el.id);
