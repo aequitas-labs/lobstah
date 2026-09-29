@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readReport, readWatch } from '@lobstah/core';
+import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readReport, readWatch, statusStateHash } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
 
 /**
@@ -76,10 +76,8 @@ export function removeAck(key: string): boolean {
 
 const sha = (v: unknown) => createHash('sha1').update(JSON.stringify(v)).digest('hex').slice(0, 16);
 
-/** stateHash for question / landed: the status entry the item stands on. */
-export function statusStateHash(verb: string, at: string | undefined): string {
-  return sha({ verb, at: at ?? '' });
-}
+/** stateHash for question / landed: the status entry the item stands on (core, so the daemon's hold agrees). */
+export { statusStateHash };
 
 /**
  * stateHash for a PR's items: the head plus every evidence field a pr:* kind

@@ -111,6 +111,7 @@ import {
   reportMarkdownPath,
   dispatchReportKey,
   readReport,
+  releaseHeldQuestions,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice, RepoConfig, ReportMeta, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
@@ -1293,8 +1294,9 @@ async function mainCli(): Promise<void> {
       }
       if (has('--json')) {
         // The pet's read: the same items and fields as `man tend --json`
-        // puts under `attention`, without the rest of the report.
-        console.log(JSON.stringify({ attention: report.attention }));
+        // puts under `attention`, without the rest of the report, and without
+        // a question still held on the helm's turn.
+        console.log(JSON.stringify({ attention: report.attention.filter((a) => !a.held) }));
         break;
       }
       console.log(
@@ -1304,9 +1306,10 @@ async function mainCli(): Promise<void> {
             key: a.key,
             kind: a.kind,
             acked: a.acked ? `${a.acked.by} ${Math.round((Date.now() - Date.parse(a.acked.at)) / 60_000)}m ago` : '',
+            held: a.held ? 'yes' : '',
             note: a.note ?? '',
           })),
-          ['key', 'kind', 'acked', 'note'],
+          ['key', 'kind', 'acked', 'held', 'note'],
         ),
       );
       break;
@@ -1638,6 +1641,8 @@ async function mainCli(): Promise<void> {
         // A helm registration enables the hook without a marker file or env var.
         const helm = hook?.session_id ? helmOf(hook.session_id) : undefined;
         if (helm) heartbeatHelm(helm.sessionId);
+        // The helm ended a turn: a question it left unanswered walks to the human.
+        if (helm) releaseHeldQuestions(helm);
         const cfgHaul = loadConfig();
         // Strict helm rule: with a claimed lobstah man anywhere, no other
         // session parks as one — a marker-armed bystander would consume the

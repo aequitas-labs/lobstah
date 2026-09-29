@@ -243,7 +243,8 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
 function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[]; attentionKinds: string[]; attentionError?: string } {
   try {
     const cfg = loadConfig();
-    return { attention: buildTendReport().attention, landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
+    // The pet's list: a question held on the helm's turn is not the human's yet.
+    return { attention: buildTendReport().attention.filter((a) => !a.held), landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
   } catch (err) {
     return { attention: [], landed: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
   }

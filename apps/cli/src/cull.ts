@@ -6,6 +6,7 @@ import {
   followUpAncestors,
   formatGB,
   laneDirs,
+  listReleases,
   listReports,
   listTraps,
   loadConfig,
@@ -16,6 +17,7 @@ import {
   readPr,
   readPrs,
   removeHelmReport,
+  removeRelease,
   removePr,
   reportDir,
   statfsFreeBytes,
@@ -28,7 +30,7 @@ import type { FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
 
 export interface CullItem {
-  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report';
+  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report' | 'release';
   id: string;
   target: string;
   ageDays: number;
@@ -188,6 +190,12 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     if (ackItemExists(a.key, culling)) continue;
     const at = Date.parse(a.at) || now;
     items.push({ kind: 'ack', id: a.key, target: a.key, ageDays: Math.floor((now - at) / DAY), bytes: size(ackFile(a.key)), ageFrom: at });
+  }
+  // Question releases go the same way as acks: when their dispatch does.
+  for (const r of listReleases()) {
+    if (ackItemExists(r.key, culling)) continue;
+    const at = Date.parse(r.releasedAt) || now;
+    items.push({ kind: 'release', id: r.key, target: r.key, ageDays: Math.floor((now - at) / DAY), bytes: 0, ageFrom: at });
   }
   return items;
 }
@@ -373,6 +381,7 @@ export function applyCull(items: CullItem[]): void {
   for (const item of items.filter((i) => i.kind === 'ack')) removeAck(item.target);
   for (const item of items.filter((i) => i.kind === 'pr')) removePr(item.target);
   for (const item of items.filter((i) => i.kind === 'report')) removeHelmReport(item.id);
+  for (const item of items.filter((i) => i.kind === 'release')) removeRelease(item.id);
   for (const item of items.filter((i) => i.kind === 'state')) {
     const dir = path.dirname(item.target);
     for (const f of fs.readdirSync(dir)) {

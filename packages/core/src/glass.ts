@@ -27,6 +27,12 @@ export interface TendAttention {
   stateHash: string;
   /** A human acknowledged this state (display-only: the pet and glass lobs skip it; nothing else does). */
   acked?: { at: string; by: string };
+  /**
+   * question: held on the helm's turn (question-hold.ts). `man tend` lists it;
+   * the pet, the glass, and notifyCommand do not, until the helm ends a turn
+   * without answering it.
+   */
+  held?: boolean;
   id: string;
   lane: Lane;
   /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
