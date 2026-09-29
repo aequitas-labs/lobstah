@@ -178,6 +178,19 @@ export function kindCell(x: Pick<TendAttention, 'kind' | 'verb'>) {
 export const prLink = (p: Pick<GlassPr, 'url' | 'number'>) =>
   html`<a href=${p.url} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`;
 
+/** A PR card's name: the number bold, then the title; the number alone when there is no title. One line, cut with an ellipsis. */
+export const prName = (p: Pick<GlassPr, 'number' | 'title'>) =>
+  html`<span class="prname" title=${p.title || undefined}><b>#${p.number}</b>${p.title && [' ', p.title]}</span>`;
+
+/** A stack's numbers, `#98 → #101`, each carrying its PR's title as a title attribute. `bold` marks one number. */
+export function stackNumbers(numbers: number[], titles: Map<number, string | undefined>, bold?: number) {
+  return numbers.flatMap((n, i) => {
+    const t = titles.get(n) || undefined;
+    const num = n === bold ? html`<b title=${t}>#${n}</b>` : html`<span title=${t}>#${n}</span>`;
+    return i ? [' → ', num] : [num];
+  });
+}
+
 export function prChecks(p: Pick<GlassPr, 'checks'>): string {
   const c = p.checks;
   return (

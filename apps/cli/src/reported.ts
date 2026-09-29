@@ -4,7 +4,8 @@ import { lobstahHome } from '@lobstah/core';
 
 /**
  * The reported-through cursors: one per grounds (default `fleet`), advanced
- * by `man report` and the helm park's digest. Their own module so both the
+ * by `man report`, a helm's `man wait` event delivery, and the helm park's
+ * digest. Their own module so both the
  * digest and tend's `landed` attention read them without importing each other.
  */
 
