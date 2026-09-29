@@ -40,6 +40,7 @@ import {
   holdReason,
   readHold,
   slotUsage,
+  isFinished,
 } from '@lobstah/core';
 import type {
   ActivityView,
@@ -617,6 +618,8 @@ export function buildTendReport(now = Date.now()): TendReport {
 
   const queued = pendingIds('work');
   const active = activeIds('work');
+  // A finished dispatch whose runner is still exiting is done, not in flight.
+  const inFlight = active.filter((id) => !isFinished(id, 'work'));
   const slots = slotUsage('work');
   const choresActive = activeIds('chore').length + pendingIds('chore').length;
 
@@ -826,7 +829,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       ? 'stalled'
       : attention.some((a) => a.kind === 'question' || a.kind === 'watch')
         ? 'needs-attention'
-        : active.length + queued.length > 0
+        : inFlight.length + queued.length > 0
           ? 'working'
           : 'idle';
 
@@ -862,7 +865,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
     counts: {
       queued: queued.length,
-      active: active.length,
+      active: inFlight.length,
       headlessActive: slots.headless,
       trapActive: slots.traps,
       headlessLimit: cfg.limits.maxConcurrent,

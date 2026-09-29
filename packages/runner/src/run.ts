@@ -16,6 +16,7 @@ import {
   modelForHarness,
   originProgress,
   pausedWaiting,
+  isFinished,
   readActivity,
   readEvidence,
   chainPr,
@@ -37,7 +38,7 @@ import { startWallClock } from './wallclock.js';
 import { keepRemote } from './remote.js';
 import type { StartPlan } from './plan.js';
 
-/** Seams for tests: the harness, and the git work around it. */
+/** Seams for tests: the harness, the git work around it, and process cleanup. */
 export interface RunnerDeps {
   loadAdapter: (name: string) => Adapter;
   allocate: (repo: RepoConfig, id: string) => Promise<string>;
@@ -46,9 +47,32 @@ export interface RunnerDeps {
   /** Fetch trunk in a reused worktree; re-run setup if a lockfile changed. */
   prepareReuse: (repo: RepoConfig, dir: string) => Promise<{ setupRan: boolean }>;
   collectEvidence: (repo: RepoConfig, dir: string) => Promise<{ branch: string; commits: string[] }>;
+  /**
+   * Stop every process this runner started (the harness, and what the
+   * harness left running) and return how many. The default stops nothing:
+   * only the runner entry, a process of its own, passes the real one.
+   */
+  reap: () => Promise<number>;
 }
 
-const defaultDeps: RunnerDeps = { loadAdapter, allocate, chooseWorktree, prepareReuse, collectEvidence };
+const defaultDeps: RunnerDeps = {
+  loadAdapter,
+  allocate,
+  chooseWorktree,
+  prepareReuse,
+  collectEvidence,
+  reap: async () => 0,
+};
+
+/** How long a run that ended on a final report waits for the adapter to settle. */
+const DONE_WAIT_MS = 2000;
+
+/** `p`, or `fallback` when `p` has not settled within `ms`. */
+function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => (timer = setTimeout(() => resolve(fallback), ms)));
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
 
 const short = (s: string) => s.slice(0, 8);
 
@@ -242,10 +266,16 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
         maxMs: maxWallMs,
         initialElapsedMs: wallState.elapsedMs,
         initialWindowMs: wallState.windowMs,
-        paused: () => pausedWaiting(readStatusLog(id, lane).at(-1)),
+        // A finished dispatch spends no time: the worker's final report
+        // stops the clock, even before the turn ends.
+        paused: () => {
+          const last = readStatusLog(id, lane).at(-1);
+          return pausedWaiting(last) || isFinished(id, lane);
+        },
         progress: madeProgress,
         onTick: persistWall,
         onExpire: () => {
+          if (isFinished(id, lane)) return;
           wallClockHit = true;
           current?.kill();
         },
@@ -278,83 +308,114 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
       resumeSession,
     });
     current = run;
-    const { cancelled, activity } = await drive(run, {
+    const driven = await drive(run, {
       id,
       lane,
       cwd,
       stopped: () => wallClockHit,
       backgroundWaitMs: cfg.limits.backgroundWaitSecs * 1000,
+      exitGraceMs: (cfg.limits.exitGraceSecs ?? 30) * 1000,
+      onFinal: () => wallTimer?.stop(),
     });
-    const result = await run.done;
+    const { cancelled, activity } = driven;
+    if (driven.stopped) {
+      // The harness was killed; now its process group, so nothing it
+      // started outlives it.
+      const reaped = await deps.reap();
+      console.log(`[runner] harness stopped (${driven.stopped.reason}) ${Math.round(driven.stopped.afterMs / 1000)}s after the final report; ${reaped} process(es) stopped`);
+      mergeEvidence(id, lane, {
+        harnessStopped: {
+          reason: driven.stopped.reason,
+          afterSecs: Math.round(driven.stopped.afterMs / 1000),
+          at: new Date().toISOString(),
+        },
+      });
+    }
+    // After a final report, a harness that never settles cannot hold the run.
+    const result = driven.final ? await within(run.done, DONE_WAIT_MS, {}) : await run.done;
     return { cancelled, activity, result };
   };
 
-  let outcome = await runOnce(plan.harness, promptWith(envNudge ?? planNudge), plan.resume?.sessionId);
-
-  // A resume the harness refused (not found, culled, foreign) before doing
-  // any work falls back to a cold session — it never fails the dispatch.
-  // With no session to preserve, the cold run goes on the harness this
-  // dispatch asked for (explicit, else the configured default), not the
-  // origin's.
-  if (
-    plan.resume &&
-    !outcome.cancelled &&
-    !wallClockHit &&
-    outcome.activity === 0 &&
-    isUnresumable(outcome.result.error)
-  ) {
-    const reason = outcome.result.error!.replace(/\s+/g, ' ').slice(0, 200).trim();
-    const coldHarness = resolved.harness;
-    const coldModel = modelForHarness(coldHarness, resolved.model);
-    status(
-      'working',
-      `resume-fallback: ${reason} — starting cold on ${coldHarness}` +
-        (coldModel.dropped ? `; ${droppedModelNote(coldHarness, coldModel.dropped)}` : ''),
-    );
-    appendEvent(id, lane, {
-      at: new Date().toISOString(),
-      type: 'runner',
-      data: { resumeFallback: reason, harness: coldHarness },
-    });
-    mergeEvidence(id, lane, { resumeFallback: reason, sessionId: undefined, harness: coldHarness });
-    const note = coldNote(
-      {
-        why: `resume of session ${plan.resume.sessionId} failed`,
-        fromHarness: plan.harness,
-        ...(plan.resume.origin ? { origin: plan.resume.origin } : {}),
-      },
-      cwd,
-      repo.trunk,
-    );
-    outcome = await runOnce(coldHarness, promptWith([envNudge, note].filter(Boolean).join('\n\n')), undefined);
-  }
-
-  wallTimer?.stop();
-  const { cancelled, result } = outcome;
-
-  const terminal = ['done', 'failed'].includes(readStatusLog(id, lane).at(-1)?.verb ?? '');
-  let savedNote: string | undefined;
-  if (remoteEnabled && (wallClockHit || cancelled || !!result.error || !terminal)) {
-    savedNote = await remote.saveBeforeStop();
-    status('working', `work saved before stop: ${savedNote}`);
-  } else {
-    await remote.stop();
-  }
-
+  // Every exit path releases the worktree lock and completes the active
+  // record, including a run whose harness had to be killed.
+  let finalReport = false;
   try {
-    const gitEvidence = await deps.collectEvidence(repo, cwd);
-    console.log(`[runner] git evidence: ${JSON.stringify(gitEvidence)}`);
-    mergeEvidence(id, lane, { ...gitEvidence, sessionId: result.sessionId ?? readEvidence(id, lane).sessionId });
-    console.log(`[runner] evidence after merge: ${JSON.stringify(readEvidence(id, lane))}`);
-  } catch (err) {
-    // a dispatch that never touched git still completes — but say so
-    mergeEvidence(id, lane, {
-      note: `evidence collection failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
-    });
+    let outcome = await runOnce(plan.harness, promptWith(envNudge ?? planNudge), plan.resume?.sessionId);
+
+    // A resume the harness refused (not found, culled, foreign) before doing
+    // any work falls back to a cold session — it never fails the dispatch.
+    // With no session to preserve, the cold run goes on the harness this
+    // dispatch asked for (explicit, else the configured default), not the
+    // origin's.
+    if (
+      plan.resume &&
+      !outcome.cancelled &&
+      !wallClockHit &&
+      outcome.activity === 0 &&
+      isUnresumable(outcome.result.error)
+    ) {
+      const reason = outcome.result.error!.replace(/\s+/g, ' ').slice(0, 200).trim();
+      const coldHarness = resolved.harness;
+      const coldModel = modelForHarness(coldHarness, resolved.model);
+      status(
+        'working',
+        `resume-fallback: ${reason} — starting cold on ${coldHarness}` +
+          (coldModel.dropped ? `; ${droppedModelNote(coldHarness, coldModel.dropped)}` : ''),
+      );
+      appendEvent(id, lane, {
+        at: new Date().toISOString(),
+        type: 'runner',
+        data: { resumeFallback: reason, harness: coldHarness },
+      });
+      mergeEvidence(id, lane, { resumeFallback: reason, sessionId: undefined, harness: coldHarness });
+      const note = coldNote(
+        {
+          why: `resume of session ${plan.resume.sessionId} failed`,
+          fromHarness: plan.harness,
+          ...(plan.resume.origin ? { origin: plan.resume.origin } : {}),
+        },
+        cwd,
+        repo.trunk,
+      );
+      outcome = await runOnce(coldHarness, promptWith([envNudge, note].filter(Boolean).join('\n\n')), undefined);
+    }
+
+    wallTimer?.stop();
+    const { cancelled, result } = outcome;
+
+    // The worker's own `done` or `failed` is final: its work is not saved as
+    // an interrupted run, and nothing after it adds a verb.
+    const terminal = isFinished(id, lane);
+    finalReport = terminal;
+    let savedNote: string | undefined;
+    if (remoteEnabled && !terminal) {
+      savedNote = await remote.saveBeforeStop();
+      status('working', `work saved before stop: ${savedNote}`);
+    } else {
+      await remote.stop();
+    }
+
+    try {
+      const gitEvidence = await deps.collectEvidence(repo, cwd);
+      console.log(`[runner] git evidence: ${JSON.stringify(gitEvidence)}`);
+      mergeEvidence(id, lane, { ...gitEvidence, sessionId: result.sessionId ?? readEvidence(id, lane).sessionId });
+      console.log(`[runner] evidence after merge: ${JSON.stringify(readEvidence(id, lane))}`);
+    } catch (err) {
+      // a dispatch that never touched git still completes — but say so
+      mergeEvidence(id, lane, {
+        note: `evidence collection failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+      });
+    }
+
+    settle(id, lane, { cancelled, wallClockHit, error: result.error, budgetNote: savedNote });
+  } finally {
+    wallTimer?.stop();
+    // After a final report, nothing the harness started outlives the run.
+    if (finalReport) {
+      const reaped = await deps.reap().catch(() => 0);
+      if (reaped > 0) console.log(`[runner] ${reaped} leftover process(es) stopped`);
+    }
+    releaseWorktreeLock(cwd, id);
+    complete(id, lane);
   }
-
-  settle(id, lane, { cancelled, wallClockHit, error: result.error, budgetNote: savedNote });
-
-  releaseWorktreeLock(cwd, id);
-  complete(id, lane);
 }

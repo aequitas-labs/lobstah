@@ -150,7 +150,10 @@ before it waits. Tend, `status`, `ls`, and the glass then show
 `paused: waiting on review` with the link and the time waited. It is a
 state, not a question: nothing to answer, no attention, no pet. A paused
 headless worker is never counted as wedged and its wall clock stops, but it
-still holds a `maxConcurrent` slot while its process is alive. A paused
+still holds a `maxConcurrent` slot while its process is alive. A worker
+that reported `done` or `failed` holds no slot: its runner exits within
+`[limits].exitGraceSecs`, and a restart of the daemon does not wait for it
+(see [status verbs](vocabulary.md#status-verbs)). A paused
 trap is kept out of the ghost sweep until `--until` or
 `[soak].pausedTtlSecs` (24 hours). See [Waiting on](vocabulary.md#waiting-on).
 

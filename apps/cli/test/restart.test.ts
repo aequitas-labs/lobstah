@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { claimNext, enqueue, ensureLayout, executorPath } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, executorPath } from '@lobstah/core';
 import { restartCommand } from '../src/service.js';
 import { activeDispatchCounts, restartRefusal } from '../src/restart.js';
 import { usageFor } from '../src/usage.js';
@@ -96,6 +96,23 @@ describe('lobstah daemon|pick|glass restart', () => {
     expect(res.status).toBe(1);
     expect(res.stdout).toContain('1 headless dispatch(es)');
     expect(res.stdout).toContain('--force');
+  });
+
+  it('a finished dispatch whose runner is still exiting is not active: restart needs no --force', () => {
+    const id = '33333333-3333-4333-8333-333333333333';
+    enqueue({ id, repo: 'r', brief: 'b' });
+    claimNext('work');
+    fs.writeFileSync(
+      path.join(home, 'active', id, 'runner.json'),
+      JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), attempts: 1 }),
+    );
+    appendStatus(id, 'work', 'working');
+    expect(activeDispatchCounts()).toEqual({ headless: 1, traps: 0 });
+    appendStatus(id, 'work', 'done', 'finished');
+    const counts = activeDispatchCounts();
+    expect(counts).toEqual({ headless: 0, traps: 0 });
+    expect(restartRefusal({ kind: 'daemon', installed: true, active: counts.headless, traps: counts.traps, force: false })).toBeUndefined();
+    expect(lobstah('daemon', 'status').stdout).toContain('headless: 0');
   });
 
   it('counts trap catches separately from supervised runners', () => {

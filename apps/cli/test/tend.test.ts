@@ -32,6 +32,20 @@ describe('man tend — the fleet verdict', () => {
     expect(renderTend(report)).toContain('out of time, work saved');
   });
 
+  it('a done dispatch whose runner is still exiting shows done and is not active', () => {
+    heartbeat();
+    enqueue({ id: 'exiting', repo: 'r', brief: 'b' });
+    claimNext('work');
+    appendStatus('exiting', 'work', 'working');
+    appendStatus('exiting', 'work', 'done', 'finished');
+    const report = buildTendReport();
+    const dispatch = report.stories.flatMap((story) => story.dispatches).find((d) => d.id === 'exiting');
+    expect(dispatch?.state).toBe('done');
+    expect(report.counts.active).toBe(0);
+    expect(report.counts.headlessActive).toBe(0);
+    expect(report.verdict).toBe('idle');
+  });
+
   it('empty home with a fresh heartbeat is idle, not stalled', () => {
     heartbeat();
     expect(buildTendReport().verdict).toBe('idle');

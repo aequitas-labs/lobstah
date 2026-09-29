@@ -23,6 +23,25 @@ anything else. The status log is append-only; the last entry wins.
 `done` and `failed` are the **terminal verbs** (`TERMINAL_VERBS`): once
 logged, process state stops mattering and the daemon finalizes.
 
+A terminal verb from the worker is final. No later time limit, harness
+error, kill, cancel, or daemon restart adds a verb after it. From the
+moment the worker reports it:
+
+- the wall clock stops for that dispatch;
+- the dispatch holds no headless slot and does not count toward
+  `maxConcurrent`;
+- `lobstah daemon status` and `lobstah daemon restart` do not count it as
+  active, so a restart needs no `--force`;
+- `man tend`, the glass, and `lobstah doctor` show it as done.
+
+At the end of that turn the runner ends the session and waits
+`[limits].exitGraceSecs` (30 seconds) for the harness to exit. Then it
+stops the harness and the processes it started, releases the worktree lock,
+and moves the dispatch to `done/`. A cancel that arrives after the report
+stops the harness at once and leaves the verb as reported. The daemon stops
+a runner that is still alive `exitGraceSecs` plus `wedgeThresholdSecs` after
+the report; it does not restart the dispatch.
+
 Source of truth: `VERBS` in `packages/core/src/types.ts`.
 
 ## Waiting on
@@ -133,7 +152,7 @@ daemon — it never reaches a tracker.
 | --- | --- | --- |
 | `unclaimed` | Descriptor present, no runner yet. | Spawn a runner. |
 | `busy` | Runner alive, activity within the wedge threshold. | Nothing. |
-| `terminal` | Terminal verb logged. | Finalize once the process is gone. |
+| `terminal` | Terminal verb logged. | Finalize once the process is gone. A runner still alive `exitGraceSecs` + `wedgeThresholdSecs` after the report: stop its group (SIGTERM, then SIGKILL past twice that). Never restart. |
 | `dead` | Pid verified gone (pid + process-start-time, so pid reuse can't lie). | Respawn with session resume, bounded by `maxRestartAttempts`; then `failed`. |
 | `wedged` | Alive but no activity past `wedgeThresholdSecs`. Never a worker whose last report is `paused` with `--waiting-on` (that is `busy`). | SIGKILL the group, fork the session with a nudge, same bound. |
 | `unknown` | Contradictory or missing evidence. | Touch nothing; log it. |
@@ -141,7 +160,9 @@ daemon — it never reaches a tracker.
 Dead and wedged get opposite treatment on purpose: a dead process is safe to
 respawn; a wedged one must be killed first or two writers share a worktree. A
 pending cancel preempts all of this — a cancelled dispatch finalizes as
-`failed` ("cancelled by request") and never re-enters the ladder.
+`failed` ("cancelled by request") and never re-enters the ladder. A cancel
+of a dispatch whose worker already reported `done` or `failed` stops the
+runner and keeps the reported verb.
 
 Source of truth: `Classification` in `packages/supervisor/src/liveness.ts`.
 
