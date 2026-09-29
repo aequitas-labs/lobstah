@@ -702,7 +702,7 @@ with [Preact](https://preactjs.com) and [htm](https://github.com/developit/htm)
 
 Components are pure functions of the store. A new snapshot re-renders the
 page and Preact's reconciliation changes only the DOM whose data changed:
-rows, cards, and lobs are keyed, so an unchanged row keeps its node, an open
+rows, cards, stack groups, and lobs are keyed, so an unchanged row keeps its node, an open
 modal keeps its nodes across ticks, and scroll positions stay where the
 reader left them — no per-section hashing or manual node preservation. Only
 the active tab's section renders.

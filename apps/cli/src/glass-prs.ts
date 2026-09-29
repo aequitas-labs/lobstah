@@ -1,4 +1,4 @@
-import { parsePrRef, prBadge, prSortAt } from '@lobstah/core';
+import { parsePrRef, prBadge, prNewestFirst } from '@lobstah/core';
 import type { GlassPr, GlassPrWatch, GlassStack, PrEvidence, PrRecord } from '@lobstah/core';
 
 /**
@@ -62,7 +62,8 @@ export function deriveGlassPrs(
   const rows: GlassPr[] = [];
   for (const [url, sources] of grouped) {
     const record = recordByUrl.get(url);
-    const latest = [...sources].filter((d) => d.pr).sort((a, b) => prSortAt(b.pr!).localeCompare(prSortAt(a.pr!)))[0];
+    // The freshest observation of this one PR supplies its data.
+    const latest = [...sources].filter((d) => d.pr).sort((a, b) => b.pr!.observedAt.localeCompare(a.pr!.observedAt) || a.id.localeCompare(b.id))[0];
     // Records first; evidence only for a PR with no record yet.
     const pr: PrEvidence | undefined = record ?? latest?.pr;
     const ref = parsePrRef(url);
@@ -80,6 +81,7 @@ export function deriveGlassPrs(
       state: pr.state, draft: pr.draft, checks: pr.checks, review: pr.review,
       reviewDecision: pr.reviewDecision, mergeStateStatus: pr.mergeStateStatus,
       baseRefName: pr.baseRefName, headRefName: pr.headRefName, observedAt: pr.observedAt,
+      ...(record?.firstSeenAt ? { firstSeenAt: record.firstSeenAt } : {}),
       updatedAt: pr.updatedAt, mergedAt: pr.mergedAt, closedAt: pr.closedAt,
       badge: prBadge(pr),
       stackId: ref.key, floor: pr.baseRefName ?? '?', position: 0, nextMergeable: false,
@@ -89,11 +91,16 @@ export function deriveGlassPrs(
     });
   }
 
+  // One order for every list: first seen, newest first (core prs.ts). A
+  // refresh never changes it.
+  const newestFirst = prNewestFirst(rows);
   // A parent must be in the same forge repo. Duplicate head branch names are
-  // resolved by the newest observation; malformed cycles become independent floors.
+  // resolved by that order: the PR first seen last wins. Malformed cycles
+  // become independent floors.
   const byHead = new Map<string, GlassPr>();
-  for (const row of [...rows].sort((a, b) => prSortAt(a).localeCompare(prSortAt(b)))) {
-    if (row.headRefName) byHead.set(`${row.forgeRepo}:${row.headRefName}`, row);
+  for (const row of [...rows].sort(newestFirst)) {
+    const head = `${row.forgeRepo}:${row.headRefName}`;
+    if (row.headRefName && !byHead.has(head)) byHead.set(head, row);
   }
   const parent = new Map<string, GlassPr>();
   for (const row of rows) {
@@ -146,7 +153,9 @@ export function deriveGlassPrs(
       numbers: ordered.map((p) => p.number), open: open.length > 0,
       nextNumber: eligible?.number, behind: eligible ? open.filter((p) => p.position > eligible.position).length : 0 });
   }
-  const newest = (s: GlassStack) => groupedStacks.get(s.id)!.reduce((at, p) => at > prSortAt(p) ? at : prSortAt(p), '');
-  stacks.sort((a, b) => Number(b.open) - Number(a.open) || newest(b).localeCompare(newest(a)) || a.id.localeCompare(b.id));
+  // Open stacks first, then finished ones; within each group, the stack whose
+  // newest member sorts first leads.
+  const newest = (s: GlassStack) => [...groupedStacks.get(s.id)!].sort(newestFirst)[0]!;
+  stacks.sort((a, b) => Number(b.open) - Number(a.open) || newestFirst(newest(a), newest(b)) || a.id.localeCompare(b.id));
   return { prs: stacks.flatMap((s) => groupedStacks.get(s.id)!.sort((a, b) => a.position - b.position)), stacks };
 }

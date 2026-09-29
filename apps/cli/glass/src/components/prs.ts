@@ -1,10 +1,15 @@
+import { Fragment } from 'preact';
 import type { GlassPr, GlassStack } from '@lobstah/core';
 import { prBadgeClass } from '../../../src/glass-diff.js';
 import type { PrsInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import { Age, Table, opener, prChecks, prLink, prMerge, prReview, watchCell } from './common.js';
 
-/** The PRs tab: PRs grouped by stack, then the watches that are not PR watches. */
+/**
+ * The PRs tab: PRs grouped by stack, then the watches that are not PR
+ * watches. Every stack group and PR row is keyed, so a poll patches rows in
+ * place and never re-creates the list.
+ */
 
 export function prGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): Array<{ s: GlassStack; prs: GlassPr[] }> {
   const byStack = new Map<string, GlassPr[]>();
@@ -48,10 +53,10 @@ function prCards(inp: PrsInputs) {
   const card = (p: GlassPr) =>
     html`<div key=${p.key} class="card" onClick=${opener('pr', p.key)}><div class="top"><b>#${p.number} ${p.title || ''}</b><span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span></div><div class="meta">${p.repo} · ${stateText(p)} · ${prMerge(p)}</div><div class="foot"><span>${prChecks(p)}</span><span>${watchCell(p.watch)}</span>${p.gate && html`<span>gate ${p.gate}</span>`}</div></div>`;
   const body = groups.length
-    ? groups.map(({ s, prs }) => [
-        html`<h2>${chainText(s)} · floor ${s.floor}${s.open ? '' : ' · history'}</h2>`,
-        html`<div class="cards">${prs.map(card)}</div>`,
-      ])
+    ? groups.map(
+        ({ s, prs }) =>
+          html`<${Fragment} key=${'stack:' + s.id}><h2>${chainText(s)} · floor ${s.floor}${s.open ? '' : ' · history'}</h2><div class="cards">${prs.map(card)}</div><//>`,
+      )
     : html`<div class="empty">no PR evidence</div>`;
   return [body, otherWatches(inp)];
 }
