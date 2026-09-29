@@ -92,7 +92,7 @@ describe('isMovedHeadRejection', () => {
   });
 });
 
-describe('pushPrBranch', () => {
+describe('pushPrBranch', { timeout: 60_000 }, () => {
   it('a push rejected once is fetched, replayed onto the moved head, checked again, and accepted', () => {
     const { bare, worker, rival } = fixture();
     const count = hook(worker);

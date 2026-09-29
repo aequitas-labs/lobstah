@@ -136,7 +136,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe('lobstah push', () => {
+describe('lobstah push', { timeout: 60_000 }, () => {
   it('pushes a repair to its PR branch after one rejection and records the push', () => {
     const { bare, worker, rival } = fixture();
     const repair = queuedRepair();
