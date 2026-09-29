@@ -149,13 +149,49 @@ review, a deploy) reports `paused "<note>" --waiting-on review --link <url>`
 before it waits. Tend, `status`, `ls`, and the glass then show
 `paused: waiting on review` with the link and the time waited. It is a
 state, not a question: nothing to answer, no attention, no pet. A paused
-headless worker is never counted as wedged and its wall clock stops, but it
-still holds a `maxConcurrent` slot while its process is alive. A worker
-that reported `done` or `failed` holds no slot: its runner exits within
-`[limits].exitGraceSecs`, and a restart of the daemon does not wait for it
-(see [status verbs](vocabulary.md#status-verbs)). A paused
-trap is kept out of the ghost sweep until `--until` or
-`[soak].pausedTtlSecs` (24 hours). See [Waiting on](vocabulary.md#waiting-on).
+headless worker is never counted as wedged and its wall clock stops.
+
+A paused headless dispatch is **parked**. When the worker's turn ends on
+`paused`, the runner ends the session, stops what the harness started,
+and exits. The dispatch stays active and keeps its worktree lock, but it
+holds no `maxConcurrent` slot and runs no process. It wakes into the same
+session when an operator message reaches its inbox (`lobstah send <id>`)
+or when its `--until` time passes, as soon as a slot is free; a waking
+dispatch takes the slot before queued work. The first prompt of the woken
+session says why it woke and carries the messages. A parked dispatch
+counts in the status output, without a slot:
+
+```
+$ lobstah man tend
+active: headless: 1 of 2; traps: 0; parked: 1 (no slot)
+parked (no slot)[1]{id,waitingOn,for,link,note}:
+  6a1f0c2e,review,80m,https://github.com/o/r/pull/7,waiting for approval
+$ lobstah daemon status
+slots: 1 of 2 work in use, 1 free
+parked: 1
+parkedOn: 6a1f0c2e waiting on review for 80m https://github.com/o/r/pull/7
+```
+
+`lobstah doctor`'s `daemon` row ends in `parked: 1, no slot (…)`, and the
+glass header shows `parked: 1 (no slot)`. A worker that reported `done` or
+`failed` holds no slot: its runner exits within `[limits].exitGraceSecs`,
+and a restart of the daemon does not wait for it (see [status
+verbs](vocabulary.md#status-verbs)). A parked dispatch has no runner, so a
+restart does not wait for it either. A paused trap is kept out of the ghost
+sweep until `--until` or `[soak].pausedTtlSecs` (24 hours). See [Waiting
+on](vocabulary.md#waiting-on).
+
+**A PR's end finishes the waits on it.** When the PR a dispatch waits on
+with `paused --waiting-on pr` or `--waiting-on review` merges, the daemon
+finishes that dispatch `done` with the note `the PR merged: <url>`. When
+the PR closes without merge, it finishes it `failed` with `the PR closed
+without merge: <url>`. The PR waited on is the `--link` when it names a
+GitHub PR, else the dispatch's own PR, else its chain's PR. Every paused
+dispatch waiting on that PR is finished, in the whole chain. The daemon
+does this after it observes PR watches and before its cull pass, so
+`[limits].releaseOnMerge` releases the chain's worktrees in the same pass.
+`report paused --waiting-on pr|review` registers the watch of the
+dispatch's own PR when it has none, so the merge is observed.
 
 ### PR state after done
 
@@ -182,6 +218,8 @@ Which commands register a watch. Only these write points register one:
 
 - `lobstah report <id> done --pr <url>` registers the watch for the PR the
   worker just opened.
+- `lobstah report <id> paused --waiting-on pr|review` registers the watch
+  for the dispatch's own PR. A `--link` to another PR registers nothing.
 - `lobstah watch add <key>` registers the watch you name.
 - `lobstah watch backfill --apply` registers watches for PRs in old dispatch
   history. Without `--apply` it only lists them. Nothing runs it for you.
@@ -210,6 +248,19 @@ and requested review changes. It follows up the newest dispatch in the PR's
 chain. A conflict brief names the PR's base branch, including a stacked
 base. A check brief names each failed check and its details URL. The watch
 records each attempt and stops at `[watch].maxRepairsPerPr` per head SHA.
+Each failing check gets at most one repair round per PR and head SHA; the
+PR record's `repair.checks` lists the checks that had their round. The
+same rule holds for CI-fix continuations from `lobstah pick`.
+
+**Human gates.** A check that fails until a person approves the change is
+a human gate. It gets no repair round and no CI-fix continuation on that
+PR. Two sources name gates: `[repos.<key>].humanGateChecks` in the config,
+and a worker's `lobstah report <id> <verb> --human-gate "<check>"` (once
+per check). The report records the gate in the worker's evidence
+(`humanGates`) and on the PR record (`humanGates`). A check brief lists
+the failing gates and tells the worker to name a gate it finds. A PR whose
+only failing checks are human gates shows `repair.status: waiting` with
+`heldBy: human-gate`.
 It does not repair a PR with a person's newer commits or uncertain commit
 ownership, a terminal PR, or a PR whose chain already has queued or active
 work. `[watch].autoRepair`, `conflicts`, and `checks` control this behavior.
@@ -235,8 +286,9 @@ work. `[watch].autoRepair`, `conflicts`, and `checks` control this behavior.
   ends. `lobstah watch release <key>` ends any hold.
 
 A waiting repair is recorded on the PR record as `repair.status: waiting`,
-with `heldBy` (`wt:<trap>`, `dispatch:<id8>`, `helm`, `hold`, `settle`, or
-`checks`) and `reason`. A wait is not an attempt: it does not count against
+with `heldBy` (`wt:<trap>`, `dispatch:<id8>`, `helm`, `hold`, `settle`,
+`checks`, `human-gate`, or `repaired`) and `reason`. `repaired` means each
+failing check already had its round at this head; a new commit ends it. A wait is not an attempt: it does not count against
 `[watch].maxRepairsPerPr`. It raises no attention item. `man tend` lists it
 in the `repairs waiting` table, the PR badge ends in `repair waits: <heldBy>`,
 the glass PR modal shows the reason, and `lobstah doctor` lists it. When the

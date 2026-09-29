@@ -195,7 +195,7 @@ export function reconcileOne(
     return;
   }
 
-  const cls = classify({
+  const seen = classify({
     hasRunner: st.runner !== undefined,
     alive,
     lastVerb,
@@ -206,6 +206,9 @@ export function reconcileOne(
     now: Date.now(),
     wedgeThresholdMs: cfg.limits.wedgeThresholdSecs * 1000,
   });
+  // A runner woken from a pause that died before its first report is dead,
+  // not parked: it restarts like any dead runner.
+  const cls = seen === 'parked' && !isParked(st.id, st.lane) ? 'dead' : seen;
 
   switch (cls) {
     case 'unclaimed':

@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   acknowledge,
+  isParked,
   isVerb,
   waitingFields,
   waitingText,
@@ -572,6 +573,8 @@ function liveChainMember(member: ChainMember): boolean {
     const reg = readTrap(claim.by.slice('wt:'.length));
     return reg?.claimed === member.id && Date.now() - (Date.parse(reg.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000;
   }
+  // Parked on `paused`: no runner, but a message wakes it into its session.
+  if (isParked(member.id, member.lane)) return true;
   try {
     const runner = JSON.parse(fs.readFileSync(path.join(dir, 'runner.json'), 'utf8')) as { pid: number; processStartTime?: string };
     return pidAlive(runner.pid, runner.processStartTime);

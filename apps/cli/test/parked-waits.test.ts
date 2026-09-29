@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   activeIds,
   appendStatus,
@@ -18,6 +19,7 @@ import {
   requestCancel,
   sendMessage,
   slotUsage,
+  unhandled,
 } from '@lobstah/core';
 import type { Lane, WaitingOn } from '@lobstah/core';
 import { tick } from '@lobstah/supervisor';
@@ -238,6 +240,29 @@ describe('a parked dispatch holds no slot', () => {
     // The woken runner holds the slot before it reports: the queued work waits.
     expect(slotUsage('work')).toMatchObject({ headless: 1, parked: 0 });
     expect(daemonTick().spawned).toEqual([]);
+  });
+
+  it('lobstah send delivers to a parked dispatch\'s inbox, not a new follow-up', () => {
+    parked('p1', { waitingOn: 'review' });
+    const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+    const env: NodeJS.ProcessEnv = { ...process.env, LOBSTAH_HOME: home };
+    delete env.CLAUDE_CODE_SESSION_ID;
+    const res = spawnSync(process.execPath, [cli, 'send', 'p1', 'approved'], { encoding: 'utf8', env, timeout: 30_000 });
+    expect(res.stdout).toContain('delivered: inbox of p1');
+    expect(unhandled('p1', 'work')).toHaveLength(1);
+    expect(fs.readdirSync(laneDirs('work').queue).filter((f) => f.endsWith('.json'))).toEqual([]);
+  });
+
+  it('a woken runner that dies before it reports restarts with its session', () => {
+    parked('p1', { waitingOn: 'review' });
+    sendMessage('p1', 'work', 'go');
+    expect(daemonTick().spawned.map((s) => s.id)).toEqual(['p1']);
+    // The woken runner died before its first report.
+    fs.writeFileSync(
+      path.join(laneDirs('work').active, 'p1', 'runner.json'),
+      JSON.stringify({ pid: deadPid(), startedAt: new Date().toISOString(), attempts: 1 }),
+    );
+    expect(daemonTick().spawned).toEqual([expect.objectContaining({ id: 'p1', attempts: 2, resume: 'session-p1' })]);
   });
 
   it('waits for a slot to wake', () => {
