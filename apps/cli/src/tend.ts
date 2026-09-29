@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   activeIds,
+  questionHeld,
   waitingText,
   waitingView,
   activityLine,
@@ -658,10 +659,13 @@ export function buildTendReport(now = Date.now()): TendReport {
       // before the worker reads it and reports; the dispatch row carries
       // the marker instead.
       if (answeredAt(id, lane, last.at) !== undefined) continue;
+      const key = `${lane}:${id}`;
+      const stateHash = statusStateHash(last.verb, last.at);
+      const repo = repoOf(id, lane);
       attention.push({
         kind: 'question',
-        key: `${lane}:${id}`,
-        stateHash: statusStateHash(last.verb, last.at),
+        key,
+        stateHash,
         id,
         lane,
         verb: last.verb,
@@ -669,6 +673,9 @@ export function buildTendReport(now = Date.now()): TendReport {
         at: last.at,
         standingSince: last.at,
         note: last.note,
+        ...(repo ? { repo } : {}),
+        // On the helm's turn: listed here, kept from the pet and the glass.
+        ...(questionHeld({ key, stateHash, repo }, now) ? { held: true } : {}),
       });
     }
   }
@@ -933,9 +940,10 @@ export function renderTend(r: TendReport): string {
           id: a.id,
           verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : a.kind,
           waitingMins: Math.round(a.ageSecs / 60),
+          held: a.held ? 'yes' : '',
           note: a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? ''),
         })),
-        ['id', 'verb', 'waitingMins', 'note'],
+        ['id', 'verb', 'waitingMins', 'held', 'note'],
       ),
     );
   }

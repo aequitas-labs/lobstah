@@ -182,7 +182,7 @@ hides the item from the desktop pet and the glass lobs until its state
 changes — never from man tend --json, man wait, the park, or reminders.
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
 watch:<key>, report:<lane>:<uuid> or report:helm:<grounds>:<rid> (report). An unknown key exits 2. --json prints { "attention": [...] },
-the same items and fields as man tend --json (the desktop pet reads it).`,
+the same items and fields as man tend --json (the desktop pet reads it), less questions held on the helm's turn (the held column).`,
   cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
 without --apply (default 14 days): it measures each target (one du per
 worktree). --apply measures nothing; it deletes and prints the count and the

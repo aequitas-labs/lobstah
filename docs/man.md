@@ -296,6 +296,15 @@ See the [attention contract](vocabulary.md#attention-contract). A PR is
 something to look at, not a stall: it never flips the verdict to
 `needs-attention` and stays out of the digest.
 
+A question is held while a helm is signed on for its grounds and has not
+ended a turn since the question was filed. A held question is in `man tend`,
+`man wait`, the park, and reminders, and `lobstah attention` and `man tend`
+mark it `held`. It is not in `attention --json` (the pet), the glass, or
+notifyCommand. The question walks when the helm ends a turn (`man haul`)
+without answering it; the release is recorded in `releases/<key>.json`. With
+no helm signed on, or a helm relieved or stale past `[helm].ttlSecs`, a
+question walks at once.
+
 ### The spyglass
 
 The lobstah man skill brings up the glass when it takes the helm.
