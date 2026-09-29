@@ -277,9 +277,11 @@ normalized to that key) installs the shipped check, `lobstah watch
 check-pr`: one read-only `gh pr view` per cycle, diffed against the
 previous observation that the cursor carries, plus — while the PR is open —
 one read-only `gh api graphql` query for `reviewThreads { isResolved }`,
-which `gh pr view --json` cannot return (no bodies are requested). `report <id> done --pr
-<url>` registers the same watch owned by `dispatch:<id>` (idempotent;
-`--no-watch` opts out). `lobstah watch backfill --apply` registers watches
+which `gh pr view --json` cannot return (no bodies are requested). `report <id> <verb> --pr
+<url>` (any verb but `failed`) registers the same watch owned by
+`dispatch:<id>` (idempotent; `--no-watch` opts out). A trap's beat
+(`lobstah soak beat`) registers it the same way when it finds a PR on the
+trap's branch. `lobstah watch backfill --apply` registers watches
 for PRs in old dispatch history; it is a dry run without `--apply`. No other
 path registers a PR watch: read commands (`catch`, `man tend`, `status`,
 `ls`, `prs`, the glass) never do. **Owner:** `packages/core/src/pr.ts`

@@ -65,7 +65,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 For ume, push with its non-blocking form unless the await runs as a tracked
 background task.
 - `done` means the brief is fulfilled — report the catch. Never merge.
-- `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
+- `report --pr` (any verb but failed) and a trap's first push register a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; lobstah repairs conflicts and failed checks on its own PRs, and attention means it gave up or cannot act.
 - A repair waits while a live worker holds the PR's branch or a branch below it in the stack, until the PR is unchanged for `[watch].repairSettleSecs`, and while the PR's watch is held. A wait raises no attention; `man tend` lists it under `repairs waiting`. `lobstah cancel` on a repair holds its PR until `lobstah watch release <key>`. A brief whose worker will push to other PRs can tell it to run `lobstah watch hold <key> --for <its dispatch id>` first.
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.

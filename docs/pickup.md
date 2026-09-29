@@ -120,7 +120,7 @@ someone other than the configured identity, never a lobstah marker comment.
 
 The PR maps back to a dispatch two ways: a `lobstah/<uuid>` branch names it
 directly, and any other branch — a soaked session's PR — resolves through
-the PR URL its worker reported as evidence (`report done --pr <url>`). A PR
+the PR URL in its worker's evidence (`report --pr <url>`, or a trap's beat). A PR
 that maps to neither is not lobstah's to answer.
 
 Each feedback **round** is keyed by the newest feedback event, so a new
