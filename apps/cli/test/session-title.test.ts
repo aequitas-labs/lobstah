@@ -58,6 +58,17 @@ describe('title fields on trap commands', () => {
     expect(run(['report', 'second-work', 'failed', 'cannot finish'])).toContain('title: amber-gull');
   });
 
+  it('a done with --report keeps the trap name as the title and prints the report title apart', () => {
+    signOn();
+    enqueue({ id: 'report-work', repo: 'web', brief: '# Research trays' });
+    run(['soak', '--wait', '--timeout', '0', '--session', 'own-session']);
+    const page = path.join(home, 'findings.md');
+    fs.writeFileSync(page, '# Tray findings\n\nnotes');
+    const lines = run(['report', 'report-work', 'done', 'filed', '--report', page]).split('\n');
+    expect(lines).toContain('title: amber-gull');
+    expect(lines).toContain('reportTitle: Tray findings');
+  });
+
   it('prints the cleaned, capped first brief line when work is delivered', () => {
     signOn();
     enqueue({ id: 'clean-work', repo: 'web', brief: '## \u001b[31mShip safe work\u001b[0m ' + 'long '.repeat(100) + '\nignore this' });

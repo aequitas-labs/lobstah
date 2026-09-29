@@ -14,7 +14,7 @@ keys of that section.
 |---|---|---|
 | `notifyCommand` | — | Exec'd by the daemon on wake-worthy status transitions with `LOBSTAH_ID`, `LOBSTAH_LANE`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_AT` in the environment. Fire-and-forget; point it at ntfy, a Slack helper, anything. |
 | `notifyVerbs` | `["needs-decision", "blocked", "done", "failed"]` | Which verbs fire `notifyCommand`. |
-| `attentionKinds` | `["question", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` | Which kinds `man tend`, the glass, and the desktop pet show. `pr:draft` and `landed` are valid opt-in kinds. An explicit list is used unchanged. Unknown kinds are errors. See the [attention contract](vocabulary.md#attention-contract). |
+| `attentionKinds` | `["question", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` | Which kinds `man tend`, the glass, and the desktop pet show. `pr:draft`, `landed`, and `report` are valid opt-in kinds. An explicit list is used unchanged. Unknown kinds are errors. See the [attention contract](vocabulary.md#attention-contract). |
 | `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
 
 ## `[repos.<key>]` — workspace definitions
