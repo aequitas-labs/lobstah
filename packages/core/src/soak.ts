@@ -14,6 +14,7 @@ import { TERMINAL_VERBS } from './types.js';
 import { attachmentBlock } from './attachments.js';
 import { toolSummary, toolTarget, writeActivity } from './activity.js';
 import { knownTrapNames, reserveTrapName, trapIdForName, trapNameForId } from './trap-names.js';
+import { laneOf } from './worktrees.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -343,8 +344,9 @@ export function addressedTrap(d: Descriptor): string | undefined {
 /** Whether the registration's claimed catch is still active and non-terminal. */
 export function hasOpenCatch(reg: TrapRegistration): boolean {
   if (!reg.claimed) return false;
-  if (!fs.existsSync(path.join(laneDirs('work').active, reg.claimed))) return false;
-  const last = readStatusLog(reg.claimed, 'work').at(-1)?.verb;
+  const lane = laneOf(reg.claimed);
+  if (!lane || !fs.existsSync(path.join(laneDirs(lane).active, reg.claimed))) return false;
+  const last = readStatusLog(reg.claimed, lane).at(-1)?.verb;
   return last === undefined || !TERMINAL_VERBS.includes(last);
 }
 
@@ -356,13 +358,14 @@ export function hasOpenCatch(reg: TrapRegistration): boolean {
 export function releaseCatch(reg: TrapRegistration): { requeued?: string; finalized?: string } {
   if (!hasOpenCatch(reg)) return {};
   const id = reg.claimed!;
-  fs.rmSync(path.join(laneDirs('work').active, id, 'claim.json'), { force: true });
-  if (cancelRequested(id, 'work')) {
-    appendStatus(id, 'work', 'failed', 'cancelled by request; claimant gone, work preserved');
-    complete(id, 'work');
+  const lane = laneOf(id)!;
+  fs.rmSync(path.join(laneDirs(lane).active, id, 'claim.json'), { force: true });
+  if (cancelRequested(id, lane)) {
+    appendStatus(id, lane, 'failed', 'cancelled by request; claimant gone, work preserved');
+    complete(id, lane);
     return { finalized: id };
   }
-  requeue(id, 'work');
+  requeue(id, lane);
   return { requeued: id };
 }
 
@@ -372,20 +375,22 @@ export function releaseCatch(reg: TrapRegistration): { requeued?: string; finali
  * unaddressed bait needs a repo match; a trap already working a catch takes
  * nothing more. Claiming stamps the delivery receipt into evidence.
  */
-export function claimBait(reg: TrapRegistration): { id: string; descriptor: Descriptor } | null {
+export function claimBait(reg: TrapRegistration): { id: string; lane: Lane; descriptor: Descriptor } | null {
   if (hasOpenCatch(reg)) return null;
   const mine = `wt:${reg.trapId}`;
-  const takeable = (d: Descriptor): boolean => {
-    if (d.for === mine) return true;
-    if (d.for !== undefined) return false;
-    return reg.repo !== undefined && d.repo === reg.repo;
-  };
-  // Two passes so addressed bait wins even when it queued later.
-  for (const pass of [(d: Descriptor) => d.for === mine, takeable]) {
-    const id = claimNext('work', (d) => !pass(d));
+  const addressed = (d: Descriptor): boolean =>
+    d.for === mine && (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));
+  // Addressed chores and work beat general work. Expired system chores are
+  // left for the daemon, never delivered late to their former trap.
+  for (const [lane, pass] of [
+    ['chore', addressed],
+    ['work', addressed],
+    ['work', (d: Descriptor) => d.for === undefined && reg.repo !== undefined && d.repo === reg.repo],
+  ] as Array<[Lane, (d: Descriptor) => boolean]>) {
+    const id = claimNext(lane, (d) => !pass(d));
     if (!id) continue;
     const descriptor = JSON.parse(
-      fs.readFileSync(path.join(laneDirs('work').active, id, 'descriptor.json'), 'utf8'),
+      fs.readFileSync(path.join(laneDirs(lane).active, id, 'descriptor.json'), 'utf8'),
     ) as Descriptor;
     const claim: SessionClaim = {
       by: mine,
@@ -394,15 +399,15 @@ export function claimBait(reg: TrapRegistration): { id: string; descriptor: Desc
       worktree: reg.worktree,
       at: new Date().toISOString(),
     };
-    atomicWrite(claimPath(id, 'work'), JSON.stringify(claim, null, 2));
+    atomicWrite(claimPath(id, lane), JSON.stringify(claim, null, 2));
     // The claim is the first status entry: the dispatch is `working` from
     // now, not `unknown` until the trap's first report. It carries the claim
     // time, which is never later than the heartbeat below, so it cannot keep
     // a dead trap out of the ghost sweep past the TTL.
-    appendStatus(id, 'work', 'working', `claimed by ${mine}`, claim.at);
-    mergeEvidence(id, 'work', { sessionId: reg.sessionId, harness: reg.harness, deliveredTo: mine, deliveredAt: claim.at });
+    appendStatus(id, lane, 'working', `claimed by ${mine}`, claim.at);
+    mergeEvidence(id, lane, { sessionId: reg.sessionId, harness: reg.harness, deliveredTo: mine, deliveredAt: claim.at });
     heartbeatTrap(reg.trapId, { claimed: id, parked: true });
-    return { id, descriptor };
+    return { id, lane, descriptor };
   }
   return null;
 }
@@ -483,7 +488,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     }
     let pauseExpired = false;
     if (hasOpenCatch(reg)) {
-      const last = readStatusLog(reg.claimed!, 'work').at(-1);
+      const last = readStatusLog(reg.claimed!, laneOf(reg.claimed!) ?? 'work').at(-1);
       if (last && now - msOf(last.at) <= ttlMs) continue; // working, just not parked
       // A paused catch waits on something outside lobstah (a review, a
       // deploy): silence is expected until the pause expires.
@@ -627,13 +632,13 @@ export function beatTrap(input: BeatInput): BeatResult {
   // A push is recorded on every beat: the throttle never drops one.
   const command = (input.toolInput as { command?: unknown } | undefined)?.command;
   const pushes = typeof command === 'string' || Array.isArray(command) ? gitPushTargets(command as string | string[]) : undefined;
-  if (pushes && hasOpenCatch(reg)) recordPush(reg.claimed!, 'work', resolvePushTargets(pushes, input.cwd), new Date(now).toISOString());
+  if (pushes && hasOpenCatch(reg)) recordPush(reg.claimed!, laneOf(reg.claimed!) ?? 'work', resolvePushTargets(pushes, input.cwd), new Date(now).toISOString());
   const last = msOf(readBeat(trapId)?.at ?? '');
   if (now - last < (input.throttleMs ?? 30_000)) return { beat: false, reason: 'throttled' };
   const at = new Date(now).toISOString();
   atomicWrite(beatPath(trapId), JSON.stringify({ at, sessionId: reg.sessionId } satisfies TrapBeat));
   if (!hasOpenCatch(reg)) return { beat: true, trapId };
   const name = input.toolName || 'tool';
-  writeActivity(reg.claimed!, 'work', { at, kind: 'tool', summary: toolSummary(name, toolTarget(input.toolInput), reg.worktree) });
+  writeActivity(reg.claimed!, laneOf(reg.claimed!) ?? 'work', { at, kind: 'tool', summary: toolSummary(name, toolTarget(input.toolInput), reg.worktree) });
   return { beat: true, trapId, activityFor: reg.claimed };
 }

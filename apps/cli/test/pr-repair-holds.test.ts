@@ -123,9 +123,9 @@ function trap(trapId: string, name: string, worktree: string, claimed: string): 
 
 function queued(): Descriptor[] {
   return fs
-    .readdirSync(laneDirs('work').queue)
+    .readdirSync(laneDirs('chore').queue)
     .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs('work').queue, f), 'utf8')) as Descriptor);
+    .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs('chore').queue, f), 'utf8')) as Descriptor);
 }
 
 const later = T0 + 3_600_000;
@@ -170,7 +170,7 @@ describe('a live worker holds the branch', () => {
     };
     trap('t3', 'quiet-crab', repo('wt-other', 'https://github.com/other/web.git'), uuid('7'));
     expect(repair()).toBe(1);
-    appendStatus(readPr(key(1))!.repair!.dispatchId!, 'work', 'done', 'repaired');
+    appendStatus(readPr(key(1))!.repair!.dispatchId!, 'chore', 'done', 'repaired');
     upsertPr(observed(STACK[0]!, { observedAt: iso(T0) }), STACK[0]!.owner);
     trap('t4', 'slow-gull', repo('wt-same', 'git@github.com:acme/web.git'), uuid('8'));
     expect(repair()).toBe(0);
@@ -285,7 +285,7 @@ describe('holds on the watch', () => {
     expect(repair()).toBe(1);
     const first = readPr(key(1))!.repair!.dispatchId!;
     expect(holdCancelledRepair(first)).toEqual([key(1)]);
-    expect(cancelQueued(first, 'work')).toBe(true);
+    expect(cancelQueued(first, 'chore')).toBe(true);
     upsertPr(observed(STACK[0]!, { observedAt: iso(later) }), STACK[0]!.owner);
     expect(repair()).toBe(0);
     expect(readPr(key(1))?.repair).toMatchObject({ status: 'waiting', heldBy: 'helm', attempts: 1 });

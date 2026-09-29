@@ -122,9 +122,10 @@ export function pushRule(branch: string | undefined, id = '<dispatch id>'): stri
 export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?: string; checks?: readonly string[]; gates?: readonly string[] } = {}): string {
   const opts = typeof arg === 'string' ? { id: arg } : arg;
   const intro = `Repair ${pr.url} on its existing branch ${pr.headRefName ?? '(see PR)'} at ${pr.headSha}. Do not open a new PR.`;
+  const resolution = "For code already on main, take main's version. Keep only this PR's own changes. Never change behavior. If resolving a conflict would change code behavior, stop and report needs-decision.";
   const finish = `Run the relevant tests. ${pushRule(pr.headRefName, opts.id)} Report done with the same PR URL.`;
   if (kind === 'conflict')
-    return `${intro}\nFetch the PR's base branch ${pr.baseRefName ?? '(read from PR)'}. Bring the PR branch up to date with that base by this repo's convention. Resolve conflicts while keeping both sides' intent. ${finish}`;
+    return `${intro}\n${resolution} Fetch the PR's base branch ${pr.baseRefName ?? '(read from PR)'}. Bring the PR branch up to date with that base by this repo's convention. ${finish}`;
   if (kind === 'checks') {
     const failing = (pr.failingChecks ?? []).filter((c) => !opts.checks || opts.checks.includes(c.name));
     const checks = failing.map((c) => `- ${c.name}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`).join('\n');
@@ -133,10 +134,10 @@ export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?:
       ? `\nThese failing checks are human gates. They pass only when a person approves. Do not work on them: ${gated.join(', ')}.`
       : '';
     return (
-      `${intro}\nLatest failing checks:\n${checks || '- Read the failing check from GitHub'}${gates}\n` +
+      `${intro}\n${resolution}\nLatest failing checks:\n${checks || '- Read the failing check from GitHub'}${gates}\n` +
       `Read each check log. Fix a real failure. If it is a flake, rerun it at most once. ` +
       `If a check cannot pass until a person approves the change, it is a human gate: do not change code for it, and name it on your report with --human-gate "<check name>", once per check. ${finish}`
     );
   }
-  return `${intro}\nRead the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish}`;
+  return `${intro}\n${resolution} Read the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish}`;
 }

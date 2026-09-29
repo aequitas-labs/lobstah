@@ -43,7 +43,7 @@ import type { StartPlan } from './plan.js';
 /** Seams for tests: the harness, the git work around it, and process cleanup. */
 export interface RunnerDeps {
   loadAdapter: (name: string) => Adapter;
-  allocate: (repo: RepoConfig, id: string) => Promise<string>;
+  allocate: (repo: RepoConfig, id: string, fromRemoteBranch?: string) => Promise<string>;
   /** Whether a follow-up reuses its chain's worktree (takes the lock on reuse). */
   chooseWorktree: (input: ChooseInput) => Promise<WorktreeChoice>;
   /** Fetch trunk in a reused worktree; re-run setup if a lockfile changed. */
@@ -197,7 +197,9 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     });
     fs.writeFileSync(wtFile, JSON.stringify({ path: cwd, of: choice.owner }, null, 2));
   } else {
-    cwd = await deps.allocate(repo, id);
+    // A repair that cannot reuse its origin (notably a trap-owned checkout)
+    // starts in its own worktree at the PR head, never in the trap's worktree.
+    cwd = await deps.allocate(repo, id, descriptor.systemRepair ? descriptor.pr?.headRefName : undefined);
     acquireWorktreeLock(cwd, id, lane);
     fs.writeFileSync(wtFile, JSON.stringify({ path: cwd }, null, 2));
   }

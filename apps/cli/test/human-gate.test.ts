@@ -63,10 +63,10 @@ function owner(): void {
 }
 
 function queued(): Descriptor[] {
-  return fs
-    .readdirSync(laneDirs('work').queue)
+  return (['work', 'chore'] as const).flatMap((lane) => fs
+    .readdirSync(laneDirs(lane).queue)
     .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs('work').queue, f), 'utf8')) as Descriptor);
+    .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs(lane).queue, f), 'utf8')) as Descriptor));
 }
 
 /** Observe the PR `n` times and run the repairer after each observation. Returns the repairs started. */
@@ -82,8 +82,8 @@ function observeAndRepair(pr: PrEvidence, n: number): number {
 /** Finish the repair in flight, as its worker would. */
 function finishRepair(gates: string[] = []): string {
   const id = readPr(KEY)!.repair!.dispatchId!;
-  if (gates.length) recordReportedGates(id, 'work', gates, URL);
-  appendStatus(id, 'work', 'done', 'checked');
+  if (gates.length) recordReportedGates(id, 'chore', gates, URL);
+  appendStatus(id, 'chore', 'done', 'checked');
   return id;
 }
 
@@ -112,7 +112,7 @@ describe('human gates in the daemon repair path', () => {
   it('a human gate the worker records stops the next round', () => {
     expect(observeAndRepair(red([GATE]), 2)).toBe(1);
     const id = finishRepair([GATE]);
-    expect(readEvidence(id, 'work').humanGates).toEqual([GATE]);
+    expect(readEvidence(id, 'chore').humanGates).toEqual([GATE]);
     expect(readPr(KEY)?.humanGates).toEqual([GATE]);
     expect(observeAndRepair(red([GATE]), 3)).toBe(0);
     expect(readPr(KEY)?.repair).toMatchObject({ status: 'waiting', heldBy: 'human-gate' });

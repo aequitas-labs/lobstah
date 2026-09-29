@@ -502,12 +502,14 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     );
   }
   // Addressed bait is sticky — never the daemon's; orphans surface as helm
-  // notices instead of headless spawns. Unaddressed bait defers briefly to a
-  // trap that is parked right now. Work lane only — traps never take chores.
+  // notices instead of headless spawns. Unaddressed work defers briefly to a
+  // trap that is parked right now. Daemon repairs are the sole addressed
+  // exception: after their bounded wait, the chore may run headless.
   noticeOrphanedBait();
   const workSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
-
-  const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : undefined);
+  const choreSkip = (d: Descriptor) => d.for !== undefined &&
+    (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));
+  const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : choreSkip);
   for (const lane of ['chore', 'work'] as Lane[]) {
     for (const st of listActive(lane)) reconcileOne(st, cfg, log, hooks.spawnRunner);
   }
@@ -536,6 +538,15 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     while (inFlight < ceiling) {
       const id = claimNext(lane, skipFor(lane));
       if (!id) break;
+      if (lane === 'chore') {
+        const file = path.join(laneDirs(lane).active, id, 'descriptor.json');
+        const d = JSON.parse(fs.readFileSync(file, 'utf8')) as Descriptor;
+        if (d.for && d.systemRepair?.trapWaitUntil && Date.now() >= Date.parse(d.systemRepair.trapWaitUntil)) {
+          delete d.for;
+          d.systemRepair = {};
+          fs.writeFileSync(file, JSON.stringify(d, null, 2));
+        }
+      }
       log(`${id}: claimed (${lane})`);
       inFlight++;
       // next reconcile pass spawns it; spawn now to avoid a tick of latency

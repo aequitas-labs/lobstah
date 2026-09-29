@@ -63,7 +63,8 @@ import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
-import { liveRepairer, waitingRepairs } from './pr-repair.js';
+import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
+import type { RepairChore } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
@@ -515,6 +516,8 @@ export interface TendReport {
   parked?: Array<{ id: string; lane: Lane; trap: boolean; since: string; parkedSecs: number; note?: string; waiting?: WaitingView }>;
   /** PR repairs that are due but wait: who holds each and why. Not attention. */
   repairsWaiting: TendRepairWaiting[];
+  /** Queued or active daemon repairs in the chore lane. */
+  repairChores?: RepairChore[];
   /** A free-space hold: the daemon leaves unaddressed queued work in the queue. */
   hold?: DiskHold & { reason: string };
 }
@@ -911,6 +914,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       reason: pr.repair!.reason ?? '',
       ...(pr.repair!.until ? { until: pr.repair!.until } : {}),
     })),
+    repairChores: repairChores(records),
     ...(hold ? { hold: { ...hold, reason: holdReason(hold) } } : {}),
   };
 }
@@ -1006,6 +1010,13 @@ export function renderTend(r: TendReport): string {
         ['pr', 'kind', 'heldBy', 'reason', 'until'],
       ),
     );
+  }
+  if (r.repairChores?.length) {
+    lines.push('');
+    lines.push(toonTable('repair chores', r.repairChores.map((c) => ({
+      id: c.id.slice(0, 8), pr: c.pr, lane: c.lane, state: c.state,
+      worker: c.worker, waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
+    })), ['id', 'pr', 'lane', 'state', 'worker', 'waitingForTrap']));
   }
   if (r.watches.length > 0) {
     lines.push('');

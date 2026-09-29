@@ -299,7 +299,7 @@ describe('a parked dispatch holds no slot', () => {
     expect(text).toContain('headless: 0 of 1; traps: 0; parked: 1 (no slot)');
     expect(text).toContain('parked (no slot)');
     const status = daemonStatus(true);
-    expect(status).toMatchObject({ headless: 0, parked: 1, slots: '0 of 1 work in use, 1 free' });
+    expect(status).toMatchObject({ headless: 0, parked: 1, slots: '0 of 1 work in use, 0 of 1 chore in use' });
     expect(String(status.parkedOn)).toMatch(/^p1 waiting on review for .+ https:\/\/github\.com\/o\/r\/pull\/7$/);
     const daemonRow = (await runDoctor()).find((r) => r.check === 'daemon');
     expect(daemonRow?.detail).toContain('headless: 0 of 1 work');

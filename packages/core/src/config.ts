@@ -135,6 +135,8 @@ export interface WatchConfig {
    * must stay unchanged before a repair is queued.
    */
   repairSettleSecs: number;
+  /** Maximum time a daemon repair waits for its owning trap. */
+  repairTrapWaitSecs: number;
 }
 
 export interface GlassConfig {
@@ -203,7 +205,7 @@ export const DEFAULT_HELM: HelmConfig = {
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
-export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, repairSettleSecs: 600 };
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, repairSettleSecs: 600, repairTrapWaitSecs: 600 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,

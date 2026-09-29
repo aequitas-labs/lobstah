@@ -5,6 +5,7 @@ import {
   chainPr,
   currentBranchAt,
   hasOpenCatch,
+  laneOf,
   laneDirs,
   listTraps,
   loadConfig,
@@ -65,9 +66,9 @@ export function liveWorkers(): LiveWorker[] {
     out.push({
       label: `wt:${reg.name ?? reg.trapId}`,
       dispatchId: reg.claimed!,
-      lane: 'work',
+      lane: laneOf(reg.claimed!) ?? 'work',
       worktree: reg.worktree,
-      repo: storedDescriptor(reg.claimed!, 'work')?.repo ?? reg.repo,
+      repo: storedDescriptor(reg.claimed!, laneOf(reg.claimed!) ?? 'work')?.repo ?? reg.repo,
     });
   }
   for (const lane of ['work', 'chore'] as Lane[]) {

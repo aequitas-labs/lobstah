@@ -3,6 +3,7 @@ import { parsePrRef } from './pr.js';
 import { readPrs } from './prs.js';
 import { storedDescriptor } from './queue.js';
 import type { Lane } from './types.js';
+import { laneOf } from './worktrees.js';
 
 export interface ChainPr {
   url: string;
@@ -17,11 +18,11 @@ export function chainPr(id: string, lane: Lane): ChainPr | undefined {
   while (at && !seen.has(at)) {
     ancestry.push(at);
     seen.add(at);
-    at = storedDescriptor(at, lane)?.followUp;
+    at = storedDescriptor(at, laneOf(at) ?? lane)?.followUp;
   }
   const records = readPrs();
   for (const member of ancestry.reverse()) {
-    const evidence = readEvidence(member, lane);
+    const evidence = readEvidence(member, laneOf(member) ?? lane);
     const url = evidence.prUrl ?? evidence.pr?.url;
     const ref = url && parsePrRef(url);
     if (ref) {

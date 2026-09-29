@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { addWatch, appendStatus, appendWatchEvents, enqueue, ensureLayout, laneDirs, mergeEvidence, readEvidence, readPr, upsertPr } from '@lobstah/core';
+import { addWatch, appendStatus, appendWatchEvents, claimBait, daemonSkip, enqueue, ensureLayout, laneDirs, listTraps, mergeEvidence, readEvidence, readPr, readTrap, slotUsage, upsertPr } from '@lobstah/core';
 import type { Descriptor, PrEvidence, PrRecord } from '@lobstah/core';
 import { branchOwnership, repairBrief } from '@lobstah/core';
 import { tick } from '@lobstah/supervisor';
@@ -46,10 +46,10 @@ function owner(): void {
 }
 
 function queued(): Descriptor[] {
-  return fs
-    .readdirSync(laneDirs('work').queue)
+  return (['work', 'chore'] as const).flatMap((lane) => fs
+    .readdirSync(laneDirs(lane).queue)
     .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs('work').queue, f), 'utf8')) as Descriptor);
+    .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs(lane).queue, f), 'utf8')) as Descriptor));
 }
 
 beforeEach(() => {
@@ -82,7 +82,7 @@ describe('PR watch repairs', () => {
     daemonTick();
     const id = readPr(KEY)?.repair?.dispatchId;
     expect(id).toBeTruthy();
-    expect(fs.existsSync(path.join(laneDirs('work').active, id!, 'descriptor.json'))).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('chore').active, id!, 'descriptor.json'))).toBe(true);
     daemonTick();
     expect(readPr(KEY)?.repair?.dispatchId).toBe(id);
   });
@@ -180,6 +180,54 @@ describe('PR watch repairs', () => {
     upsertPr(pr(), OWNER);
     expect(deliverPrRepairs(() => {}, 3)).toBe(1);
     expect(queued()[0]?.for).toBe('wt:gone');
+    expect(queued()[0]?.systemRepair?.trapWaitUntil).toBeTruthy();
+    const caught = claimBait(readTrap('gone')!);
+    expect(caught).toMatchObject({ lane: 'chore', descriptor: { pr: { url: URL } } });
+    expect(readEvidence(caught!.id, 'chore').deliveredTo).toBe('wt:gone');
+  });
+
+  it('waits for a busy trap, then releases only the daemon repair as a headless chore', () => {
+    const now = Date.now();
+    const busy = '33333333-3333-3333-3333-333333333333';
+    const active = path.join(laneDirs('work').active, busy);
+    fs.mkdirSync(active, { recursive: true });
+    fs.writeFileSync(path.join(active, 'descriptor.json'), JSON.stringify({ id: busy, repo: 'web', brief: 'person task' } satisfies Descriptor));
+    appendStatus(busy, 'work', 'working', 'busy');
+    fs.writeFileSync(path.join(dir, 'soaking', 'gone.json'), JSON.stringify({
+      trapId: 'gone', worktree: '/tmp/gone', cwd: '/tmp/gone', harness: 'codex',
+      sessionId: 'session', claimed: busy, signedOnAt: new Date(now).toISOString(), heartbeatAt: new Date(now).toISOString(),
+    }));
+    fs.writeFileSync(path.join(dir, 'config.toml'), `${SETTLED}repairTrapWaitSecs = 2\n`);
+    upsertPr(pr(), OWNER);
+    upsertPr(pr(), OWNER);
+    const queuedAt = Date.now() + 10;
+    expect(deliverPrRepairs(() => {}, 3, { now: queuedAt })).toBe(1);
+    const repair = queued().find((d) => d.systemRepair)!;
+    expect(repair.for).toBe('wt:gone');
+    expect(claimBait(readTrap('gone')!)).toBeNull();
+    expect(deliverPrRepairs(() => {}, 3, { now: queuedAt + 1_000 })).toBe(0);
+    expect(queued().find((d) => d.id === repair.id)?.for).toBe('wt:gone');
+    expect(deliverPrRepairs(() => {}, 3, { now: queuedAt + 2_001 })).toBe(0);
+    expect(queued().find((d) => d.id === repair.id)?.for).toBeUndefined();
+    expect(queued().find((d) => d.id === repair.id)?.systemRepair).toEqual({});
+    expect(readPr(KEY)?.repair?.dispatchId).toBe(repair.id);
+    // A person's addressed work stays sticky after the repair timeout.
+    enqueue({ id: 'person', repo: 'web', brief: 'person task', for: 'wt:gone' });
+    expect(daemonSkip(listTraps(), 0, now + 10_000)(queued().find((d) => d.id === 'person')!)).toBe(true);
+  });
+
+  it('serializes headless repairs against choreConcurrent, not maxConcurrent', () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), `${SETTLED}[limits]\nmaxConcurrent = 0\nchoreConcurrent = 1\n`);
+    for (const id of ['repair-one', 'repair-two']) enqueue({
+      id, repo: 'web', brief: 'repair existing PR', pr: { url: URL, headRefName: 'stack-child' },
+      systemRepair: {},
+    }, 'chore');
+    tick(() => {}, { spawnRunner: () => {} });
+    expect(slotUsage('work').headless).toBe(0);
+    expect(slotUsage('chore').headless).toBe(1);
+    expect(fs.readdirSync(laneDirs('chore').queue).filter((f) => f.endsWith('.json'))).toHaveLength(1);
+    tick(() => {}, { spawnRunner: () => {} });
+    expect(slotUsage('chore').headless).toBe(1);
   });
 
   it('does not repair a first observation, then follows up a conflict against the PR base', () => {
@@ -190,7 +238,7 @@ describe('PR watch repairs', () => {
     expect(deliverPrRepairs(() => {}, 3)).toBe(1);
     const dispatch = queued()[0]!;
     expect(dispatch.followUp).toBe(OWNER);
-    expect(readEvidence(dispatch.id, 'work').prUrl).toBe(URL);
+    expect(readEvidence(dispatch.id, 'chore').prUrl).toBe(URL);
     expect(dispatch.brief).toContain('base branch stack-parent');
     expect(dispatch.brief).toContain('Push only to the existing branch stack-child.');
     expect(dispatch.pr).toEqual({ url: URL, headRefName: 'stack-child', headSha: SHA });
@@ -241,10 +289,10 @@ describe('PR watch repairs', () => {
     upsertPr(pr(), OWNER);
     upsertPr(pr(), OWNER);
     expect(deliverPrRepairs(() => {}, 3)).toBe(1);
-    appendStatus(readPr(KEY)!.repair!.dispatchId!, 'work', 'done', 'tried');
+    appendStatus(readPr(KEY)!.repair!.dispatchId!, 'chore', 'done', 'tried');
     upsertPr(pr(), OWNER);
     expect(deliverPrRepairs(() => {}, 3)).toBe(1);
-    appendStatus(readPr(KEY)!.repair!.dispatchId!, 'work', 'done', 'tried again');
+    appendStatus(readPr(KEY)!.repair!.dispatchId!, 'chore', 'done', 'tried again');
     upsertPr(pr(), OWNER);
     expect(deliverPrRepairs(() => {}, 3)).toBe(0);
     expect(readPr(KEY)?.repair).toMatchObject({ status: 'gave-up', attempts: 2, reason: 'repair limit reached (2 of 2)' });
