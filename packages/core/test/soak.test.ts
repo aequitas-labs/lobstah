@@ -24,6 +24,12 @@ import {
   readEvidence,
   readSessionClaim,
   readTrap,
+  readTrapAnchor,
+  reserveTrapName,
+  trapByAddress,
+  trapLabel,
+  TRAP_FIRST_WORDS,
+  TRAP_LAST_WORDS,
   readStatusLog,
   releaseCatch,
   requestCancel,
@@ -57,6 +63,56 @@ function trap(sessionId: string, repo?: string): TrapRegistration {
 }
 
 describe('trap registry (worktree-anchored)', () => {
+  it('assigns distinct two-word names and resolves either address', () => {
+    const one = trap('one');
+    const two = trap('two');
+    expect(one.name).toMatch(/^[a-z]{2,8}-[a-z]{2,8}$/);
+    expect(two.name).not.toBe(one.name);
+    expect(trapByAddress(one.name!)?.trapId).toBe(one.trapId);
+    expect(trapByAddress(`wt:${one.name}`)?.trapId).toBe(one.trapId);
+    expect(trapByAddress(`wt:${one.trapId}`)?.trapId).toBe(one.trapId);
+    expect(trapLabel(one)).toBe(`${one.name} (wt:${one.trapId})`);
+  });
+
+  it('skips a collision and keeps a chosen name through stow and re-soak', () => {
+    expect(reserveTrapName('first', undefined, 0)).toBe(`${TRAP_FIRST_WORDS[0]}-${TRAP_LAST_WORDS[0]}`);
+    expect(reserveTrapName('second', undefined, 0)).toBe(`${TRAP_FIRST_WORDS[0]}-${TRAP_LAST_WORDS[1]}`);
+    const first = trap('one');
+    const selected = signOnTrap({ sessionId: 'one', harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS, name: 'amber-gull' });
+    expect('ok' in selected && selected.ok.name).toBe('amber-gull');
+    stowTrap(first.trapId);
+    const again = signOnTrap({ sessionId: 'new', harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    expect('ok' in again && again.ok.name).toBe('amber-gull');
+    expect(readTrapAnchor(first.worktree)?.name).toBe('amber-gull');
+  });
+
+  it('refuses malformed and taken names and upgrades a legacy registration', () => {
+    const first = trap('one');
+    expect(() => signOnTrap({ sessionId: 'one', harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS, name: 'Amber Gull' })).toThrow('invalid trap name');
+    const second = trap('two');
+    expect(() => signOnTrap({ sessionId: 'two', harness: 'claude', worktree: second.worktree, cwd: second.worktree, ttlMs: TTL_MS, name: first.name })).toThrow('already taken');
+    const old = readTrap(first.trapId)!;
+    delete old.name;
+    fs.writeFileSync(path.join(home, 'soaking', `${first.trapId}.json`), JSON.stringify(old));
+    const upgraded = signOnTrap({ sessionId: 'one', harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    expect('ok' in upgraded && upgraded.ok.name).toBe(first.name);
+  });
+
+  it('keeps its name after a ghost sweep and re-soak', () => {
+    const first = trap('one');
+    heartbeatTrap(first.trapId, { parked: true });
+    sweepGhostTraps(1000, Date.now() + 60_000);
+    const again = signOnTrap({ sessionId: 'new', harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    expect('ok' in again && again.ok.name).toBe(first.name);
+  });
+
+  it('keeps both word lists short, lowercase, and unique', () => {
+    for (const words of [TRAP_FIRST_WORDS, TRAP_LAST_WORDS]) {
+      expect(new Set(words).size).toBe(words.length);
+      expect(words.every((word) => /^[a-z]{2,8}$/.test(word))).toBe(true);
+    }
+  });
+
   it('signs on with a worktree-anchored id, heartbeats, and stows', () => {
     const reg = trap('s1', 'web');
     expect(trapIdAt(reg.worktree)).toBe(reg.trapId);

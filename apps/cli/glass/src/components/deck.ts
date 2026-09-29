@@ -116,7 +116,7 @@ export function Deck({ inp }: { inp: DeckInputs }) {
   }));
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
-    title: '🪤 wt:' + t.trapId,
+    title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
     badge: { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
     meta: [t.repo || '', ' · ', t.live ? trapRow(t).listen : 'stowed / ghosted'],
     open: opener('trap', t.trapId),

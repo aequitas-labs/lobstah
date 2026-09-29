@@ -169,7 +169,7 @@ function trapModal(t: GlassTrap) {
     : html`<div class="empty">none yet</div>`;
   return [
     close,
-    html`<h3>🪤 wt:${t.trapId} <span class="badge">${t.harness ?? 'signed off'}</span></h3>`,
+    html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.harness ?? 'signed off'}</span></h3>`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
     t.live &&

@@ -30,6 +30,8 @@ import {
   lobstahHome,
   lobstahVersion,
   listTraps,
+  trapLabel,
+  trapNameForId,
   noticeOrphanedBait,
   readSessionClaim,
   isTrapCatch,
@@ -426,10 +428,11 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   hooks.prWatches?.(hooks.now?.() ?? Date.now(), log);
 
   for (const action of sweepGhostTraps(cfg.soak.ttlSecs * 1000, Date.now(), cfg.soak.pausedTtlSecs * 1000)) {
+    const label = trapLabel({ trapId: action.trapId, name: trapNameForId(action.trapId) });
     log(
       action.defective
-        ? `trap wt:${action.trapId} never parked — defective enlistment noticed to the helm`
-        : `ghost trap wt:${action.trapId} swept` +
+        ? `trap ${label} never parked — defective enlistment noticed to the helm`
+        : `ghost trap ${label} swept` +
             (action.pauseExpired ? ' (pause expired)' : '') +
             (action.requeued ? ` — work ${action.requeued} back in the queue` : ''),
     );

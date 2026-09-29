@@ -31,7 +31,7 @@ your working set:
                                                 external (a review session, a
                                                 CI run) — its events wake you
                                                 like any dispatch would
-  lobstah set ... --for wt:<trap>               address work to a signed-on
+  lobstah set ... --for <name>                  address work to a signed-on
                                                 worktree: the live session
                                                 manning it (\`lobstah soak\`)
                                                 works it there. Sticky — it
@@ -39,11 +39,11 @@ your working set:
                                                 falls back to a headless
                                                 spawn; orphans surface as
                                                 notices for you to decide
-  lobstah send wt:<trap> "<message>"            message that session directly
+  lobstah send <name> "<message>"               message that session directly
                                                 (no catch lifecycle; arrives
                                                 at its next park; bounces
                                                 back to you if undeliverable)
-  lobstah stow --wt <trap> [--keep]             sign a trap off; removes the
+  lobstah stow --wt <name> [--keep]             sign a trap off; removes the
                                                 worktree soak created for it
                                                 unless --keep or it holds
                                                 unpushed work (kept, with the

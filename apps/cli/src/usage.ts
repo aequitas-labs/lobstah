@@ -97,6 +97,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--wait': {},
       '--timeout': { value: '<secs>' },
       '--repo': { value: '<key>' },
+      '--name': { value: '<word-word>' },
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
@@ -139,18 +140,19 @@ export const COMMANDS: Record<string, CommandSpec> = {
 
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
-  dispatch: `Queue supervised work; prints id. --for wt:<trap> targets a signed-on trap
+  dispatch: `Queue supervised work; prints id. --for <name>, wt:<name>, or wt:<id> targets a signed-on trap
 (sticky; session:<id> resolves to it). A claimed helm requires --session
 <helm-id> to address work. Repeat --attach to copy files into owned state.
 Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
-  status: `Reconciled state for one dispatch, or all active without an id. Alias: buoy.`,
+  status: `Reconciled state for one dispatch, or all active without an id. A trap name,
+wt:<name>, or wt:<id> shows its live registration. Alias: buoy.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
   send: `Steer a live chain, queue for pending work, or wake a finished chain
 as a follow-up. --no-wake leaves finished mail unread. --for, --harness,
 and --model shape a new follow-up; --attach copies files. A claimed helm
-requires --session <helm-id>. wt:<trap> messages arrive at its next park.`,
+requires --session <helm-id>. Trap-name messages arrive at its next park.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -183,11 +185,11 @@ installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
 \`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
-  soak: `Volunteer this session as a worker; prints its wt:<trap> address. In a
+  soak: `Volunteer this session as a worker; prints its name and wt:<trap> address. In a
 linked worktree it signs on there. From a primary checkout (or with --repo
 from anywhere) it creates worktrees/soak-<trap> (branch lobstah/soak-<trap>,
 from trunk, with setup): cd there. A session's trap is re-used. --one stows
-after one catch. --wait listens in the foreground; exit 3 = run it again.
+after one catch. --name sets or changes its two-word name. --wait listens in the foreground; exit 3 = run it again.
 \`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
   stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
 requeues, unread messages bounce to the helm. Removes the worktree soak

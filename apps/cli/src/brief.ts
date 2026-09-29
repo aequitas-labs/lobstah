@@ -6,6 +6,7 @@ import {
   liveHelms,
   loadConfig,
   trapBySession,
+  trapLabel,
   type Grounds,
   type HelmRegistration,
 } from '@lobstah/core';
@@ -89,7 +90,7 @@ export async function buildBriefContext(sessionId: string, cwd?: string): Promis
   }
   const workerTrap = trapBySession(sessionId);
   if (workerTrap) {
-    return `lobstah: session id ${sessionId} — this session mans trap wt:${workerTrap.trapId} (it takes assigned work at turn end) and works in ${workerTrap.worktree}; \`lobstah stow\` signs it off.${fleet}`;
+    return `lobstah: session id ${sessionId} — this session mans trap ${trapLabel(workerTrap)} (it takes assigned work at turn end) and works in ${workerTrap.worktree}; \`lobstah stow\` signs it off.${fleet}`;
   }
   let help: string;
   try {

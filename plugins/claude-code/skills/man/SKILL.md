@@ -37,8 +37,8 @@ The charter is re-injected at every session start. Keep inside its fences:
 
 ```
 lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
-lobstah dispatch ... --for wt:<trap>              # address it to one trap
-lobstah send <id>|wt:<trap> "<instruction>"       # steer live/queued work; wake
+lobstah dispatch ... --for <trap-name>             # address it to one trap
+lobstah send <id>|<trap-name> "<instruction>"      # steer live/queued work; wake
                                                   # finished work as a follow-up
 lobstah status <id>                               # reconciled state + last note
 lobstah catch <id>                                # evidence: branch, commits, PR
@@ -56,7 +56,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 
 - Background work gets dispatched, not done inline. Write briefs that stand
   alone — the worker has no other context.
-- Addressed work is sticky: `--for wt:<trap>` waits for that trap and never
+- Addressed work is sticky: `--for <trap-name>` waits for that trap and never
   falls back to a headless worker. `man tend` lists live traps.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
