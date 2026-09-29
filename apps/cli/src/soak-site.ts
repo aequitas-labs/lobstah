@@ -9,7 +9,7 @@ function git(dir: string, ...args: string[]): string | undefined {
 }
 
 /** Canonical form for path identity checks (symlinks, 8.3 names, case). */
-function canon(p: string): string {
+export function canon(p: string): string {
   try {
     const real = path.resolve(fs.realpathSync.native(p));
     return process.platform === 'win32' ? real.toLowerCase() : real;

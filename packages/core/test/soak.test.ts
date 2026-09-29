@@ -3,6 +3,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  anchoredWorktree,
+  soakWorktreeFor,
+  writeTrapAnchor,
   appendStatus,
   beatTrap,
   claimBait,
@@ -354,6 +357,26 @@ describe('soak beat (post-tool hook liveness)', () => {
     const again = trap('s2', 'web');
     expect(beatTrap({ cwd: again.worktree, sessionId: 'someone-else' })).toEqual({ beat: false, reason: 'other-session' });
     expect(readBeat(again.trapId)).toBeUndefined();
+  });
+
+  it('outside the trap worktree, resolves the trap from the session id', () => {
+    const elsewhere = path.join(home, 'primary-checkout');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    const reg = caught('s1', 'w1');
+    expect(beatTrap({ cwd: elsewhere, sessionId: 's1', toolName: 'Read' })).toEqual({ beat: true, trapId: reg.trapId, activityFor: 'w1' });
+    expect(beatTrap({ cwd: elsewhere, sessionId: 's9', toolName: 'Read' })).toEqual({ beat: false, reason: 'not-soaking' });
+  });
+
+  it('a worktree soak created is marked on every sign-on, from its anchor', () => {
+    const reg = trap('s1', 'web');
+    expect(reg.createdWorktree).toBeUndefined();
+    writeTrapAnchor(reg.worktree, { trapId: reg.trapId, createdBy: 'soak', sessionId: 's1', repo: 'web', branch: 'lobstah/soak-x' });
+    stowTrap(reg.trapId);
+    const again = trap('s1', 'web');
+    expect(again).toMatchObject({ trapId: reg.trapId, createdWorktree: true });
+    expect(soakWorktreeFor(path.dirname(reg.worktree), 's1', 'web')).toBe(reg.worktree);
+    expect(soakWorktreeFor(path.dirname(reg.worktree), 's2', 'web')).toBeUndefined();
+    expect(anchoredWorktree(path.dirname(reg.worktree), reg.trapId)).toBe(reg.worktree);
   });
 
   it('beats without a catch refresh liveness only', () => {

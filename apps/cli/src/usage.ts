@@ -70,6 +70,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--waiting-on': { value: 'review|pr|deploy|person|external' },
       '--link': { value: '<url>' },
       '--until': { value: '<iso|30m|4h|2d>' },
+      '--session': { value: '<id>' },
     },
     positionals: '<uuid> <verb> [note...]',
   },
@@ -95,9 +96,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--harness': { value: HARNESS },
       '--wait': {},
       '--timeout': { value: '<secs>' },
+      '--repo': { value: '<key>' },
     },
   },
-  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--quiet': {} } },
+  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
   doctor: { flags: {} },
@@ -172,26 +174,27 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `The validated status write path: working | needs-decision | blocked |
-paused | done | failed. After \`--\` every word is note. \`done --pr <PR url>\`
-registers the PR's pr: watch (--no-watch opts out). --waiting-on and --link
-(paused, needs-decision, blocked) say what the worker waits on outside
-lobstah; --until (paused) sets when the pause expires.`,
+paused | done | failed. After \`--\` every word is note. \`done --pr <url>\`
+registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
+--until: what a waiting worker waits on, and when a pause expires. A trap's
+done records its worktree's HEAD, run there or with the trap's --session.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
 \`watch release <key>|--all\` frees watches held by [watch].maxForksPerCycle.`,
-  soak: `Volunteer this session as a worker. Identity is the worktree: sign-on
-anchors a trap id (.lobstah-trap) and prints its wt:<trap> address; re-runs
-need no flags. Refused from a primary checkout. --one signs off after the
-first catch. --wait listens in the foreground (no Stop hook): a quiet timeout
-exits 3 — run it again. \`soak beat\` is the post-tool hook: trap liveness
-and catch activity; inert off a trap or with [soak].beat = false; exits 0.`,
-  stow: `Sign the worktree's trap off (run it there, or pass --wt/--session); an
-unfinished assignment requeues and unread messages bounce to the helm.
-Stowing another session's trap is steering — with a claimed helm, only the
-helm may (pass its --session). The trap's own worktree or session is always
-free to stow itself.`,
+  soak: `Volunteer this session as a worker; prints its wt:<trap> address. In a
+linked worktree it signs on there. From a primary checkout (or with --repo
+from anywhere) it creates worktrees/soak-<trap> (branch lobstah/soak-<trap>,
+from trunk, with setup): cd there. A session's trap is re-used. --one stows
+after one catch. --wait listens in the foreground; exit 3 = run it again.
+\`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
+  stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
+requeues, unread messages bounce to the helm. Removes the worktree soak
+created unless --keep or it holds uncommitted changes, untracked files, or
+commits on no remote branch (kept, with the reason). Never removes a
+worktree soak did not create. Stowing another session's trap is steering:
+with a claimed helm, only the helm may (pass its --session).`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit; restart restarts it and
 waits for the new heartbeat (refused while dispatches are active, unless

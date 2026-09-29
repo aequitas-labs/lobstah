@@ -445,17 +445,63 @@ visible terminal, and whatever authenticated tooling a headless spawn can't
 get.
 
 ```bash
-lobstah soak                    # from a worktree — the primary checkout is
-                                # never claimable, so sign on from a linked
-                                # worktree (git worktree add ../side -b side)
+lobstah soak                    # in a linked worktree: sign it on; in a
+                                # repo's primary checkout: create a linked
+                                # worktree and sign that on
                                 # (the id: --session, else hook stdin, else
                                 # $CLAUDE_CODE_SESSION_ID)
+lobstah soak --repo <key>       # outside any configured repo: create a
+                                # worktree for <key> and sign it on
 lobstah soak --wait             # hookless sessions: listen in the foreground
                                 # (re-runs need no flags — identity is the
-                                # worktree); exit 3 = quiet, run it again
+                                # worktree, else the session id); exit 3 =
+                                # quiet, run it again
 lobstah stow                    # sign off; an open catch requeues, unread
-                                # messages bounce back to the helm
+                                # messages bounce back to the helm; removes
+                                # the worktree when soak created it
+lobstah stow --keep             # sign off and keep the worktree
 ```
+
+**Soak can create the worktree.** From a repo's primary checkout, or with
+`--repo <key>` from outside any configured repo, soak creates a linked
+worktree the same way a dispatch does. It fetches trunk, adds
+`~/.lobstah/worktrees/soak-<trap>` on a new branch `lobstah/soak-<trap>`
+from `origin/<trunk>`, and runs the repo's `setup` commands. Without
+`--repo`, soak run outside a configured repo fails with an error that names
+`--repo`. In a linked worktree, `--repo` must match that worktree's repo.
+Soak prints `worktree: <path>`, `created: true`, and `branch:`. When the
+session is not inside the worktree, it also prints
+`instruction: cd <path> and work in that directory from now on`, and its
+help lines carry `--session <id>`. The session changes into that directory
+before it takes work. If creation fails (setup fails, the
+`[limits].minFreeGB` check fails, or trunk cannot be fetched), soak signs
+nothing on, removes the partial worktree and its branch, and prints the
+cause. The address is `wt:<trap>`. The registration records
+`createdWorktree: true`, and `.lobstah-trap` records `createdBy: "soak"`,
+the session id, the repo, and the branch.
+
+Soak is idempotent. A session that already mans a trap re-uses it when it
+runs `soak` or `soak --wait` outside a linked worktree: the trap is resolved
+from the session id, and no second worktree is created. A worktree that soak
+created for the same session and repo is also re-used after a ghost sweep.
+From outside the worktree, `soak --wait`, `report`, and `stow` find the
+trap by session id (`--session <id>`, or `$CLAUDE_CODE_SESSION_ID`), and
+`send session:<id>` addresses it. With `--session`, or from inside the worktree, `report done` records the
+worktree's HEAD commit and branch in evidence.
+
+`stow` removes a worktree only when soak created it and nothing in it exists
+elsewhere. It keeps the worktree and prints `worktree: kept` and a `reason:`
+when soak did not create the worktree, or when the worktree has uncommitted
+changes, untracked files that are not ignored, or commits on no remote
+branch. Ignored files do not block removal. Stow never forces a removal.
+Stow runs the removal from the primary checkout, so it works from inside
+the worktree. On removal it prints `worktree: removed`, `path:`, and
+`returnTo: <primary checkout>`, with a help line `cd <primary>`. It
+deletes the branch only when every commit on it is on its upstream (with no
+upstream: on some remote branch);
+otherwise it prints `branchKept: <branch> (<reason>)`. A deleted branch
+prints as `branchDeleted:`. `stow --wt <id>` follows the same rules. The
+SessionEnd hook (`lobstah stow --quiet`) signs off and keeps the worktree.
 
 **Identity is the worktree.** Sign-on anchors a short trap id in
 `.lobstah-trap` and prints the trap's address (`wt:<id>`); the address
@@ -485,13 +531,14 @@ stamped, bounced to the helm when undeliverable.
 A soaking session proves it is alive three ways: its park heartbeat, its
 reports, and its **beat**. The plugin's post-tool hook runs
 `lobstah soak beat` after tool calls: at most once per 30 seconds it
-refreshes the trap's beat and writes the claimed catch's activity. A trap
-that works for an hour without reporting is not swept while it beats.
+refreshes the trap's beat and writes the claimed catch's activity. The hook
+resolves the trap from the working directory, else from the session id. A
+trap that works for an hour without reporting is not swept while it beats.
 `[soak].beat = false` turns the hook off.
 
 Liveness has two failure shapes with two remedies: a registration that
 parked before and went quiet (no park, report, or beat) past `[soak].ttlSecs` is a **ghost trap** —
-swept, catch requeued, noticed; one that **never parked** is a **defective
+swept, catch requeued, noticed, its worktree kept; one that **never parked** is a **defective
 enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 `soak --wait`) and left standing so the address keeps protecting its work.
 Nobody is conscripted: only a worktree whose session ran `soak` ever
@@ -503,7 +550,11 @@ Worktrees are 1 to 8 GB each. `lobstah cull` sweeps what is finished: `done/`
 entries older than the window (`--older-than <days>`, default 14), worktrees
 whose dispatch is finished or gone, stale state files, merged or closed PR
 records, and orphaned acks. It never touches queued or active work, and
-`git worktree remove` keeps each dispatch's branch. A worktree that follow-ups
+`git worktree remove` keeps each dispatch's branch. A worktree that soak
+created counts as in use while a trap registration anchors it. After that,
+the cull and the daemon's retention and free-space culls treat it like any
+other worktree that no dispatch owns: it ages out after
+`[limits].retentionDays`. A worktree that follow-ups
 reused is one worktree shared by the chain: it stays while any dispatch in
 the chain is queued or active, and it ages from the newest dispatch that
 used it.

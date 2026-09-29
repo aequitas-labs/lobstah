@@ -200,12 +200,15 @@ export interface ChooseInput {
 
 const short = (s: string) => s.slice(0, 8);
 
+/** Canonical path: native realpath (expands Windows 8.3 names), lowercased on Windows. */
 function realpath(p: string): string {
+  let r: string;
   try {
-    return fs.realpathSync(p);
+    r = fs.realpathSync.native(p);
   } catch {
-    return path.resolve(p);
+    r = path.resolve(p);
   }
+  return process.platform === 'win32' ? r.toLowerCase() : r;
 }
 
 /** A path from `git status --porcelain`, normalized for comparison with scratch paths. */
@@ -311,4 +314,139 @@ export async function remove(repo: RepoConfig, id: string): Promise<void> {
   const dir = worktreePath(id);
   if (!fs.existsSync(dir)) return;
   await git(repo.path, 'worktree', 'remove', '--force', dir);
+}
+
+/** git that never throws: exit status and trimmed output. */
+async function tryGit(cwd: string, ...args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
+  try {
+    const { stdout, stderr } = await run('git', args, { cwd, env: process.env });
+    return { ok: true, out: stdout.trimEnd(), err: stderr.trim() };
+  } catch (e) {
+    return { ok: false, out: ((e as { stdout?: string }).stdout ?? '').trim(), err: gitStderr(e) };
+  }
+}
+
+/**
+ * Undo a worktree that `allocate` left half made (its setup failed): remove
+ * the checkout, prune git's record of it, and delete the branch allocate
+ * created. Only for a worktree lobstah itself just created: it forces.
+ */
+export async function discard(repo: RepoConfig, dir: string, branch: string): Promise<void> {
+  await tryGit(repo.path, 'worktree', 'remove', '--force', dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+  await tryGit(repo.path, 'worktree', 'prune');
+  await tryGit(repo.path, 'branch', '-D', branch);
+}
+
+/** What `removeIfSafe` did with a worktree. */
+export type SafeRemoval =
+  | {
+      removed: true;
+      /** The primary checkout the removal ran from. */
+      primary: string;
+      /** Branches deleted because they held nothing unique. */
+      deletedBranches: string[];
+      /** Branches kept, each with its reason. */
+      keptBranches: Array<{ branch: string; reason: string }>;
+    }
+  | { removed: false; reason: string; primary?: string };
+
+/** Commits reachable from `ref` that no ref in `exclude` (or no remote, when empty) reaches. */
+async function uniqueCommits(cwd: string, ref: string, exclude?: string): Promise<number | undefined> {
+  const res = exclude
+    ? await tryGit(cwd, 'rev-list', '--count', ref, '--not', exclude)
+    : await tryGit(cwd, 'rev-list', '--count', ref, '--not', '--remotes');
+  return res.ok ? Number(res.out) : undefined;
+}
+
+/**
+ * Remove a worktree only when it holds no work that exists nowhere else: no
+ * uncommitted changes, no untracked files that are not ignored, and no
+ * commit that is on no remote branch. Never forces. Paths in `ignore`
+ * (relative to the worktree root, e.g. lobstah's own anchor file) do not
+ * count as untracked work; they are deleted before the removal and put back
+ * when it fails.
+ *
+ * The removal runs from the primary checkout, and this process leaves the
+ * worktree first when it stands inside it. Afterwards each branch in
+ * `branches` (and the branch the worktree had checked out) is deleted when
+ * it has no commit that is not on its upstream (without an upstream: on any
+ * remote branch), and kept otherwise.
+ */
+export async function removeIfSafe(dir: string, opts: { ignore?: string[]; branches?: string[] } = {}): Promise<SafeRemoval> {
+  if (!fs.existsSync(dir)) return { removed: false, reason: 'the worktree is already gone' };
+  const common = await tryGit(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+  if (!common.ok || !common.out) return { removed: false, reason: 'not a readable git checkout' };
+  const commonDir = path.resolve(common.out);
+  const primary = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
+  const ignore = new Set((opts.ignore ?? []).map((p) => p.replace(/\\/g, '/')));
+
+  const status = await tryGit(dir, 'status', '--porcelain', '--untracked-files=all');
+  if (!status.ok) return { removed: false, reason: `git status failed: ${status.err}`, primary };
+  const lines = status.out.split('\n').filter((l) => l.trim() !== '');
+  const untracked = lines.filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).replace(/^"(.*)"$/, '$1'));
+  const changed = lines.filter((l) => !l.startsWith('?? '));
+  const strayUntracked = untracked.filter((p) => !ignore.has(p));
+  const list = (paths: string[]) => paths.slice(0, 3).join(', ') + (paths.length > 3 ? `, and ${paths.length - 3} more` : '');
+  if (changed.length > 0) {
+    const paths = changed.map((l) => l.slice(3));
+    return { removed: false, reason: `uncommitted changes in ${changed.length} file(s): ${list(paths)}`, primary };
+  }
+  if (strayUntracked.length > 0) {
+    return { removed: false, reason: `${strayUntracked.length} untracked file(s) that are not ignored: ${list(strayUntracked)}`, primary };
+  }
+  const unpushed = await uniqueCommits(dir, 'HEAD');
+  if (unpushed === undefined) return { removed: false, reason: 'cannot tell which commits are on a remote', primary };
+  if (unpushed > 0) return { removed: false, reason: `${unpushed} commit(s) on no remote branch`, primary };
+
+  const head = await tryGit(dir, 'symbolic-ref', '--short', '-q', 'HEAD');
+  const branches = [...new Set([...(head.ok && head.out ? [head.out] : []), ...(opts.branches ?? [])])];
+
+  // Our own files go first (git refuses untracked files without --force),
+  // and come back if the removal fails.
+  const saved = new Map<string, Buffer>();
+  for (const rel of ignore) {
+    const file = path.join(dir, rel);
+    try {
+      saved.set(file, fs.readFileSync(file));
+      fs.rmSync(file, { force: true });
+    } catch {
+      // not there
+    }
+  }
+  // A process cannot remove the directory it stands in on every platform.
+  const real = (p: string) => {
+    try {
+      const r = fs.realpathSync.native(p);
+      return process.platform === 'win32' ? r.toLowerCase() : r;
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const rel = path.relative(real(dir), real(process.cwd()));
+  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) process.chdir(primary);
+  const removed = await tryGit(primary, '--git-dir', commonDir, 'worktree', 'remove', dir);
+  if (!removed.ok) {
+    if (fs.existsSync(dir)) for (const [file, content] of saved) fs.writeFileSync(file, content);
+    return { removed: false, reason: `git worktree remove refused: ${removed.err}`, primary };
+  }
+
+  const deletedBranches: string[] = [];
+  const keptBranches: Array<{ branch: string; reason: string }> = [];
+  for (const branch of branches) {
+    const exists = await tryGit(primary, '--git-dir', commonDir, 'rev-parse', '--verify', '-q', `refs/heads/${branch}`);
+    if (!exists.ok) continue;
+    const upstream = await tryGit(primary, '--git-dir', commonDir, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branch}@{upstream}`);
+    const unique = await uniqueCommits(primary, `refs/heads/${branch}`, upstream.ok && upstream.out ? upstream.out : undefined);
+    if (unique === undefined) {
+      keptBranches.push({ branch, reason: 'cannot tell which commits are unique' });
+    } else if (unique > 0) {
+      keptBranches.push({ branch, reason: `${unique} commit(s) not on ${upstream.ok && upstream.out ? upstream.out : 'any remote branch'}` });
+    } else {
+      const del = await tryGit(primary, '--git-dir', commonDir, 'branch', '-D', branch);
+      if (del.ok) deletedBranches.push(branch);
+      else keptBranches.push({ branch, reason: del.err });
+    }
+  }
+  return { removed: true, primary, deletedBranches, keptBranches };
 }

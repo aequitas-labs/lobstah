@@ -25,7 +25,7 @@ describe('man brief — the session-start sign-on offer', () => {
     expect(ctx).toContain('session id sess-1234');
     expect(ctx).toContain('to take the helm:    lobstah man helm --session sess-1234');
     expect(ctx).toContain('to work as a trap:   lobstah soak --session sess-1234');
-    expect(ctx).toContain('never the primary checkout');
+    expect(ctx).toContain('from a primary checkout it creates one');
     expect(ctx.split('\n').length).toBeLessThanOrEqual(6);
   });
 

@@ -34,9 +34,9 @@ row, and the session-start brief says when the plugin is behind.
 | SessionStart hook (`lobstah man brief`) | Prints the session id and a one-line fleet state. A session that is neither helm nor trap gets the two sign-on commands, with the id filled in. |
 | Stop hook (`lobstah man haul`) | At turn end, blocks with standing attention, or with the command to arm a watcher while work is in flight. Inert unless the session holds the helm or is soaking. |
 | PostToolUse hook (`lobstah soak beat`) | After every tool call in a soaking session: refreshes the trap's liveness and writes its catch's activity (the tool name and its primary target, redacted). At most once per 30 seconds per trap. No network, no git; always exits 0, errors go to `~/.lobstah/logs/beat.log`. Inert when not soaking or with `[soak].beat = false`. |
-| SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends. |
+| SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends and keeps its worktree. |
 | `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken. |
-| `trap` skill | The worker: soaking from a linked worktree, the `wt:` address, the six report verbs, and `paused --waiting-on` before waiting on something external (for ume, the non-blocking push when the await cannot run as a tracked background task). |
+| `trap` skill | The worker: soaking (in a linked worktree, or in one that soak creates), the `wt:` address, the six report verbs, and `paused --waiting-on` before waiting on something external (for ume, the non-blocking push when the await cannot run as a tracked background task). |
 
 `lobstah send <id> "<instruction>"` steers live or queued work and wakes a
 finished dispatch as a follow-up.
@@ -48,7 +48,7 @@ Slash commands, each a shortcut for a CLI verb:
 | `/lobstah:helm [grounds]` | `lobstah man helm` |
 | `/lobstah:relieve` | `lobstah man relieve` |
 | `/lobstah:tend` | `lobstah man tend` |
-| `/lobstah:soak` | `lobstah soak` (from a linked worktree) |
+| `/lobstah:soak` | `lobstah soak` |
 | `/lobstah:stow` | `lobstah stow` |
 
 Claude Code also loads the `man` and `trap` skills on its own when you ask
