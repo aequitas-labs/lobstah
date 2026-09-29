@@ -8,6 +8,7 @@ import { deriveGlassPrs } from '../src/glass-prs.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { manEvents, observePr, workEvents } from '../src/pr-watch.js';
 import { applyCull, planCull } from '../src/cull.js';
+import { prStateHash } from '../src/acks.js';
 
 let home: string;
 beforeEach(() => {
@@ -98,6 +99,39 @@ describe('PR records (core prs.ts)', () => {
     delete sparse.review;
     upsertPr(sparse);
     expect(readPr('pr:acme/lobstah#4')?.standingSince).toEqual({ 'pr:review': first });
+  });
+});
+
+describe('PR titles in records', () => {
+  it('keeps a title; a later upsert with a new title replaces it; one without a title keeps it', () => {
+    upsertPr(obs(8, { title: 'First title' }));
+    expect(readPr('pr:acme/lobstah#8')?.title).toBe('First title');
+    upsertPr(obs(8, { title: 'Renamed on GitHub' }));
+    expect(readPr('pr:acme/lobstah#8')?.title).toBe('Renamed on GitHub');
+    upsertPr(obs(8));
+    expect(readPr('pr:acme/lobstah#8')?.title).toBe('Renamed on GitHub');
+  });
+
+  it('a title change alone does not change the stateHash, the standing kinds, or the watch events', () => {
+    const { after: a } = upsertPr(obs(9, { title: 'Old' }));
+    const { after: b } = upsertPr(obs(9, { title: 'New' }));
+    expect(b.title).toBe('New');
+    expect(prStateHash(b)).toBe(prStateHash(a));
+    expect(b.standingSince).toEqual(a.standingSince);
+    const ref = parsePrRef(url(9))!;
+    const view: GhPrView = { title: 'Old', state: 'OPEN', isDraft: false, headRefOid: 'sha9', mergeStateStatus: 'CLEAN', reviewDecision: '', statusCheckRollup: [] };
+    const first = derivePrEvents(ref, view, '0');
+    const second = derivePrEvents(ref, { ...view, title: 'New' }, first.cursor);
+    expect(second.events).toEqual([]);
+    expect(second.cursor).toBe(first.cursor);
+  });
+
+  it('the observation stores the title the check fetched', () => {
+    const ref = parsePrRef(url(10))!;
+    const view: GhPrView = { title: 'From GitHub', state: 'OPEN', isDraft: false, headRefOid: 'sha10', mergeStateStatus: 'CLEAN', reviewDecision: '', statusCheckRollup: [] };
+    expect(observePr(ref, view).title).toBe('From GitHub');
+    expect(readPr(ref.key)?.title).toBe('From GitHub');
+    expect(observePr(ref, { ...view, title: 'Edited' }).title).toBe('Edited');
   });
 });
 

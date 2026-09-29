@@ -251,8 +251,9 @@ describe('glass: a PR card with a long badge', () => {
     p.number = 1826;
     p.badge = { ...p.badge, text: 'repairing: checks (attempt 1 of 2)' };
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
-    const card = g.$$('#prs .card').find((c) => text(c.querySelector('b')).startsWith('#1826'))!;
-    const title = card.querySelector('.top > b')!;
+    const card = g.$$('#prs .card').find((c) => text(c.querySelector('.prname')).startsWith('#1826'))!;
+    const title = card.querySelector('.top > .prname')!;
+    expect(text(title.querySelector('b'))).toBe('#1826');
     const badge = card.querySelector('.top .badge')!;
     expect(badge.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
     const style = (el: Element) => g.window.getComputedStyle(el as never);

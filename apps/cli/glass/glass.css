@@ -304,7 +304,8 @@ tr.rowhead:hover {
   min-height: 22px;
 }
 /* The title's identity (#99999, an 8-character id) never truncates: the badge gives way first. */
-.card .top > b {
+.card .top > b,
+.card .top > .prname {
   flex: 1 1 auto;
   min-width: min(9ch, 100%);
   overflow: hidden;

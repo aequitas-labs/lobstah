@@ -43,10 +43,20 @@ export function emptyFleet(): GlassSnapshot {
   return base();
 }
 
+/** Fixture PR titles. A number with no entry has no title. */
+export const PR_TITLES: Record<number, string> = {
+  30: 'Retire the legacy poller',
+  41: "Question hold: walk a question only after the helm's turn",
+  42: 'The glass shows each PR title in the deck, the PRs tab, and the modal header',
+  50: 'Merge conflict fixture',
+  60: 'Failing checks fixture',
+  61: 'Behind main fixture',
+};
+
 const evidencePr = (n: number, over: Partial<PrEvidence> = {}): PrEvidence => ({
   url: `https://github.com/acme/web/pull/${n}`,
   number: n,
-  title: `PR ${n}`,
+  ...(PR_TITLES[n] ? { title: PR_TITLES[n] } : {}),
   state: 'OPEN',
   draft: false,
   reviewDecision: 'REVIEW_REQUIRED',
@@ -307,8 +317,8 @@ export function everyAttentionFleet(): GlassSnapshot {
   d.landed = landed;
   for (let i = 0; i < 5; i++) d.dispatches.push(dispatch(`9${i}999999-0000-4000-8000-000000000000`, { verb: i % 2 ? 'blocked' : 'working', sort: NOW - (40 + i) * MIN }));
   d.traps.push(trap('t3', { heartbeatAt: ago(2 * HOUR), firstParkedAt: undefined, harness: 'codex' }), trap('t4'));
-  // More traps than the deck shows, out of order: live ones by heartbeat,
-  // signed-off ones by their stow or ghost, and one stowed too long ago.
+  // More traps than the deck shows, out of order: live seats have different
+  // heartbeats but the same sign-on (so name breaks ties), then stow/ghost history.
   const signedOff = (id: string, kind: 'trap-stowed' | 'trap-ghosted', at: string): GlassTrap => ({
     trapId: id,
     repo: 'web',

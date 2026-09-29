@@ -369,7 +369,7 @@ export function buildGlassSnapshot(): GlassSnapshot {
   for (const n of allNotices) {
     if (n.kind.startsWith('trap-') && n.refId) seenIds.add(n.refId);
   }
-  const attach = (t: GlassTrap, liveNow: boolean): GlassTrap => {
+  const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
     return {
@@ -379,7 +379,8 @@ export function buildGlassSnapshot(): GlassSnapshot {
       link: validSessionLink(t.link) ? t.link : undefined,
       sessionId: t.sessionId ?? signed?.by,
       harness: t.harness ?? (/\((claude|codex),/.exec(signed?.text ?? '')?.[1]),
-      live: liveNow,
+      live: registered,
+      listening,
       messages: trapMessages(t.trapId),
       notices,
       catches: dispatches.filter(
@@ -395,7 +396,7 @@ export function buildGlassSnapshot(): GlassSnapshot {
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps },
     helms,
     traps: [
-      ...live.map((t) => attach(t as GlassTrap, Date.now() - trapLastSeen(t) <= loadConfig().soak.ttlSecs * 1000)),
+      ...live.map((t) => attach(t as GlassTrap, true, !!t.firstParkedAt && Date.now() - trapLastSeen(t) <= loadConfig().soak.ttlSecs * 1000)),
       ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
     ],
     notices: allNotices.slice().reverse(),

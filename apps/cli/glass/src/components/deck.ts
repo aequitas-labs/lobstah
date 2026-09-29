@@ -3,7 +3,21 @@ import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, prBadgeClass } from '../../../
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
-import { Age, KIND_TONE, Table, ageText, badgeTitle, kindCell, kindLabel, opener, trapRow, windowAction } from './common.js';
+import {
+  Age,
+  KIND_TONE,
+  Table,
+  ageText,
+  badgeTitle,
+  kindCell,
+  kindLabel,
+  opener,
+  prName,
+  stackNumbers,
+  trapNow,
+  trapNowText,
+  windowAction,
+} from './common.js';
 import { openReport, reportMeta } from './reports.js';
 
 /**
@@ -58,7 +72,7 @@ function deckNotices(list: DeckAttention[]) {
 
 function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, DeckAttention[]>, view: View) {
   const next = members.find((p) => p.number === s.nextNumber) || members[0];
-  const chain = s.numbers.map((n) => '#' + n).join(' → ');
+  const chain = stackNumbers(s.numbers, new Map(members.map((p) => [p.number, p.title])));
   const nextText = next ? 'next #' + next.number : 'nothing mergeable';
   if (view === 'cards') {
     const card = (p: GlassPr) => {
@@ -68,7 +82,7 @@ function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, Deck
         ? kinds.map((a) => html`<span class=${'badge ' + (KIND_TONE[a.kind] || 'dim')}>${kindLabel(a.kind)}</span>`)
         : html`<span class=${'badge ' + prBadgeClass(p.badge)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span>`;
       const meta = `${p.repo} · ${p.badge.text}${acked ? ' · acked' : ''}`;
-      return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top"><b title=${`#${p.number} ${p.title || ''}`}>#${p.number} ${p.title || ''}</b>${badges}</div><div class="meta" title=${meta}>${meta}</div></div>`;
+      return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta" title=${meta}>${meta}</div></div>`;
     };
     return html`<div key=${s.id} class="deckstack"><div class="dim">${chain} · ${nextText}</div><div class="cards">${members.map(card)}</div></div>`;
   }
@@ -130,8 +144,8 @@ export function Deck({ inp }: { inp: DeckInputs }) {
     key: t.trapId,
     title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
     badge: { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
-    meta: [t.repo || '', ' · ', t.live ? trapRow(t).listen : 'stowed / ghosted'],
-    metaText: `${t.repo || ''} · ${t.live ? trapRow(t).listen : 'stowed / ghosted'}`,
+    meta: [t.repo || '', ' · ', trapNow(t)],
+    metaText: `${t.repo || ''} · ${trapNowText(t)}`,
     action: windowAction(t),
     open: opener('trap', t.trapId),
   }));

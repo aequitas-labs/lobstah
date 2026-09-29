@@ -3,7 +3,7 @@ import type { GlassPr, GlassStack } from '@lobstah/core';
 import { prBadgeClass } from '../../../src/glass-diff.js';
 import type { PrsInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
-import { Age, Table, badgeTitle, opener, prChecks, prLink, prMerge, prReview, watchCell } from './common.js';
+import { Age, Table, badgeTitle, opener, prChecks, prLink, prMerge, prName, prReview, stackNumbers, watchCell } from './common.js';
 
 /**
  * The PRs tab: PRs grouped by stack, then the watches that are not PR
@@ -21,7 +21,7 @@ export function prGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): Array<{ s: Gla
   return inp.stacks.map((s) => ({ s, prs: byStack.get(s.id) || [] })).filter((g) => g.prs.length);
 }
 
-const chainText = (s: GlassStack): string => s.numbers.map((n) => '#' + n).join(' → ');
+const chainText = (s: GlassStack, prs: GlassPr[]) => stackNumbers(s.numbers, new Map(prs.map((p) => [p.number, p.title])));
 const stateText = (p: GlassPr): string =>
   p.state + (p.draft ? ' · draft' : '') + (p.state === 'MERGED' && p.mergedAt ? ' · ' + p.mergedAt : '');
 
@@ -39,7 +39,7 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
 
 function prTable(inp: PrsInputs) {
   const rows = prGroups(inp).flatMap(({ s, prs }) => [
-    html`<tr key=${'stack:' + s.id}><th colspan="8">${chainText(s)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}</th></tr>`,
+    html`<tr key=${'stack:' + s.id}><th colspan="8">${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}</th></tr>`,
     ...prs.map(
       (p) =>
         html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${p.title || ''}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
@@ -51,11 +51,11 @@ function prTable(inp: PrsInputs) {
 function prCards(inp: PrsInputs) {
   const groups = prGroups(inp);
   const card = (p: GlassPr) =>
-    html`<div key=${p.key} class="card" onClick=${opener('pr', p.key)}><div class="top"><b>#${p.number} ${p.title || ''}</b><span class=${'badge ' + prBadgeClass(p.badge)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span></div><div class="meta" title=${`${p.repo} · ${stateText(p)}`}>${p.repo} · ${stateText(p)} · ${prMerge(p)}</div><div class="foot"><span>${prChecks(p)}</span><span>${watchCell(p.watch)}</span>${p.gate && html`<span>gate ${p.gate}</span>`}</div></div>`;
+    html`<div key=${p.key} class="card" onClick=${opener('pr', p.key)}><div class="top">${prName(p)}<span class=${'badge ' + prBadgeClass(p.badge)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span></div><div class="meta" title=${`${p.repo} · ${stateText(p)}`}>${p.repo} · ${stateText(p)} · ${prMerge(p)}</div><div class="foot"><span>${prChecks(p)}</span><span>${watchCell(p.watch)}</span>${p.gate && html`<span>gate ${p.gate}</span>`}</div></div>`;
   const body = groups.length
     ? groups.map(
         ({ s, prs }) =>
-          html`<${Fragment} key=${'stack:' + s.id}><h2>${chainText(s)} · floor ${s.floor}${s.open ? '' : ' · history'}</h2><div class="cards">${prs.map(card)}</div><//>`,
+          html`<${Fragment} key=${'stack:' + s.id}><h2>${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}</h2><div class="cards">${prs.map(card)}</div><//>`,
       )
     : html`<div class="empty">no PR evidence</div>`;
   return [body, otherWatches(inp)];
