@@ -68,6 +68,7 @@ tracked background task. End the turn while the external operation runs.
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; lobstah repairs conflicts and failed checks on its own PRs, and attention means it gave up or cannot act.
 - A repair waits while a live worker holds the PR's branch or a branch below it in the stack, until the PR is unchanged for `[watch].repairSettleSecs`, and while the PR's watch is held. A wait raises no attention; `man tend` lists it under `repairs waiting`. `lobstah cancel` on a repair holds its PR until `lobstah watch release <key>`. A brief whose worker will push to other PRs can tell it to run `lobstah watch hold <key> --for <its dispatch id>` first.
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.
+- File a report with `lobstah man file <file.md> [--attach <file>]` when you have findings worth keeping. Ack a report with `lobstah attention ack <key>` when the human says so.
 
 ## Getting woken instead of polling
 

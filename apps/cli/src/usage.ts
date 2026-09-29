@@ -190,13 +190,10 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
   cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
-  report: `The validated status write path: working | needs-decision | blocked |
-paused | done | failed. After \`--\` every word is note. \`done --pr <url>\`
-registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
---until: what a waiting worker waits on, and when a pause expires. A trap's
-done records its worktree's HEAD, run there or with the trap's --session.
-done|failed --report <file.md> files a page of findings as the dispatch's
-report; --attach <file> adds images it names by bare filename.`,
+  report: `The validated status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` every word is note.
+\`done --pr <url>\` registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link, --until: what a pause waits on, and until when.
+A trap's done records its worktree's HEAD, run there or with the trap's --session.
+done|failed --report <file.md> files a findings page as the dispatch's report; --attach adds the images it names by bare filename.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,
@@ -267,6 +264,9 @@ blocks: it shows standing events unconsumed, else \`standing: none\`, exit 0
   'man:haul': `Stop-hook entry: standing attention blocks immediately. In arm mode,
 work in flight requires a live watcher or the hook blocks with the arm command.
 --park or [helm].park = "block" waits in the hook instead.`,
+  'man:file': `File a markdown page as the helm's own report, under its grounds (reports/<grounds>/<rid>/).
+--attach copies images the page names by bare filename; --title overrides its first # heading.
+The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs

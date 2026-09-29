@@ -34,6 +34,7 @@ const base = (): GlassSnapshot => ({
   stacks: [],
   attention: [],
   landed: [],
+  reports: [],
   attentionKinds: ['question', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready'],
 });
 
@@ -340,6 +341,43 @@ export function everyAttentionFleet(): GlassSnapshot {
     glassPr(behind, { stackId: 'pr:acme/web#61', position: 0 }),
     glassPr(merged, { stackId: 'pr:acme/web#30', position: 0 }),
   );
+  // Two reports to read: a trap's with an image, and the helm's. A third,
+  // newer but acked, sorts after both.
+  d.reports = [
+    {
+      key: 'report:helm:fleet:99990000',
+      title: 'Old fleet notes',
+      author: 'helm',
+      filedAt: ago(MIN),
+      stateHash: 'r3',
+      acked: { at: ago(30_000), by: 'terminal' },
+      grounds: 'fleet',
+      bytes: 40,
+      attachments: [],
+    },
+    {
+      key: 'report:helm:fleet:0a1b2c3d',
+      title: 'Fleet notes',
+      author: 'helm',
+      filedAt: ago(5 * MIN),
+      stateHash: 'r2',
+      grounds: 'fleet',
+      bytes: 80,
+      attachments: [],
+    },
+    {
+      key: 'report:work:cccccccc-0000-4000-8000-000000000003',
+      title: 'Tray findings',
+      author: 'quiet-reef',
+      filedAt: ago(20 * MIN),
+      stateHash: 'r1',
+      dispatch: 'cccccccc-0000-4000-8000-000000000003',
+      lane: 'work',
+      repo: 'web',
+      bytes: 120,
+      attachments: [{ name: 'tray.png', path: '/tmp/lobstah/state/cccccccc/attachments/tray.png', bytes: 2048, type: 'image/png' }],
+    },
+  ];
   d.attentionError = undefined;
   return d;
 }

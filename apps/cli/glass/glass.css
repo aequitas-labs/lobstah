@@ -728,3 +728,90 @@ a.lob {
   font-size: 11px;
   margin-top: 2px;
 }
+
+/* A report page: markdown rendered as elements (components/report.ts). */
+.mdpage {
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin: 6px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.mdpage h1,
+.mdpage h2,
+.mdpage h3,
+.mdpage h4 {
+  margin: 12px 0 6px;
+  line-height: 1.25;
+}
+.mdpage h1 {
+  font-size: 18px;
+}
+.mdpage h2 {
+  font-size: 15px;
+}
+.mdpage h3,
+.mdpage h4 {
+  font-size: 13px;
+}
+.mdpage p,
+.mdpage ul,
+.mdpage ol,
+.mdpage blockquote {
+  margin: 6px 0;
+}
+.mdpage ul,
+.mdpage ol {
+  padding-left: 22px;
+}
+.mdpage a {
+  color: var(--link);
+}
+.mdpage code {
+  background: var(--card);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.mdpage pre.mdcode {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.mdpage pre.mdcode code {
+  padding: 0;
+  background: none;
+}
+.mdpage blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+  color: var(--dim);
+}
+.mdpage img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  display: block;
+  margin: 6px 0;
+}
+.mdpage hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.mdpage .mdtable {
+  overflow-x: auto;
+}
+.mdpage table {
+  border-collapse: collapse;
+  margin: 6px 0;
+}
+.mdpage th,
+.mdpage td {
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  text-align: left;
+}
