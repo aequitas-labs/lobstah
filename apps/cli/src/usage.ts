@@ -75,7 +75,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '<uuid> <verb> [note...]',
   },
   watch: {
-    subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'release'],
+    subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'hold', 'release'],
     flags: {
       '--check': { value: '<cmd>' },
       '--for': { value: '<uuid>' },
@@ -83,6 +83,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--every': { value: '<s>' },
       '--brief': { value: '<template>' },
       '--stream': { value: '<cmd>' },
+      '--reason': { value: '<text>' },
       '--apply': {},
       '--all': {},
     },
@@ -182,13 +183,10 @@ registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
 --until: what a waiting worker waits on, and when a pause expires. A trap's
 done records its worktree's HEAD, run there or with the trap's --session.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
-installs the shipped PR check; with --for, a check that fails after the first
-(baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
-\`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
-\`watch hold <key> [--for <id>] [--reason <text>]\` holds PR repairs for one PR;
-with --for the hold ends when that dispatch ends. Cancelling a repair holds
-its PR the same way. \`watch release <key>|--all\` ends a hold, including one
-set by [watch].maxForksPerCycle.`,
+installs the shipped PR check; with --for, a failing check forks a CI-fix
+continuation (pick only). Only \`watch add\`, \`report done --pr\`, and
+\`watch backfill --apply\` register. \`watch hold <key> [--for <id>]\` holds PR
+repairs; --for ends it with that dispatch. \`watch release\` ends any hold.`,
   soak: `Volunteer this session as a worker; prints its name and wt:<trap> address. In a
 linked worktree it signs on there. From a primary checkout (or with --repo
 from anywhere) it creates worktrees/soak-<trap> (branch lobstah/soak-<trap>,
