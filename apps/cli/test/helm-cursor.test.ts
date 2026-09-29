@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   appendStatus,
@@ -10,6 +10,7 @@ import {
   complete,
   enqueue,
   ensureLayout,
+  loadConfig,
   noticesDir,
   postNotice,
   readHelm,
@@ -18,6 +19,9 @@ import {
 } from '@lobstah/core';
 import type { Notice } from '@lobstah/core';
 import { buildDigest } from '../src/digest.js';
+import { readCursor } from '../src/reported.js';
+import { landedCatches } from '../src/tend.js';
+import { liveWatcher } from '../src/watchers.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -135,5 +139,93 @@ describe('helm sign-on starts its cursor at the sign-on', () => {
     expect(buildDigest({ cursor: 'fleet', now: Date.now() + 1000 }).landed.map((l) => l.id)).toContain(ID);
     signOn(HELM);
     expect(buildDigest({ cursor: 'fleet', now: Date.now() + 1000 }).landed).toEqual([]);
+  });
+});
+
+describe('man wait reports only delivered catches', () => {
+  const land = () => {
+    enqueue({ id: ID, repo: 'r', brief: 'b' });
+    claimNext('work');
+    appendStatus(ID, 'work', 'done', 'landed');
+    complete(ID, 'work');
+  };
+  const unreported = () => landedCatches(loadConfig()).find((c) => c.id === ID)?.unreported;
+
+  it('advances through a done event delivered to the helm watcher', async () => {
+    signOn(HELM);
+    enqueue({ id: ID, repo: 'r', brief: 'b' });
+    claimNext('work');
+    const env: NodeJS.ProcessEnv = { ...process.env, LOBSTAH_HOME: home };
+    delete env.CLAUDE_CODE_SESSION_ID;
+    const child = spawn(process.execPath, [cli, 'man', 'wait', '--session', HELM, '--timeout', '5'], { env, stdio: 'pipe' });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    try {
+      const deadline = Date.now() + 4_000;
+      while (!liveWatcher(HELM, 'man') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+      expect(liveWatcher(HELM, 'man')).toBeDefined();
+      // The watcher registers before capturing its event baseline.
+      await new Promise((r) => setTimeout(r, 500));
+      const at = appendStatus(ID, 'work', 'done', 'landed').at;
+      complete(ID, 'work');
+      expect(unreported()).toBe(true);
+      const exit = await new Promise<number | null>((resolve) => child.once('exit', resolve));
+      expect(exit, stdout).toBe(0);
+      expect(stdout).toContain(ID);
+      expect(readCursor('fleet')).toBe(at);
+      expect(unreported()).toBe(false);
+    } finally {
+      if (child.exitCode === null) child.kill();
+    }
+  }, 10_000);
+
+  it('--peek leaves a landed catch unreported', () => {
+    signOn(HELM);
+    land();
+    expect(unreported()).toBe(true);
+    const peek = lobstah('man', 'wait', '--peek', '--session', HELM);
+    expect(peek.status).toBe(0);
+    expect(readCursor('fleet')).toBeUndefined();
+    expect(unreported()).toBe(true);
+  });
+
+  it('an older standing reminder never moves a reported cursor backwards', () => {
+    signOn(HELM);
+    land();
+    expect(lobstah('man', 'report', '--session', HELM).status).toBe(0);
+    const through = readCursor('fleet')!;
+    expect(unreported()).toBe(false);
+    const questionId = '62262262-2222-4222-8222-222222222222';
+    enqueue({ id: questionId, repo: 'r', brief: 'question' });
+    claimNext('work');
+    appendStatus(questionId, 'work', 'needs-decision', 'which one?', new Date(Date.parse(through) - 1_000).toISOString());
+    const wait = lobstah('man', 'wait', '--session', HELM, '--timeout', '1');
+    expect(wait.status).toBe(0);
+    expect(wait.stdout).toContain(questionId);
+    expect(readCursor('fleet')).toBe(through);
+    expect(unreported()).toBe(false);
+  });
+
+  it('a catch landed without a helm stays unreported until man report prints it', () => {
+    land();
+    expect(unreported()).toBe(true);
+    expect(lobstah('man', 'wait', '--timeout', '1').status).toBe(3);
+    expect(readCursor('fleet')).toBeUndefined();
+    expect(unreported()).toBe(true);
+    const report = lobstah('man', 'report');
+    expect(report.status).toBe(0);
+    expect(report.stdout).toContain(ID.slice(0, 8));
+    expect(unreported()).toBe(false);
+  });
+
+  it('a quiet wait still prints a digest without advancing the cursor', () => {
+    signOn(HELM);
+    land();
+    const result = lobstah('man', 'wait', '--session', HELM, '--timeout', '1');
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain('timeout: true');
+    expect(result.stdout).toContain(ID.slice(0, 8));
+    expect(readCursor('fleet')).toBeUndefined();
+    expect(unreported()).toBe(true);
   });
 });
