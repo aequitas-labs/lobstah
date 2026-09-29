@@ -356,6 +356,23 @@ must never hide it from the orchestrator that has to answer it. The glass,
 which has no write endpoint, hides a clicked lob per browser in localStorage
 instead.
 
+**The pet's read.** Every six seconds the pet runs `lobstah attention --json`.
+It prints `{ "attention": [...] }`: the same items, with the same fields, that
+`man tend --json` puts under `attention`, and nothing else. If that command
+fails (an older CLI exits 2 on the unknown flag), the pet runs
+`man tend --json` instead. The pet reads the child's output while the child
+runs, so a report of any size works. Each read may take 10 seconds; then the
+pet stops the child and keeps its current windows. After three failed reads in
+a row it writes one line with the reason to `~/.lobstah/logs/pet.log`, and one
+more line when reads work again. After every read it writes
+`~/.lobstah/pet/state.json`. `lobstah doctor` reads that file for its `pet`
+row: installed or not, running or not, and whether the last read worked:
+
+```
+pet  ok    installed; running (pid 812); last read worked 4s ago (`lobstah attention --json`, 3 walking)
+pet  warn  installed; running (pid 812); last read failed 2s ago, 3 in a row: `lobstah attention --json` timed out; `lobstah man tend --json` timed out; last worked 5m ago
+```
+
 **Wrapper loop.** An outer loop blocking on `wait` can spawn one fresh
 headless turn per event:
 

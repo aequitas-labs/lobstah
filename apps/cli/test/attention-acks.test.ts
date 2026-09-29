@@ -136,7 +136,7 @@ function draftPr(over: Partial<PrEvidence> = {}): void {
   complete(P, 'work');
   mergeEvidence(P, 'work', { prUrl: PR_URL, pr: pr(over) });
 }
-/** What the pet walks: tend's attention minus acked items (main.swift filters the same way). */
+/** What the pet walks: tend's attention minus acked items (readAttention in apps/pet/Sources/LobstahPetCore filters the same way). */
 const petPayload = () => buildTendReport().attention.filter((a) => !a.acked);
 
 describe('part 2: click-to-ack, display-only', () => {
