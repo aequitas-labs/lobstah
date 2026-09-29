@@ -20,7 +20,7 @@ const snap = {
     { id: 'd2', lane: 'work', verb: 'working' },
   ],
   prs: [
-    { key: 'pr:acme/web#8', number: 8, stackId: 's', position: 0, nextMergeable: true, dispatchIds: ['d1'] },
+    { key: 'pr:acme/web#8', number: 8, title: 'Base PR', stackId: 's', position: 0, nextMergeable: true, dispatchIds: ['d1'] },
     { key: 'pr:acme/web#9', number: 9, stackId: 's', position: 1, nextMergeable: false, blockedBy: 8, dispatchIds: ['d1', 'd2', 'gone0000-culled'], watch },
   ],
   stacks: [{ id: 's', floor: 'main', numbers: [8, 9], nextNumber: 8 }],
@@ -30,7 +30,7 @@ describe('PR modal data', () => {
   it('selects the PR, its stack position and blocker, the linked chain, and the watch with its cursor', () => {
     const v = page.prModalView(snap, 'pr:acme/web#9')!;
     expect(v.pr.number).toBe(9);
-    expect(v.stack).toEqual({ numbers: [8, 9], position: 2, size: 2, floor: 'main', nextNumber: 8, nextMergeable: false, blockedBy: 8 });
+    expect(v.stack).toEqual({ numbers: [8, 9], titles: ['Base PR', ''], position: 2, size: 2, floor: 'main', nextNumber: 8, nextMergeable: false, blockedBy: 8 });
     expect(v.chain).toEqual([
       { id: 'd1', verb: 'done', modalKey: 'work:d1' },
       { id: 'd2', verb: 'working', modalKey: 'work:d2' },

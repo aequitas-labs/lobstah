@@ -145,6 +145,7 @@ import {
   addPrWatch,
   autoRegisterPrWatch,
   backfillPrWatches,
+  cutTitle,
   observeDispatchPrWatches,
   pollSecs,
   runPrCheck,
@@ -224,7 +225,7 @@ work (humans and agents):
                                   first check is a baseline: it forks
                                   nothing, and a PR already merged or
                                   closed is recorded and retired.
-  watch backfill [--apply]        list PRs in dispatch history with no watch
+  watch backfill [--apply]        list PRs in dispatch history with no watch or no title
                                   (dry run); --apply registers them. Read
                                   commands never register a watch.
   watch hold <key> [--for <id>] [--reason <text>]
@@ -1196,6 +1197,7 @@ async function mainCli(): Promise<void> {
             const ageMins = Math.max(0, Math.floor((now - Date.parse(r.observedAt)) / 60_000));
             return {
               number: `#${r.number}`,
+              title: cutTitle(r.title),
               repo: r.repo,
               state: r.state,
               badge: prBadge(r).text,
@@ -1205,7 +1207,7 @@ async function mainCli(): Promise<void> {
               watch: watch ? (watch.lastError ? 'error' : watch.done ? 'done' : 'watching') : 'no watch',
             };
           }),
-          ['number', 'repo', 'state', 'badge', 'draft', 'checks', 'observed', 'watch'],
+          ['number', 'title', 'repo', 'state', 'badge', 'draft', 'checks', 'observed', 'watch'],
         ),
       );
       break;
@@ -2265,7 +2267,7 @@ async function mainCli(): Promise<void> {
           toonTable(
             'backfill',
             rows.map((r) => ({ ...r })),
-            ['key', 'action', 'owner'],
+            rows.some((r) => r.error) ? ['key', 'action', 'owner', 'error'] : ['key', 'action', 'owner'],
           ),
         );
         console.log(
@@ -2273,6 +2275,7 @@ async function mainCli(): Promise<void> {
             applied: apply,
             register: rows.filter((r) => r.action === 'register').length,
             retire: rows.filter((r) => r.action === 'retire').length,
+            title: rows.filter((r) => r.action === 'title' && !r.error).length,
           }),
         );
         if (!apply && rows.length > 0) console.log('dry run — pass --apply to write');

@@ -3,7 +3,7 @@ import { DECK_TRAPS_MAX, LANDED_MAX, prBadgeClass } from '../../../src/glass-dif
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
-import { Age, KIND_TONE, Table, kindCell, kindLabel, opener, trapNow, windowAction } from './common.js';
+import { Age, KIND_TONE, Table, kindCell, kindLabel, opener, prName, stackNumbers, trapNow, windowAction } from './common.js';
 
 /**
  * On deck: attention, in flight, landed in the last 24h, traps, and open PR
@@ -49,7 +49,7 @@ function deckNotices(list: DeckAttention[]) {
 
 function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, DeckAttention[]>, view: View) {
   const next = members.find((p) => p.number === s.nextNumber) || members[0];
-  const chain = s.numbers.map((n) => '#' + n).join(' → ');
+  const chain = stackNumbers(s.numbers, new Map(members.map((p) => [p.number, p.title])));
   const nextText = next ? 'next #' + next.number : 'nothing mergeable';
   if (view === 'cards') {
     const card = (p: GlassPr) => {
@@ -58,7 +58,7 @@ function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, Deck
       const badges = kinds.length
         ? kinds.map((a) => html`<span class=${'badge ' + (KIND_TONE[a.kind] || 'dim')}>${kindLabel(a.kind)}</span>`)
         : html`<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>`;
-      return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top"><b>#${p.number} ${p.title || ''}</b>${badges}</div><div class="meta">${p.repo} · ${p.badge.text}${acked && ' · acked'}</div></div>`;
+      return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta">${p.repo} · ${p.badge.text}${acked && ' · acked'}</div></div>`;
     };
     return html`<div key=${s.id} class="deckstack"><div class="dim">${chain} · ${nextText}</div><div class="cards">${members.map(card)}</div></div>`;
   }

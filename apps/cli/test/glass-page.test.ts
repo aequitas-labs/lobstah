@@ -6,7 +6,7 @@ import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
-import { NOW, acceptanceFleet, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
+import { NOW, PR_TITLES, acceptanceFleet, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
 
 /**
  * The spyglass page, tested as a page: the built HTML loads into happy-dom,
@@ -335,7 +335,7 @@ describe('glass page: modals', () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#prs', '#42');
     const box = g.$('#modalbox')!;
-    expect(text(box.querySelector('h3'))).toBe('#42 PR 42 checks 3/4');
+    expect(text(box.querySelector('h3'))).toBe(`#42 ${PR_TITLES[42]} checks 3/4`);
     expect(text(box)).toContain('#41 → #42 → #43 · 2 of 3 · floor main · blocked by #41');
     expect(box.querySelector('b')?.textContent).toBe('#42');
     expect(g.$$('#modalbox .cmd code').map(text)).toEqual(['eyJoIjoiYWJjIn0-a-long-opaque-cursor']);
@@ -398,7 +398,7 @@ describe('glass page: PRs', () => {
     g.serve(d);
     await g.poll();
     const after = g.$$('#prs .card');
-    expect(text(after[0]!.querySelector('b'))).toBe('#99 fresh');
+    expect(text(after[0]!.querySelector('.prname'))).toBe('#99 fresh');
     expect(after.slice(1)).toEqual(cards);
     expect(g.$$('#prs h2').slice(1)).toEqual(heads);
   });
@@ -415,6 +415,60 @@ describe('glass page: PRs', () => {
     // Other (non-PR) watches list below, cursor shortened.
     expect(g.$$('#prs h2').map(text)).toEqual(['other watches']);
     expect(text(g.$$('#prs table')[1]!)).toContain('ci-nightly');
+  });
+
+  it('titles: the PRs table has a title column after the number; a PR without one leaves it empty', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#prs' });
+    expect(g.$$('#prs table')[0]!.querySelectorAll('th:not([colspan])')[1]!.textContent).toBe('title');
+    const rows = g.$$('#prs tr.rowhead').map((tr) => [...tr.querySelectorAll('td')].map(text));
+    expect(rows.map((r) => r.slice(0, 2))).toEqual([
+      ['#41', PR_TITLES[41]],
+      ['#42', PR_TITLES[42]],
+      ['#43', ''],
+    ]);
+  });
+
+  it('titles: a PR card shows the number bold and the title after it on one line; no title shows the number alone', async () => {
+    for (const hash of ['#deck', '#prs']) {
+      const g = await page(everyAttentionFleet(), { hash, prefs: { view: 'cards' } });
+      const names = g.$$(`${hash} .card .prname`);
+      const byNumber = Object.fromEntries(names.map((n) => [text(n.querySelector('b')), n]));
+      expect(text(byNumber['#41'])).toBe(`#41 ${PR_TITLES[41]}`);
+      expect(byNumber['#41']!.getAttribute('title')).toBe(PR_TITLES[41]);
+      expect(byNumber['#41']!.querySelectorAll('b')).toHaveLength(1);
+      expect(text(byNumber['#43'])).toBe('#43');
+      expect(byNumber['#43']!.hasAttribute('title')).toBe(false);
+    }
+  });
+
+  it('titles: the stack line stays numbers only, and each number carries its title', async () => {
+    const titled = (els: Element[]) => els.map((e) => [text(e), e.getAttribute('title')]);
+    const want = [
+      ['#41', PR_TITLES[41]],
+      ['#42', PR_TITLES[42]],
+      ['#43', null],
+    ];
+    const cards = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
+    const head = cards.$$('#prs h2').find((h) => text(h).startsWith('#41'))!;
+    expect(text(head)).toBe('#41 → #42 → #43 · floor main');
+    expect(titled([...head.querySelectorAll('span')])).toEqual(want);
+    const deck = await page(everyAttentionFleet());
+    const line = deck.$$('#deck .deckline').find((l) => text(l).startsWith('#41 →'))!;
+    expect(titled([...line.querySelectorAll('b > span')])).toEqual(want);
+    const modal = await page(acceptanceFleet());
+    await openRow(modal, '#prs', '#42');
+    const nums = [...modal.$('#modalbox')!.querySelectorAll('[title]')].filter((e) => /^#\d+$/.test(text(e)));
+    expect(titled(nums)).toEqual(want.slice(0, 2));
+    expect(nums[1]!.tagName).toBe('B');
+  });
+
+  it('titles: the PR modal header shows the title; a PR without one shows the number alone', async () => {
+    const g = await page(acceptanceFleet());
+    await openRow(g, '#prs', '#41');
+    expect(text(g.$('#modalbox h3'))).toBe(`#41 ${PR_TITLES[41]} green`);
+    await escape(g);
+    await openRow(g, '#prs', '#43');
+    expect(text(g.$('#modalbox h3'))).toBe('#43 draft');
   });
 
   it('a dispatch row carries its PR link, evidence badge, and merge gate', async () => {

@@ -191,7 +191,9 @@ Which commands register a watch. Only these write points register one:
   `lobstah status <id>` show it.
 - `lobstah watch add <key>` registers the watch you name.
 - `lobstah watch backfill --apply` registers watches for PRs in old dispatch
-  history. Without `--apply` it only lists them. Nothing runs it for you.
+  history, and fetches the title of each PR record that has none (one
+  `gh pr view --json title` per record). Without `--apply` it only lists
+  them. Nothing runs it for you.
 
 Read commands never register a watch: `catch`, `man tend`, `status`, `ls`,
 `prs`, `prs sync`, `attention`, and the glass. They read PR records and
@@ -260,7 +262,11 @@ with no `--for` — is how a helm follows a human's PR, or one whose
 dispatch chain was culled. Every observation lands in a PR record keyed by
 the PR, so it shows in the glass PRs tab and stacks and in tend's `pr:*`
 attention kinds exactly like a dispatched PR (its dispatch chain column is
-empty). It stays quiet while it's fine: only a failing check or a changes
+empty). Each PR card, PRs tab row, and PR modal header shows the PR's title
+after its number; a stack line shows numbers only, with each title on hover.
+`lobstah prs` prints the title, cut to 60 characters. Every check reads the
+title again, so a rename on GitHub shows on the next check and is never
+attention. It stays quiet while it's fine: only a failing check or a changes
 request surfaces as a watch event; a merge or close arrives as a notice.
 
 **PR order.** Every PR list uses one order: the glass PRs tab, the On deck
