@@ -74,7 +74,7 @@ export interface Watch {
    * buffering, but forks nothing until `lobstah watch release` clears it.
    */
   heldAt?: string;
-  /** Why the watch is held: the fork cap, a cancelled repair, or `watch hold --reason`. */
+  /** Why the watch is held: the fork cap, a cancelled repair, or the default watch-hold reason. */
   heldReason?: string;
   /** `watch hold --for <id>`: the hold ends when that dispatch ends. */
   heldFor?: string;

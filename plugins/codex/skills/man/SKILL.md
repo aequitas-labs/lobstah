@@ -39,6 +39,8 @@ lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
 lobstah dispatch ... --for <trap-name>             # address it to one trap
 lobstah send <id>|<trap-name> "<instruction>"      # steer live/queued work; wake
                                                   # finished work as a follow-up
+lobstah dispatch --repo <key> --follow-up <id> --brief-text "<instruction>" --for <name>
+                                                  # choose a follow-up worker; --harness/--model also belong here
 lobstah status <id>                               # reconciled state + last note
 lobstah catch <id>                                # evidence: branch, commits, PR
 lobstah cancel <id>                               # cut one away

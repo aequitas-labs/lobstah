@@ -149,7 +149,6 @@ import {
   observeDispatchPrWatches,
   pollSecs,
   runPrCheck,
-  syncPrWatches,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
 import { finishResolvedWaits, registerWaitWatch } from './pr-waits.js';
@@ -187,7 +186,6 @@ work (humans and agents):
   send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--] <message>
                                   steer a live chain, queue for its pending
                                   member, or wake finished work as a follow-up;
-                                  --no-wake leaves finished mail unread
                                   (arrives at its next park; undeliverable
                                   messages bounce to the helm)
   inbox <uuid>                    read and acknowledge pending messages
@@ -229,7 +227,7 @@ work (humans and agents):
   watch backfill [--apply]        list PRs in dispatch history with no watch
                                   (dry run); --apply registers them. Read
                                   commands never register a watch.
-  watch hold <key> [--for <id>] [--reason <text>]
+  watch hold <key> [--for <id>]
                                   hold PR repairs for one PR; with --for the
                                   hold ends when that dispatch ends
   watch release <key>|--all       end a hold: a watch held by the per-cycle
@@ -896,13 +894,11 @@ async function mainCli(): Promise<void> {
         break;
       }
       const chain = dispatchChain(target);
-      const targetMember = chain.find((item) => item.id === target)!;
-      const noWakeFinished = has('--no-wake') && targetMember.bucket === 'done';
       const active = chain.filter(liveChainMember).at(-1);
       const queued = chain.filter((member) => member.bucket === 'queue').at(-1);
-      const recipient = noWakeFinished ? undefined : (active ?? queued);
-      if (recipient || noWakeFinished) {
-        const member = recipient ?? targetMember;
+      const recipient = active ?? queued;
+      if (recipient) {
+        const member = recipient;
         const attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(member.id, member.lane)) ?? [];
         const block = attachmentBlock(attachments);
         const name = sendMessage(
@@ -914,7 +910,6 @@ async function mainCli(): Promise<void> {
         );
         console.log(`delivered: inbox of ${member.id}${member.bucket === 'queue' ? ' (queued)' : ''}`);
         console.log(toonKV({ id: member.id, from, queued: name }));
-        if (noWakeFinished) console.log('warning: --no-wake left this message in a finished dispatch; nothing will read it.');
         break;
       }
       const origin = chain.at(-1)!;
@@ -922,27 +917,23 @@ async function mainCli(): Promise<void> {
       if (origin.bucket !== 'done' && lastVerb !== 'needs-decision' && lastVerb !== 'blocked') {
         throw new Error(`dispatch ${origin.id} has no live worker but is not finished — wait for reconciliation before sending`);
       }
-      let address = opt('--for');
+      let address: string | undefined;
       let headless = false;
-      if (!address) {
-        const claimFile = path.join(laneDirs(origin.lane)[origin.bucket], origin.id, 'claim.json');
-        let claimedBy: string | undefined;
-        try {
-          claimedBy = (JSON.parse(fs.readFileSync(claimFile, 'utf8')) as { by?: string }).by;
-        } catch {
-          claimedBy = readEvidence(origin.id, origin.lane).deliveredTo;
-        }
-        const trap = claimedBy?.startsWith('wt:') ? readTrap(claimedBy.slice('wt:'.length)) : undefined;
-        if (trap && Date.now() - (Date.parse(trap.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000) address = claimedBy;
-        else headless = true;
+      const claimFile = path.join(laneDirs(origin.lane)[origin.bucket], origin.id, 'claim.json');
+      let claimedBy: string | undefined;
+      try {
+        claimedBy = (JSON.parse(fs.readFileSync(claimFile, 'utf8')) as { by?: string }).by;
+      } catch {
+        claimedBy = readEvidence(origin.id, origin.lane).deliveredTo;
       }
+      const trap = claimedBy?.startsWith('wt:') ? readTrap(claimedBy.slice('wt:'.length)) : undefined;
+      if (trap && Date.now() - (Date.parse(trap.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000) address = claimedBy;
+      else headless = true;
       const followUp: Descriptor = {
         id: randomUUID(),
         repo: origin.descriptor.repo,
         brief: `Follow-up instruction from ${from} on dispatch ${origin.id}:\n${text}`,
         followUp: origin.id,
-        harness: opt('--harness'),
-        model: opt('--model'),
         for: address,
       };
       const warnings = startDispatch(followUp, origin.lane, values('--attach'), sender);
@@ -1199,10 +1190,6 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'prs': {
-      if (pos[0] === 'sync') {
-        console.log(toonKV(syncPrWatches()));
-        break;
-      }
       const now = Date.now();
       const watches = new Map(listWatches().map((w) => [w.key, w]));
       const records = readPrs();
@@ -2295,7 +2282,7 @@ async function mainCli(): Promise<void> {
         const forId = opt('--for');
         if (forId) findLane(forId); // an unknown dispatch throws
         const w = holdWatch(key, new Date(), {
-          reason: opt('--reason') ?? (forId ? `held for dispatch ${forId.slice(0, 8)}` : 'held by `lobstah watch hold`'),
+          reason: forId ? `held for dispatch ${forId.slice(0, 8)}` : 'held by `lobstah watch hold`',
           ...(forId ? { forId } : {}),
           by: forId ? `dispatch:${forId.slice(0, 8)}` : 'hold',
         });

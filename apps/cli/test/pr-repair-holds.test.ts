@@ -300,12 +300,17 @@ describe('holds on the watch', () => {
     stand(STACK[0]!);
     const holder = uuid('e');
     activeDispatch(holder);
-    const out = spawnSync(process.execPath, [cli, 'watch', 'hold', 'acme/web#1', '--for', holder, '--reason', 'step 2 pushes this PR'], {
+    const out = spawnSync(process.execPath, [cli, 'watch', 'hold', 'acme/web#1', '--for', holder], {
       env: { ...process.env, LOBSTAH_HOME: dir },
       encoding: 'utf8',
     });
     expect(out.status).toBe(0);
-    expect(readWatch(key(1))).toMatchObject({ heldFor: holder, heldReason: 'step 2 pushes this PR', heldBy: 'dispatch:eeeeeeee' });
+    expect(readWatch(key(1))).toMatchObject({ heldFor: holder, heldReason: 'held for dispatch eeeeeeee', heldBy: 'dispatch:eeeeeeee' });
+    const removedReason = spawnSync(process.execPath, [cli, 'watch', 'hold', 'acme/web#1', '--reason', 'custom'], {
+      env: { ...process.env, LOBSTAH_HOME: dir }, encoding: 'utf8',
+    });
+    expect(removedReason.status).toBe(2);
+    expect(removedReason.stdout).toContain('unknown flag --reason');
     expect(repair()).toBe(0);
     expect(readPr(key(1))?.repair).toMatchObject({ status: 'waiting', heldBy: 'dispatch:eeeeeeee' });
     appendStatus(holder, 'work', 'done', 'finished');

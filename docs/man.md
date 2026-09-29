@@ -54,9 +54,9 @@ the background, dispatch it with the `lobstah` CLI instead of doing it inline:
 - `lobstah status [<id>]`, `lobstah ls` — check progress when I ask, not on a loop.
 - `lobstah send <id> "<instruction>"` — steer a live dispatch, add to a queued
   dispatch's inbox, or wake a finished chain as a follow-up. Sending to any
-  member of a finished chain follows up its newest member. Use `--no-wake` to
-  leave a message in a finished inbox without starting work (nothing reads it).
-  A new follow-up accepts `--harness`, `--model`, and `--for wt:<trap>`.
+  member of a finished chain follows up its newest member. To choose a new
+  worker, harness, or model, use `lobstah dispatch --follow-up <id> --repo
+  <key> --brief-text "<instruction>" --for <name> --harness <kind> --model <m>`.
 - `lobstah cancel <id>` — stop one.
 - A dispatch reporting `needs-decision` is waiting on ME — surface its question
   immediately, then `lobstah send` my answer.
@@ -225,8 +225,8 @@ Which commands register a watch. Only these write points register one:
   history. Without `--apply` it only lists them. Nothing runs it for you.
 
 Read commands never register a watch: `catch`, `man tend`, `status`, `ls`,
-`prs`, `prs sync`, `attention`, and the glass. They read PR records and
-watches that already exist. `prs sync` refreshes existing PR watches only.
+`prs`, `attention`, and the glass. They read PR records and watches that
+already exist. Use `watch check-pr <key>` to force one PR-watch refresh.
 
 The first check of a new watch is a baseline:
 
@@ -281,7 +281,7 @@ work. `[watch].autoRepair`, `conflicts`, and `checks` control this behavior.
 - For a checks repair: a fresh read of the latest run of each failing check
   shows that run in progress or passed.
 - The PR's watch is held. `lobstah cancel` on a repair dispatch holds its
-  PR's watch. `lobstah watch hold <key> [--for <id>] [--reason <text>]`
+  PR's watch. `lobstah watch hold <key> [--for <id>]`
   holds one PR's watch; with `--for`, the hold ends when that dispatch
   ends. `lobstah watch release <key>` ends any hold.
 
