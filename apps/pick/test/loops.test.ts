@@ -8,7 +8,7 @@ import { PickupState } from '../src/state.js';
 import { dispatchLoop } from '../src/loops/dispatch.js';
 import { reportLoop } from '../src/loops/report.js';
 import { reconcileLoop } from '../src/loops/reconcile.js';
-import { approvalDedupKey, mergeLoop, qualifiedApproval, qualifyingSet } from '../src/loops/merge.js';
+import { approvalDedupKey, mergeLoop, qualifiedApproval, qualifyingSet, staleApprovals } from '../src/loops/merge.js';
 import { DEFAULT_MERGE_POLICY } from '../src/types.js';
 import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../src/types.js';
 import { readMergeView } from '../src/merge-view.js';
@@ -491,6 +491,7 @@ class FakeMergeSource implements MergeSource {
   candidates: PrCandidate[] = [];
   merged: number[] = [];
   updated: number[] = [];
+  reviewRequests: Array<{ n: number; reviewers: string[] }> = [];
   comments: Array<{ n: number; text: string }> = [];
   labels: Array<{ n: number; label: string }> = [];
 
@@ -499,6 +500,7 @@ class FakeMergeSource implements MergeSource {
   async mergeCandidates() { return this.candidates; }
   async refresh(n: number) { return this.candidates.find((c) => c.number === n); }
   async updateBranch(n: number) { this.updated.push(n); }
+  async requestReview(n: number, reviewers: string[]) { this.reviewRequests.push({ n, reviewers }); }
   async merge(n: number) { this.merged.push(n); }
   async comment(n: number, text: string) { this.comments.push({ n, text }); }
   async addLabel(n: number, label: string) { this.labels.push({ n, label }); }
@@ -539,9 +541,64 @@ describe('merge policy — monotone by construction', () => {
   it('an approval on a stale head does not qualify', () => {
     expect(qualifiedApproval(policy, pr({ reviews: [{ id: 10, author: 'chris', state: 'APPROVED', sha: 'old' }] }))).toBeUndefined();
   });
+  it('finds only qualifying stale approvers and never the author', () => {
+    expect(staleApprovals(policy, pr({ reviews: [
+      { id: 10, author: 'chris', state: 'APPROVED', sha: 'old' },
+      { id: 11, author: 'alice', state: 'APPROVED', sha: 'older' },
+      { id: 12, author: 'bob', state: 'APPROVED', sha: 'old' },
+      { id: 13, author: 'lobstah-bot', state: 'APPROVED', sha: 'old' },
+    ] }))).toEqual(['chris', 'alice']);
+  });
+  it('an outstanding change request suppresses every stale approval', () => {
+    expect(staleApprovals(policy, pr({ reviews: [
+      { id: 10, author: 'chris', state: 'APPROVED', sha: 'old' },
+      { id: 11, author: 'bob', state: 'CHANGES_REQUESTED', sha: 'abc' },
+    ] }))).toEqual([]);
+  });
+  it('non-qualifying and author approvals alone are not stale approval signals', () => {
+    expect(staleApprovals(policy, pr({ reviews: [
+      { id: 10, author: 'bob', state: 'APPROVED', sha: 'old' },
+      { id: 11, author: 'lobstah-bot', state: 'APPROVED', sha: 'old' },
+    ] }))).toEqual([]);
+  });
 });
 
 describe('merge loop', () => {
+  it('re-requests a stale approval once per head and distinguishes a never-approved PR', async () => {
+    const ms = new FakeMergeSource();
+    const stale = pr({ reviews: [{ id: 10, author: 'alice', state: 'APPROVED', sha: 'old' }] });
+    const never = pr({ number: 2, url: 'https://x/pr/2', reviews: [] });
+    ms.candidates = [stale, never];
+    const st = new PickupState();
+    await mergeLoop(ms, policy, st);
+    expect(ms.reviewRequests).toEqual([{ n: 1, reviewers: ['alice'] }]);
+    expect(readMergeView()!.open.map((p) => [p.number, p.gate])).toEqual([
+      [1, 'stale-approval'], [2, 'waiting-approval'],
+    ]);
+    await mergeLoop(ms, policy, st);
+    expect(ms.reviewRequests).toHaveLength(1);
+    stale.headSha = 'new-head';
+    await mergeLoop(ms, policy, st);
+    expect(ms.reviewRequests).toEqual([
+      { n: 1, reviewers: ['alice'] }, { n: 1, reviewers: ['alice'] },
+    ]);
+    expect(new PickupState().reviewRequested('fake-merge#1', 'new-head')).toBe(true);
+  });
+
+  it('records the head even if a stale review re-request is refused', async () => {
+    const ms = new FakeMergeSource();
+    ms.candidates = [pr({ reviews: [{ id: 10, author: 'alice', state: 'APPROVED', sha: 'old' }] })];
+    let attempts = 0;
+    ms.requestReview = async () => { attempts++; throw new Error('reviewer unavailable'); };
+    const notes: string[] = [];
+    const st = new PickupState();
+    await mergeLoop(ms, policy, st, (note) => notes.push(note));
+    await mergeLoop(ms, policy, st, (note) => notes.push(note));
+    expect(attempts).toBe(1);
+    expect(notes.some((note) => note.includes('review re-request refused: reviewer unavailable'))).toBe(true);
+    expect(readMergeView()!.open[0]?.gate).toBe('stale-approval');
+  });
+
   it('merges a qualified PR and consumes the approval exactly once', async () => {
     const ms = new FakeMergeSource();
     ms.candidates = [pr()];

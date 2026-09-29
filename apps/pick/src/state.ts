@@ -27,6 +27,7 @@ export interface MapEntry {
 interface StateFile {
   map: Record<string, MapEntry>;
   consumedApprovals: Record<string, string>;
+  requestedReviews: Record<string, string>;
   rebases: Record<string, { uuid: string; failed?: boolean }>;
 }
 
@@ -45,9 +46,10 @@ export class PickupState {
     this.file = path.join(dir, 'state.json');
     this.data = fs.existsSync(this.file)
       ? (JSON.parse(fs.readFileSync(this.file, 'utf8')) as StateFile)
-      : { map: {}, consumedApprovals: {}, rebases: {} };
+      : { map: {}, consumedApprovals: {}, requestedReviews: {}, rebases: {} };
     this.data.map ??= {};
     this.data.consumedApprovals ??= {};
+    this.data.requestedReviews ??= {};
     this.data.rebases ??= {};
   }
 
@@ -85,6 +87,14 @@ export class PickupState {
   }
   consumeApproval(dedupKey: string): void {
     this.data.consumedApprovals[dedupKey] = new Date().toISOString();
+    this.save();
+  }
+
+  reviewRequested(prKey: string, headSha: string): boolean {
+    return this.data.requestedReviews[prKey] === headSha;
+  }
+  markReviewRequested(prKey: string, headSha: string): void {
+    this.data.requestedReviews[prKey] = headSha;
     this.save();
   }
 

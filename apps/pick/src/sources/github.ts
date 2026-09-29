@@ -285,6 +285,13 @@ export class GithubSource implements Source, MergeSource {
     await this.api('PUT', `/repos/${this.cfg.repo}/pulls/${n}/update-branch`, {});
   }
 
+  async requestReview(n: number, reviewers: string[]): Promise<void> {
+    const pr = await this.api<GhPull>('GET', `/repos/${this.cfg.repo}/pulls/${n}`);
+    const requested = [...new Set(reviewers.filter((reviewer) => reviewer.toLowerCase() !== pr.user.login.toLowerCase()))];
+    if (requested.length === 0) return;
+    await this.api('POST', `/repos/${this.cfg.repo}/pulls/${n}/requested_reviewers`, { reviewers: requested });
+  }
+
   async merge(n: number, method: string): Promise<void> {
     await this.api('PUT', `/repos/${this.cfg.repo}/pulls/${n}/merge`, { merge_method: method });
   }

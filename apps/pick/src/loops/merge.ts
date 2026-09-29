@@ -31,6 +31,16 @@ export function qualifiedApproval(policy: MergePolicy, pr: PrCandidate): PrCandi
   return pr.reviews.find((r) => r.state === 'APPROVED' && r.sha === pr.headSha && set.includes(r.author));
 }
 
+/** Qualifying reviewers whose approval was for a previous head, unless a
+ * change request remains outstanding. GitHub does not dismiss these reviews. */
+export function staleApprovals(policy: MergePolicy, pr: PrCandidate): string[] {
+  if (pr.reviews.some((r) => r.state === 'CHANGES_REQUESTED')) return [];
+  const qualifying = qualifyingSet(policy, pr);
+  return [...new Set(pr.reviews
+    .filter((r) => r.state === 'APPROVED' && r.sha !== pr.headSha && r.author !== pr.author && qualifying.includes(r.author))
+    .map((r) => r.author))];
+}
+
 export function approvalDedupKey(pr: PrCandidate, review: { id: number }): string {
   return `${pr.number}#${review.id}@${pr.headSha}`;
 }
@@ -79,6 +89,25 @@ export async function mergeLoop(
       uuid: m?.[1],
     });
   };
+  const holdForApproval = async (pr: PrCandidate, prKey: string): Promise<void> => {
+    const reviewers = staleApprovals(policy, pr);
+    if (reviewers.length === 0) {
+      observe(pr, 'waiting-approval');
+      return;
+    }
+    if (!state.reviewRequested(prKey, pr.headSha)) {
+      // Record the head even if GitHub rejects the request. A refusal is not
+      // a reason to retry on every tick; a new head gets a new attempt.
+      state.markReviewRequested(prKey, pr.headSha);
+      try {
+        await ms.requestReview(pr.number, reviewers);
+        log(`${prKey}: stale approval — requested review from ${reviewers.join(', ')}`);
+      } catch (err) {
+        log(`${prKey}: review re-request refused: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    observe(pr, 'stale-approval');
+  };
 
   for (const candidate of await ms.mergeCandidates()) {
     const prKey = `${ms.name}#${candidate.number}`;
@@ -108,7 +137,8 @@ export async function mergeLoop(
 
     const provisional = qualifiedApproval(policy, candidate);
     if (!provisional || state.approvalConsumed(approvalDedupKey(candidate, provisional))) {
-      observe(candidate, 'waiting-approval');
+      if (!provisional) await holdForApproval(candidate, prKey);
+      else observe(candidate, 'waiting-approval');
       continue;
     }
 
@@ -118,7 +148,7 @@ export async function mergeLoop(
     const approval = qualifiedApproval(policy, pr);
     if (!approval) {
       log(`${prKey}: gate no longer holds on fresh fetch — skipping`);
-      observe(pr, 'waiting-approval');
+      await holdForApproval(pr, prKey);
       continue;
     }
     const dedupKey = approvalDedupKey(pr, approval);
