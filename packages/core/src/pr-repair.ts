@@ -40,12 +40,34 @@ export function repairLimit(n: number): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 2;
 }
 
+/** How many times a worker retries a push rejected because the PR branch moved. */
+export const PUSH_RETRIES = 3;
+
+/** The start of the failed note a worker writes when it cannot push to its PR's branch. */
+export const PUSH_REJECTED = 'push rejected:';
+
+/**
+ * The push rule for a worker on an existing PR: push to the PR's head
+ * branch only; on a non-fast-forward rejection fetch, rebase onto the moved
+ * head, and push with a lease, up to three times; never a new branch or PR.
+ */
+export function pushRule(branch: string | undefined, id = '<dispatch id>'): string {
+  const b = branch ?? "the PR's head branch";
+  return [
+    `Push only to the existing branch ${b}.`,
+    `If the push is rejected as non-fast-forward because ${b} moved, fetch ${b}, rebase your commits onto the moved head again, and push with \`--force-with-lease=${b}:<the head you just fetched>\`. Retry at most ${PUSH_RETRIES} times.`,
+    'If a push hook fails with a real test or type error, do not retry the push: fix the error, commit, and push again.',
+    `If you still cannot push, report \`lobstah report ${id} failed "${PUSH_REJECTED} <rejection text>; moved head <full sha of the head you fetched>"\` and leave the PR as it was.`,
+    'Never push to another branch. Never open a new PR.',
+  ].join(' ');
+}
+
 /** The repair prompt uses the PR's actual base branch, including stacked PRs. */
-export function repairBrief(pr: PrRecord, kind: RepairKind): string {
+export function repairBrief(pr: PrRecord, kind: RepairKind, id?: string): string {
   const intro = `Repair ${pr.url} on its existing branch ${pr.headRefName ?? '(see PR)'} at ${pr.headSha}. Do not open a new PR.`;
-  const finish = 'Run the relevant tests. Push the PR branch and report done with the same PR URL.';
+  const finish = `Run the relevant tests. ${pushRule(pr.headRefName, id)} Report done with the same PR URL.`;
   if (kind === 'conflict')
-    return `${intro}\nFetch the PR's base branch ${pr.baseRefName ?? '(read from PR)'}. Bring the PR branch up to date with that base by this repo's convention. Resolve conflicts while keeping both sides' intent. Push with --force-with-lease only if you rebased. ${finish}`;
+    return `${intro}\nFetch the PR's base branch ${pr.baseRefName ?? '(read from PR)'}. Bring the PR branch up to date with that base by this repo's convention. Resolve conflicts while keeping both sides' intent. ${finish}`;
   if (kind === 'checks') {
     const checks = (pr.failingChecks ?? []).map((c) => `- ${c.name}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`).join('\n');
     return `${intro}\nLatest failing checks:\n${checks || '- Read the failing check from GitHub'}\nRead each check log. Fix a real failure. If it is a flake, rerun it at most once. ${finish}`;

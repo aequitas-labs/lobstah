@@ -1,4 +1,4 @@
-import { attachmentBlock, VERBS, WAITING_ON } from '@lobstah/core';
+import { attachmentBlock, pushRule, VERBS, WAITING_ON } from '@lobstah/core';
 import type { Attachment, ChainPr } from '@lobstah/core';
 
 /**
@@ -26,7 +26,7 @@ export function buildPrompt(brief: string, opts: { id: string; nudge?: string; a
       `\`lobstah report ${opts.id} paused "<note>" --waiting-on ${WAITING_ON.join('|')} --link <url>\`. Report \`working\` when you resume.`,
     opts.existingPr
       ? `Commit your work with clear messages. This chain already has PR ${opts.existingPr.url}. The runner does not push or open another PR. ` +
-        `Push your changes to its existing head branch${opts.existingPr.headRefName ? ` ${opts.existingPr.headRefName}` : ' (inspect the PR to find it)'}; do not create a duplicate PR. ` +
+        `${pushRule(opts.existingPr.headRefName, opts.id)} ` +
         `Report done with the same PR URL. Do not merge anything.`
       : `Commit your work with clear messages. The runner pushes committed HEAD early and opens or adopts one draft PR for the branch when available; do not create a duplicate PR. ` +
         `When finished, mark the draft ready for review if appropriate, then report done with its URL. Do not merge anything.`,

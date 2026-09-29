@@ -69,6 +69,7 @@ background task.
 - `report --pr` (any verb but failed) and a trap's first push register a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; lobstah repairs conflicts and failed checks on its own PRs, and attention means it gave up or cannot act.
 - A repair waits while a live worker holds the PR's branch or a branch below it in the stack, until the PR is unchanged for `[watch].repairSettleSecs`, and while the PR's watch is held. A wait raises no attention; `man tend` lists it under `repairs waiting`. `lobstah cancel` on a repair holds its PR until `lobstah watch release <key>`. A brief whose worker will push to other PRs can tell it to run `lobstah watch hold <key> --for <its dispatch id>` first.
+- A repair or rebase pushes only to its PR's branch: on a non-fast-forward rejection its worker fetches, rebases onto the moved head, and pushes with `--force-with-lease`, at most three times. When it cannot push it reports `failed "push rejected: ..."`: the PR's repair is `blocked`, a `push-failed` notice arrives, and the PR is left as it was. It never opens a branch or a PR.
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.
 - File a report with `lobstah man file <file.md> [--attach <file>]` when you have findings worth keeping. Ack a report with `lobstah attention ack <key>` when the human says so.
 

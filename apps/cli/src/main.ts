@@ -160,7 +160,7 @@ import {
   runPrCheck,
   syncPrWatches,
 } from './pr-watch.js';
-import { deliverPrRepairs, holdCancelledRepair, stampRepairerBeat } from './pr-repair.js';
+import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, stampRepairerBeat } from './pr-repair.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { runBeat } from './beat.js';
@@ -1027,6 +1027,8 @@ async function mainCli(): Promise<void> {
         }
       }
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true);
+      // A PR-bound worker that could not push: mark its PR record and tell the helm.
+      if (verb === 'failed') recordPushFailure(id, lane, note);
       // A trap reports from its own checkout, or names its session from
       // anywhere else (a primary checkout): keep its last commit as the
       // ownership anchor for safe PR-watch repairs after the session moves on.

@@ -173,6 +173,12 @@ export interface PrRepair {
   /** A settle wait: the earliest time the repair can be queued (ISO). */
   until?: string;
   dispatchId?: string;
+  /**
+   * A failed push: the head the repair started from. The record is marked
+   * at the moved head (`headSha`); this head is covered too until the PR
+   * watch observes the move.
+   */
+  fromHeadSha?: string;
   observationsAtRepair?: number;
   /** Atomic claim metadata for one repairer. */
   startedAt?: string;

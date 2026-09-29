@@ -26,7 +26,7 @@ import {
   resolveDispatch,
   worktreeProgress,
 } from '@lobstah/core';
-import type { Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
+import type { ChainPr, Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
 import { loadAdapter } from '@lobstah/adapters';
 import type { Adapter, AdapterRun } from '@lobstah/adapters';
 import { allocate, chooseWorktree, collectEvidence, prepareReuse, worktreePath } from '@lobstah/worktree';
@@ -75,6 +75,19 @@ function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 }
 
 const short = (s: string) => s.slice(0, 8);
+
+/**
+ * The existing PR a dispatch works on: the one its descriptor names (a
+ * repair or a rebase), else its origin chain's PR. The runner pushes no
+ * branch and opens no PR for such a dispatch.
+ */
+export function boundPr(descriptor: Descriptor, lane: Lane): ChainPr | undefined {
+  if (descriptor.pr?.url) {
+    const chain = descriptor.followUp ? chainPr(descriptor.followUp, lane) : undefined;
+    return { url: descriptor.pr.url, headRefName: descriptor.pr.headRefName ?? (chain?.url === descriptor.pr.url ? chain.headRefName : undefined) };
+  }
+  return descriptor.followUp ? chainPr(descriptor.followUp, lane) : undefined;
+}
 
 /** The note a cold replacement session reads in place of the conversation. */
 function coldNote(cold: NonNullable<StartPlan['cold']>, cwd: string, trunk: string): string {
@@ -191,7 +204,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   // A follow-up belongs to the origin chain's PR even when its checkout has
   // a different local branch name. Seed evidence before remote polling starts.
-  const existingPr = descriptor.followUp ? chainPr(descriptor.followUp, lane) : undefined;
+  const existingPr = boundPr(descriptor, lane);
   if (existingPr) mergeEvidence(id, lane, { prUrl: existingPr.url });
 
   const remotePolicy = {
