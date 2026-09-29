@@ -61,6 +61,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   falls back to a headless worker. `man tend` lists live traps.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
+- A question you do not answer walks to the human when your turn ends.
 - `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long. A paused headless dispatch is parked: its session ends and it holds no slot. A message (`lobstah send`) or its `--until` wakes it into the same session. When the PR it waits on merges, lobstah finishes it `done`; closed without merge, `failed`.
 - Before you wait on something external yourself, say what.
 For ume, push with its non-blocking form; Codex cannot run an await as a
@@ -73,6 +74,7 @@ tracked background task. End the turn while the external operation runs.
 - Daemon repairs run as chores under `[limits].choreConcurrent`. A trap-built PR's repair waits for its live owning trap up to `[watch].repairTrapWaitSecs` (default 600), then runs headless in its own PR-branch checkout. A headless-built PR's repair runs headless in its origin worktree when safe. Headless chores never use a trap's worktree. A person's addressed work never falls back. Tend, daemon status, doctor, and the glass show the PR, lane, worker, and trap wait.
 - A repair or rebase pushes only to its PR's branch: on a non-fast-forward rejection its worker fetches, rebases onto the moved head, and pushes with `--force-with-lease`, at most three times. When it cannot push it reports `failed "push rejected: ..."`: the PR's repair is `blocked`, a `push-failed` notice arrives, and the PR is left as it was. It never opens a branch or a PR.
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.
+- File a report with `lobstah man file <file.md> [--attach <file>]` when you have findings worth keeping. Ack a report with `lobstah attention ack <key>` when the human says so.
 
 ## Getting woken instead of polling
 

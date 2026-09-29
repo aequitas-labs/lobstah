@@ -158,6 +158,9 @@ final class PetView: NSView {
   weak var pet: Pet?
   override func mouseDown(with event: NSEvent) {
     guard let item = pet?.item else { focusHelm(); return }
+    // A report opens in the spyglass and stays unacked: only
+    // `lobstah attention ack` (the menu's Acknowledge) acks a report.
+    if let url = item.reportLink(glass: glassURL) { NSWorkspace.shared.open(url); return }
     // A click is the human taking it: open the target, and ack so the pet
     // stops walking this state on the next poll.
     if let url = item.prLink { NSWorkspace.shared.open(url) } else { focusHelm() }

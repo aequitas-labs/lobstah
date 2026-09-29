@@ -3,6 +3,8 @@
  * page's Lobs component. The page's bundle imports it, so the browser and
  * the tests run the same code — keep it free of Node imports.
  */
+import { reportModal } from './glass-diff.js';
+import type { ModalRef } from './glass-diff.js';
 
 export interface LobAttention {
   id: string;
@@ -22,8 +24,8 @@ export interface LobAttention {
 export interface LobItem {
   key: string;
   text: string;
-  /** The modal a lob opens in the page (a question's dispatch, the preview's helm). */
-  open?: { type: 'dispatch' | 'helm'; key: string };
+  /** The modal a lob opens in the page (a question's dispatch, a report, the preview's helm). */
+  open?: ModalRef;
   /** A PR lob is a plain link out — the glass opens, never acts. */
   href?: string;
   /** The short kind label shown before the text (draft, review, checks, ready, landed, watch). */
@@ -55,6 +57,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
     'pr:ready': 'ready',
     landed: 'landed',
     watch: 'watch',
+    report: 'report',
   };
   const hidden = opts.hidden ?? {};
   let items: LobItem[] = att
@@ -68,7 +71,9 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
             key: (x.kind ?? 'question') + ':' + (x.key ?? x.lane + ':' + x.id),
             text: x.note || x.verb,
             label,
-            ...(x.kind === 'watch' ? {} : { open: { type: 'dispatch' as const, key: x.lane + ':' + x.id } }),
+            ...(x.kind === 'watch'
+              ? {}
+              : { open: x.kind === 'report' && x.key ? reportModal(x.key) : { type: 'dispatch' as const, key: x.lane + ':' + x.id } }),
             ...hide,
           };
     });

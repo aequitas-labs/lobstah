@@ -13,6 +13,8 @@ export interface GlassDom {
   serve(d: GlassSnapshot): void;
   /** How many times the page fetched /data. */
   fetches(): number;
+  /** The /report/ URLs the page fetched, in order. */
+  reportFetches(): string[];
   /** The poll intervals (ms) the page currently holds. */
   intervals(): number[];
   /** Hide or show the tab (visibilitychange). */
@@ -41,6 +43,8 @@ export interface GlassDomOptions {
   prefs?: Record<string, unknown>;
   hidden?: boolean;
   initialScroll?: number;
+  /** Other URLs the page fetches (a report's markdown), by path; any other /report/ path is a 404. */
+  files?: Record<string, string>;
 }
 
 export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: GlassDomOptions): Promise<GlassDom> {
@@ -66,7 +70,13 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
     scrollY = y;
     scrolls.push(y);
   };
-  w.fetch = async () => {
+  const fetched: string[] = [];
+  w.fetch = async (url: string) => {
+    if (typeof url === 'string' && url.startsWith('/report/')) {
+      fetched.push(url);
+      const file = opts.files?.[url];
+      return { ok: file !== undefined, status: file !== undefined ? 200 : 404, text: async () => file ?? 'not found' };
+    }
     count++;
     const body = JSON.parse(JSON.stringify(current));
     return { json: async () => body };
@@ -115,6 +125,7 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
       current = d;
     },
     fetches: () => count,
+    reportFetches: () => [...fetched],
     intervals: () => [...intervals.values()].map((i) => i.ms),
     hide: async (hidden: boolean) => {
       Object.defineProperty(window.document, 'hidden', { value: hidden, configurable: true });

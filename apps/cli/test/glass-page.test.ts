@@ -83,7 +83,7 @@ describe('glass page: tabs and hash routing', () => {
     const waiting = { ...live, trapId: 'parked', label: 'parked trap', claimed: parked.id, catches: [parked] };
     d.traps = [live, idle, waiting];
     const g = await page(d, { hash: '#deck', prefs: { view: 'table' } });
-    const deck = g.$$('#deck section')[3]!;
+    const deck = g.$$('#deck section')[4]!;
     expect(text(deck)).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
     expect(text(deck)).toContain('idle · not listening');
     expect(text(deck)).toContain('parked · waiting on review');
@@ -96,7 +96,7 @@ describe('glass page: tabs and hash routing', () => {
     expect(rows.map(text).join(' ')).toContain('parked · waiting on review');
   });
 
-  it('shows Open window on live traps in the table, cards, deck, and modal only', async () => {
+  it('shows the ↗ open button on live traps in the table, cards, deck, and modal only', async () => {
     const d = acceptanceFleet();
     d.focusSupported = true;
     d.focusToken = 'fixture-token';
@@ -105,19 +105,19 @@ describe('glass page: tabs and hash routing', () => {
     const g = await page(d, { hash: '#traps' });
     const t1 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1'))!;
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
-    expect(text(t1)).toContain('Open window');
-    expect(text(t2)).not.toContain('Open window');
+    expect(text(t1)).toContain('↗ open');
+    expect(text(t2)).not.toContain('↗ open');
     expect(text(t2)).toContain('codex resume past-session');
     await click(g, t1.querySelector('button'));
     expect(g.$('#overlay')!.className).toBe('');
     await click(g, t1);
-    expect(text(g.$('#modalbox'))).toContain('Open window');
+    expect(text(g.$('#modalbox'))).toContain('↗ open');
     await escape(g);
     await g.go('#deck');
-    expect(text(g.$('#deck'))).toContain('Open window');
+    expect(text(g.$('#deck'))).toContain('↗ open');
     await g.go('#traps');
     const cardPage = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
-    expect(text(cardPage.$('#traps'))).toContain('Open window');
+    expect(text(cardPage.$('#traps'))).toContain('↗ open');
   });
   it('opens On deck by default and follows the hash to each tab', async () => {
     const g = await page(acceptanceFleet());
@@ -494,16 +494,16 @@ describe('glass page: PRs', () => {
 });
 
 describe('glass page: On deck', () => {
-  it('shows attention (no pr:* kinds), in flight, landed, traps, and PR stacks as five full-width sections', async () => {
+  it('shows attention (no pr:* kinds), in flight, landed, reports, traps, and PR stacks as six full-width sections', async () => {
     const g = await page(everyAttentionFleet());
     const sections = g.$$('#deck .deckgrid > section');
-    expect(sections.map((s) => text(s.querySelector('h2')))).toEqual(['attention →', 'in flight →', 'Landed · 24h →', 'traps →', 'PRs →']);
+    expect(sections.map((s) => text(s.querySelector('h2')))).toEqual(['attention →', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →', 'PRs →']);
     const kinds = [...sections[0]!.querySelectorAll('tr.rowhead td:first-child')].map(text);
     expect(kinds.every((k) => !k.startsWith('pr:') && !['draft', 'review', 'checks', 'conflicts', 'ready'].includes(k))).toBe(true);
     expect(text(sections[0]!.querySelector('.deckmore'))).toMatch(/^\+\d+ more →$/);
     // PR standing rides the stack line.
-    expect(text(sections[4]!)).toContain('#41 → #42 → #43 · next #41');
-    expect(text(sections[4]!.querySelector('.deckmore'))).toBe('+1 more →');
+    expect(text(sections[5]!)).toContain('#41 → #42 → #43 · next #41');
+    expect(text(sections[5]!.querySelector('.deckmore'))).toBe('+1 more →');
   });
 
   it('a queued in-flight row shows the queued badge, its queue time, and its trap address', async () => {
@@ -541,7 +541,7 @@ describe('glass page: On deck', () => {
   it('traps: eight at most, live by sign-on then recently signed off, the rest in "+N more"', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
-      const traps = g.$$('#deck section')[3]!;
+      const traps = g.$$('#deck section')[4]!;
       const items = [...traps.querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
       expect(items.map((l) => text(l.querySelector('b')))).toEqual([
         '🪤 wt:t1',
@@ -579,7 +579,7 @@ describe('glass page: On deck', () => {
 
   it('cards view: acked PR standing dims its card', async () => {
     const g = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
-    const prs = g.$$('#deck section')[4]!;
+    const prs = g.$$('#deck section')[5]!;
     const cards = [...prs.querySelectorAll('.card')];
     expect(cards.map((c) => [text(c.querySelector('b')).split(' ')[0], c.className])).toContainEqual(['#42', 'card acked']);
     expect(text(prs.querySelector('.card .badge.pr-conflicts'))).toBe('conflicts');
@@ -587,7 +587,7 @@ describe('glass page: On deck', () => {
 
   it('an empty fleet: every section says none, the daemon is down', async () => {
     const g = await page(emptyFleet());
-    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'none', 'none', 'none', 'none']);
+    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'none', 'none', 'none', 'none', 'none']);
     expect(text(g.$('#chips'))).toBe('daemon down');
   });
 });
