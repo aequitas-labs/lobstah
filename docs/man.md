@@ -302,6 +302,11 @@ only a trap id in a same-origin, token-protected POST. The ⚙ popover's two
 preferences — table or cards, and whether lobsters crawl the page — are
 per-browser, kept in that browser's localStorage and never on disk.
 
+The On deck tab shows up to 8 traps. Live traps come first, most recent
+heartbeat first. Traps stowed or ghosted in the last hour follow, most recent
+first. A "+N more" link opens the traps tab for the rest. The traps tab keeps
+its own order.
+
 This is where "is the agent alive?" belongs: the helm's heartbeat age on a
 page, not periodic proof-of-life turns in a transcript.
 
