@@ -36,8 +36,12 @@ import {
   readHold,
   slotUsage,
   readPrs,
+  listReports,
+  readReportMarkdown,
+  resolveReportFile,
 } from '@lobstah/core';
-import type { Attachment, Descriptor, GlassDispatch, GlassMessage, GlassSnapshot, GlassTrap, Lane } from '@lobstah/core';
+import type { Attachment, Descriptor, GlassDispatch, GlassMessage, GlassReport, GlassSnapshot, GlassTrap, Lane } from '@lobstah/core';
+import { reportAck } from './report-file.js';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { buildTendReport, landedCatches } from './tend.js';
@@ -246,10 +250,79 @@ function awaitingOf(id: string): Pick<GlassDispatch, 'awaitingReply'> {
 function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[]; attentionKinds: string[]; attentionError?: string } {
   try {
     const cfg = loadConfig();
-    return { attention: buildTendReport().attention, landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
+    // The pet's list: a question held on the helm's turn is not the human's yet.
+    return { attention: buildTendReport().attention.filter((a) => !a.held), landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
   } catch (err) {
     return { attention: [], landed: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Every filed report, newest first, with its ack. Never its markdown: the modal fetches that. */
+function reportRows(): GlassReport[] {
+  return listReports().map((r) => {
+    const acked = reportAck(r);
+    return {
+      key: r.key,
+      title: r.title,
+      author: r.author,
+      filedAt: r.filedAt,
+      stateHash: r.stateHash,
+      ...(acked ? { acked } : {}),
+      ...(r.dispatch ? { dispatch: r.dispatch } : {}),
+      ...(r.lane ? { lane: r.lane } : {}),
+      ...(r.trap ? { trap: r.trap } : {}),
+      ...(r.grounds ? { grounds: r.grounds } : {}),
+      ...(r.repo ? { repo: r.repo } : {}),
+      bytes: r.bytes,
+      attachments: r.attachments,
+      ...(r.renamed ? { renamed: r.renamed } : {}),
+    };
+  });
+}
+
+/** Image types a report may serve. Anything else (an SVG, a script, HTML) is not served. */
+const REPORT_IMAGE_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+/**
+ * `/report/<key>/md` and `/report/<key>/files/<name>`: a report's markdown as
+ * text, and an image from that report's own attachments by basename. The
+ * key names a report, never a path; a name with any path part is refused.
+ */
+export function serveReport(url: string, res: http.ServerResponse): boolean {
+  const m = /^\/report\/([^/?#]+)\/(md|files\/([^/?#]+))$/.exec(url.split('?')[0] ?? '');
+  if (!m) return false;
+  const headers = { 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'no-store' };
+  const notFound = () => {
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain; charset=utf-8' });
+    res.end('not found');
+  };
+  let key: string, name: string | undefined;
+  try {
+    key = decodeURIComponent(m[1]!);
+    name = m[3] !== undefined ? decodeURIComponent(m[3]) : undefined;
+  } catch {
+    notFound();
+    return true;
+  }
+  if (m[2] === 'md') {
+    const text = readReportMarkdown(key);
+    if (text === undefined) return notFound(), true;
+    res.writeHead(200, { ...headers, 'content-type': 'text/plain; charset=utf-8' });
+    res.end(text);
+    return true;
+  }
+  const file = name !== undefined ? resolveReportFile(key, name) : undefined;
+  const type = file && REPORT_IMAGE_TYPES[path.extname(file).toLowerCase()];
+  if (!file || !type) return notFound(), true;
+  res.writeHead(200, { ...headers, 'content-type': type });
+  res.end(fs.readFileSync(file));
+  return true;
 }
 
 /** One disk pass, everything the page renders. Pure read. */
@@ -339,6 +412,7 @@ export function buildGlassSnapshot(): GlassSnapshot {
     prs,
     stacks,
     ...attentionSnapshot(),
+    reports: reportRows(),
     mergeView,
   };
 }
@@ -418,6 +492,8 @@ export function serveGlass(
         res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-cache' });
         res.end(fallbackIcon);
       }
+    } else if (req.url?.startsWith('/report/') && req.method === 'GET' && serveReport(req.url, res)) {
+      return;
     } else if (req.url === '/data') {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify({ ...buildGlassSnapshot(), focusToken, focusSupported: process.platform === 'darwin' }));

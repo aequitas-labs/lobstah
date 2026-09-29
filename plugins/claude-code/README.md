@@ -48,7 +48,7 @@ repo's primary checkout, `lobstah soak` creates a linked worktree for the
 trap; `lobstah stow` removes it unless it holds work that exists nowhere
 else or `--keep` is passed.
 `lobstah soak --link <url>` records the session's own link for the glass's
-Open window action. `lobstah focus <trap>` runs the same focus steps from the
+↗ open action. `lobstah focus <trap>` runs the same focus steps from the
 CLI.
 
 `lobstah soak` prints a two-word name alongside the stable `wt:<id>`.

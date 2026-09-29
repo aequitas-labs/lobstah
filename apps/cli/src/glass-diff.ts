@@ -2,6 +2,7 @@ import type {
   GlassDispatch,
   GlassHelm,
   GlassPr,
+  GlassReport,
   GlassSnapshot,
   GlassStack,
   GlassTrap,
@@ -28,6 +29,8 @@ export const LANDED_MAX = 8;
 export const LANDED_WINDOW_MS = 86400000;
 // On deck's traps section: at most DECK_TRAPS_MAX traps, then "+N more".
 export const DECK_TRAPS_MAX = 8;
+// On deck's reports section: at most REPORTS_MAX, unacked first, then "+N more".
+export const REPORTS_MAX = 8;
 export const STALE_DAEMON_MS = 90000;
 export const STALE_SEAT_MS = 1800000;
 
@@ -43,7 +46,7 @@ export interface GlassPrefs {
   noticeKind: string;
 }
 
-export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'settings';
+export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'report' | 'settings';
 export interface ModalRef {
   type: ModalType;
   key: string;
@@ -65,7 +68,7 @@ export interface SettingsItem {
   attentionKinds: string[];
   attentionError?: string;
 }
-export type ModalItem = GlassHelm | GlassDispatch | GlassPr | GlassTrap | SettingsItem;
+export type ModalItem = GlassHelm | GlassDispatch | GlassPr | GlassTrap | GlassReport | SettingsItem;
 
 /**
  * A PR state badge's class: GitHub's state colors (.pr-merged purple,
@@ -80,13 +83,57 @@ export function prBadgeClass(b: Partial<PrBadge> | undefined | null): string {
   return state === 'open' && b.tone && b.tone !== 'ok' ? b.tone : 'pr-' + state;
 }
 
-export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'prs', 'notices'] as const;
+export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'prs', 'reports', 'notices'] as const;
 export type GlassTab = (typeof GLASS_TABS)[number];
 
 export function tabFromHash(hash: string | undefined | null): GlassTab {
   const tab = String(hash || '').replace(/^#/, '');
   return (GLASS_TABS as readonly string[]).includes(tab) ? (tab as GlassTab) : 'deck';
 }
+
+/**
+ * The modal a report opens: its dispatch's modal (the report renders above
+ * the attachments there), or a helm report's own modal.
+ */
+export function reportModal(key: string): ModalRef {
+  const m = /^report:(work|chore):(.+)$/.exec(key);
+  return m ? { type: 'dispatch', key: `${m[1]}:${m[2]}` } : { type: 'report', key };
+}
+
+/** `#report/<key>` opens that report's modal; any other hash opens none. */
+export function modalFromHash(hash: string | undefined | null): ModalRef | null {
+  const m = /^#?report\/(.+)$/.exec(String(hash || ''));
+  if (!m) return null;
+  try {
+    return reportModal(decodeURIComponent(m[1]!));
+  } catch {
+    return null;
+  }
+}
+
+/** The report a dispatch filed, if any. */
+export function dispatchReport(d: Pick<GlassSnapshot, 'reports'>, x: Pick<GlassDispatch, 'lane' | 'id'>): GlassReport | undefined {
+  return (d.reports || []).find((r) => r.key === `report:${x.lane}:${x.id}`);
+}
+
+/**
+ * Who a report is from, as its meta line says it: a trap's name, a headless
+ * dispatch's id (first 8), or nothing for the helm's own report.
+ */
+export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>): string {
+  if (r.author === 'helm') return '';
+  if (r.trap) return r.trap;
+  if (r.author === 'headless') return r.dispatch ? r.dispatch.slice(0, 8) : '';
+  return r.author;
+}
+
+/** Reports in list order: unacked first, then newest first. */
+export const reportOrder = (a: GlassReport, b: GlassReport): number =>
+  Number(!!a.acked) - Number(!!b.acked) || b.filedAt.localeCompare(a.filedAt);
+
+/** Where a report's markdown and images are served (glass.ts serveReport). */
+export const reportMarkdownUrl = (key: string): string => `/report/${encodeURIComponent(key)}/md`;
+export const reportFileUrl = (key: string, name: string): string => `/report/${encodeURIComponent(key)}/files/${encodeURIComponent(name)}`;
 
 export function isStale(iso: string | undefined, ms: number, now: number): boolean {
   return !!iso && now - Date.parse(iso) > ms;
@@ -110,6 +157,7 @@ export function modalItem(d: GlassSnapshot, modal: ModalRef | null): ModalItem |
   if (modal.type === 'helm') return d.helms.find((v) => v.grounds === modal.key) || null;
   if (modal.type === 'dispatch') return d.dispatches.find((v) => v.lane + ':' + v.id === modal.key) || null;
   if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || null;
+  if (modal.type === 'report') return (d.reports || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError };
   return d.traps.find((v) => v.trapId === modal.key) || null;
 }
@@ -122,6 +170,8 @@ export interface DeckInputs {
   attention: DeckAttention[];
   prAttention: DeckAttention[];
   landed: LandedCatch[];
+  /** Unacked first, then newest first; the deck shows REPORTS_MAX. */
+  reports: GlassReport[];
   inflight: GlassDispatch[];
   traps: Seat<GlassTrap>[];
   stacks: GlassStack[];
@@ -142,6 +192,7 @@ export interface SectionInputs {
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatch[] };
   traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrap>[] };
   prs: PrsInputs;
+  reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
   notices: { list: Notice[] };
   foot: { version: string; repoUrl: string };
   modal: { modal: ModalRef | null; item: Seat<ModalItem> | null; prefs: { view: GlassPrefs['view'] | undefined; lobs: boolean | undefined } | undefined };
@@ -182,6 +233,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
         .filter((a) => recent(a.at, LANDED_WINDOW_MS) && hasQuery(a.repo, a.note, a.id))
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, LANDED_MAX),
+      reports: (d.reports || []).filter((r) => hasQuery(r.title, r.author, r.dispatch, r.repo)).sort(reportOrder),
       inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', repo: '', verb: '' })),
       traps: deckTraps.map(seat),
       stacks: (d.stacks || []).filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
@@ -200,6 +252,12 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
         (p) => (!st.repo || p.repo === st.repo) && hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName),
       ),
       watches: (d.watches || []).filter((w) => !String(w.key).startsWith('pr:')),
+    },
+    reports: {
+      view: st.view,
+      list: (d.reports || [])
+        .filter((r) => (!st.repo || r.repo === st.repo) && hasQuery(r.title, r.author, r.dispatch, r.repo))
+        .sort(reportOrder),
     },
     notices: {
       list: (d.notices || []).filter(
