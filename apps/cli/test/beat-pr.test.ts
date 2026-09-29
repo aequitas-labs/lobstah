@@ -148,10 +148,12 @@ describe('a PR recorded before done repairs through its trap', () => {
     observedAt: new Date().toISOString(),
   });
   const queued = (): Descriptor[] =>
-    fs
-      .readdirSync(laneDirs('work').queue)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs('work').queue, f), 'utf8')) as Descriptor);
+    (['work', 'chore'] as const).flatMap((lane) =>
+      fs
+        .readdirSync(laneDirs(lane).queue)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs(lane).queue, f), 'utf8')) as Descriptor),
+    );
 
   const record = {
     'the beat': () => runBeat(hook(readTrap(caughtTrapId)!), { run: fakeRun(() => ({ status: 0, stdout: URL_ })).run, now: T0 }),

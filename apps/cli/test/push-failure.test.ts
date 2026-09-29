@@ -42,9 +42,9 @@ const pr = (over: Partial<PrEvidence> = {}): PrEvidence => ({
 
 function queued(): Descriptor[] {
   return fs
-    .readdirSync(laneDirs('work').queue)
+    .readdirSync(laneDirs('chore').queue)
     .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs('work').queue, f), 'utf8')) as Descriptor);
+    .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs('chore').queue, f), 'utf8')) as Descriptor);
 }
 
 /** A dispatch-owned PR with one conflict repair queued: the repair's descriptor. */
@@ -76,8 +76,8 @@ describe('a repair that cannot push', () => {
   it('marks the PR record at the moved head, posts one notice, and starts no new round on either head', () => {
     const repair = queuedRepair();
     const note = `push rejected: ${REJECTION}; moved head ${MOVED}`;
-    appendStatus(repair.id, 'work', 'failed', note);
-    expect(recordPushFailure(repair.id, 'work', note)).toBe(KEY);
+    appendStatus(repair.id, 'chore', 'failed', note);
+    expect(recordPushFailure(repair.id, 'chore', note)).toBe(KEY);
     expect(readPr(KEY)).toMatchObject({ headSha: SHA, state: 'OPEN' }); // the PR itself is left as it was
     expect(readPr(KEY)?.repair).toMatchObject({ status: 'blocked', headSha: MOVED, fromHeadSha: SHA, dispatchId: repair.id });
     expect(readPr(KEY)?.repair?.reason).toContain('non-fast-forward');
@@ -92,8 +92,8 @@ describe('a repair that cannot push', () => {
 
   it('a failed report that is not a push rejection marks nothing', () => {
     const repair = queuedRepair();
-    appendStatus(repair.id, 'work', 'failed', 'could not resolve the conflict');
-    expect(recordPushFailure(repair.id, 'work', 'could not resolve the conflict')).toBeUndefined();
+    appendStatus(repair.id, 'chore', 'failed', 'could not resolve the conflict');
+    expect(recordPushFailure(repair.id, 'chore', 'could not resolve the conflict')).toBeUndefined();
     expect(readPr(KEY)?.repair).toMatchObject({ status: 'repairing', headSha: SHA });
     expect(listNotices().filter((n) => n.kind === 'push-failed')).toEqual([]);
   });
@@ -113,6 +113,9 @@ describe('the push rule in briefs', () => {
     upsertPr(pr(), OWNER);
     for (const kind of ['conflict', 'checks', 'review'] as const) {
       const brief = repairBrief(readPr(KEY)!, kind, 'repair-id');
+      expect(brief).toContain("For code already on main, take main's version.");
+      expect(brief).toContain("Keep only this PR's own changes.");
+      expect(brief).toContain('If resolving a conflict would change code behavior, stop and report needs-decision.');
       for (const line of rule('feature/pr', 'repair-id')) expect(brief).toContain(line);
     }
   });

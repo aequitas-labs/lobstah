@@ -96,7 +96,7 @@ async function gitShared(cwd: string, ...args: string[]): Promise<string> {
  * second one for the same id. (A follow-up may instead reuse its chain's
  * worktree: see chooseWorktree.)
  */
-export async function allocate(repo: RepoConfig, id: string): Promise<string> {
+export async function allocate(repo: RepoConfig, id: string, fromRemoteBranch = repo.trunk): Promise<string> {
   const dir = worktreePath(id);
   if (fs.existsSync(dir)) {
     throw new Error(`worktree for ${id} already exists at ${dir} — never allocate a second`);
@@ -105,11 +105,11 @@ export async function allocate(repo: RepoConfig, id: string): Promise<string> {
     if (!repo.origin) throw new Error(`repo path ${repo.path} missing and no origin configured`);
     await run('git', ['clone', repo.origin, repo.path], { env: process.env });
   }
-  await gitShared(repo.path, 'fetch', 'origin', repo.trunk);
+  await gitShared(repo.path, 'fetch', 'origin', fromRemoteBranch);
   // --no-track: an upstream of origin/<trunk> under another branch name is
   // never useful, and writing it takes .git/config's lock, which concurrent
   // allocations contend for too.
-  await gitShared(repo.path, 'worktree', 'add', '--no-track', dir, '-b', `lobstah/${id}`, `origin/${repo.trunk}`);
+  await gitShared(repo.path, 'worktree', 'add', '--no-track', dir, '-b', `lobstah/${id}`, `origin/${fromRemoteBranch}`);
   await runSetup(repo, dir);
   return dir;
 }

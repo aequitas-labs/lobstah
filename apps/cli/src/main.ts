@@ -89,6 +89,7 @@ import {
   ensureLayout,
   eventsPath,
   laneDirs,
+  laneOf,
   lastEventAt,
   readStatusLog,
   reconcile,
@@ -451,14 +452,15 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
     }
     if (hasOpenCatch(reg)) {
       const id = reg.claimed!;
-      if (cancelRequested(id, 'work')) {
+      const lane = laneOf(id) ?? 'work';
+      if (cancelRequested(id, lane)) {
         block(
           `Your assigned dispatch ${id} was cancelled. Stop working on it, leave the worktree as it is, ` +
             `and run \`lobstah report ${id} failed "cancelled by request"\`.`,
         );
         return true;
       }
-      if (unhandled(id, 'work').length > 0) {
+      if (unhandled(id, lane).length > 0) {
         block(`New instruction for your dispatch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`);
         return true;
       }
@@ -822,9 +824,11 @@ async function mainCli(): Promise<void> {
       }
       if (id.startsWith('wt:') || /^[a-z]+-[a-z]+$/.test(id)) throw new Error(unknownTrapMessage(id));
       const lane = findLane(id);
+      const descriptor = storedDescriptor(id, lane);
+      const claim = readSessionClaim(id, lane);
       const log = readStatusLog(id, lane);
       const since = queuedAt(id, lane);
-      const claimedAt = readSessionClaim(id, lane)?.at;
+      const claimedAt = claim?.at;
       const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined, claimedAt });
       // Activity only while the dispatch is live: a finished one did its last thing.
       const live = fs.existsSync(path.join(laneDirs(lane).active, id));
@@ -835,6 +839,11 @@ async function mainCli(): Promise<void> {
           id,
           lane,
           state,
+          ...(descriptor?.systemRepair ? {
+            repairPr: descriptor.pr?.url ?? '(unknown)',
+            worker: claim?.by ?? descriptor.for ?? 'headless',
+            ...(state === 'queued' && descriptor.for ? { waitingForTrap: descriptor.systemRepair.trapWaitUntil ?? true } : {}),
+          } : {}),
           ...(state === 'queued' ? { queued: since } : {}),
           lastNote: log.at(-1)?.note,
           ...(waitingNow ? { [log.at(-1)!.verb]: waitingText(waitingNow) } : {}),
@@ -1059,8 +1068,10 @@ async function mainCli(): Promise<void> {
       // and merge flow back through its pr: watch instead of lobstah going
       // blind at "PR open". The watch is registered once per PR. A pause on
       // the dispatch's own PR registers that PR's watch.
+      // A daemon repair is already bound to that PR's watch. Reporting the
+      // same URL must not register a replacement watch.
       const prWatch =
-        verb !== 'failed' && prUrl && !noWatch
+        verb !== 'failed' && prUrl && !noWatch && !storedDescriptor(id, lane)?.systemRepair
           ? autoRegisterPrWatch(id, prUrl)
           : verb === 'paused' && !noWatch
             ? registerWaitWatch(id, lane, entry)

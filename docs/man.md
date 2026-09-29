@@ -279,6 +279,17 @@ It does not repair a PR with a person's newer commits or uncertain commit
 ownership, a terminal PR, or a PR whose chain already has queued or active
 work. `[watch].autoRepair`, `conflicts`, and `checks` control this behavior.
 
+Daemon repairs run in the `chore` lane and use `[limits].choreConcurrent`.
+A repair for a trap-built PR is addressed to its owning live trap. If the
+trap is busy, the chore waits for up to `[watch].repairTrapWaitSecs`
+(default 600). It then runs headless in its own checkout of the PR branch.
+A repair for a headless-built PR runs headless and reuses its origin
+worktree when that checkout is clean and free. A headless chore never uses
+a trap's worktree. Only daemon-created repair chores have this bounded
+addressed fallback. Work addressed by a person stays addressed until the
+person releases or redirects it. `man tend`, `daemon status`, `doctor`,
+and the glass show the repair's PR, chore lane, worker, and trap wait.
+
 **A repair waits** while any of these is true:
 
 - A live worker holds the PR's head branch. A live worker is an active
@@ -318,6 +329,9 @@ non-fast-forward rejection, fetch the branch, rebase the commits onto the
 moved head again, and push with `--force-with-lease` on the head just
 fetched, at most three times. A push hook that fails with a real test or
 type error is not retried: the worker fixes the error and pushes again.
+For code already on main, the repair keeps main's version and only this
+PR's own changes. It does not change behavior. If a conflict resolution
+would change behavior, the worker reports `needs-decision`.
 When the worker cannot push, it reports
 `failed "push rejected: <rejection text>; moved head <sha>"` and leaves the
 PR as it was. That report marks the PR's repair `blocked` at the moved head

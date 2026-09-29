@@ -212,7 +212,9 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
             : (last?.verb ?? (claim ? ('working' as const) : ('unknown' as const))),
         ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
         // Held for free space: the note carries the reason.
-        note: (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
+        note: (r.bucket === 'queued' && r.d.systemRepair?.trapWaitUntil && r.d.for
+          ? `repair chore waits for ${r.d.for} until ${r.d.systemRepair.trapWaitUntil}` : undefined) ??
+          (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
         verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
         activity: r.bucket === 'active' ? activityView(readActivity(id, r.lane), staleSecs) : undefined,
         waiting: r.bucket === 'active' ? waitingView(last) : undefined,

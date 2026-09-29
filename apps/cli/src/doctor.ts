@@ -29,7 +29,7 @@ import { parkedSummary } from './parked-view.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
-import { liveRepairer, waitingRepairs } from './pr-repair.js';
+import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import { petRow } from './pet.js';
 
 export interface DoctorRow {
@@ -348,6 +348,11 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
       'ok',
       waiting.map((pr) => `${pr.key} ${pr.repair!.kind}: ${pr.repair!.heldBy ?? 'held'} — ${pr.repair!.reason ?? ''}`).join('; '),
     );
+  }
+  const chores = cfg.watch.autoRepair ? repairChores() : [];
+  if (chores.length > 0) {
+    push('PR repair chores', 'ok', chores.map((r) =>
+      `${r.pr} ${r.lane} ${r.state} ${r.worker}${r.waitingForTrap ? ` waiting for trap until ${r.until}` : ''}`).join('; '));
   }
 
   const disk = diskRow(cfg);

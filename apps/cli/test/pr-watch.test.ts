@@ -60,6 +60,18 @@ describe('report done --pr registers the PR watch', () => {
     expect(note).toBe('shipped');
   });
 
+  it('a daemon repair report does not replace or create the PR watch', () => {
+    enqueue({
+      id: ID, repo: 'web', brief: 'repair the existing PR',
+      pr: { url: URL_, headRefName: 'feature' }, systemRepair: {},
+    }, 'chore');
+    const res = lobstah('report', ID, 'done', 'repaired', '--pr', URL_);
+    expect(res.status).toBe(0);
+    expect(res.stdout).not.toContain('watch:');
+    expect(readWatch('pr:acme/web#7')).toBeUndefined();
+    expect(readEvidence(ID, 'chore').prUrl).toBe(URL_);
+  });
+
   it('a non-GitHub PR URL or a failed report registers nothing and never fails the report', () => {
     enqueue({ id: ID, repo: 'web', brief: 'b' }, 'work');
     expect(lobstah('report', ID, 'done', '--pr', 'https://gitlab.com/a/b/-/merge_requests/1').status).toBe(0);

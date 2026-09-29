@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import { executorPath, loadConfig, parkedDispatches, slotUsage } from '@lobstah/core';
 import type { ServiceKind } from './service.js';
 import { parkedText } from './parked-view.js';
+import { repairChores } from './pr-repair.js';
 
 /** How long a restart waits for the new process to show itself. */
 export const RESTART_WAIT_MS = 10_000;
@@ -95,13 +96,17 @@ export function daemonStatus(installed: boolean, now = Date.now()): Record<strin
   const parked = parkedDispatches(now);
   const cfg = loadConfig();
   const work = slotUsage('work');
+  const chore = slotUsage('chore');
+  const repairs = repairChores();
   return {
     daemon: running ? 'running' : 'stopped',
     installed,
     headless: usage.headless,
     trapCatches: usage.traps,
     // Parked dispatches hold no slot: the slots line is real capacity.
-    slots: `${work.headless} of ${cfg.limits.maxConcurrent} work in use, ${Math.max(0, cfg.limits.maxConcurrent - work.headless)} free`,
+    slots: `${work.headless} of ${cfg.limits.maxConcurrent} work in use, ${chore.headless} of ${cfg.limits.choreConcurrent} chore in use`,
+    repairChores: repairs.length,
+    ...(repairs.length ? { repairs: repairs.map((r) => `${r.pr} ${r.lane} ${r.state} ${r.worker}${r.waitingForTrap ? ` waiting for trap until ${r.until}` : ''}`).join('; ') } : {}),
     parked: parked.length,
     ...(parked.length ? { parkedOn: parked.map(parkedText).join('; ') } : {}),
     ...(hb?.pid !== undefined ? { pid: hb.pid } : {}),

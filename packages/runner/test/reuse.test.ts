@@ -98,7 +98,7 @@ interface Seen {
  * in the worktree, and reports done. `gate` holds it at the start, so tests
  * can run two dispatches at once.
  */
-function harness(work: (cwd: string) => void = () => {}, gate?: Promise<void>) {
+function harness(work: (cwd: string) => void = () => {}, gate?: Promise<void>, lane: 'work' | 'chore' = 'work') {
   const seen: Seen[] = [];
   const prompts: string[] = [];
   const adapter = (name: string): Adapter => ({
@@ -115,7 +115,7 @@ function harness(work: (cwd: string) => void = () => {}, gate?: Promise<void>) {
         events.push({ at: at(), type: 'session', data: { sessionId: `${o.id}-session` } });
         events.push({ at: at(), type: 'tool-start', data: { name: 'Bash' } });
         work(o.cwd);
-        appendStatus(o.id, 'work', 'done', 'finished');
+        appendStatus(o.id, lane, 'done', 'finished');
         events.push({ at: at(), type: 'turn-end', data: {} });
       })();
       const finish = () => {
@@ -308,6 +308,46 @@ describe('a follow-up reuses its origin chain’s worktree', () => {
     await run('fu', 'origin', f);
     expect(f.seen[0]!.cwd).toBe(worktreePath('fu'));
     expect(firstNote('fu')).toContain('fresh worktree (origin worktree is a trap’s)');
+  });
+
+  it('a headless repair of trap-built work starts from the PR head in its own checkout', async () => {
+    await run('origin', undefined, harness(commit('origin work')));
+    const wt = worktreePath('origin');
+    const prHead = git(wt, 'rev-parse', 'HEAD');
+    git(wt, 'push', '-q', 'origin', 'HEAD:refs/heads/feature/pr');
+    expect(signOnTrap({ worktree: wt, cwd: wt, repo: 'r', harness: 'claude', sessionId: 's', ttlMs: 3_600_000 })).toHaveProperty('ok');
+
+    enqueue({
+      id: 'repair', repo: 'r', brief: 'Repair the existing PR', followUp: 'origin',
+      pr: { url: 'https://github.com/example/repo/pull/17', headRefName: 'feature/pr', headSha: prHead },
+      systemRepair: {},
+    }, 'chore');
+    expect(claimNext('chore')).toBe('repair');
+    const worker = harness(() => {}, undefined, 'chore');
+    await main(path.join(laneDirs('chore').active, 'repair'), 'chore', worker.deps);
+
+    expect(worker.seen[0]).toEqual({ cwd: worktreePath('repair'), head: prHead, branch: 'lobstah/repair' });
+    expect(git(wt, 'rev-parse', 'HEAD')).toBe(prHead);
+    expect(fs.existsSync(worktreePath('repair'))).toBe(true);
+    expect(readEvidence('repair', 'chore')).toMatchObject({ worktree: worktreePath('repair'), prUrl: 'https://github.com/example/repo/pull/17' });
+  });
+
+  it('a headless repair of headless-built work reuses the safe origin checkout', async () => {
+    await run('origin', undefined, harness(commit('origin work')));
+    const wt = worktreePath('origin');
+    const prHead = git(wt, 'rev-parse', 'HEAD');
+    enqueue({
+      id: 'repair', repo: 'r', brief: 'Repair the existing PR', followUp: 'origin',
+      pr: { url: 'https://github.com/example/repo/pull/17', headRefName: 'feature/pr', headSha: prHead },
+      systemRepair: {},
+    }, 'chore');
+    expect(claimNext('chore')).toBe('repair');
+    const worker = harness(() => {}, undefined, 'chore');
+    await main(path.join(laneDirs('chore').active, 'repair'), 'chore', worker.deps);
+
+    expect(worker.seen[0]).toEqual({ cwd: wt, head: prHead, branch: 'lobstah/origin' });
+    expect(fs.existsSync(worktreePath('repair'))).toBe(false);
+    expect(readEvidence('repair', 'chore')).toMatchObject({ worktree: wt, worktreeOf: 'origin' });
   });
 
   it('reuseWorktree = false: every follow-up allocates fresh, as before', async () => {

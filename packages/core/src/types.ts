@@ -49,6 +49,9 @@ export interface Descriptor {
    * the PR's head branch.
    */
   pr?: DescriptorPr;
+  /** Daemon-created PR chore. Only these addressed dispatches may fall back
+   * to headless after the trap wait expires. */
+  systemRepair?: { trapWaitUntil?: string };
   attachments?: Attachment[];
   /** Address this bait to a specific claimant (`session:<id>`). A live
    * soaking session claims it; once its registration is gone the daemon

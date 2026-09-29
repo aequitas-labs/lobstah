@@ -1,5 +1,6 @@
 import { storedDescriptor } from './queue.js';
 import { hasOpenCatch, readTrap, trapBySession, trapIdAbove } from './soak.js';
+import { laneOf } from './worktrees.js';
 
 export interface TrapSessionTitle {
   title: string;
@@ -42,6 +43,6 @@ export function trapSessionTitle(input: { sessionId?: string; cwd: string }): Tr
   const reg = input.sessionId ? trapBySession(input.sessionId) : readTrap(trapIdAbove(input.cwd) ?? '');
   if (!reg || (input.sessionId && reg.sessionId !== input.sessionId)) return undefined;
   const name = Array.from(cleanTitleText(reg.name ?? `wt:${reg.trapId}`)).slice(0, 40).join('');
-  const work = reg.claimed && hasOpenCatch(reg) ? titleFromBrief(storedDescriptor(reg.claimed, 'work')?.brief ?? '') : '';
+  const work = reg.claimed && hasOpenCatch(reg) ? titleFromBrief(storedDescriptor(reg.claimed, laneOf(reg.claimed) ?? 'work')?.brief ?? '') : '';
   return { title: work ? `${name} · ${work}` : name, name, work: work || null };
 }

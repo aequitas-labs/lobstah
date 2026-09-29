@@ -27,6 +27,7 @@ import {
   readSessionClaim,
   readStatusLog,
   readTrap,
+  trapLastSeen,
   readWatchEvents,
   recordHumanGates,
   reconcile,
@@ -36,6 +37,7 @@ import {
   repairLimit,
   repairableChecks,
   storedDescriptor,
+  queuedDescriptor,
   unrepairedChecks,
   withPrLock,
   writePr,
@@ -248,7 +250,8 @@ export function holdCancelledRepair(id: string, now = new Date()): string[] {
  * fail. A wait is not an attempt.
  */
 export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: RepairOptions = {}): number {
-  const cfg = loadConfig().watch;
+  const config = loadConfig();
+  const cfg = config.watch;
   if (!cfg.autoRepair) return 0;
   const now = opts.now ?? Date.now();
   const limit = repairLimit(cfg.maxRepairsPerPr);
@@ -303,7 +306,14 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         if (previous?.status === 'waiting') writePr({ ...pr, repair: endWait(previous) });
         return;
       }
-      if (previous?.status === 'repairing' && previous.dispatchId && !isTerminal(previous.dispatchId)) return;
+      if (previous?.status === 'repairing' && previous.dispatchId && !isTerminal(previous.dispatchId)) {
+        const queued = queuedDescriptor(previous.dispatchId, 'chore');
+        if (queued?.for && queued.systemRepair?.trapWaitUntil && now >= Date.parse(queued.systemRepair.trapWaitUntil)) {
+          enqueue({ ...queued, for: undefined, systemRepair: {} }, 'chore');
+          log(`repair ${watch.key}: trap wait expired; ${previous.dispatchId} re-queued headless in its origin chain`);
+        }
+        return;
+      }
       if (previous?.status === 'blocked' || previous?.status === 'gave-up') return;
       if (previous?.observationsAtRepair !== undefined && (pr.observations ?? 0) <= previous.observationsAtRepair) return;
       // The floor: one round per PR, check, and commit. A head that has not
@@ -382,6 +392,8 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       const deliveredTo = readEvidence(chain.latest, 'work').deliveredTo;
       const address = claim?.by.startsWith('wt:') ? claim.by : deliveredTo?.startsWith('wt:') ? deliveredTo : undefined;
       const trap = address ? readTrap(address.slice(3)) : undefined;
+      const liveTrap = trap && now - trapLastSeen(trap) <= config.soak.ttlSecs * 1000 ? trap : undefined;
+      const waitSecs = Math.max(0, Number.isFinite(cfg.repairTrapWaitSecs) ? cfg.repairTrapWaitSecs : 600);
       const id = randomUUID();
       writePr({
         ...pr,
@@ -406,12 +418,13 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
           brief,
           followUp: chain.latest,
           pr: { url: pr.url, headRefName: pr.headRefName, headSha: pr.headSha },
-          ...(trap ? { for: address } : {}),
-        }, 'work');
-        mergeEvidence(id, 'work', { prUrl: pr.url, pr });
+          systemRepair: liveTrap && waitSecs > 0 ? { trapWaitUntil: new Date(now + waitSecs * 1000).toISOString() } : {},
+          ...(liveTrap && waitSecs > 0 ? { for: address } : {}),
+        }, 'chore');
+        mergeEvidence(id, 'chore', { prUrl: pr.url, pr });
         markFollowUp(watch.key, id, readWatchEvents(watch.key).length);
         started++;
-        log(`repair ${watch.key}: ${kind} -> ${id}${trap ? ` (addressed to ${address})` : ''}`);
+        log(`repair ${watch.key}: ${kind} chore -> ${id}${liveTrap ? ` (waiting for ${address} up to ${waitSecs}s)` : ' (headless in origin chain)'}`);
       } catch (err) {
         writePr({
           ...pr,
@@ -457,6 +470,37 @@ function endWait(previous: PrRepair): PrRepair | undefined {
 /** PRs whose repair waits, for tend, the glass, and doctor. */
 export function waitingRepairs(records: readonly PrRecord[] = readPrs()): PrRecord[] {
   return records.filter((pr) => pr.state === 'OPEN' && pr.repair?.status === 'waiting' && pr.repair.headSha === pr.headSha);
+}
+
+export interface RepairChore {
+  id: string;
+  pr: string;
+  lane: 'chore';
+  state: 'queued' | 'active';
+  worker: string;
+  waitingForTrap: boolean;
+  until?: string;
+}
+
+/** Current daemon repairs shown consistently by tend, daemon status, and doctor. */
+export function repairChores(records: readonly PrRecord[] = readPrs()): RepairChore[] {
+  const rows: RepairChore[] = [];
+  for (const pr of records) {
+    const id = pr.repair?.dispatchId;
+    if (!id || pr.repair?.status !== 'repairing') continue;
+    const bucket = bucketOf(id);
+    if (!bucket || bucket.lane !== 'chore' || bucket.bucket === 'done') continue;
+    const descriptor = storedDescriptor(id, 'chore');
+    if (!descriptor?.systemRepair) continue;
+    const claim = readSessionClaim(id, 'chore');
+    const waitingForTrap = bucket.bucket === 'queue' && !!descriptor.for;
+    rows.push({
+      id, pr: pr.url, lane: 'chore', state: bucket.bucket === 'queue' ? 'queued' : 'active',
+      worker: claim?.by ?? descriptor.for ?? 'headless', waitingForTrap,
+      ...(waitingForTrap && descriptor.systemRepair.trapWaitUntil ? { until: descriptor.systemRepair.trapWaitUntil } : {}),
+    });
+  }
+  return rows;
 }
 
 /**
