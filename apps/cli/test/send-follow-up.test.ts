@@ -74,22 +74,18 @@ describe('send wakes a finished dispatch', () => {
     finish(B);
     const file = path.join(home, 'note.txt');
     fs.writeFileSync(file, 'evidence');
-    const first = lobstah('send', A, 'continue', '--attach', file, '--harness', 'codex', '--model', 'm');
+    const first = lobstah('send', A, 'continue', '--attach', file);
     expect(first.status, first.stdout).toBe(0);
     const next = startedId(first.stdout);
     const descriptor = queuedDescriptor(next, 'work')!;
     expect(descriptor.followUp).toBe(B);
     expect(descriptor.brief).toBe(`Follow-up instruction from terminal on dispatch ${B}:\ncontinue`);
     expect(descriptor.attachments?.some((a) => a.name === 'note.txt')).toBe(true);
-    expect(descriptor.harness).toBe('codex');
-    expect(descriptor.harnessExplicit).toBe(true);
-    expect(descriptor.model).toBe('m');
+    expect(descriptor.harnessExplicit).not.toBe(true);
+    expect(descriptor.model).toBeUndefined();
     const second = lobstah('send', A, 'one more');
     expect(second.stdout).toContain(`delivered: inbox of ${next} (queued)`);
     expect(unhandled(next, 'work')[0]?.text).toContain('one more');
-    const quiet = lobstah('send', A, 'archive only', '--no-wake');
-    expect(quiet.stdout).toContain('nothing will read it');
-    expect(unhandled(A, 'work')[0]?.text).toContain('archive only');
     expect(unhandled(next, 'work')).toHaveLength(1);
     expect(storedDescriptor(next, 'work')).toBeDefined();
   });
@@ -115,7 +111,7 @@ describe('send wakes a finished dispatch', () => {
     expect(queuedDescriptor(startedId(headless.stdout), 'work')?.for).toBeUndefined();
   });
 
-  it('delivers to a live trap claim and permits an explicit follow-up address', () => {
+  it('delivers to a live trap claim; dispatch chooses an explicit follow-up address', () => {
     dispatch(A);
     expect(claimNext('work')).toBe(A);
     fs.writeFileSync(path.join(laneDirs('work').active, A, 'claim.json'), JSON.stringify({ by: 'wt:seat' }));
@@ -131,9 +127,11 @@ describe('send wakes a finished dispatch', () => {
     expect(unhandledTrapMessages('seat').map((message) => message.text).join(' ')).toContain('alias');
     appendStatus(A, 'work', 'done');
     complete(A, 'work');
-    const sent = lobstah('send', A, 'next', '--for', 'wt:seat');
+    const sent = lobstah('dispatch', '--repo', 'r', '--follow-up', A, '--brief-text', 'next', '--for', 'wt:seat', '--harness', 'codex', '--model', 'm', '--id', B);
     expect(sent.status, sent.stdout).toBe(0);
-    expect(queuedDescriptor(startedId(sent.stdout), 'work')?.for).toBe('wt:seat');
+    expect(queuedDescriptor(B, 'work')?.for).toBe('wt:seat');
+    expect(queuedDescriptor(B, 'work')?.harness).toBe('codex');
+    expect(queuedDescriptor(B, 'work')?.model).toBe('m');
   });
 
   it('turns an answer to a stranded question into a follow-up and clears the question', () => {
@@ -147,12 +145,14 @@ describe('send wakes a finished dispatch', () => {
     expect(answeredAt(A, 'work', at)).toBeDefined();
   });
 
-  it('supports no-wake and preserves the helm gate', () => {
+  it('rejects removed send flags and preserves the helm gate', () => {
     dispatch(A);
     finish(A);
-    const quiet = lobstah('send', A, 'note', '--no-wake');
-    expect(quiet.stdout).toContain('nothing will read it');
-    expect(unhandled(A, 'work')[0]?.text).toContain('note');
+    for (const flags of [['--no-wake'], ['--harness', 'codex'], ['--model', 'm'], ['--for', 'wt:seat']]) {
+      const rejected = lobstah('send', A, 'note', ...flags);
+      expect(rejected.status).toBe(2);
+      expect(rejected.stdout).toContain('unknown flag');
+    }
     takeHelm({ sessionId: 'helm-session', grounds: { name: 'fleet', repos: ['r'] }, ttlMs: 60_000 });
     const refused = lobstah('send', A, 'cannot');
     expect(refused.status).not.toBe(0);

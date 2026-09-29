@@ -192,7 +192,7 @@ describe('prs', () => {
     expect(res.stdout).not.toContain('green');
   });
 
-  processTest('prs sync checks a due PR once, refreshes its record, retires its terminal watch, and registers nothing', () => {
+  processTest('rejects the removed prs sync subcommand', () => {
     upsertPr(pr(7));
     upsertPr(pr(8));
     // A portable check fixture: the shipped check is exercised against real
@@ -211,12 +211,7 @@ describe('prs', () => {
     `);
     addWatch(key(7), `"${process.execPath}" "${script}"`);
     const res = lobstah('prs', 'sync');
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain('refreshed: 1');
-    expect(readPr(key(7))).toMatchObject({ state: 'MERGED', mergedAt: '2026-09-24T12:00:00Z' });
-    expect(readWatch(key(7))).toBeUndefined();
-    const second = lobstah('prs', 'sync');
-    expect(second.stdout).toContain('refreshed: 0');
-    expect(readWatch(key(8))).toBeUndefined();
+    expect(res.status).toBe(2);
+    expect(res.stdout).toContain('prs takes no positional arguments');
   });
 });

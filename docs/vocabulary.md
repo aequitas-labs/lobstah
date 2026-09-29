@@ -273,7 +273,7 @@ session id's UUID version (v7 codex, v4 claude), else the descriptor.
 | Word | Meaning |
 | ---- | ------- |
 | follow-up | `--follow-up <id>` forks the origin's session **under the origin's harness** when the follow-up names no harness. An explicit `--harness` (recorded as `harnessExplicit: true` in the descriptor by `dispatch`, `swap`, and the node tool) that differs from the origin session's makes it a swap. A descriptor from before the record falls back to the old guess: a swap only if the harness is one the chain never asked for. Pickup review rounds and watch continuations are follow-ups. |
-| send to a chain | `lobstah send <id> "<instruction>"` routes to a live member's inbox first, then a queued member's inbox. If the chain is finished, it dispatches a follow-up of its newest member, with the instruction as the brief. A second send reaches that queued follow-up. `--no-wake` instead leaves unread mail in the addressed finished dispatch. |
+| send to a chain | `lobstah send <id> "<instruction>"` routes to a live member's inbox first, then a queued member's inbox. If the chain is finished, it dispatches a follow-up of its newest member, with the instruction as the brief. A second send reaches that queued follow-up. Use `dispatch --follow-up` to choose a new worker, harness, or model. |
 | worktree reuse | A headless follow-up runs in its chain's worktree (the newest chain member's that still exists) when that worktree is clean, same-repo, and free, instead of allocating a new one (`[limits].reuseWorktree`, default on). Evidence records `worktree` (the checkout) and, on reuse, `worktreeOf` (the dispatch that allocated it). `dispatchWorktree` (`packages/core/src/worktrees.ts`) is the one resolver from a dispatch id to its checkout; attach, swap, catch, tend, the glass, and the cull all use it. The first status note says `reusing worktree of <origin>` or `fresh worktree (<reason>)`. |
 | release on merge | With `[limits].releaseOnMerge`, the cull pass after a PR watch records `merged` removes the worktrees of that PR's finished chain, only when each is clean and its HEAD is on the remote. Evidence records `worktreeReleased` (when). A worktree that fails a check is **kept**: `release-kept.json` holds the reason, and doctor's `disk` row shows `kept: unpushed work`. |
 | swap | Start cold on another harness with the brief plus a progress note (commits so far, uncommitted changes, and the origin's branch/PR/commits for a follow-up). `lobstah swap` does it to an active dispatch; a follow-up does it when it explicitly asks for a different harness. |
@@ -377,7 +377,7 @@ record is already terminal gets the notice only when it ended in the last
 One pick watch cycle forks at most `[watch].maxForksPerCycle`
 continuations (default 3). Generic watches over the cap are held (`heldAt`
 on the watch); PR repairs wait for the next cycle. A watch hold also comes
-from `lobstah watch hold <key> [--for <id>] [--reason <text>]` and from
+from `lobstah watch hold <key> [--for <id>]` and from
 `lobstah cancel` on a repair dispatch. The watch then carries `heldReason`,
 `heldBy`, and, for `--for`, `heldFor`: the hold ends when that dispatch ends.
 `lobstah watch release` ends any hold.

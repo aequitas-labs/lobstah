@@ -17,10 +17,14 @@ interface FlagSpec {
 
 export interface CommandSpec {
   flags: Record<string, FlagSpec>;
+  /** Flags that are meaningful only with one of these first positionals. */
+  flagSubverbs?: Record<string, string[]>;
   /** Allowed first positional; bare invocation is always allowed too. */
   subverbs?: string[];
   /** Positional synopsis text, verbatim. */
   positionals?: string;
+  /** Reject extra positionals for commands with no positional forms. */
+  maxPositionals?: number;
 }
 
 const HARNESS = 'claude|codex';
@@ -37,17 +41,17 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--effort': { value: '<e>' },
       '--follow-up': { value: '<uuid>' },
       '--attach': { value: '<file>', repeatable: true },
-      '--for': { value: 'wt:<trap>' },
+      '--for': { value: '<name>|wt:<trap>' },
       '--session': { value: '<id>' },
       '--chore': {},
       '--id': { value: '<uuid>' },
     },
   },
   ls: { flags: { '--all': {} } },
-  status: { flags: {}, positionals: '[<uuid>]' },
+  status: { flags: {}, positionals: '[<uuid>|<trap-name>|wt:<trap>]' },
   focus: { flags: {}, positionals: '<trap>' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--harness': { value: HARNESS }, '--model': { value: '<m>' }, '--for': { value: 'wt:<trap>' }, '--no-wake': {}, '--no-reply': {} }, positionals: '<uuid>|wt:<trap> [<message...>]' },
+  send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {} }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -60,7 +64,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '<uuid>',
   },
   catch: { flags: {}, positionals: '<uuid>' },
-  prs: { subverbs: ['sync'], flags: {} },
+  prs: { flags: {}, maxPositionals: 0 },
   reports: { flags: { '--json': {} } },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
@@ -88,10 +92,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--every': { value: '<s>' },
       '--brief': { value: '<template>' },
       '--stream': { value: '<cmd>' },
-      '--reason': { value: '<text>' },
       '--apply': {},
       '--all': {},
     },
+    flagSubverbs: { '--apply': ['backfill'], '--all': ['release'] },
     positionals: '[<key>]',
   },
   soak: {
@@ -108,7 +112,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
-  daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} } },
+  daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
   doctor: { flags: {} },
   glass: { subverbs: ['stop', 'status', 'install', 'uninstall', 'restart'], flags: { '--port': { value: '<n>' }, '--detach': {} } },
@@ -165,10 +169,10 @@ focus requires macOS.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
   send: `Steer a live chain, queue for pending work, or wake a finished chain
-as a follow-up; the worker's next note wakes man wait (--no-reply: none).
---no-wake leaves finished mail unread. --for, --harness, and --model shape
-a new follow-up; --attach copies files. A claimed helm requires --session
-<helm-id>. Trap-name messages arrive at its next park.`,
+as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
+choose the follow-up's worker, harness, or model, use dispatch --follow-up with
+--for, --harness, or --model. --attach copies files. A claimed helm requires
+--session <helm-id>. Trap-name messages arrive at its next park.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -176,7 +180,7 @@ working unless --force; --print shows the command instead of running it.`,
 git progress note.`,
   catch: `The evidence: branch, commits, PR, session, and the worktree it ran in.`,
   prs: `List known PR records newest first with state, checks, age, and watch state.
-\`prs sync\` refreshes each due PR watch once. It registers no watch.`,
+Use watch check-pr <key> to force a refresh of one PR watch.`,
   attention: `Standing attention items with their ack state; \`ack <item-key>\` marks the
 current state seen (--by names who), \`unack\` clears it. Display-only: an ack
 hides the item from the desktop pet and the glass lobs until its state
@@ -368,6 +372,14 @@ export function parseArgs(cmd: string, args: string[]): ParsedArgs | undefined {
     } else if (!flags.has(tok)) {
       flags.set(tok, value);
     }
+  }
+  for (const [flag, allowed] of Object.entries(spec.flagSubverbs ?? {})) {
+    if (flags.has(flag) && !allowed.includes(positionals[0] ?? '')) {
+      return fail(`flag ${flag} requires ${cmd.replace(':', ' ')} ${allowed.join(' | ')}`);
+    }
+  }
+  if (spec.maxPositionals !== undefined && positionals.length > spec.maxPositionals) {
+    return fail(`${cmd.replace(':', ' ')} takes no positional arguments`);
   }
   return { flags, positionals };
 }

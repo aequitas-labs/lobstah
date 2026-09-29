@@ -83,6 +83,24 @@ describe('parseArgs — one flag-extraction step (axi P6)', () => {
     expect(ok('pick', ['once']).positionals).toEqual(['once']);
   });
 
+  it('rejects flags outside the subcommand that reads them', () => {
+    expect(parseArgs('watch', ['--apply'])?.error).toMatch(/--apply requires watch backfill/);
+    expect(parseArgs('watch', ['hold', 'pr:o/r#1', '--apply'])?.error).toMatch(/--apply requires watch backfill/);
+    expect(ok('watch', ['backfill', '--apply']).flags).toEqual({ '--apply': true });
+    expect(parseArgs('watch', ['--all'])?.error).toMatch(/--all requires watch release/);
+    expect(ok('watch', ['release', '--all']).flags).toEqual({ '--all': true });
+    expect(parseArgs('daemon', ['--force', 'status'])?.error).toMatch(/--force requires daemon restart/);
+    expect(ok('daemon', ['--force', 'restart']).flags).toEqual({ '--force': true });
+    expect(parseArgs('soak', ['--json'])?.error).toMatch(/unknown flag --json/);
+    expect(parseArgs('watch', ['hold', 'pr:o/r#1', '--reason', 'x'])?.error).toMatch(/unknown flag --reason/);
+  });
+
+  it('synopses show trap names as accepted addresses', () => {
+    expect(synopsis('status')).toContain('<trap-name>');
+    expect(synopsis('send')).toContain('<trap-name>');
+    expect(synopsis('dispatch')).toContain('--for <name>|wt:<trap>');
+  });
+
   it('--help before any -- asks for the card', () => {
     expect(parseArgs('dispatch', ['--help'])?.help).toBe(true);
     expect(parseArgs('send', ['abc', '--help'])?.help).toBe(true);
