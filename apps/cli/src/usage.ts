@@ -184,14 +184,14 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `The validated status write path: working | needs-decision | blocked |
-paused | done | failed. After \`--\` every word is note. \`done --pr <url>\`
-registers the PR's pr: watch (--no-watch opts out). --waiting-on, --link,
+paused | done | failed. After \`--\` every word is note. \`--pr <url>\` on any
+verb but failed records the PR and registers its pr: watch (--no-watch opts out). --waiting-on, --link,
 --until: what a waiting worker waits on, and when a pause expires. A trap's
 done records its worktree's HEAD, run there or with the trap's --session.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
-\`report done --pr\`, and \`watch backfill --apply\` register; reads never do.
+\`report --pr\`, a trap's beat, and \`watch backfill --apply\` register; reads never do.
 \`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
   soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
 Primary checkout or --repo creates worktrees/soak-<trap> from trunk

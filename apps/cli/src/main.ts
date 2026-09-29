@@ -305,9 +305,10 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
 workers (dispatched agents; injected into every brief):
   report <uuid> <verb> [--pr <url>] [--no-watch] [--session <id>] [--] [note]
                                   the validated status write path
-                                  (${VERBS.join(' | ')}). done --pr
-                                  registers the PR's pr: watch for this
-                                  chain; --no-watch opts out.
+                                  (${VERBS.join(' | ')}). --pr on any
+                                  verb but failed records the PR and
+                                  registers its pr: watch for this chain;
+                                  --no-watch opts out.
 
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
@@ -985,9 +986,10 @@ async function mainCli(): Promise<void> {
         }
       }
       if (prUrl) mergeEvidence(id, lane, { prUrl });
-      // A done PR stays observed: CI, review, and merge flow back through its
-      // pr: watch instead of lobstah going blind at "PR open".
-      const prWatch = verb === 'done' && prUrl && !noWatch ? autoRegisterPrWatch(id, prUrl) : undefined;
+      // A PR stays observed from the first report that names it: CI, review,
+      // and merge flow back through its pr: watch instead of lobstah going
+      // blind at "PR open". The watch is registered once per PR.
+      const prWatch = verb !== 'failed' && prUrl && !noWatch ? autoRegisterPrWatch(id, prUrl) : undefined;
       console.log(
         toonKV({
           id,

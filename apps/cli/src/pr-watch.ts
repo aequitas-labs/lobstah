@@ -33,7 +33,7 @@ import { repoOf } from './digest.js';
 
 /**
  * The CLI half of the `pr:` watch preset (the pure half is core's pr.ts):
- * the check subcommand, auto-registration from `report done --pr`, evidence
+ * the check subcommand, auto-registration from `report --pr` and the trap beat, evidence
  * stamping, and observe-only polling for the inline poller.
  *
  * The daemon observes dispatch-owned PRs even without pickup or a helm.
@@ -66,10 +66,10 @@ export function addPrWatch(ref: PrRef, opts: { forId?: string; everySecs?: numbe
 }
 
 /**
- * `report done --pr <url>` registers the PR's watch, owned by the reporting
- * dispatch's chain. Idempotent: an existing watch for the PR (a continuation
+ * `report --pr <url>` and the trap beat register the PR's watch, owned by
+ * the reporting dispatch's chain. Idempotent: an existing watch for the PR (a continuation
  * re-reporting the same PR, or a hand-registered one) is left alone. A URL
- * that is not a GitHub PR registers nothing. Never throws — a done report
+ * that is not a GitHub PR registers nothing. Never throws — a report
  * must not fail over observation.
  */
 export function autoRegisterPrWatch(id: string, prUrl: string): Watch | undefined {

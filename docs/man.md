@@ -159,10 +159,11 @@ trap is kept out of the ghost sweep until `--until` or
 
 ### PR state after done
 
-A dispatch reports `done` when its PR opens; `report done --pr <url>`
+A dispatch reports its PR with `report <id> <verb> --pr <url>`, which
 registers a `pr:` watch for the chain so the PR stays observed (see the
 PR preset in [vocabulary.md](vocabulary.md#the-pr-preset); `--no-watch`
-opts out). What you get depends on what runs:
+opts out). A trap's PR is tracked from its first push. What you get
+depends on what runs:
 
 - **Only the helm park or `man wait`** (no service): PR state badges in
   `man tend`, `lobstah catch`, and the glass (`merged`, `draft`, `review`,
@@ -180,8 +181,14 @@ succeeds and the watch's check records `lastError`.
 
 Which commands register a watch. Only these write points register one:
 
-- `lobstah report <id> done --pr <url>` registers the watch for the PR the
-  worker just opened.
+- `lobstah report <id> <verb> --pr <url>` registers the watch for the PR the
+  worker opened. Any verb but `failed` does this. A PR already watched is
+  not registered again.
+- `lobstah soak beat` registers the watch for a trap's PR from its first
+  push. At most once a minute, it reads the trap's branch. When the branch
+  is not trunk and has an upstream, it asks `gh pr view <branch>` for the PR.
+  It records a new PR in the dispatch's evidence, where `lobstah catch` and
+  `lobstah status <id>` show it.
 - `lobstah watch add <key>` registers the watch you name.
 - `lobstah watch backfill --apply` registers watches for PRs in old dispatch
   history. Without `--apply` it only lists them. Nothing runs it for you.
