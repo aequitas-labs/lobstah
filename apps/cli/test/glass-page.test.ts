@@ -271,6 +271,16 @@ describe('glass page: per-section change detection', () => {
 });
 
 describe('glass page: modals', () => {
+  it('shows a send awaiting its reply under the dispatch messages', async () => {
+    const d = acceptanceFleet();
+    d.dispatches.find((x) => x.id.startsWith('cccccccc'))!.awaitingReply = { sentAt: ago(300_000), from: 'helm', line: 'start the dev server' };
+    const g = await page(d);
+    await openRow(g, '#dispatches', 'cccccccc');
+    const secs = g.$$('#modalbox .sec').map((el) => text(el));
+    expect(secs).toContain('awaiting reply');
+    expect(text(g.$('#modalbox'))).toContain('start the dev server · from helm · 5m ago');
+  });
+
   it('an open modal keeps its root element across ten ticks; its own item changing updates it in place', async () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#dispatches', 'cccccccc');

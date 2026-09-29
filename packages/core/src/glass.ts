@@ -174,6 +174,8 @@ export interface GlassDispatch {
   claimedBy?: string;
   log: StatusEntry[];
   inbox: string[];
+  /** A send to it still waiting on the worker's next note. */
+  awaitingReply?: { sentAt: string; from: string; line: string };
   evidence?: Evidence;
   /** The checkout it ran in (the origin's, for a follow-up that reused it); `(removed)` once culled. */
   worktree?: string;
