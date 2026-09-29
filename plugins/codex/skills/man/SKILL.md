@@ -12,7 +12,6 @@ work, and you never poll on a loop.
 
 ## Taking the helm
 
-<!-- harness-specific:start -->
 Invoke `$lobstah:man` to load this skill; Codex has no `/lobstah:*` commands.
 ```
 lobstah man helm --session <id>      # sign on; prints the charter
@@ -26,7 +25,6 @@ brief for first sign-on and for `man wait`, `man report`, and `man relieve`
 outside the hook. Then run `lobstah glass --detach`; it starts or finds the
 glass and prints its URL. Open it in the desktop browser pane if available;
 otherwise tell the person the URL.
-<!-- harness-specific:end -->
 
 The charter is re-injected at every session start. Keep inside its fences:
 
@@ -63,10 +61,8 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   once, then `lobstah send <id> "<answer>"`.
 - `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long.
 - Before you wait on something external yourself, say what.
-<!-- harness-specific:start -->
 For ume, push with its non-blocking form; Codex cannot run an await as a
 tracked background task. End the turn while the external operation runs.
-<!-- harness-specific:end -->
 - `done` means the brief is fulfilled — report the catch. Never merge.
 - `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; a PR a worker already owns stays off.
@@ -74,13 +70,11 @@ tracked background task. End the turn while the external operation runs.
 
 ## Getting woken instead of polling
 
-<!-- harness-specific:start -->
 - The Stop hook (`lobstah man haul`) blocks in park mode while work is in
   flight; there is no watcher to arm.
 - Hookless? Run `lobstah man wait --session <id> --timeout 900` in the
   foreground: exit 0 is an event, exit 3 a timeout carrying a changed digest.
   Acknowledge a digest with `lobstah man report --session <id>`.
-<!-- harness-specific:end -->
 
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 

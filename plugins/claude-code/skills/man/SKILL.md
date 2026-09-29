@@ -12,7 +12,6 @@ work, and you never poll on a loop.
 
 ## Taking the helm
 
-<!-- harness-specific:start -->
 Invoke `/lobstah:man` to load this skill.
 ```
 lobstah man helm                     # sign on; prints the charter
@@ -27,7 +26,6 @@ is in the session-start brief. Then run `lobstah glass --detach`. It starts or
 finds the glass and prints its URL. Open the URL in the harness browser pane
 if one is available. Otherwise, tell the person the URL.
 `/lobstah:helm` is bare sign-on and does not start the glass.
-<!-- harness-specific:end -->
 
 The charter is re-injected at every session start. Keep inside its fences:
 
@@ -64,10 +62,8 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   once, then `lobstah send <id> "<answer>"`.
 - `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long.
 - Before you wait on something external yourself, say what.
-<!-- harness-specific:start -->
 For ume, push with its non-blocking form unless the await runs as a tracked
 background task.
-<!-- harness-specific:end -->
 - `done` means the brief is fulfilled — report the catch. Never merge.
 - `done --pr` registers a `pr:` watch: PR state in tend, merge notices, CI-fix forks (with pick).
 - Attention kinds (`attentionKinds` in config.toml) decide what walks; a PR a worker already owns stays off.
@@ -75,13 +71,11 @@ background task.
 
 ## Getting woken instead of polling
 
-<!-- harness-specific:start -->
 - After `man helm`, run `lobstah man wait --session <id> --timeout 900`
   as a background task; re-arm after every completion. The Stop hook blocks
   with standing attention or the arm command when no watcher is live.
 - A timeout (exit 3) carries the digest when something changed; acknowledge
   it with `lobstah man report`. `man haul --park` waits in the hook.
-<!-- harness-specific:end -->
 
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 
