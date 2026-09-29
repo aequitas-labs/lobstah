@@ -92,7 +92,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<key>]',
   },
   soak: {
-    subverbs: ['beat'],
+    subverbs: ['beat', 'title'],
     flags: {
       '--session': { value: '<id>' },
       '--one': {},
@@ -102,6 +102,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--repo': { value: '<key>' },
       '--link': { value: '<url>' },
       '--name': { value: '<word-word>' },
+      '--json': {},
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },

@@ -31,6 +31,7 @@ import {
   trapByAddress,
   trapIdForName,
   trapLabel,
+  trapSessionTitle,
   unknownTrapMessage,
   readSessionClaim,
   releaseCatch,
@@ -1734,6 +1735,12 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'soak': {
+      if (pos[0] === 'title') {
+        if (pos.length !== 1) throw new UsageError(usageFor('soak')!);
+        const title = trapSessionTitle({ sessionId: opt('--session') ?? resolveSessionId({ env: process.env })?.id, cwd: process.cwd() });
+        if (title) console.log(has('--json') ? JSON.stringify(title) : title.title);
+        break;
+      }
       if (opt('--link') !== undefined && !validSessionLink(opt('--link'))) {
         throw new UsageError('invalid --link: use a supported claude://, vscode://, or codex:// session URL');
       }

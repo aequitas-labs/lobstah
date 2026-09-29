@@ -88,6 +88,8 @@ export interface LimitsConfig {
 }
 
 export interface SoakConfig {
+  /** Give a soaking session its trap name and current work as a title. */
+  sessionTitle: boolean;
   /** How long a fresh park heartbeat holds unaddressed matching bait for a soaking session. */
   deferSecs: number;
   /** Heartbeat age past which a registration is a ghost trap and gets swept. */
@@ -189,6 +191,7 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
 }
 
 export const DEFAULT_SOAK: SoakConfig = {
+  sessionTitle: true,
   deferSecs: 90,
   ttlSecs: 1800,
   beat: true,
