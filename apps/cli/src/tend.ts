@@ -21,6 +21,8 @@ import {
   listTraps,
   listReservations,
   trapLabel,
+  trapNamer,
+  nameTrapsIn,
   listWatches,
   watchErrorCell,
   loadConfig,
@@ -955,6 +957,9 @@ export function buildTendReport(now = Date.now()): TendReport {
 
 export function renderTend(r: TendReport): string {
   const lines: string[] = [];
+  // Tables show each trap by name alone; `wt:<id>` only where no name is known.
+  const names = trapNamer();
+  const named = (text: string) => nameTrapsIn(text, 'name', names);
   lines.push(
     toonKV({
       verdict: r.verdict,
@@ -981,7 +986,7 @@ export function renderTend(r: TendReport): string {
           verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : a.kind,
           waitingMins: Math.round(a.ageSecs / 60),
           held: a.held ? 'yes' : '',
-          note: a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? ''),
+          note: named(a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? '')),
         })),
         ['id', 'verb', 'waitingMins', 'held', 'note'],
       ),
@@ -998,7 +1003,7 @@ export function renderTend(r: TendReport): string {
             .map(
               (d) =>
                 `${d.id.slice(0, 8)}:${d.outOfTimeWorkSaved ? 'out of time, work saved' : d.state}` +
-                (d.state === 'held' && d.note ? ` (${d.note.replace(/^held: /, '')})` : '') +
+                (d.state === 'held' && d.note ? ` (${named(d.note.replace(/^held: /, ''))})` : '') +
                 (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
                 (d.waiting ? ` (${waitingText(d.waiting)})` : '') +
                 (d.awaitingReply ? ` (awaiting reply · ${ageLabel(Date.now() - (Date.parse(d.awaitingReply.sentAt) || Date.now()))})` : ''),
@@ -1031,7 +1036,7 @@ export function renderTend(r: TendReport): string {
           waitingOn: p.waiting?.on ?? '',
           for: ageLabel(p.parkedSecs * 1000),
           link: p.waiting?.link ?? '',
-          note: `${p.note ?? ''}${p.trap ? ' (trap)' : ''}`.trim(),
+          note: named(`${p.note ?? ''}${p.trap ? ' (trap)' : ''}`.trim()),
         })),
         ['id', 'waitingOn', 'for', 'link', 'note'],
       ),
@@ -1042,7 +1047,7 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'repairs waiting',
-        r.repairsWaiting.map((w) => ({ pr: w.key, kind: w.kind, heldBy: w.heldBy, reason: w.reason, until: w.until ?? '' })),
+        r.repairsWaiting.map((w) => ({ pr: w.key, kind: w.kind, heldBy: named(w.heldBy), reason: named(w.reason), until: w.until ?? '' })),
         ['pr', 'kind', 'heldBy', 'reason', 'until'],
       ),
     );
@@ -1051,7 +1056,7 @@ export function renderTend(r: TendReport): string {
     lines.push('');
     lines.push(toonTable('repair chores', r.repairChores.map((c) => ({
       id: c.id.slice(0, 8), pr: c.pr, lane: c.lane, state: c.state,
-      worker: c.worker, waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
+      worker: named(c.worker), waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
     })), ['id', 'pr', 'lane', 'state', 'worker', 'waitingForTrap']));
   }
   if (r.watches.length > 0) {
@@ -1094,7 +1099,7 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'awaiting-trap (sticky — never claimed headless)',
-        r.awaiting.map((a) => ({ id: a.id.slice(0, 8), for: a.for, waitingMins: a.ageMins })),
+        r.awaiting.map((a) => ({ id: a.id.slice(0, 8), for: named(a.for), waitingMins: a.ageMins })),
         ['id', 'for', 'waitingMins'],
       ),
     );

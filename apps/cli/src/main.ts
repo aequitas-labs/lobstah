@@ -40,6 +40,9 @@ import {
   TRAP_TICKET_RE,
   DEFAULT_TRAP_START_SECS,
   trapLabel,
+  trapNamer,
+  trapAddressText,
+  nameTrapsIn,
   trapSessionTitle,
   unknownTrapMessage,
   readSessionClaim,
@@ -690,6 +693,25 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
   });
 }
 
+/**
+ * The trap a dispatch names — the one that claimed it, ran it, or is
+ * addressed by it — as `crisp-heron (wt:68c5da5f)`, or `wt:<id>` when no
+ * name is known. Empty for headless work.
+ */
+function dispatchTrap(id: string, lane: Lane, names: (trapId: string) => string | undefined): { trap?: string } {
+  const claimedBy = (bucket: 'active' | 'done'): unknown => {
+    try {
+      return (JSON.parse(fs.readFileSync(path.join(laneDirs(lane)[bucket], id, 'claim.json'), 'utf8')) as { by?: unknown }).by;
+    } catch {
+      return undefined;
+    }
+  };
+  const address = [claimedBy('active'), claimedBy('done'), readEvidence(id, lane).deliveredTo, storedDescriptor(id, lane)?.for].find(
+    (a): a is string => typeof a === 'string' && a.startsWith('wt:'),
+  );
+  return address ? { trap: trapAddressText(address, 'label', names) } : {};
+}
+
 /** Activity past the wedge threshold shows stale. */
 function wedgeSecs(): number {
   try {
@@ -908,6 +930,7 @@ async function mainCli(): Promise<void> {
       const descriptor = storedDescriptor(id, lane);
       const claim = readSessionClaim(id, lane);
       const log = readStatusLog(id, lane);
+      const names = trapNamer();
       const since = queuedAt(id, lane);
       const claimedAt = claim?.at;
       const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined, claimedAt });
@@ -922,11 +945,12 @@ async function mainCli(): Promise<void> {
           state,
           ...(descriptor?.systemRepair ? {
             repairPr: descriptor.pr?.url ?? '(unknown)',
-            worker: claim?.by ?? descriptor.for ?? 'headless',
+            worker: trapAddressText(claim?.by ?? descriptor.for ?? 'headless', 'label', names),
             ...(state === 'queued' && descriptor.for ? { waitingForTrap: descriptor.systemRepair.trapWaitUntil ?? true } : {}),
           } : {}),
           ...(state === 'queued' ? { queued: since } : {}),
-          lastNote: log.at(-1)?.note,
+          ...dispatchTrap(id, lane, names),
+          lastNote: log.at(-1)?.note === undefined ? undefined : nameTrapsIn(log.at(-1)!.note!, 'label', names),
           ...(waitingNow ? { [log.at(-1)!.verb]: waitingText(waitingNow) } : {}),
           ...(waitingNow?.until ? { until: waitingNow.until } : {}),
           ...(activity ? { activity: activityLine(activity) } : {}),
@@ -1292,6 +1316,7 @@ async function mainCli(): Promise<void> {
       const lane = findLane(id);
       const log = readStatusLog(id, lane);
       const ev = readEvidence(id, lane);
+      const names = trapNamer();
       console.log(
         toonKV({
           id,
@@ -1305,7 +1330,8 @@ async function mainCli(): Promise<void> {
           prUrl: ev.prUrl,
           sessionId: ev.sessionId,
           ...worktreeView(id, lane),
-          note: log.at(-1)?.note,
+          ...dispatchTrap(id, lane, names),
+          note: log.at(-1)?.note === undefined ? undefined : nameTrapsIn(log.at(-1)!.note!, 'label', names),
           ...(reportMarkdownPath(dispatchReportKey(id, lane)) ? { report: reportMarkdownPath(dispatchReportKey(id, lane)) } : {}),
         }),
       );

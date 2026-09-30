@@ -82,6 +82,7 @@ tracked background task. End the turn while the external operation runs.
 - A repair or rebase pushes only to its PR's branch: on a non-fast-forward rejection its worker fetches, rebases onto the moved head, and pushes with `--force-with-lease`, at most three times. When it cannot push it reports `failed "push rejected: ..."`: the PR's repair is `blocked`, a `push-failed` notice arrives, and the PR is left as it was. It never opens a branch or a PR.
 - Six verbs exist: working, needs-decision, blocked, paused, done, failed.
 - File a report with `lobstah man file <file.md> [--attach <file>]` when you have findings worth keeping. Ack a report with `lobstah attention ack <key>` when the human says so.
+- A pet click opens the item and acks it; the pet's Acknowledge menu entry acks without opening. Opening a report in the glass does not ack it.
 
 ## Getting woken instead of polling
 

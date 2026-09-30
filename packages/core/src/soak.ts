@@ -179,6 +179,47 @@ export function trapLabel(reg: Pick<TrapRegistration, 'trapId' | 'name'>): strin
   return reg.name ? `${reg.name} (wt:${reg.trapId})` : `wt:${reg.trapId}`;
 }
 
+/** A `wt:<id>` address in free text: a claim note, a log line, a hold reason. */
+export const TRAP_ADDRESS_RE = /\bwt:([a-z0-9][a-z0-9-]*)/g;
+
+/**
+ * A trap's name by id: the live registration's name, else the name the
+ * registry recorded for it (a signed-off trap keeps its name), else
+ * undefined. Lookups are cached for the life of the returned function, so
+ * one render pass reads each registration and the registry once.
+ */
+export function trapNamer(): (trapId: string) => string | undefined {
+  const cache = new Map<string, string | undefined>();
+  return (trapId) => {
+    if (!cache.has(trapId)) cache.set(trapId, readTrap(trapId)?.name ?? trapNameForId(trapId));
+    return cache.get(trapId);
+  };
+}
+
+/**
+ * Show a worker address by the trap's name. `name` gives `crisp-heron`;
+ * `label` gives `crisp-heron (wt:68c5da5f)`. An address with no known name
+ * stays `wt:<id>`; anything that is not a `wt:` address is unchanged.
+ */
+export function trapAddressText(address: string, style: 'name' | 'label' = 'name', names = trapNamer()): string {
+  return nameTrapsIn(address, style, names);
+}
+
+/** Whether the address at `at` already sits in its label, `<name> (wt:<id>)`. */
+export function alreadyLabelled(text: string, at: number, length: number, name: string): boolean {
+  return text.slice(Math.max(0, at - name.length - 2), at) === `${name} (` && text[at + length] === ')';
+}
+
+/** Replace every `wt:<id>` in text with the trap's name (see trapAddressText). */
+export function nameTrapsIn(text: string, style: 'name' | 'label' = 'name', names = trapNamer()): string {
+  return text.replace(TRAP_ADDRESS_RE, (whole: string, id: string, at: number) => {
+    const name = names(id);
+    // Already a label, `crisp-heron (wt:68c5da5f)`: leave it whole.
+    if (!name || alreadyLabelled(text, at, whole.length, name)) return whole;
+    return style === 'label' ? `${name} (${whole})` : name;
+  });
+}
+
 /** Resolve a bare name, wt:name, bare id, or wt:id to the live registration. */
 export function trapByAddress(address: string): TrapRegistration | undefined {
   const value = address.startsWith('wt:') ? address.slice(3) : address;

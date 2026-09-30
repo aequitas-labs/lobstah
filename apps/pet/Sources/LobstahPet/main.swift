@@ -43,10 +43,14 @@ let glassURL: URL = {
  * as a blocker (the click still opened its target).
  */
 func ackItem(_ item: AttentionItem) {
-  guard let key = item.key else { return }
+  guard let args = item.ackArguments else { return }
+  ackAttention(args)
+}
+
+func ackAttention(_ args: [String]) {
   DispatchQueue.global().async {
-    if case let .failure(why) = ackOutcome(defaultRunner(["attention", "ack", key, "--by", "pet"])) {
-      petLog("ack failed for \(key): `lobstah attention ack` \(why)")
+    if case let .failure(why) = ackOutcome(defaultRunner(args)) {
+      petLog("ack failed for \(args[2]): `lobstah attention ack` \(why)")
     }
   }
 }
@@ -158,13 +162,10 @@ final class PetView: NSView {
   weak var pet: Pet?
   override func mouseDown(with event: NSEvent) {
     guard let item = pet?.item else { focusHelm(); return }
-    // A report opens in the spyglass and stays unacked: only
-    // `lobstah attention ack` (the menu's Acknowledge) acks a report.
-    if let url = item.reportLink(glass: glassURL) { NSWorkspace.shared.open(url); return }
-    // A click is the human taking it: open the target, and ack so the pet
-    // stops walking this state on the next poll.
-    if let url = item.prLink { NSWorkspace.shared.open(url) } else { focusHelm() }
-    ackItem(item)
+    clickAttentionItem(item, glass: glassURL,
+      open: { NSWorkspace.shared.open($0) },
+      focusHelm: focusHelm,
+      acknowledge: ackAttention)
   }
   override func updateTrackingAreas() {
     trackingAreas.forEach(removeTrackingArea)
