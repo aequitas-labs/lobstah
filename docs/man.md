@@ -470,10 +470,11 @@ the helm files to keep.
   own attachments.
 - **Attention.** A filed report with no ack stands as the `report` attention
   kind. Add `report` to `attentionKinds` to walk it. The desktop pet shows
-  the report's title; a click opens the glass at the report and does not
-  ack it. `lobstah attention ack <key>` acks a report, whether or not
-  `report` is in `attentionKinds`. Nothing else acks it, and opening it in
-  the glass does not. A report filed by a follow-up dispatch acks the report
+  the report's title; a pet click opens the item and acks it through
+  `lobstah attention ack <key> --by pet`. The pet's Acknowledge menu entry
+  acks without opening, and `lobstah attention ack <key>` acks a report
+  whether or not `report` is in `attentionKinds`. Opening a report in the
+  glass does not ack it. A report filed by a follow-up dispatch acks the report
   of each dispatch before it in the chain.
 - **Cull.** `lobstah cull` removes a dispatch's report with the rest of its
   state. A helm report is culled when it is older than the retention window,

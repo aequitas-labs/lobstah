@@ -19,7 +19,9 @@ to the helm through the focus ladder:
 Every attention kind walks (`attentionKinds` in `config.toml` picks them),
 its bubble led by a short label: `draft`, `review`, `checks`, `ready`,
 `landed`, or nothing for a question. Clicking a PR pet (`pr:*`) opens the
-PR in your browser instead of the helm; right-click adds **Open PR**. Any
+PR in your browser instead of the helm; right-click adds **Open PR**.
+Clicking a report pet opens the glass at the report. Opening a report in
+the glass does not acknowledge it. Any pet
 click also acknowledges the item (`lobstah attention ack <key> --by pet`),
 so that pet stops walking until the item's state changes; right-click
 **Acknowledge** does only that. Acks are display-only — the helm is still
