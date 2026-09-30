@@ -58,8 +58,9 @@ the background, dispatch it with the `lobstah` CLI instead of doing it inline:
   worker, harness, or model, use `lobstah dispatch --follow-up <id> --repo
   <key> --brief-text "<instruction>" --for <name> --harness <kind> --model <m>`.
 - `lobstah cancel <id>` — stop one.
-- A dispatch reporting `needs-decision` is waiting on ME — surface its question
-  immediately, then `lobstah send` my answer.
+- A dispatch reporting `needs-decision` or `blocked`: when the brief or your
+  context gives the answer, `lobstah send` it and tell me what you decided;
+  when the choice is mine, frame it with `lobstah man ask <id>` for me to answer.
 - `done` means brief fulfilled with a branch + commits; report the evidence
   (`~/.lobstah/state/<id>.evidence`) and never merge anything yourself.
 ```
@@ -490,8 +491,13 @@ the helm files to keep.
 ### Decisions
 
 A decision is a question the helm puts to the human. Workers still ask in
-prose (`report needs-decision "<note>"`). The helm decides what it can and
-frames the rest as decisions.
+prose (`report needs-decision "<note>"`). The helm decides first. When the
+brief, the code, or its context gives the answer, it sends it with
+`lobstah send <id> "<answer>"` and says what it decided in its next report.
+When it lacks the context, or the choice is the human's (scope, product
+behavior, money, releases, merges, anything outward-facing or hard to
+undo), it frames a decision with `man ask`. The helm's own questions follow
+the same rule.
 
 - **Asking.** `lobstah man ask [<dispatch-id>] --title "<question>"
   [--detail <file.md>] [--option "<label>"]... [--attach <file>]...` stores a

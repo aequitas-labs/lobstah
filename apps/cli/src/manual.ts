@@ -78,7 +78,7 @@ getting woken instead of asking:
                             your grounds; --attach images it names, --title.
                             \`lobstah reports\` lists every report;
                             \`lobstah attention ack <key>\` acks one
-  lobstah man ask           put a question that needs the human to them:
+  lobstah man ask           put a question the helm cannot decide to the human:
                             [<dispatch-id>] --title, --detail <f.md>,
                             --option (0-6), --attach. The glass shows it as a
                             card; the answer wakes man wait as a

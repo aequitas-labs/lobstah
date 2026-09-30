@@ -1778,7 +1778,7 @@ async function mainCli(): Promise<void> {
           console.log(
             `next: run \`lobstah status ${ev.id}\` for full state` +
               (ev.entry.verb === 'needs-decision' || ev.entry.verb === 'blocked'
-                ? `, answer with \`lobstah send ${ev.id} "<answer>"\``
+                ? `, then send an answer with \`lobstah send ${ev.id} "<answer>"\` when you can decide, or frame it with \`lobstah man ask ${ev.id}\` when it needs the human`
                 : `, collect the evidence, then \`lobstah send ${ev.id} "<instruction>"\` to wake a follow-up if needed`) +
               `, then re-arm a background \`lobstah man wait${sid ? ` --session ${sid}` : ''}\`.`,
           );
@@ -2112,7 +2112,7 @@ async function mainCli(): Promise<void> {
           [
             'A lobstah dispatch, watched source, or fleet notice needs attention:',
             ...lines,
-            'Check a dispatch with `lobstah status <id>`; answer a needs-decision with `lobstah send <id> "<answer>"`.',
+            'Check a dispatch with `lobstah status <id>`. For a needs-decision or blocked, send an answer with `lobstah send <id> "<answer>"` when you can decide, or frame it with `lobstah man ask <id>` when it needs the human.',
             'A watch line means an external source updated (e.g. a review round) — handle it directly.',
             'A notice line names its own decision or remedy.',
             'Handle it now. This session re-parks automatically at turn end — do not arm any watcher.',
