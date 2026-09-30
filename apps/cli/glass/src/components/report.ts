@@ -76,11 +76,26 @@ function blocks(fileUrl: FileUrl, list: MdBlock[]): Children {
   });
 }
 
+/**
+ * Parsed markdown by text. A modal re-renders on every 2 s poll; the same
+ * text is parsed once, not per render. Holds the few texts shown recently.
+ */
+const parsed = new Map<string, MdBlock[]>();
+function parseOnce(text: string): MdBlock[] {
+  let tree = parsed.get(text);
+  if (!tree) {
+    tree = parseMarkdown(text);
+    parsed.set(text, tree);
+    if (parsed.size > 8) parsed.delete(parsed.keys().next().value!);
+  }
+  return tree;
+}
+
 /** The page body for one report's markdown, or the loading and error states. */
 export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string; error?: string } | undefined }) {
   const body =
     text?.text !== undefined
-      ? blocks((name) => reportFileUrl(r.key, name), parseMarkdown(text.text))
+      ? blocks((name) => reportFileUrl(r.key, name), parseOnce(text.text))
       : text?.error
         ? html`<div class="bad">${text.error}</div>`
         : html`<div class="dim">loading…</div>`;
@@ -89,7 +104,7 @@ export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string;
 
 /** Markdown as elements, with images from `fileUrl` (a decision's detail page). */
 export function Markdown({ text, fileUrl }: { text: string; fileUrl: FileUrl }) {
-  return html`<div class="mdpage">${blocks(fileUrl, parseMarkdown(text))}</div>`;
+  return html`<div class="mdpage">${blocks(fileUrl, parseOnce(text))}</div>`;
 }
 
 /** The report's heading line: who it is from (a trap, a headless dispatch's id, nothing for the helm), its age, and `acked`. */

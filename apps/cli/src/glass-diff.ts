@@ -48,7 +48,7 @@ export interface GlassPrefs {
   noticeKind: string;
 }
 
-export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'report' | 'settings';
+export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'settings';
 export interface ModalRef {
   type: ModalType;
   key: string;
@@ -70,7 +70,7 @@ export interface SettingsItem {
   attentionKinds: string[];
   attentionError?: string;
 }
-export type ModalItem = GlassHelm | GlassDispatch | GlassPr | GlassTrapView | GlassReport | SettingsItem;
+export type ModalItem = GlassHelm | GlassDispatch | GlassPr | GlassTrapView | SettingsItem;
 
 /** A trap as the page renders it: its catch ids resolved against the snapshot's dispatches. */
 export type GlassTrapView = Omit<GlassTrap, 'catches'> & { catches: GlassDispatch[] };
@@ -113,26 +113,6 @@ export type GlassTab = (typeof GLASS_TABS)[number];
 export function tabFromHash(hash: string | undefined | null): GlassTab {
   const tab = String(hash || '').replace(/^#/, '');
   return (GLASS_TABS as readonly string[]).includes(tab) ? (tab as GlassTab) : 'deck';
-}
-
-/**
- * The modal a report opens: its dispatch's modal (the report renders above
- * the attachments there), or a helm report's own modal.
- */
-export function reportModal(key: string): ModalRef {
-  const m = /^report:(work|chore):(.+)$/.exec(key);
-  return m ? { type: 'dispatch', key: `${m[1]}:${m[2]}` } : { type: 'report', key };
-}
-
-/** `#report/<key>` opens that report's modal; any other hash opens none. */
-export function modalFromHash(hash: string | undefined | null): ModalRef | null {
-  const m = /^#?report\/(.+)$/.exec(String(hash || ''));
-  if (!m) return null;
-  try {
-    return reportModal(decodeURIComponent(m[1]!));
-  } catch {
-    return null;
-  }
 }
 
 /** `#decision/<key>`: the deck, scrolled to that decision's card. */
@@ -250,6 +230,31 @@ export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>)
 export const reportOrder = (a: GlassReport, b: GlassReport): number =>
   Number(!!a.acked) - Number(!!b.acked) || b.filedAt.localeCompare(a.filedAt);
 
+/** A report's own page on the glass: it opens in a new tab and renders once. */
+export const reportPageUrl = (key: string): string => `/report/${encodeURIComponent(key)}`;
+
+/** The report key an old `#report/<key>` link names, else null: it redirects to the report's page. */
+export function reportFromHash(hash: string | undefined | null): string | null {
+  const m = /^#?report\/(.+)$/.exec(String(hash || ''));
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]!);
+  } catch {
+    return null;
+  }
+}
+
+/** The report key a `/report/<key>` page path names, else null. */
+export function reportFromPath(pathname: string): string | null {
+  const m = /^\/report\/([^/?#]+)\/?$/.exec(pathname);
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]!);
+  } catch {
+    return null;
+  }
+}
+
 /** Where a report's markdown and images are served (glass.ts serveReport). */
 export const reportMarkdownUrl = (key: string): string => `/report/${encodeURIComponent(key)}/md`;
 export const reportFileUrl = (key: string, name: string): string => `/report/${encodeURIComponent(key)}/files/${encodeURIComponent(name)}`;
@@ -276,7 +281,6 @@ export function modalItem(d: GlassSnapshot, modal: ModalRef | null): ModalItem |
   if (modal.type === 'helm') return d.helms.find((v) => v.grounds === modal.key) || null;
   if (modal.type === 'dispatch') return d.dispatches.find((v) => v.lane + ':' + v.id === modal.key) || null;
   if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || null;
-  if (modal.type === 'report') return (d.reports || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError };
   const t = d.traps.find((v) => v.trapId === modal.key);
   return t ? trapView(d, t) : null;

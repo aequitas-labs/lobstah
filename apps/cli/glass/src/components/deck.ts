@@ -1,5 +1,5 @@
 import type { GlassPr, GlassStack } from '@lobstah/core';
-import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, prBadgeClass } from '../../../src/glass-diff.js';
+import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -22,7 +22,7 @@ import {
   trapNowText,
   windowAction,
 } from './common.js';
-import { openReport, reportMeta } from './reports.js';
+import { reportMeta } from './reports.js';
 import { DeckDecisions } from './decisions.js';
 import type { DecisionDraft } from '../store.js';
 
@@ -41,6 +41,8 @@ interface DeckItem {
   metaText?: string;
   /** A control at the right end of the card's foot line, or the row's end. */
   action?: Children;
+  /** A page this item opens in a new tab, instead of `open`. */
+  href?: string;
   /** A block under the card or line: a starting trap's start commands. */
   extra?: Children;
   open?: () => void;
@@ -53,6 +55,13 @@ function deckItem(it: DeckItem, view: View) {
   const badge =
     it.badge &&
     html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`;
+  if (it.href) {
+    // A page of its own, in a new tab (a report).
+    const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
+    return view === 'cards'
+      ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener"><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
+      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
+  }
   if (view === 'cards')
     return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
   return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
@@ -151,7 +160,7 @@ export function Deck({
   }));
   const reports = inp.reports.map((r): DeckItem => {
     const meta = reportMeta(r);
-    return { key: r.key, title: r.title, meta: meta.nodes, metaText: meta.text, open: openReport(r), acked: !!r.acked };
+    return { key: r.key, title: r.title, meta: meta.nodes, metaText: meta.text, href: reportPageUrl(r.key), acked: !!r.acked };
   });
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,

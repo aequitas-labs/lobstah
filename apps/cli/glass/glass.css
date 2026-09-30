@@ -1072,3 +1072,29 @@ a.lob {
   font-size: 11px;
   cursor: default;
 }
+
+/* A report on its own page (/report/<key>): full width, rendered once. */
+.reportview {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+.reportview h1 {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+.reportview .sub {
+  color: var(--dim);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.reportview .sec {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin: 14px 0 4px;
+}
+.reportview .mdpage {
+  padding: 12px 20px;
+}

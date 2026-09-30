@@ -462,9 +462,10 @@ the helm files to keep.
   unacked first, up to 8, then "+N more", which opens the Reports tab. A
   report's card or row shows its title, then who filed it (a trap's name, a
   headless dispatch's id, nothing for the helm), its age, and `acked`. A
-  dispatch's report renders as a
-  page at the top of its dispatch modal. A helm report opens in a modal of
-  its own; `#report/<key>` links to it. The page shows headings, lists,
+  report opens on its own page, `/report/<key>`, in a new tab: from its card
+  or row, a lob, the desktop pet, or its dispatch's modal. The page renders
+  once and does not refresh; opening it does not ack the report.
+  `#report/<key>` goes to that page. The page shows headings, lists,
   tables, fenced code, links (in a new tab), bold, italics, and images.
   Raw HTML in the markdown shows as text. The glass serves the markdown and
   the images read-only, and an image only by basename from that report's

@@ -36,10 +36,10 @@ public struct AttentionItem: Decodable, Equatable {
   /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
   public var prLink: URL? { (kind?.hasPrefix("pr:") ?? false) ? prUrl.flatMap(URL.init(string:)) : nil }
 
-  /** A report pet clicks through to the spyglass at the report's modal (#report/<key>). */
+  /** A report pet clicks through to the report's own page on the spyglass (/report/<key>). */
   public func reportLink(glass: URL) -> URL? {
     guard kind == "report", let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
-    return URL(string: "\(glass.absoluteString)/#report/\(encoded)")
+    return URL(string: "\(glass.absoluteString)/report/\(encoded)")
   }
 
   /**

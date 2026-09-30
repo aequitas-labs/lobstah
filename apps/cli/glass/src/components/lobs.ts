@@ -42,7 +42,7 @@ function lob(it: LobItem, i: number, spriteOk: boolean | null) {
   if (it.hash)
     return html`<a key=${it.key} class="lob" style=${style} title="open the decision" href=${it.hash} onClick=${hide}>${body}</a>`;
   return it.href
-    ? html`<a key=${it.key} class="lob" style=${style} title="open the PR" href=${it.href} target="_blank" rel="noopener" onClick=${hide}>${body}</a>`
+    ? html`<a key=${it.key} class="lob" style=${style} title=${it.label === 'report' ? 'open the report' : 'open the PR'} href=${it.href} target="_blank" rel="noopener" onClick=${hide}>${body}</a>`
     : html`<div
         key=${it.key}
         class="lob"

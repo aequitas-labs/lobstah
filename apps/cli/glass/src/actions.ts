@@ -1,5 +1,5 @@
 import type { GlassSnapshot } from '@lobstah/core';
-import { answerSummary, decisionCards, modalItem, reportMarkdownUrl } from '../../src/glass-diff.js';
+import { answerSummary, decisionCards, modalItem } from '../../src/glass-diff.js';
 import type { GlassPrefs, ModalType } from '../../src/glass-diff.js';
 import { saveLobHidden, savePrefs } from './prefs.js';
 import { getState, setState } from './store.js';
@@ -19,7 +19,6 @@ export function receive(snapshot: GlassSnapshot): void {
     modal: modal && modalItem(snapshot, modal) ? modal : null,
     ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
   });
-  loadOpenReport();
 }
 
 const emptyDraft = (): DecisionDraft => ({ text: '', files: [] });
@@ -139,30 +138,6 @@ export async function sendAnswer(key: string): Promise<void> {
   }
 }
 
-/**
- * Fetch the open modal's report page once per filing. Opening a report
- * reads it; it never acks it (only `lobstah attention ack` does).
- */
-export function loadOpenReport(): void {
-  const { snapshot, modal, reportText } = getState();
-  if (!snapshot || !modal) return;
-  const r =
-    modal.type === 'report'
-      ? (snapshot.reports || []).find((x) => x.key === modal.key)
-      : modal.type === 'dispatch'
-        ? (snapshot.reports || []).find((x) => 'report:' + modal.key === x.key)
-        : undefined;
-  if (!r || reportText[r.key]?.hash === r.stateHash) return;
-  const key = r.key;
-  const hash = r.stateHash;
-  const put = (entry: { text?: string; error?: string }) =>
-    setState({ reportText: { ...getState().reportText, [key]: { hash, ...entry } } });
-  put({});
-  fetch(reportMarkdownUrl(key))
-    .then(async (res) => (res.ok === false ? put({ error: `report not found (${res.status})` }) : put({ text: await res.text() })))
-    .catch(() => put({ error: 'report could not be read' }));
-}
-
 export const markStale = (): void => setState({ stale: true });
 
 /** Show an image in the in-page overlay. */
@@ -173,12 +148,10 @@ export function showModal(type: ModalType, key: string): void {
   const { snapshot } = getState();
   const modal = { type, key };
   setState({ modal: !snapshot || modalItem(snapshot, modal) ? modal : null });
-  loadOpenReport();
 }
 
-/** Close the modal; a #report/<key> deep link gives way to the deck. */
+/** Close the modal. */
 export function closeModal(): void {
-  if (/^#report\//.test(location.hash)) history.replaceState(null, '', '#deck');
   setState({ modal: null });
 }
 

@@ -243,21 +243,27 @@ describe('glass: the image overlay', () => {
     expect(overlay(g)!.querySelector('img.lbimg')!.getAttribute('src')).toBe(imgSrc);
   });
 
-  it("report pages and the dispatch modal's attachments use the same overlay; Escape closes it before the modal", async () => {
+  it('a report page opens its image in the same overlay; Escape closes it', async () => {
     const reportKey = 'report:work:cccccccc-0000-4000-8000-000000000003';
-    const g = await page(everyAttentionFleet(), {
-      files: { [`/report/${encodeURIComponent(reportKey)}/md`]: '# Tray findings\n\n![the tray](tray.png)\n' },
+    const fleet = everyAttentionFleet();
+    const row = (fleet.reports ?? []).find((r) => r.key === reportKey)!;
+    const k = encodeURIComponent(reportKey);
+    const g = await page(fleet, {
+      path: `/report/${k}`,
+      files: { [`/report/${k}/md`]: '# Tray findings\n\n![the tray](tray.png)\n', [`/report/${k}/meta`]: JSON.stringify(row) },
     });
+    await click(g, g.$('.reportview .mdpage .mdimg'));
+    expect(overlay(g)!.querySelector('img')!.getAttribute('src')).toBe(`/report/${k}/files/tray.png`);
+    await escape(g);
+    expect(overlay(g)).toBeNull();
+    expect(text(g.$('.reportview h1'))).toBe('Tray findings');
+  });
+
+  it("the dispatch modal's attachments use the same overlay; Escape closes it before the modal", async () => {
+    const g = await page(everyAttentionFleet());
     await g.go('#dispatches');
     await click(g, g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc')));
     expect(g.$('#overlay')!.className).toBe('open');
-    // The report page's image.
-    await click(g, g.$('#modalbox .mdpage .mdimg'));
-    expect(overlay(g)!.querySelector('img')!.getAttribute('src')).toBe(`/report/${encodeURIComponent(reportKey)}/files/tray.png`);
-    await escape(g);
-    expect(overlay(g)).toBeNull();
-    expect(g.$('#overlay')!.className).toBe('open');
-    // The dispatch's own attachment.
     const thumbs = g.$$('#modalbox button.thumb');
     const shot = thumbs.find((b) => b.querySelector('img')!.getAttribute('src')!.endsWith('/shot.png'))!;
     expect(shot.querySelector('img')!.getAttribute('src')).toBe('/attachment/dispatch/work/cccccccc-0000-4000-8000-000000000003/shot.png');
