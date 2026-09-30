@@ -17,6 +17,13 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  listReservations,
+  listRequests,
+  liveHelms,
+  readReservationTicket,
+  trapRequestError,
+  trapStartCommands,
+  writeRequest,
   trapLastSeen,
   validSessionLink,
   trapLabel,
@@ -77,6 +84,26 @@ import type { TrapRegistration } from '@lobstah/core';
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
+
+/** limits.attachmentMaxBytes; a config error falls back to the default. */
+function attachmentLimit(): number {
+  try {
+    return loadConfig().limits.attachmentMaxBytes;
+  } catch {
+    return DEFAULT_LIMITS.attachmentMaxBytes;
+  }
+}
+
+/**
+ * The /requests body cap: room for the largest kind, an answer's files as
+ * base64 with its text. Each kind's own limit applies after parsing.
+ */
+export function requestBodyCap(): number {
+  return Math.ceil((attachmentLimit() * 4) / 3) * ANSWER_FILES_MAX + ANSWER_TEXT_MAX * 4 + 64 * 1024;
+}
+
+/** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
+export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([['trap-request', 4096]]);
 
 const readJson = <T>(f: string): T | undefined => {
   try {
@@ -420,7 +447,12 @@ export function serveAttachment(url: string, res: http.ServerResponse): boolean 
 }
 
 /** One disk pass, everything the page renders. Pure read. */
-export function buildGlassSnapshot(): GlassSnapshot {
+/**
+ * `local`: the snapshot goes to this machine's own glass page (a same-host
+ * request), so starting cards may carry their start command and ticket.
+ */
+export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnapshot {
+  const cfg = loadConfig();
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
@@ -456,7 +488,9 @@ export function buildGlassSnapshot(): GlassSnapshot {
   // Historical traps: a stowed or ghosted registration is gone, but its mail
   // dir, notices, and delivery receipts survive — list those ids too so a
   // seat's story stays inspectable after sign-off.
-  const liveIds = new Set(live.map((t) => t.trapId));
+  const reserved = listReservations();
+  const requested = listRequests({ kind: 'trap-request', open: true });
+  const liveIds = new Set([...live.map((t) => t.trapId), ...reserved.map((r) => r.trapId), ...requested.map((r) => r.id)]);
   const seenIds = new Set<string>();
   for (const f of listDir(laneDirs('work').inbox)) {
     const m = /^trap-(.+)$/.exec(f);
@@ -493,6 +527,30 @@ export function buildGlassSnapshot(): GlassSnapshot {
   };
   const traps = [
     ...live.map((t) => attach(t as GlassTrap, true, !!t.firstParkedAt && Date.now() - trapLastSeen(t) <= loadConfig().soak.ttlSecs * 1000)),
+    ...reserved.map((r) =>
+      attach(
+        {
+          trapId: r.trapId,
+          name: r.name,
+          repo: r.repo,
+          harness: r.harness,
+          starting: {
+            reservedAt: r.reservedAt,
+            deadline: r.deadline,
+            ...(() => {
+              const ticket = options.local ? readReservationTicket(r.trapId) : undefined;
+              const repoPath = cfg.repos[r.repo]?.path;
+              return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness) } : {};
+            })(),
+            ...(r.failedAt || Date.now() > (Date.parse(r.deadline) || 0)
+              ? { failedAt: r.failedAt ?? r.deadline, reason: r.reason ?? `no session signed on by ${r.deadline}` }
+              : {}),
+          },
+        } as GlassTrap,
+        false,
+      ),
+    ),
+    ...requested.map((r) => attach({ trapId: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), requested: { at: r.at } } as GlassTrap, false)),
     ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
   ];
   const attention = attentionSnapshot();
@@ -506,6 +564,8 @@ export function buildGlassSnapshot(): GlassSnapshot {
     traps,
     trapNames: trapNamesShown(traps, dispatches, attention, names),
     notices: allNotices.slice().reverse(),
+    repoKeys: Object.keys(cfg.repos),
+    helmOn: liveHelms(cfg.helm.ttlSecs * 1000).length > 0,
     watches,
     dispatches,
     prs,
@@ -521,15 +581,6 @@ export function buildGlassSnapshot(): GlassSnapshot {
       extensions: [...ANSWER_EXTENSIONS],
     },
   };
-}
-
-/** limits.attachmentMaxBytes; a config error falls back to the default. */
-function attachmentLimit(): number {
-  try {
-    return loadConfig().limits.attachmentMaxBytes;
-  } catch {
-    return DEFAULT_LIMITS.attachmentMaxBytes;
-  }
 }
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -575,7 +626,7 @@ const PAGE = GLASS_PAGE;
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(
   port: number,
-  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: () => GlassSnapshot } = {},
+  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: (options?: { local?: boolean }) => GlassSnapshot } = {},
 ): http.Server {
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   const logged = new Set<string>();
@@ -620,8 +671,7 @@ export function serveGlass(
         req.resume();
         return reply(415, { ok: false, reason: 'JSON required.' });
       }
-      // A decision answer carries its files as base64, with its text.
-      const cap = Math.ceil((attachmentLimit() * 4) / 3) * ANSWER_FILES_MAX + ANSWER_TEXT_MAX * 4 + 64 * 1024;
+      const cap = requestBodyCap();
       if (Number(req.headers['content-length'] ?? NaN) > cap) {
         req.resume();
         return reply(413, { ok: false, reason: 'The request is too large.' });
@@ -645,14 +695,29 @@ export function serveGlass(
         } catch {
           return reply(400, { ok: false, reason: 'Invalid JSON.' });
         }
-        if (body?.kind !== 'decision-answer') return reply(400, { ok: false, reason: 'Unknown request kind.' });
-        try {
-          const { key, ...answer } = decisionAnswerRequest(body.payload);
-          const { decision, answer: stored } = answerKey(key, { ...answer, by: 'glass' });
-          reply(201, { ok: true, id: stored.request, key: decision.key });
-        } catch (err) {
-          if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });
-          reply(500, { ok: false, reason: 'The answer could not be stored.' });
+        const kindMax = typeof body?.kind === 'string' ? REQUEST_KIND_MAX_BYTES.get(body.kind) : undefined;
+        if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
+        // One switch per kind: each kind validates and stores its own payload.
+        switch (body?.kind) {
+          case 'decision-answer': {
+            try {
+              const { key, ...answer } = decisionAnswerRequest(body.payload);
+              const { decision, answer: stored } = answerKey(key, { ...answer, by: 'glass' });
+              return reply(201, { ok: true, id: stored.request, key: decision.key });
+            } catch (err) {
+              if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });
+              return reply(500, { ok: false, reason: 'The answer could not be stored.' });
+            }
+          }
+          case 'trap-request': {
+            const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
+            if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
+            const { repo, harness } = body.payload as { repo: string; harness: string };
+            const request = writeRequest('trap-request', { repo, harness }, 'glass');
+            return reply(201, { ok: true, id: request.id });
+          }
+          default:
+            return reply(400, { ok: false, reason: 'Unknown request kind.' });
         }
       });
       req.on('error', () => reply(400, { ok: false, reason: 'The request failed.' }));
@@ -708,7 +773,9 @@ export function serveGlass(
     } else if (req.url?.startsWith('/attachment/') && req.method === 'GET' && serveAttachment(req.url, res)) {
       return;
     } else if (req.url === '/data') {
-      const body = JSON.stringify({ ...snapshot(), focusToken, focusSupported: process.platform === 'darwin' });
+      // Start commands carry a ticket: only a same-host request (this
+      // machine's own page, not a rebound name) gets them.
+      const body = JSON.stringify({ ...snapshot({ local: req.headers.host === ownHost() }), focusToken, focusSupported: process.platform === 'darwin' });
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(body);
     } else {

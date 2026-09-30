@@ -15,6 +15,7 @@ import { attachmentBlock } from './attachments.js';
 import { toolSummary, toolTarget, writeActivity } from './activity.js';
 import { knownTrapNames, reserveTrapName, trapIdForName, trapNameForId } from './trap-names.js';
 import { laneOf } from './worktrees.js';
+import { readReservation } from './trap-start.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -265,6 +266,8 @@ export function signOnTrap(opts: {
   name?: string;
   window?: WindowRef;
   link?: string;
+  /** A reserved trap id (a redeemed ticket): the worktree must anchor it, or anchor nothing yet. */
+  trapId?: string;
   ttlMs: number;
   now?: number;
 }): SignOnResult {
@@ -272,7 +275,12 @@ export function signOnTrap(opts: {
     throw new Error('invalid session link: pass a supported claude://, vscode://, or codex:// session URL');
   }
   const now = opts.now ?? Date.now();
-  const trapId = ensureTrapId(opts.worktree);
+  const anchored = trapIdAt(opts.worktree);
+  if (opts.trapId !== undefined && anchored !== undefined && anchored !== opts.trapId) {
+    throw new Error(`this worktree already anchors trap wt:${anchored}; a reserved trap signs on in a new worktree — run soak from the repo's primary checkout`);
+  }
+  if (opts.trapId !== undefined && anchored === undefined) writeTrapAnchor(opts.worktree, { trapId: opts.trapId });
+  const trapId = opts.trapId ?? ensureTrapId(opts.worktree);
   const createdWorktree = readTrapAnchor(opts.worktree)?.createdBy === 'soak' || undefined;
   const prior = readTrap(trapId);
   if (prior && prior.sessionId !== opts.sessionId) {
@@ -570,7 +578,8 @@ export function noticeOrphanedBait(now = Date.now()): void {
     const d = queuedDescriptor(id, 'work');
     if (!d?.for) continue;
     const to = addressedTrap(d);
-    if (to !== undefined && traps.has(to)) continue;
+    // A reserved trap (starting, or failed to start) still holds its address.
+    if (to !== undefined && (traps.has(to) || readReservation(to))) continue;
     postNotice({
       kind: 'bait-orphaned',
       text:

@@ -17,6 +17,8 @@ export type NoticeKind =
   | 'trap-stowed'
   | 'trap-defective'
   | 'trap-ghosted'
+  | 'trap-starting'
+  | 'trap-start-failed'
   | 'trap-request'
   | 'decision-answer'
   | 'bait-orphaned'

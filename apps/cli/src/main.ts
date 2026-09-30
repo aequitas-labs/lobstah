@@ -30,6 +30,19 @@ import {
   readTrap,
   trapByAddress,
   trapIdForName,
+  reservationByAddress,
+  reservationForTicket,
+  dropReservation,
+  withdrawReservation,
+  reserveTrap,
+  expireReservations,
+  TRAP_TICKET_ENV,
+  TRAP_TICKET_RE,
+  DEFAULT_TRAP_START_SECS,
+  trapStartCommands,
+  listRequests,
+  readRequest,
+  closeRequest,
   trapLabel,
   trapNamer,
   trapAddressText,
@@ -124,7 +137,6 @@ import {
   releaseHeldQuestions,
   askDecision,
   withdrawDecision,
-  readRequest,
   DecisionError,
   decisionDir,
 } from '@lobstah/core';
@@ -176,6 +188,7 @@ import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReporte
 import { finishResolvedWaits, registerWaitWatch } from './pr-waits.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
+import { setTerminalTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows } from './report-file.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
@@ -351,7 +364,7 @@ workers (dispatched agents; injected into every brief):
                                   dispatch's report, images --attach'ed.
 
 soaking (interactive sessions volunteering as workers):
-  soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
+  soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--ticket <t>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
                                   volunteer this session as a worker.
                                   Identity is the worktree: sign-on anchors a
                                   trap id and two-word name (.lobstah-trap).
@@ -365,6 +378,18 @@ soaking (interactive sessions volunteering as workers):
                                   sessions without Stop hooks): work prints
                                   plain, a quiet timeout exits 3 — re-run it.
                                   prints this session's trap title.
+                                  --ticket (or LOBSTAH_TRAP_TICKET) signs on
+                                  as a reserved trap. Sign-on names a
+                                  Terminal.app or iTerm2 tab after the trap.
+  trap reserve --repo <key> [--harness claude|codex] [--name <word-word>] [--deadline <secs>]
+                                  reserve a trap before its session starts:
+                                  prints its name, id, a one-time ticket, and
+                                  the start command. dispatch --for works on
+                                  it at once; unredeemed past the deadline
+                                  (default 180s) it fails with a notice.
+  trap reserve --request <id>     reserve what a glass trap request asks for
+                                  (repo, harness), and close the request.
+  trap requests                   open trap requests from the glass.
   stow [--wt <trap>|--session <id>] [--keep] [--quiet]
                                   sign the trap off; an unfinished
                                   assignment requeues, unread messages
@@ -516,12 +541,20 @@ function runDueManWatches(): void {
   // The daemon observes dispatch-owned PR watches even with no helm signed on.
 }
 
+/** A trap request as a man wait event: its id, repo, and harness. */
+function trapRequestFields(n: Notice): Record<string, string> | undefined {
+  const r = n.kind === 'trap-request' && n.refId ? readRequest(n.refId) : undefined;
+  return r?.kind === 'trap-request'
+    ? { event: 'trap-request', id: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), from: r.from, at: r.at }
+    : undefined;
+}
+
 function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
     // A decision answer is an event with its request's payload.
     const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
     if (answer) console.log(toonKV(decisionEventFields(answer)));
-    else console.log(toonKV({ notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
+    else console.log(toonKV(trapRequestFields(n) ?? { notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
   }
   console.log(
     'next: each notice names its own decision or remedy — act on it (or note it and move on), ' +
@@ -540,10 +573,12 @@ function emitReplies(replies: ReplyEvent[], sessionId?: string): void {
   );
 }
 
-/** A haul line for a notice; a decision answer carries its request's payload. */
+/** A haul line for a notice; requests carry their own payload and remedy. */
 function noticeLine(n: Notice, prefix = 'notice '): string {
   const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
-  return answer ? decisionLine(answer) : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
+  if (answer) return decisionLine(answer);
+  const r = trapRequestFields(n);
+  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: reserve with \`lobstah trap reserve --request ${r.id}\`` : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
 }
 
 /** A haul line for a send's answer. */
@@ -787,10 +822,17 @@ async function mainCli(): Promise<void> {
         address = `wt:${trap.trapId}`;
       }
       const trap = trapByAddress(address);
-      if (!trap) throw new Error(`${unknownTrapMessage(address)} — \`lobstah man tend\` lists live traps`);
-      address = `wt:${trap.trapId}`;
-      const hbAgeSecs = Math.round((Date.now() - (Date.parse(trap.heartbeatAt) || 0)) / 1000);
-      if (trap.firstParkedAt === undefined) {
+      const reserved = trap ? undefined : reservationByAddress(address);
+      if (!trap && !reserved) throw new Error(`${unknownTrapMessage(address)} — \`lobstah man tend\` lists live traps`);
+      address = `wt:${(trap ?? reserved)!.trapId}`;
+      const hbAgeSecs = trap ? Math.round((Date.now() - (Date.parse(trap.heartbeatAt) || 0)) / 1000) : 0;
+      if (!trap) {
+        warnings.push(
+          reserved!.failedAt
+            ? `trap ${trapLabel(reserved!)} did not start (${reserved!.reason}) — the work waits until a session redeems its ticket`
+            : `trap ${trapLabel(reserved!)} is starting (reserved, not signed on) — delivery waits until its session signs on and parks`,
+        );
+      } else if (trap.firstParkedAt === undefined) {
         warnings.push(`trap ${trapLabel(trap)} has never listened (signed on, no park yet) — delivery waits until its session parks`);
       } else if (hbAgeSecs > cfgDispatch.soak.deferSecs) {
         warnings.push(`trap ${trapLabel(trap)} is not currently parked (heartbeat ${hbAgeSecs}s ago) — delivery waits for its next park.`);
@@ -807,6 +849,85 @@ async function mainCli(): Promise<void> {
   };
 
   switch (cmd) {
+    case 'trap': {
+      if (pos[0] === 'requests') {
+        const open = listRequests({ kind: 'trap-request', open: true });
+        console.log(
+          open.length
+            ? toonTable(
+                'trap-requests',
+                open.map((r) => ({ id: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), from: r.from, at: r.at })),
+                ['id', 'repo', 'harness', 'from', 'at'],
+              )
+            : toonKV({ requests: 'none open' }),
+        );
+        if (open.length) console.log(toonHelp(['lobstah trap reserve --request <id>   (reserve the trap a request asks for, and close the request)']));
+        break;
+      }
+      if (pos[0] !== 'reserve') throw new UsageError(usageFor('trap')!);
+      const cfg = loadConfig();
+      // A request from the glass names the repo and harness; flags may repeat them, never contradict them.
+      const requestId = opt('--request');
+      const request = requestId !== undefined ? readRequest(requestId) : undefined;
+      if (requestId !== undefined) {
+        if (!request || request.kind !== 'trap-request') throw new Error(`no trap request ${requestId} — \`lobstah trap requests\` lists open ones`);
+        if (request.closedAt) throw new Error(`trap request ${requestId} is already closed: ${request.outcome ?? 'no outcome recorded'}`);
+      }
+      const asked = request?.payload as { repo?: string; harness?: string } | undefined;
+      for (const [flag, value] of [['--repo', asked?.repo], ['--harness', asked?.harness]] as const) {
+        if (value !== undefined && opt(flag) !== undefined && opt(flag) !== value) {
+          throw new UsageError(`${flag} ${opt(flag)} contradicts trap request ${requestId} (${flag} ${value}): drop ${flag}`);
+        }
+      }
+      const repoKey = opt('--repo') ?? asked?.repo;
+      if (!repoKey) throw new UsageError(`trap reserve needs --repo <key> or --request <id>\n\n${usageFor('trap')!}`);
+      const repo = cfg.repos[repoKey];
+      if (!repo) {
+        throw new Error(`no repo "${repoKey}" is configured (configured: ${Object.keys(cfg.repos).join(', ') || 'none'}) — \`lobstah repos\` lists them`);
+      }
+      const harness = opt('--harness') ?? asked?.harness;
+      if (harness !== undefined && harness !== 'claude' && harness !== 'codex') {
+        throw new UsageError(`--harness must be claude or codex, got "${harness}"`);
+      }
+      const deadlineFlag = opt('--deadline');
+      const startSecs = deadlineFlag === undefined ? DEFAULT_TRAP_START_SECS : Number(deadlineFlag);
+      if (!Number.isInteger(startSecs) || startSecs < 1) throw new UsageError('--deadline must be a whole number of seconds, 1 or more');
+      const { reservation, ticket } = reserveTrap({
+        repo: repoKey,
+        harness,
+        name: opt('--name'),
+        startSecs,
+        by: callerSession(opt('--session'))?.id,
+        ...(request ? { request: request.id } : {}),
+      });
+      if (request) closeRequest(request.id, `reserved ${trapLabel(reservation)}`);
+      const starts = trapStartCommands(repo.path, ticket, reservation.harness);
+      console.log(
+        toonKV({
+          name: reservation.name,
+          trap: `wt:${reservation.trapId}`,
+          label: trapLabel(reservation),
+          state: 'starting',
+          repo: reservation.repo,
+          ...(reservation.harness ? { harness: reservation.harness } : {}),
+          ...(request ? { request: `${request.id} (closed)` } : {}),
+          ticket,
+          deadline: reservation.deadline,
+          note:
+            `start one session in the repo's primary checkout with this ticket; its soak signs on as ${reservation.name}. ` +
+            `\`dispatch --for ${reservation.name}\` works now. The ticket redeems once.`,
+        }),
+      );
+      console.log(
+        toonHelp([
+          ...starts.map((s) =>
+            s.harness === 'claude' ? `${s.command}   (Claude Code; the variable keeps the tab named ${reservation.name})` : `${s.command}   (Codex)`,
+          ),
+          `lobstah stow --wt ${reservation.name}   (withdraw the reservation)`,
+        ]),
+      );
+      break;
+    }
     case 'focus': {
       const address = pos[0];
       if (!address || pos.length !== 1) throw new UsageError(usageFor('focus')!);
@@ -2026,6 +2147,27 @@ async function mainCli(): Promise<void> {
           `no repo "${repoFlag}" is configured (configured: ${Object.keys(cfg.repos).join(', ') || 'none'}) — \`lobstah repos\` lists them`,
         );
       }
+      // A reserved trap: a valid ticket (flag, else the environment) names
+      // the trap id, name, and repo this session signs on as. A stale
+      // ticket in the environment is ignored; a bad --ticket refuses.
+      const ticketFlag = opt('--ticket');
+      const ticket = ticketFlag ?? (process.env[TRAP_TICKET_ENV] || undefined);
+      const reservation = ticket !== undefined ? reservationForTicket(ticket) : undefined;
+      if (ticketFlag !== undefined && !reservation) {
+        const redeemedBy = TRAP_TICKET_RE.exec(ticketFlag)?.[1];
+        const own = redeemedBy !== undefined ? readTrap(redeemedBy) : undefined;
+        if (!own || own.sessionId !== callerSession(opt('--session'), true)?.id) {
+          throw new Error('this ticket redeems no reserved trap: it is malformed, already redeemed, or withdrawn — `lobstah trap reserve` issues a new one');
+        }
+      }
+      if (reservation) {
+        if (repoFlag !== undefined && repoFlag !== reservation.repo) {
+          throw new Error(`--repo ${repoFlag} does not match the reserved trap ${trapLabel(reservation)} (repo ${reservation.repo}): drop --repo`);
+        }
+        if (!cfg.repos[reservation.repo]) {
+          throw new Error(`the reserved trap ${trapLabel(reservation)} is for repo ${reservation.repo}, which is no longer configured`);
+        }
+      }
       // Where the trap lives. A linked worktree is its own site: sign on
       // there. Anywhere else (a primary checkout, a directory outside any
       // repo), the session's own trap is re-used, else soak creates a
@@ -2035,7 +2177,29 @@ async function mainCli(): Promise<void> {
       let prior: ReturnType<typeof readTrap>;
       let sessionId: string | undefined;
       let create: { key: string; repo: RepoConfig } | undefined;
-      if (site && !site.primary) {
+      if (reservation) {
+        // A reserved trap signs on in a new worktree, or in a linked
+        // worktree of its repo that anchors no trap yet.
+        sessionId = callerSession(opt('--session'), true)?.id;
+        if (!sessionId) {
+          throw new Error(
+            'redeeming a ticket needs --session <id> — the harness session id, announced at session start ' +
+              'by the lobstah plugin (`lobstah man brief`).',
+          );
+        }
+        const mine = trapBySession(sessionId);
+        if (mine) {
+          throw new Error(
+            `this session already mans trap ${trapLabel(mine)}. Sign it off with \`lobstah stow\` before you redeem the ticket for ${trapLabel(reservation)}.`,
+          );
+        }
+        repoKey = reservation.repo;
+        if (site && !site.primary && site.repoKey === reservation.repo && trapIdAt(site.worktree) === undefined) {
+          worktree = site.worktree;
+        } else {
+          create = { key: reservation.repo, repo: cfg.repos[reservation.repo]! };
+        }
+      } else if (site && !site.primary) {
         if (repoFlag !== undefined && repoFlag !== site.repoKey) {
           throw new Error(
             `--repo ${repoFlag} does not match this linked worktree (repo ${site.repoKey ?? 'not configured'}). ` +
@@ -2110,7 +2274,8 @@ async function mainCli(): Promise<void> {
       // else the environment (session id format breaks a CLAUDE*/CODEX* tie).
       // Undecidable refuses — a wrong label makes attach resume the wrong CLI.
       const sameSession = prior?.sessionId === sessionId;
-      const resolved = detectHarness({ flag: opt('--harness'), prior: sameSession ? prior?.harness : undefined, sessionId });
+      let resolved = detectHarness({ flag: opt('--harness'), prior: sameSession ? prior?.harness : undefined, sessionId });
+      if (!resolved.harness && reservation?.harness) resolved = detectHarness({ prior: reservation.harness, sessionId });
       if (!resolved.harness) {
         throw new UsageError(
           `cannot tell which harness this session is: ${resolved.reason}. Pass --harness claude|codex.\n\n${usageFor('soak')!}`,
@@ -2120,7 +2285,13 @@ async function mainCli(): Promise<void> {
       // Created last, after every check that can refuse: a refusal leaves
       // nothing behind.
       const made = create
-        ? await createSoakWorktree({ repoKey: create.key, repo: create.repo, sessionId, minFreeGB: cfg.limits.minFreeGB })
+        ? await createSoakWorktree({
+            repoKey: create.key,
+            repo: create.repo,
+            sessionId,
+            minFreeGB: cfg.limits.minFreeGB,
+            ...(reservation ? { trapId: reservation.trapId } : {}),
+          })
         : undefined;
       if (made) worktree = canon(made.dir);
       let res: ReturnType<typeof signOnTrap>;
@@ -2135,6 +2306,7 @@ async function mainCli(): Promise<void> {
           name: opt('--name'),
           window: captureWindow(),
           link: opt('--link'),
+          ...(reservation ? { trapId: reservation.trapId } : {}),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
       } catch (err) {
@@ -2148,6 +2320,9 @@ async function mainCli(): Promise<void> {
         );
       }
       const reg = res.ok;
+      if (reservation) dropReservation(reservation.trapId);
+      // The terminal tab carries the trap's name while it soaks.
+      const titled = reg.name ? await setTerminalTitle(reg.window, reg.name) : undefined;
       // A command cannot move the session: a session outside the trap's
       // worktree is told to change into it.
       const inside = (() => {
@@ -2162,11 +2337,13 @@ async function mainCli(): Promise<void> {
           trap: `wt:${reg.trapId}`,
           label: trapLabel(reg),
           session: sessionId,
-          harness: `${reg.harness} (${resolved.source === 'flag' ? '--harness' : resolved.source === 'prior' ? 'as signed on' : resolved.source === 'env' ? 'from the environment' : 'from the session id format'})`,
+          harness: `${reg.harness} (${resolved.source === 'flag' ? '--harness' : resolved.source === 'prior' ? (sameSession ? 'as signed on' : 'as reserved') : resolved.source === 'env' ? 'from the environment' : 'from the session id format'})`,
           ...(harnessChanged ? { harnessChanged: `${harnessChanged} → ${reg.harness} (registration updated)` } : {}),
           repo: reg.repo ?? '(none configured — addressed work only)',
           worktree: reg.worktree,
           ...(made ? { created: true, branch: made.branch } : {}),
+          ...(reservation ? { ticket: `redeemed — signed on as the reserved trap` } : {}),
+          ...(titled?.named ? { terminal: `tab named ${reg.name}` } : {}),
           ...(reg.one ? { one: true } : {}),
           ...(inside ? {} : { instruction: `cd ${reg.worktree} and work in that directory from now on` }),
           note:
@@ -2226,6 +2403,23 @@ async function mainCli(): Promise<void> {
         if (wtFlag) throw new Error(unknownTrapMessage(wtFlag));
         throw new Error("nothing to stow here — run from the trap's worktree, or pass --wt <trap-id> / --session <id>");
       }
+      // A reserved trap no session has signed on as: withdraw the
+      // reservation. No session owns it, so this is steering.
+      if (!readTrap(trapId) && reservationByAddress(trapId)) {
+        gateHelm(caller);
+        const withdrawn = withdrawReservation(trapId, sessionId)!;
+        if (!quiet) {
+          console.log(
+            toonKV({
+              name: withdrawn.name,
+              label: trapLabel(withdrawn),
+              withdrawn: `wt:${trapId}`,
+              note: 'reservation withdrawn; its ticket no longer redeems. Work addressed to it stays queued.',
+            }),
+          );
+        }
+        break;
+      }
       // A trap always signs itself off from its own worktree (or its own
       // session id). Stowing someone ELSE's trap is steering — with a
       // claimed helm, that force path is the helm's alone.
@@ -2236,6 +2430,8 @@ async function mainCli(): Promise<void> {
         gateHelm(caller);
       }
       const reg = stowTrap(trapId, own ? 'signed off' : 'stowed by the helm', sessionId);
+      // Clear the tab name sign-on set.
+      if (reg?.window) await setTerminalTitle(reg.window, '');
       const released = reg ? releaseCatch(reg) : {};
       const bounced = reg ? bounceTrapMessages(trapId) : 0;
       // The trap's worktree: removed only when soak created it and it holds

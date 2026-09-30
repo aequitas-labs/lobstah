@@ -1050,3 +1050,27 @@ a.lob {
   padding: 3px 8px;
   text-align: left;
 }
+
+/* New trap: a button on the Traps tab and the deck's traps heading, opening a small form. */
+.tabhead {
+  margin: 0 0 8px;
+}
+.newtrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.newtrap select {
+  font: inherit;
+}
+/* A starting trap's start commands: copy one, paste it in a terminal. */
+.startcmds {
+  margin: 6px 0;
+  font-size: 11px;
+  cursor: default;
+}

@@ -909,6 +909,94 @@ enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 Nobody is conscripted: only a worktree whose session ran `soak` ever
 receives work.
 
+### Reserving a trap before its session starts
+
+```bash
+lobstah trap reserve --repo <key>       # reserve a trap; prints its name, id, and a one-time ticket
+        [--harness claude|codex]        # print only that harness's start command
+        [--name amber-gull]             # choose the name
+        [--deadline 180]                # seconds the session has to sign on (default 180)
+lobstah soak --ticket <ticket>          # in the new session: sign on as the reserved trap
+lobstah stow --wt amber-gull            # withdraw a reservation no session has redeemed
+```
+
+`trap reserve` picks the two-word name and the `wt:` id before any session
+exists and writes a **starting** reservation (`soaking/<id>.starting`) with a
+deadline. `dispatch --for <name>` works on it at once: the work waits, as it
+does for any addressed trap. `man tend` and the glass show the trap as
+`starting`.
+
+The output holds a one-time ticket and the command that starts the session in
+the repo's primary checkout:
+
+```bash
+cd <repo> && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:soak --ticket <ticket>"
+cd <repo> && codex '$lobstah:trap soak --ticket <ticket>'
+```
+
+Nothing starts the session for you: a person runs the command. The session's
+soak redeems the ticket, from `--ticket` or from the `LOBSTAH_TRAP_TICKET`
+environment variable. It creates a worktree named after the reserved id,
+signs on under the reserved name and id, and deletes the reservation. The
+ticket then redeems nothing. A spent ticket left in `LOBSTAH_TRAP_TICKET` is
+ignored; a spent `--ticket` is refused, except in the session that redeemed
+it. A session that already mans a trap cannot redeem a ticket.
+
+A reservation still unredeemed at its deadline **fails**: the daemon posts one
+`trap-start-failed` notice, and the glass shows the trap as `start failed`
+with the reason. Work addressed to it stays queued. The ticket still redeems
+after the deadline. `lobstah stow --wt <name>` withdraws the reservation; its
+addressed work is then orphaned bait and the helm gets a `bait-orphaned`
+notice.
+
+### Asking for a trap from the glass
+
+The Traps tab and the deck's traps block have a **+ New trap** button. It
+opens a small form: a repo (from the configured repo keys) and a harness
+(`claude` or `codex`). Submitting it files a **trap request**: the glass POSTs
+`{ kind: "trap-request", payload: { repo, harness } }` to `/requests` with
+the same same-origin and page token guard as the open-window button. The
+server checks the repo and harness, writes `~/.lobstah/requests/<id>.json`
+(kind `trap-request`), and runs nothing. `/requests` refuses a body larger
+than eight attachments (`[limits].attachmentMaxBytes` each, as base64) plus
+room for text, with 413. After it reads the kind, it refuses a `trap-request`
+larger than 4 KB with 413.
+
+A request wakes the helm's `man wait` (and the Stop-hook park) as a
+`trap-request` event with the request's id, repo, and harness. An open
+request also wakes a helm that signs on later. The glass shows it at once as a
+greyed card: `requested · <repo> · <harness> · waiting for the helm`, or
+`waiting for a helm` when no helm is signed on.
+
+```bash
+lobstah trap requests                  # open trap requests
+lobstah trap reserve --request <id>    # reserve what the request asks for, and close it
+```
+
+`trap reserve --request <id>` takes the repo and harness from the request,
+records the request on the reservation, and closes the request. The card
+becomes the starting card, then the live trap when the session signs on.
+
+Every starting card shows the start command `trap reserve` prints, with a copy
+button: paste it into a terminal to start the session by hand. The ticket in
+it is kept in `soaking/<id>.ticket` (mode 0600) until the reservation is
+redeemed or withdrawn. The glass sends it only to a page on this machine's
+own glass address, only on the starting card, and no notice or log carries
+it.
+
+### The terminal tab name
+
+At sign-on, soak names the session's terminal tab after the trap. It finds the
+tab by the tty recorded in the registration's window: a Terminal.app tab gets
+the name as its custom title, an iTerm2 session gets it as its session name.
+Other terminals are left alone. `lobstah stow` clears the name.
+`LOBSTAH_TERMINAL_TITLE=0` turns naming off.
+
+Claude Code writes its own title to the tab, and in Terminal.app that title
+replaces the custom title. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` on the
+command that starts Claude Code stops that for that one process; the start
+command `trap reserve` prints sets it. Codex also sets the terminal title.
+
 ### Culling and disk space
 
 Worktrees are 1 to 8 GB each. `lobstah cull` sweeps what is finished: `done/`

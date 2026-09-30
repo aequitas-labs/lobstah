@@ -2,7 +2,7 @@ import type { Attachment, GlassDispatch, GlassPr, GlassTrap, TendAttention } fro
 import { useState } from 'preact/hooks';
 import { dispatchFileUrl, isImageName, prBadgeClass, watchState } from '../../../src/glass-diff.js';
 import type { ModalType } from '../../../src/glass-diff.js';
-import { copyText, openLightbox, openTrapWindow, showModal } from '../actions.js';
+import { copyText, openLightbox, openTrapWindow, requestTrap, showModal } from '../actions.js';
 import { getState } from '../store.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -65,6 +65,8 @@ const resumeCmd = (t: GlassTrap): string | undefined =>
 
 /** The same live-trap action and honest result wherever a trap is shown. */
 export function windowAction(t: GlassTrap): Children {
+  if (t.requested) return html`<span class="dim">Requested — no window yet</span>`;
+  if (t.starting) return html`<span class="dim">${t.starting.failedAt ? 'Did not start' : 'Starting — no window yet'}</span>`;
   if (!t.live) {
     const command = resumeCmd(t);
     return command
@@ -331,6 +333,20 @@ export interface TrapRowView {
 }
 
 export function trapRow(t: GlassTrap): TrapRowView {
+  if (t.requested)
+    return {
+      stale: false,
+      listen: [html`<span class="dot"></span>`, html`<span class="dim">requested</span>`],
+      hb: html`<span class="dim">—</span>`,
+    };
+  if (t.starting)
+    return {
+      stale: false,
+      listen: t.starting.failedAt
+        ? [html`<span class="dot bad"></span>`, html`<span class="bad">start failed</span>`]
+        : [html`<span class="dot warn"></span>`, 'starting'],
+      hb: html`<span class="dim">—</span>`,
+    };
   if (!t.live)
     return {
       stale: false,
@@ -346,14 +362,22 @@ export function trapRow(t: GlassTrap): TrapRowView {
   };
 }
 
-/** A trap's state: signed off, idle (listening or not), parked on a wait, or working a catch. */
+/** A trap's state: starting, start failed, signed off, idle (listening or not), parked on a wait, or working a catch. */
 type TrapState =
+  | { kind: 'requested'; helmOn: boolean }
+  | { kind: 'starting'; deadline: string }
+  | { kind: 'start failed'; reason: string }
   | { kind: 'signed off' }
   | { kind: 'idle'; listening: boolean }
   | { kind: 'parked'; current: GlassDispatch }
   | { kind: 'working'; current: GlassDispatch };
 
 function trapState(t: GlassTrap): TrapState {
+  if (t.requested) return { kind: 'requested', helmOn: !!getState().snapshot?.helmOn };
+  if (t.starting)
+    return t.starting.failedAt
+      ? { kind: 'start failed', reason: t.starting.reason ?? 'no session signed on in time' }
+      : { kind: 'starting', deadline: t.starting.deadline };
   if (!t.live) return { kind: 'signed off' };
   const current = t.claimed ? t.catches.find((c) => c.id === t.claimed && c.bucket === 'active') : undefined;
   if (!current)
@@ -362,11 +386,12 @@ function trapState(t: GlassTrap): TrapState {
   return { kind: 'working', current };
 }
 
-/** The state dot's tone: green working or listening, amber parked, grey not listening or signed off. */
-export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'dim' {
+/** The state dot's tone: green working or listening, amber parked or starting, red start failed, grey not listening or signed off. */
+export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
   const s = trapState(t);
   if (s.kind === 'working' || (s.kind === 'idle' && s.listening)) return 'ok';
-  return s.kind === 'parked' ? 'warn' : 'dim';
+  if (s.kind === 'start failed') return 'bad';
+  return s.kind === 'parked' || s.kind === 'starting' ? 'warn' : 'dim';
 }
 
 const parkedText = (c: GlassDispatch) => (c.waiting ? `waiting on ${c.waiting.on}` : c.note || 'waiting');
@@ -376,6 +401,9 @@ const workTitle = (c: GlassDispatch) => c.brief.split(/\r?\n/, 1)[0]?.trim().sli
 export function trapNow(t: GlassTrap): Children {
   const s = trapState(t);
   const dot = html`<span class=${'dot trapdot ' + trapDotTone(t)}></span>`;
+  if (s.kind === 'requested') return [dot, html`<span class="dim">${requestedText(t, s.helmOn)}</span>`];
+  if (s.kind === 'starting') return [dot, 'starting · waiting for its session to sign on'];
+  if (s.kind === 'start failed') return [dot, html`<span class="bad">start failed</span>`, ' · ', s.reason];
   if (s.kind === 'signed off') return [dot, html`<span class="dim">signed off</span>`];
   if (s.kind === 'idle') return [dot, 'idle · ', s.listening ? 'listening' : 'not listening'];
   const current = s.current;
@@ -395,9 +423,48 @@ export function trapNow(t: GlassTrap): Children {
   ];
 }
 
+const requestedText = (t: GlassTrap, helmOn: boolean): string =>
+  `requested · ${t.repo ?? ''} · ${t.harness ?? ''} · ${helmOn ? 'waiting for the helm' : 'waiting for a helm'}`;
+
+/** A reserved trap's start commands, each copyable: the way to start it by hand. Only a starting card has them. */
+export function startCommands(t: GlassTrap): Children {
+  const commands = t.starting?.commands;
+  if (!commands?.length) return null;
+  return html`<div class="startcmds" onClick=${stop}><div class="dim">start it: run one in a terminal</div>${commands.map((c) => cmdRow(c.command, c.harness))}</div>`;
+}
+
+/** The New trap button and its form: a repo and a harness, filed as a request for the helm. */
+export function NewTrap() {
+  const d = getState().snapshot;
+  const repos = d?.repoKeys ?? [];
+  const [open, setOpen] = useState(false);
+  const [repo, setRepo] = useState('');
+  const [harness, setHarness] = useState('claude');
+  const [result, setResult] = useState<string | null>(null);
+  const chosen = repo || repos[0] || '';
+  const submit = async (e: Event) => {
+    e.preventDefault();
+    const error = await requestTrap(chosen, harness);
+    setResult(error ?? null);
+    if (!error) setOpen(false);
+  };
+  if (!open)
+    return html`<span class="newtrap"><button class="btn" onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap</button></span>`;
+  return html`<form class="newtrap" onClick=${stop} onSubmit=${submit}>
+    <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
+    <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">claude</option><option value="codex">codex</option></select></label>
+    <button class="btn" type="submit" disabled=${!chosen}>Request</button>
+    <button class="btn" type="button" onClick=${() => setOpen(false)}>Cancel</button>
+    ${result && html`<span class="bad">${result}</span>`}
+  </form>`;
+}
+
 /** trapNow as plain text: the hover title of a clamped meta line. */
 export function trapNowText(t: GlassTrap): string {
   const s = trapState(t);
+  if (s.kind === 'requested') return requestedText(t, s.helmOn);
+  if (s.kind === 'starting') return `starting · sign-on due by ${s.deadline}`;
+  if (s.kind === 'start failed') return `start failed · ${s.reason}`;
   if (s.kind === 'signed off') return 'signed off';
   if (s.kind === 'idle') return `idle · ${s.listening ? 'listening' : 'not listening'}`;
   if (s.kind === 'parked') return `parked · ${parkedText(s.current)}`;

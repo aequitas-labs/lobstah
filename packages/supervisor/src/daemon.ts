@@ -43,6 +43,7 @@ import {
   releaseDispatchLock,
   daemonSkip,
   sweepGhostTraps,
+  expireReservations,
   pausedWaiting,
 } from '@lobstah/core';
 import type { Config, Descriptor, FreeBytesReader, Lane, RunnerInfo } from '@lobstah/core';
@@ -501,6 +502,9 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
             (action.requeued ? ` — work ${action.requeued} back in the queue` : ''),
     );
   }
+  // A reserved trap whose session never signed on by its deadline fails
+  // with a notice; its addressed work stays queued.
+  for (const r of expireReservations()) log(`trap ${trapLabel(r)} did not start — ${r.reason}`);
   // Addressed bait is sticky — never the daemon's; orphans surface as helm
   // notices instead of headless spawns. Unaddressed work defers briefly to a
   // trap that is parked right now. Daemon repairs are the sole addressed
