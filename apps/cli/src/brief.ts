@@ -7,6 +7,7 @@ import {
   loadConfig,
   trapBySession,
   trapLabel,
+  TITLE_REMINDERS,
   type Grounds,
   type HelmRegistration,
 } from '@lobstah/core';
@@ -58,8 +59,12 @@ function sessionGrounds(cwd: string | undefined): { grounds?: Grounds; placehold
  * heartbeat), a trap, or neither (offered the two sign-ons).
  */
 /** The reminder SessionStart and Stop give a trap that has not confirmed its sign-on title. */
-export function titleReminder(title: string): string {
-  return `lobstah: sign-on is not complete. Apply this title: ${title}. Then run \`lobstah trap title-set\`.`;
+export function titleReminder(title: string, last = false): string {
+  return (
+    `lobstah: sign-on is not complete. Apply this title: ${title} (skip this if you have no tool that sets the session title). ` +
+    `Then run \`lobstah soak title-set\`.` +
+    (last ? ' This is the last reminder: if the command cannot run here, carry on; lobstah stops asking.' : '')
+  );
 }
 
 export async function buildBriefContext(sessionId: string, cwd?: string): Promise<string> {
@@ -95,7 +100,8 @@ export async function buildBriefContext(sessionId: string, cwd?: string): Promis
   }
   const workerTrap = trapBySession(sessionId);
   if (workerTrap) {
-    const title = workerTrap.titlePending ? `\n${titleReminder(workerTrap.titlePending)}` : '';
+    const title =
+      workerTrap.titlePending && (workerTrap.titleReminders ?? 0) < TITLE_REMINDERS ? `\n${titleReminder(workerTrap.titlePending)}` : '';
     return `lobstah: session id ${sessionId} — this session mans trap ${trapLabel(workerTrap)} (it takes assigned work at turn end) and works in ${workerTrap.worktree}; \`lobstah stow\` signs it off.${fleet}${title}`;
   }
   let help: string;

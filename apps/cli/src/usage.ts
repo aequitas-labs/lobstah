@@ -99,7 +99,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<key>]',
   },
   soak: {
-    subverbs: ['beat'],
+    subverbs: ['beat', 'title-set'],
     flags: {
       '--session': { value: '<id>' },
       '--one': {},
@@ -255,7 +255,7 @@ on as a reserved trap. Names the Terminal.app/iTerm2 tab. \`soak beat\`: hook.`,
 start command. dispatch --for works at once; soak --ticket <t> redeems it. Past
 --deadline (default 180s) trap-start-failed posts; work stays queued. stow --wt
 <name> withdraws it. --request <id> reserves what a glass request asks for and
-closes it; \`trap requests\` lists them. \`trap title-set\` confirms the sign-on title.`,
+closes it; \`trap requests\` lists them. \`trap title-set\` = \`soak title-set\`.`,
   stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
 finalizes; unread messages bounce. Removes only worktrees soak created, kept
 when dirty, untracked, unpushed to upstream, or without upstream (with reason).

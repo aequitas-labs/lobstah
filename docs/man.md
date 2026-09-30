@@ -1122,14 +1122,22 @@ it.
 Sign-on asks the session to apply a title: `lobstah soak` prints
 `step: Apply this title: <title>` (the trap's name). The session applies it
 with its harness's title tool when there is one (`set_session_title` in the
-Claude desktop Code tab, `set_thread_title` in the Codex app), then runs
-`lobstah trap title-set` (`--session <id>` from outside the worktree), which
-prints `signOn: complete`. Until then, sign-on is not complete: the
-SessionStart hook adds `lobstah: sign-on is not complete. Apply this title:
-<title>. Then run \`lobstah trap title-set\`.` to the session brief, and the
-Stop hook blocks the stop once with the same text. A turn the Stop hook
-already continued (`stop_hook_active`) is not reminded again. A session that
-signs on again keeps a title it confirmed.
+Claude desktop Code tab, `set_thread_title` in the Codex app) and skips that
+part when it has none. Then it runs `lobstah soak title-set` (`--session
+<id>` from outside the worktree), which prints `signOn: complete`.
+`lobstah trap title-set` does the same, but Claude Code's worktree isolation
+refuses any command line with the word `trap` in it (it reads it as the
+shell builtin), so a trap runs `soak title-set`.
+
+Until then, sign-on is not complete. The SessionStart hook adds the
+reminder to the session brief, and the Stop hook blocks the stop once per
+turn with it: `lobstah: sign-on is not complete. Apply this title: <title>
+(skip this if you have no tool that sets the session title). Then run
+\`lobstah soak title-set\`.` A turn the Stop hook already continued
+(`stop_hook_active`) is not reminded again. After three reminders (the
+third says it is the last), both hooks stop asking; `soak title-set` still
+completes sign-on later. A session that signs on again keeps a title it
+confirmed.
 
 ### The terminal tab name
 

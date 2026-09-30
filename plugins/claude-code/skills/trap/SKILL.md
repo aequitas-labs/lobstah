@@ -60,10 +60,11 @@ Invoke `/lobstah:trap` to load this skill.
 Sign-on has one more step. `lobstah soak` prints
 `step: Apply this title: <title>`. Apply it: set this session's title to
 that text with `set_session_title` for literal `self` when the Claude
-desktop Code tab offers it (Claude Code CLI has no title setter; its
-terminal tab already carries the name). Then run `lobstah trap title-set`.
-Sign-on is complete after that. Until then, the SessionStart and Stop
-hooks remind you once per turn.
+desktop Code tab offers it. Without a title tool, skip that part (Claude
+Code CLI has no title setter; its terminal tab already carries the name).
+Then run `lobstah soak title-set`. Sign-on is complete after that. Until
+then, the SessionStart and Stop hooks remind you once per turn, at most
+three times.
 
 When `soak --wait` or `report done`/`failed` prints a `title` field, set
 the title the same way. Never retry a title the tool refused or asked the

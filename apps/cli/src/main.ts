@@ -57,6 +57,8 @@ import {
   trapIdAbove,
   askTrapTitle,
   confirmTrapTitle,
+  countTitleReminder,
+  TITLE_REMINDERS,
   trapIdAt,
   anchoredWorktree,
   readTrapAnchor,
@@ -413,7 +415,7 @@ soaking (interactive sessions volunteering as workers):
   trap reserve --request <id>     reserve what a glass trap request asks for
                                   (repo, harness), and close the request.
   trap requests                   open trap requests from the glass.
-  trap title-set [--session <id>] confirm this session applied the title
+  soak title-set [--session <id>] confirm this session applied the title
                                   sign-on printed. Sign-on is complete
                                   after it; until then SessionStart and
                                   Stop remind the session once per turn.
@@ -481,6 +483,15 @@ function hookParkMode(configured: 'arm' | 'block' | undefined, harness?: string)
  * as `soak --wait` in a hookless session (wakes print plain; a timeout
  * exits 3 so re-running the same command re-arms).
  */
+/** Record that this session applied its sign-on title; sign-on is complete. */
+function confirmTitle(sessionFlag: string | undefined): void {
+  const who = callerSession(sessionFlag);
+  const trapId = trapIdAbove(process.cwd()) ?? (who ? trapBySession(who.id)?.trapId : undefined);
+  const reg = trapId ? confirmTrapTitle(trapId) : undefined;
+  if (!reg) throw new Error("no trap here — run from the trap's worktree, or pass --session <id>");
+  console.log(toonKV({ trap: trapLabel(reg), title: reg.titleSet, signOn: 'complete' }));
+}
+
 /** How a park ended: something to act on, the registration gone, or the timeout. */
 type ParkEnd = 'woke' | 'gone' | 'timeout';
 
@@ -897,12 +908,9 @@ async function mainCli(): Promise<void> {
 
   switch (cmd) {
     case 'trap': {
+      // `trap title-set` is the older name of `soak title-set`.
       if (pos[0] === 'title-set') {
-        const who = callerSession(opt('--session'));
-        const trapId = trapIdAbove(process.cwd()) ?? (who ? trapBySession(who.id)?.trapId : undefined);
-        const reg = trapId ? confirmTrapTitle(trapId) : undefined;
-        if (!reg) throw new Error("no trap here — run from the trap's worktree, or pass --session <id>");
-        console.log(toonKV({ trap: trapLabel(reg), title: reg.titleSet, signOn: 'complete' }));
+        confirmTitle(opt('--session'));
         break;
       }
       if (pos[0] === 'requests') {
@@ -2059,10 +2067,15 @@ async function mainCli(): Promise<void> {
       try {
         const hook = readHookStdin();
         const trapReg = hook?.session_id ? trapBySession(hook.session_id) : undefined;
-        // An unconfirmed sign-on title: remind once per turn (a continued turn is not reminded again).
-        if (trapReg?.titlePending && !hook?.stop_hook_active) {
-          console.log(JSON.stringify({ decision: 'block', reason: titleReminder(trapReg.titlePending) }));
-          break;
+        // An unconfirmed sign-on title: remind once per turn (a continued turn
+        // is not reminded again), at most TITLE_REMINDERS times; the last one
+        // says so, and then the hook stops asking.
+        if (trapReg?.titlePending && !hook?.stop_hook_active && (trapReg.titleReminders ?? 0) < TITLE_REMINDERS) {
+          const n = countTitleReminder(trapReg.trapId);
+          if (n !== undefined) {
+            console.log(JSON.stringify({ decision: 'block', reason: titleReminder(trapReg.titlePending, n >= TITLE_REMINDERS) }));
+            break;
+          }
         }
         if (trapReg) {
           const cfg = loadConfig();
@@ -2280,6 +2293,13 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'soak': {
+      // A trap confirms its sign-on title. The command avoids the word `trap`:
+      // Claude Code's worktree isolation refuses a command line that contains
+      // it (it reads it as the shell builtin that runs a string).
+      if (pos[0] === 'title-set') {
+        confirmTitle(opt('--session'));
+        break;
+      }
       if (opt('--link') !== undefined && !validSessionLink(opt('--link'))) {
         throw new UsageError('invalid --link: use a supported claude://, vscode://, or codex:// session URL');
       }
@@ -2498,7 +2518,9 @@ async function mainCli(): Promise<void> {
           ...(reg.one ? { one: true } : {}),
           ...(inside ? {} : { instruction: `cd ${reg.worktree} and work in that directory from now on` }),
           ...(reg.titlePending
-            ? { step: `Apply this title: ${reg.titlePending}. Then run \`lobstah trap title-set${sessionFlag}\`. Sign-on is complete after that.` }
+            ? {
+                step: `Apply this title: ${reg.titlePending} (skip this if you have no tool that sets the session title). Then run \`lobstah soak title-set${sessionFlag}\`. Sign-on is complete after that.`,
+              }
             : {}),
           note:
             'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
