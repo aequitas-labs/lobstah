@@ -709,6 +709,21 @@ are preserved verbatim. What it writes:
 { "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "lobstah hook stop", "timeout": 14400 }] }] } }
 ```
 
+**A trap's park renews.** When a trap parks in the Stop hook (park mode:
+`--park`, `[helm].park = "block"`, or the default for a Codex trap) and the
+park reaches its `--timeout` with nothing to act on, the hook blocks the stop
+with one instruction: park again, by ending the turn. The next Stop hook
+parks again. Both harnesses take this as a Stop hook's
+`{"decision":"block","reason":…}` output. The hook stops renewing:
+
+- when the trap is stowed or its registration is gone (silently);
+- when the daemon is unreachable (no heartbeat in the last 90 s);
+- after 3 parks in a row that each returned within 5 seconds.
+
+In the last two cases it prints a `systemMessage` that says why and how to
+park again. A trap in arm mode (the Claude Code default) needs no renewal:
+its background `soak --wait` is re-armed at each turn end.
+
 A Stop hook that runs `lobstah man haul` already counts as installed.
 The Stop hook applies to a signed-on helm or trap, or a session opted in with
 `LOBSTAH_MAN=1` or `.lobstah-man`. Queued dispatches count as work in flight.
