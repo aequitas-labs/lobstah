@@ -192,12 +192,18 @@ with `paused --waiting-on pr` or `--waiting-on review` merges, the daemon
 finishes that dispatch `done` with the note `the PR merged: <url>`. When
 the PR closes without merge, it finishes it `failed` with `the PR closed
 without merge: <url>`. The PR waited on is the `--link` when it names a
-GitHub PR, else the dispatch's own PR, else its chain's PR. Every paused
-dispatch waiting on that PR is finished, in the whole chain. The daemon
-does this after it observes PR watches and before its cull pass, so
-`[limits].releaseOnMerge` releases the chain's worktrees in the same pass.
-`report paused --waiting-on pr|review` registers the watch of the
-dispatch's own PR when it has none, so the merge is observed.
+GitHub PR, else the dispatch's own PR (its evidence, which `lobstah catch`
+shows), else its chain's PR, else the PR of a `pr:` watch the dispatch
+owns. Every paused dispatch waiting on that PR is finished, in the whole
+chain. The daemon does this after it observes PR watches and before its
+cull pass, so `[limits].releaseOnMerge` releases the chain's worktrees in
+the same pass. `report paused --waiting-on pr|review` registers the watch
+of the dispatch's own PR when it has none. The daemon also reads, at
+`[pickup].pollSecs`, each waited-on PR that no live dispatch-owned watch
+observes (a linked PR with no watch, or a helm-owned watch), so its merge
+or close is seen without `lobstah pick`. When lobstah knows no PR for the
+wait, the report prints a `warning` and a merge will not finish the
+dispatch: report again with `--link <PR url>`.
 
 ### PR state after done
 
@@ -227,7 +233,8 @@ Which commands register a watch. Only these write points register one:
   worker opened. Any verb but `failed` does this. A PR already watched is
   not registered again.
 - `lobstah report <id> paused --waiting-on pr|review` registers the watch
-  for the dispatch's own PR. A `--link` to another PR registers nothing.
+  for the dispatch's own PR. A `--link` to another PR registers nothing; the
+  daemon reads that PR while the dispatch waits on it.
 - `lobstah soak beat` registers the watch for a trap's PR from its first
   push. At most once a minute, it reads the trap's branch. When the branch
   is not trunk and has an upstream, it asks `gh pr view <branch>` for the PR.

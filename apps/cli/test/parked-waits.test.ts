@@ -11,8 +11,10 @@ import {
   enqueue,
   ensureLayout,
   laneDirs,
+  addWatch,
   mergeEvidence,
   prRecordFile,
+  readPr,
   readEvidence,
   readStatusLog,
   readWatch,
@@ -21,12 +23,12 @@ import {
   slotUsage,
   unhandled,
 } from '@lobstah/core';
-import type { Lane, WaitingOn } from '@lobstah/core';
+import type { GhPrView, Lane, PrRef, WaitingOn } from '@lobstah/core';
 import { tick } from '@lobstah/supervisor';
 import type { ActiveState } from '@lobstah/supervisor';
 import { cliCuller } from '../src/auto-cull.js';
 import { runDoctor } from '../src/doctor.js';
-import { finishResolvedWaits, registerWaitWatch } from '../src/pr-waits.js';
+import { finishResolvedWaits, observeWaitedPrs, registerWaitWatch } from '../src/pr-waits.js';
 import { daemonStatus } from '../src/restart.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -56,7 +58,10 @@ function config(extra = ''): void {
 }
 
 /** An active headless dispatch whose runner exited after its worker's last report. */
-function parked(id: string, opts: { followUp?: string; waitingOn?: WaitingOn; link?: string; until?: string; worktree?: boolean; lane?: Lane } = {}): void {
+function parked(
+  id: string,
+  opts: { followUp?: string; waitingOn?: WaitingOn; link?: string; until?: string; worktree?: boolean; lane?: Lane; noPr?: boolean } = {},
+): void {
   const lane = opts.lane ?? 'work';
   enqueue({ id, repo: 'r', brief: 'b', ...(opts.followUp ? { followUp: opts.followUp } : {}) }, lane);
   expect(claimNext(lane)).toBe(id);
@@ -72,7 +77,7 @@ function parked(id: string, opts: { followUp?: string; waitingOn?: WaitingOn; li
     fs.writeFileSync(path.join(dir, 'worktree.json'), JSON.stringify({ path: wt }));
     mergeEvidence(id, lane, { worktree: wt, branch: `lobstah/${id}` });
   }
-  mergeEvidence(id, lane, { prUrl: PR, sessionId: `session-${id}` });
+  mergeEvidence(id, lane, { ...(opts.noPr ? {} : { prUrl: PR }), sessionId: `session-${id}` });
   appendStatus(id, lane, 'working');
   appendStatus(id, lane, 'paused', 'waiting for approval', undefined, {
     ...(opts.waitingOn ? { waitingOn: opts.waitingOn } : {}),
@@ -219,6 +224,92 @@ describe('a merged or closed PR finishes the dispatches parked on it', () => {
     parked('d2', { waitingOn: 'pr', link: 'https://github.com/o/r/pull/9' });
     expect(registerWaitWatch('d2', 'work', verbOf('d2')!)).toBeUndefined();
     expect(readWatch('pr:o/r#9')).toBeUndefined();
+  });
+});
+
+describe('a parked dispatch releases on whichever PR lobstah knows for it', () => {
+  /** gh pr view for a PR in `state`; records every PR it was asked about. */
+  const asked: string[] = [];
+  const ghView = (state: 'OPEN' | 'MERGED' | 'CLOSED') => (ref: PrRef): GhPrView => {
+    asked.push(ref.key);
+    return {
+      state,
+      isDraft: false,
+      headRefOid: 'a'.repeat(40),
+      mergeStateStatus: state === 'OPEN' ? 'BLOCKED' : 'UNKNOWN',
+      reviewDecision: '',
+      statusCheckRollup: [],
+      ...(state === 'MERGED' ? { mergedAt: new Date(now).toISOString() } : {}),
+      ...(state === 'CLOSED' ? { closedAt: new Date(now).toISOString() } : {}),
+    };
+  };
+  beforeEach(() => {
+    asked.length = 0;
+  });
+
+  it('the link: a linked PR with no watch is observed, and its merge finishes the dispatch', () => {
+    const linked = 'https://github.com/o/r/pull/8';
+    parked('d1', { waitingOn: 'review', link: linked, noPr: true });
+    expect(registerWaitWatch('d1', 'work', verbOf('d1')!)).toBeUndefined();
+    expect(observeWaitedPrs({ now, view: ghView('OPEN') })).toEqual(['pr:o/r#8']);
+    expect(finishResolvedWaits()).toEqual([]);
+    // Observed less than the poll interval ago: not read again.
+    expect(observeWaitedPrs({ now: now + 10_000, view: ghView('MERGED') })).toEqual([]);
+    expect(observeWaitedPrs({ now: now + 60_000, view: ghView('MERGED') })).toEqual(['pr:o/r#8']);
+    expect(finishResolvedWaits().map((f) => f.id)).toEqual(['d1']);
+    expect(verbOf('d1')).toMatchObject({ verb: 'done', note: `the PR merged: ${linked}` });
+    // A linked PR that is not the dispatch's own is not stamped as its PR.
+    expect(readPr('pr:o/r#8')?.dispatches).toEqual([]);
+  });
+
+  it("the catch's PR: a park without a link reads the PR its evidence names", () => {
+    parked('d1', { waitingOn: 'review', noPr: true });
+    mergeEvidence('d1', 'work', {
+      pr: { url: PR, number: 7, state: 'OPEN', draft: false, reviewDecision: '', mergeStateStatus: 'BLOCKED', headSha: 'x', checks: { total: 0, passed: 0, failed: 0, pending: 0 }, observedAt: new Date(now).toISOString() },
+    });
+    expect(observeWaitedPrs({ now, view: ghView('CLOSED') })).toEqual(['pr:o/r#7']);
+    expect(finishResolvedWaits()).toEqual([{ id: 'd1', lane: 'work', pr: 'pr:o/r#7', verb: 'failed' }]);
+    expect(readPr('pr:o/r#7')?.dispatches).toEqual(['d1']);
+  });
+
+  it("the dispatch's pr watch: a PR known only by the watch it owns", () => {
+    parked('d1', { waitingOn: 'pr', noPr: true });
+    addWatch('pr:o/r#9', 'echo {}', { owner: 'dispatch:d1' });
+    // The daemon's own pass observes a live dispatch-owned watch: this pass leaves it.
+    expect(observeWaitedPrs({ now, view: ghView('MERGED') })).toEqual([]);
+    prRecord('MERGED', [], 'https://github.com/o/r/pull/9');
+    expect(finishResolvedWaits()).toEqual([{ id: 'd1', lane: 'work', pr: 'pr:o/r#9', verb: 'done' }]);
+  });
+
+  it('a helm-owned watch is observed for the parked dispatch', () => {
+    parked('d1', { waitingOn: 'review', link: PR });
+    addWatch('pr:o/r#7', 'echo {}', { owner: 'man' });
+    expect(observeWaitedPrs({ now, view: ghView('MERGED') })).toEqual(['pr:o/r#7']);
+    expect(finishResolvedWaits().map((f) => f.id)).toEqual(['d1']);
+  });
+
+  it('a gh failure is skipped; nothing parked, nothing read', () => {
+    expect(observeWaitedPrs({ now, view: ghView('OPEN') })).toEqual([]);
+    parked('d1', { waitingOn: 'review' });
+    const fail = (): GhPrView => {
+      throw new Error('gh: not authenticated');
+    };
+    expect(observeWaitedPrs({ now, view: fail })).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
+  it('report paused --waiting-on review warns when lobstah knows no PR for the wait', () => {
+    const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+    parked('d1', { waitingOn: 'review', noPr: true });
+    const run = (...args: string[]) => spawnSync(process.execPath, [cli, 'report', 'd1', 'paused', ...args], { env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8' });
+    const none = run('in review', '--waiting-on', 'review', '--link', 'https://example.com/review/1');
+    expect(none.status, none.stderr).toBe(0);
+    expect(none.stdout).toContain('warning: "no PR known for this wait');
+    const linked = run('in review', '--waiting-on', 'review', '--link', PR);
+    expect(linked.status, linked.stderr).toBe(0);
+    expect(linked.stdout).not.toContain('warning');
+    const person = run('asked Ana', '--waiting-on', 'person');
+    expect(person.stdout).not.toContain('warning');
   });
 });
 

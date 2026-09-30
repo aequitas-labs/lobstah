@@ -85,7 +85,9 @@ naming a dispatch id. Then:
   --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,
   not a question: nobody is paged. Report `working` when you resume. When the
   PR you wait on merges, lobstah finishes the dispatch `done`; closed without
-  merge, `failed`.
+  merge, `failed`. For `review` or `pr`, `--link` is the PR's URL. If the
+  report prints a `warning`, lobstah knows no PR for the wait: report again
+  with `--link <PR url>`.
 - A failing check that passes only when a person approves is a human gate.
   Do not change code for it. Name it on your report with
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.

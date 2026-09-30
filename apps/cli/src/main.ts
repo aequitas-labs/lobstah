@@ -187,7 +187,7 @@ import {
   runPrCheck,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
-import { finishResolvedWaits, registerWaitWatch } from './pr-waits.js';
+import { finishResolvedWaits, observeWaitedPrs, registerWaitWatch, waitWarning } from './pr-waits.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { setTerminalTitle } from './terminal-title.js';
@@ -1266,6 +1266,7 @@ async function mainCli(): Promise<void> {
           : verb === 'paused' && !noWatch
             ? registerWaitWatch(id, lane, entry)
             : undefined;
+      const warning = waitWarning(id, lane, entry);
       console.log(
         toonKV({
           id,
@@ -1277,6 +1278,7 @@ async function mainCli(): Promise<void> {
           ...(entry.until ? { until: entry.until } : {}),
           ...(prUrl ? { prUrl } : {}),
           ...(prWatch ? { watch: prWatch.key } : {}),
+          ...(warning ? { warning } : {}),
           ...(gatesNamed.length ? { humanGates: gatesNamed.join(', ') } : {}),
           ...(filed ? { report: reportMarkdownPath(filed.key), reportKey: filed.key, reportTitle: filed.title } : {}),
         }),
@@ -2577,6 +2579,7 @@ async function mainCli(): Promise<void> {
           culler: cliCuller,
           prWatches: (now, log) => {
             observeDispatchPrWatches(pollSecs(), now);
+            observeWaitedPrs({ everySecs: pollSecs(), now });
             // Before the cull pass: a merged PR's release needs the chain finished.
             finishResolvedWaits(log);
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
