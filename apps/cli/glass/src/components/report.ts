@@ -12,7 +12,10 @@ import { Age, attachmentRows, cmdRow } from './common.js';
  * report's own attachments by bare filename.
  */
 
-function inline(key: string, nodes: MdInline[]): Children {
+/** Where an image named by bare filename loads from: the report's or the decision's own attachments. */
+type FileUrl = (name: string) => string;
+
+function inline(fileUrl: FileUrl, nodes: MdInline[]): Children {
   return nodes.map((n) => {
     switch (n.t) {
       case 'text':
@@ -20,30 +23,30 @@ function inline(key: string, nodes: MdInline[]): Children {
       case 'code':
         return html`<code>${n.v}</code>`;
       case 'b':
-        return html`<strong>${inline(key, n.c)}</strong>`;
+        return html`<strong>${inline(fileUrl, n.c)}</strong>`;
       case 'i':
-        return html`<em>${inline(key, n.c)}</em>`;
+        return html`<em>${inline(fileUrl, n.c)}</em>`;
       case 'br':
         return html`<br />`;
       case 'a': {
         const href = safeHref(n.href);
-        return href ? html`<a href=${href} target="_blank" rel="noopener noreferrer">${inline(key, n.c)}</a>` : inline(key, n.c);
+        return href ? html`<a href=${href} target="_blank" rel="noopener noreferrer">${inline(fileUrl, n.c)}</a>` : inline(fileUrl, n.c);
       }
       case 'img': {
         const name = bareImageName(n.src);
         return name
-          ? html`<img src=${reportFileUrl(key, name)} alt=${n.alt} loading="lazy" />`
+          ? html`<img src=${fileUrl(name)} alt=${n.alt} loading="lazy" />`
           : html`<span class="dim">[image not shown: ${n.alt || n.src}]</span>`;
       }
     }
   });
 }
 
-function blocks(key: string, list: MdBlock[]): Children {
+function blocks(fileUrl: FileUrl, list: MdBlock[]): Children {
   return list.map((b) => {
     switch (b.t) {
       case 'h': {
-        const c = inline(key, b.c);
+        const c = inline(fileUrl, b.c);
         return b.level === 1
           ? html`<h1>${c}</h1>`
           : b.level === 2
@@ -53,21 +56,21 @@ function blocks(key: string, list: MdBlock[]): Children {
               : html`<h4>${c}</h4>`;
       }
       case 'p':
-        return html`<p>${inline(key, b.c)}</p>`;
+        return html`<p>${inline(fileUrl, b.c)}</p>`;
       case 'code':
         return html`<pre class="mdcode"><code>${b.v}</code></pre>`;
       case 'hr':
         return html`<hr />`;
       case 'quote':
-        return html`<blockquote>${blocks(key, b.c)}</blockquote>`;
+        return html`<blockquote>${blocks(fileUrl, b.c)}</blockquote>`;
       case 'list': {
-        const items = b.items.map((it) => html`<li>${blocks(key, it)}</li>`);
+        const items = b.items.map((it) => html`<li>${blocks(fileUrl, it)}</li>`);
         return b.ordered ? html`<ol start=${b.start}>${items}</ol>` : html`<ul>${items}</ul>`;
       }
       case 'table':
-        return html`<div class="mdtable"><table><thead><tr>${b.head.map((c, i) => html`<th style=${b.align[i] ? 'text-align:' + b.align[i] : undefined}>${inline(key, c)}</th>`)}</tr></thead><tbody>${b.rows.map(
+        return html`<div class="mdtable"><table><thead><tr>${b.head.map((c, i) => html`<th style=${b.align[i] ? 'text-align:' + b.align[i] : undefined}>${inline(fileUrl, c)}</th>`)}</tr></thead><tbody>${b.rows.map(
           (row) =>
-            html`<tr>${row.map((c, i) => html`<td style=${b.align[i] ? 'text-align:' + b.align[i] : undefined}>${inline(key, c)}</td>`)}</tr>`,
+            html`<tr>${row.map((c, i) => html`<td style=${b.align[i] ? 'text-align:' + b.align[i] : undefined}>${inline(fileUrl, c)}</td>`)}</tr>`,
         )}</tbody></table></div>`;
     }
   });
@@ -77,11 +80,16 @@ function blocks(key: string, list: MdBlock[]): Children {
 export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string; error?: string } | undefined }) {
   const body =
     text?.text !== undefined
-      ? blocks(r.key, parseMarkdown(text.text))
+      ? blocks((name) => reportFileUrl(r.key, name), parseMarkdown(text.text))
       : text?.error
         ? html`<div class="bad">${text.error}</div>`
         : html`<div class="dim">loading…</div>`;
   return html`<div class="mdpage" data-report=${r.key}>${body}</div>`;
+}
+
+/** Markdown as elements, with images from `fileUrl` (a decision's detail page). */
+export function Markdown({ text, fileUrl }: { text: string; fileUrl: FileUrl }) {
+  return html`<div class="mdpage">${blocks(fileUrl, parseMarkdown(text))}</div>`;
 }
 
 /** The report's heading line: who it is from (a trap, a headless dispatch's id, nothing for the helm), its age, and `acked`. */

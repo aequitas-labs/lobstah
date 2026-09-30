@@ -1,16 +1,110 @@
 import type { GlassSnapshot } from '@lobstah/core';
-import { modalItem, reportMarkdownUrl } from '../../src/glass-diff.js';
+import { answerSummary, decisionAnswerUrl, decisionCards, modalItem, reportMarkdownUrl } from '../../src/glass-diff.js';
 import type { GlassPrefs, ModalType } from '../../src/glass-diff.js';
 import { saveLobHidden, savePrefs } from './prefs.js';
 import { getState, setState } from './store.js';
+import type { DecisionDraft, DraftFile } from './store.js';
 
 /** Everything the page can do: each action updates the store (and localStorage for preferences). */
 
 /** A new snapshot; an open modal whose item vanished closes and stays closed. */
 export function receive(snapshot: GlassSnapshot): void {
-  const { modal } = getState();
-  setState({ snapshot, stale: false, modal: modal && modalItem(snapshot, modal) ? modal : null });
+  const { modal, drafts } = getState();
+  // A card that left the snapshot (answered, withdrawn) takes its draft with it.
+  const live = new Set(decisionCards(snapshot.attention || [], snapshot.decisions || []).map((c) => c.key));
+  const kept = Object.fromEntries(Object.entries(drafts).filter(([key]) => live.has(key)));
+  setState({
+    snapshot,
+    stale: false,
+    modal: modal && modalItem(snapshot, modal) ? modal : null,
+    ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
+  });
   loadOpenReport();
+}
+
+const emptyDraft = (): DecisionDraft => ({ text: '', files: [] });
+
+/** Change one card's draft. */
+export function setDraft(key: string, patch: Partial<DecisionDraft>): void {
+  const drafts = getState().drafts;
+  setState({ drafts: { ...drafts, [key]: { ...(drafts[key] ?? emptyDraft()), ...patch } } });
+}
+
+/** Choose an option, or clear it when it is chosen already. */
+export function toggleOption(key: string, option: string): void {
+  const current = getState().drafts[key]?.option;
+  setDraft(key, { option: current === option ? undefined : option, error: undefined });
+}
+
+const readBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+/** Add picked files to a card's answer, refusing what the server would refuse. */
+export async function addFiles(key: string, list: FileList | File[] | null): Promise<void> {
+  const limits = getState().snapshot?.answerLimits;
+  const picked = [...(list ?? [])];
+  const current = getState().drafts[key]?.files ?? [];
+  const errors: string[] = [];
+  const added: DraftFile[] = [];
+  for (const file of picked) {
+    const ext = (/\.[^.]+$/.exec(file.name)?.[0] ?? '').toLowerCase();
+    if (limits && !limits.extensions.includes(ext)) errors.push(`${file.name}: type not accepted`);
+    else if (limits && file.size > limits.maxBytes) errors.push(`${file.name}: larger than ${limits.maxBytes} bytes`);
+    else if (limits && current.length + added.length >= limits.maxFiles) errors.push(`${file.name}: at most ${limits.maxFiles} files`);
+    else {
+      try {
+        added.push({ name: file.name, bytes: file.size, data: await readBase64(file) });
+      } catch {
+        errors.push(`${file.name}: could not be read`);
+      }
+    }
+  }
+  setDraft(key, { files: [...(getState().drafts[key]?.files ?? []), ...added], error: errors.length ? errors.join('; ') : undefined });
+}
+
+export function removeFile(key: string, index: number): void {
+  const files = (getState().drafts[key]?.files ?? []).filter((_, i) => i !== index);
+  setDraft(key, { files });
+}
+
+/** Send a card's answer: one same-origin POST with the page's token. The server stores it; the helm acts on it. */
+export async function sendAnswer(key: string): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  const draft = getState().drafts[key] ?? emptyDraft();
+  if (draft.sending || draft.sent) return;
+  if (!draft.option && !draft.text.trim() && draft.files.length === 0) {
+    setDraft(key, { error: 'Choose an option, write an answer, or attach a file.' });
+    return;
+  }
+  if (!token) {
+    setDraft(key, { error: 'This page has no answer token; reload it.' });
+    return;
+  }
+  setDraft(key, { sending: true, error: undefined });
+  try {
+    const response = await fetch(decisionAnswerUrl(key), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-lobstah-focus-token': token },
+      body: JSON.stringify({
+        ...(draft.option ? { option: draft.option } : {}),
+        ...(draft.text.trim() ? { text: draft.text } : {}),
+        files: draft.files.map((f) => ({ name: f.name, data: f.data })),
+      }),
+    });
+    const result = (await response.json()) as { answered?: boolean; reason?: string };
+    if (!response.ok || !result.answered) {
+      setDraft(key, { sending: false, error: result.reason ?? `The answer was refused (${response.status}).` });
+      return;
+    }
+    setDraft(key, { sending: false, sent: answerSummary({ option: draft.option, text: draft.text, files: draft.files.length }) });
+  } catch {
+    setDraft(key, { sending: false, error: 'The answer could not be sent.' });
+  }
 }
 
 /**

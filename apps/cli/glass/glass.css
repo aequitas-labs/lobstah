@@ -780,6 +780,135 @@ a.lob {
   margin-top: 2px;
 }
 
+/* The deck's decisions: one full-row card each (components/decisions.ts). */
+.dcards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dcard {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+}
+.dcard.focus {
+  border-color: var(--link);
+}
+.dcard.answered {
+  opacity: 0.7;
+}
+.dcard .dtop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.dcard .dtop .badge {
+  margin-top: 0;
+}
+.dcard .dtitle {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dcard .dmeta {
+  font-size: 11px;
+  margin-left: auto;
+}
+.dcard .dlink {
+  color: var(--link);
+}
+.dfiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 6px 0;
+}
+.dfiles .dimg img {
+  max-height: 160px;
+  max-width: 320px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: block;
+}
+.dfiles .dfile {
+  width: 100%;
+  font-size: 11px;
+}
+.doptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 6px;
+}
+.btn.dopt {
+  font-size: 12px;
+  padding: 3px 12px;
+  color: var(--fg);
+}
+.btn.dopt.on {
+  background: var(--seg-on);
+  border-color: var(--link);
+}
+.danswer {
+  display: block;
+  width: 100%;
+  min-height: 3.2em;
+  max-height: 50vh;
+  margin: 6px 0;
+  padding: 6px 8px;
+  resize: vertical;
+  overflow-y: auto;
+  field-sizing: content;
+  background: var(--inset);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+}
+.danswer:focus {
+  outline: none;
+  border-color: var(--line-hover);
+}
+.dfoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.dfoot .dattach input {
+  display: none;
+}
+.dfoot .dchip {
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--badge-radius);
+  padding: 0 0 0 6px;
+}
+.dfoot .dx {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+}
+.dfoot .derr {
+  font-size: 11px;
+}
+.btn.dsend {
+  margin-left: auto;
+  color: var(--fg);
+  padding: 2px 14px;
+}
+.btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.danswered {
+  margin-top: 6px;
+}
+
 /* A report page: markdown rendered as elements (components/report.ts). */
 .mdpage {
   background: var(--inset);

@@ -27,6 +27,28 @@ export interface GlassState {
   preview: boolean;
   /** Report markdown fetched for an open modal, by key, for the filing (stateHash) it was fetched at. */
   reportText: Record<string, ReportText>;
+  /** Answers being written on the deck's decision cards, by card key. */
+  drafts: Record<string, DecisionDraft>;
+  /** The card a `#decision/<key>` link points at. */
+  focusDecision: string | null;
+}
+
+/** A file picked for an answer, read as base64 for the POST. */
+export interface DraftFile {
+  name: string;
+  bytes: number;
+  data: string;
+}
+
+/** One card's answer in progress, or the answer it sent. */
+export interface DecisionDraft {
+  option?: string;
+  text: string;
+  files: DraftFile[];
+  sending?: boolean;
+  error?: string;
+  /** Set once the server stored the answer: what the card says it sent. */
+  sent?: string;
 }
 
 export interface ReportText {

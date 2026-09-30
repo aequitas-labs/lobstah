@@ -25,7 +25,8 @@ export function App({ state }: { state: GlassState }) {
   const inp = d && sectionInputs(d, { st: state.prefs, modal: state.modal }, Date.now());
   const page = (t: GlassTab): Children => {
     if (!inp || t !== tab) return null;
-    if (t === 'deck') return html`<${Deck} inp=${inp.deck} />`;
+    if (t === 'deck')
+      return html`<${Deck} inp=${inp.deck} drafts=${state.drafts} focus=${state.focusDecision} extensions=${d?.answerLimits?.extensions ?? []} />`;
     if (t === 'dispatches') return html`<${Dispatches} inp=${inp.dispatches} />`;
     if (t === 'traps') return html`<${Traps} inp=${inp.traps} />`;
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} />`;

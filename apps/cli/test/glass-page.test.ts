@@ -532,13 +532,14 @@ describe('glass page: PRs', () => {
 });
 
 describe('glass page: On deck', () => {
-  it('shows attention (no pr:* kinds), in flight, landed, reports, traps, and PR stacks as six full-width sections', async () => {
+  it('shows decisions (no pr:* kinds), in flight, landed, reports, traps, and PR stacks as six full-width sections', async () => {
     const g = await page(everyAttentionFleet());
     const sections = g.$$('#deck .deckgrid > section');
-    expect(sections.map((s) => text(s.querySelector('h2')))).toEqual(['attention →', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →', 'PRs →']);
-    const kinds = [...sections[0]!.querySelectorAll('tr.rowhead td:first-child')].map(text);
-    expect(kinds.every((k) => !k.startsWith('pr:') && !['draft', 'review', 'checks', 'conflicts', 'ready'].includes(k))).toBe(true);
-    expect(text(sections[0]!.querySelector('.deckmore'))).toMatch(/^\+\d+ more →$/);
+    expect(sections.map((s) => text(s.querySelector('h2')))).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →', 'PRs →']);
+    // Only raw questions (and framed decisions) are cards; PR kinds stay with the PRs.
+    const cards = [...sections[0]!.querySelectorAll('.dcard')];
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every((c) => c.classList.contains('plain'))).toBe(true);
     // PR standing rides the stack line.
     expect(text(sections[5]!)).toContain('#41 → #42 → #43 · next #41');
     expect(text(sections[5]!.querySelector('.deckmore'))).toBe('+1 more →');

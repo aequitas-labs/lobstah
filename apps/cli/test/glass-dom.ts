@@ -15,6 +15,8 @@ export interface GlassDom {
   fetches(): number;
   /** The /report/ URLs the page fetched, in order. */
   reportFetches(): string[];
+  /** The POSTs the page made, in order. */
+  posts(): Array<{ url: string; headers: Record<string, string>; body: string }>;
   /** The poll intervals (ms) the page currently holds. */
   intervals(): number[];
   /** Hide or show the tab (visibilitychange). */
@@ -45,6 +47,8 @@ export interface GlassDomOptions {
   initialScroll?: number;
   /** Other URLs the page fetches (a report's markdown), by path; any other /report/ path is a 404. */
   files?: Record<string, string>;
+  /** Answers a POST the page makes (an answer to a decision); the default is a 404. */
+  post?: (url: string, init: { headers: Record<string, string>; body: string }) => { status: number; body: unknown };
 }
 
 export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: GlassDomOptions): Promise<GlassDom> {
@@ -71,7 +75,14 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
     scrolls.push(y);
   };
   const fetched: string[] = [];
-  w.fetch = async (url: string) => {
+  const posted: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+  w.fetch = async (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => {
+    if (init?.method === 'POST') {
+      const req = { url, headers: init.headers ?? {}, body: init.body ?? '' };
+      posted.push(req);
+      const res = opts.post ? opts.post(url, req) : { status: 404, body: { reason: 'not found' } };
+      return { ok: res.status >= 200 && res.status < 300, status: res.status, json: async () => res.body };
+    }
     if (typeof url === 'string' && url.startsWith('/report/')) {
       fetched.push(url);
       const file = opts.files?.[url];
@@ -126,6 +137,7 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
     },
     fetches: () => count,
     reportFetches: () => [...fetched],
+    posts: () => [...posted],
     intervals: () => [...intervals.values()].map((i) => i.ms),
     hide: async (hidden: boolean) => {
       Object.defineProperty(window.document, 'hidden', { value: hidden, configurable: true });

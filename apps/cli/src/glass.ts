@@ -39,9 +39,16 @@ import {
   listReports,
   readReportMarkdown,
   resolveReportFile,
+  resolveDecisionFile,
+  DecisionError,
+  ANSWER_EXTENSIONS,
+  ANSWER_FILES_MAX,
+  ANSWER_TEXT_MAX,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassMessage, GlassReport, GlassSnapshot, GlassTrap, Lane } from '@lobstah/core';
 import { reportAck } from './report-file.js';
+import { glassDecisions } from './decisions.js';
+import { answerKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { buildTendReport, landedCatches } from './tend.js';
@@ -293,11 +300,13 @@ const REPORT_IMAGE_TYPES: Record<string, string> = {
 
 /**
  * `/report/<key>/md` and `/report/<key>/files/<name>`: a report's markdown as
- * text, and an image from that report's own attachments by basename. The
- * key names a report, never a path; a name with any path part is refused.
+ * text, and an image from that report's own attachments by basename.
+ * `/decision/<key>/files/<name>` serves an image from a decision's own
+ * attachments the same way. The key names a report or a decision, never a
+ * path; a name with any path part is refused.
  */
 export function serveReport(url: string, res: http.ServerResponse): boolean {
-  const m = /^\/report\/([^/?#]+)\/(md|files\/([^/?#]+))$/.exec(url.split('?')[0] ?? '');
+  const m = /^\/(report|decision)\/([^/?#]+)\/(md|files\/([^/?#]+))$/.exec(url.split('?')[0] ?? '');
   if (!m) return false;
   const headers = { 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'no-store' };
   const notFound = () => {
@@ -306,20 +315,23 @@ export function serveReport(url: string, res: http.ServerResponse): boolean {
   };
   let key: string, name: string | undefined;
   try {
-    key = decodeURIComponent(m[1]!);
-    name = m[3] !== undefined ? decodeURIComponent(m[3]) : undefined;
+    key = decodeURIComponent(m[2]!);
+    name = m[4] !== undefined ? decodeURIComponent(m[4]) : undefined;
   } catch {
     notFound();
     return true;
   }
-  if (m[2] === 'md') {
+  const decision = m[1] === 'decision';
+  // A decision's detail rides in the snapshot; only its images are served.
+  if (decision && m[3] === 'md') return notFound(), true;
+  if (m[3] === 'md') {
     const text = readReportMarkdown(key);
     if (text === undefined) return notFound(), true;
     res.writeHead(200, { ...headers, 'content-type': 'text/plain; charset=utf-8' });
     res.end(text);
     return true;
   }
-  const file = name !== undefined ? resolveReportFile(key, name) : undefined;
+  const file = name === undefined ? undefined : decision ? resolveDecisionFile(key, name) : resolveReportFile(key, name);
   const type = file && REPORT_IMAGE_TYPES[path.extname(file).toLowerCase()];
   if (!file || !type) return notFound(), true;
   res.writeHead(200, { ...headers, 'content-type': type });
@@ -416,6 +428,62 @@ export function buildGlassSnapshot(): GlassSnapshot {
     ...attentionSnapshot(),
     reports: reportRows(),
     mergeView,
+    decisions: glassDecisions(),
+    answerLimits: {
+      maxBytes: attachmentLimit(),
+      maxFiles: ANSWER_FILES_MAX,
+      textMax: ANSWER_TEXT_MAX,
+      extensions: [...ANSWER_EXTENSIONS],
+    },
+  };
+}
+
+/** limits.attachmentMaxBytes; a config error falls back to the default. */
+function attachmentLimit(): number {
+  try {
+    return loadConfig().limits.attachmentMaxBytes;
+  } catch {
+    return DEFAULT_LIMITS.attachmentMaxBytes;
+  }
+}
+
+/** The JSON body the glass posts to answer a decision. */
+interface AnswerBody {
+  option?: unknown;
+  text?: unknown;
+  files?: unknown;
+}
+
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * Parse and check an answer body's shape. Content checks (the key, the
+ * option, sizes, types) are answerKey's, shared with `man answer`.
+ */
+function answerRequest(raw: string): { option?: string; text?: string; uploads: Array<{ name: string; data: Buffer }> } {
+  let body: AnswerBody;
+  try {
+    body = JSON.parse(raw) as AnswerBody;
+  } catch {
+    throw new DecisionError('the body is not JSON');
+  }
+  if (typeof body !== 'object' || body === null) throw new DecisionError('the body is not an object');
+  if (body.option !== undefined && typeof body.option !== 'string') throw new DecisionError('option must be a string');
+  if (body.text !== undefined && typeof body.text !== 'string') throw new DecisionError('text must be a string');
+  if (body.files !== undefined && !Array.isArray(body.files)) throw new DecisionError('files must be a list');
+  const files = (body.files ?? []) as unknown[];
+  if (files.length > ANSWER_FILES_MAX) throw new DecisionError(`an answer takes at most ${ANSWER_FILES_MAX} files`, 413);
+  const uploads = files.map((f) => {
+    const file = f as { name?: unknown; data?: unknown };
+    if (typeof file !== 'object' || file === null || typeof file.name !== 'string' || typeof file.data !== 'string' || !BASE64.test(file.data)) {
+      throw new DecisionError('each file needs a name and base64 data');
+    }
+    return { name: file.name, data: Buffer.from(file.data, 'base64') };
+  });
+  return {
+    ...(body.option !== undefined ? { option: body.option as string } : {}),
+    ...(body.text !== undefined ? { text: body.text as string } : {}),
+    uploads,
   };
 }
 
@@ -439,8 +507,75 @@ export function serveGlass(
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
+  /** Same origin, and the page's per-server token: the one guard for every action. */
+  const sameOriginWithToken = (req: http.IncomingMessage): boolean => {
+    const address = server.address();
+    const ownHost = `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
+    const supplied = req.headers['x-lobstah-focus-token'];
+    const token = typeof supplied === 'string' ? supplied : '';
+    const validToken = token.length === focusToken.length && timingSafeEqual(Buffer.from(token), Buffer.from(focusToken));
+    return req.headers.host === ownHost && req.headers.origin === `http://${ownHost}` && validToken;
+  };
   const server = http.createServer((req, res) => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
+    if (req.url?.startsWith('/api/decision/')) {
+      res.setHeader('cache-control', 'no-store');
+      const reply = (status: number, result: unknown) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      };
+      if (req.method !== 'POST') return reply(405, { answered: false, reason: 'POST required.' });
+      if (!sameOriginWithToken(req) || !/^application\/json\b/.test(req.headers['content-type'] ?? '')) {
+        req.resume();
+        return reply(403, { answered: false, reason: 'Answer request was not authorized.' });
+      }
+      const m = /^\/api\/decision\/([^/?#]+)\/answer$/.exec(req.url);
+      let key = '';
+      try {
+        key = m ? decodeURIComponent(m[1]!) : '';
+      } catch {
+        key = '';
+      }
+      if (!/^(decision:[a-f0-9]{8}|(work|chore):[A-Za-z0-9-]{1,64})$/.test(key)) {
+        req.resume();
+        return reply(404, { answered: false, reason: 'Unknown decision.' });
+      }
+      // Base64 files and the text, with room for the JSON around them.
+      const cap = Math.ceil((attachmentLimit() * 4) / 3) * ANSWER_FILES_MAX + ANSWER_TEXT_MAX * 4 + 64 * 1024;
+      const declared = Number(req.headers['content-length'] ?? NaN);
+      if (declared > cap) {
+        req.resume();
+        return reply(413, { answered: false, reason: 'The answer is too large.' });
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let refused = false;
+      req.on('data', (c: Buffer) => {
+        if (refused) return;
+        size += c.length;
+        if (size > cap) {
+          refused = true;
+          chunks.length = 0;
+          reply(413, { answered: false, reason: 'The answer is too large.' });
+          return;
+        }
+        chunks.push(c);
+      });
+      req.on('end', () => {
+        if (refused) return;
+        try {
+          const request = answerRequest(Buffer.concat(chunks).toString('utf8'));
+          const { decision, answer } = answerKey(key, { ...request, by: 'glass' });
+          reply(200, { answered: true, key: decision.key, option: answer.option ?? null, text: answer.text ?? null, files: answer.attachments.length });
+        } catch (err) {
+          if (err instanceof DecisionError) return reply(err.status, { answered: false, reason: err.message });
+          reply(500, { answered: false, reason: 'The answer could not be stored.' });
+        }
+      });
+      req.on('error', () => reply(400, { answered: false, reason: 'The request failed.' }));
+      return;
+    }
     if (req.url?.startsWith('/api/focus/')) {
       res.setHeader('cache-control', 'no-store');
       const reply = (status: number, result: unknown) => {
@@ -448,16 +583,8 @@ export function serveGlass(
         res.end(JSON.stringify(result));
       };
       if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required.' });
-      const address = server.address();
-      const ownHost = `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
-      const supplied = req.headers['x-lobstah-focus-token'];
-      const token = typeof supplied === 'string' ? supplied : '';
-      const validToken =
-        token.length === focusToken.length && timingSafeEqual(Buffer.from(token), Buffer.from(focusToken));
       if (
-        req.headers.host !== ownHost ||
-        req.headers.origin !== `http://${ownHost}` ||
-        !validToken ||
+        !sameOriginWithToken(req) ||
         (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
         req.headers['transfer-encoding'] !== undefined
       ) {
@@ -494,7 +621,7 @@ export function serveGlass(
         res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-cache' });
         res.end(fallbackIcon);
       }
-    } else if (req.url?.startsWith('/report/') && req.method === 'GET' && serveReport(req.url, res)) {
+    } else if ((req.url?.startsWith('/report/') || req.url?.startsWith('/decision/')) && req.method === 'GET' && serveReport(req.url, res)) {
       return;
     } else if (req.url === '/data') {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
