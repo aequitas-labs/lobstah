@@ -18,6 +18,12 @@ import {
   listNotices,
   listTraps,
   listReservations,
+  listRequests,
+  liveHelms,
+  readReservationTicket,
+  trapRequestError,
+  trapStartCommands,
+  writeRequest,
   trapLastSeen,
   validSessionLink,
   trapLabel,
@@ -60,13 +66,17 @@ import type { TrapRegistration } from '@lobstah/core';
  * observational stance as `man tend`, with room for detail a terminal
  * can't afford. It binds 127.0.0.1 only; /data registers no watch, never
  * advances a cursor, and never consumes attention.
- * Look freely, steer only from the helm. The sole desktop action is a
- * same-origin, token-gated request to focus a live trap. The
+ * Look freely, steer only from the helm. The glass writes only through
+ * same-origin, token-gated POSTs: focus a live trap, and file a request
+ * (`/requests`) that wakes the helm. It runs nothing itself. The
  * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
  * own, kept in its localStorage — the server has nothing to write.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
+
+/** A request body is a kind and a small payload. */
+const REQUEST_MAX_BYTES = 4096;
 
 const readJson = <T>(f: string): T | undefined => {
   try {
@@ -329,7 +339,12 @@ export function serveReport(url: string, res: http.ServerResponse): boolean {
 }
 
 /** One disk pass, everything the page renders. Pure read. */
-export function buildGlassSnapshot(): GlassSnapshot {
+/**
+ * `local`: the snapshot goes to this machine's own glass page (a same-host
+ * request), so starting cards may carry their start command and ticket.
+ */
+export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnapshot {
+  const cfg = loadConfig();
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
@@ -366,7 +381,8 @@ export function buildGlassSnapshot(): GlassSnapshot {
   // dir, notices, and delivery receipts survive — list those ids too so a
   // seat's story stays inspectable after sign-off.
   const reserved = listReservations();
-  const liveIds = new Set([...live.map((t) => t.trapId), ...reserved.map((r) => r.trapId)]);
+  const requested = listRequests({ kind: 'trap-request', open: true });
+  const liveIds = new Set([...live.map((t) => t.trapId), ...reserved.map((r) => r.trapId), ...requested.map((r) => r.id)]);
   const seenIds = new Set<string>();
   for (const f of listDir(laneDirs('work').inbox)) {
     const m = /^trap-(.+)$/.exec(f);
@@ -418,6 +434,11 @@ export function buildGlassSnapshot(): GlassSnapshot {
             starting: {
               reservedAt: r.reservedAt,
               deadline: r.deadline,
+              ...(() => {
+                const ticket = options.local ? readReservationTicket(r.trapId) : undefined;
+                const repoPath = cfg.repos[r.repo]?.path;
+                return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness) } : {};
+              })(),
               ...(r.failedAt || Date.now() > (Date.parse(r.deadline) || 0)
                 ? { failedAt: r.failedAt ?? r.deadline, reason: r.reason ?? `no session signed on by ${r.deadline}` }
                 : {}),
@@ -426,9 +447,14 @@ export function buildGlassSnapshot(): GlassSnapshot {
           false,
         ),
       ),
+      ...requested.map((r) =>
+        attach({ trapId: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), requested: { at: r.at } } as GlassTrap, false),
+      ),
       ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
     ],
     notices: allNotices.slice().reverse(),
+    repoKeys: Object.keys(cfg.repos),
+    helmOn: liveHelms(cfg.helm.ttlSecs * 1000).length > 0,
     watches,
     dispatches,
     prs,
@@ -459,8 +485,55 @@ export function serveGlass(
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
+  /** Same host, same origin, and this server's page token: the only writes the glass accepts. */
+  const ownHost = () => {
+    const address = server.address();
+    return `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
+  };
+  const authorized = (req: http.IncomingMessage, header: string): boolean => {
+    const supplied = req.headers[header];
+    const token = typeof supplied === 'string' ? supplied : '';
+    return (
+      req.headers.host === ownHost() &&
+      req.headers.origin === `http://${ownHost()}` &&
+      token.length === focusToken.length &&
+      timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
+    );
+  };
   const server = http.createServer((req, res) => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
+    if (req.url === '/requests') {
+      res.setHeader('cache-control', 'no-store');
+      const reply = (status: number, result: unknown) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      };
+      if (req.method !== 'POST') return reply(405, { ok: false, reason: 'POST required.' });
+      if (!authorized(req, 'x-lobstah-token')) return reply(403, { ok: false, reason: 'Request was not authorized.' });
+      if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) return reply(415, { ok: false, reason: 'JSON required.' });
+      const chunks: Buffer[] = [];
+      let size = 0;
+      req.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > REQUEST_MAX_BYTES) req.destroy();
+        else chunks.push(chunk);
+      });
+      req.on('end', () => {
+        let body: { kind?: unknown; payload?: unknown };
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof body;
+        } catch {
+          return reply(400, { ok: false, reason: 'Invalid JSON.' });
+        }
+        if (body?.kind !== 'trap-request') return reply(400, { ok: false, reason: 'Unknown request kind.' });
+        const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
+        if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
+        const { repo, harness } = body.payload as { repo: string; harness: string };
+        const request = writeRequest('trap-request', { repo, harness }, 'glass');
+        reply(201, { ok: true, id: request.id });
+      });
+      return;
+    }
     if (req.url?.startsWith('/api/focus/')) {
       res.setHeader('cache-control', 'no-store');
       const reply = (status: number, result: unknown) => {
@@ -468,16 +541,8 @@ export function serveGlass(
         res.end(JSON.stringify(result));
       };
       if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required.' });
-      const address = server.address();
-      const ownHost = `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
-      const supplied = req.headers['x-lobstah-focus-token'];
-      const token = typeof supplied === 'string' ? supplied : '';
-      const validToken =
-        token.length === focusToken.length && timingSafeEqual(Buffer.from(token), Buffer.from(focusToken));
       if (
-        req.headers.host !== ownHost ||
-        req.headers.origin !== `http://${ownHost}` ||
-        !validToken ||
+        !authorized(req, 'x-lobstah-focus-token') ||
         (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
         req.headers['transfer-encoding'] !== undefined
       ) {
@@ -518,7 +583,9 @@ export function serveGlass(
       return;
     } else if (req.url === '/data') {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(JSON.stringify({ ...buildGlassSnapshot(), focusToken, focusSupported: process.platform === 'darwin' }));
+      // Start commands carry a ticket: only a same-host request (this
+      // machine's own page, not a rebound name) gets them.
+      res.end(JSON.stringify({ ...buildGlassSnapshot({ local: req.headers.host === ownHost() }), focusToken, focusSupported: process.platform === 'darwin' }));
     } else {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(PAGE);

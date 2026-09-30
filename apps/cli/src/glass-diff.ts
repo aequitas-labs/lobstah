@@ -209,7 +209,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   // changes. Signed-off traps follow in most-recently-signed-off order.
   const signedOffAt = (t: GlassTrap) =>
     Math.max(0, ...(t.notices || []).filter((n) => n.kind === 'trap-stowed' || n.kind === 'trap-ghosted').map((n) => Date.parse(n.at) || 0));
-  const seated = (t: GlassTrap) => t.live || !!t.starting;
+  const seated = (t: GlassTrap) => t.live || !!t.starting || !!t.requested;
   const orderedTraps = [...(d.traps || [])].sort((a, b) =>
     Number(seated(b)) - Number(seated(a)) ||
     Number(b.live) - Number(a.live) ||

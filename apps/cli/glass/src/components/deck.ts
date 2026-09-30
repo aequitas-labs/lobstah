@@ -12,9 +12,11 @@ import {
   badgeTitle,
   kindCell,
   kindLabel,
+  NewTrap,
   opener,
   prName,
   stackNumbers,
+  startCommands,
   trapNow,
   trapNowText,
   windowAction,
@@ -36,6 +38,8 @@ interface DeckItem {
   metaText?: string;
   /** A control at the right end of the card's foot line, or the row's end. */
   action?: Children;
+  /** A block under the card or line: a starting trap's start commands. */
+  extra?: Children;
   open?: () => void;
   acked?: boolean;
 }
@@ -50,17 +54,17 @@ function deckItem(it: DeckItem, view: View) {
     it.badge &&
     html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`;
   if (view === 'cards')
-    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
-  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}</div>`;
+    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
+  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
 }
 
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
 
-function deckBlock(title: string, items: DeckItem[], tab: string, max: number, view: View) {
+function deckBlock(title: string, items: DeckItem[], tab: string, max: number, view: View, headAction?: Children) {
   const shown = items.slice(0, max);
   const lines = shown.map((i) => deckItem(i, view));
   const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
-  return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${body}${more(items.length - shown.length, tab)}</section>`;
+  return html`<section><h2><a href=${'#' + tab}>${title} →</a>${headAction && [' ', headAction]}</h2>${body}${more(items.length - shown.length, tab)}</section>`;
 }
 
 function deckNotices(list: DeckAttention[]) {
@@ -145,13 +149,16 @@ export function Deck({ inp }: { inp: DeckInputs }) {
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
     title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
-    badge: t.starting
-      ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
-      : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
+    badge: t.requested
+      ? { text: 'requested', tone: 'dim' }
+      : t.starting
+        ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
+        : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
     meta: [t.repo || '', ' · ', trapNow(t)],
     metaText: `${t.repo || ''} · ${trapNowText(t)}`,
     action: windowAction(t),
+    extra: startCommands(t),
     open: opener('trap', t.trapId),
   }));
-  return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view)}${deckPrs(inp, view)}</div>`;
+  return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`;
 }

@@ -252,7 +252,16 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   /** Parked and recently beating; false for a stale or never-parked registration. */
   listening?: boolean;
   /** A reserved trap no session has signed on as yet (`trap reserve`); `live` is false. */
-  starting?: { reservedAt: string; deadline: string; failedAt?: string; reason?: string };
+  starting?: {
+    reservedAt: string;
+    deadline: string;
+    failedAt?: string;
+    reason?: string;
+    /** The start commands with the ticket: only in a snapshot served to this machine's own glass page. */
+    commands?: Array<{ harness: 'claude' | 'codex'; command: string }>;
+  };
+  /** A trap asked for from the glass that no helm has reserved yet; `trapId` is the request id. */
+  requested?: { at: string };
   messages: GlassMessage[];
   /** This trap's notices, newest first. */
   notices: Notice[];
@@ -265,6 +274,10 @@ export interface GlassSnapshot {
   focusToken?: string;
   /** Native window selection is available on this host. Session links may work elsewhere. */
   focusSupported?: boolean;
+  /** Configured repo keys, for the New trap form. */
+  repoKeys?: string[];
+  /** A helm is signed on and beating: a trap request will be answered. */
+  helmOn?: boolean;
   now: string;
   version: string;
   repoUrl: string;
