@@ -51,6 +51,11 @@ const LOCK_CONTENTION = [
   // exists"). The files backend maps the lock's EEXIST to this reason; older
   // git printed "Unable to create '<ref>.lock': File exists" instead.
   /reference already exists/,
+  // Windows: two fetches unpack the same loose object, and one cannot write
+  // the file the other holds open ("unable to write file
+  // .git/objects/<xx>/<rest>: Permission denied", then "unpack-objects
+  // failed"). Only an object path matches, not any denied write.
+  /unable to write file \S*objects[\\/][0-9a-f]{2}[\\/][0-9a-f]{38,}: Permission denied/,
 ];
 
 /** git's stderr, falling back to the error message. */
@@ -93,6 +98,136 @@ async function gitShared(cwd: string, ...args: string[]): Promise<string> {
 }
 
 /**
+ * How long a git step waits for another process's step in the same repo. A
+ * holder older than this is stale, and after it the waiter runs anyway (the
+ * lock-contention retry covers a collision then).
+ */
+const REPO_LOCK_WAIT_MS = 5 * 60_000;
+
+/** The in-process tail of each repo's queue, by canonical git common dir. */
+const repoQueues = new Map<string, Promise<void>>();
+
+interface RepoLock {
+  pid: number;
+  at: string;
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** Codes a lock-file create or read hits while another process deletes it (Windows). */
+const BUSY = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+/**
+ * Run `fn` while holding `lobstah-git.lock` in the git common dir, so runner
+ * processes allocating in one repo take turns. A lock whose process is gone,
+ * or older than REPO_LOCK_WAIT_MS, is stale.
+ */
+async function withRepoLock(common: string, fn: () => Promise<void>): Promise<void> {
+  const file = path.join(common, 'lobstah-git.lock');
+  const mine = JSON.stringify({ pid: process.pid, at: new Date().toISOString() } satisfies RepoLock);
+  const deadline = Date.now() + REPO_LOCK_WAIT_MS;
+  let held = false;
+  while (Date.now() < deadline) {
+    try {
+      fs.writeFileSync(file, mine, { flag: 'wx' });
+      held = true;
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? '';
+      if (code !== 'EEXIST' && !BUSY.has(code)) throw err;
+    }
+    let raw = '';
+    let age = 0;
+    try {
+      raw = fs.readFileSync(file, 'utf8');
+      age = Date.now() - fs.statSync(file).mtimeMs;
+    } catch {
+      continue; // released (or being deleted) between our create and our read
+    }
+    let holder: RepoLock | undefined;
+    try {
+      holder = JSON.parse(raw) as RepoLock;
+    } catch {
+      holder = undefined; // being written, or torn: stale only when old
+    }
+    const stale = age > REPO_LOCK_WAIT_MS || (holder ? !pidAlive(holder.pid) : age > 5_000);
+    if (stale) {
+      try {
+        if (fs.readFileSync(file, 'utf8') === raw) fs.rmSync(file, { force: true });
+      } catch {
+        // gone already
+      }
+      continue;
+    }
+    await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
+  }
+  try {
+    await fn();
+  } finally {
+    if (held) {
+      try {
+        if (fs.readFileSync(file, 'utf8') === mine) fs.rmSync(file, { force: true, recursive: true, maxRetries: 5 });
+      } catch {
+        // gone already
+      }
+    }
+  }
+}
+
+/**
+ * Run `fn` alone in the repo that holds `cwd`: one at a time within this
+ * process (a queue) and across processes (withRepoLock). Parallel fetches
+ * collide on the repo's ref locks and, on Windows, on the loose objects they
+ * unpack; a parallel `git worktree add` can read another's half-written
+ * `.git/worktrees/<id>`. `fn` gets the git common dir.
+ */
+async function oneAtATime(cwd: string, fn: (common: string) => Promise<void>): Promise<void> {
+  const common = await git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+  const key = realpath(common);
+  const run = (repoQueues.get(key) ?? Promise.resolve()).then(() => withRepoLock(common, () => fn(common)));
+  const tail = run.catch(() => {});
+  repoQueues.set(key, tail);
+  try {
+    await run;
+  } finally {
+    if (repoQueues.get(key) === tail) repoQueues.delete(key);
+  }
+}
+
+/** When each `<remote> <ref>` fetch that succeeded last started, in ms. */
+function fetchStamps(common: string): Record<string, number> {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(common, 'lobstah-fetch.json'), 'utf8')) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * `git fetch <remote> <ref>`, one at a time per repo. A caller that asked
+ * before a fetch of the same ref started reuses that fetch instead of
+ * fetching again: it would get the same answer.
+ */
+async function fetchShared(cwd: string, remote: string, ref: string): Promise<void> {
+  const asked = Date.now();
+  const key = `${remote} ${ref}`;
+  await oneAtATime(cwd, async (common) => {
+    if ((fetchStamps(common)[key] ?? -Infinity) >= asked) return;
+    const started = Date.now();
+    await gitShared(cwd, 'fetch', remote, ref);
+    const stamps = { ...fetchStamps(common), [key]: started };
+    fs.writeFileSync(path.join(common, 'lobstah-fetch.json'), JSON.stringify(stamps, null, 2));
+  });
+}
+
+/**
  * A fresh worktree for a dispatch, branched from trunk. Never allocate a
  * second one for the same id. (A follow-up may instead reuse its chain's
  * worktree: see chooseWorktree.)
@@ -106,11 +241,13 @@ export async function allocate(repo: RepoConfig, id: string, fromRemoteBranch = 
     if (!repo.origin) throw new Error(`repo path ${repo.path} missing and no origin configured`);
     await run('git', ['clone', repo.origin, repo.path], { env: process.env });
   }
-  await gitShared(repo.path, 'fetch', 'origin', fromRemoteBranch);
+  await fetchShared(repo.path, 'origin', fromRemoteBranch);
   // --no-track: an upstream of origin/<trunk> under another branch name is
   // never useful, and writing it takes .git/config's lock, which concurrent
   // allocations contend for too.
-  await gitShared(repo.path, 'worktree', 'add', '--no-track', dir, '-b', `lobstah/${id}`, `origin/${fromRemoteBranch}`);
+  await oneAtATime(repo.path, async () => {
+    await gitShared(repo.path, 'worktree', 'add', '--no-track', dir, '-b', `lobstah/${id}`, `origin/${fromRemoteBranch}`);
+  });
   await runSetup(repo, dir);
   return dir;
 }
@@ -297,7 +434,7 @@ export async function chooseWorktree(input: ChooseInput): Promise<WorktreeChoice
  * setup ran.
  */
 export async function prepareReuse(repo: RepoConfig, dir: string): Promise<{ setupRan: boolean }> {
-  await gitShared(dir, 'fetch', 'origin', repo.trunk);
+  await fetchShared(dir, 'origin', repo.trunk);
   if (!(repo.setup?.length)) return { setupRan: false };
   if (recordedSetupHash(dir) === setupHash(repo, dir)) return { setupRan: false };
   await runSetup(repo, dir);
