@@ -41,6 +41,9 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * a card's `<span class="prname"><b>#n</b> title</span>` folds back to the
  * old `<b>#n title</b>`, and a stack line's per-number `<span title>#n</span>`
  * folds back to plain text (foldPrTitles).
+ * The glass also shows each trap by name on purpose (glass-page.test.ts tests
+ * it): a `.trapname` link folds back to its text, and a dispatch modal's
+ * `claimed by <name>` line is removed (foldPrTitles).
  */
 /** Take the Reports tab out of a live page, so the page compares with the old one. */
 function withoutReportsTab(g: GlassDom): void {
@@ -105,6 +108,9 @@ function foldPrTitles(el: Element): Node {
   }
   // The old card wrote `#n ${title || ''}`: a PR without a title left a trailing space.
   for (const b of copy.querySelectorAll('.card .top > b')) b.textContent = (b.textContent ?? '').trimEnd();
+  for (const n of copy.querySelectorAll('.claimedby')) n.remove();
+  for (const n of copy.querySelectorAll('.trapname')) n.replaceWith(doc.createTextNode(n.textContent ?? ''));
+  copy.normalize();
   for (const n of copy.querySelectorAll('span, b')) {
     if (!STACK_NUMBER.test(n.textContent ?? '') || [...n.attributes].some((a) => a.name !== 'title')) continue;
     if (n.tagName === 'B') n.removeAttribute('title');
@@ -284,7 +290,8 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
         const hidden = [...g.$$('.tabpage:not(.on)'), ...(g.$('#overlay')!.className === 'open' ? [] : [g.$('#modalbox')!])];
         g.$$('body *')
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
-          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *'))
+          // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
+          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);
