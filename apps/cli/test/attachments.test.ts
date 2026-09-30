@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { claimNext, ensureLayout, laneDirs, queuedDescriptor, readMessageMeta, storedDescriptor, unhandled, unhandledTrapMessages } from '@lobstah/core';
 import { buildGlassSnapshot } from '../src/glass.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -18,7 +19,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

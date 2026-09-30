@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { claudeCliArgs, claudeSdkOptions, pumpClaudeMessage, startClaudeCli } from '../src/claude.js';
 import { codexExecArgs, startCodexCli } from '../src/codex.js';
 import type { AdapterStartOpts } from '../src/types.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let dir: string;
 beforeEach(() => {
@@ -14,7 +15,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 function opts(over: Partial<AdapterStartOpts> = {}): AdapterStartOpts {

@@ -9,6 +9,7 @@ import type { Descriptor, PrEvidence, TrapRegistration } from '@lobstah/core';
 import { runBeat } from '../src/beat.js';
 import type { ProbeRun } from '../src/beat-pr.js';
 import { deliverPrRepairs } from '../src/pr-repair.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const ID = 'bbbbbbbb-1111-2222-3333-444444444444';
@@ -74,7 +75,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 describe('the trap beat records its catch PR', () => {

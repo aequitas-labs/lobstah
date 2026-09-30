@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { appendStatus, claimBait, cleanTitleText, enqueue, ensureLayout, signOnTrap, trapSessionTitle, titleFromBrief } from '../src/index.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 let worktree: string;
@@ -16,7 +17,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

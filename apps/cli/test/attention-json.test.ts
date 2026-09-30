@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence } from '@lobstah/core';
 import { petRow, petStateFile, type PetState } from '../src/pet.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 
@@ -18,7 +19,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["question", "pr:draft"]\n');
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

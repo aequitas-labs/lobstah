@@ -21,6 +21,7 @@ import {
 import { retentionPass } from '@lobstah/supervisor';
 import { cliCuller } from '../src/auto-cull.js';
 import { diskRow } from '../src/doctor.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * `[limits].releaseOnMerge`: a merged PR's worktree goes on the next cull
@@ -141,7 +142,7 @@ beforeEach(() => {
   config(true);
 });
 afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
   delete process.env.LOBSTAH_HOME;
 });
 

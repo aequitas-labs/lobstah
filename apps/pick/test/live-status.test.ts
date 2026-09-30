@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { activityLine, activityPath, activityView, appendStatus, claimNext, enqueue, ensureLayout, mergeEvidence, readActivity, writeActivity } from '@lobstah/core';
 import { liveStatus } from '../src/live-status.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -13,7 +14,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 it('redacts a token-like value even in an untrusted on-disk activity record', () => {

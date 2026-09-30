@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { ensureLayout, listTraps, queuedDescriptor, readEvidence, readTrap, readTrapAnchor, unhandledTrapMessages, type TrapRegistration } from '@lobstah/core';
 import { planCull, planPressureCull } from '../src/cull.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end: soak and stow through the built CLI, against throwaway repos
 // with a bare origin. Every test has its own LOBSTAH_HOME.
@@ -57,7 +58,7 @@ beforeEach(() => {
   config();
 });
 afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true });
+  removeTempDir(tmp);
   delete process.env.LOBSTAH_HOME;
 });
 
@@ -233,7 +234,7 @@ describe('soak creates a worktree when the session has none', () => {
     expect(disk.status).not.toBe(0);
     expect(disk.stdout).toContain('[limits].minFreeGB');
     config();
-    fs.rmSync(origin, { recursive: true, force: true });
+    removeTempDir(origin);
     const fetch = soak(primary);
     expect(fetch.status).not.toBe(0);
     expect(fetch.stdout).toContain('could not create a worktree for repo r');
