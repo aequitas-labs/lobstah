@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { RepoConfig } from '@lobstah/core';
+import { detectHarness } from './harness-detect.js';
+import { recordHookRun } from './hook-runs.js';
 
 function git(dir: string, ...args: string[]): string | undefined {
   const res = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
@@ -64,7 +66,10 @@ export function readHookStdin(): HookInput | undefined {
     const raw = fs.readFileSync(0, 'utf8');
     if (!raw.trim()) return undefined;
     const parsed = JSON.parse(raw) as HookInput;
-    return typeof parsed === 'object' && parsed !== null ? parsed : undefined;
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    // Every lobstah hook reads its input here: stamp the run for `lobstah doctor`.
+    recordHookRun(parsed.hook_event_name, detectHarness({ sessionId: parsed.session_id }).harness);
+    return parsed;
   } catch {
     return undefined;
   }

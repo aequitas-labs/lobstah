@@ -2170,7 +2170,7 @@ async function mainCli(): Promise<void> {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 1500));
-            if (helm) heartbeatHelm(helm.sessionId); // a queued-only park is liveness too
+            if (helm) heartbeatHelm(helm.sessionId, { parked: true }); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
             runDueManWatches();

@@ -298,6 +298,41 @@ session id's UUID version (v7 codex, v4 claude), else the descriptor.
 | `fail` | Broken configuration or missing requirement — fix before relying on lobstah. |
 | `skip` | The check does not apply on this host (e.g. no harness plugin installed). Never fails the run. |
 
+### Hook readiness
+
+Parks and wakes run through the plugin's hooks, so doctor checks them. It
+prints one `hooks claude` and one `hooks codex` row for each harness whose
+lobstah plugin is installed (`skip` otherwise). The row starts with the
+readiness of each role: the helm needs `Stop` and `SessionStart`; a trap
+needs all four (`helm ready, trap not ready (needs PostToolUse)`). Then, for
+each hook (`Stop`, `SessionStart`, `PostToolUse`, `SessionEnd`), it says:
+
+- **installed**: the plugin's `hooks/hooks.json` declares it (`missing`
+  otherwise), and whether the harness has it turned off (`installed but
+  disabled`);
+- **trusted**: Codex runs a plugin hook only after the user trusts it in
+  `/hooks`, and records trust in `config.toml` as
+  `[hooks.state."lobstah@lobstah:hooks/hooks.json:<event>:<group>:<handler>"]`
+  with a `trusted_hash`, a hash of the hook's definition. The row says
+  `trusted` when that hash matches the hook as the plugin declares it now,
+  `changed since trusted` when the hook changed after it was trusted (a
+  plugin update; Codex asks again), and `untrusted` without an entry. Claude
+  Code has no per-hook trust: `trust n/a`;
+- **last run**: when lobstah last saw the hook run (`never run` when it has
+  not). Each hook run stamps `~/.lobstah/hook-runs.json` (`<harness>:<event>`
+  → time; a hook that runs on every tool call stamps at most every 30 s).
+
+A hook that is missing, untrusted, or off makes the row `fail`, and the row
+ends with the step to take, for example `In Codex, open /hooks and trust
+lobstah's Stop and SessionStart hooks.` Doctor reads the harness config and
+never writes it.
+
+A `listeners` row follows: for each signed-on helm, whether it listens (a
+live `man wait`, or a park in the Stop hook), and for each trap whether it is
+`parked`, `working a catch`, or `not listening`. A helm or trap that is not
+listening makes the row `warn`: no automatic wake reaches it until it parks
+again.
+
 ## Watch contract
 
 A **watch** is a standing outbound poll on something external (a ume review

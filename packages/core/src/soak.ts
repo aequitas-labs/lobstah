@@ -44,6 +44,8 @@ export interface TrapRegistration {
   heartbeatAt: string;
   /** Set the first time the trap actually parks. Absent = signed on but never listened. */
   firstParkedAt?: string;
+  /** The last heartbeat of a park (the Stop hook or `soak --wait`): fresh while the trap listens. */
+  parkedAt?: string;
   /** Where the manning session's window lives — a companion's focus target. */
   window?: WindowRef;
   /** A validated deep link supplied by the session itself. */
@@ -363,6 +365,7 @@ export function heartbeatTrap(
     ...reg,
     heartbeatAt: new Date().toISOString(),
     firstParkedAt: firstPark ? new Date().toISOString() : reg.firstParkedAt,
+    ...(opts.parked ? { parkedAt: new Date().toISOString() } : {}),
     claimed: opts.claimed === null ? undefined : (opts.claimed ?? reg.claimed),
   };
   atomicWrite(regPath(trapId), JSON.stringify(next, null, 2));
