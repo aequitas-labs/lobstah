@@ -73,6 +73,8 @@ function expectOneAtATime(spans: Array<[number, number]>): void {
   for (let i = 1; i < spans.length; i++) expect(spans[i][0]).toBeGreaterThanOrEqual(spans[i - 1][1]);
 }
 
+// Allocations in one repo take turns, and each git step takes about 0.4s on
+// Windows CI, so these tests get more than the default 5s.
 describe('allocate', () => {
   it('concurrent dispatches all get a worktree on the fetched trunk, from one fetch', async () => {
     // Several dispatches claimed in one poll allocate in the same repo at
@@ -92,7 +94,7 @@ describe('allocate', () => {
     }
     expect(results.runs('fetch')).toHaveLength(1);
     expectOneAtATime(results.runs('worktree'));
-  });
+  }, 20_000);
 
   it('fetches of different refs in one repo run one at a time', async () => {
     const repo = repoBehindOrigin();
@@ -103,7 +105,7 @@ describe('allocate', () => {
     expect(results.value).toHaveLength(6);
     expect(results.runs('fetch').length).toBeGreaterThanOrEqual(2);
     expectOneAtATime(results.runs('fetch'));
-  });
+  }, 20_000);
 
   it('fetches again for a dispatch that asks after the last fetch started', async () => {
     const repo = repoBehindOrigin();
@@ -113,7 +115,7 @@ describe('allocate', () => {
     const tip = git(path.join(root, 'origin.git'), 'rev-parse', 'main');
     const dir = await allocate(repo, '00000000-0000-4000-8000-000000000011');
     expect(git(dir, 'rev-parse', 'HEAD')).toBe(tip);
-  });
+  }, 20_000);
 
   it('waits while another live process holds the repo lock, and takes over a dead one', async () => {
     const repo = repoBehindOrigin();
