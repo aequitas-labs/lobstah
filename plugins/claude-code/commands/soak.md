@@ -29,9 +29,11 @@ Volunteer this session as a worker (a trap).
 3. Print the two-word name, the `wt:<trap>` id, and the worktree path from
    its output. The lobstah man addresses work with `--for <name>`.
    `lobstah soak --name <word-word>` chooses or changes the name.
-   When `soak`, `soak --wait`, or `report done`/`failed` prints a `title`,
-   use `set_session_title` for literal `self` if available in the desktop
-   Code tab. Do not retry a refused title.
+   Apply the title from the `step: Apply this title: <title>` line: use
+   `set_session_title` for literal `self` if available in the desktop Code
+   tab. Then run `lobstah trap title-set`; sign-on is complete after that.
+   When `soak --wait` or `report done`/`failed` prints a `title`, set it the
+   same way. Do not retry a refused title.
 4. State the worker rules and follow them from here on:
    - Report only with `lobstah report <id> <verb> "<note>"`, using the six
      verbs: working, needs-decision, blocked, paused, done, failed.

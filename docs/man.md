@@ -1093,6 +1093,20 @@ redeemed or withdrawn. The glass sends it only to a page on this machine's
 own glass address, only on the starting card, and no notice or log carries
 it.
 
+### The sign-on title
+
+Sign-on asks the session to apply a title: `lobstah soak` prints
+`step: Apply this title: <title>` (the trap's name). The session applies it
+with its harness's title tool when there is one (`set_session_title` in the
+Claude desktop Code tab, `set_thread_title` in the Codex app), then runs
+`lobstah trap title-set` (`--session <id>` from outside the worktree), which
+prints `signOn: complete`. Until then, sign-on is not complete: the
+SessionStart hook adds `lobstah: sign-on is not complete. Apply this title:
+<title>. Then run \`lobstah trap title-set\`.` to the session brief, and the
+Stop hook blocks the stop once with the same text. A turn the Stop hook
+already continued (`stop_hook_active`) is not reminded again. A session that
+signs on again keeps a title it confirmed.
+
 ### The terminal tab name
 
 At sign-on, soak names the session's terminal tab after the trap. It finds the

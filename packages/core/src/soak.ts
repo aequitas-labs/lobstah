@@ -46,6 +46,11 @@ export interface TrapRegistration {
   firstParkedAt?: string;
   /** The last heartbeat of a park (the Stop hook or `soak --wait`): fresh while the trap listens. */
   parkedAt?: string;
+  /** The title sign-on asked the session to apply, until the session confirms it (`trap title-set`). */
+  titlePending?: string;
+  /** When the session confirmed its title, and which. */
+  titleSetAt?: string;
+  titleSet?: string;
   /** Where the manning session's window lives — a companion's focus target. */
   window?: WindowRef;
   /** A validated deep link supplied by the session itself. */
@@ -314,6 +319,9 @@ export function signOnTrap(opts: {
     link: link !== undefined && linkMismatch(link, window) === undefined ? link : undefined,
     claimed: prior?.claimed,
     ...(createdWorktree ? { createdWorktree } : {}),
+    // The same session keeps the title it confirmed or was asked to apply.
+    ...(sameSession && prior.titleSet ? { titleSet: prior.titleSet, titleSetAt: prior.titleSetAt } : {}),
+    ...(sameSession && prior.titlePending ? { titlePending: prior.titlePending } : {}),
   };
   atomicWrite(regPath(trapId), JSON.stringify(reg, null, 2));
   if (!prior) {
@@ -347,6 +355,31 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
     by,
   });
   return reg;
+}
+
+/**
+ * Sign-on asks the session to apply `title`. A title the session already
+ * confirmed is not asked again. Returns the registration, or undefined when
+ * the trap is gone.
+ */
+export function askTrapTitle(trapId: string, title: string): TrapRegistration | undefined {
+  const reg = readTrap(trapId);
+  if (!reg) return undefined;
+  const next: TrapRegistration = { ...reg };
+  if (reg.titleSet === title) delete next.titlePending;
+  else next.titlePending = title;
+  atomicWrite(regPath(trapId), JSON.stringify(next, null, 2));
+  return next;
+}
+
+/** The session applied its title: sign-on is complete. Returns the registration, or undefined when the trap is gone. */
+export function confirmTrapTitle(trapId: string, now = Date.now()): TrapRegistration | undefined {
+  const reg = readTrap(trapId);
+  if (!reg) return undefined;
+  const { titlePending, ...rest } = reg;
+  const next: TrapRegistration = { ...rest, titleSet: titlePending ?? reg.titleSet ?? reg.name, titleSetAt: new Date(now).toISOString() };
+  atomicWrite(regPath(trapId), JSON.stringify(next, null, 2));
+  return next;
 }
 
 /**

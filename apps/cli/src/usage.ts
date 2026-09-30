@@ -113,7 +113,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
   },
   trap: {
-    subverbs: ['reserve', 'requests'],
+    subverbs: ['reserve', 'requests', 'title-set'],
     flags: {
       '--repo': { value: '<key>' },
       '--request': { value: '<id>' },
@@ -128,7 +128,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--harness': ['reserve'],
       '--name': ['reserve'],
       '--deadline': ['reserve'],
-      '--session': ['reserve'],
+      '--session': ['reserve', 'title-set'],
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--force': {}, '--quiet': {} } },
@@ -255,7 +255,7 @@ on as a reserved trap. Names the Terminal.app/iTerm2 tab. \`soak beat\`: hook.`,
 start command. dispatch --for works at once; soak --ticket <t> redeems it. Past
 --deadline (default 180s) trap-start-failed posts; work stays queued. stow --wt
 <name> withdraws it. --request <id> reserves what a glass request asks for and
-closes it; \`trap requests\` lists open requests.`,
+closes it; \`trap requests\` lists them. \`trap title-set\` confirms the sign-on title.`,
   stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
 finalizes; unread messages bounce. Removes only worktrees soak created, kept
 when dirty, untracked, unpushed to upstream, or without upstream (with reason).
