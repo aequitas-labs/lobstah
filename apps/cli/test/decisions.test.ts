@@ -20,6 +20,7 @@ import {
   takeDecisionAnswers,
 } from '@lobstah/core';
 import { buildTendReport } from '../src/tend.js';
+import { planCull } from '../src/cull.js';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 
 /**
@@ -198,6 +199,39 @@ describe('man answer and the decision-answered event', () => {
     expect(buildTendReport().attention.some((a) => a.id === A)).toBe(false);
     const [event] = takeDecisionAnswers(true);
     expect(event).toMatchObject({ decision: { dispatch: A }, answer: { text: 'v2' } });
+  });
+});
+
+describe('the Stop hook and cull', () => {
+  it('man haul wakes an idle helm with the answered decision, once', () => {
+    const key = keyOf(lobstah('man', 'ask', '--title', 'Cut 0.6.0?', '--option', 'yes', '--option', 'no').stdout)!;
+    expect(lobstah('man', 'answer', key, '--option', 'yes').status).toBe(0);
+    const haul = () =>
+      spawnSync(process.execPath, [cli, 'man', 'haul', '--park', '--timeout', '1'], {
+        encoding: 'utf8',
+        env: { ...process.env, LOBSTAH_HOME: home, LOBSTAH_MAN: '1' },
+        input: JSON.stringify({ session_id: 'helm-session' }),
+        timeout: 15_000,
+      });
+    const first = haul();
+    expect(first.status, first.stderr).toBe(0);
+    const block = JSON.parse(first.stdout) as { decision: string; reason: string };
+    expect(block.decision).toBe('block');
+    expect(block.reason).toContain(`decision-answered ${key}`);
+    expect(block.reason).toContain('option "yes"');
+    expect(haul().stdout.trim()).toBe('');
+  });
+
+  it('cull removes a decision once it is answered, delivered, and older than the window; never a standing one', () => {
+    const standing = keyOf(lobstah('man', 'ask', '--title', 'still open').stdout)!;
+    const answered = keyOf(lobstah('man', 'ask', '--title', 'answered').stdout)!;
+    lobstah('man', 'answer', answered, '--text', 'done');
+    const later = Date.now() + 30 * 86_400_000;
+    expect(planCull(14, later).filter((i) => i.kind === 'decision')).toEqual([]);
+    takeDecisionAnswers(true);
+    expect(planCull(14, later).filter((i) => i.kind === 'decision').map((i) => i.id)).toEqual([answered]);
+    expect(planCull(14, Date.now()).filter((i) => i.kind === 'decision')).toEqual([]);
+    expect(readDecision(standing)).toBeDefined();
   });
 });
 

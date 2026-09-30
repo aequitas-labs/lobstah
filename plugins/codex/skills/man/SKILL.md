@@ -62,6 +62,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
 - A question you do not answer walks to the human when your turn ends.
+- For a question only the human can answer, frame it with `lobstah man ask [<id>] --title "<question>" [--detail <file.md>] [--option "<label>"]...`: the glass shows it as a card the human answers in place, and it replaces the worker's raw question there. The answer wakes `man wait` as a `decision-answered` event with the option, text, and file paths; act on it, usually with `lobstah send <id> "<instruction>"`.
 - `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long. A paused headless dispatch is parked: its session ends and it holds no slot. A message (`lobstah send`) or its `--until` wakes it into the same session. When the PR it waits on merges, lobstah finishes it `done`; closed without merge, `failed`.
 - Before you wait on something external yourself, say what.
 For ume, push with its non-blocking form; Codex cannot run an await as a

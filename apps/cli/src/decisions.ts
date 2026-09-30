@@ -1,4 +1,4 @@
-import { listDecisions, readDecisionAnswer, readDecisionDetail, standingDecisions } from '@lobstah/core';
+import { listDecisions, readDecisionDetail, standingDecisions } from '@lobstah/core';
 import type { DecisionAnsweredEvent, DecisionMeta, GlassDecision, TendAttention } from '@lobstah/core';
 
 /**
@@ -78,5 +78,3 @@ export function decisionLine(e: DecisionAnsweredEvent): string {
   return `- decision-answered ${e.decision.key}${e.decision.dispatch ? ` (${e.decision.dispatch})` : ''} — ${e.decision.title} · ${what}`;
 }
 
-/** Whether a standing answer was already recorded, for callers that report it. */
-export const isAnswered = (key: string): boolean => readDecisionAnswer(key) !== undefined;

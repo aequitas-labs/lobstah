@@ -455,15 +455,3 @@ export function resolveDecisionFile(key: string, name: string): string | undefin
   const file = path.join(dir, 'attachments', hit.name);
   return fs.existsSync(file) ? file : undefined;
 }
-
-/** Remove answered, delivered decisions answered before `cutoffMs`. Returns their keys. */
-export function cullDecisions(cutoffMs: number, apply: boolean): string[] {
-  const out: string[] = [];
-  for (const d of listDecisions()) {
-    const a = readDecisionAnswer(d.key);
-    if (!a?.deliveredAt || (Date.parse(a.answeredAt) || 0) >= cutoffMs) continue;
-    out.push(d.key);
-    if (apply) fs.rmSync(decisionDir(d.key)!, { recursive: true, force: true });
-  }
-  return out;
-}
