@@ -2574,6 +2574,10 @@ async function mainCli(): Promise<void> {
         }
         break;
       }
+      // The SessionEnd hook (`stow --quiet`) signs a trap off only for the
+      // session registered as its trap. Any other session ending in the
+      // worktree (a second window, a child session) leaves the trap alone.
+      if ((quiet || sessionEnd) && readTrap(trapId) && readTrap(trapId)!.sessionId !== sessionId) break;
       // A trap always signs itself off from its own worktree (or its own
       // session id). Stowing someone ELSE's trap is steering — with a
       // claimed helm, that force path is the helm's alone.

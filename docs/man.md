@@ -944,6 +944,13 @@ otherwise it prints `branchKept: <branch> (<reason>)`. A deleted branch
 prints as `branchDeleted:`. `stow --wt <id>` follows the same rules. The
 SessionEnd hook (`lobstah stow --quiet`) signs off and keeps the worktree.
 
+**Only the trap's own session signs it off from a hook.** `lobstah hook
+session-end` (and `stow --quiet`) stows a trap only when the ending session
+is the one registered as the trap. Another session in the same worktree (a
+second window, a child session) ending leaves the trap signed on. The
+PostToolUse and SessionStart hooks never beat or adopt a trap for a session
+that is not the trap's.
+
 **A sign-off holds the address for a while.** A session that restarts or
 compacts can end (SessionEnd stows it) and sign on again a minute later.
 SessionEnd cannot tell that from an exit: Claude Code's `reason` is `clear`,

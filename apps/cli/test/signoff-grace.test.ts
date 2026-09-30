@@ -10,7 +10,9 @@ import {
   ensureLayout,
   listNotices,
   noticeOrphanedBait,
+  readBeat,
   readSignedOff,
+  readTrap,
   sendTrapMessage,
   signOnTrap,
   unhandledTrapMessages,
@@ -112,5 +114,31 @@ describe('a trap that signs off keeps its address for the grace', () => {
     sessionEnd();
     expect(bounces()).toHaveLength(1);
     expect(readSignedOff(trapId)).toBeUndefined();
+  });
+});
+
+describe('only the trap session signs its trap off', () => {
+  it("another session ending in the trap's worktree leaves the trap signed on; its messages still deliver", () => {
+    sendTrapMessage(trapId, 'helm', 'still there?');
+    const other = run(['hook', 'session-end'], { session_id: 'second-window', hook_event_name: 'SessionEnd', reason: 'other', cwd: worktree });
+    expect(other.status).toBe(0);
+    expect(other.stdout).toBe('');
+    expect(readSignedOff(trapId)).toBeUndefined();
+    const stop = run(['hook', 'stop'], { session_id: SESSION, hook_event_name: 'Stop' });
+    expect(stop.stdout).toContain('still there?');
+    // The alias behaves the same, and the trap's own session still signs off.
+    expect(run(['stow', '--quiet', '--session', 'second-window']).stdout).toBe('');
+    expect(readSignedOff(trapId)).toBeUndefined();
+    sessionEnd();
+    expect(readSignedOff(trapId)).toMatchObject({ trapId });
+  });
+
+  it("a foreign session's tool calls and session start neither beat nor adopt the trap", () => {
+    const beat = run(['hook', 'post-tool-use'], { session_id: 'second-window', hook_event_name: 'PostToolUse', cwd: worktree, tool_name: 'Bash' });
+    expect(beat.status).toBe(0);
+    expect(readBeat(trapId)).toBeUndefined();
+    const brief = run(['hook', 'session-start'], { session_id: 'second-window', hook_event_name: 'SessionStart', cwd: worktree });
+    expect(brief.stdout).not.toContain('this session mans trap');
+    expect(readTrap(trapId)?.sessionId).toBe(SESSION);
   });
 });
