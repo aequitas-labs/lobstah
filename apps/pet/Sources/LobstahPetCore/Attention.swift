@@ -42,6 +42,11 @@ public struct AttentionItem: Decodable, Equatable {
     return URL(string: "\(glass.absoluteString)/#report/\(encoded)")
   }
 
+  /** The CLI acknowledgement for a pet click or its Acknowledge menu entry. */
+  public var ackArguments: [String]? {
+    key.map { ["attention", "ack", $0, "--by", "pet"] }
+  }
+
   /** The short kind label shown before the note; nothing for a question. */
   public var kindLabel: String? {
     switch kind {
@@ -62,6 +67,22 @@ public struct AttentionItem: Decodable, Equatable {
     let body = note ?? verb
     return kindLabel.map { "\($0) · \(body)" } ?? body
   }
+}
+
+/// Opens a pet's target before acknowledging it. Items without a URL focus the helm.
+public func clickAttentionItem(
+  _ item: AttentionItem,
+  glass: URL,
+  open: (URL) -> Void,
+  focusHelm: () -> Void,
+  acknowledge: ([String]) -> Void
+) {
+  if let url = item.reportLink(glass: glass) ?? item.prLink {
+    open(url)
+  } else {
+    focusHelm()
+  }
+  if let args = item.ackArguments { acknowledge(args) }
 }
 
 /// The shape both reads share: `lobstah attention --json` prints
