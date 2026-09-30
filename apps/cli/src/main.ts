@@ -2042,9 +2042,13 @@ async function mainCli(): Promise<void> {
           const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
           const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
           const replies = takeReplies(false, matchHelm);
-          // Listing an unanswered send is its reminder: paced like a question.
-          const unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
-          if (evs.length || watched.length || notices.length || replies.length || unanswered.length) {
+          // A sent line waits on the worker, not the helm: the worker's next
+          // note wakes man wait. Alone it never blocks a stop that has a live
+          // watcher; with no watcher it rides on the arm block below. Due sent
+          // lines are listed with any block, paced like a question.
+          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0;
+          const unanswered = blocking ? dueUnanswered(true, remindMs, Date.now(), matchHelm) : [];
+          if (blocking) {
             emit(
               [
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
@@ -2062,10 +2066,14 @@ async function mainCli(): Promise<void> {
           // A wait backgrounded just before the turn ended may still be starting.
           const graceSecs = cfgHaul.helm.armGraceSecs;
           if (await awaitWatcher(hook.session_id, 'man', graceSecs * 1000)) break;
+          const sent = dueUnanswered(true, remindMs, Date.now(), matchHelm);
           emit(
-            `Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
-              '(it wakes this session when the fleet needs you), then end your turn. ' +
-              armGraceNote(graceSecs),
+            [
+              ...(sent.length ? ['A send still waits on its reply:', ...sent.map(sentLine), SENT_HINT] : []),
+              `Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
+                '(it wakes this session when the fleet needs you), then end your turn. ' +
+                armGraceNote(graceSecs),
+            ].join('\n'),
           );
           break;
         }
