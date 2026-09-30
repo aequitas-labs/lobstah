@@ -1,4 +1,5 @@
-import type { Attachment, GlassDispatch, GlassPr, GlassTrap, TendAttention } from '@lobstah/core';
+import type { Attachment, GlassDispatch, GlassPr, TendAttention } from '@lobstah/core';
+import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { useState } from 'preact/hooks';
 import { dispatchFileUrl, isImageName, prBadgeClass, watchState } from '../../../src/glass-diff.js';
 import type { ModalType } from '../../../src/glass-diff.js';

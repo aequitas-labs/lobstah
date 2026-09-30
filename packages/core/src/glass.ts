@@ -265,7 +265,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   messages: GlassMessage[];
   /** This trap's notices, newest first. */
   notices: Notice[];
-  catches: GlassDispatch[];
+  /** The ids of this trap's catches, in `dispatches` order; the page reads each from `dispatches`. */
+  catches: string[];
 }
 
 /** A standing decision as the glass renders it: the record plus its detail page. */

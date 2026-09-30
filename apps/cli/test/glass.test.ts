@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { appendStatus, claimNext, enqueue, ensureLayout, expireReservations, laneDirs, mergeEvidence, postNotice, reserveTrap, takeHelm, writeActivity } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
+import { trapView } from '../src/glass-diff.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -68,7 +69,7 @@ describe('glass snapshot', () => {
     const snap = buildGlassSnapshot();
     const t = snap.traps.find((x) => x.trapId === 'deadbeef');
     expect(t?.live).toBe(false);
-    expect(t?.catches.map((c) => c.id)).toContain(UUID);
+    expect(t?.catches).toContain(UUID);
     expect(t?.notices.map((n) => n.kind)).toContain('trap-stowed');
   });
 
@@ -79,7 +80,7 @@ describe('glass snapshot', () => {
     expect(starting).toHaveLength(1);
     expect(starting[0]).toMatchObject({ live: false, name: 'amber-gull', repo: 'web', harness: 'codex', starting: { deadline: reservation.deadline } });
     expect(starting[0]!.starting!.failedAt).toBeUndefined();
-    expect(starting[0]!.catches.map((c) => c.id)).toEqual([UUID]);
+    expect(starting[0]!.catches).toEqual([UUID]);
     expireReservations(Date.now() + 61_000);
     const failed = buildGlassSnapshot().traps.find((x) => x.trapId === reservation.trapId);
     expect(failed?.starting?.failedAt).toBeDefined();
@@ -114,7 +115,8 @@ describe('glass snapshot', () => {
     writeActivity(traps[0]!.claimed!, 'work', { at: iso(12_000), kind: 'tool', summary: 'Bash' });
     appendStatus(traps[2]!.claimed!, 'work', 'paused', 'awaiting review', undefined, { waitingOn: 'review' });
     const snap = buildGlassSnapshot();
-    const byId = (id: string) => snap.traps.find((t) => t.trapId === id)!;
+    // The snapshot names catches by id; the page resolves them against dispatches.
+    const byId = (id: string) => trapView(snap, snap.traps.find((t) => t.trapId === id)!);
     expect(byId('working')).toMatchObject({ live: true, listening: true, claimed: traps[0]!.claimed });
     expect(byId('working').catches.find((c) => c.id === traps[0]!.claimed)).toMatchObject({
       brief: 'Build a stable trap view', activity: { summary: 'Bash' }, verb: 'working',

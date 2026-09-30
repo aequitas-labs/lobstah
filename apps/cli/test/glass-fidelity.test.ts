@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
-import type { GlassSnapshot } from '@lobstah/core';
+import type { GlassSnapshot, GlassTrap } from '@lobstah/core';
+import { trapView } from '../src/glass-diff.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
@@ -47,12 +48,20 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * The glass also shows each trap by name on purpose (glass-page.test.ts tests
  * it): a `.trapname` link folds back to its text, and a dispatch modal's
  * `claimed by <name>` line is removed (foldPrTitles).
+ * The snapshot names each trap's catches by dispatch id; the old page read
+ * full dispatch objects there, so the old page is served the ids expanded
+ * back into those objects (legacyWire). Both pages render the same catches.
  */
 /** Take the Reports tab out of a live page, so the page compares with the old one. */
 function withoutReportsTab(g: GlassDom): void {
   for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports')) el.remove();
 }
 const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
+/** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */
+const legacyWire = (d: GlassSnapshot): GlassSnapshot => {
+  const shaped = legacyShape(d);
+  return { ...shaped, traps: shaped.traps.map((t) => trapView(shaped, t) as unknown as GlassTrap) };
+};
 // The exact bytes served, whatever line endings the checkout gave the fixture.
 const LEGACY = fs.readFileSync(new URL('./fixtures/glass-legacy.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
@@ -272,7 +281,7 @@ async function trace(page: string, d: GlassSnapshot, search = '') {
 describe('glass fidelity: the built page renders the legacy page’s DOM', () => {
   for (const [name, make] of Object.entries(FIXTURES)) {
     it(`${name} fleet: every tab, view, filter, and modal`, async () => {
-      const [legacy, built] = [await trace(LEGACY, legacyShape(make())), await trace(GLASS_PAGE, legacyShape(make()))];
+      const [legacy, built] = [await trace(LEGACY, legacyWire(make())), await trace(GLASS_PAGE, legacyShape(make()))];
       expect(built.skeleton).toBe(legacy.skeleton);
       expect(built.views.map(([n]) => n)).toEqual(legacy.views.map(([n]) => n));
       for (let i = 0; i < legacy.views.length; i++) {
@@ -287,7 +296,8 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
   // properties): every visible element's computed style must come out the same.
   it('every visible element computes the same style under glass.css as under the legacy stylesheet', async () => {
     const computed = async (page: string) => {
-      const g = await loadGlass(page, legacyShape(FIXTURES['every-attention']!()), { now: NOW });
+      const d = FIXTURES['every-attention']!();
+      const g = await loadGlass(page, page === LEGACY ? legacyWire(d) : legacyShape(d), { now: NOW });
       const out: string[] = [];
       const snap = (label: string) => {
         withoutReportsTab(g);

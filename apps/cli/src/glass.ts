@@ -521,9 +521,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnap
       listening,
       messages: trapMessages(t.trapId),
       notices,
-      catches: dispatches.filter(
-        (x) => x.claimedBy === `wt:${t.trapId}` || x.evidence?.deliveredTo === `wt:${t.trapId}` || x.for === `wt:${t.trapId}`,
-      ),
+      catches: dispatches
+        .filter((x) => x.claimedBy === `wt:${t.trapId}` || x.evidence?.deliveredTo === `wt:${t.trapId}` || x.for === `wt:${t.trapId}`)
+        .map((x) => x.id),
     };
   };
   const traps = [

@@ -1,4 +1,5 @@
-import type { GlassDispatch, GlassHelm, GlassReport, GlassSnapshot, GlassTrap } from '@lobstah/core';
+import type { GlassDispatch, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
+import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, trapFileUrl } from '../../../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal } from '../actions.js';
