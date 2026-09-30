@@ -92,7 +92,10 @@ export interface Evidence {
   resumeFallback?: string;
   branch?: string;
   commits?: string[];
+  /** The dispatch's PR: the first one it reported. */
   prUrl?: string;
+  /** Every PR the dispatch reported when it has more than one (`--pr` repeated, or the PRs of its stack), `prUrl` first. */
+  prUrls?: string[];
   transcriptPath?: string;
   note?: string;
   /** Delivery receipt: the trap address that actually claimed this dispatch. */

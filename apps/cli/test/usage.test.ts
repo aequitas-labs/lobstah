@@ -53,7 +53,7 @@ describe('parseArgs — one flag-extraction step (axi P6)', () => {
     expect(ok('send', ['abc', '--session', 's1', 'hello', 'there'])).toEqual(want);
     expect(ok('send', ['abc', 'hello', 'there', '--session', 's1'])).toEqual(want);
     expect(ok('report', ['abc', 'done', 'fixed', '--pr', 'https://x/1'])).toEqual({
-      flags: { '--pr': 'https://x/1' },
+      flags: { '--pr': ['https://x/1'] },
       positionals: ['abc', 'done', 'fixed'],
     });
   });

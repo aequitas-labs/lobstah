@@ -11,6 +11,8 @@ export interface LivenessView {
   lastCommit?: string;
   aheadTrunk?: string;
   draftPr?: string;
+  /** Every PR of a dispatch that has more than one. */
+  prs?: string;
   updated?: string;
 }
 
@@ -92,6 +94,7 @@ export function livenessView(id: string, lane: Lane): LivenessView {
     ...(lastCommit ? { lastCommit } : {}),
     ...(ahead !== undefined && trunk ? { aheadTrunk: `${ahead} ahead of ${trunk}` } : {}),
     ...(ev.prUrl ? { draftPr: ev.prUrl } : {}),
+    ...(ev.prUrls && ev.prUrls.length > 1 ? { prs: ev.prUrls.join(', ') } : {}),
     ...(readStatusLog(id, lane).at(-1)?.at ? { updated: readStatusLog(id, lane).at(-1)!.at } : {}),
   };
 }

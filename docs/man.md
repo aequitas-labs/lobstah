@@ -192,10 +192,14 @@ with `paused --waiting-on pr` or `--waiting-on review` merges, the daemon
 finishes that dispatch `done` with the note `the PR merged: <url>`. When
 the PR closes without merge, it finishes it `failed` with `the PR closed
 without merge: <url>`. The PR waited on is the `--link` when it names a
-GitHub PR, else the dispatch's own PR (its evidence, which `lobstah catch`
-shows), else its chain's PR, else the PR of a `pr:` watch the dispatch
-owns. Every paused dispatch waiting on that PR is finished, in the whole
-chain. The daemon does this after it observes PR watches and before its
+GitHub PR that is not one of the dispatch's own. Otherwise the dispatch
+waits on all of its own PRs (its evidence, which `lobstah catch` shows),
+else its chain's PR, else the PRs of the `pr:` watches it owns. A
+dispatch with several PRs finishes only when every one of them has merged
+or closed: `done` when at least one merged (`the PRs merged: <urls>`, or
+`the PRs ended — merged: <urls>; closed without merge: <urls>`), `failed`
+when all closed without merge. Every paused dispatch waiting on those PRs
+is finished, in the whole chain. The daemon does this after it observes PR watches and before its
 cull pass, so `[limits].releaseOnMerge` releases the chain's worktrees in
 the same pass. `report paused --waiting-on pr|review` registers the watch
 of the dispatch's own PR when it has none. The daemon also reads, at
@@ -210,8 +214,25 @@ dispatch: report again with `--link <PR url>`.
 A dispatch reports its PR with `report <id> <verb> --pr <url>`, which
 registers a `pr:` watch for the chain so the PR stays observed (see the
 PR preset in [vocabulary.md](vocabulary.md#the-pr-preset); `--no-watch`
-opts out). A trap's PR is tracked from its first push. What you get
-depends on what runs:
+opts out). A trap's PR is tracked from its first push.
+
+A dispatch can own several PRs. `--pr` is repeatable: each PR is recorded
+and gets its own `pr:` watch. The first is the dispatch's `prUrl`; all of
+them are its `prUrls`. When a reported PR is part of a stack, the other PRs
+of the stack are recorded too:
+
+- a gh stack: the `gh-stack` state in the dispatch's checkout (from
+  `gh stack init` or `gh stack submit`) lists a stack that holds the PR;
+- a base chain: the dispatch pushed two or more branches, and
+  `gh pr view <branch>` links their PRs to the reported one by base
+  branch.
+
+The report prints `prs` with every PR it recorded. `lobstah catch` and
+`lobstah status <id>` list each PR (`prs`), `man tend` lists each with its
+state in the story's `pr` column, and the glass links each by number. Each
+PR has its own record, so `pr:*` attention and the merged/closed notice are
+per PR. `[limits].releaseOnMerge` keeps the worktree while another PR of
+the dispatch is open. What you get depends on what runs:
 
 - **Only the helm park or `man wait`** (no service): PR state badges in
   `man tend`, `lobstah catch`, and the glass (`merged`, `draft`, `review`,
@@ -229,9 +250,10 @@ succeeds and the watch's check records `lastError`.
 
 Which commands register a watch. Only these write points register one:
 
-- `lobstah report <id> <verb> --pr <url>` registers the watch for the PR the
-  worker opened. Any verb but `failed` does this. A PR already watched is
-  not registered again.
+- `lobstah report <id> <verb> --pr <url> [--pr <url> ...]` registers the
+  watch for each PR the worker opened, and for the other PRs of a stack
+  that holds one of them. Any verb but `failed` does this. A PR already
+  watched is not registered again.
 - `lobstah report <id> paused --waiting-on pr|review` registers the watch
   for the dispatch's own PR. A `--link` to another PR registers nothing; the
   daemon reads that PR while the dispatch waits on it.

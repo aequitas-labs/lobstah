@@ -68,7 +68,10 @@ naming a dispatch id. Then:
   working, needs-decision, blocked, paused, done, failed. Nothing else.
 - Finish with `lobstah report <id> done "<note>" --pr <url>` (or `failed`).
   `--pr <url>` may be given on any report verb. It records the PR and registers
-  its `pr:` watch for your chain; `--no-watch` opts out. Your PR is tracked
+  its `pr:` watch for your chain; `--no-watch` opts out. For several PRs,
+  repeat `--pr` once per PR. A PR in a gh stack also records the stack's
+  other PRs. A dispatch parked on its PRs finishes when all of them have
+  merged or closed. Your PR is tracked
   from its first push: the beat finds it on your branch once you commit
   there after taking the work.
 - A `needs-decision` or `blocked` report queues your question to the human.
