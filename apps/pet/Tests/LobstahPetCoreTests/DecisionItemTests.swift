@@ -25,7 +25,7 @@ final class DecisionItemTests: XCTestCase {
     var actions: [String] = []
     clickAttentionItem(item, glass: glass,
       open: { actions.append($0.absoluteString) },
-      focusHelm: { XCTFail("a decision opens its glass card") },
+      focusHelm: { _ in XCTFail("a decision opens its glass card") },
       acknowledge: { actions.append($0.joined(separator: " ")) })
     XCTAssertEqual(actions, [
       "http://127.0.0.1:4949/#decision/decision%3A0a1b2c3d",
