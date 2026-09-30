@@ -164,3 +164,40 @@ export function bounceTrapMessages(trapId: string): number {
   }
   return msgs.length;
 }
+
+/** The text of every message a dispatch was sent, pending and handled. */
+export function messageTexts(id: string, lane: Lane): string[] {
+  const dir = inboxDir(id, lane);
+  const texts: string[] = [];
+  for (const d of [dir, path.join(dir, 'handled')]) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(d).filter((f) => f.endsWith('.msg'));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      try {
+        texts.push(fs.readFileSync(path.join(d, f), 'utf8'));
+      } catch {
+        // gone meanwhile
+      }
+    }
+  }
+  return texts;
+}
+
+/**
+ * The text of every message a trap was sent directly (`lobstah send <trap>`),
+ * pending and handled; with `sinceMs`, only those sent at or after it.
+ */
+export function trapMessageTexts(trapId: string, sinceMs = 0): string[] {
+  return messageTexts(trapKey(trapId), 'work').flatMap((raw) => {
+    try {
+      const m = JSON.parse(raw) as { text?: string; at?: string };
+      return (Date.parse(m.at ?? '') || 0) >= sinceMs ? [m.text ?? ''] : [];
+    } catch {
+      return sinceMs > 0 ? [] : [raw];
+    }
+  });
+}

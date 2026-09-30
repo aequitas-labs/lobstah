@@ -18,6 +18,8 @@ import {
   readWatch,
   recordPush,
   releaseHeldWatches,
+  sendMessage,
+  sendTrapMessage,
   soakingDir,
   upsertPr,
 } from '@lobstah/core';
@@ -179,13 +181,21 @@ describe('a live worker holds the branch', () => {
     expect(readPr(key(1))?.repair?.reason).toContain('tracks origin/b1');
   });
 
-  it('a trap that is signed on without an open catch holds nothing', () => {
+  it('a signed-on trap between catches still holds the branch its worktree has checked out', () => {
     stand(STACK[0]!);
     trap('t1', 'brave-otter', checkout('wt-trap', 'b1'), uuid('a'));
     appendStatus(uuid('a'), 'work', 'done', 'finished');
-    expect(repair()).toBe(1);
+    expect(repair()).toBe(0);
+    expect(readPr(key(1))?.repair).toMatchObject({ status: 'waiting', heldBy: 'wt:brave-otter' });
+    expect(readPr(key(1))?.repair?.reason).toBe('wt:brave-otter has b1 checked out');
   });
 
+  it('a signed-on trap between catches on another branch holds nothing', () => {
+    stand(STACK[0]!);
+    trap('t1', 'brave-otter', checkout('wt-trap', 'lobstah/soak-t1'), uuid('a'));
+    appendStatus(uuid('a'), 'work', 'done', 'finished');
+    expect(repair()).toBe(1);
+  });
   it('a live dispatch holds the base PR of a stack of three: no repair for the two PRs above it', () => {
     for (const p of STACK) stand(p);
     activeDispatch(uuid('b'));
@@ -224,6 +234,43 @@ describe('a live worker holds the branch', () => {
     appendStatus(uuid('d'), 'work', 'done', 'pushed');
     expect(repair()).toBe(1);
     expect(readPr(key(1))?.repair).toMatchObject({ status: 'repairing', attempts: 1 });
+  });
+});
+
+describe('a trap told to work on the PR holds it', () => {
+  it("its current dispatch's inbox names the PR: no repair", () => {
+    stand(STACK[0]!);
+    trap('t1', 'crisp-crab', checkout('wt-trap', 'lobstah/soak-t1'), uuid('a'));
+    sendMessage(uuid('a'), 'work', 'Also rebase https://github.com/acme/web/pull/1 onto main.', 'helm');
+    expect(repair()).toBe(0);
+    expect(readPr(key(1))?.repair).toMatchObject({ status: 'waiting', heldBy: 'wt:crisp-crab' });
+    expect(readPr(key(1))?.repair?.reason).toContain('was told to work on this PR');
+  });
+
+  it("its current dispatch's brief names the PR as owner/repo#n: no repair; another PR's number does not count", () => {
+    stand(STACK[0]!);
+    trap('t1', 'crisp-crab', checkout('wt-trap', 'lobstah/soak-t1'), uuid('a'));
+    const file = path.join(laneDirs('work').active, uuid('a'), 'descriptor.json');
+    fs.writeFileSync(file, JSON.stringify({ id: uuid('a'), repo: 'web', brief: 'Rebase acme/web#11 onto main.' } satisfies Descriptor));
+    expect(repair()).toBe(1);
+    appendStatus(readPr(key(1))!.repair!.dispatchId!, 'chore', 'done', 'repaired');
+    upsertPr(observed(STACK[0]!, { observedAt: iso(T0) }), STACK[0]!.owner);
+    fs.writeFileSync(file, JSON.stringify({ id: uuid('a'), repo: 'web', brief: 'Rebase acme/web#1 onto main.' } satisfies Descriptor));
+    expect(repair()).toBe(0);
+    expect(readPr(key(1))?.repair?.heldBy).toBe('wt:crisp-crab');
+  });
+
+  it('a message sent to the trap itself in the last day names the PR, between catches too; an older one does not', () => {
+    stand(STACK[0]!);
+    trap('t1', 'crisp-crab', checkout('wt-trap', 'lobstah/soak-t1'), uuid('a'));
+    appendStatus(uuid('a'), 'work', 'done', 'finished');
+    sendMessage('trap-t1', 'work', JSON.stringify({ from: 'helm', at: iso(Date.now() - 2 * 86_400_000), text: 'rebase acme/web#1' }), 'helm');
+    expect(repair()).toBe(1);
+    appendStatus(readPr(key(1))!.repair!.dispatchId!, 'chore', 'done', 'repaired');
+    upsertPr(observed(STACK[0]!, { observedAt: iso(T0) }), STACK[0]!.owner);
+    sendTrapMessage('t1', 'helm', 'Please rebase https://github.com/acme/web/pull/1 now.');
+    expect(repair()).toBe(0);
+    expect(readPr(key(1))?.repair).toMatchObject({ status: 'waiting', heldBy: 'wt:crisp-crab', reason: 'wt:crisp-crab was told to work on this PR' });
   });
 });
 
