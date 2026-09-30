@@ -36,11 +36,15 @@ lobstah stow --keep           # sign off; keep the worktree
   way.
 - Soak names this session's Terminal.app or iTerm2 tab after the trap; stow
   clears the name.
-- If the session has a link, pass `--link <url>` on sign-on or re-soak. Copy
-  a Claude desktop session link from the session in the app; its app id is
-  not the CLI session id. In the VS Code extension, form
+- Pass `--link <url>` on sign-on or re-soak only when the session runs in an
+  app, not a terminal. In the Claude desktop app's Code tab, copy its session
+  link from the app; its app id is not the CLI session id. In the VS Code
+  extension (`$CLAUDE_CODE_ENTRYPOINT` is `claude-vscode`), form
   `vscode://anthropic.claude-code/open?session=<session-id>` from
-  `$CLAUDE_CODE_SESSION_ID`. The glass checks the link before showing it.
+  `$CLAUDE_CODE_SESSION_ID`. A CLI session in a terminal, including the
+  Claude desktop app's terminal panel, passes no link. Soak ignores a link
+  that does not fit the session and says why; the glass checks the link
+  before showing it.
 Invoke `/lobstah:trap` to load this skill.
 - No flag is needed inside Claude Code: the CLI reads
   `$CLAUDE_CODE_SESSION_ID`, from any directory. If it refuses, pass

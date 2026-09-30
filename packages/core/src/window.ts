@@ -18,6 +18,8 @@ export interface WindowRef {
   tmuxPane?: string;
   kittyWindow?: string;
   weztermPane?: string;
+  /** Claude Code's `CLAUDE_CODE_ENTRYPOINT` (`cli`, `claude-vscode`, …): which surface runs the session. */
+  entrypoint?: string;
 }
 
 function ancestorTty(): string | undefined {
@@ -45,6 +47,7 @@ export function captureWindow(env: NodeJS.ProcessEnv = process.env): WindowRef |
     tmuxPane: env.TMUX_PANE,
     kittyWindow: env.KITTY_WINDOW_ID,
     weztermPane: env.WEZTERM_PANE,
+    entrypoint: env.CLAUDE_CODE_ENTRYPOINT,
     tty: ancestorTty(),
   };
   for (const k of Object.keys(ref) as Array<keyof WindowRef>) {

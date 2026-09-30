@@ -66,9 +66,11 @@ afterEach(async () => {
   delete process.env.LOBSTAH_HOME;
 });
 
-/** Run the CLI in `cwd` with no harness environment of its own. */
+/** Run the CLI in `cwd` with no harness, app, or terminal environment of its own. */
 function lobstah(cwd: string, ...args: string[]) {
-  const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE') && !k.startsWith('CODEX')));
+  const base = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE') && !k.startsWith('CODEX') && k !== 'TERM_PROGRAM' && k !== '__CFBundleIdentifier'),
+  );
   return spawnSync(process.execPath, [cli, ...args], {
     cwd,
     encoding: 'utf8',

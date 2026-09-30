@@ -11,10 +11,14 @@ Volunteer this session as a worker (a trap).
    If `$ARGUMENTS` carries `--ticket <t>`, pass it on:
    `lobstah soak --ticket <t>`. The session then signs on as the trap
    reserved with that ticket.
-   If this session has a link, pass `--link <url>`. Copy a Claude desktop
-   session link from that session in the app; its app id is not the CLI
-   session id. In the VS Code extension, use
+   Pass `--link <url>` only when this session runs in an app, not a
+   terminal. In the Claude desktop app's Code tab, copy its session link
+   from the app; its app id is not the CLI session id. In the VS Code
+   extension (`$CLAUDE_CODE_ENTRYPOINT` is `claude-vscode`), use
    `vscode://anthropic.claude-code/open?session=$CLAUDE_CODE_SESSION_ID`.
+   A CLI session in a terminal, including the Claude desktop app's terminal
+   panel, passes no link. Soak ignores a link that does not fit the session
+   and says why.
    - In a linked worktree, it signs on there.
    - In the repo's primary checkout, it creates a new worktree and signs on
      in it.

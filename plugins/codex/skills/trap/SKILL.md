@@ -36,10 +36,11 @@ lobstah stow --keep           # sign off; keep the worktree
   way.
 - Soak names this session's Terminal.app or iTerm2 tab after the trap; stow
   clears the name.
-- The session-start brief gives this task's id. In the Codex desktop app,
-  form `codex://threads/<task-id>` from that id and pass it with
-  `lobstah soak --link <url>` on sign-on or re-soak. The glass checks the
-  link before showing it.
+- The session-start brief gives this task's id. Only in the Codex desktop
+  app, form `codex://threads/<task-id>` from that id and pass it with
+  `lobstah soak --link <url>` on sign-on or re-soak. A Codex CLI session in
+  a terminal passes no link. Soak ignores a link that does not fit the
+  session and says why; the glass checks the link before showing it.
 Invoke `$lobstah:trap` to load this skill; Codex has no `/lobstah:*` commands.
 Codex exports no session variable: pass `--session <task-id>` from the
 session-start brief on first sign-on, and on every `soak`, `soak --wait`,

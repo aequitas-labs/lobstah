@@ -130,6 +130,7 @@ import {
   CODEX_DESKTOP_THREAD,
   worktreeProgress,
   validSessionLink,
+  linkMismatch,
   ReportError,
   reportMarkdownPath,
   dispatchReportKey,
@@ -2302,6 +2303,11 @@ async function mainCli(): Promise<void> {
           })
         : undefined;
       if (made) worktree = canon(made.dir);
+      // The CLI, not the prose, decides whether a session link fits: a link
+      // for another surface (a vscode:// link from a terminal CLI) is dropped.
+      const window = captureWindow();
+      const linkFlag = opt('--link');
+      const linkIgnored = linkFlag !== undefined ? linkMismatch(linkFlag, window) : undefined;
       let res: ReturnType<typeof signOnTrap>;
       try {
         res = signOnTrap({
@@ -2312,8 +2318,8 @@ async function mainCli(): Promise<void> {
           sessionId,
           one: has('--one') || undefined,
           name: opt('--name'),
-          window: captureWindow(),
-          link: opt('--link'),
+          window,
+          link: linkIgnored ? undefined : linkFlag,
           ...(reservation ? { trapId: reservation.trapId } : {}),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
@@ -2350,6 +2356,7 @@ async function mainCli(): Promise<void> {
           repo: reg.repo ?? '(none configured — addressed work only)',
           worktree: reg.worktree,
           ...(made ? { created: true, branch: made.branch } : {}),
+          ...(linkIgnored ? { link: `ignored — ${linkIgnored}` } : {}),
           ...(reservation ? { ticket: `redeemed — signed on as the reserved trap` } : {}),
           ...(titled?.named ? { terminal: `tab named ${reg.name}` } : {}),
           ...(reg.one ? { one: true } : {}),
