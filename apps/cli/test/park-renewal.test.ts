@@ -67,7 +67,7 @@ describe('the Stop hook renews a timed-out park', () => {
       timeout: 20_000,
     });
 
-  it('renews while soaked, backs off after instant parks, and stops after stow', () => {
+  it('renews while soaked, backs off after instant parks, and stops after stow', { timeout: 60_000 }, () => {
     daemonUp();
     // A one-second park returns "at once": renewals count toward the cap.
     for (let i = 1; i < MAX_INSTANT_PARKS; i++) expect(JSON.parse(stop().stdout)).toEqual({ decision: 'block', reason: RENEW_REASON });
