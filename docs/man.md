@@ -325,10 +325,16 @@ wait ends, the normal rules apply again.
 **A repair pushes** to its PR's head branch, and so does a rebase chore
 from pickup's merge loop. The descriptor of each names its PR (`pr`), so
 the runner pushes no branch and opens no PR for it. The brief gives the
-worker the push rule: push only to the PR's head branch. On a
-non-fast-forward rejection, fetch the branch, rebase the commits onto the
-moved head again, and push with `--force-with-lease` on the head just
-fetched, at most three times. A push hook that fails with a real test or
+worker the push rule: push only to the PR's head branch. A conflict
+repair of a **standalone** PR (its base is the repo's `trunk`) merges the
+base into the PR branch with a merge commit and pushes normally; on a
+non-fast-forward rejection it fetches the moved head, merges it, and
+pushes again, never with force. A conflict repair of a **stacked** PR (its
+base is another PR's branch) rebases onto that base and pushes with
+`--force-with-lease`; on a rejection it rebases onto the moved head again
+and pushes with a lease on the head just fetched. A checks or review
+repair follows the rebase rule on a rejection. Each retries at most three
+times. A push hook that fails with a real test or
 type error is not retried: the worker fixes the error and pushes again.
 For code already on main, the repair keeps main's version and only this
 PR's own changes. It does not change behavior. If a conflict resolution

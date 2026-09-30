@@ -8,7 +8,7 @@ import { PickupState } from '../src/state.js';
 import { dispatchLoop } from '../src/loops/dispatch.js';
 import { reportLoop } from '../src/loops/report.js';
 import { reconcileLoop } from '../src/loops/reconcile.js';
-import { approvalDedupKey, mergeLoop, qualifiedApproval, qualifyingSet, staleApprovals } from '../src/loops/merge.js';
+import { approvalDedupKey, mergeLoop, qualifiedApproval, qualifyingSet, rebaseBrief, staleApprovals } from '../src/loops/merge.js';
 import { DEFAULT_MERGE_POLICY } from '../src/types.js';
 import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../src/types.js';
 import { readMergeView } from '../src/merge-view.js';
@@ -637,12 +637,26 @@ describe('merge loop', () => {
     expect(chores).toHaveLength(1);
     const desc = readChore(chores[0]!);
     expect(desc.repo).toBe('demo');
-    expect(desc.brief).toMatch(/Rebase the branch/);
+    expect(desc.brief).toMatch(/^Bring the branch \S+ of https:\/\/x\/pr\/1 up to date with its base branch/);
     expect(desc.followUp).toBeUndefined(); // rebase chores start cold on purpose
     // Bound to the PR: the runner pushes no other branch and opens no PR.
     expect(desc.pr).toEqual({ url: 'https://x/pr/1', headRefName: 'lobstah/33333333-3333-3333-3333-333333333333', headSha: 'abc' });
     expect(desc.brief).toContain(`lobstah report ${chores[0]} failed "push rejected:`);
     expect(desc.brief).toContain('Never open a new PR.');
+  });
+
+  it('a standalone PR (based on trunk) merges its base in; a stacked PR rebases onto its base', async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/d"\ntrunk = "main"\n');
+    const ms = new FakeMergeSource();
+    ms.candidates = [pr({ mergeableState: 'dirty', baseRef: 'main' })];
+    await mergeLoop(ms, policy, new PickupState());
+    const standalone = readChore(pendingIds('chore')[0]!).brief;
+    expect(standalone).toContain('merge it into');
+    expect(standalone).toContain('git merge origin/main');
+    expect(standalone).toContain('Never force-push.');
+    expect(standalone).not.toContain('--force-with-lease');
+    expect(rebaseBrief({ ...pr(), baseRef: 'feature/parent' }, 'x', 'main')).toContain('stacked on its base branch feature/parent');
+    expect(rebaseBrief({ ...pr(), baseRef: 'feature/parent' }, 'x', 'main')).toContain('--force-with-lease');
   });
 
   it("a rebase chore ends with the repo's rebase hook, then its all hook", async () => {

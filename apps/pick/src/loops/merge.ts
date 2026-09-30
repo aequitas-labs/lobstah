@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { enqueue, laneDirs, loadConfig, pushRule, readStatusLog, withBriefHooks } from '@lobstah/core';
+import { conflictUpdate, enqueue, laneDirs, loadConfig, pushRule, readStatusLog, standalonePr, withBriefHooks } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { MergePolicy, MergeSource, PrCandidate } from '../types.js';
@@ -45,11 +45,17 @@ export function approvalDedupKey(pr: PrCandidate, review: { id: number }): strin
   return `${pr.number}#${review.id}@${pr.headSha}`;
 }
 
-export function rebaseBrief(pr: PrCandidate, id: string): string {
+/**
+ * The conflict chore for a PR the merge loop found conflicting. A standalone
+ * PR (based on `trunk`) merges its base in; a stacked PR rebases onto its base.
+ */
+export function rebaseBrief(pr: PrCandidate, id: string, trunk?: string): string {
+  const standalone = standalonePr(pr.baseRef, trunk);
   return [
-    `Rebase the branch ${pr.headRef} of ${pr.url} onto its base branch, resolving any conflicts`,
+    `Bring the branch ${pr.headRef} of ${pr.url} up to date with its base branch${pr.baseRef ? ` ${pr.baseRef}` : ''}, resolving any conflicts`,
     `in a way that preserves the intent of both sides.`,
-    pushRule(pr.headRef, id),
+    conflictUpdate(pr.baseRef, pr.headRef, standalone),
+    pushRule(pr.headRef, id, standalone ? 'merge' : 'rebase'),
     `Do not merge the PR. Do not change anything beyond conflict resolution. When pushed, report status done.`,
   ].join(' ');
 }
@@ -177,7 +183,7 @@ export async function mergeLoop(
           {
             id: uuid,
             repo: ms.repoKey(),
-            brief: withBriefHooks(rebaseBrief(pr, uuid), loadConfig().repos[ms.repoKey()], 'rebase'),
+            brief: withBriefHooks(rebaseBrief(pr, uuid, loadConfig().repos[ms.repoKey()]?.trunk), loadConfig().repos[ms.repoKey()], 'rebase'),
             // The chore works on this PR: the runner pushes no other branch and opens no PR.
             pr: { url: pr.url, headRefName: pr.headRef, headSha: pr.headSha },
           },
