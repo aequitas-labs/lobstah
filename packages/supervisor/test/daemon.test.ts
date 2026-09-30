@@ -17,6 +17,7 @@ import {
 import { reconcileOne } from '../src/daemon.js';
 import type { ActiveState } from '../src/daemon.js';
 import { DEFAULT_LIMITS, DEFAULT_SOAK } from '@lobstah/core';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -25,7 +26,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

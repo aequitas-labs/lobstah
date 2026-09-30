@@ -24,6 +24,7 @@ import { worktreePath } from '@lobstah/worktree';
 import { main } from '../src/run.js';
 import type { RunnerDeps } from '../src/run.js';
 import { planStart } from '../src/plan.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const CODEX_SID = '01a0ceb8-b9bd-7d42-927c-c52a334b8e2d'; // UUIDv7
 const CLAUDE_SID = '19a4f6e4-1341-4c3a-9f2e-0123456789ab'; // UUIDv4
@@ -45,7 +46,7 @@ beforeEach(() => {
   process.env.CODEX_HOME = path.join(home, 'codex');
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
   delete process.env.CODEX_HOME;
 });

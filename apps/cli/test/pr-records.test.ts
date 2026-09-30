@@ -9,6 +9,7 @@ import { buildTendReport, renderTend } from '../src/tend.js';
 import { manEvents, observePr, workEvents } from '../src/pr-watch.js';
 import { applyCull, planCull } from '../src/cull.js';
 import { prStateHash } from '../src/acks.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -18,7 +19,7 @@ beforeEach(() => {
   fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

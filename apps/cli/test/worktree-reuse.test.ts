@@ -9,6 +9,7 @@ import { cliCuller } from '../src/auto-cull.js';
 import { planCull, planPressureCull } from '../src/cull.js';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { buildTendReport } from '../src/tend.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * A follow-up that reused its origin's worktree: the cull and the
@@ -70,7 +71,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = ${JSON.stringify(repo)}\ntrunk = "main"\n`);
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

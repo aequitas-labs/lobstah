@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { ensureLayout, laneDirs } from '@lobstah/core';
 import { GithubSource } from '../src/sources/github.js';
 import { marker } from '../src/types.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -14,7 +15,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

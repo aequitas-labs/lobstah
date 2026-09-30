@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { checkVersions, cliVersion, syncVersions, TARGETS } from '../../../scripts/sync-versions.mjs';
 import { pluginRows } from '../src/doctor.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginBehindLine, pluginDrift, versionGap } from '../src/plugin-version.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const repo = fileURLToPath(new URL('../../..', import.meta.url));
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -17,7 +18,7 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-pluginver-'));
 });
 afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true });
+  removeTempDir(tmp);
 });
 
 /** A copy of the repo's version-bearing files, to break and fix without touching the tree. */

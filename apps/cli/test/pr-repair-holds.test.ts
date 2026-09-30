@@ -26,6 +26,7 @@ import { pumpClaudeMessage } from '../../../packages/adapters/src/claude.js';
 import { deliverPrRepairs, holdCancelledRepair, stampRepairerBeat } from '../src/pr-repair.js';
 import type { LatestChecks } from '../src/pr-repair.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const T0 = Date.parse('2026-09-29T14:00:00.000Z');
@@ -138,7 +139,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 describe('a live worker holds the branch', () => {

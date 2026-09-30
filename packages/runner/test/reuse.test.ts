@@ -25,6 +25,7 @@ import { AsyncQueue } from '@lobstah/adapters';
 import type { Adapter, AdapterRun, AdapterStartOpts } from '@lobstah/adapters';
 import { main } from '../src/run.js';
 import { processTest as it } from '../../../test/process-test.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * Follow-ups reuse the origin chain's worktree. Real git throughout: a local
@@ -80,7 +81,7 @@ beforeEach(() => {
   writeConfig();
 });
 afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
   delete process.env.LOBSTAH_HOME;
   delete process.env.CODEX_HOME;
 });

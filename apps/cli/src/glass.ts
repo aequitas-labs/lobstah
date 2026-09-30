@@ -528,8 +528,10 @@ const PAGE = GLASS_PAGE;
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(
   port: number,
-  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult> } = {},
+  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: (options?: { local?: boolean }) => GlassSnapshot } = {},
 ): http.Server {
+  const snapshot = options.snapshot ?? buildGlassSnapshot;
+  const logged = new Set<string>();
   const focusToken = randomBytes(32).toString('hex');
   const icon = assetPath('favicon.png') ?? assetPath('lob-star.png');
   const lob = assetPath('lob.png');
@@ -553,7 +555,7 @@ export function serveGlass(
       timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
     );
   };
-  const server = http.createServer((req, res) => {
+  const handle = (req: http.IncomingMessage, res: http.ServerResponse): void => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
     if (req.url === '/requests') {
       res.setHeader('cache-control', 'no-store');
@@ -661,13 +663,29 @@ export function serveGlass(
     } else if (req.url?.startsWith('/report/') && req.method === 'GET' && serveReport(req.url, res)) {
       return;
     } else if (req.url === '/data') {
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       // Start commands carry a ticket: only a same-host request (this
       // machine's own page, not a rebound name) gets them.
-      res.end(JSON.stringify({ ...buildGlassSnapshot({ local: req.headers.host === ownHost() }), focusToken, focusSupported: process.platform === 'darwin' }));
+      const body = JSON.stringify({ ...snapshot({ local: req.headers.host === ownHost() }), focusToken, focusSupported: process.platform === 'darwin' });
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(body);
     } else {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(PAGE);
+    }
+  };
+  // One bad read answers that request with 500; the server keeps serving.
+  const server = http.createServer((req, res) => {
+    try {
+      handle(req, res);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (!logged.has(message)) {
+        logged.add(message);
+        console.error(`lobstah glass: ${req.method} ${req.url} failed: ${message}`);
+      }
+      if (res.headersSent) return void res.end();
+      res.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ error: 'The glass could not answer this request.' }));
     }
   });
   server.listen(port, '127.0.0.1');

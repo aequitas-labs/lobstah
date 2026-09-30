@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { lobstahHome } from './paths.js';
+import { lobstahHome, readDirIfPresent } from './paths.js';
 import { classifyGhError, firstMeaningfulLine, isBackoffKind } from './gh-errors.js';
 import type { GhErrorKind } from './gh-errors.js';
 import { postNotice } from './notices.js';
@@ -125,9 +125,7 @@ export function readWatch(key: string): Watch | undefined {
 }
 
 export function listWatches(): Watch[] {
-  if (!fs.existsSync(watchesDir())) return [];
-  return fs
-    .readdirSync(watchesDir())
+  return readDirIfPresent(watchesDir())
     .filter((f) => f.endsWith('.json'))
     .map((f) => {
       try {

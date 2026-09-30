@@ -16,6 +16,7 @@ import {
 import type { Descriptor, PrEvidence } from '@lobstah/core';
 import { deliverPrRepairs, recordPushFailure } from '../src/pr-repair.js';
 import { rebaseBrief } from '../../pick/src/loops/merge.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const OWNER = '11111111-1111-1111-1111-111111111111';
 const SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -69,7 +70,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 describe('a repair that cannot push', () => {

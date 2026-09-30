@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { appendStatus, derivePrEvents, enqueue, ensureLayout, listNotices, listWatches, parsePrRef, readEvidence, readPr, readStatusLog, readWatch, runWatchCheck } from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
 import { pickupOwnsReviewFeedback, stampPrEvidence, workEvents } from '../src/pr-watch.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`):
 // registration rides the report write path in main.ts.
@@ -19,7 +20,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 
