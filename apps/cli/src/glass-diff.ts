@@ -70,7 +70,29 @@ export interface SettingsItem {
   attentionKinds: string[];
   attentionError?: string;
 }
-export type ModalItem = GlassHelm | GlassDispatch | GlassPr | GlassTrap | GlassReport | SettingsItem;
+export type ModalItem = GlassHelm | GlassDispatch | GlassPr | GlassTrapView | GlassReport | SettingsItem;
+
+/** A trap as the page renders it: its catch ids resolved against the snapshot's dispatches. */
+export type GlassTrapView = Omit<GlassTrap, 'catches'> & { catches: GlassDispatch[] };
+
+/**
+ * A catch id with no dispatch in the snapshot. The server builds each trap's
+ * catches from `dispatches`, so this does not happen; if it does, the catch
+ * still renders, as its id with an unknown state.
+ */
+export function missingCatch(id: string): GlassDispatch {
+  return { id, lane: 'work', bucket: 'done', repo: '', brief: '', attachments: [], messageAttachments: [], verb: 'unknown', log: [], inbox: [], sort: 0 };
+}
+
+const dispatchIndex = new WeakMap<GlassDispatch[], Map<string, GlassDispatch>>();
+
+/** The trap with its catches resolved, in the order the server sent the ids. */
+export function trapView(d: Pick<GlassSnapshot, 'dispatches'>, t: GlassTrap): GlassTrapView {
+  const list = d.dispatches || [];
+  let byId = dispatchIndex.get(list);
+  if (!byId) dispatchIndex.set(list, (byId = new Map(list.map((x) => [x.id, x]))));
+  return { ...t, catches: (t.catches || []).map((id) => byId!.get(id) ?? missingCatch(id)) };
+}
 
 /**
  * A PR state badge's class: GitHub's state colors (.pr-merged purple,
@@ -256,7 +278,8 @@ export function modalItem(d: GlassSnapshot, modal: ModalRef | null): ModalItem |
   if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'report') return (d.reports || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError };
-  return d.traps.find((v) => v.trapId === modal.key) || null;
+  const t = d.traps.find((v) => v.trapId === modal.key);
+  return t ? trapView(d, t) : null;
 }
 
 /** An attention item as the deck hashes it: without its ticking age. */
@@ -271,7 +294,7 @@ export interface DeckInputs {
   /** Unacked first, then newest first; the deck shows REPORTS_MAX. */
   reports: GlassReport[];
   inflight: GlassDispatch[];
-  traps: Seat<GlassTrap>[];
+  traps: Seat<GlassTrapView>[];
   stacks: GlassStack[];
   prs: GlassPr[];
   error: string | undefined;
@@ -288,7 +311,7 @@ export interface SectionInputs {
   chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[] };
   deck: DeckInputs;
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatch[] };
-  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrap>[] };
+  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[] };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
   notices: { list: Notice[] };
@@ -335,7 +358,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
         .slice(0, LANDED_MAX),
       reports: (d.reports || []).filter((r) => hasQuery(r.title, r.author, r.dispatch, r.repo)).sort(reportOrder),
       inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', repo: '', verb: '' })),
-      traps: deckTraps.map(seat),
+      traps: deckTraps.map((t) => seat(trapView(d, t))),
       stacks: (d.stacks || []).filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
       prs: (d.prs || []).filter((p) => p.state === 'OPEN'),
       error: d.attentionError,
@@ -343,7 +366,9 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },
     traps: {
       view: st.view,
-      list: orderedTraps.filter((t) => (!st.repo || t.repo === st.repo) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness)).map(seat),
+      list: orderedTraps
+        .filter((t) => (!st.repo || t.repo === st.repo) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness))
+        .map((t) => seat(trapView(d, t))),
     },
     prs: {
       view: st.view,

@@ -1,4 +1,4 @@
-import type { GlassTrap } from '@lobstah/core';
+import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import type { SectionInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import {

@@ -238,14 +238,14 @@ export function acceptanceFleet(): GlassSnapshot {
         },
       ],
       notices: [notices[0]!],
-      catches: [c],
+      catches: [c.id],
     }),
     {
       trapId: 't2',
       live: false,
       messages: [],
       notices: [notices[1]!],
-      catches: [q],
+      catches: [q.id],
     },
   ];
   d.landed = [{ key: `work:${a.id}`, id: a.id, lane: 'work', verb: 'done', at: ago(30 * MIN), note: 'opened #41', repo: 'web', prUrl: pr41.url, unreported: true }];
@@ -284,9 +284,9 @@ export function trapStatesFleet(): GlassSnapshot {
   d.dispatches = d.dispatches.map((x) => (x.id === c.id ? working : x)).concat(parked);
   d.attention = [];
   d.traps = [
-    trap('working', { label: 'working trap', claimed: working.id, catches: [working] }),
+    trap('working', { label: 'working trap', claimed: working.id, catches: [working.id] }),
     trap('listening', { label: 'listening trap' }),
-    trap('parked', { label: 'parked trap', claimed: parked.id, catches: [parked] }),
+    trap('parked', { label: 'parked trap', claimed: parked.id, catches: [parked.id] }),
     trap('stale', { label: 'stale trap', heartbeatAt: ago(45 * MIN) }),
   ];
   return d;
