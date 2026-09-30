@@ -48,6 +48,11 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * The glass also shows each trap by name on purpose (glass-page.test.ts tests
  * it): a `.trapname` link folds back to its text, and a dispatch modal's
  * `claimed by <name>` line is removed (foldPrTitles).
+ * A question lob grew into a link to its card on the deck on purpose
+ * (glass-page.test.ts and glass-decisions.test.ts test it): its
+ * `<a class="lob" href="#decision/<key>">` folds back to the old
+ * `<div class="lob">` (foldPrTitles), and the lobs are left out of the
+ * computed-style check on both pages.
  * The snapshot names each trap's catches by dispatch id; the old page read
  * full dispatch objects there, so the old page is served the ids expanded
  * back into those objects (legacyWire). Both pages render the same catches.
@@ -123,6 +128,12 @@ function foldPrTitles(el: Element): Node {
   for (const b of copy.querySelectorAll('.card .top > b')) b.textContent = (b.textContent ?? '').trimEnd();
   for (const n of copy.querySelectorAll('.claimedby')) n.remove();
   for (const n of copy.querySelectorAll('.trapname')) n.replaceWith(doc.createTextNode(n.textContent ?? ''));
+  for (const a of copy.querySelectorAll('a.lob[href^="#decision/"]')) {
+    const div = doc.createElement('div');
+    for (const attr of a.attributes) if (attr.name !== 'href' && attr.name !== 'title') div.setAttribute(attr.name, attr.value);
+    div.append(...a.childNodes);
+    a.replaceWith(div);
+  }
   copy.normalize();
   for (const n of copy.querySelectorAll('span, b')) {
     if (!STACK_NUMBER.test(n.textContent ?? '') || [...n.attributes].some((a) => a.name !== 'title')) continue;
@@ -305,7 +316,8 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
         g.$$('body *')
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
-          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *'))
+          // A question lob became a link (see the header); the lobs have DOM tests of their own.
+          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);

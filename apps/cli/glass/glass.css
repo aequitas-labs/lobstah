@@ -794,8 +794,20 @@ a.lob {
   border-radius: var(--card-radius);
   padding: var(--card-pad);
 }
+/* A decision card someone followed a link to: it flashes once, then settles. */
 .dcard.focus {
-  border-color: var(--link);
+  animation: dflash 1.6s ease-out 1;
+}
+@keyframes dflash {
+  0%,
+  35% {
+    border-color: var(--link);
+    box-shadow: 0 0 0 3px var(--link);
+  }
+  100% {
+    border-color: var(--line);
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 .dcard.answered {
   opacity: 0.7;

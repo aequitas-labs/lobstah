@@ -184,6 +184,27 @@ describe('glass: decision cards', () => {
     expect(card(g, Q)!.className).not.toContain('focus');
   });
 
+  it('a decision lob scrolls to its card and flashes it, with no modal; following the link again flashes it again', async () => {
+    const g = await page(fleet(), { hash: '#prs' });
+    const scrolled: string[] = [];
+    (g.window as unknown as { Element: { prototype: { scrollIntoView: unknown } } }).Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.getAttribute('data-decision') ?? '');
+    };
+    const lob = g.$$('#lobs a.lob').find((l) => l.getAttribute('href') === `#decision/${encodeURIComponent(KEY)}`)!;
+    expect(lob).toBeTruthy();
+    await click(g, lob);
+    expect(g.$('.tabpage.on')!.id).toBe('page-deck');
+    expect(card(g, KEY)!.className).toContain('focus');
+    expect(scrolled).toEqual([KEY]);
+    expect(g.$('#overlay')!.className).not.toBe('open');
+    // Leave the card, then follow its link again: it scrolls and flashes again.
+    await g.go('#prs');
+    expect(card(g, KEY)).toBeFalsy();
+    await g.go(`#decision/${encodeURIComponent(KEY)}`);
+    expect(scrolled).toEqual([KEY, KEY]);
+    expect(card(g, KEY)!.className).toContain('focus');
+  });
+
   it('an empty fleet says none', async () => {
     const g = await page(emptyFleet());
     expect(text(g.$('#deck .decisions .empty'))).toBe('none');

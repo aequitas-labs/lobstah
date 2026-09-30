@@ -79,6 +79,7 @@ function startGlass(): void {
     // Hash navigation can target a hidden tab before it renders. Reset only on
     // entry, never on a poll that refreshes the tab someone is reading.
     if (enteredTab) window.scrollTo(0, 0);
+    if (!state.focusDecision) scrolledTo = null;
     scrollToDecision(state.focusDecision);
   };
 
