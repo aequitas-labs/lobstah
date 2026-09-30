@@ -1039,7 +1039,7 @@ The output holds a one-time ticket and the command that starts the session in
 the repo's primary checkout:
 
 ```bash
-cd <repo> && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:soak --ticket <ticket>"
+cd <repo> && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket <ticket>"
 cd <repo> && codex '$lobstah:trap soak --ticket <ticket>'
 ```
 

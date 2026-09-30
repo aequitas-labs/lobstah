@@ -1,9 +1,9 @@
 # lobstah in Claude Code
 
-Use `/lobstah:man` to load the lobstah man skill. `/lobstah:helm` signs on
-without loading the skill. You can also say "Lobstah man, take the helm."
+Use `/lobstah:man` to take the helm. You can also say "Lobstah man, take
+the helm."
 
-This page covers the plugin's commands, skills, session id, and Stop hook.
+This page covers the plugin's skills, session id, and Stop hook.
 See [docs/man.md](../man.md) for the full pattern.
 
 The lobstah man skill brings up the glass and prints its URL. Open it in the
@@ -41,18 +41,17 @@ row, and the session-start brief says when the plugin is behind.
 `lobstah send <id> "<instruction>"` steers live or queued work and wakes a
 finished dispatch as a follow-up.
 
-Slash commands, each a shortcut for a CLI verb:
+The plugin has four skills and no slash commands:
 
-| Command | CLI equivalent |
-| ------- | -------------- |
-| `/lobstah:helm [grounds]` | `lobstah man helm` |
-| `/lobstah:relieve` | `lobstah man relieve` |
-| `/lobstah:tend` | `lobstah man tend` |
-| `/lobstah:soak` | `lobstah soak` |
-| `/lobstah:stow` | `lobstah stow` |
+| Skill | What it does |
+| ----- | ------------ |
+| `/lobstah:man` | Take the helm: `lobstah man helm`, the glass, then the orchestrator flow. |
+| `/lobstah:trap` | Sign on as a trap: `lobstah soak`, then the worker flow. |
+| `/lobstah:stow` | Sign the trap off with `lobstah stow` and report which trap was stowed. |
+| `/lobstah:relieve` | Step down with `lobstah man relieve`; afterwards no `man wait` or `man report`, and no re-take unless asked. |
 
-Claude Code also loads the `man` and `trap` skills on its own when you ask
-for that kind of work ("take the helm", "work as a trap").
+Claude Code also loads these skills on its own when you ask for that kind of
+work ("take the helm", "work as a trap", "stow", "step down").
 
 ## The session id
 
@@ -101,7 +100,7 @@ Without the plugin, `lobstah man init` merges the Stop hook into
 
 ## CLI vs desktop app
 
-The plugin, hooks, skills, and slash commands are the same whether you run
+The plugin, hooks, and skills are the same whether you run
 `claude` in a terminal or use the Code tab of the Claude desktop app. What
 differs:
 

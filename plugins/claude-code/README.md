@@ -5,7 +5,7 @@ woken when something needs you, never watch the water.
 
 This plugin wires [lobstah](https://github.com/aequitas-labs/lobstah) into
 Claude Code with no settings surgery — everything `lobstah man init` does by
-hand, plus the skills and commands.
+hand, plus four skills.
 
 ## What it installs
 
@@ -15,11 +15,10 @@ hand, plus the skills and commands.
 | PostToolUse hook (`lobstah hook post-tool-use`) | Refreshes a soaking trap's liveness and records redacted activity after tool calls. |
 | Stop hook (`lobstah hook stop`) | Checks for an armed watcher while work is in flight; `--park` waits in the hook. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah hook session-end`) | Signs a soaking session off cleanly when it ends and keeps its worktree. |
-| `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
-| `trap` skill | The worker: soaking, its two-word name and `wt:` id, the six report verbs, inbox, session title, stowing. |
-| `/lobstah:helm` · `/lobstah:relieve` | Take the helm (optionally for a named grounds) and step down. |
-| `/lobstah:soak` · `/lobstah:stow` | Volunteer this session as a trap, and sign it off. |
-| `/lobstah:tend` command | Fleet status at a keystroke. |
+| `man` skill (`/lobstah:man`) | Take the helm: sign on, start the glass, then orchestrate — the charter fences, dispatching, addressing traps, tending, getting woken. |
+| `trap` skill (`/lobstah:trap`) | Sign on as a trap: soaking, its two-word name and `wt:` id, the sign-on title, the six report verbs, inbox. |
+| `stow` skill (`/lobstah:stow`) | Sign the trap off and report which trap was stowed. |
+| `relieve` skill (`/lobstah:relieve`) | Step down from the helm; afterwards no `man wait` or `man report`, and no re-take unless asked. |
 
 ## Requirements
 

@@ -124,7 +124,7 @@ describe('glass: a requested trap, and the start command on a starting card only
         repo: 'web',
         harness: 'claude',
         live: false,
-        starting: { reservedAt: ago(5_000), deadline: ago(-170_000), commands: [{ harness: 'claude', command: 'cd /r && claude "/lobstah:soak --ticket abcd1234-00"' }] },
+        starting: { reservedAt: ago(5_000), deadline: ago(-170_000), commands: [{ harness: 'claude', command: 'cd /r && claude "/lobstah:trap soak --ticket abcd1234-00"' }] },
         messages: [],
         notices: [],
         catches: [],
@@ -142,7 +142,7 @@ describe('glass: a requested trap, and the start command on a starting card only
       const blocks = g.$$('#traps .startcmds');
       expect(blocks).toHaveLength(1);
       expect(items.find((c) => c.contains(blocks[0]!))?.textContent).toContain('amber-gull');
-      expect(text(blocks[0])).toContain('/lobstah:soak --ticket abcd1234-00');
+      expect(text(blocks[0])).toContain('/lobstah:trap soak --ticket abcd1234-00');
       expect(g.$$('#traps .newtrap button').map(text)).toEqual(['+ New trap']);
     });
   }

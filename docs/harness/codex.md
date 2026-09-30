@@ -59,7 +59,12 @@ mentions below. Plain-language requests load the same skills:
 /skills
 $lobstah:man take the helm for this repo
 $lobstah:trap work as a trap in this linked worktree
+$lobstah:stow sign this trap off
+$lobstah:relieve step down from the helm
 ```
+
+The plugin has these four skills and no commands; the Claude Code plugin has
+the same four.
 
 The skill instructions lead to `lobstah man helm` and `lobstah soak`,
 respectively. This verification stopped before running either sign-on

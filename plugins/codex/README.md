@@ -14,8 +14,10 @@ Codex with no settings surgery.
 | PostToolUse hook (`lobstah hook post-tool-use`) | Refreshes a soaking trap's liveness and records redacted activity after supported tool calls (Codex 0.117.0+). |
 | Stop hook (`lobstah hook stop`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
 | SessionEnd hook (`lobstah hook session-end`) | Signs a soaking session off cleanly when it ends and keeps its worktree. |
-| `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
-| `trap` skill | The worker: soaking, its two-word name and `wt:` id, the six report verbs, inbox, optional session title, `paused --waiting-on` before external waits, stowing. |
+| `man` skill (`$lobstah:man`) | Take the helm: sign on, start the glass, then orchestrate — the charter fences, dispatching, addressing traps, tending, getting woken. |
+| `trap` skill (`$lobstah:trap`) | Sign on as a trap: soaking, its two-word name and `wt:` id, the sign-on title, the six report verbs, inbox, `paused --waiting-on` before external waits. |
+| `stow` skill (`$lobstah:stow`) | Sign the trap off and report which trap was stowed. |
+| `relieve` skill (`$lobstah:relieve`) | Step down from the helm; afterwards no `man wait` or `man report`, and no re-take unless asked. |
 
 ## Requirements
 
@@ -60,8 +62,8 @@ in every harness, is in the
 [README](https://github.com/aequitas-labs/lobstah#quickstart-the-lobstah-man-).
 
 `lobstah send <id> "<instruction>"` steers live or queued work and wakes a
-finished dispatch as a follow-up. Use `$lobstah:man` or `$lobstah:trap` to
-load the skills; Codex has no `/lobstah:*` commands.
+finished dispatch as a follow-up. `$lobstah:man`, `$lobstah:trap`,
+`$lobstah:stow`, and `$lobstah:relieve` load the four skills.
 
 Manual fallbacks without the helm: `touch .lobstah-man` in a project (every
 session there parks as the lobstah man), or `LOBSTAH_MAN=1` for one launch.

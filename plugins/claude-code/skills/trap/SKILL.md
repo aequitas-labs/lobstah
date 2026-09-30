@@ -53,7 +53,7 @@ Invoke `/lobstah:trap` to load this skill.
 - The harness (claude or codex) is inferred from the environment and the
   session id; `--harness claude|codex` overrides.
 - Soak prints a two-word name such as `amber-gull` and the stable `wt:<trap>`
-  id. Tell the lobstah man the name; `--for <name>` addresses this trap.
+  id. Print the name, the id, and the worktree path. Tell the lobstah man the name; `--for <name>` addresses this trap.
   `--name <word-word>` chooses or changes it. The name survives stow and a
   ghost sweep; `wt:<name>` and `wt:<id>` also remain valid addresses.
 
@@ -123,7 +123,7 @@ naming a dispatch id. Then:
 
 ## Signing off
 
-`lobstah stow` signs the trap off. An unfinished catch requeues; a catch
+`/lobstah:stow` loads the stow skill. `lobstah stow` signs the trap off. An unfinished catch requeues; a catch
 whose last report is done or failed finalizes in done/ instead. Unread
 messages bounce back to the helm.
 
