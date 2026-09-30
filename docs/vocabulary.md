@@ -313,8 +313,11 @@ each hook (`Stop`, `SessionStart`, `PostToolUse`, `SessionEnd`), it says:
 - **trusted**: Codex runs a plugin hook only after the user trusts it in
   `/hooks`, and records trust in `config.toml` as
   `[hooks.state."lobstah@lobstah:hooks/hooks.json:<event>:<group>:<handler>"]`
-  with a `trusted_hash`. The row says `trusted` when that entry exists and
-  `untrusted` otherwise. Claude Code has no per-hook trust: `trust n/a`;
+  with a `trusted_hash`, a hash of the hook's definition. The row says
+  `trusted` when that hash matches the hook as the plugin declares it now,
+  `changed since trusted` when the hook changed after it was trusted (a
+  plugin update; Codex asks again), and `untrusted` without an entry. Claude
+  Code has no per-hook trust: `trust n/a`;
 - **last run**: when lobstah last saw the hook run (`never run` when it has
   not). Each hook run stamps `~/.lobstah/hook-runs.json` (`<harness>:<event>`
   → time; a hook that runs on every tool call stamps at most every 30 s).
