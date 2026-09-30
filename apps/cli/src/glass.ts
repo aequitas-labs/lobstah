@@ -76,8 +76,29 @@ import type { TrapRegistration } from '@lobstah/core';
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
 
-/** A request body is a kind and a small payload. */
-const REQUEST_MAX_BYTES = 4096;
+/** An answer's text, in characters, and the files it may carry: the largest request kind. */
+const ANSWER_TEXT_MAX = 20_000;
+const ANSWER_FILES_MAX = 8;
+
+/** limits.attachmentMaxBytes; a config error falls back to the default. */
+function attachmentLimit(): number {
+  try {
+    return loadConfig().limits.attachmentMaxBytes;
+  } catch {
+    return DEFAULT_LIMITS.attachmentMaxBytes;
+  }
+}
+
+/**
+ * The /requests body cap: room for the largest kind, an answer's files as
+ * base64 with its text. Each kind's own limit applies after parsing.
+ */
+export function requestBodyCap(): number {
+  return Math.ceil((attachmentLimit() * 4) / 3) * ANSWER_FILES_MAX + ANSWER_TEXT_MAX * 4 + 64 * 1024;
+}
+
+/** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
+export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([['trap-request', 4096]]);
 
 const readJson = <T>(f: string): T | undefined => {
   try {
@@ -550,7 +571,7 @@ export function serveGlass(
         req.resume();
         return reply(415, { ok: false, reason: 'JSON required.' });
       }
-      const cap = REQUEST_MAX_BYTES;
+      const cap = requestBodyCap();
       if (Number(req.headers['content-length'] ?? NaN) > cap) {
         req.resume();
         return reply(413, { ok: false, reason: 'The request is too large.' });
@@ -574,12 +595,20 @@ export function serveGlass(
         } catch {
           return reply(400, { ok: false, reason: 'Invalid JSON.' });
         }
-        if (body?.kind !== 'trap-request') return reply(400, { ok: false, reason: 'Unknown request kind.' });
-        const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
-        if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
-        const { repo, harness } = body.payload as { repo: string; harness: string };
-        const request = writeRequest('trap-request', { repo, harness }, 'glass');
-        reply(201, { ok: true, id: request.id });
+        const kindMax = typeof body?.kind === 'string' ? REQUEST_KIND_MAX_BYTES.get(body.kind) : undefined;
+        if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
+        // One switch per kind: each kind validates and stores its own payload.
+        switch (body?.kind) {
+          case 'trap-request': {
+            const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
+            if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
+            const { repo, harness } = body.payload as { repo: string; harness: string };
+            const request = writeRequest('trap-request', { repo, harness }, 'glass');
+            return reply(201, { ok: true, id: request.id });
+          }
+          default:
+            return reply(400, { ok: false, reason: 'Unknown request kind.' });
+        }
       });
       req.on('error', () => reply(400, { ok: false, reason: 'The request failed.' }));
       return;

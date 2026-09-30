@@ -16,7 +16,7 @@ import {
   signOnTrap,
 } from '@lobstah/core';
 import type { GlassSnapshot } from '@lobstah/core';
-import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
+import { REQUEST_KIND_MAX_BYTES, buildGlassSnapshot, requestBodyCap, serveGlass } from '../src/glass.js';
 
 let home: string;
 let repoDir: string;
@@ -101,6 +101,32 @@ describe('glass /requests', () => {
     expect(((await big.json()) as { reason: string }).reason).toBe('The request is too large.');
     expect(listRequests()).toEqual([]);
     expect(listNotices(50)).toEqual([]);
+  });
+
+  it('the shared cap admits an answer with files; a trap-request over 4 KB is refused after parsing', async () => {
+    // The shared cap: base64 of eight files at limits.attachmentMaxBytes, the answer text, and 64 KB.
+    const expected = (attachment: number) => Math.ceil((attachment * 4) / 3) * 8 + 20_000 * 4 + 64 * 1024;
+    expect(requestBodyCap()).toBe(expected(25 * 1024 * 1024));
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.web]\npath = '${repoDir}'\ntrunk = 'main'\n\n[limits]\nattachmentMaxBytes = 1024\n`);
+    const cap = requestBodyCap();
+    expect(cap).toBe(expected(1024));
+    expect(REQUEST_KIND_MAX_BYTES.get('trap-request')).toBe(4096);
+
+    // 64 KB of trap-request: under the shared cap, over its kind's limit.
+    const large = await post(trapRequest({ repo: 'web', harness: 'claude', pad: 'x'.repeat(64 * 1024) }));
+    expect(large.status).toBe(413);
+    expect(((await large.json()) as { reason: string }).reason).toBe('The request is too large.');
+    // 100 KB of another kind passes the cap and reaches the kind switch (a 4 KB cap would have refused it).
+    expect(100 * 1024).toBeLessThan(cap);
+    const other = await post({ kind: 'launch', payload: { pad: 'x'.repeat(100 * 1024) } });
+    expect(other.status).toBe(400);
+    expect(((await other.json()) as { reason: string }).reason).toBe('Unknown request kind.');
+    // Past the shared cap, any kind is refused before parsing.
+    const over = await post({ kind: 'launch', payload: { pad: 'x'.repeat(cap + 1024) } });
+    expect(over.status).toBe(413);
+    // A trap-request at its limit or under is still taken.
+    expect((await post(trapRequest({ repo: 'web', harness: 'claude' }))).status).toBe(201);
+    expect(listRequests({ kind: 'trap-request' })).toHaveLength(1);
   });
 
   it('a valid request writes one trap-request and one wake notice, and runs nothing', async () => {

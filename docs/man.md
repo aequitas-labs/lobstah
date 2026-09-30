@@ -878,7 +878,10 @@ opens a small form: a repo (from the configured repo keys) and a harness
 `{ kind: "trap-request", payload: { repo, harness } }` to `/requests` with
 the same same-origin and page token guard as the open-window button. The
 server checks the repo and harness, writes `~/.lobstah/requests/<id>.json`
-(kind `trap-request`), and runs nothing. A body over 4 KB is refused.
+(kind `trap-request`), and runs nothing. `/requests` refuses a body larger
+than eight attachments (`[limits].attachmentMaxBytes` each, as base64) plus
+room for text, with 413. After it reads the kind, it refuses a `trap-request`
+larger than 4 KB with 413.
 
 A request wakes the helm's `man wait` (and the Stop-hook park) as a
 `trap-request` event with the request's id, repo, and harness. An open
