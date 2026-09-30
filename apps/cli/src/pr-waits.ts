@@ -2,6 +2,7 @@ import {
   activeIds,
   appendStatus,
   chainPr,
+  dispatchPrUrls,
   ghPrView,
   laneOf,
   listWatches,
@@ -18,22 +19,27 @@ import { autoRegisterPrWatch, observePr } from './pr-watch.js';
 const PR_WAITS = new Set(['pr', 'review']);
 
 /**
- * The PR a paused dispatch waits on: its `--link` when that names a GitHub
- * PR, else its own PR (evidence), else its chain's PR, else the PR of a
- * `pr:` watch the dispatch owns.
+ * The PRs a paused dispatch waits on. A `--link` to a GitHub PR that is not
+ * one of the dispatch's own is the one PR waited on. Otherwise it waits on
+ * all of its own PRs: its evidence (`prUrl` and `prUrls`), else its chain's
+ * PR, else the PRs of the `pr:` watches it owns.
  */
-export function waitedPr(id: string, lane: Lane, entry: StatusEntry): PrRef | undefined {
+export function waitedPrs(id: string, lane: Lane, entry: StatusEntry): PrRef[] {
   const link = entry.link ? parsePrRef(entry.link) : undefined;
-  return link ?? ownPr(id, lane);
+  const own = ownPrs(id, lane);
+  if (link && !own.some((r) => r.key === link.key)) return [link];
+  return own;
 }
 
-/** The dispatch's own PR: its evidence, else its chain's, else its `pr:` watch. */
-function ownPr(id: string, lane: Lane): PrRef | undefined {
+/** The dispatch's own PRs: its evidence, else its chain's, else its `pr:` watches. */
+function ownPrs(id: string, lane: Lane): PrRef[] {
   const evidence = readEvidence(id, lane);
-  const url = evidence.prUrl ?? evidence.pr?.url ?? chainPr(id, lane)?.url;
-  if (url) return parsePrRef(url);
-  const watch = listWatches().find((w) => w.key.startsWith('pr:') && w.owner === `dispatch:${id}`);
-  return watch ? parsePrRef(watch.key) : undefined;
+  let urls = dispatchPrUrls(evidence);
+  if (urls.length === 0) {
+    const chain = chainPr(id, lane)?.url;
+    urls = chain ? [chain] : listWatches().filter((w) => w.key.startsWith('pr:') && w.owner === `dispatch:${id}`).map((w) => w.key);
+  }
+  return urls.map((u) => parsePrRef(u)).filter((r): r is PrRef => !!r);
 }
 
 /**
@@ -43,7 +49,7 @@ function ownPr(id: string, lane: Lane): PrRef | undefined {
  */
 export function waitWarning(id: string, lane: Lane, entry: StatusEntry): string | undefined {
   if (entry.verb !== 'paused' || !entry.waitingOn || !PR_WAITS.has(entry.waitingOn)) return undefined;
-  if (waitedPr(id, lane, entry)) return undefined;
+  if (waitedPrs(id, lane, entry).length > 0) return undefined;
   return (
     `no PR known for this wait: --link names no GitHub PR and the dispatch has no PR. ` +
     `A merge or close will not finish it. Report again with --link <PR url>, or report --pr <url> first.`
@@ -51,19 +57,19 @@ export function waitWarning(id: string, lane: Lane, entry: StatusEntry): string 
 }
 
 /**
- * `report paused --waiting-on pr|review` on the dispatch's own PR registers
- * that PR's watch when it has none, as `done --pr` does, so its merge is
+ * `report paused --waiting-on pr|review` on the dispatch's own PRs registers
+ * each PR's watch when it has none, as `done --pr` does, so their merges are
  * observed. A `--link` to another PR registers nothing. Never throws.
  */
-export function registerWaitWatch(id: string, lane: Lane, entry: StatusEntry): Watch | undefined {
+export function registerWaitWatches(id: string, lane: Lane, entry: StatusEntry): Watch[] {
   try {
-    if (entry.verb !== 'paused' || !entry.waitingOn || !PR_WAITS.has(entry.waitingOn)) return undefined;
-    const own = ownPr(id, lane);
+    if (entry.verb !== 'paused' || !entry.waitingOn || !PR_WAITS.has(entry.waitingOn)) return [];
+    const own = ownPrs(id, lane);
     const link = entry.link ? parsePrRef(entry.link) : undefined;
-    if (!own || (link && link.key !== own.key)) return undefined;
-    return autoRegisterPrWatch(id, own.url);
+    if (own.length === 0 || (link && !own.some((r) => r.key === link.key))) return [];
+    return own.map((r) => autoRegisterPrWatch(id, r.url)).filter((w): w is Watch => !!w);
   } catch {
-    return undefined;
+    return [];
   }
 }
 
@@ -103,18 +109,23 @@ export function observeWaitedPrs(
       try {
         const last = readStatusLog(id, lane).at(-1);
         if (last?.verb !== 'paused' || !last.waitingOn || !PR_WAITS.has(last.waitingOn)) continue;
-        const ref = waitedPr(id, lane, last);
-        if (!ref || done.has(ref.key) || daemonWatched.has(ref.key)) continue;
-        done.add(ref.key);
-        const record = readPr(ref.key);
-        if (record && (record.state === 'MERGED' || record.state === 'CLOSED')) continue;
-        if (record && now - Date.parse(record.observedAt) < everyMs) continue;
-        // Stamp the dispatch only when the PR is its own, not another PR it links.
-        const own = ownPr(id, lane)?.key === ref.key;
-        observePr(ref, view(ref), { ...(own ? { dispatchId: id } : {}), now: new Date(now) });
-        observed.push(ref.key);
+        const own = new Set(ownPrs(id, lane).map((r) => r.key));
+        for (const ref of waitedPrs(id, lane, last)) {
+          if (done.has(ref.key) || daemonWatched.has(ref.key)) continue;
+          done.add(ref.key);
+          const record = readPr(ref.key);
+          if (record && (record.state === 'MERGED' || record.state === 'CLOSED')) continue;
+          if (record && now - Date.parse(record.observedAt) < everyMs) continue;
+          try {
+            // Stamp the dispatch only when the PR is its own, not another PR it links.
+            observePr(ref, view(ref), { ...(own.has(ref.key) ? { dispatchId: id } : {}), now: new Date(now) });
+            observed.push(ref.key);
+          } catch {
+            // gh missing, unauthenticated, or forbidden: the next pass tries again.
+          }
+        }
       } catch {
-        // gh missing, unauthenticated, or forbidden: the next pass tries again.
+        // An unreadable dispatch is skipped.
       }
     }
   }
@@ -129,11 +140,11 @@ export interface FinishedWait {
 }
 
 /**
- * Finish every dispatch parked on a PR that has ended. A dispatch whose last
- * report is `paused --waiting-on pr|review`, and whose PR record is MERGED,
- * is finished `done`: the work landed. CLOSED without merge finishes it
- * `failed`. Every such dispatch is finished, in every chain, not only the
- * newest. The daemon runs this after it observes PR watches and before its
+ * Finish every dispatch parked on PRs that have all ended. A dispatch whose
+ * last report is `paused --waiting-on pr|review` finishes when every PR it
+ * waits on is MERGED or CLOSED: `done` when one merged (the work landed),
+ * `failed` when all closed without merge. Every such dispatch is finished,
+ * in every chain, not only the newest. The daemon runs this after it observes PR watches and before its
  * cull pass, so a merged PR's worktree release sees the chain finished.
  */
 export function finishResolvedWaits(log: (message: string) => void = () => {}): FinishedWait[] {
@@ -148,15 +159,28 @@ export function finishResolvedWaits(log: (message: string) => void = () => {}): 
     for (const id of ids) {
       const last = readStatusLog(id, lane).at(-1);
       if (last?.verb !== 'paused' || !last.waitingOn || !PR_WAITS.has(last.waitingOn)) continue;
-      const ref = waitedPr(id, lane, last);
-      const record = ref ? readPr(ref.key) : undefined;
-      if (!ref || !record || (record.state !== 'MERGED' && record.state !== 'CLOSED')) continue;
-      const merged = record.state === 'MERGED';
-      const verb = merged ? 'done' : 'failed';
-      appendStatus(id, lane, verb, merged ? `the PR merged: ${ref.url}` : `the PR closed without merge: ${ref.url}`);
-      if (!readEvidence(id, lane).prUrl) mergeEvidence(id, lane, { prUrl: ref.url });
-      out.push({ id, lane, pr: ref.key, verb });
-      log(`${id}: waited on ${ref.key}, which ${merged ? 'merged' : 'closed without merge'} — ${verb}`);
+      const refs = waitedPrs(id, lane, last);
+      const states = refs.map((r) => readPr(r.key)?.state);
+      if (refs.length === 0 || !states.every((st) => st === 'MERGED' || st === 'CLOSED')) continue;
+      const merged = refs.filter((_, i) => states[i] === 'MERGED');
+      const closed = refs.filter((_, i) => states[i] === 'CLOSED');
+      const verb = merged.length > 0 ? 'done' : 'failed';
+      const urls = (rs: PrRef[]) => rs.map((r) => r.url).join(', ');
+      const note =
+        refs.length === 1
+          ? merged.length
+            ? `the PR merged: ${refs[0]!.url}`
+            : `the PR closed without merge: ${refs[0]!.url}`
+          : closed.length === 0
+            ? `the PRs merged: ${urls(merged)}`
+            : merged.length === 0
+              ? `the PRs closed without merge: ${urls(closed)}`
+              : `the PRs ended — merged: ${urls(merged)}; closed without merge: ${urls(closed)}`;
+      appendStatus(id, lane, verb, note);
+      if (!readEvidence(id, lane).prUrl) mergeEvidence(id, lane, { prUrl: refs[0]!.url });
+      const keys = refs.map((r) => r.key).join(', ');
+      out.push({ id, lane, pr: keys, verb });
+      log(`${id}: waited on ${keys}, which ${verb === 'done' ? 'merged' : 'closed without merge'} — ${verb}`);
     }
   }
   return out;

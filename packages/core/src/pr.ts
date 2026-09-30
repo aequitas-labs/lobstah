@@ -21,6 +21,23 @@ export interface PrRef {
   url: string;
 }
 
+/**
+ * Every PR a dispatch owns, one per PR: its `prUrl`, then its `prUrls`,
+ * else the PR its watch observed. Canonical URLs.
+ */
+export function dispatchPrUrls(ev: { prUrl?: string; prUrls?: string[]; pr?: { url: string } }): string[] {
+  const out = new Map<string, string>();
+  for (const u of [ev.prUrl, ...(ev.prUrls ?? [])]) {
+    const ref = u ? parsePrRef(u) : undefined;
+    if (ref && !out.has(ref.key)) out.set(ref.key, ref.url);
+  }
+  if (out.size === 0 && ev.pr?.url) {
+    const ref = parsePrRef(ev.pr.url);
+    if (ref) out.set(ref.key, ref.url);
+  }
+  return [...out.values()];
+}
+
 /** `pr:o/r#n`, `o/r#n`, or a github.com PR URL (any trailing path) → the ref. */
 export function parsePrRef(s: string): PrRef | undefined {
   const m =

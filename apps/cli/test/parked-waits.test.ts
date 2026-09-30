@@ -28,7 +28,7 @@ import { tick } from '@lobstah/supervisor';
 import type { ActiveState } from '@lobstah/supervisor';
 import { cliCuller } from '../src/auto-cull.js';
 import { runDoctor } from '../src/doctor.js';
-import { finishResolvedWaits, observeWaitedPrs, registerWaitWatch } from '../src/pr-waits.js';
+import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches } from '../src/pr-waits.js';
 import { daemonStatus } from '../src/restart.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -219,10 +219,10 @@ describe('a merged or closed PR finishes the dispatches parked on it', () => {
 
   it('pausing on its own PR registers the PR watch; a link to another PR does not', () => {
     parked('d1', { waitingOn: 'review' });
-    expect(registerWaitWatch('d1', 'work', verbOf('d1')!)?.owner).toBe('dispatch:d1');
+    expect(registerWaitWatches('d1', 'work', verbOf('d1')!)[0]?.owner).toBe('dispatch:d1');
     expect(readWatch('pr:o/r#7')).toBeTruthy();
     parked('d2', { waitingOn: 'pr', link: 'https://github.com/o/r/pull/9' });
-    expect(registerWaitWatch('d2', 'work', verbOf('d2')!)).toBeUndefined();
+    expect(registerWaitWatches('d2', 'work', verbOf('d2')!)).toEqual([]);
     expect(readWatch('pr:o/r#9')).toBeUndefined();
   });
 });
@@ -250,7 +250,7 @@ describe('a parked dispatch releases on whichever PR lobstah knows for it', () =
   it('the link: a linked PR with no watch is observed, and its merge finishes the dispatch', () => {
     const linked = 'https://github.com/o/r/pull/8';
     parked('d1', { waitingOn: 'review', link: linked, noPr: true });
-    expect(registerWaitWatch('d1', 'work', verbOf('d1')!)).toBeUndefined();
+    expect(registerWaitWatches('d1', 'work', verbOf('d1')!)).toEqual([]);
     expect(observeWaitedPrs({ now, view: ghView('OPEN') })).toEqual(['pr:o/r#8']);
     expect(finishResolvedWaits()).toEqual([]);
     // Observed less than the poll interval ago: not read again.
@@ -310,6 +310,91 @@ describe('a parked dispatch releases on whichever PR lobstah knows for it', () =
     expect(linked.stdout).not.toContain('warning');
     const person = run('asked Ana', '--waiting-on', 'person');
     expect(person.stdout).not.toContain('warning');
+  });
+});
+
+describe('a dispatch with several PRs', () => {
+  const PR8 = 'https://github.com/o/r/pull/8';
+  const PR9 = 'https://github.com/o/r/pull/9';
+  const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+  const lobstah = (cwd: string, ...args: string[]) =>
+    spawnSync(process.execPath, [cli, ...args], { cwd, env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8' });
+  const claimed = (id: string) => {
+    enqueue({ id, repo: 'r', brief: 'b' });
+    expect(claimNext('work')).toBe(id);
+  };
+
+  it('report --pr is repeatable: each PR is recorded, gets its watch, and shows in catch and tend', () => {
+    claimed('d1');
+    const out = lobstah(root, 'report', 'd1', 'working', 'two PRs', '--pr', PR, '--pr', PR8);
+    expect(out.status, out.stderr).toBe(0);
+    expect(out.stdout).toMatch(/prs: "?https:\/\/github\.com\/o\/r\/pull\/7, https:\/\/github\.com\/o\/r\/pull\/8/);
+    expect(readEvidence('d1', 'work')).toMatchObject({ prUrl: PR, prUrls: [PR, PR8] });
+    expect(readWatch('pr:o/r#7')?.owner).toBe('dispatch:d1');
+    expect(readWatch('pr:o/r#8')?.owner).toBe('dispatch:d1');
+    prRecord('OPEN', ['d1']);
+    expect(lobstah(root, 'status', 'd1').stdout).toMatch(/prs: "?https:\/\/github\.com\/o\/r\/pull\/7, https:\/\/github\.com\/o\/r\/pull\/8/);
+    const caught = lobstah(root, 'catch', 'd1');
+    expect(caught.stdout).toMatch(/prs: "?.*pull\/7; .*pull\/8/);
+    const story = buildTendReport().stories.find((st) => st.dispatches.some((d) => d.id === 'd1'));
+    expect(story?.prs).toEqual([expect.stringContaining(PR), PR8]);
+    expect(renderTend(buildTendReport())).toContain(PR8);
+  });
+
+  it('a reported PR in a gh stack records every PR of the stack', () => {
+    claimed('d1');
+    const state = { schemaVersion: 1, stacks: [{ branches: [7, 8, 9].map((n) => ({ branch: `b${n}`, pullRequest: { number: n, url: `https://github.com/o/r/pull/${n}` } })) }] };
+    fs.writeFileSync(path.join(repo, '.git', 'gh-stack'), JSON.stringify(state));
+    const out = lobstah(repo, 'report', 'd1', 'done', 'stack sent', '--pr', PR9);
+    expect(out.status, out.stderr).toBe(0);
+    expect(readEvidence('d1', 'work')).toMatchObject({ prUrl: PR9, prUrls: [PR9, PR, PR8] });
+    for (const n of [7, 8, 9]) expect(readWatch(`pr:o/r#${n}`)?.owner).toBe('dispatch:d1');
+  });
+
+  it('a parked dispatch finishes only when all its PRs have ended', () => {
+    parked('d1', { waitingOn: 'review', link: PR });
+    mergeEvidence('d1', 'work', { prUrls: [PR, PR8] });
+    expect(registerWaitWatches('d1', 'work', verbOf('d1')!).map((w) => w.key)).toEqual(['pr:o/r#7', 'pr:o/r#8']);
+    prRecord('MERGED', ['d1']);
+    prRecord('OPEN', ['d1'], PR8);
+    expect(finishResolvedWaits()).toEqual([]);
+    expect(verbOf('d1')?.verb).toBe('paused');
+    prRecord('CLOSED', ['d1'], PR8);
+    expect(finishResolvedWaits()).toEqual([{ id: 'd1', lane: 'work', pr: 'pr:o/r#7, pr:o/r#8', verb: 'done' }]);
+    expect(verbOf('d1')?.note).toBe(`the PRs ended — merged: ${PR}; closed without merge: ${PR8}`);
+  });
+
+  it('all merged: done; all closed: failed', () => {
+    parked('d1', { waitingOn: 'pr' });
+    mergeEvidence('d1', 'work', { prUrls: [PR, PR8] });
+    parked('d2', { waitingOn: 'pr', noPr: true });
+    mergeEvidence('d2', 'work', { prUrl: PR9, prUrls: [PR9, 'https://github.com/o/r/pull/10'] });
+    prRecord('MERGED', ['d1']);
+    prRecord('MERGED', ['d1'], PR8);
+    prRecord('CLOSED', ['d2'], PR9);
+    prRecord('CLOSED', ['d2'], 'https://github.com/o/r/pull/10');
+    expect(finishResolvedWaits().map((f) => [f.id, f.verb])).toEqual([
+      ['d1', 'done'],
+      ['d2', 'failed'],
+    ]);
+    expect(verbOf('d1')?.note).toBe(`the PRs merged: ${PR}, ${PR8}`);
+  });
+
+  it.skipIf(process.platform === 'win32')('a merged PR does not release the worktree while another PR of the dispatch is open', () => {
+    config('releaseOnMerge = true\n');
+    parked('d1', { waitingOn: 'review', worktree: true });
+    mergeEvidence('d1', 'work', { prUrls: [PR, PR8] });
+    const wt = path.join(home, 'worktrees', 'd1');
+    prRecord('MERGED', ['d1']);
+    prRecord('OPEN', ['d1'], PR8);
+    daemonTick();
+    expect(verbOf('d1')?.verb).toBe('paused');
+    expect(fs.existsSync(wt)).toBe(true);
+    prRecord('MERGED', ['d1'], PR8);
+    now += 3_600_000;
+    daemonTick();
+    expect(verbOf('d1')?.verb).toBe('done');
+    expect(fs.existsSync(wt)).toBe(false);
   });
 });
 

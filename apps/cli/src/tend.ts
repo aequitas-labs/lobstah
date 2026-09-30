@@ -92,6 +92,8 @@ export interface TendDispatch {
   /** A needs-decision / blocked the helm (or anyone) has answered but the worker hasn't acted on yet. */
   answeredAt?: string;
   prUrl?: string;
+  /** Every PR of a dispatch that has more than one, `prUrl` first. */
+  prUrls?: string[];
   /** PR state as last observed by the chain's pr: watch. */
   pr?: PrEvidence;
   /** The checkout it ran in (the origin's, for a follow-up that reused it). */
@@ -120,6 +122,8 @@ export interface TendStory {
   key: string;
   dispatches: TendDispatch[];
   prUrl?: string;
+  /** Every PR of the chain when it has more than one, each `<state> <url>` when observed. */
+  prs?: string[];
   /** Short PR state (prBadge) from evidence, when the chain's pr: watch observed it. */
   prState?: string;
   /** Merge-gate verdict from the pick snapshot, when one matches. */
@@ -583,6 +587,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),
     ...(answered ? { answeredAt: answered } : {}),
     prUrl: evidence.prUrl,
+    ...(evidence.prUrls && evidence.prUrls.length > 1 ? { prUrls: evidence.prUrls } : {}),
     pr: evidence.pr,
     ...(bucket === 'queued' ? {} : worktreeView(id, lane)),
     ...(bucket === 'queued' ? {} : livenessView(id, lane)),
@@ -595,6 +600,17 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
 function awaitingView(id: string): Pick<TendDispatch, 'awaitingReply'> {
   const e = awaitingReply(id);
   return e ? { awaitingReply: { sentAt: e.sentAt, from: e.from, line: e.line } } : {};
+}
+
+/** Each PR of a chain with more than one, `<state> <url>` when its record exists. */
+function prsOf(chain: TendDispatch[]): string[] | undefined {
+  const urls = [...new Set(chain.flatMap((d) => d.prUrls ?? []))];
+  if (urls.length < 2) return undefined;
+  return urls.map((u) => {
+    const ref = parsePrRef(u);
+    const record = ref ? readPr(ref.key) : undefined;
+    return record ? `${prBadge(record).text} ${u}` : u;
+  });
 }
 
 /**
@@ -799,12 +815,14 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (!fresh) continue;
     const prUrl = chain.map((d) => d.prUrl).find((u) => u !== undefined);
     const watch = chain.map((d) => watchByDispatch.get(d.id)).find((w) => w !== undefined);
-    stories.push({ key, dispatches: chain, prUrl, prState: prStateOf(chain), gate: gateFor(entry.uuid, prUrl), watch });
+    const prs = prsOf(chain);
+    stories.push({ key, dispatches: chain, prUrl, ...(prs ? { prs } : {}), prState: prStateOf(chain), gate: gateFor(entry.uuid, prUrl), watch });
   }
   const direct = (d: TendDispatch): TendStory => ({
     key: '(direct)',
     dispatches: [d],
     prUrl: d.prUrl,
+    ...(prsOf([d]) ? { prs: prsOf([d]) } : {}),
     prState: prStateOf([d]),
     gate: gateFor(d.id, d.prUrl),
     watch: watchByDispatch.get(d.id),
@@ -1012,7 +1030,7 @@ export function renderTend(r: TendReport): string {
                 (d.awaitingReply ? ` (awaiting reply · ${ageLabel(Date.now() - (Date.parse(d.awaitingReply.sentAt) || Date.now()))})` : ''),
             )
             .join(' → '),
-          pr: s.prState ? `${s.prState} ${s.prUrl ?? ''}`.trim() : (s.prUrl ?? ''),
+          pr: s.prs ? s.prs.join('; ') : s.prState ? `${s.prState} ${s.prUrl ?? ''}`.trim() : (s.prUrl ?? ''),
           gate: s.gate ?? '',
           watch: s.watch ?? '',
           // Under the verb and note: what the live dispatch is doing now.

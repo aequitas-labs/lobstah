@@ -91,6 +91,7 @@ import {
   releaseHeldWatches,
   resetRepairStreaks,
   readEvidence,
+  dispatchPrUrls,
   removeWatch,
   runWatchCheck,
   watchDue,
@@ -123,6 +124,7 @@ import {
   VERBS,
   parsePrRef,
   prBadge,
+  readPr,
   prNewestFirst,
   readPrs,
   handoffNote,
@@ -142,7 +144,7 @@ import {
   DecisionError,
   decisionDir,
 } from '@lobstah/core';
-import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, WatchAttention } from '@lobstah/core';
+import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, Watch, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
@@ -187,7 +189,8 @@ import {
   runPrCheck,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
-import { finishResolvedWaits, observeWaitedPrs, registerWaitWatch, waitWarning } from './pr-waits.js';
+import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
+import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { setTerminalTitle } from './terminal-title.js';
@@ -359,12 +362,15 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   man wait (lobstah man).
 
 workers (dispatched agents; injected into every brief):
-  report <uuid> <verb> [--pr <url>] [--no-watch] [--report <file.md> [--attach <file> ...]] [--session <id>] [--] [note]
+  report <uuid> <verb> [--pr <url> ...] [--no-watch] [--report <file.md> [--attach <file> ...]] [--session <id>] [--] [note]
                                   the validated status write path
                                   (${VERBS.join(' | ')}). --pr on any
                                   verb but failed records the PR and
                                   registers its pr: watch for this chain;
-                                  --no-watch opts out. done|failed
+                                  repeat it for several PRs. A PR in a gh
+                                  stack, or in a base chain of this
+                                  dispatch's branches, adds the stack's
+                                  other PRs. --no-watch opts out. done|failed
                                   --report files a markdown page as the
                                   dispatch's report, images --attach'ed.
 
@@ -1182,7 +1188,8 @@ async function mainCli(): Promise<void> {
       if (!id || !verb) throw new Error(`report requires an id and a verb (${VERBS.join('|')})`);
       const lane = findLane(id);
       const note = rest.join(' ') || undefined;
-      const prUrl = opt('--pr');
+      const reportedPrs = values('--pr');
+      const prUrl = reportedPrs[0];
       const noWatch = has('--no-watch');
       const waiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
       const saysWaiting = waiting.waitingOn !== undefined || waiting.link !== undefined || waiting.until !== undefined;
@@ -1252,7 +1259,19 @@ async function mainCli(): Promise<void> {
             mergeEvidence(id, lane, { commits: [head.stdout.trim()], branch: branch.stdout.trim() });
         }
       }
-      if (prUrl) mergeEvidence(id, lane, { prUrl });
+      // Each --pr, and the other PRs of a stack that holds one, belongs to
+      // this dispatch. The first reported PR stays its `prUrl`.
+      let reportPrs: string[] = [];
+      if (prUrl) {
+        const ev = readEvidence(id, lane);
+        const worktree = readSessionClaim(id, lane)?.worktree ?? ev.worktree;
+        const branches = [...new Set([ev.branch, ...(ev.pushes ?? []).map((p) => p.branch)])].filter(
+          (b): b is string => !!b && b !== 'HEAD',
+        );
+        reportPrs = stackPrUrls(reportedPrs, { cwd: worktree && fs.existsSync(worktree) ? worktree : process.cwd(), branches });
+        const all = dispatchPrUrls({ prUrl, prUrls: [...reportPrs, ...dispatchPrUrls(ev)] });
+        mergeEvidence(id, lane, { prUrl, ...(all.length > 1 ? { prUrls: all } : {}) });
+      }
       const gatesNamed = recordReportedGates(id, lane, values('--human-gate'), prUrl);
       // A PR stays observed from the first report that names it: CI, review,
       // and merge flow back through its pr: watch instead of lobstah going
@@ -1260,12 +1279,12 @@ async function mainCli(): Promise<void> {
       // the dispatch's own PR registers that PR's watch.
       // A daemon repair is already bound to that PR's watch. Reporting the
       // same URL must not register a replacement watch.
-      const prWatch =
+      const prWatches =
         verb !== 'failed' && prUrl && !noWatch && !storedDescriptor(id, lane)?.systemRepair
-          ? autoRegisterPrWatch(id, prUrl)
+          ? reportPrs.map((u) => autoRegisterPrWatch(id, u)).filter((w): w is Watch => !!w)
           : verb === 'paused' && !noWatch
-            ? registerWaitWatch(id, lane, entry)
-            : undefined;
+            ? registerWaitWatches(id, lane, entry)
+            : [];
       const warning = waitWarning(id, lane, entry);
       console.log(
         toonKV({
@@ -1277,7 +1296,8 @@ async function mainCli(): Promise<void> {
           ...(entry.link ? { link: entry.link } : {}),
           ...(entry.until ? { until: entry.until } : {}),
           ...(prUrl ? { prUrl } : {}),
-          ...(prWatch ? { watch: prWatch.key } : {}),
+          ...(reportPrs.length > 1 ? { prs: reportPrs.join(', ') } : {}),
+          ...(prWatches.length ? { watch: prWatches.map((w) => w.key).join(', ') } : {}),
           ...(warning ? { warning } : {}),
           ...(gatesNamed.length ? { humanGates: gatesNamed.join(', ') } : {}),
           ...(filed ? { report: reportMarkdownPath(filed.key), reportKey: filed.key, reportTitle: filed.title } : {}),
@@ -1415,6 +1435,16 @@ async function mainCli(): Promise<void> {
           }),
           branch: ev.branch,
           prUrl: ev.prUrl,
+          ...(dispatchPrUrls(ev).length > 1
+            ? {
+                prs: dispatchPrUrls(ev)
+                  .map((u) => {
+                    const record = readPr(parsePrRef(u)!.key);
+                    return record ? `${prBadge(record).text} ${u}` : u;
+                  })
+                  .join('; '),
+              }
+            : {}),
           sessionId: ev.sessionId,
           ...worktreeView(id, lane),
           ...dispatchTrap(id, lane, names),

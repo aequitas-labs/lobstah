@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import {
+  dispatchPrUrls,
   dispatchWorktree,
   laneDirs,
   loadConfig,
@@ -188,8 +189,15 @@ export function planMergeRelease(now = Date.now(), batch = Infinity): ReleasePla
 
   // Candidate owners, each with the PR and the chain it was reached through.
   const candidates = new Map<string, { pr: MergedPr; chain: Set<string> }>();
+  // A dispatch with several PRs keeps its worktree while one of them is open.
+  const openSibling = (id: string): boolean => {
+    const k = all.get(id);
+    const urls = k ? dispatchPrUrls(readEvidence(id, k.lane)) : [];
+    return urls.length > 1 && urls.some((u) => readPr(parsePrRef(u)!.key)?.state === 'OPEN');
+  };
   for (const pr of merged.values()) {
     for (const id of pr.owners) {
+      if (openSibling(id)) continue;
       const chain = chains.get(id) ?? new Set([id]);
       const home = owner(id);
       const add = (o: string) => {

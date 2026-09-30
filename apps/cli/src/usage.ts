@@ -71,7 +71,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
   report: {
     flags: {
-      '--pr': { value: '<url>' },
+      '--pr': { value: '<url>', repeatable: true },
       '--no-watch': {},
       '--waiting-on': { value: 'review|pr|deploy|person|external' },
       '--link': { value: '<url>' },

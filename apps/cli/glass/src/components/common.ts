@@ -242,8 +242,11 @@ export function prCell(x: GlassDispatch) {
   const url = x.evidence && (x.evidence.prUrl || (x.evidence.pr && x.evidence.pr.url));
   if (!url) return '';
   const b = x.prBadge;
+  const many = x.evidence && x.evidence.prUrls && x.evidence.prUrls.length > 1 ? x.evidence.prUrls : undefined;
   return [
-    html`<a href=${url} target="_blank" rel="noopener" onClick=${stop}>PR</a>`,
+    many
+      ? many.map((u, i) => [i ? ' ' : '', html`<a href=${u} target="_blank" rel="noopener" onClick=${stop}>#${u.split('/').pop()}</a>`])
+      : html`<a href=${url} target="_blank" rel="noopener" onClick=${stop}>PR</a>`,
     b && [' ', html`<span class=${'badge ' + prBadgeClass(b)} title=${'observed ' + b.observedAt}>${b.text}</span>`],
     x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
   ];

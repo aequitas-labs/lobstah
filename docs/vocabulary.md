@@ -83,9 +83,11 @@ Effects of `paused` with `--waiting-on`:
 - With `--waiting-on pr` or `--waiting-on review`: when the PR it waits on
   merges, the daemon finishes the dispatch `done` (`the PR merged: <url>`);
   closed without merge, `failed`. The PR is the `--link` when it names a
-  GitHub PR, else the dispatch's own PR, else its chain's PR, else the PR
-  of a `pr:` watch the dispatch owns. Every paused dispatch in the chain
-  that waits on the PR is finished. The report registers the watch of the
+  GitHub PR that is not the dispatch's own. Otherwise it is every PR of the
+  dispatch (`prUrl` and `prUrls`), else its chain's PR, else the PRs of the
+  `pr:` watches the dispatch owns; the dispatch finishes when all of them
+  have ended. Every paused dispatch in the chain that waits on the PR is
+  finished. The report registers the watch of the
   dispatch's own PR when it has none, and the daemon reads a waited-on PR
   that no live dispatch-owned watch observes. When no PR is known, the
   report prints a `warning`.
