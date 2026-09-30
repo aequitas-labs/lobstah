@@ -311,6 +311,27 @@ describe('releaseCatch and the ghost-trap sweep', () => {
     expect(readStatusLog('w1', 'work').at(-1)?.verb).toBe('failed');
   });
 
+  it.each(['done', 'failed'] as const)('releaseCatch finalizes %s without requeueing', (verb) => {
+    const reg = caughtTrap('s1', 'w1');
+    appendStatus('w1', 'work', verb, 'finished');
+    expect(releaseCatch(reg)).toEqual({ finalized: 'w1' });
+    expect(pendingIds('work')).toEqual([]);
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'w1'))).toBe(true);
+    expect(readStatusLog('w1', 'work').at(-1)?.verb).toBe(verb);
+  });
+
+  it.each(['done', 'failed'] as const)('a stale %s trap leaves no orphaned bait', (verb) => {
+    const reg = trap('s1', 'web');
+    enqueue({ id: 'w1', repo: 'web', brief: 'x', for: `wt:${reg.trapId}` });
+    claimBait(reg);
+    appendStatus('w1', 'work', verb, 'finished');
+    expect(sweepGhostTraps(1000, Date.now() + 60_000)).toEqual([{ trapId: reg.trapId, finalized: 'w1' }]);
+    noticeOrphanedBait();
+    expect(pendingIds('work')).toEqual([]);
+    expect(listNotices().some((n) => n.kind === 'bait-orphaned')).toBe(false);
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'w1'))).toBe(true);
+  });
+
   it('sweeps a stale registration that HAS parked before', () => {
     const reg = trap('s1', 'web');
     heartbeatTrap(reg.trapId, { parked: true });

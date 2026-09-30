@@ -140,7 +140,11 @@ describe('trap reserve and soak --ticket', () => {
     const res = withEnv(primary, { LOBSTAH_TRAP_TICKET: r.ticket }, 'soak', '--session', SESSION, '--harness', 'claude');
     expect(res.status, res.stderr).toBe(0);
     expect(kv(res.stdout, 'trap')).toBe(r.trap);
-    expect(lobstah(primary, 'stow', '--session', SESSION).status).toBe(0);
+    // A clean, pushed checkout can be removed; a no-upstream checkout is kept.
+    git(only().worktree, 'branch', '--set-upstream-to=origin/main');
+    const stowed = lobstah(primary, 'stow', '--session', SESSION);
+    expect(stowed.status, stowed.stderr).toBe(0);
+    expect(stowed.stdout).toMatch(/^worktree: removed$/m);
     // The session stays alive with the spent ticket in its environment: soak works as usual.
     const again = withEnv(primary, { LOBSTAH_TRAP_TICKET: r.ticket }, 'soak', '--session', SESSION, '--harness', 'claude');
     expect(again.status, again.stderr).toBe(0);

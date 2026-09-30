@@ -131,7 +131,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--session': ['reserve'],
     },
   },
-  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
+  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--force': {}, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
   doctor: { flags: {} },
@@ -254,13 +254,12 @@ start command. dispatch --for works at once; soak --ticket <t> redeems it. Past
 --deadline (default 180s) trap-start-failed posts; work stays queued. stow --wt
 <name> withdraws it. --request <id> reserves what a glass request asks for and
 closes it; \`trap requests\` lists open requests.`,
-  stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
-requeues, unread messages bounce to the helm. Removes the worktree soak
-created unless --keep or it holds uncommitted changes, untracked files, or
-commits on no remote branch (kept, with the reason). Never removes a
-worktree soak did not create. Stowing another session's trap is steering:
-with a claimed helm, only the helm may (pass its --session). --wt on a
-reserved trap withdraws the reservation. Stow clears the tab name sign-on set.`,
+  stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
+finalizes; unread messages bounce. Removes only worktrees soak created, kept
+when dirty, untracked, unpushed to upstream, or without upstream (with reason).
+--force discards unsaved files; --keep keeps it. --wt withdraws reservations.
+Only a claimed helm may stow another session (pass its --session).
+Clears the tab name sign-on set.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit; restart restarts it and
 waits for the new heartbeat (refused while dispatches are active, unless

@@ -86,7 +86,7 @@ send a continuation.
 | Key | Default | Meaning |
 |---|---|---|
 | `deferSecs` | `90` | A soaking session whose park heartbeat is this fresh holds unaddressed matching bait — the daemon waits instead of spawning. Addressed bait (`--for session:<id>`) waits regardless, until the registration is gone. |
-| `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues its open catch (or finalizes a cancelled one as failed). A fresh `lobstah report` on the catch counts as liveness too, and so does a fresh beat. |
+| `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues an unfinished catch, finalizes done/failed in `done/`, or finalizes a cancelled catch as failed. A fresh `lobstah report` or beat counts as liveness. If the daemon's own tick gap exceeds this TTL, it grants a full TTL after resume before sweeping any traps. |
 | `beat` | `true` | The post-tool hook (`lobstah soak beat`) refreshes a soaking session's liveness and writes its catch's activity, at most once per 30 seconds per trap. With `false` the hook does nothing, and a trap's liveness comes from its reports and its park only. |
 | `pausedTtlSecs` | `86400` (24 hours) | A trap whose catch last reported `paused` is kept out of the ghost sweep this long after the report. `report paused --until <iso|duration>` sets the expiry instead. After it, the sweep removes the trap as usual, and the notice says the pause expired. |
 

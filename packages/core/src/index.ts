@@ -36,5 +36,6 @@ export * from './glass.js';
 export * from './models.js';
 export * from './disk.js';
 export * from './worktrees.js';
+export * from './worktree-safety.js';
 export * from './activity.js';
 export * from './slots.js';
