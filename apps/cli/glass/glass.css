@@ -504,6 +504,9 @@ a {
 .dot.bad {
   background: var(--bad);
 }
+.dot.dim {
+  background: var(--dim);
+}
 #overlay {
   position: fixed;
   inset: 0;
