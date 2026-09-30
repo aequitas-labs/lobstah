@@ -18,6 +18,7 @@ import {
 } from '../src/watch.js';
 import { listNotices } from '../src/notices.js';
 import { classifyGhError, firstMeaningfulLine } from '../src/gh-errors.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let dir: string;
 beforeEach(() => {
@@ -26,7 +27,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 /** A check script that pages two events after cursor 0, then goes quiet. */

@@ -6,6 +6,7 @@ import { claimNext, enqueue, ensureLayout } from '@lobstah/core';
 import { LinearSource } from '../src/sources/linear.js';
 import { PickupState } from '../src/state.js';
 import { reconcileLoop } from '../src/loops/reconcile.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -15,7 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

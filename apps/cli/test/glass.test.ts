@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { appendStatus, claimNext, enqueue, ensureLayout, expireReservations, laneDirs, mergeEvidence, postNotice, reserveTrap, takeHelm, writeActivity } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -14,7 +15,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

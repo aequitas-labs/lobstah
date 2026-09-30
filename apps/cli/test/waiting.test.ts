@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { appendStatus, claimNext, enqueue, ensureLayout, readStatusLog } from '@lobstah/core';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 let home: string;
@@ -17,7 +18,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

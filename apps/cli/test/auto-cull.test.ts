@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { appendStatus, claimNext, enqueue, ensureLayout, GB, laneDirs, prRecordFile, statusPath } from '@lobstah/core';
 import { cliCuller } from '../src/auto-cull.js';
 import { planCull, planPressureCull, runCull, sizing } from '../src/cull.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 let repo: string;
@@ -55,7 +56,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

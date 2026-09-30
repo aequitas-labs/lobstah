@@ -8,6 +8,7 @@ import { CULL_INTERVAL_MS, retentionPass, spaceGuard, tick } from '@lobstah/supe
 import type { DaemonCuller } from '@lobstah/supervisor';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { diskRow } from '../src/doctor.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -16,7 +17,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

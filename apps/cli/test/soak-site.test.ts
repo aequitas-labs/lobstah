@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { inspectSoakSite } from '../src/soak-site.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 function git(dir: string, ...args: string[]): void {
   const res = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
@@ -27,7 +28,7 @@ beforeEach(() => {
   git(primary, 'worktree', 'add', linked, '-b', 'side');
 });
 afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 describe('inspectSoakSite', () => {

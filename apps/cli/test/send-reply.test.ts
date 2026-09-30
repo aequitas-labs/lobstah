@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   appendStatus, awaitingReply, claimNext, complete, ensureLayout, laneDirs, markListed, readExpectation, takeHelm,
 } from '@lobstah/core';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -20,7 +21,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

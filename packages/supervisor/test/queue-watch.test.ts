@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, laneDirs } from '@lobstah/core';
 import { watchQueues } from '../src/daemon.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let dir: string;
 beforeEach(() => {
@@ -13,7 +14,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 describe('watchQueues', () => {

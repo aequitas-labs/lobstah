@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { appendStatus, claimNext, enqueue, ensureLayout, executorPath, mergeEvidence, prNewestFirst, readPr, readPrs, upsertPr, writePr } from '@lobstah/core';
 import type { PrEvidence } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * The PR order is the first-seen time, stored once in the PR record. A
@@ -19,7 +20,7 @@ beforeEach(() => {
   fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 
