@@ -198,7 +198,7 @@ describe('glass /requests', () => {
     expect(buildGlassSnapshot().traps.find((t) => t.trapId === reservation.trapId)?.starting?.commands).toBeUndefined();
     const own = (await (await fetch(`${base}/data`)).json()) as GlassSnapshot;
     const commands = own.traps.find((t) => t.trapId === reservation.trapId)?.starting?.commands;
-    expect(commands).toEqual([{ harness: 'claude', command: `cd ${shellQuote(repoDir)} && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:soak --ticket ${ticket}"` }]);
+    expect(commands).toEqual([{ harness: 'claude', command: `cd ${shellQuote(repoDir)} && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${ticket}"` }]);
     const rebound = await withHost('/data', 'evil.example');
     expect(rebound.status).toBe(200);
     expect(rebound.text).not.toContain(ticket);

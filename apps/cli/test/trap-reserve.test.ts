@@ -100,7 +100,7 @@ describe('trap reserve and soak --ticket', () => {
     const r = reserve('--name', 'amber-gull', '--harness', 'claude');
     expect(r.name).toBe('amber-gull');
     expect(r.out).toMatch(/^state: starting$/m);
-    expect(r.out).toContain(`CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:soak --ticket ${r.ticket}"`);
+    expect(r.out).toContain(`CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${r.ticket}"`);
     expect(r.out).not.toContain('$lobstah:trap soak'); // --harness claude prints only the Claude Code command
     expect(listTraps()).toEqual([]);
     const id = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';

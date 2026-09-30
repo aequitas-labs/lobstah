@@ -125,7 +125,7 @@ Then install the lobstah plugin for your harness
 Open a new session in the repo (or any folder) with the plugin installed.
 
 ```text
-/lobstah:man                      # Claude Code (or /lobstah:helm, the bare sign-on)
+/lobstah:man                      # Claude Code
 $lobstah:man                      # Codex
 ```
 
@@ -140,8 +140,9 @@ brings you the catch.
 Use `/lobstah:trap` in Claude Code or `$lobstah:trap` in Codex to turn another
 live session into a worker. The skill runs `lobstah soak`, which creates a
 linked worktree when the session is in a repo's primary checkout;
-the helm addresses bait to its `wt:<trap>` address, and `lobstah stow` signs
-it off.
+the helm addresses bait to its `wt:<trap>` address, and `/lobstah:stow`
+(`$lobstah:stow` in Codex) signs it off. `/lobstah:relieve`
+(`$lobstah:relieve`) steps down from the helm.
 
 Harness specifics: [Claude Code](docs/harness/claude-code.md) · [Codex](docs/harness/codex.md).
 The full pattern (charter, grounds, the three tiers of getting woken, traps)
@@ -249,10 +250,9 @@ continues the turn the moment something needs it.
   `pickup = true`; `lobstah pick install` runs it as a service.
   [docs/pickup.md](docs/pickup.md)
 - **Claude Code + Codex plugins** — the lobstah man as a one-step install: the
-  hook wiring (session brief, Stop-hook park, clean stow), the `man` and `trap`
-  skills, and (on Claude Code) `/lobstah:tend`, `/lobstah:helm`,
-  `/lobstah:relieve`, `/lobstah:soak`, and `/lobstah:stow` commands, no
-  settings surgery.
+  hook wiring (session brief, Stop-hook park, clean stow) and the same four
+  skills in both harnesses (`man`, `trap`, `stow`, `relieve`), no settings
+  surgery.
   This repo doubles as the plugin marketplace for both agent registries —
   install steps per harness are in [docs/harness/claude-code.md](docs/harness/claude-code.md)
   and [docs/harness/codex.md](docs/harness/codex.md). The park stays inert until a directory

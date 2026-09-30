@@ -25,7 +25,13 @@ Inside Claude Code, no `--session` flag is needed: the CLI reads
 is in the session-start brief. Then run `lobstah glass --detach`. It starts or
 finds the glass and prints its URL. Open the URL in the harness browser pane
 if one is available. Otherwise, tell the person the URL.
-`/lobstah:helm` is bare sign-on and does not start the glass.
+
+If sign-on refuses because another session holds a live helm, report who
+holds it and stop. Do not pass `--take` unless the user asks to displace
+them. On success, print the charter's **Role** and **Fences** sections
+verbatim. Then run `lobstah man wait --peek` and surface anything
+standing: questions waiting on a human first, with the exact
+`lobstah send <id> "..."` to answer each. `/lobstah:relieve` steps down.
 
 The charter is re-injected at every session start. Keep inside its fences:
 

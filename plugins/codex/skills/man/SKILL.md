@@ -12,7 +12,7 @@ work, and you never poll on a loop.
 
 ## Taking the helm
 
-Invoke `$lobstah:man` to load this skill; Codex has no `/lobstah:*` commands.
+Invoke `$lobstah:man` to load this skill.
 ```
 lobstah man helm --session <id>      # sign on; prints the charter
 lobstah man helm --session <id> --grounds <name>  # when several grounds are configured
@@ -25,6 +25,13 @@ brief for first sign-on and for `man wait`, `man report`, and `man relieve`
 outside the hook. Then run `lobstah glass --detach`; it starts or finds the
 glass and prints its URL. Open it in the desktop browser pane if available;
 otherwise tell the person the URL.
+
+If sign-on refuses because another session holds a live helm, report who
+holds it and stop. Do not pass `--take` unless the user asks to displace
+them. On success, print the charter's **Role** and **Fences** sections
+verbatim. Then run `lobstah man wait --peek` and surface anything
+standing: questions waiting on a human first, with the exact
+`lobstah send <id> "..."` to answer each. `$lobstah:relieve` steps down.
 
 The charter is re-injected at every session start. Keep inside its fences:
 

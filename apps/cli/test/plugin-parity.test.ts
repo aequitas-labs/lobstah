@@ -73,20 +73,17 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(read('plugins/claude-code/README.md')).toContain('lobstah for Claude Code');
   });
 
-  it('Claude slash commands are namespaced in user-facing text', () => {
-    const commands = 'plugins/claude-code/commands';
-    expect(fs.existsSync(`${root}/${commands}/tend.md`)).toBe(true);
-    expect(fs.existsSync(`${root}/${commands}/lobstah.md`)).toBe(false);
+  it('both plugins expose the same four skills and no commands; Claude mentions are namespaced', () => {
+    for (const plugin of ['claude-code', 'codex']) {
+      expect(fs.existsSync(`${root}/plugins/${plugin}/commands`), plugin).toBe(false);
+      expect(fs.readdirSync(`${root}/plugins/${plugin}/skills`).sort(), plugin).toEqual(['man', 'relieve', 'stow', 'trap']);
+    }
+    const skills = 'plugins/claude-code/skills';
     const files = [
       'README.md',
       'docs/man.md',
       'plugins/claude-code/README.md',
-      'plugins/claude-code/skills/man/SKILL.md',
-      'plugins/claude-code/skills/trap/SKILL.md',
-      ...fs
-        .readdirSync(`${root}/${commands}`)
-        .filter((name) => name.endsWith('.md'))
-        .map((name) => `${commands}/${name}`),
+      ...fs.readdirSync(`${root}/${skills}`).map((name) => `${skills}/${name}/SKILL.md`),
       ...fs
         .readdirSync(`${root}/apps/cli/src`)
         .filter((name) => name.endsWith('.ts'))
