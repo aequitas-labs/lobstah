@@ -645,6 +645,16 @@ describe('merge loop', () => {
     expect(desc.brief).toContain('Never open a new PR.');
   });
 
+  it("a rebase chore ends with the repo's rebase hook, then its all hook", async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/d"\n[repos.demo.briefHooks]\nrebase = "Run the rebase refresh."\nall = "Run /pr-refresh."\nchecks = "not this one"\n');
+    const ms = new FakeMergeSource();
+    ms.candidates = [pr({ mergeableState: 'dirty' })];
+    await mergeLoop(ms, policy, new PickupState());
+    const desc = readChore(pendingIds('chore')[0]!);
+    expect(desc.brief.endsWith('\n\nRun the rebase refresh.\n\nRun /pr-refresh.')).toBe(true);
+    expect(desc.brief).not.toContain('not this one');
+  });
+
   it('a failed rebase chore flags for a human and stops, bounded at one attempt', async () => {
     const ms = new FakeMergeSource();
     ms.candidates = [pr({ mergeableState: 'dirty' })];

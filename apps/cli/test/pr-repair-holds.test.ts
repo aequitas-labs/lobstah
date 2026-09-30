@@ -144,6 +144,17 @@ afterEach(() => {
   removeTempDir(dir);
 });
 
+describe('brief hooks', () => {
+  it("a conflict repair's brief ends with the repo's conflict hook, then its all hook", () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[repos.web]\npath = "/w"\n[repos.web.briefHooks]\nconflict = "Run the conflict refresh."\nall = "Run /pr-refresh."\nchecks = "not this one"\n');
+    stand(STACK[0]!);
+    expect(repair()).toBe(1);
+    const [chore] = queued();
+    expect(chore!.brief.endsWith('\n\nRun the conflict refresh.\n\nRun /pr-refresh.')).toBe(true);
+    expect(chore!.brief).not.toContain('not this one');
+  });
+});
+
 describe('a live worker holds the branch', () => {
   it('a trap with a claimed dispatch has the head branch checked out: no repair, and the record says who holds it', () => {
     stand(STACK[0]!);

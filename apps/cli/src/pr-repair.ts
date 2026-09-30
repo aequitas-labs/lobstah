@@ -33,6 +33,7 @@ import {
   reconcile,
   releaseHeldWatches,
   repairBrief,
+  withBriefHooks,
   repairKind,
   repairLimit,
   repairableChecks,
@@ -423,7 +424,11 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         },
       });
       try {
-        const brief = repairBrief(pr, kind, kind === 'checks' && fresh.length > 0 ? { id, checks: fresh, gates } : { id, gates });
+        const brief = withBriefHooks(
+          repairBrief(pr, kind, kind === 'checks' && fresh.length > 0 ? { id, checks: fresh, gates } : { id, gates }),
+          config.repos[target.repo],
+          kind,
+        );
         enqueue({
           id,
           repo: target.repo,

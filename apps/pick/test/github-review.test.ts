@@ -97,6 +97,20 @@ describe('post-PR feedback pickup', () => {
     expect(items[0]).toMatchObject({ key: 'gh:o/r#pr5@rv90', subject: 'gh:o/r#pr5', kind: 'review', followUp: UUID });
   });
 
+  it("a review-feedback brief ends with the repo's review hook", async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/d"\n[repos.demo.briefHooks]\nreview = "Run the review refresh."\n');
+    stubApi([
+      {
+        number: 5,
+        branch: `lobstah/${UUID}`,
+        reviews: [{ id: 90, login: 'chris', state: 'COMMENTED', body: 'two nits inline', at: '2026-09-21T10:00:00Z' }],
+      },
+    ]);
+    const [item] = await source().poll();
+    expect(item!.brief).toMatch(/^Address the review feedback on /);
+    expect(item!.brief.endsWith('\n\nRun the review refresh.')).toBe(true);
+  });
+
   it('CHANGES_REQUESTED counts even when reviewed on a stale sha', async () => {
     stubApi([
       {

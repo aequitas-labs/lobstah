@@ -34,6 +34,36 @@ export interface RepoConfig {
    * repair or a CI-fix continuation. `*` matches any run of characters.
    */
   humanGateChecks?: string[];
+  /**
+   * Markdown appended to the briefs lobstah writes for this repo, per kind
+   * (`[repos.<key>.briefHooks]`). The text is the repo's own; lobstah does
+   * not read it.
+   */
+  briefHooks?: BriefHooks;
+}
+
+/** The kinds of brief lobstah writes itself, and `all` for every one of them. */
+export const BRIEF_KINDS = ['conflict', 'checks', 'review', 'ciFix', 'rebase'] as const;
+export type BriefKind = (typeof BRIEF_KINDS)[number];
+export type BriefHooks = Partial<Record<BriefKind | 'all', string>>;
+
+function parseBriefHooks(raw: unknown): BriefHooks | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: BriefHooks = {};
+  for (const kind of [...BRIEF_KINDS, 'all'] as const) {
+    const text = (raw as Record<string, unknown>)[kind];
+    if (typeof text === 'string' && text.trim()) out[kind] = text.trim();
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * A generated brief with the repo's hooks for its kind appended: that
+ * kind's text, then `all`. The brief is unchanged when the repo has none.
+ */
+export function withBriefHooks(brief: string, repo: Pick<RepoConfig, 'briefHooks'> | undefined, kind: BriefKind): string {
+  const hooks = [repo?.briefHooks?.[kind], repo?.briefHooks?.all].filter((t): t is string => !!t);
+  return hooks.length ? `${brief}\n\n${hooks.join('\n\n')}` : brief;
 }
 
 export interface LimitsConfig {
@@ -253,6 +283,7 @@ export function loadConfig(): Config {
       draftPr: r.draftPr === undefined ? undefined : Boolean(r.draftPr),
       checkpointOnStop: r.checkpointOnStop === undefined ? undefined : Boolean(r.checkpointOnStop),
       humanGateChecks: Array.isArray(r.humanGateChecks) ? r.humanGateChecks.map(String).filter(Boolean) : undefined,
+      briefHooks: parseBriefHooks(r.briefHooks),
     };
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;

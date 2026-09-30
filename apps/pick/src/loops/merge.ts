@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { enqueue, laneDirs, pushRule, readStatusLog } from '@lobstah/core';
+import { enqueue, laneDirs, loadConfig, pushRule, readStatusLog, withBriefHooks } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { MergePolicy, MergeSource, PrCandidate } from '../types.js';
@@ -177,7 +177,7 @@ export async function mergeLoop(
           {
             id: uuid,
             repo: ms.repoKey(),
-            brief: rebaseBrief(pr, uuid),
+            brief: withBriefHooks(rebaseBrief(pr, uuid), loadConfig().repos[ms.repoKey()], 'rebase'),
             // The chore works on this PR: the runner pushes no other branch and opens no PR.
             pr: { url: pr.url, headRefName: pr.headRef, headSha: pr.headSha },
           },

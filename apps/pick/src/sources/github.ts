@@ -1,4 +1,5 @@
 import type { Evidence, Verb } from '@lobstah/core';
+import { loadConfig, withBriefHooks } from '@lobstah/core';
 import { MARKER, marker } from '../types.js';
 import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../types.js';
 import { prEvidenceIndex, prUrlKey } from '../pr-evidence.js';
@@ -127,7 +128,11 @@ export class GithubSource implements Source, MergeSource {
         repoKey: this.cfg.key,
         title: pr.title,
         followUp: uuid,
-        brief: `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. When the feedback is addressed, report status done.`,
+        brief: withBriefHooks(
+          `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. When the feedback is addressed, report status done.`,
+          loadConfig().repos[this.cfg.key],
+          'review',
+        ),
       });
     }
     return items;
