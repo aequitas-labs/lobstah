@@ -100,7 +100,7 @@ background task.
   as a background task; re-arm after every completion. The Stop hook blocks
   with standing attention or the arm command when no watcher is live.
 - A timeout (exit 3) carries the digest when something changed; acknowledge
-  it with `lobstah man report`. `man haul --park` waits in the hook.
+  it with `lobstah man report`. `lobstah hook stop --park` waits in the hook.
 
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 - A send is answered by the worker's next note, which wakes you; use `--no-reply` for a steer that needs no answer.

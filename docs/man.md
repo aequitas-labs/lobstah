@@ -675,9 +675,21 @@ watcher that is still starting, so arming and ending the turn at once is safe.
 wait for attention itself. Without a Stop hook, use the
 [foreground loop below](#without-a-plugin).
 
-The hook is a CLI command — `lobstah man haul` (the lobstah man hauls the
-trapline; every orchestrator-facing command lives under `lobstah man`).
-Install it from the project you'll run the lobstah man in:
+Each plugin hook runs one CLI command, `lobstah hook <event>`:
+
+| Hook | Command | What it does |
+| ---- | ------- | ------------ |
+| SessionStart | `lobstah hook session-start` | Announces the session id and a one-line fleet state; for the helm, its charter; for a trap, its worktree. A session with neither role gets its id and the sign-on commands. |
+| Stop | `lobstah hook stop` | Parks the helm or a trap: blocks with standing attention, asks for a watcher in arm mode, or waits in the hook with `--park` (`--timeout <secs>`). Inert for a session with neither role. |
+| PostToolUse | `lobstah hook post-tool-use` | A trap's beat: liveness, activity, pushes, and its PR. Inert for a session with neither role. |
+| SessionEnd | `lobstah hook session-end` | Signs a trap off and keeps its worktree. Inert for a session with neither role. |
+
+Each command detects the session's role: the helm (a helm registration, or a
+session opted in with `LOBSTAH_MAN=1` or `.lobstah-man`), a trap (a soaking
+registration), or neither. The older commands stay as aliases and do the same:
+`lobstah man brief`, `lobstah man haul`, `lobstah soak beat`, and
+`lobstah stow --quiet`. Install the Stop hook from the project you'll run the
+lobstah man in:
 
 ```bash
 # Easiest: the plugin ships the hooks + the man and trap skills, no settings
@@ -694,10 +706,11 @@ Idempotent, and it only appends to `hooks.Stop` — existing hooks and settings
 are preserved verbatim. What it writes:
 
 ```json
-{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "lobstah man haul", "timeout": 14400 }] }] } }
+{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "lobstah hook stop", "timeout": 14400 }] }] } }
 ```
 
-`haul` applies to a signed-on helm or trap, or a session opted in with
+A Stop hook that runs `lobstah man haul` already counts as installed.
+The Stop hook applies to a signed-on helm or trap, or a session opted in with
 `LOBSTAH_MAN=1` or `.lobstah-man`. Queued dispatches count as work in flight.
 
 **Delivery guarantee.** Attention wakes are at-least-once with backoff. An

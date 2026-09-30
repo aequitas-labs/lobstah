@@ -10,10 +10,10 @@ Codex with no settings surgery.
 
 | Piece | What it does |
 | ----- | ------------ |
-| SessionStart hook (`lobstah man brief`) | Announces the session's id and a one-line fleet state into the conversation, so every session starts oriented. A session that is neither helm nor trap gets the two copy-paste sign-on commands. |
-| PostToolUse hook (`lobstah soak beat`) | Refreshes a soaking trap's liveness and records redacted activity after supported tool calls (Codex 0.117.0+). |
-| Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
-| SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off cleanly when it ends and keeps its worktree. |
+| SessionStart hook (`lobstah hook session-start`) | Announces the session's id and a one-line fleet state into the conversation, so every session starts oriented. A session that is neither helm nor trap gets the two copy-paste sign-on commands. |
+| PostToolUse hook (`lobstah hook post-tool-use`) | Refreshes a soaking trap's liveness and records redacted activity after supported tool calls (Codex 0.117.0+). |
+| Stop hook (`lobstah hook stop`) | Parks the session at turn end while work is in flight and wakes it the moment something needs attention. Inert unless the session holds the helm or is soaking (or the directory opts in with a `.lobstah-man` file or `LOBSTAH_MAN=1`). |
+| SessionEnd hook (`lobstah hook session-end`) | Signs a soaking session off cleanly when it ends and keeps its worktree. |
 | `man` skill | The orchestrator: taking the helm, the charter fences, dispatching, addressing traps, tending, getting woken, relieving. |
 | `trap` skill | The worker: soaking, its two-word name and `wt:` id, the six report verbs, inbox, optional session title, `paused --waiting-on` before external waits, stowing. |
 
