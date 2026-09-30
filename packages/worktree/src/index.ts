@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { exec, execFile } from 'node:child_process';
+import { exec, execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   acquireWorktreeLock,
@@ -125,9 +125,58 @@ function pidAlive(pid: number): boolean {
 const BUSY = new Set(['EPERM', 'EACCES', 'EBUSY']);
 
 /**
+ * One attempt at `lobstah-git.lock` in the git common dir: `held` when this
+ * call took it, `retry` when a stale holder was just cleared, `wait` while
+ * a live holder has it. A lock whose process is gone, or older than
+ * REPO_LOCK_WAIT_MS, is stale. `holder` is the live holder's pid.
+ */
+function takeRepoLock(file: string, mine: string): { state: 'held' | 'retry' | 'wait'; holder?: number } {
+  try {
+    fs.writeFileSync(file, mine, { flag: 'wx' });
+    return { state: 'held' };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code ?? '';
+    if (code !== 'EEXIST' && !BUSY.has(code)) throw err;
+  }
+  let raw = '';
+  let age = 0;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+    age = Date.now() - fs.statSync(file).mtimeMs;
+  } catch {
+    return { state: 'retry' }; // released (or being deleted) between our create and our read
+  }
+  let holder: RepoLock | undefined;
+  try {
+    holder = JSON.parse(raw) as RepoLock;
+  } catch {
+    holder = undefined; // being written, or torn: stale only when old
+  }
+  const stale = age > REPO_LOCK_WAIT_MS || (holder ? !pidAlive(holder.pid) : age > 5_000);
+  if (stale) {
+    try {
+      if (fs.readFileSync(file, 'utf8') === raw) fs.rmSync(file, { force: true });
+    } catch {
+      // gone already
+    }
+    return { state: 'retry' };
+  }
+  return { state: 'wait', ...(holder ? { holder: holder.pid } : {}) };
+}
+
+/** Release the lock when this holder still owns it. */
+function releaseRepoLock(file: string, mine: string): void {
+  try {
+    if (fs.readFileSync(file, 'utf8') === mine) fs.rmSync(file, { force: true, recursive: true, maxRetries: 5 });
+  } catch {
+    // gone already
+  }
+}
+
+/**
  * Run `fn` while holding `lobstah-git.lock` in the git common dir, so runner
- * processes allocating in one repo take turns. A lock whose process is gone,
- * or older than REPO_LOCK_WAIT_MS, is stale.
+ * processes allocating in one repo take turns. After REPO_LOCK_WAIT_MS the
+ * waiter runs anyway (the lock-contention retry covers a collision then).
  */
 async function withRepoLock(common: string, fn: () => Promise<void>): Promise<void> {
   const file = path.join(common, 'lobstah-git.lock');
@@ -135,49 +184,54 @@ async function withRepoLock(common: string, fn: () => Promise<void>): Promise<vo
   const deadline = Date.now() + REPO_LOCK_WAIT_MS;
   let held = false;
   while (Date.now() < deadline) {
-    try {
-      fs.writeFileSync(file, mine, { flag: 'wx' });
+    const took = takeRepoLock(file, mine);
+    if (took.state === 'held') {
       held = true;
       break;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code ?? '';
-      if (code !== 'EEXIST' && !BUSY.has(code)) throw err;
     }
-    let raw = '';
-    let age = 0;
-    try {
-      raw = fs.readFileSync(file, 'utf8');
-      age = Date.now() - fs.statSync(file).mtimeMs;
-    } catch {
-      continue; // released (or being deleted) between our create and our read
-    }
-    let holder: RepoLock | undefined;
-    try {
-      holder = JSON.parse(raw) as RepoLock;
-    } catch {
-      holder = undefined; // being written, or torn: stale only when old
-    }
-    const stale = age > REPO_LOCK_WAIT_MS || (holder ? !pidAlive(holder.pid) : age > 5_000);
-    if (stale) {
-      try {
-        if (fs.readFileSync(file, 'utf8') === raw) fs.rmSync(file, { force: true });
-      } catch {
-        // gone already
-      }
-      continue;
-    }
-    await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
+    if (took.state === 'wait') await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
   }
   try {
     await fn();
   } finally {
-    if (held) {
-      try {
-        if (fs.readFileSync(file, 'utf8') === mine) fs.rmSync(file, { force: true, recursive: true, maxRetries: 5 });
-      } catch {
-        // gone already
-      }
+    if (held) releaseRepoLock(file, mine);
+  }
+}
+
+/**
+ * `withRepoLock` for synchronous callers (the release pass): `fn` runs while
+ * holding the same lock, so a fetch there takes turns with runner
+ * allocations in the same repo. It blocks while it waits. A holder in this
+ * same process cannot release while this call blocks, so it runs without
+ * waiting then. `cwd` is any checkout of the repo.
+ */
+export function withRepoLockSync<T>(cwd: string, fn: () => T): T {
+  let common: string;
+  try {
+    common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return fn(); // not a git checkout: nothing to take turns with
+  }
+  const file = path.join(common, 'lobstah-git.lock');
+  const mine = JSON.stringify({ pid: process.pid, at: new Date().toISOString() } satisfies RepoLock);
+  const deadline = Date.now() + REPO_LOCK_WAIT_MS;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  let held = false;
+  while (Date.now() < deadline) {
+    const took = takeRepoLock(file, mine);
+    if (took.state === 'held') {
+      held = true;
+      break;
     }
+    if (took.state === 'wait') {
+      if (took.holder === process.pid) break;
+      Atomics.wait(pause, 0, 0, 50 + Math.random() * 50);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) releaseRepoLock(file, mine);
   }
 }
 

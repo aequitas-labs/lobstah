@@ -1,8 +1,11 @@
 /**
  * A wall-clock limit that does not run while the worker is paused on
- * something external. It ticks every `tickMs`, adds the elapsed time only
- * when `paused()` is false, and calls `onExpire` once the running time
- * reaches `limitMs`.
+ * something external, or while the machine sleeps. It ticks every
+ * `tickMs`, adds the elapsed time only when `paused()` is false, and calls
+ * `onExpire` once the running time reaches `limitMs`. A tick that comes
+ * much later than `tickMs` (longer than `sleepGapMs`) crossed a system
+ * sleep: it adds at most one tick, so a laptop that sleeps overnight does
+ * not wake to an expired budget.
  */
 export interface WallClock {
   stop(): void;
@@ -23,10 +26,13 @@ export function startWallClock(opts: {
   onTick?: (elapsedMs: number, windowMs: number) => void;
   onExpire: () => void;
   tickMs?: number;
+  /** A gap between ticks longer than this is a sleep (default: 60 s, or six ticks if longer). */
+  sleepGapMs?: number;
   now?: () => number;
 }): WallClock {
   const now = opts.now ?? Date.now;
   const tickMs = Math.max(1, Math.min(opts.tickMs ?? 5000, opts.limitMs));
+  const sleepGapMs = opts.sleepGapMs ?? Math.max(60_000, tickMs * 6);
   let elapsed = opts.initialElapsedMs ?? 0;
   const maxMs = Math.max(opts.limitMs, opts.maxMs ?? opts.limitMs);
   let windowMs = Math.min(maxMs, Math.max(opts.limitMs, opts.initialWindowMs ?? opts.limitMs));
@@ -40,7 +46,9 @@ export function startWallClock(opts: {
     } catch {
       paused = false;
     }
-    if (!paused) elapsed += t - last;
+    // Awake time only: the interval that spans a sleep counts as one tick.
+    const step = Math.max(0, t - last);
+    if (!paused) elapsed += step > sleepGapMs ? Math.min(step, tickMs) : step;
     last = t;
     if (!done && elapsed >= windowMs && elapsed < maxMs) {
       let advanced = false;

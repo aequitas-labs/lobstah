@@ -104,3 +104,38 @@ describe('the wall clock does not run while paused on something external', () =>
     expect(expired).toBe(1);
   });
 });
+
+describe('the wall clock counts awake time only', () => {
+  it('a system sleep between ticks adds at most one tick; awake time before and after counts', () => {
+    vi.useFakeTimers();
+    let t = 0;
+    let expired = 0;
+    const clock = startWallClock({ limitMs: 3_600_000, tickMs: 5000, now: () => t, paused: () => false, onExpire: () => expired++ });
+    const awake = (seconds: number) => {
+      for (let i = 0; i < seconds / 5; i++) { t += 5000; vi.advanceTimersByTime(5000); }
+    };
+    awake(600);
+    expect(clock.elapsed()).toBe(600_000);
+    // The laptop sleeps for eight hours: the clock jumps, the timer fires once on wake.
+    t += 8 * 3_600_000;
+    vi.advanceTimersByTime(5000);
+    expect(clock.elapsed()).toBe(605_000);
+    expect(expired).toBe(0);
+    awake(600);
+    expect(clock.elapsed()).toBe(1_205_000);
+    clock.stop();
+  });
+
+  it('[sleepGapMs] sets the threshold; a slow tick below it still counts in full', () => {
+    vi.useFakeTimers();
+    let t = 0;
+    const clock = startWallClock({ limitMs: 3_600_000, tickMs: 1000, sleepGapMs: 30_000, now: () => t, paused: () => false, onExpire: () => {} });
+    t += 20_000;
+    vi.advanceTimersByTime(1000);
+    expect(clock.elapsed()).toBe(20_000);
+    t += 40_000;
+    vi.advanceTimersByTime(1000);
+    expect(clock.elapsed()).toBe(21_000);
+    clock.stop();
+  });
+});

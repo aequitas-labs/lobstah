@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   appendStatus,
@@ -284,5 +284,27 @@ describe('releaseOnMerge', () => {
     pass();
     expect(fs.existsSync(wtOf('origin'))).toBe(true);
     expect(readKeptWorktrees()).toEqual([]);
+  });
+});
+
+describe('the release fetch and the per-repo git lock', () => {
+  it('waits while another process holds the repo lock, then fetches and releases', () => {
+    config(true);
+    finished('d1', { pr: 42 });
+    pr(42, 'MERGED', ['d1']);
+    const lock = path.join(repo, '.git', 'lobstah-git.lock');
+    const script = `const fs=require('fs');fs.writeFileSync(${JSON.stringify(lock)},JSON.stringify({pid:process.pid,at:new Date().toISOString()}));setTimeout(()=>{fs.rmSync(${JSON.stringify(lock)},{force:true});process.exit(0)},1200);`;
+    const holder = spawn(process.execPath, ['-e', script], { stdio: 'ignore' });
+    try {
+      const pause = new Int32Array(new SharedArrayBuffer(4));
+      for (let i = 0; i < 200 && !fs.existsSync(lock); i++) Atomics.wait(pause, 0, 0, 25);
+      const t0 = Date.now();
+      pass();
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(900);
+      expect(fs.existsSync(wtOf('d1'))).toBe(false);
+      expect(fs.existsSync(lock)).toBe(false);
+    } finally {
+      holder.kill('SIGKILL');
+    }
   });
 });
