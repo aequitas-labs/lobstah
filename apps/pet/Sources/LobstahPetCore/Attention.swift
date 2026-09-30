@@ -36,10 +36,10 @@ public struct AttentionItem: Decodable, Equatable {
   /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
   public var prLink: URL? { (kind?.hasPrefix("pr:") ?? false) ? prUrl.flatMap(URL.init(string:)) : nil }
 
-  /** A report pet clicks through to the spyglass at the report's modal (#report/<key>). */
+  /** A report pet clicks through to the report's own page on the spyglass (/report/<key>). */
   public func reportLink(glass: URL) -> URL? {
     guard kind == "report", let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
-    return URL(string: "\(glass.absoluteString)/#report/\(encoded)")
+    return URL(string: "\(glass.absoluteString)/report/\(encoded)")
   }
 
   /**
@@ -79,18 +79,24 @@ public struct AttentionItem: Decodable, Equatable {
   }
 }
 
-/// Opens a pet's target before acknowledging it. Items without a URL focus the helm.
+/// Opens a pet's target before acknowledging it. A decision brings up the
+/// live helm's session, which frames it; with no live helm it opens its glass
+/// card. Reports and PRs open their URLs. Other items focus the helm.
+/// `focusHelm` gets the glass URL to open when no helm step works.
 public func clickAttentionItem(
   _ item: AttentionItem,
   glass: URL,
+  helmLive: Bool = false,
   open: (URL) -> Void,
-  focusHelm: () -> Void,
+  focusHelm: (URL) -> Void,
   acknowledge: ([String]) -> Void
 ) {
-  if let url = item.reportLink(glass: glass) ?? item.decisionLink(glass: glass) ?? item.prLink {
+  if let card = item.decisionLink(glass: glass) {
+    if helmLive { focusHelm(card) } else { open(card) }
+  } else if let url = item.reportLink(glass: glass) ?? item.prLink {
     open(url)
   } else {
-    focusHelm()
+    focusHelm(glass)
   }
   if let args = item.ackArguments { acknowledge(args) }
 }

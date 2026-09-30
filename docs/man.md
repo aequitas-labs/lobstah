@@ -462,9 +462,10 @@ the helm files to keep.
   unacked first, up to 8, then "+N more", which opens the Reports tab. A
   report's card or row shows its title, then who filed it (a trap's name, a
   headless dispatch's id, nothing for the helm), its age, and `acked`. A
-  dispatch's report renders as a
-  page at the top of its dispatch modal. A helm report opens in a modal of
-  its own; `#report/<key>` links to it. The page shows headings, lists,
+  report opens on its own page, `/report/<key>`, in a new tab: from its card
+  or row, a lob, the desktop pet, or its dispatch's modal. The page renders
+  once and does not refresh; opening it does not ack the report.
+  `#report/<key>` goes to that page. The page shows headings, lists,
   tables, fenced code, links (in a new tab), bold, italics, and images.
   Raw HTML in the markdown shows as text. The glass serves the markdown and
   the images read-only, and an image only by basename from that report's
@@ -558,9 +559,11 @@ the same rule.
   [--text <text>] [--attach <file>]...` answers the same way, with the same
   checks.
 - **The pet.** The desktop pet shows a decision as its title only. A click
-  opens the glass at the card and acks the item for the pet
-  (`lobstah attention ack <key> --by pet`). The card stays in the glass until
-  the decision is answered or withdrawn.
+  brings up the live helm's session through the pet's focus ladder: the
+  Claude desktop app for a desktop helm, the exact terminal tab for a terminal
+  helm. With no live helm, it opens the glass at the card. Either way it acks
+  the item for the pet (`lobstah attention ack <key> --by pet`). The card
+  stays in the glass until the decision is answered or withdrawn.
 - **Cull.** `lobstah cull` removes a decision once its answer is older than
   the retention window, with the `decision-answer` request and its files. A
   standing decision is never culled.

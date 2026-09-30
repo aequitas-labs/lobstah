@@ -210,10 +210,11 @@ export function parseMarkdown(markdown: string): MdBlock[] {
     }
     if (QUOTE.test(line)) {
       const body: string[] = [];
-      while (i < lines.length && lines[i]!.trim() && (QUOTE.test(lines[i]!) || !startsBlock(lines[i]!)))
+      while (i < lines.length && lines[i]!.trim() && (QUOTE.test(lines[i]!) || !startsBlock(lines[i]!))) {
         body.push(QUOTE.exec(lines[i]!)?.[1] ?? lines[i]!);
+        i++;
+      }
       out.push({ t: 'quote', c: parseMarkdown(body.join('\n')) });
-      i += body.length;
       continue;
     }
     const bullet = BULLET.exec(line);

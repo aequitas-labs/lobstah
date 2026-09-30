@@ -3,10 +3,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type * as http from 'node:http';
-import { dispatchReportKey, ensureLayout, fileReport } from '@lobstah/core';
+import { request as httpRequest } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { dispatchReportKey, ensureLayout, fileReport, listReports } from '@lobstah/core';
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
-import { serveReport } from '../src/glass.js';
+import { serveGlass, serveReport } from '../src/glass.js';
 import { parseMarkdown, parseInline } from '../src/glass-markdown.js';
 import { lobItems } from '../src/glass-lobs.js';
 import { loadGlass } from './glass-dom.js';
@@ -15,9 +17,10 @@ import { NOW, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snap
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
- * Reports in the spyglass: the deck's reports block, the report page in the
- * dispatch modal and in a helm report's own modal, the sanitized markdown,
- * and the read-only endpoint that serves a report's markdown and images.
+ * Reports in the spyglass: the deck's reports block, the report's own page
+ * (rendered once, never polled), the link to it from a dispatch's modal, the
+ * sanitized markdown, and the read-only endpoints that serve a report's page,
+ * row, markdown, and images.
  */
 
 const TRAP_KEY = 'report:work:cccccccc-0000-4000-8000-000000000003';
@@ -68,10 +71,6 @@ const click = async (g: GlassDom, el: Element | null) => {
   (el as HTMLElement).click();
   await g.settle();
 };
-const escape = async (g: GlassDom) => {
-  g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
-  await g.settle();
-};
 const reportsSection = (g: GlassDom) => g.$$('#deck .deckgrid > section').find((s) => text(s.querySelector('h2')) === 'reports →')!;
 
 describe('glass: the deck reports block', () => {
@@ -111,61 +110,79 @@ describe('glass: the deck reports block', () => {
   });
 });
 
-describe('glass: report modals', () => {
-  it("a trap's report renders at the top of its dispatch modal: headings, image, table, code, links", async () => {
-    const g = await page(everyAttentionFleet());
-    await click(g, [...reportsSection(g).querySelectorAll('.deckline')].find((l) => text(l).includes('Tray findings')) ?? null);
-    expect(text(g.$('#modalbox h3'))).toContain('cccccccc');
-    const page_ = g.$('#modalbox .mdpage')!;
-    expect(g.reportFetches()).toEqual([md(TRAP_KEY)]);
+describe('glass: a report page', () => {
+  const pagePath = (key: string) => `/report/${encodeURIComponent(key)}`;
+  const meta = (key: string) => `/report/${encodeURIComponent(key)}/meta`;
+  const reportPage = async (key: string) => {
+    const fleet = everyAttentionFleet();
+    const row = (fleet.reports ?? []).find((r) => r.key === key)!;
+    return page(fleet, { path: pagePath(key), files: { [md(TRAP_KEY)]: TRAP_MD, [md(HELM_KEY)]: HELM_MD, [meta(key)]: JSON.stringify(row) } });
+  };
+
+  it("renders a trap's report once: headings, image, table, code, links, byline, and the ack command", async () => {
+    const g = await reportPage(TRAP_KEY);
+    expect(g.reportFetches()).toEqual([meta(TRAP_KEY), md(TRAP_KEY)]);
+    expect(text(g.$('.reportview h1'))).toBe('Tray findings');
+    expect(text(g.$('.reportview .sub'))).toBe('kind-crab · 20m ago');
+    const page_ = g.$('.reportview .mdpage')!;
     expect(text(page_.querySelector('h1'))).toBe('Tray findings');
     expect(text(page_.querySelector('strong'))).toBe('fits');
-    expect(text(page_.querySelector('em'))).toBe('base');
     expect(page_.querySelector('img')!.getAttribute('src')).toBe(`/report/${encodeURIComponent(TRAP_KEY)}/files/tray.png`);
-    expect(page_.querySelector('img')!.getAttribute('alt')).toBe('the tray');
     expect([...page_.querySelectorAll('td')].map(text)).toEqual(['tray', '42']);
     expect(text(page_.querySelector('pre.mdcode'))).toBe('measure --all');
-    expect(page_.querySelectorAll('li')).toHaveLength(2);
-    const links = [...page_.querySelectorAll('a')];
-    expect(links.map((a) => [a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel')])).toEqual([
+    expect([...page_.querySelectorAll('a')].map((a) => [a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel')])).toEqual([
       ['https://example.com/docs', '_blank', 'noopener noreferrer'],
     ]);
-    expect(text(page_)).toContain('bad');
-    // The report sits above the brief and the attachments.
-    const secs = g.$$('#modalbox .sec').map(text);
-    expect(secs.indexOf('report · Tray findings')).toBeLessThan(secs.indexOf('brief'));
-    expect(text(g.$('#modalbox'))).toContain('lobstah attention ack ' + TRAP_KEY);
+    expect(text(g.$('.reportview'))).toContain('lobstah attention ack ' + TRAP_KEY);
+    expect(g.document.title).toBe('Tray findings · lobstah glass');
+    // It never polls: no /data fetch and no interval, so nothing re-renders while someone reads.
+    expect(g.fetches()).toBe(0);
+    expect(g.intervals()).toEqual([]);
+    expect(g.$('#deck')).toBeNull();
   });
 
-  it('a helm report opens in its own modal, and raw HTML shows as text', async () => {
-    const g = await page(everyAttentionFleet());
-    await click(g, [...reportsSection(g).querySelectorAll('.deckline')].find((l) => text(l).includes('Fleet notes')) ?? null);
-    expect(text(g.$('#modalbox h3'))).toBe('📄 Fleet notes');
-    const page_ = g.$('#modalbox .mdpage')!;
+  it('shows raw HTML in a helm report as text and loads no remote or path image', async () => {
+    const g = await reportPage(HELM_KEY);
+    const page_ = g.$('.reportview .mdpage')!;
     expect(page_.querySelector('script')).toBeNull();
     expect(page_.querySelector('b')).toBeNull();
     expect(text(page_)).toContain('<script>alert(1)</script><b>bold?</b>');
-    // A remote image and a path are not loaded.
     expect(page_.querySelectorAll('img')).toHaveLength(0);
     expect(text(page_)).toContain('[image not shown: remote]');
-    expect(text(page_)).toContain('[image not shown: up]');
   });
 
-  it('#report/<key> opens the report on load; opening it does not ack it', async () => {
-    const g = await page(everyAttentionFleet(), { hash: '#report/' + encodeURIComponent(HELM_KEY) });
-    expect(g.$('#overlay')!.className).toBe('open');
-    expect(text(g.$('#modalbox h3'))).toBe('📄 Fleet notes');
-    // The helm's own report: no "from", the age, and no "acked".
-    expect(text(g.$('#modalbox .sub'))).toBe('5m ago');
-    expect(text(g.$('#modalbox'))).toContain('lobstah attention ack ' + HELM_KEY);
-    await g.poll();
-    expect(g.reportFetches()).toEqual([md(HELM_KEY)]);
+  it('says so when the report is gone', async () => {
+    const g = await page(everyAttentionFleet(), { path: pagePath('report:helm:fleet:ffffffff') });
+    expect(text(g.$('.reportview .bad'))).toBe('report not found (404)');
   });
 
-  it('a dispatch key in #report/<key> opens that dispatch', async () => {
-    const g = await page(everyAttentionFleet(), { hash: '#report/' + encodeURIComponent(TRAP_KEY) });
-    expect(text(g.$('#modalbox h3'))).toContain('cccccccc');
-    expect(text(g.$('#modalbox .mdpage h1'))).toBe('Tray findings');
+  it('an old #report/<key> link goes to the report page and starts nothing else', async () => {
+    for (const key of [HELM_KEY, TRAP_KEY]) {
+      const g = await page(everyAttentionFleet(), { hash: '#report/' + encodeURIComponent(key) });
+      expect(g.replaced()).toEqual([pagePath(key)]);
+      expect(g.fetches()).toBe(0);
+    }
+  });
+
+  it("a dispatch's modal names its report and links to the page; it renders no markdown", async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#dispatches' });
+    await click(g, g.$$('#dispatches tr.rowhead').find((r) => text(r).includes('cccccccc')) ?? null);
+    expect(g.$$('#modalbox .sec').map(text)).toContain('report · Tray findings');
+    const link = [...g.$$('#modalbox a')].find((a) => text(a) === 'open the report ↗')!;
+    expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([pagePath(TRAP_KEY), '_blank', 'noopener']);
+    expect(g.$('#modalbox .mdpage')).toBeNull();
+    expect(g.reportFetches()).toEqual([]);
+  });
+
+  it("the deck's reports block links each report to its page in a new tab", async () => {
+    const g = await page(everyAttentionFleet());
+    const lines = [...reportsSection(g).querySelectorAll('a.deckline')];
+    const tray = lines.find((l) => text(l).includes('Tray findings'))!;
+    expect([tray.getAttribute('href'), tray.getAttribute('target'), tray.getAttribute('rel')]).toEqual([pagePath(TRAP_KEY), '_blank', 'noopener']);
+    const cards = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
+    const card = [...reportsSection(cards).querySelectorAll('a.card')].find((c) => text(c).includes('Fleet notes'))!;
+    expect(card.getAttribute('href')).toBe(pagePath(HELM_KEY));
+    expect(card.getAttribute('target')).toBe('_blank');
   });
 });
 
@@ -195,14 +212,17 @@ describe('glass: the Reports tab', () => {
     expect(byRepo.$$('#reports tr.rowhead').map((r) => text(r.querySelector('td')))).toEqual(['Tray findings', 'Build timings']);
   });
 
-  it('a row opens its report: a dispatch report its dispatch, a helm report its own modal', async () => {
+  it("a row, a card, or the title opens the report's own page in a new tab", async () => {
     const g = await page(everyAttentionFleet(), { hash: '#reports' });
     await click(g, g.$$('#reports tr.rowhead').find((r) => text(r).includes('Build timings')) ?? null);
-    expect(text(g.$('#modalbox h3'))).toContain('aaaaaaaa');
-    expect(g.$$('#modalbox .sub').map(text)).toContain('aaaaaaaa · 40m ago');
-    await escape(g);
-    await click(g, g.$$('#reports tr.rowhead').find((r) => text(r).includes('Fleet notes')) ?? null);
-    expect(text(g.$('#modalbox h3'))).toBe('📄 Fleet notes');
+    const buildKey = (everyAttentionFleet().reports ?? []).find((r) => r.title === 'Build timings')!.key;
+    expect(g.opened()).toEqual([[`/report/${encodeURIComponent(buildKey)}`, '_blank', 'noopener']]);
+    expect(g.$('#overlay')!.className).toBe('');
+    const title = g.$$('#reports tr.rowhead td a').find((a) => text(a) === 'Fleet notes')!;
+    expect([title.getAttribute('href'), title.getAttribute('target'), title.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(HELM_KEY)}`, '_blank', 'noopener']);
+    const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
+    const card = cards.$$('#reports a.card').find((c) => text(c).includes('Tray findings'))!;
+    expect([card.getAttribute('href'), card.getAttribute('target'), card.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']);
   });
 });
 
@@ -323,7 +343,7 @@ describe('glass: the open-window button', () => {
 });
 
 describe('glass: a report lob', () => {
-  it('walks with the report label and opens its report', () => {
+  it("walks with the report label and links to the report's page", () => {
     const items = lobItems(
       [
         { id: '0a1b2c3d', lane: 'work', verb: 'report', kind: 'report', key: HELM_KEY, stateHash: 'r2', note: 'Fleet notes' },
@@ -331,9 +351,9 @@ describe('glass: a report lob', () => {
       ],
       { lobs: true, preview: false },
     );
-    expect(items.map((i) => [i.label, i.text, i.open])).toEqual([
-      ['report', 'Fleet notes', { type: 'report', key: HELM_KEY }],
-      ['report', 'Tray findings', { type: 'dispatch', key: 'work:cccccccc-0000-4000-8000-000000000003' }],
+    expect(items.map((i) => [i.label, i.text, i.href, i.open])).toEqual([
+      ['report', 'Fleet notes', `/report/${encodeURIComponent(HELM_KEY)}`, undefined],
+      ['report', 'Tray findings', `/report/${encodeURIComponent(TRAP_KEY)}`, undefined],
     ]);
   });
 });
@@ -351,6 +371,74 @@ describe('glass: the report markdown', () => {
       { t: 'code', v: 'd' },
       { t: 'text', v: ' *e' },
     ]);
+  });
+});
+
+describe('glass: a block quote', () => {
+  it('parses to the end: a quote, a nested quote, and the text after it', () => {
+    const blocks = parseMarkdown('> one\n> two\n>\n> > inner\n\nafter\n\n> last');
+    expect(blocks.map((b) => b.t)).toEqual(['quote', 'p', 'quote']);
+    const quote = blocks[0] as { t: 'quote'; c: Array<{ t: string }> };
+    expect(quote.c.map((b) => b.t)).toEqual(['p', 'quote']);
+  });
+
+  it('parses a long report with quotes in milliseconds', () => {
+    const report = Array.from({ length: 200 }, (_, i) => `## Part ${i}\n\n> a quoted line ${i}\n> and more\n\n| a | b |\n| - | - |\n| ${i} | x |\n`).join('\n');
+    const t = performance.now();
+    expect(parseMarkdown(report).filter((b) => b.t === 'quote')).toHaveLength(200);
+    expect(performance.now() - t).toBeLessThan(2000);
+  });
+});
+
+describe('glass: the report page route', () => {
+  let server: http.Server | undefined;
+  afterEach(async () => {
+    if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+    server = undefined;
+  });
+  const get = (base: string, url: string, host?: string): Promise<{ status?: number; type?: string; body: string }> =>
+    new Promise((resolve, reject) => {
+      const req = httpRequest(`${base}${url}`, { headers: host ? { Host: host } : {} }, (res) => {
+        let body = '';
+        res.on('data', (c: Buffer) => (body += c.toString('utf8')));
+        res.on('end', () => resolve({ status: res.statusCode, type: String(res.headers['content-type'] ?? ''), body }));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+
+  it('serves the page and the row to its own host only, refuses a rebound name, and never acks', async () => {
+    ensureLayout();
+    const src = path.join(home, 'src');
+    fs.mkdirSync(src);
+    fs.writeFileSync(path.join(src, 'r.md'), '# Findings\n\n> quoted\n');
+    const key = dispatchReportKey('eeeeeeee-0000-4000-8000-000000000006', 'work');
+    fileReport({ key, file: path.join(src, 'r.md'), attach: [], fallbackTitle: 'r', author: 'headless', maxBytes: 1_000_000 });
+    server = serveGlass(0);
+    await new Promise<void>((resolve) => server!.once('listening', resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const k = encodeURIComponent(key);
+
+    const pageRes = await get(base, `/report/${k}`);
+    expect(pageRes.status).toBe(200);
+    expect(pageRes.type).toBe('text/html; charset=utf-8');
+    expect(pageRes.body).toBe(GLASS_PAGE);
+    const metaRes = await get(base, `/report/${k}/meta`);
+    expect(metaRes.status).toBe(200);
+    expect(JSON.parse(metaRes.body)).toMatchObject({ key, title: 'Findings', author: 'headless' });
+    expect((await get(base, `/report/${k}/md`)).body).toContain('> quoted');
+
+    // A name rebound to this machine is refused.
+    expect((await get(base, `/report/${k}`, 'evil.example')).status).toBe(403);
+    expect((await get(base, `/report/${k}/meta`, 'evil.example')).status).toBe(403);
+    // An unknown key is a 404.
+    expect((await get(base, `/report/${encodeURIComponent('report:helm:fleet:ffffffff')}`)).status).toBe(404);
+    expect((await get(base, `/report/${encodeURIComponent('report:helm:fleet:ffffffff')}/meta`)).status).toBe(404);
+
+    // Opening the page, its row, and its markdown acks nothing.
+    expect(listReports().find((r) => r.key === key)).toBeDefined();
+    expect(JSON.parse((await get(base, `/report/${k}/meta`)).body).acked).toBeUndefined();
+    expect(fs.existsSync(path.join(home, 'acks')) ? fs.readdirSync(path.join(home, 'acks')) : []).toEqual([]);
   });
 });
 
