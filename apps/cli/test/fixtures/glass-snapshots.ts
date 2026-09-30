@@ -267,6 +267,31 @@ export function acceptanceFleet(): GlassSnapshot {
   return d;
 }
 
+/**
+ * One trap in each live state: working a catch, idle and listening, parked on
+ * a review wait, and idle with a stale heartbeat (not listening).
+ */
+export function trapStatesFleet(): GlassSnapshot {
+  const d = acceptanceFleet();
+  const c = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
+  const working = { ...c, verb: 'working' as const, note: undefined, brief: 'Polish the glass trap deck' };
+  const parked = dispatch('eeeeeeee-0000-4000-8000-000000000005', {
+    verb: 'paused',
+    claimedBy: 'wt:parked',
+    waiting: { on: 'review', since: ago(3 * MIN), waitedSecs: 180 },
+    sort: NOW - 3 * MIN,
+  });
+  d.dispatches = d.dispatches.map((x) => (x.id === c.id ? working : x)).concat(parked);
+  d.attention = [];
+  d.traps = [
+    trap('working', { label: 'working trap', claimed: working.id, catches: [working] }),
+    trap('listening', { label: 'listening trap' }),
+    trap('parked', { label: 'parked trap', claimed: parked.id, catches: [parked] }),
+    trap('stale', { label: 'stale trap', heartbeatAt: ago(45 * MIN) }),
+  ];
+  return d;
+}
+
 /** Every attention kind at once, some acked, plus a stale daemon and helm and more than a deck's worth of each list. */
 export function everyAttentionFleet(): GlassSnapshot {
   const d = acceptanceFleet();

@@ -251,43 +251,64 @@ export function trapRow(t: GlassTrap): TrapRowView {
   };
 }
 
-/** One current activity line for deck and traps tab, from the shared snapshot. */
-export function trapNow(t: GlassTrap): Children {
-  if (!t.live) return html`<span class="dim">signed off</span>`;
-  const current = t.claimed && t.catches.find((c) => c.id === t.claimed && c.bucket === 'active');
+/** A trap's state: signed off, idle (listening or not), parked on a wait, or working a catch. */
+type TrapState =
+  | { kind: 'signed off' }
+  | { kind: 'idle'; listening: boolean }
+  | { kind: 'parked'; current: GlassDispatch }
+  | { kind: 'working'; current: GlassDispatch };
+
+function trapState(t: GlassTrap): TrapState {
+  if (!t.live) return { kind: 'signed off' };
+  const current = t.claimed ? t.catches.find((c) => c.id === t.claimed && c.bucket === 'active') : undefined;
   if (!current)
-    return [
-      'idle · ',
-      (t.listening ?? (!!t.firstParkedAt && Date.now() - Date.parse(t.heartbeatAt ?? '') <= 1800000)) ? 'listening' : 'not listening',
-    ];
-  if (current.waiting || current.verb === 'paused')
-    return ['parked · ', current.waiting ? `waiting on ${current.waiting.on}` : current.note || 'waiting'];
+    return { kind: 'idle', listening: t.listening ?? (!!t.firstParkedAt && Date.now() - Date.parse(t.heartbeatAt ?? '') <= 1800000) };
+  if (current.waiting || current.verb === 'paused') return { kind: 'parked', current };
+  return { kind: 'working', current };
+}
+
+/** The state dot's tone: green working or listening, amber parked, grey not listening or signed off. */
+export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'dim' {
+  const s = trapState(t);
+  if (s.kind === 'working' || (s.kind === 'idle' && s.listening)) return 'ok';
+  return s.kind === 'parked' ? 'warn' : 'dim';
+}
+
+const parkedText = (c: GlassDispatch) => (c.waiting ? `waiting on ${c.waiting.on}` : c.note || 'waiting');
+const workTitle = (c: GlassDispatch) => c.brief.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '(no title)';
+
+/** One current activity line for deck and traps tab, from the shared snapshot, led by the state dot. */
+export function trapNow(t: GlassTrap): Children {
+  const s = trapState(t);
+  const dot = html`<span class=${'dot trapdot ' + trapDotTone(t)}></span>`;
+  if (s.kind === 'signed off') return [dot, html`<span class="dim">signed off</span>`];
+  if (s.kind === 'idle') return [dot, 'idle · ', s.listening ? 'listening' : 'not listening'];
+  const current = s.current;
+  if (s.kind === 'parked') return [dot, 'parked · ', parkedText(current)];
   const openDispatch = (event: MouseEvent) => {
     event.preventDefault();
     stop(event);
     showModal('dispatch', `${current.lane}:${current.id}`);
   };
-  const title = current.brief.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '(no title)';
   return [
+    dot,
     'working · ',
     html`<a href="#dispatches" onClick=${openDispatch}>${current.id.slice(0, 8)}</a>`,
     ' · ',
-    title,
+    workTitle(current),
     current.activity && [' · ', current.activity.summary, ' ', Age(current.activity.at), ' ago'],
   ];
 }
 
 /** trapNow as plain text: the hover title of a clamped meta line. */
 export function trapNowText(t: GlassTrap): string {
-  if (!t.live) return 'signed off';
-  const current = t.claimed && t.catches.find((c) => c.id === t.claimed && c.bucket === 'active');
-  if (!current)
-    return `idle · ${(t.listening ?? (!!t.firstParkedAt && Date.now() - Date.parse(t.heartbeatAt ?? '') <= 1800000)) ? 'listening' : 'not listening'}`;
-  if (current.waiting || current.verb === 'paused')
-    return `parked · ${current.waiting ? `waiting on ${current.waiting.on}` : current.note || 'waiting'}`;
-  const title = current.brief.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '(no title)';
+  const s = trapState(t);
+  if (s.kind === 'signed off') return 'signed off';
+  if (s.kind === 'idle') return `idle · ${s.listening ? 'listening' : 'not listening'}`;
+  if (s.kind === 'parked') return `parked · ${parkedText(s.current)}`;
+  const current = s.current;
   return [
-    `working · ${current.id.slice(0, 8)} · ${title}`,
+    `working · ${current.id.slice(0, 8)} · ${workTitle(current)}`,
     current.activity && `${current.activity.summary} ${ageText(current.activity.at)} ago`,
   ]
     .filter(Boolean)

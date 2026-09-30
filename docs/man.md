@@ -424,7 +424,11 @@ The On deck tab shows up to 8 traps. Signed-on traps come first, oldest
 sign-on first, with name breaking ties. Traps stowed or ghosted in the last
 hour follow, most recent sign-off first, with name breaking ties. A "+N more"
 link opens the traps tab for the rest, in the same order. Both views show each
-trap's current dispatch, last activity, or idle and waiting state.
+trap's current dispatch, last activity, or idle and waiting state. A dot leads
+that state line on the deck, the traps tab cards, and the traps tab table. The
+dot is green when the trap is working or idle and listening. It is amber when
+the trap is parked. It is grey when the trap is not listening (its heartbeat is
+stale) or signed off.
 
 This is where "is the agent alive?" belongs: the helm's heartbeat age on a
 page, not periodic proof-of-life turns in a transcript.

@@ -6,7 +6,7 @@ import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
-import { NOW, PR_TITLES, acceptanceFleet, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
+import { NOW, PR_TITLES, acceptanceFleet, ago, emptyFleet, everyAttentionFleet, trapStatesFleet } from './fixtures/glass-snapshots.js';
 
 /**
  * The spyglass page, tested as a page: the built HTML loads into happy-dom,
@@ -94,6 +94,44 @@ describe('glass page: tabs and hash routing', () => {
     expect(rows.map(text).join(' ')).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
     expect(rows.map(text).join(' ')).toContain('idle · not listening');
     expect(rows.map(text).join(' ')).toContain('parked · waiting on review');
+  });
+
+  it('leads each trap state line with a green, amber, or grey dot on deck, cards, and table', async () => {
+    const want: Record<string, [string, string]> = {
+      'working trap': ['ok', 'working · '],
+      'listening trap': ['ok', 'idle · listening'],
+      'parked trap': ['warn', 'parked · waiting on review'],
+      'stale trap': ['dim', 'idle · not listening'],
+    };
+    /** The state dot's tone and its line's text, per trap label, in one tab's items. */
+    const dots = (items: Element[]) =>
+      Object.fromEntries(
+        items.map((el) => {
+          const dot = el.querySelector('.trapdot')!;
+          const tone = [...dot.classList].filter((c) => c !== 'dot' && c !== 'trapdot').join(' ');
+          const label = Object.keys(want).find((l) => text(el).includes(l))!;
+          return [label, [tone, text(dot.parentElement)]];
+        }),
+      );
+    const check = (got: Record<string, [string, string]>) => {
+      expect(Object.keys(got).sort()).toEqual(Object.keys(want).sort());
+      for (const [label, [tone, line]] of Object.entries(want)) {
+        expect(got[label]![0], label).toBe(tone);
+        expect(got[label]![1], label).toContain(line);
+      }
+    };
+    for (const view of ['cards', 'table'] as const) {
+      const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view } });
+      check(dots([...g.$$('#deck section')[4]!.querySelectorAll(view === 'cards' ? '.card' : '.deckline')]));
+      await g.go('#traps');
+      check(dots(view === 'cards' ? g.$$('#traps .card') : g.$$('#traps tr.rowhead')));
+    }
+  });
+
+  it('gives a signed-off trap a grey state dot', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#traps', prefs: { view: 'table' } });
+    const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
+    expect([...t2.querySelector('.trapdot')!.classList]).toEqual(['dot', 'trapdot', 'dim']);
   });
 
   it('shows the ↗ open button on live traps in the table, cards, deck, and modal only', async () => {
