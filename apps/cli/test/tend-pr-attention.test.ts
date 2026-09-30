@@ -287,7 +287,7 @@ describe('the on-the-hook rule', () => {
 
 describe('attentionKinds (config.toml)', () => {
   it('defaults to human-actionable kinds, excluding drafts', () => {
-    expect(loadConfig().attentionKinds).toEqual(['question', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks']);
+    expect(loadConfig().attentionKinds).toEqual(['question', 'decision', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks']);
   });
 
   it('honors a user list including draft unchanged', () => {
@@ -307,7 +307,7 @@ describe('attentionKinds (config.toml)', () => {
 
   it('rejects an unknown kind, naming the valid set', () => {
     config('attentionKinds = ["question", "pr:merged"]\n');
-    expect(() => loadConfig()).toThrow(/unknown kind "pr:merged".*question, landed, pr:draft, pr:review, pr:checks, pr:conflict, pr:ready/);
+    expect(() => loadConfig()).toThrow(/unknown kind "pr:merged".*question, decision, landed, pr:draft, pr:review, pr:checks, pr:conflict, pr:ready/);
   });
 
   it('prKinds is pure over one observation', () => {

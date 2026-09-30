@@ -1684,25 +1684,25 @@ async function mainCli(): Promise<void> {
         // A send's answer: a working or paused note delivered once.
         const standingReplies = takeReplies(consume, matchGrounds);
         // A human's answer to a decision: delivered once.
-        const standingDecisions = takeDecisionAnswers(consume, matchDecision);
+        const standingAnswers = takeDecisionAnswers(consume, matchDecision);
         if (
           standing.length > 0 ||
           standingWatches.length > 0 ||
           standingNotices.length > 0 ||
           standingReplies.length > 0 ||
-          standingDecisions.length > 0
+          standingAnswers.length > 0
         ) {
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
           if (standingNotices.length > 0) emitNotices(standingNotices, sid);
           if (standingReplies.length > 0) emitReplies(standingReplies, sid);
-          if (standingDecisions.length > 0) emitDecisions(standingDecisions, sid);
+          if (standingAnswers.length > 0) emitDecisions(standingAnswers, sid);
           delivered(
             ...standing.map((e) => e.entry.at),
             ...standingWatches.flatMap((a) => a.events.map((e) => e.at)),
             ...standingNotices.map((n) => n.at),
             ...standingReplies.map((r) => r.entry.at),
-            ...standingDecisions.map((d) => d.answer.answeredAt),
+            ...standingAnswers.map((d) => d.answer.answeredAt),
           );
           break;
         }

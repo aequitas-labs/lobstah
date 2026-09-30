@@ -289,19 +289,11 @@ work in flight requires a live watcher or the hook blocks with the arm command.
   'man:file': `File a markdown page as the helm's own report, under its grounds (reports/<grounds>/<rid>/).
 --attach copies images the page names by bare filename; --title overrides its first # heading.
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
-  'man:ask': `Put a decision to the human: a title, an optional markdown detail page
-(--detail, at most 64 KiB), 0 to 6 --option labels, and --attach files.
-With a dispatch id it is about that dispatch, and a newer ask on the same
-dispatch replaces it; it then hides that dispatch's raw question. It stands
-as a \`decision\` attention item and a card in the glass until it is answered
-or withdrawn (--withdraw <key>). The answer wakes man wait as a
-decision-answered event. Stored under decisions/<rid>/. Reserved for the
-claimed helm.`,
-  'man:answer': `Answer a decision from the terminal, as the glass does: --option (one of
-its labels), --text, --attach (images, pdf, text, json, zip; each at most
-limits.attachmentMaxBytes), in any mix. A raw question's key (<lane>:<id>)
-is answered too. It writes the answer and runs nothing; the helm's man wait
-receives it as a decision-answered event.`,
+  'man:ask': `Put a decision to the human: a card in the glass (decisions/<rid>/) until
+answered or withdrawn. A newer ask on the same dispatch replaces it. The answer
+wakes man wait as decision-answered. Reserved for the claimed helm.`,
+  'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
+Stores the answer; the helm's man wait receives it as decision-answered.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
