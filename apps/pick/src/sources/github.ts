@@ -50,6 +50,7 @@ interface GhPull {
   html_url: string;
   user: { login: string };
   head: { ref: string; sha: string };
+  base?: { ref: string };
   labels: Array<{ name: string }>;
   assignees: Array<{ login: string }>;
   mergeable_state?: string;
@@ -258,6 +259,7 @@ export class GithubSource implements Source, MergeSource {
       author: pr.user.login,
       headSha: pr.head.sha,
       headRef: pr.head.ref,
+      baseRef: pr.base?.ref,
       labels: pr.labels.map((l) => l.name),
       assignees: pr.assignees.map((a) => a.login),
       reviews: reviews.map((r) => ({ id: r.id, author: r.user.login, state: r.state, sha: r.commit_id })),

@@ -104,28 +104,56 @@ export const PUSH_REJECTED = 'push rejected:';
 
 /**
  * The push rule for a worker on an existing PR: push to the PR's head
- * branch only; on a non-fast-forward rejection fetch, rebase onto the moved
- * head, and push with a lease, up to three times; never a new branch or PR.
+ * branch only; never a new branch or PR. On a non-fast-forward rejection,
+ * up to three times: `rebase` mode fetches, rebases onto the moved head,
+ * and pushes with a lease; `merge` mode (a standalone PR brought up to date
+ * by a merge commit) fetches, merges the moved head, and pushes normally.
  */
-export function pushRule(branch: string | undefined, id = '<dispatch id>'): string {
+export function pushRule(branch: string | undefined, id = '<dispatch id>', mode: 'rebase' | 'merge' = 'rebase'): string {
   const b = branch ?? "the PR's head branch";
   return [
     `Push only to the existing branch ${b}.`,
-    `If the push is rejected as non-fast-forward because ${b} moved, fetch ${b}, rebase your commits onto the moved head again, and push with \`--force-with-lease=${b}:<the head you just fetched>\`. Retry at most ${PUSH_RETRIES} times.`,
+    mode === 'merge'
+      ? `If the push is rejected as non-fast-forward because ${b} moved, fetch ${b}, merge the moved head into your branch, and push again with a normal push. Retry at most ${PUSH_RETRIES} times. Never force-push.`
+      : `If the push is rejected as non-fast-forward because ${b} moved, fetch ${b}, rebase your commits onto the moved head again, and push with \`--force-with-lease=${b}:<the head you just fetched>\`. Retry at most ${PUSH_RETRIES} times.`,
     'If a push hook fails with a real test or type error, do not retry the push: fix the error, commit, and push again.',
     `If you still cannot push, report \`lobstah report ${id} failed "${PUSH_REJECTED} <rejection text>; moved head <full sha of the head you fetched>"\` and leave the PR as it was.`,
     'Never push to another branch. Never open a new PR.',
   ].join(' ');
 }
 
-/** The repair prompt uses the PR's actual base branch, including stacked PRs. */
-export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?: string; checks?: readonly string[]; gates?: readonly string[] } = {}): string {
+/**
+ * A PR is standalone when its base is the repo's trunk; a PR whose base is
+ * another PR's branch is stacked.
+ */
+export function standalonePr(baseRefName: string | undefined, trunk: string | undefined): boolean {
+  return baseRefName !== undefined && trunk !== undefined && baseRefName === trunk;
+}
+
+/**
+ * How a conflict repair brings a PR up to date with its base. A standalone
+ * PR merges the base in (a merge commit and a normal push): the repos
+ * squash-merge, so a rebase's history is lost at merge and its force-push
+ * costs the reviewer's incremental diff. A stacked PR rebases onto its base
+ * branch and pushes with a lease.
+ */
+export function conflictUpdate(base: string | undefined, branch: string | undefined, standalone: boolean): string {
+  const b = base ?? "the PR's base branch";
+  const head = branch ?? "the PR's head branch";
+  return standalone
+    ? `Fetch origin/${b} and merge it into ${head} with a merge commit (\`git merge origin/${b}\`), resolving the conflicts in that merge. Do not rebase, and do not force-push: push the merge commit with a normal push.`
+    : `This PR is stacked on its base branch ${b}. Fetch origin/${b} and rebase ${head} onto it, resolving the conflicts. Push with \`--force-with-lease=${head}:<the head you started from>\`.`;
+}
+
+/** The repair prompt uses the PR's actual base branch, including stacked PRs. `trunk` tells a standalone PR from a stacked one. */
+export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?: string; checks?: readonly string[]; gates?: readonly string[]; trunk?: string } = {}): string {
   const opts = typeof arg === 'string' ? { id: arg } : arg;
   const intro = `Repair ${pr.url} on its existing branch ${pr.headRefName ?? '(see PR)'} at ${pr.headSha}. Do not open a new PR.`;
   const resolution = "For code already on main, take main's version. Keep only this PR's own changes. Never change behavior. If resolving a conflict would change code behavior, stop and report needs-decision.";
-  const finish = `Run the relevant tests. ${pushRule(pr.headRefName, opts.id)} Report done with the same PR URL.`;
+  const standalone = standalonePr(pr.baseRefName, opts.trunk);
+  const finish = (mode: 'rebase' | 'merge' = 'rebase') => `Run the relevant tests. ${pushRule(pr.headRefName, opts.id, mode)} Report done with the same PR URL.`;
   if (kind === 'conflict')
-    return `${intro}\n${resolution} Fetch the PR's base branch ${pr.baseRefName ?? '(read from PR)'}. Bring the PR branch up to date with that base by this repo's convention. ${finish}`;
+    return `${intro}\n${resolution} ${conflictUpdate(pr.baseRefName, pr.headRefName, standalone)} ${finish(standalone ? 'merge' : 'rebase')}`;
   if (kind === 'checks') {
     const failing = (pr.failingChecks ?? []).filter((c) => !opts.checks || opts.checks.includes(c.name));
     const checks = failing.map((c) => `- ${c.name}${c.detailsUrl ? ` — ${c.detailsUrl}` : ''}`).join('\n');
@@ -136,8 +164,8 @@ export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?:
     return (
       `${intro}\n${resolution}\nLatest failing checks:\n${checks || '- Read the failing check from GitHub'}${gates}\n` +
       `Read each check log. Fix a real failure. If it is a flake, rerun it at most once. ` +
-      `If a check cannot pass until a person approves the change, it is a human gate: do not change code for it, and name it on your report with --human-gate "<check name>", once per check. ${finish}`
+      `If a check cannot pass until a person approves the change, it is a human gate: do not change code for it, and name it on your report with --human-gate "<check name>", once per check. ${finish()}`
     );
   }
-  return `${intro}\n${resolution} Read the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish}`;
+  return `${intro}\n${resolution} Read the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish()}`;
 }

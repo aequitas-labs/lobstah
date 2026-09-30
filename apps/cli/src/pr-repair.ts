@@ -425,7 +425,12 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       });
       try {
         const brief = withBriefHooks(
-          repairBrief(pr, kind, kind === 'checks' && fresh.length > 0 ? { id, checks: fresh, gates } : { id, gates }),
+          repairBrief(pr, kind, {
+            id,
+            gates,
+            trunk: config.repos[target.repo]?.trunk,
+            ...(kind === 'checks' && fresh.length > 0 ? { checks: fresh } : {}),
+          }),
           config.repos[target.repo],
           kind,
         );

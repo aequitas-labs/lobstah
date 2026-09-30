@@ -55,6 +55,8 @@ export interface PrCandidate {
   author: string;
   headSha: string;
   headRef: string;
+  /** The branch the PR merges into. */
+  baseRef?: string;
   labels: string[];
   assignees: string[];
   /** Latest review per author. */
