@@ -4,7 +4,7 @@ import type { DecisionCard } from '../../../src/glass-diff.js';
 import { addFiles, removeFile, sendAnswer, setDraft, toggleOption } from '../actions.js';
 import { html } from '../html.js';
 import type { DecisionDraft } from '../store.js';
-import { Age, opener } from './common.js';
+import { Age, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
 
 /**
@@ -91,7 +91,7 @@ function card(c: DecisionCard, draft: DecisionDraft | undefined, focused: boolea
   return html`<div key=${c.key} class=${cls} data-decision=${c.key}>
     <div class="dtop">
       ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
-      <b class="dtitle">${c.kind === 'decision' ? c.title : c.note}</b>
+      <b class="dtitle">${c.kind === 'decision' ? c.title : NamedText(c.note)}</b>
       <span class="dmeta dim">${metaLine}</span>
     </div>
     ${c.kind === 'decision' && c.detail.trim() && html`<${Markdown} text=${c.detail} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`}

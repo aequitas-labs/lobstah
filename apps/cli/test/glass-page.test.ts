@@ -705,3 +705,58 @@ describe('glass page: lobs', () => {
     expect(g.$$('#lobs .lob')).toHaveLength(0);
   });
 });
+
+describe('glass page: a dispatch shows its trap by name', () => {
+  /** t1 is live (crisp-heron), t2 signed off with a recorded name (kind-crab), wt:gone has no known name. */
+  function namedFleet(): GlassSnapshot {
+    const d = acceptanceFleet();
+    d.trapNames = { t1: 'crisp-heron', t2: 'kind-crab' };
+    const c = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
+    c.note = 'claimed by wt:t1';
+    c.log = [{ at: ago(4 * 60_000), verb: 'working', note: 'claimed by wt:t1' }];
+    d.dispatches.push({ ...d.dispatches.find((x) => x.id.startsWith('dddddddd'))!, id: 'ffffffff-0000-4000-8000-000000000006', for: 'wt:gone' });
+    return d;
+  }
+  const row = (g: GlassDom, id: string) => g.$$('#dispatches tr.rowhead').find((tr) => text(tr).startsWith(id))!;
+
+  it('names a live trap, a signed-off trap, and falls back to wt:<id>, each with wt:<id> in its title', async () => {
+    const g = await page(namedFleet(), { hash: '#dispatches', prefs: { view: 'table' } });
+    const live = row(g, 'cccccccc');
+    expect(text(live)).toContain('claimed by crisp-heron');
+    expect(text(live)).not.toContain('wt:t1');
+    const liveNames = [...live.querySelectorAll('.trapname')];
+    expect(liveNames.map(text)).toEqual(['crisp-heron', 'crisp-heron']);
+    expect(liveNames.map((n) => n.getAttribute('title'))).toEqual(['wt:t1', 'wt:t1']);
+
+    const signedOff = row(g, 'dddddddd').querySelector('.trapname')!;
+    expect(text(signedOff)).toBe('kind-crab');
+    expect(signedOff.getAttribute('title')).toBe('wt:t2');
+
+    const unknown = row(g, 'ffffffff').querySelector('.trapname')!;
+    expect(text(unknown)).toBe('wt:gone');
+    expect(unknown.getAttribute('title')).toBe('wt:gone');
+    expect(unknown.tagName).toBe('SPAN');
+  });
+
+  it('shows the name on the deck, in the dispatch modal, and in its log', async () => {
+    const g = await page(namedFleet(), { hash: '#deck', prefs: { view: 'table' } });
+    const flight = g.$$('#deck .deckline').find((l) => text(l).includes('cccccccc'))!;
+    expect(text(flight)).toContain('claimed by crisp-heron');
+    expect(text(flight)).toMatch(/· crisp-heron$/);
+    expect(text(flight)).not.toContain('wt:t1');
+    await openRow(g, '#dispatches', 'cccccccc');
+    expect(text(g.$('#modalbox .claimedby'))).toBe('claimed by crisp-heron');
+    expect(g.$('#modalbox .claimedby .trapname')!.getAttribute('title')).toBe('wt:t1');
+    expect(text(g.$('#modalbox .loglines'))).toContain('working claimed by crisp-heron');
+  });
+
+  it("opens the trap's modal when its name is clicked, not the dispatch's", async () => {
+    const g = await page(namedFleet(), { hash: '#dispatches', prefs: { view: 'table' } });
+    await click(g, row(g, 'cccccccc').querySelector('a.trapname'));
+    expect(text(g.$('#modalbox h3'))).toContain('🪤');
+    expect(text(g.$('#modalbox h3'))).toContain('t1');
+    await escape(g);
+    await click(g, row(g, 'dddddddd').querySelector('a.trapname'));
+    expect(text(g.$('#modalbox h3'))).toContain('signed off');
+  });
+});

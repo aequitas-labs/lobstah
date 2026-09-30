@@ -297,6 +297,12 @@ export interface GlassSnapshot {
   slots?: { headless: number; limit: number; traps: number; parked?: number };
   helms: GlassHelm[];
   traps: GlassTrap[];
+  /**
+   * Trap id → name for every `wt:<id>` the snapshot shows: the live
+   * registration's name, else the name registry's. An id with no known
+   * name is absent; the page shows it as `wt:<id>`.
+   */
+  trapNames?: Record<string, string>;
   /** Newest first. */
   notices: Notice[];
   watches: Watch[];

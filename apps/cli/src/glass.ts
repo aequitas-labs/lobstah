@@ -20,7 +20,8 @@ import {
   trapLastSeen,
   validSessionLink,
   trapLabel,
-  trapNameForId,
+  trapNamer,
+  TRAP_ADDRESS_RE,
   listWatches,
   watchErrorCell,
   loadConfig,
@@ -340,6 +341,34 @@ export function serveReport(url: string, res: http.ServerResponse): boolean {
   return true;
 }
 
+/**
+ * Trap id → name for every trap the page can show: each trap row, and every
+ * `wt:<id>` a dispatch, a note, or a log line names. Ids with no known name
+ * are left out.
+ */
+function trapNamesShown(
+  traps: GlassTrap[],
+  dispatches: GlassDispatch[],
+  attention: { attention: TendAttention[]; landed: LandedCatch[] },
+  names: (trapId: string) => string | undefined,
+): Record<string, string> {
+  const ids = new Set(traps.map((t) => t.trapId));
+  const scan = (text: string | undefined) => {
+    for (const m of (text ?? '').matchAll(TRAP_ADDRESS_RE)) ids.add(m[1]!);
+  };
+  for (const x of dispatches) {
+    for (const v of [x.claimedBy, x.for, x.evidence?.deliveredTo, x.note]) scan(v);
+    for (const e of x.log) scan(e.note);
+  }
+  for (const a of [...attention.attention, ...attention.landed]) scan(a.note);
+  const out: Record<string, string> = {};
+  for (const id of [...ids].sort()) {
+    const name = traps.find((t) => t.trapId === id)?.name ?? names(id);
+    if (name) out[id] = name;
+  }
+  return out;
+}
+
 /** One disk pass, everything the page renders. Pure read. */
 export function buildGlassSnapshot(): GlassSnapshot {
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
@@ -391,13 +420,15 @@ export function buildGlassSnapshot(): GlassSnapshot {
   for (const n of allNotices) {
     if (n.kind.startsWith('trap-') && n.refId) seenIds.add(n.refId);
   }
+  const names = trapNamer();
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
+    const name = t.name ?? names(t.trapId);
     return {
       ...t,
-      name: t.name ?? trapNameForId(t.trapId),
-      label: trapLabel({ trapId: t.trapId, name: t.name ?? trapNameForId(t.trapId) }),
+      name,
+      label: trapLabel({ trapId: t.trapId, name }),
       link: validSessionLink(t.link) ? t.link : undefined,
       sessionId: t.sessionId ?? signed?.by,
       harness: t.harness ?? (/\((claude|codex),/.exec(signed?.text ?? '')?.[1]),
@@ -410,6 +441,11 @@ export function buildGlassSnapshot(): GlassSnapshot {
       ),
     };
   };
+  const traps = [
+    ...live.map((t) => attach(t as GlassTrap, true, !!t.firstParkedAt && Date.now() - trapLastSeen(t) <= loadConfig().soak.ttlSecs * 1000)),
+    ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
+  ];
+  const attention = attentionSnapshot();
   return {
     now: new Date().toISOString(),
     version: lobstahVersion(),
@@ -417,16 +453,14 @@ export function buildGlassSnapshot(): GlassSnapshot {
     daemon: executor ? { version: executor.version, heartbeat: executor.heartbeat } : undefined,
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
     helms,
-    traps: [
-      ...live.map((t) => attach(t as GlassTrap, true, !!t.firstParkedAt && Date.now() - trapLastSeen(t) <= loadConfig().soak.ttlSecs * 1000)),
-      ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
-    ],
+    traps,
+    trapNames: trapNamesShown(traps, dispatches, attention, names),
     notices: allNotices.slice().reverse(),
     watches,
     dispatches,
     prs,
     stacks,
-    ...attentionSnapshot(),
+    ...attention,
     reports: reportRows(),
     mergeView,
     decisions: glassDecisions(),
