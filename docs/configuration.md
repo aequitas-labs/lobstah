@@ -42,6 +42,25 @@ rather than relying on the default — left unset, a Claude session takes
 `effortLevel` from the host's settings files, including the user's own
 `~/.claude/settings.json`.
 
+`[repos.<key>.briefHooks]` — markdown appended to the briefs lobstah
+writes for this repo, one key per kind. Each value is a string; lobstah
+appends it as written and does not read it.
+
+| Key | Appended to |
+|---|---|
+| `conflict` | A daemon repair of a PR with a merge conflict. |
+| `checks` | A daemon repair of a PR with failing checks. |
+| `review` | A daemon repair of a PR with requested changes, and a pickup review-feedback round. |
+| `ciFix` | A CI-fix continuation a PR watch forks. |
+| `rebase` | A rebase chore from pickup's merge loop. |
+| `all` | Every kind above, after that kind's own text. |
+
+```toml
+[repos.web.briefHooks]
+all = "Before you report done, run the repo's PR refresh (`/pr-refresh`)."
+checks = "Run `pnpm test:ci` before you push."
+```
+
 `lobstah repos add <path> [--pickup]` detects and appends a block (origin,
 default branch from `origin/HEAD`, setup from the lockfile); `lobstah init
 --scan <dir>...` does the same for every git repo found under the given

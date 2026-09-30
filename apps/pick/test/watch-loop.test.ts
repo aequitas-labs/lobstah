@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, ensureLayout, laneDirs, listNotices, listWatches, readWatch, releaseHeldWatches, signOnTrap } from '@lobstah/core';
+import { addWatch, appendStatus, appendWatchEvents, ensureLayout, laneDirs, listNotices, listWatches, readWatch, releaseHeldWatches, signOnTrap } from '@lobstah/core';
 import type { Descriptor } from '@lobstah/core';
 import { watchLoop } from '../src/loops/watch.js';
 import type { ReportNotification } from '../src/loops/report.js';
@@ -46,6 +46,24 @@ function queuedDescriptors(): Descriptor[] {
 }
 
 describe('watchLoop', () => {
+  it("a PR watch's continuation ends with the repo's ciFix hook; another watch's does not", async () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nautoRepair = false\n[repos.myrepo]\npath = "/m"\n[repos.myrepo.briefHooks]\nciFix = "Run the CI refresh."\n');
+    const pr = '22222222-2222-4222-8222-222222222222';
+    makeOwnerDispatch(pr);
+    appendStatus(pr, 'work', 'done', 'PR sent');
+    // The daemon's PR poller writes a PR watch's events; the watch loop delivers them.
+    addWatch('pr:acme/web#9', 'echo {}', { owner: `dispatch:${pr}`, brief: 'Fix {key}: {summaries}' });
+    appendWatchEvents('pr:acme/web#9', [{ seq: 1, summary: 'review: CHANGES_REQUESTED', at: new Date().toISOString() }]);
+    const other = '33333333-3333-4333-8333-333333333333';
+    makeOwnerDispatch(other);
+    appendStatus(other, 'work', 'paused', 'awaiting review');
+    addWatch('ume:abc', eventCheck([{ seq: 1, summary: 'feedback batch' }], '1'), { owner: `dispatch:${other}` });
+    await watchLoop(45, () => {});
+    const queued = queuedDescriptors();
+    expect(queued.find((d) => d.followUp === pr)?.brief).toBe('Fix pr:acme/web#9: - review: CHANGES_REQUESTED\n\nRun the CI refresh.');
+    expect(queued.find((d) => d.followUp === other)?.brief).not.toContain('Run the CI refresh.');
+  });
+
   it('dispatch-owned events fork one continuation of the owning chain', async () => {
     const owner = '11111111-1111-1111-1111-111111111111';
     makeOwnerDispatch(owner);
