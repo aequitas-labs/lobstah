@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Attachment, Lane } from './types.js';
-import { laneDirs } from './paths.js';
+import { laneDirs, readDirIfPresent } from './paths.js';
 import { postNotice } from './notices.js';
 import { trapLabel } from './soak.js';
 import { trapNameForId } from './trap-names.js';
@@ -93,9 +93,7 @@ export function answeredAt(id: string, lane: Lane, since: string): string | unde
 
 export function unhandled(id: string, lane: Lane): InboxMessage[] {
   const dir = inboxDir(id, lane);
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
+  return readDirIfPresent(dir)
     .filter((f) => f.endsWith('.msg'))
     .sort()
     .map((f) => ({ file: f, text: fs.readFileSync(path.join(dir, f), 'utf8') }));

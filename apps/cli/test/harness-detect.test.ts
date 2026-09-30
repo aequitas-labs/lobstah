@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { ensureLayout, listNotices, readTrap } from '@lobstah/core';
 import { detectHarness, harnessFromSessionId } from '../src/harness-detect.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // Real ids from this machine (see the comment in harness-detect.ts).
 const CODEX_ID = '01a0ceb8-b9bd-7d42-927c-c52a334b8e2d'; // UUIDv7
@@ -80,7 +81,7 @@ beforeEach(() => {
   git('worktree', 'add', '-q', wt, '-b', 'trap');
 });
 afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true });
+  removeTempDir(tmp);
   delete process.env.LOBSTAH_HOME;
 });
 

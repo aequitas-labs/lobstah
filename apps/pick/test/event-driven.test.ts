@@ -15,6 +15,7 @@ import type { Descriptor } from '@lobstah/core';
 import { handleStreamLine } from '../src/loops/watch.js';
 import { SingleFlight } from '../src/run.js';
 import type { ReportNotification } from '../src/loops/report.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let dir: string;
 beforeEach(() => {
@@ -24,7 +25,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 describe('appendWatchEvents', () => {

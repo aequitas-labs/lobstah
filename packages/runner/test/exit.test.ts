@@ -20,6 +20,7 @@ import { worktreePath } from '@lobstah/worktree';
 import { main } from '../src/run.js';
 import type { RunnerDeps } from '../src/run.js';
 import { drive, settle } from '../src/drive.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -30,7 +31,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

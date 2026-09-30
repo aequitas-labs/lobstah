@@ -6,6 +6,7 @@ import { ensureLayout, writeTrapAnchor } from '@lobstah/core';
 import type { TrapRegistration, WindowRef } from '@lobstah/core';
 import { focusRegistration, focusTrap } from '../src/focus.js';
 import type { FileRunner } from '../src/focus.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 let worktree: string;
@@ -18,7 +19,7 @@ beforeEach(() => {
   writeTrapAnchor(worktree, { trapId: 'deadbeef' });
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

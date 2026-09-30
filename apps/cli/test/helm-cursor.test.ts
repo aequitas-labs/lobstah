@@ -22,6 +22,7 @@ import { buildDigest } from '../src/digest.js';
 import { readCursor } from '../src/reported.js';
 import { landedCatches } from '../src/tend.js';
 import { liveWatcher } from '../src/watchers.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -40,7 +41,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = "${home.replace(/\\/g, '/')}"\ntrunk = "main"\n`);
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

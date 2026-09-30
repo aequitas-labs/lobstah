@@ -3,6 +3,17 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import type { Lane } from './types.js';
 
+/** Entries of a lobstah folder. A folder that does not exist yet is empty. */
+export function readDirIfPresent(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
+    throw e;
+  }
+}
+
 export function lobstahHome(): string {
   return process.env.LOBSTAH_HOME ?? path.join(os.homedir(), '.lobstah');
 }

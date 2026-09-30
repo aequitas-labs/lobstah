@@ -7,6 +7,7 @@ import { AsyncQueue } from '@lobstah/adapters';
 import type { AdapterRun } from '@lobstah/adapters';
 import type { NormalizedEvent } from '@lobstah/core';
 import { drive } from '../src/drive.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -15,7 +16,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

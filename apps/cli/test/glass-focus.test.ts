@@ -7,6 +7,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ensureLayout, signOnTrap, soakingDir, stowTrap } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 let worktree: string;
@@ -33,7 +34,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

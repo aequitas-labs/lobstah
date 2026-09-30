@@ -10,6 +10,7 @@ import { backfillPrWatches } from '../src/pr-watch.js';
 import { buildTendReport } from '../src/tend.js';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { processTest } from '../../../test/process-test.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const url = (n: number) => `https://github.com/acme/web/pull/${n}`;
@@ -28,7 +29,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 const lobstah = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], {

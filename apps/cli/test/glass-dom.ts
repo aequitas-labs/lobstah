@@ -90,7 +90,7 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
     }
     count++;
     const body = JSON.parse(JSON.stringify(current));
-    return { json: async () => body };
+    return { ok: true, status: 200, json: async () => body };
   };
   // The page probes one sprite with `new Image()`. Resolve it immediately in
   // the DOM shim; there is no HTTP server for /lob-sprite.png in these tests.

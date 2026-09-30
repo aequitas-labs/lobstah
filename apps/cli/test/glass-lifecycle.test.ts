@@ -7,6 +7,7 @@ import { execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { glassLines, glassPort, probeGlass, readGlassState, stopGlass } from '../src/glass-lifecycle.js';
 import { killAndWait, reservePort, type ReservedPort } from './reserved-port.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 let home: string;
@@ -63,7 +64,7 @@ afterEach(async () => {
   for (const r of reserved) await track(r.port);
   for (const pid of started) await killAndWait(pid);
   for (const r of reserved) r.release();
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
   delete process.env.LOBSTAH_GLASS_PORT;
 });

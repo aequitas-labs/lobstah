@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence } from '@lobstah/core';
 import { advanceCursor, buildDigest, dueHelmDigest, lastReportedAt, renderDigest } from '../src/digest.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -13,7 +14,7 @@ beforeEach(() => {
   fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

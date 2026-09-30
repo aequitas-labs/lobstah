@@ -8,6 +8,7 @@ import { appendStatus, claimNext, enqueue, ensureLayout, executorPath } from '@l
 import { restartCommand } from '../src/service.js';
 import { activeDispatchCounts, restartRefusal } from '../src/restart.js';
 import { usageFor } from '../src/usage.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).
 // No test here reaches a real service manager: every CLI run below stops at
@@ -24,7 +25,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

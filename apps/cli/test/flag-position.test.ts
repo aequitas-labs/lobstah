@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { claimNext, enqueue, ensureLayout, laneDirs, readEvidence, readStatusLog, unhandled } from '@lobstah/core';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`):
 // the bug was a trailing `--session` read as message text in main.ts, so
@@ -23,7 +24,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(laneDirs('work').active, ID, 'runner.json'), JSON.stringify({ pid: process.pid }));
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 
