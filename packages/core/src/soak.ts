@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { Descriptor, Lane, StatusEntry } from './types.js';
 import { laneDirs, soakingDir } from './paths.js';
-import { validSessionLink } from './session-link.js';
+import { linkMismatch, validSessionLink } from './session-link.js';
 import { cancelRequested, claimNext, complete, queuedDescriptor, pendingIds, requeue } from './queue.js';
 import { appendStatus, readStatusLog } from './status.js';
 import { mergeEvidence } from './evidence.js';
@@ -293,6 +293,9 @@ export function signOnTrap(opts: {
   if (anchor.name !== name) writeTrapAnchor(opts.worktree, { ...anchor, name });
   const iso = new Date(now).toISOString();
   const sameSession = prior?.sessionId === opts.sessionId;
+  const window = opts.window ?? (sameSession ? prior.window : undefined);
+  // A link, new or kept from an earlier sign-on, must fit the window.
+  const link = opts.link ?? (sameSession && validSessionLink(prior?.link) ? prior.link : undefined);
   const reg: TrapRegistration = {
     trapId,
     name,
@@ -305,8 +308,8 @@ export function signOnTrap(opts: {
     signedOnAt: sameSession ? prior.signedOnAt : iso,
     heartbeatAt: iso,
     firstParkedAt: sameSession ? prior.firstParkedAt : undefined,
-    window: opts.window ?? (sameSession ? prior.window : undefined),
-    link: opts.link ?? (sameSession && validSessionLink(prior?.link) ? prior.link : undefined),
+    window,
+    link: link !== undefined && linkMismatch(link, window) === undefined ? link : undefined,
     claimed: prior?.claimed,
     ...(createdWorktree ? { createdWorktree } : {}),
   };

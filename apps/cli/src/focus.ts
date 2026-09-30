@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { loadConfig, readTrap, trapIdAt, trapLastSeen, validSessionLink } from '@lobstah/core';
+import { linkMismatch, loadConfig, readTrap, trapIdAt, trapLastSeen, validSessionLink } from '@lobstah/core';
 import type { TrapRegistration } from '@lobstah/core';
 
 const exec = promisify(execFile);
@@ -105,7 +105,9 @@ export async function focusRegistration(
   if (win?.bundleId && VSCODE_RE.test(win.bundleId) && !safeWorktree(reg))
     return { focused: false, reason: 'Recorded editor worktree does not match this trap.' };
 
-  if (validSessionLink(reg.link)) {
+  // A link that contradicts the recorded window (a vscode:// link on a
+  // terminal session) is skipped: the window ladder below focuses it.
+  if (validSessionLink(reg.link) && linkMismatch(reg.link, win) === undefined) {
     const opener: [string, string[]] = platform === 'darwin' ? ['open', [reg.link]] : platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', reg.link]] : ['xdg-open', [reg.link]];
     const result = await attempt(opener[0], opener[1], 'link', 'Opened the session link.');
     if (result) return result;

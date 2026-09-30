@@ -66,6 +66,8 @@ For the glass's ↗ open button, give the trap its own session link with
 `claude://claude.ai/...` link in the app; copy that link from the session.
 Its app id is not the CLI session id. In the VS Code extension, use
 `vscode://anthropic.claude-code/open?session=<session-id>` with the id above.
+A CLI session in a terminal, including the Claude desktop app's terminal
+panel, passes no link; soak ignores a link that does not fit the session.
 The glass checks the stored link before showing it. `lobstah focus <trap>`
 uses the same focus steps from the terminal.
 

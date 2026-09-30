@@ -26,6 +26,7 @@ import {
   writeRequest,
   trapLastSeen,
   validSessionLink,
+  linkMismatch,
   trapLabel,
   trapNamer,
   TRAP_ADDRESS_RE,
@@ -522,7 +523,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnap
       ...t,
       name,
       label: trapLabel({ trapId: t.trapId, name }),
-      link: validSessionLink(t.link) ? t.link : undefined,
+      // A link that contradicts the trap's window (a vscode:// link on a
+      // terminal session) is not shown; focus falls back to the window.
+      link: validSessionLink(t.link) && linkMismatch(t.link, t.window) === undefined ? t.link : undefined,
       sessionId: t.sessionId ?? signed?.by,
       harness: t.harness ?? (/\((claude|codex),/.exec(signed?.text ?? '')?.[1]),
       live: registered,

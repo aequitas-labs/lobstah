@@ -809,7 +809,15 @@ lobstah soak --name amber-gull  # choose or change this trap's two-word name
 a VS Code extension URL of the form
 `vscode://anthropic.claude-code/open?session=<id>`, or a Codex task URL of
 the form `codex://threads/<task-id>`. It rejects all other schemes and
-malformed links. The glass checks a stored link again before rendering it.
+malformed links. A link must also fit the session's surface, taken from
+Claude Code's `CLAUDE_CODE_ENTRYPOINT` and the recorded window: a `vscode://`
+link only in the VS Code extension (`claude-vscode`), a `claude://` link only
+in the Claude desktop app's Code tab, a `codex://` link only in the Codex app.
+A CLI session in a terminal, including the Claude desktop app's terminal
+panel, has no link: soak ignores one and prints `link: ignored — <why>`. The
+glass and `lobstah focus` skip a stored link that contradicts the trap's
+window and focus the window instead. The glass checks a stored link again
+before rendering it.
 `lobstah focus <trap>` accepts the trap id with or without `wt:` and reports
 the focus step or why it could not focus. It does not revive a signed-off trap.
 
