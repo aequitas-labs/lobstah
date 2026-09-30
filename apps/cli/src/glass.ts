@@ -67,6 +67,7 @@ import { GLASS_PAGE } from './glass-page.generated.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
+import { startSnapshotThread } from './glass-snapshot-thread.js';
 import { focusRegistration, liveTrap } from './focus.js';
 import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
@@ -629,6 +630,8 @@ export function serveGlass(
   options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: (options?: { local?: boolean }) => GlassSnapshot } = {},
 ): http.Server {
   const snapshot = options.snapshot ?? buildGlassSnapshot;
+  // A caller's own snapshot function runs here; the default builds on the snapshot thread.
+  const thread = options.snapshot ? undefined : startSnapshotThread();
   const logged = new Set<string>();
   const focusToken = randomBytes(32).toString('hex');
   const icon = assetPath('favicon.png') ?? assetPath('lob-star.png');
@@ -775,29 +778,46 @@ export function serveGlass(
     } else if (req.url === '/data') {
       // Start commands carry a ticket: only a same-host request (this
       // machine's own page, not a rebound name) gets them.
-      const body = JSON.stringify({ ...snapshot({ local: req.headers.host === ownHost() }), focusToken, focusSupported: process.platform === 'darwin' });
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(body);
+      const local = req.headers.host === ownHost();
+      const page = `"focusToken":${JSON.stringify(focusToken)},"focusSupported":${process.platform === 'darwin'}`;
+      const send = (snap: string) => {
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(snap === '{}' ? `{${page}}` : `${snap.slice(0, -1)},${page}}`);
+      };
+      const onThisThread = () => send(JSON.stringify(snapshot({ local })));
+      // The snapshot thread builds the body, so nothing else waits for it.
+      if (!thread) return onThisThread();
+      void thread.build(local).then(send, () => {
+        try {
+          onThisThread();
+        } catch (e) {
+          fail(req, res, e);
+        }
+      });
     } else {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(PAGE);
     }
   };
   // One bad read answers that request with 500; the server keeps serving.
+  const fail = (req: http.IncomingMessage, res: http.ServerResponse, e: unknown): void => {
+    const message = e instanceof Error ? e.message : String(e);
+    if (!logged.has(message)) {
+      logged.add(message);
+      console.error(`lobstah glass: ${req.method} ${req.url} failed: ${message}`);
+    }
+    if (res.headersSent) return void res.end();
+    res.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ error: 'The glass could not answer this request.' }));
+  };
   const server = http.createServer((req, res) => {
     try {
       handle(req, res);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (!logged.has(message)) {
-        logged.add(message);
-        console.error(`lobstah glass: ${req.method} ${req.url} failed: ${message}`);
-      }
-      if (res.headersSent) return void res.end();
-      res.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(JSON.stringify({ error: 'The glass could not answer this request.' }));
+      fail(req, res, e);
     }
   });
+  server.on('close', () => void thread?.close());
   server.listen(port, '127.0.0.1');
   return server;
 }

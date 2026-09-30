@@ -34,6 +34,8 @@ for (const [target, name] of targets) {
       '--external', '@openai/codex-sdk',
       '--define', `process.env.LOBSTAH_BUILD_VERSION=${JSON.stringify(version)}`,
       'apps/cli/src/main.ts',
+      // The glass's snapshot thread (glass-snapshot-thread.ts) loads this as ./glass-snapshot-worker.ts.
+      'apps/cli/src/glass-snapshot-worker.ts',
       '--outfile', path.join(out, name),
     ],
     { cwd: root, stdio: 'inherit' },

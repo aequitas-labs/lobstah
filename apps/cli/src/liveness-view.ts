@@ -14,10 +14,58 @@ export interface LivenessView {
   updated?: string;
 }
 
-function git(cwd: string, ...args: string[]): string | undefined {
+/**
+ * A worktree's git answers, kept per process. The glass builds a snapshot on
+ * every poll, and each dispatch with a worktree asked git three times, twice
+ * per snapshot (the dispatch rows and tend). An answer is reused while the
+ * worktree's reflog (`logs/HEAD`, appended on every commit, checkout, and
+ * reset) is unchanged, and for at most GIT_CACHE_MS, which bounds how stale
+ * the commits-ahead count can be after a fetch moves the trunk.
+ */
+export const GIT_CACHE_MS = 60_000;
+const gitCache = new Map<string, { stamp: string; at: number; out: string | undefined }>();
+
+/** The worktree's reflog size and mtime: it changes with every HEAD move. '' when unreadable. */
+function headStamp(cwd: string): string {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }).trim();
-  } catch { return undefined; }
+    const dotGit = path.join(cwd, '.git');
+    const gitdir = fs.statSync(dotGit).isFile()
+      ? path.resolve(cwd, fs.readFileSync(dotGit, 'utf8').replace(/^gitdir:\s*/, '').trim())
+      : dotGit;
+    const stamp = (f: string) => {
+      try {
+        const st = fs.statSync(path.join(gitdir, f));
+        return `${st.size}:${st.mtimeMs}`;
+      } catch {
+        return '-';
+      }
+    };
+    return `${stamp('logs/HEAD')}|${stamp('HEAD')}`;
+  } catch {
+    return '';
+  }
+}
+
+function git(cwd: string, ...args: string[]): string | undefined {
+  const key = `${cwd}\0${args.join('\0')}`;
+  const stamp = headStamp(cwd);
+  const now = Date.now();
+  const hit = gitCache.get(key);
+  if (hit && stamp !== '' && hit.stamp === stamp && now - hit.at < GIT_CACHE_MS) return hit.out;
+  let out: string | undefined;
+  try {
+    out = execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }).trim();
+  } catch {
+    out = undefined;
+  }
+  gitCache.set(key, { stamp, at: now, out });
+  if (gitCache.size > 4096) for (const [k, v] of gitCache) if (now - v.at >= GIT_CACHE_MS) gitCache.delete(k);
+  return out;
+}
+
+/** Drop every cached git answer (tests). */
+export function clearGitCache(): void {
+  gitCache.clear();
 }
 
 /** Read-only local counterpart of pickup's live tracker comment. */
