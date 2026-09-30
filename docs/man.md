@@ -879,8 +879,9 @@ lobstah soak --wait             # hookless sessions: listen in the foreground
 lobstah soak --link <url>       # store this session's link for the glass's ↗ open button
 lobstah focus <trap>           # focus a live trap from the CLI
 lobstah stow                    # sign off; an open catch requeues, unread
-                                # messages bounce back to the helm; removes
-                                # the worktree when soak created it
+                                # messages wait [soak].signOffGraceSecs for a
+                                # re-soak, then bounce back to the helm;
+                                # removes the worktree when soak created it
 lobstah stow --keep             # sign off and keep the worktree
 lobstah soak --name amber-gull  # choose or change this trap's two-word name
 ```
@@ -942,6 +943,29 @@ upstream: on some remote branch);
 otherwise it prints `branchKept: <branch> (<reason>)`. A deleted branch
 prints as `branchDeleted:`. `stow --wt <id>` follows the same rules. The
 SessionEnd hook (`lobstah stow --quiet`) signs off and keeps the worktree.
+
+**Only the trap's own session signs it off from a hook.** `lobstah hook
+session-end` (and `stow --quiet`) stows a trap only when the ending session
+is the one registered as the trap. Another session in the same worktree (a
+second window, a child session) ending leaves the trap signed on. The
+PostToolUse and SessionStart hooks never beat or adopt a trap for a session
+that is not the trap's.
+
+**A sign-off holds the address for a while.** A session that restarts or
+compacts can end (SessionEnd stows it) and sign on again a minute later.
+SessionEnd cannot tell that from an exit: Claude Code's `reason` is `clear`,
+`resume`, `logout`, `prompt_input_exit`, or `other`, and Codex's is always
+`other`. So for `[soak].signOffGraceSecs` (default 600) after any sign-off:
+
+- unread messages stay in the trap's inbox, and `send wt:<trap>` queues
+  more with a warning instead of refusing;
+- work addressed to the trap raises no `bait-orphaned` notice;
+- a re-soak of the same worktree releases the hold, and the messages deliver
+  at its next park.
+
+After the grace, the daemon bounces the held messages to the helm
+(`message-bounced`), and `bait-orphaned` is raised as before. A stow that
+removes the worktree, or a grace of `0`, bounces at once.
 Releasing a claim whose last report is `done` or `failed` moves it to `done/`;
 only an unfinished catch requeues (a cancelled catch finalizes as failed).
 

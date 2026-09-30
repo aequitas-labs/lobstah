@@ -324,6 +324,8 @@ export function signOnTrap(opts: {
     ...(sameSession && prior.titlePending ? { titlePending: prior.titlePending } : {}),
   };
   atomicWrite(regPath(trapId), JSON.stringify(reg, null, 2));
+  // Back within the grace: held messages deliver at the next park.
+  releaseSignedOff(trapId);
   if (!prior) {
     postNotice({
       kind: 'trap-signed-on',
@@ -341,9 +343,56 @@ export function signOnTrap(opts: {
  * end-state explicit: a trap that leaves the registry without either a
  * trap-stowed or a trap-ghosted notice never leaves cleanly.
  */
+/** A trap that signed off: its address is held for `[soak].signOffGraceSecs`. */
+export interface SignedOff {
+  trapId: string;
+  name?: string;
+  worktree: string;
+  at: string;
+}
+
+const signedOffDir = () => path.join(path.dirname(soakingDir()), 'signed-off');
+const signedOffPath = (trapId: string) => path.join(signedOffDir(), `${trapId}.json`);
+
+/** When a trap signed off, while its address is held; undefined once it re-soaked or was released. */
+export function readSignedOff(trapId: string): SignedOff | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(signedOffPath(trapId), 'utf8')) as SignedOff;
+  } catch {
+    return undefined;
+  }
+}
+
+export function listSignedOff(): SignedOff[] {
+  try {
+    return fs
+      .readdirSync(signedOffDir())
+      .filter((f) => f.endsWith('.json'))
+      .flatMap((f) => {
+        const s = readSignedOff(f.slice(0, -'.json'.length));
+        return s ? [s] : [];
+      });
+  } catch {
+    return [];
+  }
+}
+
+/** Release a signed-off trap's held address (a re-soak, or the grace ended). */
+export function releaseSignedOff(trapId: string): void {
+  fs.rmSync(signedOffPath(trapId), { force: true });
+}
+
+/** A trap signed off less than `graceMs` ago and not back yet. */
+export function recentlySignedOff(trapId: string, graceMs: number, now = Date.now()): SignedOff | undefined {
+  const s = readSignedOff(trapId);
+  return s && now - (Date.parse(s.at) || 0) < graceMs ? s : undefined;
+}
+
 export function stowTrap(trapId: string, reason = 'signed off', by?: string): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
+  fs.mkdirSync(signedOffDir(), { recursive: true });
+  atomicWrite(signedOffPath(trapId), JSON.stringify({ trapId, name: reg.name, worktree: reg.worktree, at: new Date().toISOString() } satisfies SignedOff));
   fs.rmSync(regPath(trapId), { force: true });
   fs.rmSync(beatPath(trapId), { force: true });
   fs.rmSync(prProbePath(trapId), { force: true });
@@ -624,7 +673,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
  * Sticky means it is never claimed headless, so without this the queue
  * would wait in silence.
  */
-export function noticeOrphanedBait(now = Date.now()): void {
+export function noticeOrphanedBait(now = Date.now(), graceMs = 0): void {
   const traps = new Set(listTraps().map((r) => r.trapId));
   for (const id of pendingIds('work')) {
     const d = queuedDescriptor(id, 'work');
@@ -632,6 +681,8 @@ export function noticeOrphanedBait(now = Date.now()): void {
     const to = addressedTrap(d);
     // A reserved trap (starting, or failed to start) still holds its address.
     if (to !== undefined && (traps.has(to) || readReservation(to))) continue;
+    // A trap that signed off moments ago (a restart) may come back: wait out the grace.
+    if (to !== undefined && recentlySignedOff(to, graceMs, now)) continue;
     postNotice({
       kind: 'bait-orphaned',
       text:
@@ -642,7 +693,6 @@ export function noticeOrphanedBait(now = Date.now()): void {
       dedupeKey: `orphan-${id}`,
     });
   }
-  void now;
 }
 
 /** The brief a trap receives with its claimed work — plain task language. */
