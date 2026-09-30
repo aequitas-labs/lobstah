@@ -28,7 +28,8 @@ import { applyCull, planCull } from '../src/cull.js';
 import { buildGlassSnapshot, serveAttachment, serveGlass } from '../src/glass.js';
 
 /**
- * Decisions end to end: `man ask` stores one, a newer ask replaces it,
+ * Decisions end to end: `man ask` stores one, asks stand side by side and
+ * `--replace <key>` replaces one,
  * `--withdraw` removes it, and a framed decision hides the raw question on
  * its dispatch. An answer is a `decision-answer` request: the glass's
  * /requests POST files one (and refuses what it must), and `man wait`
@@ -116,17 +117,34 @@ describe('man ask', () => {
     expect(lobstah('man', 'ask').status).toBe(2);
   });
 
-  it('a newer ask on the same dispatch replaces the older one', () => {
+  it('a newer ask on the same dispatch keeps the older one: each is its own card', () => {
+    question();
+    const first = keyOf(lobstah('man', 'ask', A, '--title', 'Which schema should the tray use?').stdout)!;
+    const second = lobstah('man', 'ask', A, '--title', 'May the worker bump the lockfile?');
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.stdout).not.toContain('replaced:');
+    expect(readDecision(first)).toBeDefined();
+    expect(listDecisions().map((d) => d.title).sort()).toEqual(['May the worker bump the lockfile?', 'Which schema should the tray use?']);
+    const keys = buildTendReport().attention.filter((a) => a.kind === 'decision').map((a) => a.key);
+    expect(keys).toContain(first);
+    expect(keys).toContain(keyOf(second.stdout));
+  });
+
+  it('--replace <key> replaces that one standing decision, and refuses an unknown key', () => {
     question();
     const first = keyOf(lobstah('man', 'ask', A, '--title', 'first framing').stdout)!;
-    const second = lobstah('man', 'ask', A, '--title', 'second framing');
+    const other = keyOf(lobstah('man', 'ask', A, '--title', 'an unrelated question').stdout)!;
+    const second = lobstah('man', 'ask', A, '--title', 'second framing', '--replace', first);
+    expect(second.status, second.stderr).toBe(0);
     expect(second.stdout).toContain(`replaced: ${first}`);
     expect(readDecision(first)).toBeUndefined();
-    expect(listDecisions().map((d) => d.title)).toEqual(['second framing']);
-    // A decision about no dispatch is never replaced.
-    lobstah('man', 'ask', '--title', 'Cut 0.6.0?');
-    lobstah('man', 'ask', '--title', 'Rename the pet?');
-    expect(listDecisions().map((d) => d.title).sort()).toEqual(['Cut 0.6.0?', 'Rename the pet?', 'second framing']);
+    expect(readDecision(other)).toBeDefined();
+    expect(listDecisions().map((d) => d.title).sort()).toEqual(['an unrelated question', 'second framing']);
+    // An unknown or already-gone key is refused, and nothing is written.
+    const bad = lobstah('man', 'ask', A, '--title', 'third framing', '--replace', first);
+    expect(bad.status).toBe(2);
+    expect(bad.stdout + bad.stderr).toContain(`no standing decision ${first} to replace`);
+    expect(listDecisions()).toHaveLength(2);
   });
 
   it('--withdraw removes it', () => {

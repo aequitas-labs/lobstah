@@ -509,7 +509,9 @@ the same rule.
   `attachments/`. The claimed helm alone may ask.
 - **Standing.** A decision stands until it is answered or the helm withdraws
   it with `lobstah man ask --withdraw <key>`, which removes its directory. A
-  newer `man ask` on the same dispatch replaces the older decision.
+  newer `man ask` on the same dispatch keeps the older decisions: each shows
+  as its own card. `lobstah man ask ... --replace <key>` replaces that one
+  standing decision; a key that is not standing is refused.
 - **Attention.** A standing decision is attention of kind `decision`, in
   the default `attentionKinds`. It makes the verdict `needs-attention`. A
   worker's raw `needs-decision` or `blocked` stays a `question` until the

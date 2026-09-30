@@ -226,8 +226,8 @@ export interface AskOptions {
   repo?: string;
   grounds?: string;
   askedBy: string;
-  /** Replace a standing decision on the same dispatch (default true). */
-  replace?: boolean;
+  /** A standing decision this one replaces (`man ask --replace <key>`). Without it, every standing decision stays. */
+  replace?: string;
   /** Per-file limit for attachments (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -252,11 +252,15 @@ function checkOptions(raw: string[]): string[] {
 }
 
 /**
- * Store a decision. Every input is checked before anything is written. A
- * standing decision on the same dispatch is replaced: its directory is
- * removed and its key returned in `replaced`.
+ * Store a decision. Every input is checked before anything is written. Older
+ * standing decisions stay, on the same dispatch too: each is its own card.
+ * `replace` names one standing decision to remove; its key is returned in
+ * `replaced`.
  */
 export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: string[] } {
+  if (opts.replace !== undefined && !standingDecisions().some((d) => d.key === opts.replace)) {
+    throw new DecisionError(`no standing decision ${opts.replace} to replace — \`lobstah man tend\` lists them`);
+  }
   const title = checkTitle(opts.title);
   const options = checkOptions(opts.options ?? []);
   let detail = opts.detailText ?? '';
@@ -308,9 +312,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   };
   writeAtomic(path.join(dir, DETAIL_MD), detail);
   writeAtomic(path.join(dir, DECISION_JSON), `${JSON.stringify(meta, null, 2)}\n`);
-  const replaced = opts.dispatch && opts.replace !== false
-    ? standingDecisions().filter((d) => d.key !== key && d.dispatch === opts.dispatch && d.lane === opts.lane).map((d) => d.key)
-    : [];
+  const replaced = opts.replace !== undefined && opts.replace !== key ? [opts.replace] : [];
   for (const old of replaced) fs.rmSync(decisionDir(old)!, { recursive: true, force: true });
   return { meta, replaced };
 }

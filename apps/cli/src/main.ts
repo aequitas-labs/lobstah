@@ -322,11 +322,12 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man file <file.md> [--attach <file> ...] [--title <text>]
                                   file the helm's own report under its
                                   grounds; the glass renders it on the deck.
-  man ask [<dispatch-id>] --title <q> [--detail <f.md>] [--option <label> ...] [--attach <file> ...]
+  man ask [<dispatch-id>] --title <q> [--detail <f.md>] [--option <label> ...] [--attach <file> ...] [--replace <key>]
                                   put a decision to the human: a card in the
                                   glass until answered or withdrawn
-                                  (--withdraw <key>). The answer wakes man
-                                  wait as a decision-answer event.
+                                  (--withdraw <key>). Asks stand side by side;
+                                  --replace <key> replaces one. The answer
+                                  wakes man wait as a decision-answer event.
   man answer <key> [--option <label>] [--text <text>] [--attach <file> ...]
                                   answer a decision from the terminal.
   man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
@@ -1189,6 +1190,23 @@ async function mainCli(): Promise<void> {
           throw new UsageError(`${err instanceof Error ? err.message : String(err)}\n\n${usageFor('report')!}`);
         }
       }
+      // A message that arrived while the worker worked is read before it may
+      // finish: done prints the unread messages, marks them read, and refuses.
+      // Nothing is written; the worker acts on them and reports done again.
+      if (verb === 'done') {
+        const unread = unhandled(id, lane);
+        if (unread.length > 0) {
+          for (const m of unread) {
+            console.log(`--- message ${m.file}`);
+            console.log(m.text);
+            acknowledge(id, lane, m.file);
+          }
+          throw new Error(
+            `not reported done: ${unread.length} unread message(s) for ${id} arrived while you worked. ` +
+              'They are printed above and now marked read. Act on them, then report done again.',
+          );
+        }
+      }
       // A report page files before the status: a refused file changes nothing.
       const reportFile = opt('--report');
       const attachFiles = values('--attach');
@@ -1535,6 +1553,7 @@ async function mainCli(): Promise<void> {
           ...(repo ? { repo } : {}),
           ...(grounds ? { grounds } : {}),
           askedBy: 'helm',
+          ...(opt('--replace') !== undefined ? { replace: opt('--replace') } : {}),
           maxBytes: loadConfig().limits.attachmentMaxBytes,
         });
       } catch (err) {
