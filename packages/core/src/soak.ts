@@ -46,7 +46,9 @@ export interface TrapRegistration {
   firstParkedAt?: string;
   /** The last heartbeat of a park (the Stop hook or `soak --wait`): fresh while the trap listens. */
   parkedAt?: string;
-  /** The title sign-on asked the session to apply, until the session confirms it (`trap title-set`). */
+  /** Title reminders given while titlePending stands; they stop at TITLE_REMINDERS. */
+  titleReminders?: number;
+  /** The title sign-on asked the session to apply, until the session confirms it (`soak title-set`). */
   titlePending?: string;
   /** When the session confirmed its title, and which. */
   titleSetAt?: string;
@@ -421,11 +423,27 @@ export function askTrapTitle(trapId: string, title: string): TrapRegistration | 
   return next;
 }
 
+/** How many times the hooks remind a trap to confirm its sign-on title; the last one says it is the last. */
+export const TITLE_REMINDERS = 3;
+
+/**
+ * Count one title reminder for a trap whose title is still pending. Returns
+ * the reminder's number (1-based), or undefined when no title is pending or
+ * the trap is gone.
+ */
+export function countTitleReminder(trapId: string): number | undefined {
+  const reg = readTrap(trapId);
+  if (!reg?.titlePending) return undefined;
+  const n = (reg.titleReminders ?? 0) + 1;
+  atomicWrite(regPath(trapId), JSON.stringify({ ...reg, titleReminders: n }, null, 2));
+  return n;
+}
+
 /** The session applied its title: sign-on is complete. Returns the registration, or undefined when the trap is gone. */
 export function confirmTrapTitle(trapId: string, now = Date.now()): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
-  const { titlePending, ...rest } = reg;
+  const { titlePending, titleReminders: _reminders, ...rest } = reg;
   const next: TrapRegistration = { ...rest, titleSet: titlePending ?? reg.titleSet ?? reg.name, titleSetAt: new Date(now).toISOString() };
   atomicWrite(regPath(trapId), JSON.stringify(next, null, 2));
   return next;

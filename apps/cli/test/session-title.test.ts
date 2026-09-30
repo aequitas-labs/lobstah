@@ -98,26 +98,51 @@ describe('the sign-on title is a step the session confirms', () => {
       hookSpecificOutput: { additionalContext: string };
     }).hookSpecificOutput.additionalContext;
 
-  it('sign-on says to apply the title; SessionStart and Stop remind once per turn until title-set', () => {
+  const REMINDER =
+    'lobstah: sign-on is not complete. Apply this title: amber-gull (skip this if you have no tool that sets the session title). Then run `lobstah soak title-set`.';
+
+  it('sign-on says to apply the title; a confirmation from the trap worktree stops the reminders', () => {
     signOn();
     const out = run(['soak', '--session', 'own-session']);
-    expect(out).toMatch(/step: Apply this title: amber-gull\. Then run `lobstah trap title-set( --session own-session)?`\. Sign-on is complete after that\./);
-    const reminder = 'lobstah: sign-on is not complete. Apply this title: amber-gull. Then run `lobstah trap title-set`.';
-    expect(JSON.parse(stop())).toEqual({ decision: 'block', reason: reminder });
+    expect(out).toMatch(
+      /step: Apply this title: amber-gull \(skip this if you have no tool that sets the session title\)\. Then run `lobstah soak title-set( --session own-session)?`\. Sign-on is complete after that\./,
+    );
+    expect(JSON.parse(stop())).toEqual({ decision: 'block', reason: REMINDER });
     // A turn the Stop hook already continued is not reminded again.
     expect(stop({ stop_hook_active: true })).not.toContain('sign-on is not complete');
-    expect(brief()).toContain(reminder);
+    expect(brief()).toContain(REMINDER);
 
-    expect(run(['trap', 'title-set'])).toContain('signOn: complete');
+    // The step never asks for a command with the word `trap`, which Claude
+    // Code's worktree isolation refuses as the shell builtin.
+    const confirm = 'soak title-set';
+    expect(REMINDER).toContain(`lobstah ${confirm}`);
+    expect(REMINDER).not.toMatch(/\btrap\b/);
+    expect(run(['soak', 'title-set'])).toContain('signOn: complete');
     expect(stop()).not.toContain('sign-on is not complete');
     expect(brief()).not.toContain('sign-on is not complete');
     // Signing on again in the same session asks nothing new.
     expect(run(['soak', '--session', 'own-session'])).not.toContain('step:');
   });
 
-  it('title-set finds the trap by session from outside its worktree', () => {
+  it('a confirmation that never comes: two reminders, a last one that says so, then silence', () => {
     signOn();
     run(['soak', '--session', 'own-session']);
-    expect(run(['trap', 'title-set', '--session', 'own-session'], home)).toContain('title: amber-gull');
+    expect(JSON.parse(stop()).reason).toBe(REMINDER);
+    expect(JSON.parse(stop()).reason).toBe(REMINDER);
+    expect(JSON.parse(stop()).reason).toBe(
+      `${REMINDER} This is the last reminder: if the command cannot run here, carry on; lobstah stops asking.`,
+    );
+    expect(stop()).not.toContain('sign-on is not complete');
+    expect(brief()).not.toContain('sign-on is not complete');
+    // It can still be confirmed later.
+    expect(run(['soak', 'title-set'])).toContain('signOn: complete');
+  });
+
+  it('title-set finds the trap by session from outside its worktree; trap title-set is an alias', () => {
+    signOn();
+    run(['soak', '--session', 'own-session']);
+    expect(run(['soak', 'title-set', '--session', 'own-session'], home)).toContain('title: amber-gull');
+    signOn();
+    expect(run(['trap', 'title-set', '--session', 'own-session'], home)).toContain('signOn: complete');
   });
 });
