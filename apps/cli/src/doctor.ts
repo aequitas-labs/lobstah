@@ -31,6 +31,7 @@ import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import { petRow } from './pet.js';
+import { claudeHooks, codexHooks, hookRow, listenerRow } from './hook-readiness.js';
 
 export interface DoctorRow {
   check: string;
@@ -385,5 +386,11 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
 
   push('lobstah', 'ok', `v${lobstahVersion()} at ${process.argv[1] ?? '?'}`);
   for (const row of pluginRows(lobstahVersion())) push(row.check, row.status, row.detail);
+  for (const h of [claudeHooks(), codexHooks()]) {
+    const row = hookRow(h, now);
+    push(row.check, row.status, row.detail);
+  }
+  const listeners = listenerRow(now);
+  push(listeners.check, listeners.status, listeners.detail);
   return rows;
 }

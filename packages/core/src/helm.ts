@@ -34,6 +34,8 @@ export interface HelmRegistration {
   label?: string;
   /** Where the session's window lives — a companion app's focus target. */
   window?: WindowRef;
+  /** The last heartbeat of a park in the Stop hook: fresh while the helm listens there. */
+  parkedAt?: string;
   /**
    * The wake cursor's start. Notices and watch events recorded before it are
    * not wakes for this helm; `man tend` and the glass still list them.
@@ -260,10 +262,11 @@ export function relieveHelm(sessionId: string): string[] {
   return relieved;
 }
 
-export function heartbeatHelm(sessionId: string): HelmRegistration | undefined {
+export function heartbeatHelm(sessionId: string, opts: { parked?: boolean } = {}): HelmRegistration | undefined {
   const reg = helmOf(sessionId);
   if (!reg) return undefined;
-  const next = { ...reg, heartbeatAt: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const next = { ...reg, heartbeatAt: now, ...(opts.parked ? { parkedAt: now } : {}) };
   atomicWrite(helmPath(reg.grounds), JSON.stringify(next, null, 2));
   return next;
 }
