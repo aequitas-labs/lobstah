@@ -5,6 +5,7 @@ import {
   mergeEvidence,
   parsePrRef,
   readEvidence,
+  readSessionClaim,
   readTrapPrProbe,
   storedDescriptor,
   writeTrapPrProbe,
@@ -23,13 +24,16 @@ const defaultRun: ProbeRun = (cmd, args, cwd) => {
 export const PR_PROBE_INTERVAL_MS = 60_000;
 
 export type PrProbeResult =
-  | { recorded: false; reason: 'no-catch' | 'throttled' | 'no-branch' | 'trunk' | 'no-upstream' | 'known' | 'no-pr' }
+  | { recorded: false; reason: 'no-catch' | 'throttled' | 'no-branch' | 'trunk' | 'no-upstream' | 'before-claim' | 'known' | 'no-pr' }
   | { recorded: true; dispatch: string; prUrl: string; watch?: string };
 
 /**
  * The beat's PR lookup for a trap's open catch. At most once a minute it
  * reads the worktree's branch. When the branch is not trunk and tracks a
- * remote branch of its own, `gh pr view <branch>` names its PR. A PR not yet
+ * remote branch of its own, `gh pr view <branch>` names its PR. The branch
+ * is this dispatch's only when its head commit is newer than the claim: a
+ * trap that took new work on the branch of its last dispatch does not give
+ * that dispatch's PR to the new one. A PR not yet
  * in the dispatch's evidence is recorded there and gets its `pr:` watch,
  * as `report --pr` does. Once the PR is found for a branch, later beats on
  * that branch run no gh. Throws on a broken state; the caller logs it.
@@ -56,6 +60,12 @@ export function probeTrapPr(reg: TrapRegistration, opts: { now?: number; run?: P
   const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
   const tracked = upstream.status === 0 ? upstream.stdout.trim() : '';
   if (!tracked || tracked.endsWith(`/${trunk}`)) return { recorded: false, reason: 'no-upstream' };
+  const claimedAt = Date.parse(readSessionClaim(id, 'work')?.at ?? '');
+  if (Number.isFinite(claimedAt)) {
+    const committed = git(['log', '-1', '--format=%ct', 'HEAD']);
+    const at = committed.status === 0 ? Number(committed.stdout.trim()) * 1000 : NaN;
+    if (!(at >= claimedAt)) return { recorded: false, reason: 'before-claim' };
+  }
   const view = run('gh', ['pr', 'view', branch, '--json', 'url', '--jq', '.url'], reg.worktree);
   const prUrl = view.status === 0 ? view.stdout.trim() : '';
   if (!parsePrRef(prUrl)) return { recorded: false, reason: 'no-pr' };

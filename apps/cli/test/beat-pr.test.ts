@@ -4,8 +4,25 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimBait, enqueue, ensureLayout, laneDirs, listWatches, mergeEvidence, readEvidence, readTrap, readWatch, signOnTrap, upsertPr } from '@lobstah/core';
-import type { Descriptor, PrEvidence, TrapRegistration } from '@lobstah/core';
+import {
+  appendStatus,
+  claimBait,
+  enqueue,
+  ensureLayout,
+  laneDirs,
+  listNotices,
+  listTraps,
+  listWatches,
+  mergeEvidence,
+  readEvidence,
+  readPr,
+  readTrap,
+  readWatch,
+  signOnTrap,
+  upsertPr,
+} from '@lobstah/core';
+import type { Descriptor, GhPrView, PrEvidence, TrapRegistration } from '@lobstah/core';
+import { observePr } from '../src/pr-watch.js';
 import { runBeat } from '../src/beat.js';
 import type { ProbeRun } from '../src/beat-pr.js';
 import { deliverPrRepairs } from '../src/pr-repair.js';
@@ -42,12 +59,32 @@ function repo(): string {
   return dir;
 }
 
-function caughtTrap(): TrapRegistration {
-  const signed = signOnTrap({ sessionId: 'trap-s', harness: 'claude', repo: 'web', worktree: wt, cwd: wt, ttlMs: 60_000 });
-  if (!('ok' in signed)) throw new Error('unexpected hold');
-  enqueue({ id: ID, repo: 'web', brief: 'trap work' });
-  expect(claimBait(signed.ok)?.id).toBe(ID);
-  return readTrap(signed.ok.trapId)!;
+/** A commit on the checked-out branch, dated `at` (ms). */
+function commitAt(at: number, name = 'b.txt'): void {
+  fs.writeFileSync(path.join(wt, name), `${at}\n`);
+  git(wt, 'add', name);
+  const date = `@${Math.floor(at / 1000)} +0000`;
+  const res = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', name], {
+    cwd: wt,
+    encoding: 'utf8',
+    env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+  });
+  if (res.status !== 0) throw new Error(`git commit: ${res.stderr}`);
+}
+
+/** A trap that caught `id`; with `work`, it committed on its branch after the claim. */
+function caughtTrap(id = ID, work = true): TrapRegistration {
+  const existing = listTraps()[0];
+  let reg = existing;
+  if (!reg) {
+    const signed = signOnTrap({ sessionId: 'trap-s', harness: 'claude', repo: 'web', worktree: wt, cwd: wt, ttlMs: 60_000 });
+    if (!('ok' in signed)) throw new Error('unexpected hold');
+    reg = signed.ok;
+  }
+  enqueue({ id, repo: 'web', brief: 'trap work' });
+  expect(claimBait(reg)?.id).toBe(id);
+  if (work) commitAt(Date.now() + 5_000, `${id}.txt`);
+  return readTrap(reg.trapId)!;
 }
 
 /** Real git; a fake gh that answers with `gh` and counts its calls. */
@@ -122,14 +159,59 @@ describe('the trap beat records its catch PR', () => {
     const failing = fakeRun(() => ({ status: 1, stdout: '' }));
     expect(() => runBeat(hook(reg), { run: failing.run, now: T0 })).not.toThrow();
     expect(failing.calls.gh).toBe(1);
-    const throwing: ProbeRun = (cmd) => {
+    const throwing: ProbeRun = (cmd, args) => {
       if (cmd === 'gh') throw new Error('gh exploded');
+      if (args[0] === 'log') return { status: 0, stdout: `${Math.floor(Date.now() / 1000) + 60}\n` };
       return { status: 0, stdout: 'feature\n' };
     };
     expect(() => runBeat(hook(reg), { run: throwing, now: T0 + 61_000 })).not.toThrow();
     expect(readEvidence(ID, 'work').prUrl).toBeUndefined();
     expect(readWatch(KEY)).toBeUndefined();
     expect(fs.readFileSync(path.join(home, 'logs', 'beat.log'), 'utf8')).toContain('gh exploded');
+  });
+});
+
+describe('a trap reused for new work does not pass on its last PR', () => {
+  const B = 'cccccccc-1111-2222-3333-444444444444';
+
+  it('a branch with no commit since the claim gives the dispatch no PR', () => {
+    const reg = caughtTrap(ID, false);
+    const { run, calls } = fakeRun(() => ({ status: 0, stdout: URL_ }));
+    runBeat(hook(reg), { run, now: T0 });
+    expect(calls.gh).toBe(0);
+    expect(readEvidence(ID, 'work').prUrl).toBeUndefined();
+    // Its first commit after the claim makes the branch its own.
+    commitAt(Date.now() + 5_000);
+    runBeat(hook(reg), { run, now: T0 + 61_000 });
+    expect(readEvidence(ID, 'work').prUrl).toBe(URL_);
+  });
+
+  it('dispatch A finishes with a PR; B, claimed on the same branch, has none, and the merge notice names A', () => {
+    const a = caughtTrap(ID);
+    const { run } = fakeRun(() => ({ status: 0, stdout: URL_ }));
+    runBeat(hook(a), { run, now: T0 });
+    expect(readEvidence(ID, 'work').prUrl).toBe(URL_);
+    appendStatus(ID, 'work', 'done', 'PR sent');
+
+    const b = caughtTrap(B, false);
+    expect(b.claimed).toBe(B);
+    // B is claimed after A's last commit.
+    const claimFile = path.join(laneDirs('work').active, B, 'claim.json');
+    fs.writeFileSync(claimFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(claimFile, 'utf8')), at: new Date(Date.now() + 60_000).toISOString() }));
+    runBeat(hook(b), { run, now: T0 + 61_000 });
+    runBeat(hook(b), { run, now: T0 + 122_000 });
+    expect(readEvidence(B, 'work').prUrl).toBeUndefined();
+    expect(readWatch(KEY)?.owner).toBe(`dispatch:${ID}`);
+
+    // The daemon observes the watch for its owner; the PR merges.
+    const view: GhPrView = { state: 'MERGED', isDraft: false, headRefOid: 'c'.repeat(40), mergeStateStatus: 'UNKNOWN', mergedAt: new Date().toISOString() };
+    const ref = { owner: 'acme', repo: 'web', number: 41, key: KEY, url: URL_ };
+    upsertPr({ ...view, url: URL_, number: 41, state: 'OPEN', draft: false, reviewDecision: '', headSha: 'c'.repeat(40), checks: { total: 0, passed: 0, failed: 0, pending: 0 }, observedAt: new Date(T0).toISOString() } as PrEvidence, ID);
+    observePr(ref, view, { dispatchId: readWatch(KEY)!.owner.slice('dispatch:'.length) });
+    expect(readPr(KEY)?.dispatches).toEqual([ID]);
+    const notice = listNotices(20).find((n) => n.kind === 'pr-merged');
+    expect(notice?.refId).toBe(ID);
+    expect(notice?.text).toContain(`dispatch ${ID.slice(0, 8)}`);
   });
 });
 

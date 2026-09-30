@@ -69,7 +69,8 @@ naming a dispatch id. Then:
 - Finish with `lobstah report <id> done "<note>" --pr <url>` (or `failed`).
   `--pr <url>` may be given on any report verb. It records the PR and registers
   its `pr:` watch for your chain; `--no-watch` opts out. Your PR is tracked
-  from its first push: the beat finds it on your branch.
+  from its first push: the beat finds it on your branch once you commit
+  there after taking the work.
 - A `needs-decision` or `blocked` report queues your question to the human.
   The answer arrives in the dispatch's inbox: `lobstah inbox <id>`.
 - Check `lobstah inbox <id>` at natural checkpoints.
@@ -85,7 +86,9 @@ naming a dispatch id. Then:
   --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,
   not a question: nobody is paged. Report `working` when you resume. When the
   PR you wait on merges, lobstah finishes the dispatch `done`; closed without
-  merge, `failed`.
+  merge, `failed`. For `review` or `pr`, `--link` is the PR's URL. If the
+  report prints a `warning`, lobstah knows no PR for the wait: report again
+  with `--link <PR url>`.
 - A failing check that passes only when a person approves is a human gate.
   Do not change code for it. Name it on your report with
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.
