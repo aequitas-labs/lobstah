@@ -5,6 +5,8 @@
 // question pet runs the focus ladder against the helm registration lobstah
 // already keeps: exact iTerm pane -> Terminal tab by tty -> VS Code window
 // by cwd -> app by bundle id -> resume-if-stale -> the spyglass. Clicking a
+// decision pet brings up a live helm the same way (the Claude desktop app for
+// a desktop helm), else the decision's glass card. Clicking a
 // draft-PR pet opens the PR. The pet only ever reads lobstah state
 // (`attention --json`, or `man tend --json` from an older lobstah, plus the
 // helm files); it steers nothing. Its one write is ~/.lobstah/pet/state.json,
@@ -15,21 +17,7 @@ import LobstahPetCore
 
 // MARK: - lobstah state
 
-struct WindowRef: Decodable {
-  let bundleId: String?
-  let termProgram: String?
-  let tty: String?
-  let itermSession: String?
-  let tmuxPane: String?
-}
-
-struct HelmRegistration: Decodable {
-  let sessionId: String
-  let harness: String?
-  let cwd: String?
-  let heartbeatAt: String
-  let window: WindowRef?
-}
+// HelmRegistration and HelmWindow live in LobstahPetCore (Helm.swift).
 
 /** The spyglass: $LOBSTAH_GLASS_PORT (shared with `lobstah glass`), else 4949. */
 let glassURL: URL = {
@@ -76,84 +64,76 @@ func osascript(_ source: String) -> Bool {
   return error == nil
 }
 
-func focusHelm() {
-  guard let helm = readHelm() else {
-    NSWorkspace.shared.open(glassURL)
-    return
+/**
+ * Bring up the helm's session: run the ladder from helmFocusSteps (Helm.swift)
+ * until a step works. `fallback` is the spyglass URL to open when none does.
+ */
+func focusHelm(fallback: URL = glassURL) {
+  for step in helmFocusSteps(readHelm(), glass: fallback) {
+    if runFocusStep(step) { return }
   }
-  let iso = ISO8601DateFormatter()
-  iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-  let beat = iso.date(from: helm.heartbeatAt)
-    ?? ISO8601DateFormatter().date(from: helm.heartbeatAt)
-  let live = beat.map { Date().timeIntervalSince($0) < 1800 } ?? false
-  let win = helm.window
+}
 
-  if live {
-    // exact iTerm pane
-    if let sess = win?.itermSession, let uuid = sess.split(separator: ":").last {
-      let ok = osascript("""
-        tell application "iTerm2"
-          repeat with w in windows
-            repeat with t in tabs of w
-              repeat with s in sessions of t
-                if id of s contains "\(uuid)" then
-                  select t
-                  select w
-                  activate
-                  return
-                end if
-              end repeat
-            end repeat
-          end repeat
-        end tell
-        """)
-      if ok { return }
-    }
-    // exact Terminal.app tab by tty
-    if let tty = win?.tty, win?.termProgram == "Apple_Terminal" {
-      let ok = osascript("""
-        tell application "Terminal"
-          repeat with w in windows
-            repeat with t in tabs of w
-              if (tty of t as string) ends with "\(tty)" then
-                set selected of t to true
-                set frontmost of w to true
+/// One ladder step; true when it brought something up.
+func runFocusStep(_ step: HelmFocusStep) -> Bool {
+  switch step {
+  case .itermSession(let uuid):
+    return osascript("""
+      tell application "iTerm2"
+        repeat with w in windows
+          repeat with t in tabs of w
+            repeat with s in sessions of t
+              if id of s contains "\(uuid)" then
+                select t
+                select w
                 activate
                 return
               end if
             end repeat
           end repeat
-        end tell
-        """)
-      if ok { return }
-    }
+        end repeat
+      end tell
+      """)
+  case .terminalTab(let tty):
+    return osascript("""
+      tell application "Terminal"
+        repeat with w in windows
+          repeat with t in tabs of w
+            if (tty of t as string) ends with "\(tty)" then
+              set selected of t to true
+              set frontmost of w to true
+              activate
+              return
+            end if
+          end repeat
+        end repeat
+      end tell
+      """)
+  case .editor(let bundle, let cwd):
     // VS Code family: one window per folder, cwd is the window
-    if let bundle = win?.bundleId, let cwd = helm.cwd,
-       bundle.contains("VSCode") || bundle.contains("Cursor") || bundle.contains("windsurf") {
-      let p = Process()
-      p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-      p.arguments = ["-b", bundle, cwd]
-      try? p.run()
-      return
-    }
-    // any recorded app
-    if let bundle = win?.bundleId,
-       let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first {
-      app.activate()
-      return
-    }
-  } else if let cwd = helm.cwd {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    p.arguments = ["-b", bundle, cwd]
+    try? p.run()
+    return true
+  case .activateApp(let bundle):
+    // The Claude desktop app for a desktop helm, or any recorded app.
+    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first else { return false }
+    app.activate()
+    return true
+  case .revive(let cwd, let command):
     // stale helm: revive it in a fresh Terminal window
-    let resume = helm.harness == "codex" ? "codex resume" : "claude --resume"
     _ = osascript("""
       tell application "Terminal"
-        do script "cd \(cwd) && \(resume) \(helm.sessionId)"
+        do script "cd \(cwd) && \(command)"
         activate
       end tell
       """)
-    return
+    return true
+  case .openGlass(let url):
+    NSWorkspace.shared.open(url)
+    return true
   }
-  NSWorkspace.shared.open(glassURL)
 }
 
 // MARK: - pet window
@@ -163,8 +143,9 @@ final class PetView: NSView {
   override func mouseDown(with event: NSEvent) {
     guard let item = pet?.item else { focusHelm(); return }
     clickAttentionItem(item, glass: glassURL,
+      helmLive: helmIsLive(readHelm()),
       open: { NSWorkspace.shared.open($0) },
-      focusHelm: focusHelm,
+      focusHelm: { focusHelm(fallback: $0) },
       acknowledge: ackAttention)
   }
   override func updateTrackingAreas() {

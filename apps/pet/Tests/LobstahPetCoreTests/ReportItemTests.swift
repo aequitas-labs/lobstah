@@ -44,7 +44,7 @@ final class ReportItemTests: XCTestCase {
     }
     clickAttentionItem(item, glass: URL(string: "http://127.0.0.1:4949")!,
       open: { actions.append($0.absoluteString) },
-      focusHelm: { XCTFail("a report opens its glass URL") },
+      focusHelm: { _ in XCTFail("a report opens its glass URL") },
       acknowledge: { _ = ackOutcome(run($0)) })
     XCTAssertEqual(actions, ["http://127.0.0.1:4949/#report/report%3Awork%3Aabc", "ack"])
     XCTAssertEqual(commands, [["attention", "ack", "report:work:abc", "--by", "pet"]])
@@ -56,7 +56,7 @@ final class ReportItemTests: XCTestCase {
     var failure: ReadFailure?
     clickAttentionItem(item, glass: URL(string: "http://127.0.0.1:4949")!,
       open: { _ in opened = true },
-      focusHelm: { XCTFail("a report opens its glass URL") },
+      focusHelm: { _ in XCTFail("a report opens its glass URL") },
       acknowledge: { _ in
         XCTAssertTrue(opened)
         if case let .failure(why) = ackOutcome(.exited(status: 1, stdout: Data())) { failure = why }
@@ -73,7 +73,7 @@ final class ReportItemTests: XCTestCase {
       var actions: [String] = []
       clickAttentionItem(item, glass: glass,
         open: { actions.append($0.absoluteString) },
-        focusHelm: { actions.append("helm") },
+        focusHelm: { _ in actions.append("helm") },
         acknowledge: { actions.append($0.joined(separator: " ")) })
       XCTAssertEqual(actions, [kind == "pr:ready" ? pr : "helm", "attention ack work:abc --by pet"], kind)
     }
@@ -84,7 +84,7 @@ final class ReportItemTests: XCTestCase {
     var focused = false
     clickAttentionItem(item, glass: URL(string: "http://127.0.0.1:4949")!,
       open: { _ in XCTFail("a legacy question focuses the helm") },
-      focusHelm: { focused = true },
+      focusHelm: { _ in focused = true },
       acknowledge: { _ in XCTFail("an item without a key cannot be acknowledged") })
     XCTAssertTrue(focused)
   }

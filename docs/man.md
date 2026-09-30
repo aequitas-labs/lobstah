@@ -558,9 +558,11 @@ the same rule.
   [--text <text>] [--attach <file>]...` answers the same way, with the same
   checks.
 - **The pet.** The desktop pet shows a decision as its title only. A click
-  opens the glass at the card and acks the item for the pet
-  (`lobstah attention ack <key> --by pet`). The card stays in the glass until
-  the decision is answered or withdrawn.
+  brings up the live helm's session through the pet's focus ladder: the
+  Claude desktop app for a desktop helm, the exact terminal tab for a terminal
+  helm. With no live helm, it opens the glass at the card. Either way it acks
+  the item for the pet (`lobstah attention ack <key> --by pet`). The card
+  stays in the glass until the decision is answered or withdrawn.
 - **Cull.** `lobstah cull` removes a decision once its answer is older than
   the retention window, with the `decision-answer` request and its files. A
   standing decision is never culled.
