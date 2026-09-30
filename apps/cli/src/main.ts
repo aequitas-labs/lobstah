@@ -89,6 +89,7 @@ import {
   readWatchEvents,
   holdWatch,
   releaseHeldWatches,
+  resetRepairStreaks,
   readEvidence,
   removeWatch,
   runWatchCheck,
@@ -273,7 +274,9 @@ work (humans and agents):
                                   hold ends when that dispatch ends
   watch release <key>|--all       end a hold: a watch held by the per-cycle
                                   fork cap ([watch].maxForksPerCycle), by
-                                  watch hold, or by a cancelled repair
+                                  watch hold, or by a cancelled repair;
+                                  resume repairs stopped by
+                                  [watch].maxRepairsWithoutProgress
 
 host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
@@ -2812,7 +2815,9 @@ async function mainCli(): Promise<void> {
         const key = pos[1];
         if (!key && !has('--all')) throw new Error('watch release requires a key or --all');
         const released = releaseHeldWatches(has('--all') ? undefined : key);
-        console.log(toonKV({ released: released.length }));
+        // A release also starts a PR's run of repairs without progress over.
+        const resumed = resetRepairStreaks(has('--all') ? undefined : key);
+        console.log(toonKV({ released: released.length, ...(resumed.length ? { repairsResumed: resumed.join(', ') } : {}) }));
         break;
       }
       if (sub === 'rm') {

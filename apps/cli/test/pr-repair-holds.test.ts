@@ -12,12 +12,14 @@ import {
   ensureLayout,
   gitPushTargets,
   laneDirs,
+  listNotices,
   mergeEvidence,
   readEvidence,
   readPr,
   readWatch,
   recordPush,
   releaseHeldWatches,
+  resetRepairStreaks,
   sendMessage,
   sendTrapMessage,
   soakingDir,
@@ -142,6 +144,94 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
   removeTempDir(dir);
+});
+
+describe('the repair circuit breaker', () => {
+  const P = STACK[0]!;
+  /** The last queued repair finishes done at `head`, and the PR is seen still conflicting there. */
+  const repairedAt = (head: string, at: number) => {
+    const id = readPr(key(1))!.repair!.dispatchId!;
+    mergeEvidence(id, 'chore', { commits: [`${head.slice(0, 7)} resolve conflicts`] });
+    appendStatus(id, 'chore', 'done', 'repaired');
+    upsertPr(observed(P, { headSha: head, observedAt: iso(at) }), P.owner);
+    upsertPr(observed(P, { headSha: head, observedAt: iso(at + 1000) }), P.owner);
+    return id;
+  };
+  const step = 7_200_000;
+
+  it('stops after [watch].maxRepairsWithoutProgress repairs that left the PR conflicting, with attention and a notice', () => {
+    stand(P);
+    expect(repair()).toBe(1);
+    repairedAt(sha('4'), T0 + 100_000);
+    expect(repair(3, { now: later + step })).toBe(1);
+    expect(readPr(key(1))?.repairStreak?.count).toBe(1);
+    repairedAt(sha('5'), T0 + step + 100_000);
+    expect(repair(3, { now: later + 2 * step })).toBe(0);
+    expect(queued()).toHaveLength(2);
+    const rec = readPr(key(1))!;
+    expect(rec.repair).toMatchObject({ status: 'gave-up', kind: 'conflict' });
+    expect(rec.repair?.reason).toContain('no merge progress after 2 repair(s) in a row ([watch].maxRepairsWithoutProgress = 2)');
+    expect(listNotices(50).filter((n) => n.kind === 'repair-stopped')).toHaveLength(1);
+    const tend = buildTendReport();
+    expect(tend.attention.find((a) => a.kind === 'pr:conflict' && a.key === key(1))?.note ?? JSON.stringify(tend.attention)).toContain('no merge progress');
+    // It stays stopped on the next pass.
+    expect(repair(3, { now: later + 2 * step + 60_000 })).toBe(0);
+  });
+
+  it('[watch].maxRepairsWithoutProgress sets the cap', () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nmaxRepairsWithoutProgress = 1\n');
+    stand(P);
+    expect(repair()).toBe(1);
+    repairedAt(sha('4'), T0 + 100_000);
+    expect(repair(3, { now: later + step })).toBe(0);
+    expect(readPr(key(1))?.repair?.status).toBe('gave-up');
+  });
+
+  it('a push that is not the repair\'s resets the run; so does watch release after a stop', () => {
+    stand(P);
+    expect(repair()).toBe(1);
+    const id = readPr(key(1))!.repair!.dispatchId!;
+    mergeEvidence(id, 'chore', { commits: [`${sha('4').slice(0, 7)} resolve conflicts`] });
+    appendStatus(id, 'chore', 'done', 'repaired');
+    // Another push after the repair (here the owner's): the head is not the repair's.
+    mergeEvidence(P.owner, 'work', { commits: [sha('6')] });
+    upsertPr(observed(P, { headSha: sha('6'), observedAt: iso(T0 + 100_000) }), P.owner);
+    upsertPr(observed(P, { headSha: sha('6'), observedAt: iso(T0 + 101_000) }), P.owner);
+    expect(repair(3, { now: later + step })).toBe(1);
+    expect(readPr(key(1))?.repairStreak?.count).toBe(0);
+
+    // Two repairs without progress stop it; a release lets it repair again.
+    repairedAt(sha('7'), T0 + step + 100_000);
+    expect(repair(3, { now: later + 2 * step })).toBe(1);
+    repairedAt(sha('8'), T0 + 2 * step + 100_000);
+    expect(repair(3, { now: later + 3 * step })).toBe(0);
+    expect(readPr(key(1))?.repair?.status).toBe('gave-up');
+    const out = spawnSync(process.execPath, [cli, 'watch', 'release', key(1)], { env: { ...process.env, LOBSTAH_HOME: dir }, encoding: 'utf8' });
+    expect(out.status, out.stderr).toBe(0);
+    expect(out.stdout).toContain(`repairsResumed: ${key(1)}`);
+    expect(readPr(key(1))?.repairStreak).toBeUndefined();
+    expect(resetRepairStreaks(key(1))).toEqual([]);
+    expect(repair(3, { now: later + 3 * step + 60_000 })).toBe(1);
+  });
+
+  it('a merge or close ends the run', () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nmaxRepairsWithoutProgress = 1\n');
+    stand(P);
+    expect(repair()).toBe(1);
+    repairedAt(sha('4'), T0 + 100_000);
+    expect(repair(3, { now: later + step })).toBe(0);
+    expect(readPr(key(1))?.repairStreak).toBeDefined();
+    upsertPr(observed(P, { headSha: sha('4'), state: 'MERGED', observedAt: iso(T0 + step + 200_000) }), P.owner);
+    expect(readPr(key(1))?.repairStreak).toBeUndefined();
+  });
+
+  it('a conflict repair never starts within the settle time of an approval', () => {
+    stand(P, { review: { changesRequested: false, lastApprovalAt: iso(later - 8_000) } });
+    expect(repair()).toBe(0);
+    expect(readPr(key(1))?.repair).toMatchObject({ status: 'waiting', heldBy: 'settle' });
+    expect(readPr(key(1))?.repair?.reason).toContain('the PR was approved at');
+    expect(repair(3, { now: later + 600_000 })).toBe(1);
+  });
 });
 
 describe('brief hooks', () => {

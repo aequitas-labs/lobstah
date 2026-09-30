@@ -161,6 +161,12 @@ export interface WatchConfig {
   /** Maximum repair follow-ups on one PR head sha. */
   maxRepairsPerPr: number;
   /**
+   * Consecutive repairs of one PR that made no merge progress (the PR needs
+   * a repair again after one finished, with no other push between) before
+   * lobstah stops repairing it and raises attention. Default 2.
+   */
+  maxRepairsWithoutProgress: number;
+  /**
    * Seconds the PR's head, its base branch's head, and its failing checks
    * must stay unchanged before a repair is queued.
    */
@@ -235,7 +241,7 @@ export const DEFAULT_HELM: HelmConfig = {
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
-export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, repairSettleSecs: 600, repairTrapWaitSecs: 600 };
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, maxRepairsWithoutProgress: 2, repairSettleSecs: 600, repairTrapWaitSecs: 600 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,

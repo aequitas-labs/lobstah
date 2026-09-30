@@ -42,6 +42,22 @@ export interface PrRecord extends PrEvidence {
   failingSince?: string;
   /** Checks a worker named as human gates on this PR (`report --human-gate`). */
   humanGates?: string[];
+  /**
+   * Consecutive lobstah repairs that made no merge progress. It survives
+   * head changes; a push by anyone else or `lobstah watch release` resets it.
+   */
+  repairStreak?: RepairStreak;
+}
+
+export interface RepairStreak {
+  /** Repairs that finished and still left the PR needing a repair. */
+  count: number;
+  /** The last repair started; judged once, when the next repair is due. */
+  lastRepairId?: string;
+  /** The PR head when that repair started. */
+  startHead?: string;
+  /** Set when repairs stopped at the cap: the head they stopped at. A push by anyone else resets the streak. */
+  stoppedHead?: string;
 }
 
 /** The failing check runs as one comparable string: names and run URLs. */
@@ -196,6 +212,8 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
         ? { failingSince: sinceOf(!!before && failingKey(before) === failingKey(pr), before?.failingSince, before?.observedAt, pr.observedAt) }
         : { failingSince: undefined }),
       repair: before?.headSha === pr.headSha ? before?.repair : undefined,
+      // A merged or closed PR ends the run of repairs without progress.
+      ...(pr.state === 'OPEN' ? {} : { repairStreak: undefined }),
     };
     writePr(after);
     return { before, after };
@@ -229,4 +247,25 @@ export function removePr(key: string): boolean {
   const existed = fs.existsSync(file);
   fs.rmSync(file, { force: true });
   return existed;
+}
+
+/**
+ * A person's release (`lobstah watch release`): the PR's run of repairs
+ * without progress starts over, and a stop at the cap is lifted. Returns
+ * the PR keys it reset; `key` absent means every PR.
+ */
+export function resetRepairStreaks(key?: string): string[] {
+  const reset: string[] = [];
+  for (const pr of key === undefined ? readPrs() : [readPr(key)].filter((p): p is PrRecord => p !== undefined)) {
+    if (!pr.repairStreak) continue;
+    withPrLock(pr.key, () => {
+      const current = readPr(pr.key);
+      if (!current?.repairStreak) return;
+      const stopped = current.repair?.status === 'gave-up' && current.repairStreak.stoppedHead !== undefined;
+      const { repairStreak: _streak, ...rest } = current;
+      writePr({ ...rest, ...(stopped ? { repair: undefined } : {}) } as PrRecord);
+      reset.push(pr.key);
+    });
+  }
+  return reset;
 }

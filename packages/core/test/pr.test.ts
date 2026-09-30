@@ -292,7 +292,7 @@ describe('review fields (gh pr view reviews + the reviewThreads GraphQL count)',
     expect(parseUnresolvedThreads(graphql)).toBe(1);
     const view: GhPrView = { ...open, reviews, unresolvedThreads: parseUnresolvedThreads(graphql) };
     const pr = prEvidence(ref, view, '2026-09-23T13:00:00Z');
-    expect(pr.review).toEqual({ unresolvedThreads: 1, changesRequested: true, lastReviewAt: '2026-09-23T12:00:00Z' });
+    expect(pr.review).toEqual({ unresolvedThreads: 1, changesRequested: true, lastReviewAt: '2026-09-23T12:00:00Z', lastApprovalAt: '2026-09-23T12:00:00Z' });
     expect(JSON.stringify(pr)).not.toContain('please fix');
   });
 
@@ -302,10 +302,19 @@ describe('review fields (gh pr view reviews + the reviewThreads GraphQL count)',
     expect(prReview({ ...open, reviews: [], reviewDecision: 'CHANGES_REQUESTED' }).changesRequested).toBe(true);
   });
 
+  it('records the latest approval time', () => {
+    const approvals = [
+      ...reviews,
+      { author: { login: 'cy' }, state: 'APPROVED', submittedAt: '2026-09-23T15:00:00Z' },
+      { author: { login: 'bo' }, state: 'APPROVED', submittedAt: '2026-09-23T14:00:00Z' },
+    ];
+    expect(prReview({ ...open, reviews: approvals }).lastApprovalAt).toBe('2026-09-23T15:00:00Z');
+  });
+
   it('a failed or odd GraphQL answer omits unresolvedThreads rather than guessing', () => {
     expect(parseUnresolvedThreads('not json')).toBeUndefined();
     expect(parseUnresolvedThreads(JSON.stringify({ errors: [{ message: 'nope' }] }))).toBeUndefined();
-    expect(prReview({ ...open, reviews })).toEqual({ changesRequested: true, lastReviewAt: '2026-09-23T12:00:00Z' });
+    expect(prReview({ ...open, reviews })).toEqual({ changesRequested: true, lastReviewAt: '2026-09-23T12:00:00Z', lastApprovalAt: '2026-09-23T12:00:00Z' });
   });
 
   it('gh pr view requests reviews in the same call', () => {

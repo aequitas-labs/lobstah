@@ -20,6 +20,7 @@ import {
   mergeEvidence,
   parsePrRef,
   postNotice,
+  laneOf,
   PUSH_REJECTED,
   readEvidence,
   readPr,
@@ -43,7 +44,7 @@ import {
   withPrLock,
   writePr,
 } from '@lobstah/core';
-import type { Descriptor, GhPrView, Lane, Outcome, PrCommit, PrRecord, PrRepair, Watch } from '@lobstah/core';
+import type { Descriptor, GhPrView, Lane, Outcome, PrCommit, PrRecord, PrRepair, RepairStreak, Watch } from '@lobstah/core';
 import { readWorkerHolds, repairHold } from './repair-holds.js';
 import type { RepairHold, WorkerHold } from './repair-holds.js';
 
@@ -250,6 +251,25 @@ export function holdCancelledRepair(id: string, now = new Date()): string[] {
  * or a PR below it, the PR has not settled, or the failing checks no longer
  * fail. A wait is not an attempt.
  */
+/**
+ * The PR's run of repairs without merge progress, with the last repair
+ * judged: a repair that finished done while the PR is still at the head it
+ * started from or at a commit it recorded made no progress. Any other head
+ * means someone else pushed: the run resets, and so does a push after the
+ * repairs stopped. Judged once: the result carries no `lastRepairId`.
+ */
+function progressStreak(pr: PrRecord): RepairStreak {
+  const s = pr.repairStreak ?? { count: 0 };
+  if (s.stoppedHead !== undefined) return s.stoppedHead === pr.headSha ? s : { count: 0 };
+  const id = s.lastRepairId;
+  if (!id) return { count: s.count };
+  const lane = laneOf(id) ?? 'chore';
+  if (readStatusLog(id, lane).at(-1)?.verb !== 'done') return { count: s.count };
+  const own = (readEvidence(id, lane).commits ?? []).some((c) => pr.headSha.startsWith(c.split(' ')[0]!));
+  if (!own && s.startHead !== undefined && s.startHead !== pr.headSha) return { count: 0 };
+  return { count: s.count + 1 };
+}
+
 /** The trap (`wt:<id>`) that worked a dispatch: its claim, else its delivery receipt. */
 function trapAddressOf(id: string): string | undefined {
   const claim = readSessionClaim(id, 'work');
@@ -383,9 +403,16 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         Date.parse(pr.baseSince ?? pr.observedAt) || now,
         kind === 'checks' ? Date.parse(pr.failingSince ?? pr.observedAt) || now : 0,
       );
+      // A conflict repair rewrites the head: it never starts right after an
+      // approval, which that head change would invalidate.
+      const approvedAt = kind === 'conflict' ? Date.parse(pr.review?.lastApprovalAt ?? '') || 0 : 0;
       if (now < changed + settleMs) {
         const until = new Date(changed + settleMs).toISOString();
         return wait({ heldBy: 'settle', reason: `settling: the head, base, or failing checks changed at ${new Date(changed).toISOString()}` }, until);
+      }
+      if (now < approvedAt + settleMs) {
+        const until = new Date(approvedAt + settleMs).toISOString();
+        return wait({ heldBy: 'settle', reason: `settling: the PR was approved at ${new Date(approvedAt).toISOString()}` }, until);
       }
       const chain = chainState(owner);
       if (chain.busy) return;
@@ -407,9 +434,34 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       const trap = address ? readTrap(address.slice(3)) : undefined;
       const liveTrap = trap && now - trapLastSeen(trap) <= config.soak.ttlSecs * 1000 ? trap : undefined;
       const waitSecs = Math.max(0, Number.isFinite(cfg.repairTrapWaitSecs) ? cfg.repairTrapWaitSecs : 600);
+      // The circuit breaker: a repair that finished while the PR still needs
+      // one made no merge progress. At [watch].maxRepairsWithoutProgress in a
+      // row, lobstah stops repairing the PR and raises attention.
+      const streak = progressStreak(pr);
+      const maxNoProgress = Number.isFinite(cfg.maxRepairsWithoutProgress) ? Math.max(1, Math.floor(cfg.maxRepairsWithoutProgress)) : 2;
+      if (streak.count >= maxNoProgress) {
+        const reason =
+          `no merge progress after ${streak.count} repair(s) in a row ([watch].maxRepairsWithoutProgress = ${maxNoProgress}); ` +
+          `\`lobstah watch release ${watch.key}\` repairs again`;
+        writePr({
+          ...pr,
+          repairStreak: { count: streak.count, stoppedHead: pr.headSha },
+          repair: { headSha: pr.headSha, kind, attempts, maxAttempts: limit, status: 'gave-up', reason },
+        });
+        postNotice({
+          kind: 'repair-stopped',
+          text: `${pr.key}: repairs stopped — ${reason} (${pr.url})`,
+          refId: owner,
+          repo: target.repo,
+          dedupeKey: `repair-stopped-${pr.key}-${pr.headSha}`,
+        });
+        log(`repair ${watch.key}: stopped — ${reason}`);
+        return;
+      }
       const id = randomUUID();
       writePr({
         ...pr,
+        repairStreak: { count: streak.count, lastRepairId: id, startHead: pr.headSha },
         repair: {
           headSha: pr.headSha,
           kind,

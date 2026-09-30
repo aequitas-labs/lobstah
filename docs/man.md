@@ -304,6 +304,8 @@ and the glass show the repair's PR, chore lane, worker, and trap wait.
   PR whose head branch is its base branch.
 - The PR's head, its base branch's head, or its failing checks changed less
   than `[watch].repairSettleSecs` ago (default 600).
+- For a conflict repair: the PR was approved less than
+  `[watch].repairSettleSecs` ago.
 - For a checks repair: a fresh read of the latest run of each failing check
   shows that run in progress or passed.
 - The PR's watch is held. `lobstah cancel` on a repair dispatch holds its
@@ -321,6 +323,16 @@ its reason: the round did not fix the check. A wait is not an attempt: it does n
 in the `repairs waiting` table, the PR badge ends in `repair waits: <heldBy>`,
 the glass PR modal shows the reason, and `lobstah doctor` lists it. When the
 wait ends, the normal rules apply again.
+
+**Repairs stop** on a PR after `[watch].maxRepairsWithoutProgress`
+(default 2) repairs in a row that each ended `done` while the PR stayed at
+the head the repair pushed and did not merge. lobstah then queues no repair
+for that PR, marks its repair `gave-up`, raises `pr:conflict` (or
+`pr:checks`, `pr:review`) attention that names the cap, and posts one
+`repair-stopped` notice. The count resets when the PR merges or closes,
+when a push that is not the repair's moves the head, and on
+`lobstah watch release <key>`, which prints `repairsResumed` with the PRs it
+resumed.
 
 **A repair pushes** to its PR's head branch, and so does a rebase chore
 from pickup's merge loop. The descriptor of each names its PR (`pr`), so

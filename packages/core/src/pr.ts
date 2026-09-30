@@ -256,6 +256,8 @@ export interface PrReview {
   unresolvedThreads?: number;
   changesRequested: boolean;
   lastReviewAt?: string;
+  /** The latest approval's time: a conflict repair waits the settle time after it. */
+  lastApprovalAt?: string;
 }
 
 /**
@@ -267,10 +269,12 @@ export interface PrReview {
 export function prReview(view: GhPrView): PrReview {
   const latest = new Map<string, string>();
   let lastReviewAt: string | undefined;
+  let lastApprovalAt: string | undefined;
   const reviews = [...(view.reviews ?? [])].sort((a, b) => (a.submittedAt ?? '').localeCompare(b.submittedAt ?? ''));
   for (const r of reviews) {
     if (r.submittedAt && (!lastReviewAt || r.submittedAt > lastReviewAt)) lastReviewAt = r.submittedAt;
     const state = (r.state ?? '').toUpperCase();
+    if (state === 'APPROVED' && r.submittedAt && (!lastApprovalAt || r.submittedAt > lastApprovalAt)) lastApprovalAt = r.submittedAt;
     if (state === 'APPROVED' || state === 'CHANGES_REQUESTED' || state === 'DISMISSED') latest.set(r.author?.login ?? '?', state);
   }
   const changesRequested = view.reviewDecision === 'CHANGES_REQUESTED' || [...latest.values()].includes('CHANGES_REQUESTED');
@@ -278,6 +282,7 @@ export function prReview(view: GhPrView): PrReview {
     ...(view.unresolvedThreads !== undefined ? { unresolvedThreads: view.unresolvedThreads } : {}),
     changesRequested,
     ...(lastReviewAt ? { lastReviewAt } : {}),
+    ...(lastApprovalAt ? { lastApprovalAt } : {}),
   };
 }
 
