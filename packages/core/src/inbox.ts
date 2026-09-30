@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import type { Attachment, Lane } from './types.js';
 import { laneDirs, readDirIfPresent } from './paths.js';
 import { postNotice } from './notices.js';
-import { trapLabel } from './soak.js';
+import { listSignedOff, readTrap, releaseSignedOff, trapLabel } from './soak.js';
 import { trapNameForId } from './trap-names.js';
 
 export interface InboxMessage {
@@ -163,6 +163,26 @@ export function bounceTrapMessages(trapId: string): number {
     acknowledgeTrapMessage(trapId, m.file);
   }
   return msgs.length;
+}
+
+/**
+ * The end of each signed-off trap's grace: a trap that has not re-soaked
+ * within `graceMs` of signing off gets its held messages bounced to the helm.
+ * A trap that re-soaked only has its hold released. Returns the trap ids
+ * whose messages bounced.
+ */
+export function bounceExpiredSignOffs(graceMs: number, now = Date.now()): string[] {
+  const out: string[] = [];
+  for (const s of listSignedOff()) {
+    if (readTrap(s.trapId)) {
+      releaseSignedOff(s.trapId);
+      continue;
+    }
+    if (now - (Date.parse(s.at) || 0) < graceMs) continue;
+    if (bounceTrapMessages(s.trapId) > 0) out.push(s.trapId);
+    releaseSignedOff(s.trapId);
+  }
+  return out;
 }
 
 /** The text of every message a dispatch was sent, pending and handled. */

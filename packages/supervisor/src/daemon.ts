@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   appendStatus,
+  bounceExpiredSignOffs,
   cancelRequested,
   claimNext,
   clearHold,
@@ -529,7 +530,11 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   // notices instead of headless spawns. Unaddressed work defers briefly to a
   // trap that is parked right now. Daemon repairs are the sole addressed
   // exception: after their bounded wait, the chore may run headless.
-  noticeOrphanedBait();
+  // A trap that signed off moments ago (a restart) keeps its address for
+  // [soak].signOffGraceSecs: its messages wait and its bait is not orphaned.
+  const signOffGraceMs = cfg.soak.signOffGraceSecs * 1000;
+  for (const t of bounceExpiredSignOffs(signOffGraceMs)) log(`trap wt:${t} did not re-soak within the sign-off grace — its messages bounced to the helm`);
+  noticeOrphanedBait(Date.now(), signOffGraceMs);
   const workSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
   const choreSkip = (d: Descriptor) => d.for !== undefined &&
     (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));

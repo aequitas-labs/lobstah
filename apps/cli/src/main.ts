@@ -65,6 +65,8 @@ import {
   worktreesDir,
   sendTrapMessage,
   unhandledTrapMessages,
+  releaseSignedOff,
+  recentlySignedOff,
   acknowledgeTrapMessage,
   bounceTrapMessages,
   cancelQueued,
@@ -1151,8 +1153,28 @@ async function mainCli(): Promise<void> {
             );
           trapId = t.trapId;
         }
+        const graceMs = cfgSend.soak.signOffGraceSecs * 1000;
+        // A trap that signed off moments ago (a restart) keeps its address for the grace.
+        if (!trapId && !target.startsWith('session:')) {
+          const v = target.replace(/^wt:/, '');
+          const id = trapIdForName(v) ?? v;
+          if (recentlySignedOff(id, graceMs)) trapId = id;
+        }
         if (!trapId) throw new Error(unknownTrapMessage(target));
         const reg = readTrap(trapId);
+        const off = reg ? undefined : recentlySignedOff(trapId, graceMs);
+        if (!reg && off) {
+          const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
+          const name = sendTrapMessage(trapId, from, [text, attachmentBlock(attachments)].filter(Boolean).join('\n\n'), attachments);
+          const leftSecs = Math.max(0, Math.round((Date.parse(off.at) + graceMs - Date.now()) / 1000));
+          console.log(toonKV({ name: off.name, to: `wt:${trapId}`, from, queued: name }));
+          console.log(
+            toonKV({
+              warning: `the trap signed off ${Math.round((Date.now() - Date.parse(off.at)) / 1000)}s ago — the message is held and delivers if its worktree re-soaks within ${leftSecs}s; otherwise it bounces back to the helm.`,
+            }),
+          );
+          break;
+        }
         if (!reg) throw new Error(`${unknownTrapMessage(target)} — \`lobstah man tend\` lists live traps`);
         const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
         const block = attachmentBlock(attachments);
@@ -2565,7 +2587,11 @@ async function mainCli(): Promise<void> {
       // Clear the tab name sign-on set.
       if (reg?.window) await setTerminalTitle(reg.window, '');
       const released = reg ? releaseCatch(reg) : {};
-      const bounced = reg ? bounceTrapMessages(trapId) : 0;
+      // Unread messages wait for a re-soak of this worktree within the grace
+      // (a restart signs off and on again); the daemon bounces them after it.
+      const graceSecs = loadConfig().soak.signOffGraceSecs;
+      let held = reg ? unhandledTrapMessages(trapId).length : 0;
+      let bounced = 0;
       // The trap's worktree: removed only when soak created it and it holds
       // no work that exists nowhere else.
       const wtDir =
@@ -2604,6 +2630,12 @@ async function mainCli(): Promise<void> {
             : { worktree: 'kept', path: wtDir, reason: removal.reason };
         }
       }
+      // A removed worktree cannot re-soak: its messages bounce now.
+      if (reg && (worktreeOut.worktree === 'removed' || graceSecs <= 0)) {
+        bounced = bounceTrapMessages(trapId);
+        held = 0;
+        releaseSignedOff(trapId);
+      }
       if (!quiet) {
         console.log(
           toonKV({
@@ -2612,6 +2644,9 @@ async function mainCli(): Promise<void> {
             ...(released.requeued ? { requeued: released.requeued } : {}),
             ...(released.finalized ? { finalized: released.finalized } : {}),
             ...(bounced > 0 ? { bounced: `${bounced} undelivered message(s) — returned to the helm as notices` } : {}),
+            ...(held > 0
+              ? { held: `${held} unread message(s) — delivered if this worktree re-soaks within ${Math.round(graceSecs / 60)}m, else returned to the helm` }
+              : {}),
             ...worktreeOut,
           }),
         );

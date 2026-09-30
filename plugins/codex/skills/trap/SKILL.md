@@ -121,7 +121,8 @@ naming a dispatch id. Then:
 
 `$lobstah:stow` loads the stow skill. `lobstah stow` signs the trap off. An unfinished catch requeues; a catch
 whose last report is done or failed finalizes in done/ instead. Unread
-messages bounce back to the helm.
+messages wait `[soak].signOffGraceSecs` (default 10 minutes) for this
+worktree to re-soak, then bounce back to the helm.
 
 - When soak created the worktree, stow removes it and prints `returnTo:`.
   Run `cd` to that path and work from there.

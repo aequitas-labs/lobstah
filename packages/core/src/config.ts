@@ -132,6 +132,12 @@ export interface SoakConfig {
    * ghost sweep, from the report. `report paused --until` overrides it.
    */
   pausedTtlSecs: number;
+  /**
+   * How long after a trap signs off its address is held: messages to it wait
+   * for a re-soak of the same worktree instead of bouncing, and addressed
+   * work raises no bait-orphaned notice.
+   */
+  signOffGraceSecs: number;
 }
 
 export interface HelmConfig {
@@ -231,6 +237,7 @@ export const DEFAULT_SOAK: SoakConfig = {
   ttlSecs: 1800,
   beat: true,
   pausedTtlSecs: 86400,
+  signOffGraceSecs: 600,
 };
 
 export const DEFAULT_HELM: HelmConfig = {
