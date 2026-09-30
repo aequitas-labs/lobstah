@@ -65,7 +65,7 @@ import { readMergeView } from '@lobstah/pick';
 import { buildTendReport, landedCatches } from './tend.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE } from './glass-page.generated.js';
-import { deriveGlassPrs } from './glass-prs.js';
+import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { startSnapshotThread } from './glass-snapshot-thread.js';
@@ -493,6 +493,11 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnap
     watches,
     readPrs(),
   );
+  // A dispatch with several PRs lists each, in stack order, with its state.
+  for (const d of dispatches as GlassDispatch[]) {
+    const urls = d.evidence?.prUrls;
+    if (urls && urls.length > 1) d.prList = dispatchPrList(urls, prs);
+  }
   const allNotices = listNotices(Number.MAX_SAFE_INTEGER);
   const live = listTraps();
   // Historical traps: a stowed or ghosted registration is gone, but its mail

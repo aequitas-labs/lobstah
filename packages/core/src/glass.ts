@@ -197,6 +197,8 @@ export interface GlassDispatch {
   prBadge?: PrBadge & { observedAt: string };
   /** The merge view's gate verdict, where pick has one. */
   prGate?: string;
+  /** Every PR of a dispatch with more than one, in stack order, each with its badge once observed. */
+  prList?: Array<{ url: string; number: number; badge?: PrBadge }>;
 }
 
 export interface GlassHelm extends HelmRegistration {

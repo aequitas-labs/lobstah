@@ -229,7 +229,7 @@ of the stack are recorded too:
 
 The report prints `prs` with every PR it recorded. `lobstah catch` and
 `lobstah status <id>` list each PR (`prs`), `man tend` lists each with its
-state in the story's `pr` column, and the glass links each by number. Each
+state in the story's `pr` column, and the glass lists each in stack order with its state. Each
 PR has its own record, so `pr:*` attention and the merged/closed notice are
 per PR. `[limits].releaseOnMerge` keeps the worktree while another PR of
 the dispatch is open. What you get depends on what runs:

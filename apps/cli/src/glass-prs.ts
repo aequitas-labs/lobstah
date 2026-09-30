@@ -183,3 +183,27 @@ export function prsBelow(records: readonly PrRecord[], key: string): GlassPr[] {
   }
   return out;
 }
+
+/**
+ * A dispatch's PRs in stack order: PRs in the same stack by position, stacks
+ * in the order the dispatch reported their first PR; a PR not yet observed
+ * keeps its report order after the observed ones.
+ */
+export function dispatchPrList(
+  urls: readonly string[],
+  prs: ReadonlyArray<Pick<GlassPr, 'url' | 'number' | 'badge' | 'stackId' | 'position'>>,
+): Array<{ url: string; number: number; badge?: GlassPr['badge'] }> {
+  const byKey = new Map(prs.map((p) => [parsePrRef(p.url)?.key ?? p.url, p]));
+  const rows = urls.flatMap((u, i) => {
+    const ref = parsePrRef(u);
+    return ref ? [{ ref, i, pr: byKey.get(ref.key) }] : [];
+  });
+  const stackOrder = new Map<string, number>();
+  for (const r of rows) if (r.pr && !stackOrder.has(r.pr.stackId)) stackOrder.set(r.pr.stackId, r.i);
+  rows.sort((a, b) =>
+    a.pr && b.pr
+      ? stackOrder.get(a.pr.stackId)! - stackOrder.get(b.pr.stackId)! || a.pr.position - b.pr.position
+      : a.pr ? -1 : b.pr ? 1 : a.i - b.i,
+  );
+  return rows.map((r) => ({ url: r.ref.url, number: r.ref.number, ...(r.pr ? { badge: r.pr.badge } : {}) }));
+}
