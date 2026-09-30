@@ -5,7 +5,7 @@ describe('mergeHaulHook', () => {
   it('creates the structure from nothing', () => {
     const { settings, changed } = mergeHaulHook(undefined);
     expect(changed).toBe(true);
-    expect(settings.hooks?.Stop?.[0]?.hooks?.[0]?.command).toBe('lobstah man haul');
+    expect(settings.hooks?.Stop?.[0]?.hooks?.[0]?.command).toBe('lobstah hook stop');
   });
 
   it('is idempotent', () => {
