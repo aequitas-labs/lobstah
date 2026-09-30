@@ -14,6 +14,9 @@ import {
   loadConfig,
   mergeEvidence,
   parsePrRef,
+  pendingIds,
+  queuedDescriptor,
+  cancelQueued,
   postNotice,
   prEvidence,
   prFixBrief,
@@ -260,6 +263,8 @@ export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: strin
   if (id && lane) mergeEvidence(id, lane, { pr });
   const was = before?.state ?? legacyBefore?.state;
   const terminal = pr.state === 'MERGED' || pr.state === 'CLOSED';
+  // A merged or closed PR has nothing to repair: repairs still queued for it are cancelled.
+  if (terminal) cancelQueuedRepairs(ref.key);
   // First sight of a terminal PR: announce only when it ended in the last 24 hours.
   const endedAt = Date.parse(view.mergedAt ?? view.closedAt ?? '');
   const recentEnd = Number.isFinite(endedAt) && now.getTime() - endedAt <= FIRST_SIGHT_NOTICE_MS;
@@ -276,6 +281,21 @@ export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: strin
     });
   }
   return after;
+}
+
+/**
+ * Cancel the repair chores still queued for a PR (by its `owner/repo#n`
+ * key): each finalizes as cancelled before claim. A claimed repair re-checks
+ * the PR itself before it starts. Returns the cancelled ids.
+ */
+export function cancelQueuedRepairs(key: string): string[] {
+  const cancelled: string[] = [];
+  for (const id of pendingIds('chore')) {
+    const d = queuedDescriptor(id, 'chore');
+    if (!d?.systemRepair || !d.pr?.url || parsePrRef(d.pr.url)?.key !== key) continue;
+    if (cancelQueued(id, 'chore')) cancelled.push(id);
+  }
+  return cancelled;
 }
 
 /** The dispatch-owned observation, as #27 named it: record + that dispatch's evidence. */

@@ -3,6 +3,9 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  ghPrView,
+  parsePrRef,
+  readPr,
   acknowledge,
   appendEvent,
   appendStatus,
@@ -55,6 +58,19 @@ export interface RunnerDeps {
    * only the runner entry, a process of its own, passes the real one.
    */
   reap: () => Promise<number>;
+  /** A PR's live state (`OPEN`, `MERGED`, `CLOSED`), or undefined when it cannot be read. */
+  prState: (url: string) => string | undefined;
+}
+
+/** A PR's state from the forge, or undefined when gh cannot say. */
+function livePrState(url: string): string | undefined {
+  const ref = parsePrRef(url);
+  if (!ref) return undefined;
+  try {
+    return ghPrView(ref).state;
+  } catch {
+    return undefined;
+  }
 }
 
 const defaultDeps: RunnerDeps = {
@@ -64,6 +80,7 @@ const defaultDeps: RunnerDeps = {
   prepareReuse,
   collectEvidence,
   reap: async () => 0,
+  prState: livePrState,
 };
 
 /** How long a run that ended on a final report waits for the adapter to settle. */
@@ -124,6 +141,18 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     attempts,
   };
   fs.writeFileSync(path.join(activeDir, 'runner.json'), JSON.stringify(runnerInfo, null, 2));
+
+  // A repair re-checks its PR before it starts: a PR that merged or closed
+  // while the repair waited in the queue has nothing to repair, and its
+  // branch may be gone.
+  if (descriptor.systemRepair && descriptor.pr?.url) {
+    const state = deps.prState(descriptor.pr.url) ?? readPr(parsePrRef(descriptor.pr.url)?.key ?? '')?.state;
+    if (state === 'MERGED' || state === 'CLOSED') {
+      status('failed', `cancelled: ${descriptor.pr.url} is ${state.toLowerCase()}; nothing to repair`);
+      complete(id, lane);
+      return;
+    }
+  }
 
   // Which harness, and whether to resume: the session's own harness wins
   // (see planStart). The first status note says which way it went.

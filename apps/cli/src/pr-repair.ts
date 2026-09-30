@@ -249,6 +249,13 @@ export function holdCancelledRepair(id: string, now = new Date()): string[] {
  * or a PR below it, the PR has not settled, or the failing checks no longer
  * fail. A wait is not an attempt.
  */
+/** The trap (`wt:<id>`) that worked a dispatch: its claim, else its delivery receipt. */
+function trapAddressOf(id: string): string | undefined {
+  const claim = readSessionClaim(id, 'work');
+  const deliveredTo = readEvidence(id, 'work').deliveredTo;
+  return claim?.by.startsWith('wt:') ? claim.by : deliveredTo?.startsWith('wt:') ? deliveredTo : undefined;
+}
+
 export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: RepairOptions = {}): number {
   const config = loadConfig();
   const cfg = config.watch;
@@ -361,7 +368,14 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         });
       };
       if (watch.heldAt) return wait(watchHold(watch));
-      const held = repairHold(pr, (records ??= readPrs()), (workers ??= (opts.workerHolds ?? readWorkerHolds)()));
+      // The chain's own trap, between catches, is where the repair goes:
+      // its worktree on the PR's branch does not hold the PR against it.
+      const ownerTrap = trapAddressOf(chainState(owner).latest);
+      const held = repairHold(
+        pr,
+        (records ??= readPrs()),
+        (workers ??= (opts.workerHolds ?? readWorkerHolds)()).filter((w) => !(w.dispatchId === undefined && w.trapId !== undefined && `wt:${w.trapId}` === ownerTrap)),
+      );
       if (held) return wait(held);
       const changed = Math.max(
         Date.parse(pr.headSince ?? pr.observedAt) || now,
@@ -388,9 +402,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       }
       const target = storedDescriptor(chain.latest, 'work');
       if (!target) return;
-      const claim = readSessionClaim(chain.latest, 'work');
-      const deliveredTo = readEvidence(chain.latest, 'work').deliveredTo;
-      const address = claim?.by.startsWith('wt:') ? claim.by : deliveredTo?.startsWith('wt:') ? deliveredTo : undefined;
+      const address = trapAddressOf(chain.latest);
       const trap = address ? readTrap(address.slice(3)) : undefined;
       const liveTrap = trap && now - trapLastSeen(trap) <= config.soak.ttlSecs * 1000 ? trap : undefined;
       const waitSecs = Math.max(0, Number.isFinite(cfg.repairTrapWaitSecs) ? cfg.repairTrapWaitSecs : 600);

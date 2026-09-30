@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { derivePrEvents, ensureLayout, executorPath, listNotices, parsePrRef, prRecordFile, readPr, readPrs, upsertPr } from '@lobstah/core';
+import { derivePrEvents, enqueue, ensureLayout, executorPath, listNotices, parsePrRef, pendingIds, prRecordFile, readPr, readPrs, readStatusLog, upsertPr } from '@lobstah/core';
 import type { GhPrView, PrEvidence } from '@lobstah/core';
 import { deriveGlassPrs } from '../src/glass-prs.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
-import { manEvents, observePr, workEvents } from '../src/pr-watch.js';
+import { cancelQueuedRepairs, manEvents, observePr, workEvents } from '../src/pr-watch.js';
 import { applyCull, planCull } from '../src/cull.js';
 import { prStateHash } from '../src/acks.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -242,5 +242,23 @@ describe('cull', () => {
     expect(plan.map((i) => i.id).sort()).toEqual(['pr:acme/lobstah#2', 'pr:acme/lobstah#3']);
     applyCull(plan);
     expect(readPrs().map((r) => r.number).sort()).toEqual([1, 4]);
+  });
+});
+
+describe('a PR that merges or closes cancels its queued repairs', () => {
+  it('only the repairs of that PR, and only those not yet claimed', () => {
+    ensureLayout();
+    const merged = parsePrRef('https://github.com/acme/web/pull/1854')!;
+    const other = 'https://github.com/acme/web/pull/1855';
+    enqueue({ id: 'aaaaaaaa-0000-4000-8000-000000001854', repo: 'r', brief: 'repair', systemRepair: {}, pr: { url: merged.url } }, 'chore');
+    enqueue({ id: 'bbbbbbbb-0000-4000-8000-000000001855', repo: 'r', brief: 'repair', systemRepair: {}, pr: { url: other } }, 'chore');
+    enqueue({ id: 'cccccccc-0000-4000-8000-000000001854', repo: 'r', brief: 'a chore, not a repair', pr: { url: merged.url } }, 'chore');
+    const open: GhPrView = { title: 'T', state: 'OPEN', isDraft: false, headRefOid: 'sha1', mergeStateStatus: 'CLEAN', reviewDecision: '', statusCheckRollup: [] };
+    observePr(merged, open);
+    expect(pendingIds('chore')).toHaveLength(3);
+    observePr(merged, { ...open, state: 'MERGED', mergedAt: new Date().toISOString() });
+    expect(pendingIds('chore').sort()).toEqual(['bbbbbbbb-0000-4000-8000-000000001855', 'cccccccc-0000-4000-8000-000000001854']);
+    expect(readStatusLog('aaaaaaaa-0000-4000-8000-000000001854', 'chore').at(-1)).toMatchObject({ verb: 'failed', note: 'cancelled before claim' });
+    expect(cancelQueuedRepairs(parsePrRef(other)!.key)).toEqual(['bbbbbbbb-0000-4000-8000-000000001855']);
   });
 });
