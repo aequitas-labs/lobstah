@@ -105,6 +105,7 @@ h2 {
   padding: 3px 9px;
 }
 .controls select,
+.newtrap select,
 .controls input[type='search'] {
   background: var(--card);
   border: 1px solid var(--line);
@@ -1064,9 +1065,6 @@ a.lob {
   font-weight: normal;
   text-transform: none;
   letter-spacing: normal;
-}
-.newtrap select {
-  font: inherit;
 }
 /* A starting trap's start commands: copy one, paste it in a terminal. */
 .startcmds {

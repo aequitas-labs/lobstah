@@ -104,6 +104,9 @@ send a continuation.
 |---|---|---|
 | `port` | `4949` | Localhost port for the glass. `LOBSTAH_GLASS_PORT` takes precedence. |
 
+The glass uses one dark palette. Filter controls and the New trap dropdowns
+share its card background, border, text color, and spacing.
+
 ## `[watch]` — watch delivery
 
 | Key | Default | Meaning |

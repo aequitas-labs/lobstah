@@ -964,7 +964,9 @@ notice.
 
 The Traps tab and the deck's traps block have a **+ New trap** button. It
 opens a small form: a repo (from the configured repo keys) and a harness
-(`claude` or `codex`). Submitting it files a **trap request**: the glass POSTs
+(`claude` or `codex`). Its dropdowns match the filter controls' dark card
+background, border, text, and spacing. Request and Cancel sit beside them.
+Submitting it files a **trap request**: the glass POSTs
 `{ kind: "trap-request", payload: { repo, harness } }` to `/requests` with
 the same same-origin and page token guard as the open-window button. The
 server checks the repo and harness, writes `~/.lobstah/requests/<id>.json`
