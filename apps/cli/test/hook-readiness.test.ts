@@ -5,7 +5,8 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { ensureLayout, signOnTrap } from '@lobstah/core';
-import { claudeHooks, codexHooks, hookRow, listenerRow } from '../src/hook-readiness.js';
+import { claudeHooks, codexHookHash, codexHooks, hookRow, listenerRow } from '../src/hook-readiness.js';
+import type { LobstahHook } from '../src/hook-runs.js';
 import { readHookRuns, recordHookRun } from '../src/hook-runs.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -33,7 +34,13 @@ function codexHome(config: string, hooks: object = HOOKS_JSON): void {
   fs.writeFileSync(path.join(home, '.codex', 'config.toml'), `[plugins."lobstah@lobstah"]\nenabled = true\n\n${config}`);
 }
 
-const trust = (event: string, extra = '') => `[hooks.state."lobstah@lobstah:hooks/hooks.json:${event}:0:0"]\ntrusted_hash = "sha256:abc"\n${extra}\n`;
+const EVENT: Record<string, LobstahHook> = { stop: 'Stop', session_start: 'SessionStart', post_tool_use: 'PostToolUse', session_end: 'SessionEnd' };
+type Hooks = { hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout?: number }> }>> };
+/** Codex's trust entry for the hook as `hooks` declares it. */
+const trust = (event: string, extra = '', hooks: Hooks = HOOKS_JSON) => {
+  const hash = codexHookHash(EVENT[event]!, undefined, hooks.hooks[EVENT[event]!]![0]!.hooks[0]!);
+  return `[hooks.state."lobstah@lobstah:hooks/hooks.json:${event}:0:0"]\ntrusted_hash = "${hash}"\n${extra}\n`;
+};
 const opts = () => ({ home, env: {} as NodeJS.ProcessEnv, now: NOW });
 
 beforeEach(() => {
@@ -64,10 +71,10 @@ describe('doctor: Codex hook readiness', () => {
     codexHome(trust('post_tool_use') + trust('session_end'));
     const h = codexHooks(opts());
     expect(h.hooks.map((x) => [x.hook, x.installed, x.trusted, x.lastRun])).toEqual([
-      ['Stop', true, false, undefined],
-      ['SessionStart', true, false, undefined],
-      ['PostToolUse', true, true, undefined],
-      ['SessionEnd', true, true, undefined],
+      ['Stop', true, 'untrusted', undefined],
+      ['SessionStart', true, 'untrusted', undefined],
+      ['PostToolUse', true, 'trusted', undefined],
+      ['SessionEnd', true, 'trusted', undefined],
     ]);
     const row = hookRow(h, NOW);
     expect(row.status).toBe('fail');
@@ -104,8 +111,27 @@ describe('doctor: Codex hook readiness', () => {
         SessionEnd: [{ hooks: [{ type: 'command', command: 'lobstah stow --quiet' }] }],
       },
     };
-    codexHome(['stop', 'session_start', 'post_tool_use', 'session_end'].map((e) => trust(e)).join('\n'), old);
+    codexHome(['stop', 'session_start', 'post_tool_use', 'session_end'].map((e) => trust(e, '', old)).join('\n'), old);
     expect(hookRow(codexHooks(opts()), NOW).status).toBe('ok');
+  });
+
+  it('a hook that changed since it was trusted is not trusted: Codex asks again', () => {
+    // Trusted as `lobstah soak beat`; the plugin now runs `lobstah hook post-tool-use`.
+    const old = { hooks: { ...HOOKS_JSON.hooks, PostToolUse: [{ hooks: [{ type: 'command', command: 'lobstah soak beat', timeout: 5 }] }] } };
+    codexHome(trust('stop') + trust('session_start') + trust('post_tool_use', '', old) + trust('session_end'));
+    const row = hookRow(codexHooks(opts()), NOW);
+    expect(row.status).toBe('fail');
+    expect(row.detail).toContain('PostToolUse: installed, changed since trusted, never run');
+    expect(row.detail).toContain("In Codex, open /hooks and trust lobstah's PostToolUse hook.");
+  });
+
+  it("the hash is Codex's: two trust entries Codex wrote for lobstah 0.6.3", () => {
+    expect(codexHookHash('PostToolUse', undefined, { type: 'command', command: 'lobstah soak beat', timeout: 5 })).toBe(
+      'sha256:20180ee5a463cab93ae2e9a9ef36bda89742ee4e4229d30e1485d4fe767adf9f',
+    );
+    expect(codexHookHash('SessionEnd', undefined, { type: 'command', command: 'lobstah stow --quiet', timeout: 3 })).toBe(
+      'sha256:b3e81d99f7cbab1779a0106ee123c64e5b3107284fa61035ad4df120a6f6977b',
+    );
   });
 
   it('hooks turned off in Codex fail the row even when trusted', () => {

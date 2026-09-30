@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -15,8 +16,12 @@ export interface HookReadiness {
   hook: LobstahHook;
   /** The plugin declares it. */
   installed: boolean;
-  /** Codex: a trust entry exists for it. Claude Code has no per-hook trust: `n/a`. */
-  trusted: boolean | 'n/a';
+  /**
+   * Codex: `trusted` when its trust entry matches the hook as declared now,
+   * `changed` when the hook changed since it was trusted (Codex asks again),
+   * `untrusted` without an entry. Claude Code has no per-hook trust: `n/a`.
+   */
+  trusted: 'trusted' | 'changed' | 'untrusted' | 'n/a';
   /** Not turned off in the harness (a disabled hook, the plugin, or all hooks). */
   enabled: boolean;
   /** The last run lobstah recorded (ISO). */
@@ -45,7 +50,16 @@ const readJson = (file: string): unknown => {
   }
 };
 
-type HookGroups = Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
+interface HookHandler {
+  type?: string;
+  command?: string;
+  commandWindows?: string;
+  timeout?: number;
+  async?: boolean;
+  statusMessage?: string;
+  additionalContextLimit?: number;
+}
+type HookGroups = Record<string, Array<{ matcher?: string; hooks?: HookHandler[] }>>;
 
 /** The plugin's hooks.json events, or undefined when it has none. */
 function pluginHooks(root: string): HookGroups | undefined {
@@ -65,11 +79,42 @@ function lobstahHandler(groups: HookGroups[string] | undefined): [number, number
 /** Codex's snake_case event label, as its hook trust keys use it. */
 const snake = (hook: LobstahHook) => hook.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
 
+const sortKeys = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(sortKeys)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]),
+        )
+      : v;
+
+/**
+ * The hash Codex trusts a command hook by (codex-rs hooks `hook_hash` and
+ * config `version_for_toml`): SHA-256 of the key-sorted, compact JSON of
+ * `{ event_name, matcher?, hooks: [handler] }`, with the handler's timeout
+ * normalized (SessionEnd: default 1, at most 3; others: default 600).
+ */
+export function codexHookHash(hook: LobstahHook, matcher: string | undefined, h: HookHandler): string {
+  const timeout =
+    hook === 'SessionEnd' ? Math.min(3, Math.max(1, h.timeout ?? 1)) : Math.max(1, h.timeout ?? 600);
+  const handler: Record<string, unknown> = { type: 'command', command: h.command, timeout, async: h.async ?? false };
+  if (h.commandWindows !== undefined) handler.commandWindows = h.commandWindows;
+  if (h.statusMessage !== undefined) handler.statusMessage = h.statusMessage;
+  if (h.additionalContextLimit !== undefined) handler.additionalContextLimit = h.additionalContextLimit;
+  const identity: Record<string, unknown> = { event_name: snake(hook), hooks: [handler] };
+  if (matcher !== undefined) identity.matcher = matcher;
+  return `sha256:${createHash('sha256').update(JSON.stringify(sortKeys(identity))).digest('hex')}`;
+}
+
 /**
  * Codex: the plugin's hooks and Codex's own record of them. Codex runs a
  * plugin hook only after the user trusts it in `/hooks`; it records trust
  * under `[hooks.state."<plugin>:hooks/hooks.json:<event>:<group>:<handler>"]`
- * with a `trusted_hash`. Read-only: nothing here writes Codex's config.
+ * with a `trusted_hash`, and asks again when the hook's hash changes (a
+ * plugin update that changes a hook). Read-only: nothing here writes
+ * Codex's config.
  */
 export function codexHooks(opts: Opts = {}): HarnessHooks {
   const env = opts.env ?? process.env;
@@ -89,10 +134,13 @@ export function codexHooks(opts: Opts = {}): HarnessHooks {
   const hooks = LOBSTAH_HOOKS.map((hook): HookReadiness => {
     const at = lobstahHandler(declared?.[hook]);
     const entry = at ? state[`lobstah@lobstah:hooks/hooks.json:${snake(hook)}:${at[0]}:${at[1]}`] : undefined;
+    const group = at ? declared![hook]![at[0]]! : undefined;
+    const current = at ? codexHookHash(hook, group!.matcher, group!.hooks![at[1]]!) : undefined;
+    const trustedHash = typeof entry?.trusted_hash === 'string' && entry.trusted_hash.length > 0 ? entry.trusted_hash : undefined;
     return {
       hook,
       installed: at !== undefined,
-      trusted: typeof entry?.trusted_hash === 'string' && entry.trusted_hash.length > 0,
+      trusted: !trustedHash ? 'untrusted' : trustedHash === current ? 'trusted' : 'changed',
       enabled: entry?.enabled !== false,
       ...(runs[`codex:${hook}`] ? { lastRun: runs[`codex:${hook}`] } : {}),
     };
@@ -152,7 +200,7 @@ const list = (hooks: readonly LobstahHook[]) => (hooks.length === 1 ? hooks[0]! 
 function notReady(h: HarnessHooks, need: readonly LobstahHook[]): LobstahHook[] {
   return need.filter((n) => {
     const x = h.hooks.find((y) => y.hook === n);
-    return !!h.allOff || !x || !x.installed || !x.enabled || x.trusted === false;
+    return !!h.allOff || !x || !x.installed || !x.enabled || x.trusted === 'untrusted' || x.trusted === 'changed';
   });
 }
 
@@ -167,12 +215,12 @@ export function hookRow(h: HarnessHooks, now = Date.now()): { check: string; sta
   if (!h.plugin) return { check, status: 'skip', detail: 'plugin not installed' };
   const name = h.harness === 'codex' ? 'Codex' : 'Claude Code';
   const parts = h.hooks.map((x) => {
-    const trust = x.trusted === 'n/a' ? 'trust n/a' : x.trusted ? 'trusted' : 'untrusted';
+    const trust = x.trusted === 'n/a' ? 'trust n/a' : x.trusted === 'changed' ? 'changed since trusted' : x.trusted;
     const state = !x.installed ? 'missing' : [x.enabled ? 'installed' : 'installed but disabled', trust].join(', ');
     return `${x.hook}: ${state}, ${x.lastRun ? `last run ${ago(x.lastRun, now)}` : 'never run'}`;
   });
   const missing = h.hooks.filter((x) => !x.installed).map((x) => x.hook);
-  const untrusted = h.hooks.filter((x) => x.installed && x.trusted === false).map((x) => x.hook);
+  const untrusted = h.hooks.filter((x) => x.installed && (x.trusted === 'untrusted' || x.trusted === 'changed')).map((x) => x.hook);
   const disabled = h.hooks.filter((x) => x.installed && !x.enabled).map((x) => x.hook);
   const remedies: string[] = [];
   if (h.allOff) remedies.push(`${h.allOff}: turn hooks on`);
