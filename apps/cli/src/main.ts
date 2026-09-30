@@ -121,11 +121,11 @@ import {
   releaseHeldQuestions,
   askDecision,
   withdrawDecision,
-  takeDecisionAnswers,
+  readRequest,
   DecisionError,
   decisionDir,
 } from '@lobstah/core';
-import type { DecisionAnsweredEvent, DecisionMeta, Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, WatchAttention } from '@lobstah/core';
+import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
@@ -309,7 +309,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   put a decision to the human: a card in the
                                   glass until answered or withdrawn
                                   (--withdraw <key>). The answer wakes man
-                                  wait as a decision-answered event.
+                                  wait as a decision-answer event.
   man answer <key> [--option <label>] [--text <text>] [--attach <file> ...]
                                   answer a decision from the terminal.
   man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
@@ -515,7 +515,10 @@ function runDueManWatches(): void {
 
 function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
-    console.log(toonKV({ notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
+    // A decision answer is an event with its request's payload.
+    const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
+    if (answer) console.log(toonKV(decisionEventFields(answer)));
+    else console.log(toonKV({ notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
   }
   console.log(
     'next: each notice names its own decision or remedy — act on it (or note it and move on), ' +
@@ -534,22 +537,10 @@ function emitReplies(replies: ReplyEvent[], sessionId?: string): void {
   );
 }
 
-function emitDecisions(events: DecisionAnsweredEvent[], sessionId?: string): void {
-  for (const e of events) console.log(toonKV(decisionEventFields(e)));
-  console.log(
-    'next: the human answered a decision — act on it (for a dispatch, usually `lobstah send <dispatch> "<instruction>"`), ' +
-      `then re-arm a background \`lobstah man wait${sessionId ? ` --session ${sessionId}` : ''}\`.`,
-  );
-}
-
-/**
- * Which answered decisions a helm's wait or park takes: its own grounds'
- * dispatches, and a decision about no dispatch that its grounds asked (or
- * that no grounds asked).
- */
-function decisionMatch(grounds: string | undefined, repos: Set<string> | undefined): ((d: DecisionMeta) => boolean) | undefined {
-  if (repos === undefined) return undefined;
-  return (d) => (d.repo !== undefined ? repos.has(d.repo) : d.grounds === undefined || d.grounds === grounds);
+/** A haul line for a notice; a decision answer carries its request's payload. */
+function noticeLine(n: Notice, prefix = 'notice '): string {
+  const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
+  return answer ? decisionLine(answer) : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
 }
 
 /** A haul line for a send's answer. */
@@ -561,9 +552,6 @@ function replyLine(r: ReplyEvent): string {
 function sentLine(e: SentExpectation, now = Date.now()): string {
   return `- sent · ${e.dispatchId} · ${e.line} · ${ageLabel(now - (Date.parse(e.sentAt) || now))}`;
 }
-
-const DECISION_HINT =
-  'A decision-answered line is the human\'s answer to `lobstah man ask`. Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.';
 
 const SENT_HINT = "A reply line is the worker's answer to your send. A sent line still waits on one; its next note wakes man wait.";
 
@@ -1419,7 +1407,7 @@ async function mainCli(): Promise<void> {
       );
       console.log(
         toonHelp([
-          'the glass shows it as a card on the deck; the answer wakes man wait as a decision-answered event',
+          'the glass shows it as a card on the deck; the answer wakes man wait as a decision-answer event',
           `lobstah man ask --withdraw ${meta.key}   (when it no longer needs the human)`,
         ]),
       );
@@ -1430,7 +1418,7 @@ async function mainCli(): Promise<void> {
       if (!key || pos.length > 1) throw new UsageError(`man answer requires one decision key\n\n${usageFor('man:answer')!}`);
       let result: ReturnType<typeof answerKey>;
       try {
-        result = answerKey(key, { option: opt('--option'), text: opt('--text'), attach: values('--attach'), by: 'terminal' });
+        result = answerKey(key, { option: opt('--option'), text: opt('--text'), attach: values('--attach'), by: 'cli' });
       } catch (err) {
         if (err instanceof DecisionError) throw new UsageError(err.message);
         throw err;
@@ -1440,13 +1428,14 @@ async function mainCli(): Promise<void> {
         toonKV({
           key: decision.key,
           answered: true,
+          request: answer.request,
           ...(decision.dispatch ? { dispatch: decision.dispatch } : {}),
           option: answer.option ?? '',
           text: answer.text ?? '',
           attachments: answer.attachments.map((a) => a.path).join(', '),
         }),
       );
-      console.log(toonHelp(["the helm's man wait receives it as a decision-answered event"]));
+      console.log(toonHelp(["the helm's man wait receives it as a decision-answer event"]));
       break;
     }
     case 'attention': {
@@ -1669,7 +1658,6 @@ async function mainCli(): Promise<void> {
               }
             : undefined;
         const noticeFilter = groundsRepos !== undefined ? (n: Notice) => n.repo === undefined || groundsRepos.has(n.repo) : undefined;
-        const matchDecision = decisionMatch(groundsScope?.name, groundsRepos);
         // A helm's cursor starts at its sign-on: older notices and watch
         // events are consumed without waking. Standing questions and
         // standing conditions still wake (attentionNow, noticeWakes).
@@ -1683,26 +1671,16 @@ async function mainCli(): Promise<void> {
         const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
         // A send's answer: a working or paused note delivered once.
         const standingReplies = takeReplies(consume, matchGrounds);
-        // A human's answer to a decision: delivered once.
-        const standingAnswers = takeDecisionAnswers(consume, matchDecision);
-        if (
-          standing.length > 0 ||
-          standingWatches.length > 0 ||
-          standingNotices.length > 0 ||
-          standingReplies.length > 0 ||
-          standingAnswers.length > 0
-        ) {
+        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0) {
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
           if (standingNotices.length > 0) emitNotices(standingNotices, sid);
           if (standingReplies.length > 0) emitReplies(standingReplies, sid);
-          if (standingAnswers.length > 0) emitDecisions(standingAnswers, sid);
           delivered(
             ...standing.map((e) => e.entry.at),
             ...standingWatches.flatMap((a) => a.events.map((e) => e.at)),
             ...standingNotices.map((n) => n.at),
             ...standingReplies.map((r) => r.entry.at),
-            ...standingAnswers.map((d) => d.answer.answeredAt),
           );
           break;
         }
@@ -1729,12 +1707,10 @@ async function mainCli(): Promise<void> {
           // Taken after the wake scan: a send answered by a waking verb is
           // cleared here, and that verb is the wake.
           const replies = takeReplies(true, matchGrounds);
-          const answered = takeDecisionAnswers(true, matchDecision);
-          if (fresh.length > 0 || replies.length > 0 || answered.length > 0) {
+          if (fresh.length > 0 || replies.length > 0) {
             if (fresh.length > 0) emit(fresh);
             if (replies.length > 0) emitReplies(replies, sid);
-            if (answered.length > 0) emitDecisions(answered, sid);
-            delivered(...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at), ...answered.map((d) => d.answer.answeredAt));
+            delivered(...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at));
             return;
           }
           runDueManWatches(); // no pick running? this loop is the poller
@@ -1884,17 +1860,12 @@ async function mainCli(): Promise<void> {
             helm ? (n: Notice) => n.repo === undefined || helm.repos.includes(n.repo) : undefined,
             noticeWakes(helm),
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
-          // An answered decision about no dispatch still wakes an idle helm.
-          const idleDecisions = takeDecisionAnswers(true, helm ? decisionMatch(helm.grounds, new Set(helm.repos)) : undefined);
-          if (idleNotices.length > 0 || idleDecisions.length > 0) {
+          if (idleNotices.length > 0) {
             emit(
               [
-                ...(idleNotices.length > 0 ? ['Fleet notices need a decision:'] : []),
-                ...idleNotices.map((n) => `- ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
-                ...idleDecisions.map(decisionLine),
-                ...(idleNotices.length > 0 ? ['Each notice names its own remedy.'] : []),
-                ...(idleDecisions.length > 0 ? [DECISION_HINT] : []),
-                'The Stop hook checks again at turn end.',
+                'Fleet notices need a decision:',
+                ...idleNotices.map((n) => noticeLine(n, '')),
+                'Each notice names its own remedy. The Stop hook checks again at turn end.',
               ].join('\n'),
             );
             break;
@@ -1914,7 +1885,6 @@ async function mainCli(): Promise<void> {
               }
             : undefined;
         const helmNoticeFilter = helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
-        const helmDecisions = decisionMatch(helm?.grounds, helmRepos);
         // The helm's cursor starts at its sign-on (see `man wait`).
         const helmWakes = noticeWakes(helm);
         const helmFloorMs = wakeFloorMs(helm);
@@ -1925,21 +1895,18 @@ async function mainCli(): Promise<void> {
           const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
           const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
           const replies = takeReplies(false, matchHelm);
-          const answered = takeDecisionAnswers(false, helmDecisions);
           // Listing an unanswered send is its reminder: paced like a question.
           const unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
-          if (evs.length || watched.length || notices.length || replies.length || unanswered.length || answered.length) {
+          if (evs.length || watched.length || notices.length || replies.length || unanswered.length) {
             emit(
               [
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
                 ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
-                ...notices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
+                ...notices.map((n) => noticeLine(n)),
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
                 ...(replies.length || unanswered.length ? [SENT_HINT] : []),
-                ...answered.map(decisionLine),
-                ...(answered.length ? [DECISION_HINT] : []),
                 'Handle the standing item. The Stop hook will enforce a watcher at the next turn end.',
               ].join('\n'),
             );
@@ -1964,14 +1931,8 @@ async function mainCli(): Promise<void> {
         let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
         let replies = takeReplies(true, matchHelm);
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
-        let answered = takeDecisionAnswers(true, helmDecisions);
         const quiet = () =>
-          evs.length === 0 &&
-          watched.length === 0 &&
-          fleetNotices.length === 0 &&
-          replies.length === 0 &&
-          unanswered.length === 0 &&
-          answered.length === 0;
+          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0;
         if (quiet()) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
@@ -1984,7 +1945,6 @@ async function mainCli(): Promise<void> {
             fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
             replies = takeReplies(true, matchHelm);
             unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
-            answered = takeDecisionAnswers(true, helmDecisions);
             if (!quiet()) break;
           }
         }
@@ -1996,12 +1956,10 @@ async function mainCli(): Promise<void> {
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
-          ...fleetNotices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
+          ...fleetNotices.map((n) => noticeLine(n)),
           ...replies.map(replyLine),
           ...unanswered.map(sentLine),
           ...(replies.length || unanswered.length ? [SENT_HINT] : []),
-          ...answered.map(decisionLine),
-          ...(answered.length ? [DECISION_HINT] : []),
         ];
         emit(
           [

@@ -131,7 +131,7 @@ describe('glass: decision cards', () => {
 
   it('an option, text, and one Send post the answer; the card says what was chosen and leaves on the next refresh', async () => {
     const d = fleet();
-    const g = await page(d, { post: () => ({ status: 200, body: { answered: true, key: KEY } }) });
+    const g = await page(d, { post: () => ({ status: 201, body: { ok: true, id: 'r1', key: KEY } }) });
     await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b) === 'v2'));
     expect(card(g, KEY)!.querySelector('.dopt.on')!.textContent).toBe('v2');
     const box = card(g, KEY)!.querySelector('textarea') as HTMLTextAreaElement;
@@ -140,9 +140,12 @@ describe('glass: decision cards', () => {
     await g.settle();
     await click(g, card(g, KEY)!.querySelector('.dsend'));
     const [sent] = g.posts();
-    expect(sent!.url).toBe(`/api/decision/${encodeURIComponent(KEY)}/answer`);
-    expect(sent!.headers['x-lobstah-focus-token']).toBe('tok');
-    expect(JSON.parse(sent!.body)).toEqual({ option: 'v2', text: 'keep v1 readable\nfor a week', files: [] });
+    expect(sent!.url).toBe('/requests');
+    expect(sent!.headers['x-lobstah-token']).toBe('tok');
+    expect(JSON.parse(sent!.body)).toEqual({
+      kind: 'decision-answer',
+      payload: { key: KEY, option: 'v2', text: 'keep v1 readable\nfor a week', files: [] },
+    });
     expect(text(card(g, KEY)!.querySelector('.danswered'))).toBe('answered · v2 · keep v1 readable');
     expect(card(g, KEY)!.querySelector('textarea')).toBeNull();
     // The next snapshot no longer carries it.
@@ -155,14 +158,14 @@ describe('glass: decision cards', () => {
   });
 
   it("a raw question's text alone is the answer; a refusal shows the server's reason and keeps the text", async () => {
-    const g = await page(fleet(), { post: () => ({ status: 400, body: { answered: false, reason: 'no standing decision or question' } }) });
+    const g = await page(fleet(), { post: () => ({ status: 404, body: { ok: false, reason: 'no standing decision or question' } }) });
     const box = card(g, Q)!.querySelector('textarea') as HTMLTextAreaElement;
     box.value = '8080';
     box.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('input'));
     await g.settle();
     await click(g, card(g, Q)!.querySelector('.dsend'));
-    expect(g.posts()[0]!.url).toBe(`/api/decision/${encodeURIComponent(Q)}/answer`);
-    expect(JSON.parse(g.posts()[0]!.body)).toEqual({ text: '8080', files: [] });
+    expect(g.posts()[0]!.url).toBe('/requests');
+    expect(JSON.parse(g.posts()[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: Q, text: '8080', files: [] } });
     expect(text(card(g, Q)!.querySelector('.derr'))).toBe('no standing decision or question');
     expect((card(g, Q)!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('8080');
   });

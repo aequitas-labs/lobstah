@@ -10,6 +10,7 @@ import {
   listReports,
   listDecisions,
   readDecisionAnswer,
+  removeAnsweredDecision,
   decisionDir,
   listTraps,
   loadConfig,
@@ -185,11 +186,12 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     if (filed < cutoff) items.push({ kind: 'report', id: r.key, target: dir, ageDays: Math.floor((now - filed) / DAY), bytes: size(dir), ageFrom: filed });
   }
 
-  // A decision goes once it is answered, delivered to the helm, and older
-  // than the window. A standing one never ages out.
+  // A decision goes once it is answered and the answer is older than the
+  // window, with the request that carries the answer. A standing one never
+  // ages out.
   for (const d of listDecisions()) {
     const answer = readDecisionAnswer(d.key);
-    if (!answer?.deliveredAt) continue;
+    if (!answer) continue;
     const at = Date.parse(answer.answeredAt) || now;
     const dir = decisionDir(d.key)!;
     if (at < cutoff) items.push({ kind: 'decision', id: d.key, target: dir, ageDays: Math.floor((now - at) / DAY), bytes: size(dir), ageFrom: at });
@@ -394,7 +396,7 @@ export function applyCull(items: CullItem[]): void {
   for (const item of items.filter((i) => i.kind === 'ack')) removeAck(item.target);
   for (const item of items.filter((i) => i.kind === 'pr')) removePr(item.target);
   for (const item of items.filter((i) => i.kind === 'report')) removeHelmReport(item.id);
-  for (const item of items.filter((i) => i.kind === 'decision')) fs.rmSync(item.target, { recursive: true, force: true });
+  for (const item of items.filter((i) => i.kind === 'decision')) removeAnsweredDecision(item.id);
   for (const item of items.filter((i) => i.kind === 'release')) removeRelease(item.id);
   for (const item of items.filter((i) => i.kind === 'state')) {
     const dir = path.dirname(item.target);

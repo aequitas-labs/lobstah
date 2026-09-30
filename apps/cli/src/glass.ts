@@ -66,8 +66,9 @@ import type { TrapRegistration } from '@lobstah/core';
  * observational stance as `man tend`, with room for detail a terminal
  * can't afford. It binds 127.0.0.1 only; /data registers no watch, never
  * advances a cursor, and never consumes attention.
- * Look freely, steer only from the helm. The sole desktop action is a
- * same-origin, token-gated request to focus a live trap. The
+ * Look freely, steer only from the helm. The glass writes only through
+ * same-origin, token-gated POSTs: focus a live trap, and file a request
+ * (`/requests`) that wakes the helm. It runs nothing itself. The
  * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
  * own, kept in its localStorage — the server has nothing to write.
  */
@@ -447,27 +448,19 @@ function attachmentLimit(): number {
   }
 }
 
-/** The JSON body the glass posts to answer a decision. */
-interface AnswerBody {
-  option?: unknown;
-  text?: unknown;
-  files?: unknown;
-}
-
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /**
- * Parse and check an answer body's shape. Content checks (the key, the
- * option, sizes, types) are answerKey's, shared with `man answer`.
+ * A `decision-answer` request's payload, shape-checked: the decision key
+ * (or a raw question's `<lane>:<id>`), an option, text, and base64 files.
+ * Content checks (the key, the option, sizes, types) are answerKey's,
+ * shared with `man answer`.
  */
-function answerRequest(raw: string): { option?: string; text?: string; uploads: Array<{ name: string; data: Buffer }> } {
-  let body: AnswerBody;
-  try {
-    body = JSON.parse(raw) as AnswerBody;
-  } catch {
-    throw new DecisionError('the body is not JSON');
-  }
-  if (typeof body !== 'object' || body === null) throw new DecisionError('the body is not an object');
+function decisionAnswerRequest(raw: unknown): { key: string; option?: string; text?: string; uploads: Array<{ name: string; data: Buffer }> } {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new DecisionError('payload must be an object');
+  const body = raw as { key?: unknown; option?: unknown; text?: unknown; files?: unknown };
+  const key = typeof body.key === 'string' ? body.key : '';
+  if (!/^(decision:[a-f0-9]{8}|(work|chore):[A-Za-z0-9-]{1,64})$/.test(key)) throw new DecisionError('Unknown decision.', 404);
   if (body.option !== undefined && typeof body.option !== 'string') throw new DecisionError('option must be a string');
   if (body.text !== undefined && typeof body.text !== 'string') throw new DecisionError('text must be a string');
   if (body.files !== undefined && !Array.isArray(body.files)) throw new DecisionError('files must be a list');
@@ -481,6 +474,7 @@ function answerRequest(raw: string): { option?: string; text?: string; uploads: 
     return { name: file.name, data: Buffer.from(file.data, 'base64') };
   });
   return {
+    key,
     ...(body.option !== undefined ? { option: body.option as string } : {}),
     ...(body.text !== undefined ? { text: body.text as string } : {}),
     uploads,
@@ -507,73 +501,75 @@ export function serveGlass(
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
-  /** Same origin, and the page's per-server token: the one guard for every action. */
-  const sameOriginWithToken = (req: http.IncomingMessage): boolean => {
+  /** Same host, same origin, and this server's page token: the only writes the glass accepts. */
+  const ownHost = () => {
     const address = server.address();
-    const ownHost = `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
-    const supplied = req.headers['x-lobstah-focus-token'];
+    return `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
+  };
+  const authorized = (req: http.IncomingMessage, header: string): boolean => {
+    const supplied = req.headers[header];
     const token = typeof supplied === 'string' ? supplied : '';
-    const validToken = token.length === focusToken.length && timingSafeEqual(Buffer.from(token), Buffer.from(focusToken));
-    return req.headers.host === ownHost && req.headers.origin === `http://${ownHost}` && validToken;
+    return (
+      req.headers.host === ownHost() &&
+      req.headers.origin === `http://${ownHost()}` &&
+      token.length === focusToken.length &&
+      timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
+    );
   };
   const server = http.createServer((req, res) => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
-    if (req.url?.startsWith('/api/decision/')) {
+    if (req.url === '/requests') {
       res.setHeader('cache-control', 'no-store');
       const reply = (status: number, result: unknown) => {
         if (res.headersSent) return;
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(result));
       };
-      if (req.method !== 'POST') return reply(405, { answered: false, reason: 'POST required.' });
-      if (!sameOriginWithToken(req) || !/^application\/json\b/.test(req.headers['content-type'] ?? '')) {
+      if (req.method !== 'POST') return reply(405, { ok: false, reason: 'POST required.' });
+      if (!authorized(req, 'x-lobstah-token')) {
         req.resume();
-        return reply(403, { answered: false, reason: 'Answer request was not authorized.' });
+        return reply(403, { ok: false, reason: 'Request was not authorized.' });
       }
-      const m = /^\/api\/decision\/([^/?#]+)\/answer$/.exec(req.url);
-      let key = '';
-      try {
-        key = m ? decodeURIComponent(m[1]!) : '';
-      } catch {
-        key = '';
-      }
-      if (!/^(decision:[a-f0-9]{8}|(work|chore):[A-Za-z0-9-]{1,64})$/.test(key)) {
+      if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) {
         req.resume();
-        return reply(404, { answered: false, reason: 'Unknown decision.' });
+        return reply(415, { ok: false, reason: 'JSON required.' });
       }
-      // Base64 files and the text, with room for the JSON around them.
+      // A decision answer carries its files as base64, with its text.
       const cap = Math.ceil((attachmentLimit() * 4) / 3) * ANSWER_FILES_MAX + ANSWER_TEXT_MAX * 4 + 64 * 1024;
-      const declared = Number(req.headers['content-length'] ?? NaN);
-      if (declared > cap) {
+      if (Number(req.headers['content-length'] ?? NaN) > cap) {
         req.resume();
-        return reply(413, { answered: false, reason: 'The answer is too large.' });
+        return reply(413, { ok: false, reason: 'The request is too large.' });
       }
       const chunks: Buffer[] = [];
       let size = 0;
       let refused = false;
-      req.on('data', (c: Buffer) => {
+      req.on('data', (chunk: Buffer) => {
         if (refused) return;
-        size += c.length;
-        if (size > cap) {
-          refused = true;
-          chunks.length = 0;
-          reply(413, { answered: false, reason: 'The answer is too large.' });
-          return;
-        }
-        chunks.push(c);
+        size += chunk.length;
+        if (size <= cap) return void chunks.push(chunk);
+        refused = true;
+        chunks.length = 0;
+        reply(413, { ok: false, reason: 'The request is too large.' });
       });
       req.on('end', () => {
         if (refused) return;
+        let body: { kind?: unknown; payload?: unknown };
         try {
-          const request = answerRequest(Buffer.concat(chunks).toString('utf8'));
-          const { decision, answer } = answerKey(key, { ...request, by: 'glass' });
-          reply(200, { answered: true, key: decision.key, option: answer.option ?? null, text: answer.text ?? null, files: answer.attachments.length });
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof body;
+        } catch {
+          return reply(400, { ok: false, reason: 'Invalid JSON.' });
+        }
+        if (body?.kind !== 'decision-answer') return reply(400, { ok: false, reason: 'Unknown request kind.' });
+        try {
+          const { key, ...answer } = decisionAnswerRequest(body.payload);
+          const { decision, answer: stored } = answerKey(key, { ...answer, by: 'glass' });
+          reply(201, { ok: true, id: stored.request, key: decision.key });
         } catch (err) {
-          if (err instanceof DecisionError) return reply(err.status, { answered: false, reason: err.message });
-          reply(500, { answered: false, reason: 'The answer could not be stored.' });
+          if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });
+          reply(500, { ok: false, reason: 'The answer could not be stored.' });
         }
       });
-      req.on('error', () => reply(400, { answered: false, reason: 'The request failed.' }));
+      req.on('error', () => reply(400, { ok: false, reason: 'The request failed.' }));
       return;
     }
     if (req.url?.startsWith('/api/focus/')) {
@@ -584,7 +580,7 @@ export function serveGlass(
       };
       if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required.' });
       if (
-        !sameOriginWithToken(req) ||
+        !authorized(req, 'x-lobstah-focus-token') ||
         (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
         req.headers['transfer-encoding'] !== undefined
       ) {

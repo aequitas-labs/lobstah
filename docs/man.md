@@ -516,18 +516,26 @@ frames the rest as decisions.
   `question` the helm has not framed shows as a plain card with the
   worker's note and the same text box. PR kinds stay in the PRs section.
   `#decision/<key>` opens the deck at that card.
-- **The answer POST.** Send is a same-origin POST to
-  `/api/decision/<key>/answer` with the page's token, the guard the
-  **↗ open** button uses. The server checks the key, that the option is one
-  of the decision's labels, the text length (at most 20000 characters), and
-  each file's size and type (an image must also start with its format's
-  signature). It stores the files in the decision's `answer/` directory and
-  writes `answer.json`. It runs nothing. Answering a raw question's key
+- **The answer is a request.** An answer is a glass request of kind
+  `decision-answer`, stored as `~/.lobstah/requests/<id>.json` with its
+  files in `~/.lobstah/requests/<id>/`. The payload is the decision `key`,
+  `title`, `dispatch`, `lane`, `repo`, the `option`, the `text`, and the
+  stored `attachments`. `answer.json` in the decision's directory marks it
+  answered and names the request.
+- **The POST.** Send is a same-origin POST to `/requests` with the page's
+  token (header `x-lobstah-token`), the guard the **↗ open** button uses.
+  The body is `{ "kind": "decision-answer", "payload": { "key", "option",
+  "text", "files": [{ "name", "data" }] } }`, with file data in base64. The
+  server checks the kind, the key, that the option is one of the decision's
+  labels, the text length (at most 20000 characters), and each file's size
+  and type (an image must also start with its format's signature). It
+  writes the request and runs nothing. Answering a raw question's key
   (`<lane>:<id>`) first stores it as a decision asked by `worker`.
-- **The event.** The answer wakes the helm's `man wait` (and the Stop-hook
-  park) once, as a `decision-answered` event: `key`, `dispatch`, `title`,
-  `option`, `text`, `attachments` (the stored paths), and `at`. The helm
-  acts on it, usually with `lobstah send <dispatch> "<instruction>"`.
+- **The event.** Writing the request posts a `decision-answer` notice. It
+  wakes the helm's `man wait` (and the Stop-hook park) once, as a
+  `decision-answer` event: the request `id`, `key`, `dispatch`, `title`,
+  `option`, `text`, `attachments` (the stored paths), `from`, and `at`. The
+  helm acts on it, usually with `lobstah send <dispatch> "<instruction>"`.
   Answering does not message the worker.
 - **From the terminal.** `lobstah man answer <key> [--option <label>]
   [--text <text>] [--attach <file>]...` answers the same way, with the same
@@ -536,9 +544,9 @@ frames the rest as decisions.
   opens the glass at the card and acks the item for the pet
   (`lobstah attention ack <key> --by pet`). The card stays in the glass until
   the decision is answered or withdrawn.
-- **Cull.** `lobstah cull` removes a decision once it is answered, delivered
-  to the helm, and older than the retention window. A standing decision is
-  never culled.
+- **Cull.** `lobstah cull` removes a decision once its answer is older than
+  the retention window, with the `decision-answer` request and its files. A
+  standing decision is never culled.
 
 ### The periodic report
 

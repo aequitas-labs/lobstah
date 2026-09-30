@@ -291,9 +291,9 @@ work in flight requires a live watcher or the hook blocks with the arm command.
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
   'man:ask': `Put a decision to the human: a card in the glass (decisions/<rid>/) until
 answered or withdrawn. A newer ask on the same dispatch replaces it. The answer
-wakes man wait as decision-answered. Reserved for the claimed helm.`,
+wakes man wait as decision-answer. Reserved for the claimed helm.`,
   'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
-Stores the answer; the helm's man wait receives it as decision-answered.`,
+Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs

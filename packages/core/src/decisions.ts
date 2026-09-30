@@ -3,6 +3,8 @@ import * as path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { AttachmentError, copyAttachments } from './attachments.js';
 import { lobstahHome } from './paths.js';
+import { newRequestId, readRequest, requestFilesDir, requestsDir, writeRequest } from './requests.js';
+import type { DecisionAnswerPayload } from './requests.js';
 import type { Attachment, Lane } from './types.js';
 
 /**
@@ -10,11 +12,15 @@ import type { Attachment, Lane } from './types.js';
  * the glass or with `man answer`.
  *
  * Each decision has its own directory, `decisions/<rid>/`: `decision.json`
- * (the record), `detail.md`, `attachments/` (the helm's files), and, once
- * answered, `answer.json` and `answer/` (the human's files). A decision
- * stands until it is answered or withdrawn. A withdrawn decision's directory
- * is removed. An answer is delivered to the helm's `man wait` once, as a
- * `decision-answered` event.
+ * (the record), `detail.md`, and `attachments/` (the helm's files). A
+ * decision stands until it is answered or withdrawn. A withdrawn decision's
+ * directory is removed.
+ *
+ * An answer is a glass request of kind `decision-answer` (requests.ts):
+ * `requests/<id>.json`, with the human's files in `requests/<id>/`. Writing
+ * it posts a `decision-answer` notice, which wakes the helm's `man wait`.
+ * `answer.json` in the decision's directory marks it answered and names
+ * the request.
  */
 
 export interface DecisionMeta {
@@ -43,16 +49,24 @@ export interface DecisionMeta {
 
 export interface DecisionAnswer {
   key: string;
+  /** The `decision-answer` request that carries it. */
+  request: string;
   /** The chosen option label, when one was chosen. */
   option?: string;
   text?: string;
-  /** The human's files, stored in the decision's `answer/` directory. */
+  /** The human's files, stored in the request's directory. */
   attachments: Attachment[];
   answeredAt: string;
-  /** Where it was answered: `glass` or `terminal`. */
-  by: string;
-  /** When `man wait` delivered the `decision-answered` event. */
-  deliveredAt?: string;
+  /** Where it was answered. */
+  by: 'glass' | 'cli';
+}
+
+/** `answer.json`: the decision is answered, by this request. */
+interface AnswerMarker {
+  key: string;
+  request: string;
+  answeredAt: string;
+  by: 'glass' | 'cli';
 }
 
 /** A file the glass uploaded: its name as the browser gave it, and its bytes. */
@@ -165,8 +179,18 @@ export function readDecisionDetail(key: string): string | undefined {
 
 export function readDecisionAnswer(key: string): DecisionAnswer | undefined {
   const dir = decisionDir(key);
-  const answer = dir ? readJsonFile<DecisionAnswer>(path.join(dir, ANSWER_JSON)) : undefined;
-  return answer?.key === key ? answer : undefined;
+  const marker = dir ? readJsonFile<AnswerMarker>(path.join(dir, ANSWER_JSON)) : undefined;
+  if (marker?.key !== key) return undefined;
+  const p = readRequest(marker.request)?.payload as DecisionAnswerPayload | undefined;
+  return {
+    key,
+    request: marker.request,
+    ...(p?.option !== undefined ? { option: p.option } : {}),
+    ...(p?.text !== undefined ? { text: p.text } : {}),
+    attachments: p?.attachments ?? [],
+    answeredAt: marker.answeredAt,
+    by: marker.by,
+  };
 }
 
 /** Every decision on disk, answered or not, newest first. */
@@ -326,7 +350,7 @@ export interface AnswerInput {
   attach?: string[];
   /** Files the glass uploaded. */
   uploads?: DecisionUpload[];
-  by: string;
+  by: 'glass' | 'cli';
   /** Per-file limit (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -334,9 +358,10 @@ export interface AnswerInput {
 
 /**
  * Answer a standing decision. The key, option, text, and every file are
- * checked before anything is written; then the files are stored in the
- * decision's `answer/` directory and the answer record is written. It runs
- * nothing and messages nobody: `man wait` delivers it to the helm.
+ * checked before anything is written. Then the decision is marked answered,
+ * the files are stored in the request's directory, and a `decision-answer`
+ * request is written, which wakes the helm. It runs nothing and messages
+ * nobody.
  */
 export function answerDecision(input: AnswerInput): DecisionAnswer {
   const meta = readDecision(input.key);
@@ -381,63 +406,68 @@ export function answerDecision(input: AnswerInput): DecisionAnswer {
     throw new DecisionError('an answer needs an option, text, or a file');
   }
   const dir = decisionDir(input.key)!;
-  const answerDir = path.join(dir, 'answer');
-  const stored: Attachment[] = [];
-  if (contents.length) fs.mkdirSync(answerDir, { recursive: true });
+  const answeredAt = (input.now ?? new Date()).toISOString();
+  const request = newRequestId();
+  // The marker is the claim: of two answers racing, the first one written stands.
   try {
+    fs.writeFileSync(path.join(dir, ANSWER_JSON), `${JSON.stringify({ key: input.key, request, answeredAt, by: input.by }, null, 2)}\n`, { flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new DecisionError(`decision ${input.key} was already answered`, 409);
+    throw err;
+  }
+  const filesDir = requestFilesDir(request);
+  const stored: Attachment[] = [];
+  try {
+    if (contents.length) fs.mkdirSync(filesDir, { recursive: true });
     for (const c of contents) {
       const ext = path.extname(c.name);
       const stem = c.name.slice(0, c.name.length - ext.length);
       let name = c.name;
       let n = 2;
-      while (stored.some((s) => s.name === name) || fs.existsSync(path.join(answerDir, name))) name = `${stem}-${n++}${ext}`;
-      const file = path.join(answerDir, name);
+      while (stored.some((s) => s.name === name)) name = `${stem}-${n++}${ext}`;
+      const file = path.join(filesDir, name);
       fs.writeFileSync(file, c.data, { flag: 'wx' });
       stored.push({ name, path: file, bytes: c.data.length, type: c.type });
     }
+    const payload: DecisionAnswerPayload = {
+      key: input.key,
+      title: meta.title,
+      ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
+      ...(meta.lane ? { lane: meta.lane } : {}),
+      ...(meta.repo ? { repo: meta.repo } : {}),
+      ...(option !== undefined ? { option } : {}),
+      ...(text !== undefined ? { text } : {}),
+      attachments: stored,
+    };
+    writeRequest('decision-answer', payload as unknown as Record<string, unknown>, input.by, { id: request });
   } catch (err) {
-    for (const s of stored) fs.rmSync(s.path, { force: true });
+    fs.rmSync(filesDir, { recursive: true, force: true });
+    fs.rmSync(path.join(dir, ANSWER_JSON), { force: true });
     throw err;
   }
-  const answer: DecisionAnswer = {
+  return {
     key: input.key,
+    request,
     ...(option !== undefined ? { option } : {}),
     ...(text !== undefined ? { text } : {}),
     attachments: stored,
-    answeredAt: (input.now ?? new Date()).toISOString(),
+    answeredAt,
     by: input.by,
   };
-  // wx: of two answers racing, the first one written stands.
-  try {
-    fs.writeFileSync(path.join(dir, ANSWER_JSON), `${JSON.stringify(answer, null, 2)}\n`, { flag: 'wx' });
-  } catch (err) {
-    for (const s of stored) fs.rmSync(s.path, { force: true });
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new DecisionError(`decision ${input.key} was already answered`, 409);
-    throw err;
-  }
-  return answer;
-}
-
-export interface DecisionAnsweredEvent {
-  decision: DecisionMeta;
-  answer: DecisionAnswer;
 }
 
 /**
- * Answers not yet delivered to the helm, oldest first. With `consume`, each
- * one returned is stamped delivered: an answer is one event. A decision
- * `match` rejects is left for its own grounds' helm.
+ * Remove an answered decision and the request that carries its answer
+ * (the request's file and its files directory).
  */
-export function takeDecisionAnswers(consume = true, match?: (d: DecisionMeta) => boolean): DecisionAnsweredEvent[] {
-  const out: DecisionAnsweredEvent[] = [];
-  for (const decision of listDecisions()) {
-    if (match && !match(decision)) continue;
-    const answer = readDecisionAnswer(decision.key);
-    if (!answer || answer.deliveredAt) continue;
-    out.push({ decision, answer });
-    if (consume) writeAtomic(path.join(decisionDir(decision.key)!, ANSWER_JSON), `${JSON.stringify({ ...answer, deliveredAt: new Date().toISOString() }, null, 2)}\n`);
+export function removeAnsweredDecision(key: string): void {
+  const answer = readDecisionAnswer(key);
+  if (answer && /^[0-9a-f-]{36}$/.test(answer.request)) {
+    fs.rmSync(path.join(requestsDir(), `${answer.request}.json`), { force: true });
+    fs.rmSync(requestFilesDir(answer.request), { recursive: true, force: true });
   }
-  return out.sort((a, b) => a.answer.answeredAt.localeCompare(b.answer.answeredAt));
+  const dir = decisionDir(key);
+  if (dir) fs.rmSync(dir, { recursive: true, force: true });
 }
 
 /**

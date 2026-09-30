@@ -17,17 +17,20 @@ import {
   readDecision,
   readDecisionAnswer,
   readDecisionDetail,
-  takeDecisionAnswers,
+  listRequests,
+  requestsDir,
+  unseenNotices,
 } from '@lobstah/core';
 import { buildTendReport } from '../src/tend.js';
-import { planCull } from '../src/cull.js';
+import { applyCull, planCull } from '../src/cull.js';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 
 /**
  * Decisions end to end: `man ask` stores one, a newer ask replaces it,
  * `--withdraw` removes it, and a framed decision hides the raw question on
- * its dispatch. The glass's POST answers one (and refuses what it must),
- * and `man wait` delivers exactly one decision-answered event.
+ * its dispatch. An answer is a `decision-answer` request: the glass's
+ * /requests POST files one (and refuses what it must), and `man wait`
+ * delivers exactly one decision-answer event.
  */
 
 // Against the built CLI (`pnpm build` runs before `pnpm test`).
@@ -153,22 +156,31 @@ describe('man ask', () => {
   });
 });
 
-describe('man answer and the decision-answered event', () => {
-  it('writes the answer; man wait delivers one decision-answered event with the key, dispatch, option, text, and files', () => {
+/** decision-answer requests on disk, and the unconsumed decision-answer notices that wake the helm. */
+const answerRequests = () => listRequests({ kind: 'decision-answer' });
+const answerWakes = () => unseenNotices(false).filter((n) => n.kind === 'decision-answer');
+
+describe('man answer and the decision-answer event', () => {
+  it('writes the request; man wait delivers one decision-answer event with the id, key, dispatch, option, text, and files', () => {
     question();
     const key = keyOf(lobstah('man', 'ask', A, '--title', 'Which schema?', '--option', 'v1', '--option', 'v2').stdout)!;
     const res = lobstah('man', 'answer', key, '--option', 'v2', '--text', 'and keep v1 readable', '--attach', write('shot.png', PNG));
     expect(res.status, res.stderr).toBe(0);
     const answer = readDecisionAnswer(key)!;
-    expect(answer).toMatchObject({ option: 'v2', text: 'and keep v1 readable', by: 'terminal' });
-    const stored = path.join(decisionDir(key)!, 'answer', 'shot.png');
+    expect(answer).toMatchObject({ option: 'v2', text: 'and keep v1 readable', by: 'cli' });
+    const [request] = answerRequests();
+    expect(request).toMatchObject({ id: answer.request, kind: 'decision-answer', from: 'cli', payload: { key, dispatch: A, option: 'v2' } });
+    const stored = path.join(requestsDir(), answer.request, 'shot.png');
     expect(answer.attachments.map((a) => a.path)).toEqual([stored]);
+    expect(fs.readFileSync(stored)).toEqual(PNG);
+    expect(answerWakes().map((n) => n.refId)).toEqual([answer.request]);
     // Answered: no longer attention, and the question stays hidden until the helm sends it on.
     expect(buildTendReport().attention.filter((a) => a.id === A || a.key === key)).toEqual([]);
 
     const wait = lobstah('man', 'wait', '--timeout', '1');
     expect(wait.status, wait.stderr).toBe(0);
-    expect(wait.stdout).toContain('event: decision-answered');
+    expect(wait.stdout).toContain('event: decision-answer');
+    expect(wait.stdout).toContain(`id: ${answer.request}`);
     expect(wait.stdout).toContain(key);
     expect(wait.stdout).toContain(`dispatch: ${A}`);
     expect(wait.stdout).toContain('option: v2');
@@ -176,7 +188,7 @@ describe('man answer and the decision-answered event', () => {
     expect(wait.stdout).toContain(stored);
     // Delivered once.
     const again = lobstah('man', 'wait', '--timeout', '1');
-    expect(again.stdout).not.toContain('decision-answered');
+    expect(again.stdout).not.toContain('decision-answer');
   });
 
   it('refuses a second answer, an option not in the record, and an empty answer', () => {
@@ -197,8 +209,7 @@ describe('man answer and the decision-answered event', () => {
     expect(d).toMatchObject({ title: 'which schema, v1 or v2?', askedBy: 'worker', dispatch: A });
     expect(readDecisionAnswer(d!.key)).toMatchObject({ text: 'v2' });
     expect(buildTendReport().attention.some((a) => a.id === A)).toBe(false);
-    const [event] = takeDecisionAnswers(true);
-    expect(event).toMatchObject({ decision: { dispatch: A }, answer: { text: 'v2' } });
+    expect(answerRequests().map((r) => r.payload)).toMatchObject([{ key: d!.key, dispatch: A, text: 'v2' }]);
   });
 });
 
@@ -217,20 +228,22 @@ describe('the Stop hook and cull', () => {
     expect(first.status, first.stderr).toBe(0);
     const block = JSON.parse(first.stdout) as { decision: string; reason: string };
     expect(block.decision).toBe('block');
-    expect(block.reason).toContain(`decision-answered ${key}`);
+    expect(block.reason).toContain(`decision-answer ${key}`);
     expect(block.reason).toContain('option "yes"');
     expect(haul().stdout.trim()).toBe('');
   });
 
-  it('cull removes a decision once it is answered, delivered, and older than the window; never a standing one', () => {
+  it('cull removes a decision and its answer request once the answer is older than the window; never a standing one', () => {
     const standing = keyOf(lobstah('man', 'ask', '--title', 'still open').stdout)!;
     const answered = keyOf(lobstah('man', 'ask', '--title', 'answered').stdout)!;
     lobstah('man', 'answer', answered, '--text', 'done');
-    const later = Date.now() + 30 * 86_400_000;
-    expect(planCull(14, later).filter((i) => i.kind === 'decision')).toEqual([]);
-    takeDecisionAnswers(true);
-    expect(planCull(14, later).filter((i) => i.kind === 'decision').map((i) => i.id)).toEqual([answered]);
+    const request = readDecisionAnswer(answered)!.request;
     expect(planCull(14, Date.now()).filter((i) => i.kind === 'decision')).toEqual([]);
+    const plan = planCull(14, Date.now() + 30 * 86_400_000).filter((i) => i.kind === 'decision');
+    expect(plan.map((i) => i.id)).toEqual([answered]);
+    applyCull(plan);
+    expect(readDecision(answered)).toBeUndefined();
+    expect(fs.existsSync(path.join(requestsDir(), `${request}.json`))).toBe(false);
     expect(readDecision(standing)).toBeDefined();
   });
 });
@@ -250,23 +263,26 @@ describe('the glass answer POST', () => {
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
     server = undefined;
   });
-  const post = (key: string, body: unknown, headers: Record<string, string> = {}) =>
-    fetch(`${base}/api/decision/${encodeURIComponent(key)}/answer`, {
+  const send = (body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${base}/requests`, {
       method: 'POST',
-      headers: { Origin: base, 'content-type': 'application/json', 'x-lobstah-focus-token': token, ...headers },
+      headers: { Origin: base, 'content-type': 'application/json', 'x-lobstah-token': token, ...headers },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     });
+  /** A decision-answer request for `key`. */
+  const post = (key: string, payload: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    send({ kind: 'decision-answer', payload: { key, ...payload } }, headers);
   const ask = () => keyOf(lobstah('man', 'ask', '--title', 'Cut 0.6.0?', '--option', 'yes', '--option', 'no').stdout)!;
 
   it('rejects a missing or wrong token and a foreign origin', async () => {
     const key = ask();
-    const missing = await fetch(`${base}/api/decision/${encodeURIComponent(key)}/answer`, {
+    const missing = await fetch(`${base}/requests`, {
       method: 'POST',
       headers: { Origin: base, 'content-type': 'application/json' },
-      body: JSON.stringify({ option: 'yes' }),
+      body: JSON.stringify({ kind: 'decision-answer', payload: { key, option: 'yes' } }),
     });
     expect(missing.status).toBe(403);
-    expect((await post(key, { option: 'yes' }, { 'x-lobstah-focus-token': 'wrong' })).status).toBe(403);
+    expect((await post(key, { option: 'yes' }, { 'x-lobstah-token': 'wrong' })).status).toBe(403);
     expect((await post(key, { option: 'yes' }, { Origin: 'http://evil.example' })).status).toBe(403);
     expect(readDecisionAnswer(key)).toBeUndefined();
   });
@@ -284,27 +300,28 @@ describe('the glass answer POST', () => {
     expect((await post(key, { files: [{ name: 'run.sh', data: Buffer.from('echo').toString('base64') }] })).status).toBe(415);
     expect((await post(key, { files: [{ name: 'fake.png', data: Buffer.from('not a png').toString('base64') }] })).status).toBe(415);
     expect((await post(key, {})).status).toBe(400);
-    expect((await post(key, 'not json')).status).toBe(400);
+    expect((await send('not json')).status).toBe(400);
+    expect((await send({ kind: 'mystery', payload: { key, option: 'yes' } })).status).toBe(400);
     expect(readDecisionAnswer(key)).toBeUndefined();
-    expect(fs.existsSync(path.join(decisionDir(key)!, 'answer'))).toBe(false);
+    expect(answerRequests()).toEqual([]);
+    expect(answerWakes()).toEqual([]);
   });
 
-  it('a valid answer writes the record, stores its files in the decision directory, and produces one decision-answered event', async () => {
+  it('a valid answer writes a decision-answer request with its files in the request directory, and one wake', async () => {
     const key = ask();
     const res = await post(key, { option: 'yes', text: 'ship it', files: [{ name: 'shot.png', data: PNG.toString('base64') }] });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ answered: true, key, option: 'yes', text: 'ship it', files: 1 });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { ok: boolean; id: string; key: string };
+    expect(body).toMatchObject({ ok: true, key });
     const answer = readDecisionAnswer(key)!;
-    expect(answer).toMatchObject({ option: 'yes', text: 'ship it', by: 'glass' });
-    expect(answer.attachments[0]!.path).toBe(path.join(decisionDir(key)!, 'answer', 'shot.png'));
+    expect(answer).toMatchObject({ request: body.id, option: 'yes', text: 'ship it', by: 'glass' });
+    expect(answer.attachments[0]!.path).toBe(path.join(requestsDir(), body.id, 'shot.png'));
     expect(fs.readFileSync(answer.attachments[0]!.path)).toEqual(PNG);
+    expect(answerRequests()).toMatchObject([{ id: body.id, kind: 'decision-answer', from: 'glass', payload: { key, option: 'yes', text: 'ship it' } }]);
     // Answered once; the snapshot no longer carries it.
     expect((await post(key, { option: 'no' })).status).toBe(409);
     expect(buildGlassSnapshot().decisions!.some((d) => d.key === key)).toBe(false);
-    const events = takeDecisionAnswers(true);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ decision: { key }, answer: { option: 'yes', text: 'ship it' } });
-    expect(takeDecisionAnswers(true)).toHaveLength(0);
+    expect(answerWakes().map((n) => n.refId)).toEqual([body.id]);
   });
 
   it('serves a decision image by bare name and nothing else', async () => {

@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import { buildTendReport } from './tend.js';
 
 /**
- * Answering, from the glass's POST or `man answer`. A decision key answers
+ * Answering, from the glass's `/requests` POST or `man answer`. A decision key answers
  * that decision. A raw question's key (`<lane>:<id>`, a worker's
  * needs-decision the helm has not framed) is framed first as a decision
  * asked by the worker, then answered, so the answer reaches the helm the
@@ -16,7 +16,7 @@ export interface AnswerRequest {
   text?: string;
   attach?: string[];
   uploads?: DecisionUpload[];
-  by: string;
+  by: 'glass' | 'cli';
 }
 
 /** A standing, unframed question for `<lane>:<id>`, as the glass shows it. */

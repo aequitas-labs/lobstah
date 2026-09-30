@@ -1,5 +1,5 @@
 import type { GlassSnapshot } from '@lobstah/core';
-import { answerSummary, decisionAnswerUrl, decisionCards, modalItem, reportMarkdownUrl } from '../../src/glass-diff.js';
+import { answerSummary, decisionCards, modalItem, reportMarkdownUrl } from '../../src/glass-diff.js';
 import type { GlassPrefs, ModalType } from '../../src/glass-diff.js';
 import { saveLobHidden, savePrefs } from './prefs.js';
 import { getState, setState } from './store.js';
@@ -72,7 +72,10 @@ export function removeFile(key: string, index: number): void {
   setDraft(key, { files });
 }
 
-/** Send a card's answer: one same-origin POST with the page's token. The server stores it; the helm acts on it. */
+/**
+ * Send a card's answer: one same-origin POST to /requests with the page's
+ * token, a `decision-answer` request. The server stores it; the helm acts on it.
+ */
 export async function sendAnswer(key: string): Promise<void> {
   const token = getState().snapshot?.focusToken;
   const draft = getState().drafts[key] ?? emptyDraft();
@@ -87,17 +90,21 @@ export async function sendAnswer(key: string): Promise<void> {
   }
   setDraft(key, { sending: true, error: undefined });
   try {
-    const response = await fetch(decisionAnswerUrl(key), {
+    const response = await fetch('/requests', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-lobstah-focus-token': token },
+      headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
       body: JSON.stringify({
-        ...(draft.option ? { option: draft.option } : {}),
-        ...(draft.text.trim() ? { text: draft.text } : {}),
-        files: draft.files.map((f) => ({ name: f.name, data: f.data })),
+        kind: 'decision-answer',
+        payload: {
+          key,
+          ...(draft.option ? { option: draft.option } : {}),
+          ...(draft.text.trim() ? { text: draft.text } : {}),
+          files: draft.files.map((f) => ({ name: f.name, data: f.data })),
+        },
       }),
     });
-    const result = (await response.json()) as { answered?: boolean; reason?: string };
-    if (!response.ok || !result.answered) {
+    const result = (await response.json()) as { ok?: boolean; reason?: string };
+    if (!response.ok || !result.ok) {
       setDraft(key, { sending: false, error: result.reason ?? `The answer was refused (${response.status}).` });
       return;
     }

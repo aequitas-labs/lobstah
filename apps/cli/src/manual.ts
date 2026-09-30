@@ -81,7 +81,7 @@ getting woken instead of asking:
                             [<dispatch-id>] --title, --detail <f.md>,
                             --option (0-6), --attach. The glass shows it as a
                             card; the answer wakes man wait as a
-                            decision-answered event. --withdraw <key>
+                            decision-answer event. --withdraw <key>
   lobstah man helm          take the helm: sign on as the one lobstah man for
                             your grounds. The charter prints (and re-injects
                             at every session start) and the Stop hook applies.

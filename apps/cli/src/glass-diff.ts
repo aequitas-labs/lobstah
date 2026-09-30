@@ -127,9 +127,8 @@ export function decisionFromHash(hash: string | undefined | null): string | null
   }
 }
 
-/** Where a decision's images are served, and where its answer is posted (glass.ts). */
+/** Where a decision's images are served (glass.ts). */
 export const decisionFileUrl = (key: string, name: string): string => `/decision/${encodeURIComponent(key)}/files/${encodeURIComponent(name)}`;
-export const decisionAnswerUrl = (key: string): string => `/api/decision/${encodeURIComponent(key)}/answer`;
 
 /**
  * One card in the deck's decisions section: a decision the helm framed, or

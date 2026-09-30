@@ -1,11 +1,11 @@
 import { listDecisions, readDecisionDetail, standingDecisions } from '@lobstah/core';
-import type { DecisionAnsweredEvent, DecisionMeta, GlassDecision, TendAttention } from '@lobstah/core';
+import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, LobstahRequest, TendAttention } from '@lobstah/core';
 
 /**
  * The CLI half of decisions (core's decisions.ts stores them): the
  * `decision` attention items, the rule that a framed decision hides the raw
- * question it frames, the glass rows, and the `decision-answered` event
- * text `man wait` prints.
+ * question it frames, the glass rows, and how `man wait` and the park print
+ * a `decision-answer` request.
  */
 
 /** One `decision` attention item per standing decision: it stands until answered or withdrawn. */
@@ -56,25 +56,35 @@ export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()):
   }));
 }
 
-/** The fields of one `decision-answered` event, in print order. */
-export function decisionEventFields(e: DecisionAnsweredEvent): Record<string, string> {
+/** The fields of one `decision-answer` event, in print order: the request id and its payload. */
+export function decisionEventFields(r: LobstahRequest): Record<string, string> {
+  const p = r.payload as unknown as DecisionAnswerPayload;
   return {
-    event: 'decision-answered',
-    key: e.decision.key,
-    ...(e.decision.dispatch ? { dispatch: e.decision.dispatch } : {}),
-    title: e.decision.title,
-    option: e.answer.option ?? '',
-    text: e.answer.text ?? '',
-    attachments: e.answer.attachments.map((a) => a.path).join(', '),
-    at: e.answer.answeredAt,
+    event: 'decision-answer',
+    id: r.id,
+    key: p.key,
+    ...(p.dispatch ? { dispatch: p.dispatch } : {}),
+    title: p.title,
+    option: p.option ?? '',
+    text: p.text ?? '',
+    attachments: (p.attachments ?? []).map((a) => a.path).join(', '),
+    from: r.from,
+    at: r.at,
   };
 }
 
-/** A `man haul` line for an answered decision. */
-export function decisionLine(e: DecisionAnsweredEvent): string {
-  const what = [e.answer.option && `option "${e.answer.option}"`, e.answer.text && `text: ${e.answer.text}`, e.answer.attachments.length > 0 && `files: ${e.answer.attachments.map((a) => a.path).join(', ')}`]
+/** A `man haul` line for a decision answer. */
+export function decisionLine(r: LobstahRequest): string {
+  const p = r.payload as unknown as DecisionAnswerPayload;
+  const what = [
+    p.option && `option "${p.option}"`,
+    p.text && `text: ${p.text}`,
+    p.attachments?.length > 0 && `files: ${p.attachments.map((a) => a.path).join(', ')}`,
+  ]
     .filter(Boolean)
     .join(' · ');
-  return `- decision-answered ${e.decision.key}${e.decision.dispatch ? ` (${e.decision.dispatch})` : ''} — ${e.decision.title} · ${what}`;
+  return (
+    `- decision-answer ${p.key}${p.dispatch ? ` (${p.dispatch})` : ''} — ${p.title} · ${what} (request ${r.id}). ` +
+    'Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.'
+  );
 }
-
