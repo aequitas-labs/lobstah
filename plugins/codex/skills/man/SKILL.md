@@ -95,7 +95,7 @@ tracked background task. End the turn while the external operation runs.
 
 ## Getting woken instead of polling
 
-- The Stop hook (`lobstah man haul`) blocks in park mode while work is in
+- The Stop hook (`lobstah hook stop`) blocks in park mode while work is in
   flight; there is no watcher to arm.
 - Hookless? Run `lobstah man wait --session <id> --timeout 900` in the
   foreground: exit 0 is an event, exit 3 a timeout carrying a changed digest.

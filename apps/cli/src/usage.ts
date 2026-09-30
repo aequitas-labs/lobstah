@@ -166,6 +166,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
   'man:brief': { flags: {} },
+  hook: { flags: {}, subverbs: ['session-start', 'stop', 'post-tool-use', 'session-end'], maxPositionals: 1 },
   'man:file': {
     flags: { '--attach': { value: '<file>', repeatable: true }, '--title': { value: '<text>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } },
     positionals: '<file.md>',
@@ -321,6 +322,10 @@ wakes man wait as decision-answer. Reserved for the claimed helm.`,
 Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
+  hook: `The plugin hook entry points. Each detects the session's role (helm, trap, or
+neither): session-start runs man brief, stop runs man haul (--park, --timeout),
+post-tool-use runs soak beat, session-end runs stow --quiet. The older commands
+stay as aliases.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
 itself with this verb). Not for direct use.`,
 };

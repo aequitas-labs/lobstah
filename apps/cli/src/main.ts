@@ -351,6 +351,12 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   ~/.claude/settings.json with --global (any
                                   directory with a .lobstah-man file then
                                   parks); --marker touches .lobstah-man.
+  hook session-start|stop|post-tool-use|session-end
+                                  the plugin hook entry points: each
+                                  detects the session's role (helm, trap,
+                                  or neither). session-start = man brief,
+                                  stop = man haul (same flags), post-tool-use
+                                  = soak beat, session-end = stow --quiet.
   man haul [--park] [--timeout <secs>]
                                   Stop-hook entry point: enforce an armed
                                   watcher in arm mode; --park blocks in
@@ -766,14 +772,31 @@ function wedgeSecs(): number {
   }
 }
 
+/**
+ * `lobstah hook <event>`: the command each plugin hook runs. Each detects
+ * the session's role (helm, trap, or neither) as the older command does:
+ * Stop parks a trap or the helm, SessionEnd stows a trap, PostToolUse beats
+ * a trap, and each is inert for a session with neither role. SessionStart
+ * announces the session id to every session: a Codex session learns its id
+ * only from it.
+ */
+const HOOK_COMMANDS: Record<string, string[]> = {
+  'session-start': ['man', 'brief'],
+  stop: ['man', 'haul'],
+  'session-end': ['stow', '--quiet'],
+};
+
 async function mainCli(): Promise<void> {
   let [cmd, ...args] = process.argv.slice(2);
   // The post-tool hook: before any layout or parsing work, and it never
   // fails. Errors go to the log; the exit code is always 0.
-  if (cmd === 'soak' && args[0] === 'beat') {
+  if ((cmd === 'soak' && args[0] === 'beat') || (cmd === 'hook' && args[0] === 'post-tool-use')) {
     runBeat();
     return;
   }
+  // The role-neutral hook entry points each run what the older hook command
+  // runs; those older commands stay as aliases for installed plugins.
+  if (cmd === 'hook' && args[0] !== undefined && HOOK_COMMANDS[args[0]]) [cmd, ...args] = [...HOOK_COMMANDS[args[0]]!, ...args.slice(1)];
   const ALIASES: Record<string, string> = { set: 'dispatch', buoys: 'ls', buoy: 'status' };
   cmd = cmd !== undefined ? (ALIASES[cmd] ?? cmd) : cmd;
   // Lobstah man (orchestrator) commands live under their own namespace;
@@ -2184,6 +2207,11 @@ async function mainCli(): Promise<void> {
       } catch {
         // never break a stop
       }
+      break;
+    }
+    case 'hook': {
+      // A known event was routed above; bare `lobstah hook` prints its card.
+      console.log(usageFor('hook')!);
       break;
     }
     case 'man:brief': {

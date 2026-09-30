@@ -1,12 +1,12 @@
 {
-  "description": "Park the session while lobstah work is in flight; wake it the moment something needs attention. The Stop hook is inert unless the directory opts in with a .lobstah-man file (or LOBSTAH_MAN=1) or the session is soaking (lobstah soak). SessionStart announces the session id; SessionEnd stows a soaking session cleanly. PostToolUse runs `lobstah soak beat`: a soaking session's liveness and activity, throttled, inert elsewhere.",
+  "description": "Park the session while lobstah work is in flight; wake it the moment something needs attention. Each hook runs `lobstah hook <event>`, which detects the session's role (helm, trap, or neither). The Stop hook is inert unless the directory opts in with a .lobstah-man file (or LOBSTAH_MAN=1) or the session is soaking (lobstah soak). SessionStart announces the session id; SessionEnd stows a soaking session cleanly. PostToolUse runs `lobstah hook post-tool-use`: a soaking session's liveness and activity, throttled, inert elsewhere.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "lobstah man brief",
+            "command": "lobstah hook session-start",
             "statusMessage": "lobstah session brief",
             "timeout": 10
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "lobstah soak beat",
+            "command": "lobstah hook post-tool-use",
             "timeout": 5
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "lobstah man haul",
+            "command": "lobstah hook stop",
             "statusMessage": "lobstah park — waiting for the fleet",
             "timeout": 14400
           }
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "lobstah stow --quiet",
+            "command": "lobstah hook session-end",
             "timeout": 3
           }
         ]
