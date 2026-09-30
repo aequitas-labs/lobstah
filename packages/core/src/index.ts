@@ -19,7 +19,7 @@ export * from './session-link.js';
 export * from './session-title.js';
 export * from './trap-names.js';
 export * from './trap-start.js';
-export * from './trap-requests.js';
+export * from './requests.js';
 export * from './notices.js';
 export * from './window.js';
 export * from './helm.js';

@@ -875,12 +875,13 @@ notice.
 The Traps tab and the deck's traps block have a **+ New trap** button. It
 opens a small form: a repo (from the configured repo keys) and a harness
 (`claude` or `codex`). Submitting it files a **trap request**: the glass POSTs
-`{ repo, harness }` to `/api/trap-request` with the same same-origin and page
-token guard as the open-window button. The server checks the repo and harness,
-writes `~/.lobstah/trap-requests/<id>.json`, and runs nothing.
+`{ kind: "trap-request", payload: { repo, harness } }` to `/requests` with
+the same same-origin and page token guard as the open-window button. The
+server checks the repo and harness, writes `~/.lobstah/requests/<id>.json`
+(kind `trap-request`), and runs nothing. A body over 4 KB is refused.
 
 A request wakes the helm's `man wait` (and the Stop-hook park) as a
-`trap-requested` event with the request's id, repo, and harness. An open
+`trap-request` event with the request's id, repo, and harness. An open
 request also wakes a helm that signs on later. The glass shows it at once as a
 greyed card: `requested · <repo> · <harness> · waiting for the helm`, or
 `waiting for a helm` when no helm is signed on.

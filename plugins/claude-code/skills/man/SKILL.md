@@ -68,7 +68,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   redeems the ticket. Unredeemed past `--deadline` (default 180 seconds), a
   `trap-start-failed` notice arrives and the work stays queued;
   `lobstah stow --wt <name>` withdraws the reservation.
-- A `trap-requested` event is a trap the human asked for from the glass. Run
+- A `trap-request` event is a trap the human asked for from the glass. Run
   `lobstah trap reserve --request <id>`, then start the session with the
   printed command, trying these in order and stopping at the first that works
   and is allowed: (1) a tool your harness gives for opening a terminal tab;

@@ -18,12 +18,12 @@ import {
   listNotices,
   listTraps,
   listReservations,
-  listTrapRequests,
+  listRequests,
   liveHelms,
   readReservationTicket,
   trapRequestError,
   trapStartCommands,
-  writeTrapRequest,
+  writeRequest,
   trapLastSeen,
   validSessionLink,
   trapLabel,
@@ -68,15 +68,15 @@ import type { TrapRegistration } from '@lobstah/core';
  * can't afford. It binds 127.0.0.1 only; /data registers no watch, never
  * advances a cursor, and never consumes attention.
  * Look freely, steer only from the helm. The glass writes only through
- * same-origin, token-gated POSTs: focus a live trap, and file a trap
- * request (`/api/trap-request`) that wakes the helm. It runs nothing itself. The
+ * same-origin, token-gated POSTs: focus a live trap, and file a request
+ * (`/requests`) that wakes the helm. It runs nothing itself. The
  * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
  * own, kept in its localStorage — the server has nothing to write.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
 
-/** A trap request body is a repo key and a harness. */
+/** A request body is a kind and a small payload. */
 const REQUEST_MAX_BYTES = 4096;
 
 const readJson = <T>(f: string): T | undefined => {
@@ -410,7 +410,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnap
   // dir, notices, and delivery receipts survive — list those ids too so a
   // seat's story stays inspectable after sign-off.
   const reserved = listReservations();
-  const requested = listTrapRequests({ open: true });
+  const requested = listRequests({ kind: 'trap-request', open: true });
   const liveIds = new Set([...live.map((t) => t.trapId), ...reserved.map((r) => r.trapId), ...requested.map((r) => r.id)]);
   const seenIds = new Set<string>();
   for (const f of listDir(laneDirs('work').inbox)) {
@@ -471,7 +471,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnap
         false,
       ),
     ),
-    ...requested.map((r) => attach({ trapId: r.id, repo: r.repo, harness: r.harness, requested: { at: r.at } } as GlassTrap, false)),
+    ...requested.map((r) => attach({ trapId: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), requested: { at: r.at } } as GlassTrap, false)),
     ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
   ];
   const attention = attentionSnapshot();
@@ -534,35 +534,54 @@ export function serveGlass(
   };
   const server = http.createServer((req, res) => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
-    if (req.url === '/api/trap-request') {
+    if (req.url === '/requests') {
       res.setHeader('cache-control', 'no-store');
       const reply = (status: number, result: unknown) => {
+        if (res.headersSent) return;
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(result));
       };
       if (req.method !== 'POST') return reply(405, { ok: false, reason: 'POST required.' });
-      if (!authorized(req, 'x-lobstah-focus-token')) return reply(403, { ok: false, reason: 'Request was not authorized.' });
-      if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) return reply(415, { ok: false, reason: 'JSON required.' });
+      if (!authorized(req, 'x-lobstah-token')) {
+        req.resume();
+        return reply(403, { ok: false, reason: 'Request was not authorized.' });
+      }
+      if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) {
+        req.resume();
+        return reply(415, { ok: false, reason: 'JSON required.' });
+      }
+      const cap = REQUEST_MAX_BYTES;
+      if (Number(req.headers['content-length'] ?? NaN) > cap) {
+        req.resume();
+        return reply(413, { ok: false, reason: 'The request is too large.' });
+      }
       const chunks: Buffer[] = [];
       let size = 0;
+      let refused = false;
       req.on('data', (chunk: Buffer) => {
+        if (refused) return;
         size += chunk.length;
-        if (size > REQUEST_MAX_BYTES) req.destroy();
-        else chunks.push(chunk);
+        if (size <= cap) return void chunks.push(chunk);
+        refused = true;
+        chunks.length = 0;
+        reply(413, { ok: false, reason: 'The request is too large.' });
       });
       req.on('end', () => {
-        let body: unknown;
+        if (refused) return;
+        let body: { kind?: unknown; payload?: unknown };
         try {
-          body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof body;
         } catch {
           return reply(400, { ok: false, reason: 'Invalid JSON.' });
         }
-        const error = trapRequestError(body, Object.keys(loadConfig().repos));
+        if (body?.kind !== 'trap-request') return reply(400, { ok: false, reason: 'Unknown request kind.' });
+        const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
         if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
-        const { repo, harness } = body as { repo: string; harness: 'claude' | 'codex' };
-        const request = writeTrapRequest({ repo, harness, from: 'glass' });
+        const { repo, harness } = body.payload as { repo: string; harness: string };
+        const request = writeRequest('trap-request', { repo, harness }, 'glass');
         reply(201, { ok: true, id: request.id });
       });
+      req.on('error', () => reply(400, { ok: false, reason: 'The request failed.' }));
       return;
     }
     if (req.url?.startsWith('/api/focus/')) {

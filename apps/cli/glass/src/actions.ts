@@ -69,7 +69,7 @@ export async function openTrapWindow(trapId: string): Promise<void> {
 }
 
 /**
- * Ask the helm for a new trap: the server files a trap request and runs
+ * Ask the helm for a new trap: the server writes a trap-request and runs
  * nothing. Resolves to an error reason, or undefined on success; a fresh
  * snapshot follows at once so the requested card shows.
  */
@@ -77,10 +77,10 @@ export async function requestTrap(repo: string, harness: string): Promise<string
   const token = getState().snapshot?.focusToken;
   if (!token) return 'The glass has no page token yet.';
   try {
-    const response = await fetch('/api/trap-request', {
+    const response = await fetch('/requests', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-lobstah-focus-token': token },
-      body: JSON.stringify({ repo, harness }),
+      headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
+      body: JSON.stringify({ kind: 'trap-request', payload: { repo, harness } }),
     });
     const result = (await response.json()) as { ok?: boolean; reason?: string };
     if (!result.ok) return result.reason ?? 'The request was refused.';

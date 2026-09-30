@@ -40,9 +40,9 @@ import {
   TRAP_TICKET_RE,
   DEFAULT_TRAP_START_SECS,
   trapStartCommands,
-  listTrapRequests,
-  readTrapRequest,
-  closeTrapRequest,
+  listRequests,
+  readRequest,
+  closeRequest,
   trapLabel,
   trapNamer,
   trapAddressText,
@@ -529,20 +529,22 @@ function runDueManWatches(): void {
 }
 
 /** A trap request as a man wait event: its id, repo, and harness. */
-function trapRequestedFields(n: Notice): Record<string, string> | undefined {
-  const r = n.kind === 'trap-requested' && n.refId ? readTrapRequest(n.refId) : undefined;
-  return r ? { event: 'trap-requested', id: r.id, repo: r.repo, harness: r.harness, at: r.at } : undefined;
+function trapRequestFields(n: Notice): Record<string, string> | undefined {
+  const r = n.kind === 'trap-request' && n.refId ? readRequest(n.refId) : undefined;
+  return r?.kind === 'trap-request'
+    ? { event: 'trap-request', id: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), from: r.from, at: r.at }
+    : undefined;
 }
 
 /** A haul line for a fleet notice; a trap request names what it asks for. */
 function noticeLine(n: Notice): string {
-  const r = trapRequestedFields(n);
-  return r ? `- trap-requested ${r.id} — repo ${r.repo}, harness ${r.harness}: reserve with \`lobstah trap reserve --request ${r.id}\`` : `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
+  const r = trapRequestFields(n);
+  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: reserve with \`lobstah trap reserve --request ${r.id}\`` : `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
 }
 
 function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
-    console.log(toonKV(trapRequestedFields(n) ?? { notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
+    console.log(toonKV(trapRequestFields(n) ?? { notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
   }
   console.log(
     'next: each notice names its own decision or remedy — act on it (or note it and move on), ' +
@@ -831,12 +833,12 @@ async function mainCli(): Promise<void> {
   switch (cmd) {
     case 'trap': {
       if (pos[0] === 'requests') {
-        const open = listTrapRequests({ open: true });
+        const open = listRequests({ kind: 'trap-request', open: true });
         console.log(
           open.length
             ? toonTable(
                 'trap-requests',
-                open.map((r) => ({ id: r.id, repo: r.repo, harness: r.harness, from: r.from, at: r.at })),
+                open.map((r) => ({ id: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), from: r.from, at: r.at })),
                 ['id', 'repo', 'harness', 'from', 'at'],
               )
             : toonKV({ requests: 'none open' }),
@@ -848,12 +850,12 @@ async function mainCli(): Promise<void> {
       const cfg = loadConfig();
       // A request from the glass names the repo and harness; flags may repeat them, never contradict them.
       const requestId = opt('--request');
-      const request = requestId !== undefined ? readTrapRequest(requestId) : undefined;
+      const request = requestId !== undefined ? readRequest(requestId) : undefined;
       if (requestId !== undefined) {
-        if (!request) throw new Error(`no trap request ${requestId} — \`lobstah trap requests\` lists open ones`);
+        if (!request || request.kind !== 'trap-request') throw new Error(`no trap request ${requestId} — \`lobstah trap requests\` lists open ones`);
         if (request.closedAt) throw new Error(`trap request ${requestId} is already closed: ${request.outcome ?? 'no outcome recorded'}`);
       }
-      const asked = request;
+      const asked = request?.payload as { repo?: string; harness?: string } | undefined;
       for (const [flag, value] of [['--repo', asked?.repo], ['--harness', asked?.harness]] as const) {
         if (value !== undefined && opt(flag) !== undefined && opt(flag) !== value) {
           throw new UsageError(`${flag} ${opt(flag)} contradicts trap request ${requestId} (${flag} ${value}): drop ${flag}`);
@@ -880,7 +882,7 @@ async function mainCli(): Promise<void> {
         by: callerSession(opt('--session'))?.id,
         ...(request ? { request: request.id } : {}),
       });
-      if (request) closeTrapRequest(request.id, `reserved ${trapLabel(reservation)}`);
+      if (request) closeRequest(request.id, `reserved ${trapLabel(reservation)}`);
       const starts = trapStartCommands(repo.path, ticket, reservation.harness);
       console.log(
         toonKV({
