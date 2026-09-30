@@ -109,6 +109,17 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--repo': { value: '<key>' },
       '--link': { value: '<url>' },
       '--name': { value: '<word-word>' },
+      '--ticket': { value: '<ticket>' },
+    },
+  },
+  trap: {
+    subverbs: ['reserve'],
+    flags: {
+      '--repo': { value: '<key>' },
+      '--harness': { value: HARNESS },
+      '--name': { value: '<word-word>' },
+      '--deadline': { value: '<secs>' },
+      '--session': { value: '<id>' },
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
@@ -212,14 +223,24 @@ installs the shipped PR check; with --for, a check that fails after the first
 Primary checkout or --repo creates worktrees/soak-<trap> from trunk
 (branch lobstah/soak-<trap>, with setup): cd there. Sessions reuse traps.
 --one stows after a catch; --name sets its name; --link sets a validated URL.
---wait listens; quiet exit 3 means re-run.
+--wait listens; quiet exit 3 means re-run. --ticket (or LOBSTAH_TRAP_TICKET)
+redeems a \`trap reserve\` ticket: the session signs on as the reserved trap.
+Sign-on names a Terminal.app or iTerm2 tab after the trap; stow clears it.
 \`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
+  trap: `\`trap reserve --repo <key>\` reserves a trap before its session starts: it
+picks the two-word name and wt: id, prints a one-time ticket and the command
+that starts the session, and shows the trap as starting. dispatch --for works on
+it at once. A session redeems the ticket with soak --ticket <t> (or
+LOBSTAH_TRAP_TICKET) within --deadline seconds (default 180); past that the
+helm gets a trap-start-failed notice and addressed work stays queued. The
+ticket still redeems late. stow --wt <name> withdraws the reservation.`,
   stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
 requeues, unread messages bounce to the helm. Removes the worktree soak
 created unless --keep or it holds uncommitted changes, untracked files, or
 commits on no remote branch (kept, with the reason). Never removes a
 worktree soak did not create. Stowing another session's trap is steering:
-with a claimed helm, only the helm may (pass its --session).`,
+with a claimed helm, only the helm may (pass its --session). --wt on a
+reserved trap withdraws the reservation. Stow clears the tab name sign-on set.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit; restart restarts it and
 waits for the new heartbeat (refused while dispatches are active, unless

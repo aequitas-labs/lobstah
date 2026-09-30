@@ -251,6 +251,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   live: boolean;
   /** Parked and recently beating; false for a stale or never-parked registration. */
   listening?: boolean;
+  /** A reserved trap no session has signed on as yet (`trap reserve`); `live` is false. */
+  starting?: { reservedAt: string; deadline: string; failedAt?: string; reason?: string };
   messages: GlassMessage[];
   /** This trap's notices, newest first. */
   notices: Notice[];

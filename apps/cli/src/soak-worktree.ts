@@ -31,7 +31,8 @@ function branchExists(repo: RepoConfig, branch: string): boolean {
  * one: `allocate` fetches trunk, adds `worktrees/soak-<trap>` on a new
  * branch `lobstah/soak-<trap>` from `origin/<trunk>`, and runs the repo's
  * setup. The anchor file marks it as created by soak for this session and
- * repo. Checks free space first (`[limits].minFreeGB`). On any failure the
+ * repo. A reserved trap passes its `trapId`; otherwise a fresh one is
+ * picked. Checks free space first (`[limits].minFreeGB`). On any failure the
  * half-made worktree and its branch are removed, and the error names the
  * cause.
  */
@@ -41,6 +42,8 @@ export async function createSoakWorktree(opts: {
   sessionId: string;
   minFreeGB: number;
   freeBytes?: FreeBytesReader;
+  /** A reserved trap's id; the worktree and branch are named after it. */
+  trapId?: string;
 }): Promise<SoakWorktree> {
   const need = opts.minFreeGB * GB;
   if (need > 0) {
@@ -57,8 +60,12 @@ export async function createSoakWorktree(opts: {
       );
     }
   }
-  let trapId = newTrapId();
-  while (branchExists(opts.repo, `lobstah/soak-${trapId}`) || fs.existsSync(worktreePath(`soak-${trapId}`))) trapId = newTrapId();
+  const taken = (id: string): boolean => branchExists(opts.repo, `lobstah/soak-${id}`) || fs.existsSync(worktreePath(`soak-${id}`));
+  let trapId = opts.trapId ?? newTrapId();
+  if (opts.trapId !== undefined && taken(trapId)) {
+    throw new Error(`could not create a worktree for repo ${opts.repoKey}: soak-${trapId} or its branch already exists`);
+  }
+  while (taken(trapId)) trapId = newTrapId();
   const id = `soak-${trapId}`;
   const branch = `lobstah/${id}`;
   try {

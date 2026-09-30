@@ -17,6 +17,7 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  listReservations,
   trapLastSeen,
   validSessionLink,
   trapLabel,
@@ -364,7 +365,8 @@ export function buildGlassSnapshot(): GlassSnapshot {
   // Historical traps: a stowed or ghosted registration is gone, but its mail
   // dir, notices, and delivery receipts survive — list those ids too so a
   // seat's story stays inspectable after sign-off.
-  const liveIds = new Set(live.map((t) => t.trapId));
+  const reserved = listReservations();
+  const liveIds = new Set([...live.map((t) => t.trapId), ...reserved.map((r) => r.trapId)]);
   const seenIds = new Set<string>();
   for (const f of listDir(laneDirs('work').inbox)) {
     const m = /^trap-(.+)$/.exec(f);
@@ -406,6 +408,24 @@ export function buildGlassSnapshot(): GlassSnapshot {
     helms,
     traps: [
       ...live.map((t) => attach(t as GlassTrap, true, !!t.firstParkedAt && Date.now() - trapLastSeen(t) <= loadConfig().soak.ttlSecs * 1000)),
+      ...reserved.map((r) =>
+        attach(
+          {
+            trapId: r.trapId,
+            name: r.name,
+            repo: r.repo,
+            harness: r.harness,
+            starting: {
+              reservedAt: r.reservedAt,
+              deadline: r.deadline,
+              ...(r.failedAt || Date.now() > (Date.parse(r.deadline) || 0)
+                ? { failedAt: r.failedAt ?? r.deadline, reason: r.reason ?? `no session signed on by ${r.deadline}` }
+                : {}),
+            },
+          } as GlassTrap,
+          false,
+        ),
+      ),
       ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
     ],
     notices: allNotices.slice().reverse(),

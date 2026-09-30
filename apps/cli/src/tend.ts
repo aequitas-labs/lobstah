@@ -19,6 +19,7 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  listReservations,
   trapLabel,
   listWatches,
   watchErrorCell,
@@ -156,8 +157,10 @@ export interface TendTrap {
   repo: string;
   worktree: string;
   claimed?: string;
-  /** never | now (parked) | <age>s ago */
+  /** never | now (parked) | <age>s ago | starting (due in <n>s) | start failed */
   listening: string;
+  /** Set for a reserved trap no session has signed on as yet. */
+  state?: 'starting' | 'start-failed';
 }
 
 export interface TendAwaiting {
@@ -876,6 +879,20 @@ export function buildTendReport(now = Date.now()): TendReport {
       listening: r.firstParkedAt === undefined ? 'never' : hbAgeSecs <= 10 ? 'now' : `${hbAgeSecs}s ago`,
     };
   });
+  // Reserved traps: the address exists, no session has signed on as it yet.
+  for (const r of listReservations()) {
+    const failed = r.failedAt !== undefined || now > (Date.parse(r.deadline) || 0);
+    traps.push({
+      trap: `wt:${r.trapId}`,
+      name: r.name,
+      label: trapLabel(r),
+      session: '',
+      repo: r.repo,
+      worktree: '',
+      listening: failed ? 'start failed' : `starting (due in ${Math.max(0, Math.round(((Date.parse(r.deadline) || 0) - now) / 1000))}s)`,
+      state: failed ? 'start-failed' : 'starting',
+    });
+  }
 
   const notices: TendNotice[] = listNotices(5).map((n) => ({
     kind: n.kind,
