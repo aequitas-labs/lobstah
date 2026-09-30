@@ -393,21 +393,24 @@ export function pollSecs(): number {
  * a watch cursor or append events. When auto-repair is off, pickup may still
  * check these watches; observedAt shares the cadence between the two.
  */
-export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Date.now()): void {
+export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Date.now(), view: (ref: PrRef) => GhPrView = ghPrView): void {
   for (const w of listWatches()) {
     if (!w.key.startsWith('pr:') || !w.owner.startsWith('dispatch:') || w.done) continue;
     const id = w.owner.slice('dispatch:'.length);
     const ref = parsePrRef(w.key);
     const lane = laneOf(id);
     if (!ref || !lane) continue;
-    const seen = readPr(ref.key) ?? readEvidence(id, lane).pr;
+    // The dispatch's `pr` evidence is one PR's observation: it stands in only
+    // for that PR. A dispatch with several PRs has one watch per PR.
+    const own = readEvidence(id, lane).pr;
+    const seen = readPr(ref.key) ?? (own && parsePrRef(own.url)?.key === ref.key ? own : undefined);
     // A terminal PR has nothing left to observe; pick's check retires its watch.
     if (seen && (seen.state === 'MERGED' || seen.state === 'CLOSED')) continue;
     if (seen && now - Date.parse(seen.observedAt) < (w.everySecs ?? defaultEverySecs) * 1000) continue;
     // A failing watch backs off (core watch.ts); the observe-only pass must not poll around it.
     if (w.failures && !watchDue(w, defaultEverySecs, now)) continue;
     try {
-      const record = observePr(ref, ghPrView(ref), { dispatchId: id, now: new Date(now) });
+      const record = observePr(ref, view(ref), { dispatchId: id, now: new Date(now) });
       if (record.state === 'MERGED' || record.state === 'CLOSED') removeWatch(w.key);
     } catch {
       // gh missing, unauthenticated, or forbidden: pick's real check records the streak

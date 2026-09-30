@@ -239,6 +239,17 @@ export function addrCell(x: GlassDispatch) {
 }
 
 export function prCell(x: GlassDispatch) {
+  // Several PRs: each in stack order with its own state; one not yet observed shows none.
+  if (x.prList && x.prList.length > 1) {
+    return [
+      x.prList.map((p, i) => [
+        i ? ' → ' : '',
+        html`<a href=${p.url} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`,
+        p.badge && [' ', html`<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>`],
+      ]),
+      x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
+    ];
+  }
   const url = x.evidence && (x.evidence.prUrl || (x.evidence.pr && x.evidence.pr.url));
   if (!url) return '';
   const b = x.prBadge;
