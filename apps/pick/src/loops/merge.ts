@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { conflictUpdate, enqueue, laneDirs, loadConfig, pushRule, readStatusLog, standalonePr, withBriefHooks } from '@lobstah/core';
+import { conflictUpdate, enqueue, laneDirs, loadConfig, pushRule, readStatusLog, rerequestReview, standalonePr, withBriefHooks } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { MergePolicy, MergeSource, PrCandidate } from '../types.js';
@@ -56,7 +56,11 @@ export function rebaseBrief(pr: PrCandidate, id: string, trunk?: string): string
     `in a way that preserves the intent of both sides.`,
     conflictUpdate(pr.baseRef, pr.headRef, standalone),
     pushRule(pr.headRef, id, standalone ? 'merge' : 'rebase'),
-    `Do not merge the PR. Do not change anything beyond conflict resolution. When pushed, report status done.`,
+    `Do not merge the PR. Do not change anything beyond conflict resolution.`,
+    // A reviewed PR's review goes stale at the new head: ask its reviewers again and park.
+    pr.reviews.length > 0
+      ? rerequestReview({ url: pr.url, number: pr.number }, id, [...new Set(pr.reviews.map((r) => r.author))])
+      : `When pushed, report status done.`,
   ].join(' ');
 }
 
