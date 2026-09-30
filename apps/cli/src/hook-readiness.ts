@@ -140,10 +140,25 @@ const ago = (iso: string, now: number): string => {
   return s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago` : s < 172_800 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86_400)}d ago`;
 };
 
-const list = (hooks: LobstahHook[]) => (hooks.length === 1 ? hooks[0]! : `${hooks.slice(0, -1).join(', ')} and ${hooks.at(-1)}`);
+/** The hooks each role needs: the helm parks and learns its charter; a trap also beats and stows. */
+export const ROLE_HOOKS: Record<'helm' | 'trap', readonly LobstahHook[]> = {
+  helm: ['Stop', 'SessionStart'],
+  trap: LOBSTAH_HOOKS,
+};
+
+const list = (hooks: readonly LobstahHook[]) => (hooks.length === 1 ? hooks[0]! : `${hooks.slice(0, -1).join(', ')} and ${hooks.at(-1)}`);
+
+/** The hooks of `need` that cannot run: missing, untrusted, or off. */
+function notReady(h: HarnessHooks, need: readonly LobstahHook[]): LobstahHook[] {
+  return need.filter((n) => {
+    const x = h.hooks.find((y) => y.hook === n);
+    return !!h.allOff || !x || !x.installed || !x.enabled || x.trusted === false;
+  });
+}
 
 /**
- * One doctor row per harness with the plugin installed: each hook's
+ * One doctor row per harness with the plugin installed: readiness per role
+ * (the helm needs Stop and SessionStart, a trap all four), then each hook's
  * installed, trusted, and last-run state. A hook that is missing, untrusted,
  * or off fails the row, and the remedy names the step.
  */
@@ -169,10 +184,14 @@ export function hookRow(h: HarnessHooks, now = Date.now()): { check: string; sta
     remedies.push('In Claude Code, enable the lobstah plugin (/plugin)');
   }
   const healthy = remedies.length === 0;
+  const roles = (['helm', 'trap'] as const).map((role) => {
+    const blocked = notReady(h, ROLE_HOOKS[role]);
+    return `${role} ${blocked.length ? `not ready (needs ${list(blocked)})` : 'ready'}`;
+  });
   return {
     check,
     status: healthy ? 'ok' : 'fail',
-    detail: `${parts.join('; ')}${healthy ? '' : ` — ${name} skips these hooks, so parks and wakes cannot work. ${remedies.join('. ')}.`}`,
+    detail: `${roles.join(', ')}. ${parts.join('; ')}${healthy ? '' : ` — ${name} skips these hooks, so parks and wakes cannot work. ${remedies.join('. ')}.`}`,
   };
 }
 

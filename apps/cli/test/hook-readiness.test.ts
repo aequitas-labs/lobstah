@@ -16,10 +16,10 @@ let home: string;
 
 const HOOKS_JSON = {
   hooks: {
-    SessionStart: [{ hooks: [{ type: 'command', command: 'lobstah man brief', timeout: 10 }] }],
-    PostToolUse: [{ hooks: [{ type: 'command', command: 'lobstah soak beat', timeout: 5 }] }],
-    Stop: [{ hooks: [{ type: 'command', command: 'lobstah man haul', timeout: 14400 }] }],
-    SessionEnd: [{ hooks: [{ type: 'command', command: 'lobstah stow --quiet', timeout: 3 }] }],
+    SessionStart: [{ hooks: [{ type: 'command', command: 'lobstah hook session-start', timeout: 10 }] }],
+    PostToolUse: [{ hooks: [{ type: 'command', command: 'lobstah hook post-tool-use', timeout: 5 }] }],
+    Stop: [{ hooks: [{ type: 'command', command: 'lobstah hook stop', timeout: 14400 }] }],
+    SessionEnd: [{ hooks: [{ type: 'command', command: 'lobstah hook session-end', timeout: 3 }] }],
   },
 };
 
@@ -55,7 +55,7 @@ describe('doctor: Codex hook readiness', () => {
     const row = hookRow(codexHooks(opts()), NOW);
     expect(row.status).toBe('ok');
     expect(row.detail).toBe(
-      'Stop: installed, trusted, last run 2m ago; SessionStart: installed, trusted, last run 2m ago; ' +
+      'helm ready, trap ready. Stop: installed, trusted, last run 2m ago; SessionStart: installed, trusted, last run 2m ago; ' +
         'PostToolUse: installed, trusted, last run 2m ago; SessionEnd: installed, trusted, last run 2m ago',
     );
   });
@@ -71,6 +71,7 @@ describe('doctor: Codex hook readiness', () => {
     ]);
     const row = hookRow(h, NOW);
     expect(row.status).toBe('fail');
+    expect(row.detail).toMatch(/^helm not ready \(needs Stop and SessionStart\), trap not ready \(needs Stop and SessionStart\)\. /);
     expect(row.detail).toContain('Stop: installed, untrusted, never run');
     expect(row.detail).toContain("In Codex, open /hooks and trust lobstah's Stop and SessionStart hooks.");
   });
@@ -80,10 +81,31 @@ describe('doctor: Codex hook readiness', () => {
     codexHome(trust('session_start') + trust('post_tool_use', 'enabled = false') + trust('session_end'), { hooks: rest });
     const row = hookRow(codexHooks(opts()), NOW);
     expect(row.status).toBe('fail');
+    expect(row.detail).toMatch(/^helm not ready \(needs Stop\), trap not ready \(needs Stop and PostToolUse\)\. /);
     expect(row.detail).toContain('Stop: missing, never run');
     expect(row.detail).toContain('PostToolUse: installed but disabled, trusted');
     expect(row.detail).toContain('the plugin does not declare Stop: reinstall it');
     expect(row.detail).toContain("In Codex, open /hooks and enable lobstah's PostToolUse hook");
+  });
+
+  it('the helm can be ready while a trap is not', () => {
+    codexHome(trust('stop') + trust('session_start') + trust('session_end'));
+    const row = hookRow(codexHooks(opts()), NOW);
+    expect(row.status).toBe('fail');
+    expect(row.detail).toMatch(/^helm ready, trap not ready \(needs PostToolUse\)\. /);
+  });
+
+  it('an older plugin that runs the alias commands is read the same way', () => {
+    const old = {
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: 'lobstah man brief' }] }],
+        PostToolUse: [{ hooks: [{ type: 'command', command: 'lobstah soak beat' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: 'lobstah man haul' }] }],
+        SessionEnd: [{ hooks: [{ type: 'command', command: 'lobstah stow --quiet' }] }],
+      },
+    };
+    codexHome(['stop', 'session_start', 'post_tool_use', 'session_end'].map((e) => trust(e)).join('\n'), old);
+    expect(hookRow(codexHooks(opts()), NOW).status).toBe('ok');
   });
 
   it('hooks turned off in Codex fail the row even when trusted', () => {
