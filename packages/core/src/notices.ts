@@ -31,7 +31,8 @@ export type NoticeKind =
   | 'disk-held'
   | 'disk-cleared'
   | 'worktree-released'
-  | 'push-failed';
+  | 'push-failed'
+  | 'repair-stopped';
 
 /**
  * Notices that never wake a helm on their own. `trap-listening` follows its
