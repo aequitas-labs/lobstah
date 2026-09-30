@@ -153,6 +153,8 @@ export function reconcileOne(
   cfg: Config,
   log: (m: string) => void,
   spawnHeadless: typeof spawnRunner = spawnRunner,
+  /** Just after the machine resumed from sleep: a silent worker is not treated as wedged yet. */
+  resumeGrace = false,
 ): void {
   const hasDescriptor = fs.existsSync(path.join(st.dir, 'descriptor.json'));
   if (!hasDescriptor) {
@@ -252,6 +254,9 @@ export function reconcileOne(
       break;
     }
     case 'wedged': {
+      // Just after the machine resumed, every worker looks silent: its events
+      // resume within the grace. Only a worker still silent after it is wedged.
+      if (resumeGrace) break;
       // Never restart a wedge blindly: bound it, then ladder.
       const attempts = (st.runner?.attempts ?? 0) + 1;
       if (st.runner) killGroup(st.runner.pid, 'SIGKILL');
@@ -493,10 +498,15 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   ensureLayout();
   const now = hooks.now?.() ?? Date.now();
   const ttl = cfg.soak.ttlSecs * 1000;
+  const wedgeMs = cfg.limits.wedgeThresholdSecs * 1000;
   const home = lobstahHome();
   const timing = tickTimes.get(home);
-  const resumed = timing && now - timing.last > ttl ? now : timing?.resumed;
+  // A tick delayed past a liveness limit means the machine slept (or the
+  // daemon was stopped): every heartbeat and event is old for that reason.
+  const resumed = timing && now - timing.last > Math.min(ttl, wedgeMs) ? now : timing?.resumed;
   tickTimes.set(home, { last: now, resumed });
+  // Wedge handling waits one wedge threshold after a resume for events to flow again.
+  const wedgeGrace = resumed !== undefined && now - resumed <= wedgeMs;
   writeHeartbeat(cfg);
   hooks.prWatches?.(hooks.now?.() ?? Date.now(), log);
 
@@ -525,7 +535,7 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));
   const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : choreSkip);
   for (const lane of ['chore', 'work'] as Lane[]) {
-    for (const st of listActive(lane)) reconcileOne(st, cfg, log, hooks.spawnRunner);
+    for (const st of listActive(lane)) reconcileOne(st, cfg, log, hooks.spawnRunner, wedgeGrace);
   }
   // After reconcile: a dispatch the PR pass finished is in done/ before a
   // merged PR's worktree release looks at its chain.
@@ -565,7 +575,7 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
       inFlight++;
       // next reconcile pass spawns it; spawn now to avoid a tick of latency
       const st = listActive(lane).find((s) => s.id === id);
-      if (st) reconcileOne(st, cfg, log, hooks.spawnRunner);
+      if (st) reconcileOne(st, cfg, log, hooks.spawnRunner, wedgeGrace);
     }
   }
 

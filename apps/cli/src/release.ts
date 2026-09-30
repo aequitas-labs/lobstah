@@ -17,6 +17,7 @@ import {
   writeKeptWorktrees,
 } from '@lobstah/core';
 import type { Evidence, KeptWorktree, Lane } from '@lobstah/core';
+import { withRepoLockSync } from '@lobstah/worktree';
 import { applyCull, trapWorktreeIds, worktreeUsage } from './cull.js';
 import type { CullItem } from './cull.js';
 
@@ -158,7 +159,8 @@ function unsafe(dir: string, fetched: Map<string, boolean>): string | undefined 
   if (status === undefined) return 'unpushed work: not a readable git checkout';
   if (status !== '') return 'unpushed work: uncommitted changes';
   const common = git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir') ?? dir;
-  if (!fetched.has(common)) fetched.set(common, git(dir, 'fetch', '--quiet', 'origin') !== undefined);
+  // The fetch takes turns with runner allocations in the same repo (#127).
+  if (!fetched.has(common)) fetched.set(common, withRepoLockSync(dir, () => git(dir, 'fetch', '--quiet', 'origin')) !== undefined);
   if (!fetched.get(common)) return 'unpushed work: fetch failed, remote state unknown';
   const remote = git(dir, 'branch', '-r', '--contains', 'HEAD');
   if (remote === undefined || remote === '') return 'unpushed work: HEAD is not on the remote';
