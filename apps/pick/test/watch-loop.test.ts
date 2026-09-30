@@ -6,6 +6,7 @@ import { addWatch, appendStatus, ensureLayout, laneDirs, listNotices, listWatche
 import type { Descriptor } from '@lobstah/core';
 import { watchLoop } from '../src/loops/watch.js';
 import type { ReportNotification } from '../src/loops/report.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let dir: string;
 beforeEach(() => {
@@ -15,7 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 function eventCheck(events: Array<{ seq: number; summary: string }>, cursor: string): string {

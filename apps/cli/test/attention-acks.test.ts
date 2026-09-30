@@ -23,6 +23,7 @@ import { attentionNow, freshWakeEvents } from '@lobstah/supervisor';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { acksDir, readAck } from '../src/acks.js';
 import { applyCull, planCull } from '../src/cull.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 
@@ -34,7 +35,7 @@ beforeEach(() => {
   fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

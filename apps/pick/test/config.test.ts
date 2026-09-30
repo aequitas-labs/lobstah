@@ -3,13 +3,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { githubRepoFromOrigin, loadPickupConfig, resolveTokenSource } from '../src/config.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let dir: string;
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-token-'));
 });
 afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
   delete process.env.LOBSTAH_TEST_TOKEN;
 });
 

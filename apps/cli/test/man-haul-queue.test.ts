@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enqueue, ensureLayout, helmOf, takeHelm } from '@lobstah/core';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // Exercise the built CLI: the bug is the Stop hook's control-flow gate.
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -19,7 +20,7 @@ beforeEach(() => {
   takeHelm({ sessionId, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

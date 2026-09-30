@@ -20,6 +20,7 @@ import type { Adapter, AdapterRun, AdapterStartOpts } from '@lobstah/adapters';
 import { worktreePath } from '@lobstah/worktree';
 import { main } from '../src/run.js';
 import type { RunnerDeps } from '../src/run.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * A headless worker that reports `paused` parks: the runner ends the
@@ -42,7 +43,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   for (const k of ['LOBSTAH_RESUME', 'LOBSTAH_NUDGE', 'LOBSTAH_WAKE', 'LOBSTAH_ATTEMPTS']) delete process.env[k];
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

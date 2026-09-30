@@ -12,6 +12,7 @@ import { lobItems } from '../src/glass-lobs.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
 import { NOW, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * Reports in the spyglass: the deck's reports block, the report page in the
@@ -53,7 +54,7 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.all(open.map((g) => g.close()));
   open = [];
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 async function page(d: GlassSnapshot, opts: Partial<GlassDomOptions> = {}): Promise<GlassDom> {

@@ -8,6 +8,7 @@ import {
   answeredAt, appendStatus, claimNext, complete, ensureLayout, laneDirs, queuedDescriptor,
   storedDescriptor, takeHelm, unhandled, unhandledTrapMessages,
 } from '@lobstah/core';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -20,7 +21,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

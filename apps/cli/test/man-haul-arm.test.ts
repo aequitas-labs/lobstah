@@ -8,6 +8,7 @@ import { appendStatus, claimNext, complete, enqueue, ensureLayout, loadConfig, s
 import { readCursor } from '../src/reported.js';
 import { landedCatches } from '../src/tend.js';
 import { liveWatcher } from '../src/watchers.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const sessionId = 'armed-helm';
@@ -20,7 +21,7 @@ beforeEach(() => {
   takeHelm({ sessionId, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], {

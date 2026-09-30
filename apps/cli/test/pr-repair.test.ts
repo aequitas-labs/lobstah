@@ -11,6 +11,7 @@ import { tick } from '@lobstah/supervisor';
 import { deliverDispatchOwned } from '../../pick/src/loops/watch.js';
 import { deliverPrRepairs, stampRepairerBeat } from '../src/pr-repair.js';
 import { observeDispatchPrWatches } from '../src/pr-watch.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const OWNER = '11111111-1111-1111-1111-111111111111';
 const SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -62,7 +63,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 describe('PR watch repairs', () => {

@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { RepoConfig } from '@lobstah/core';
 import { allocate, isLockContention } from '../src/index.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let root: string;
 const git = (cwd: string, ...args: string[]) =>
@@ -16,7 +17,7 @@ beforeEach(() => {
   fs.mkdirSync(process.env.LOBSTAH_HOME);
 });
 afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
   delete process.env.LOBSTAH_HOME;
 });
 

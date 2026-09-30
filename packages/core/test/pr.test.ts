@@ -18,6 +18,7 @@ import {
   isFailingConclusion,
 } from '../src/pr.js';
 import type { GhPrView, PrEvidence } from '../src/pr.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const ref = parsePrRef('pr:acme/web#26')!;
 const SHA = 'b44dd399fd98058cc8f124054b0b49aae3655c82';
@@ -349,7 +350,7 @@ ${mode === 'all-forbidden' ? `echo 'GraphQL: Resource not accessible by integrat
   }
   afterEach(() => {
     process.env.PATH = savedPath;
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeTempDir(dir);
   });
 
   it('retries without statusCheckRollup, records the PR state, marks checks unknown, and never reports ready', () => {

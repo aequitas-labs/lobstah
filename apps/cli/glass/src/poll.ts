@@ -14,6 +14,7 @@ export async function poll(): Promise<void> {
   inflight = true;
   try {
     const r = await fetch('/data');
+    if (!r.ok) throw new Error(`/data answered ${r.status}`);
     receive((await r.json()) as GlassSnapshot);
   } catch (e) {
     markStale();
