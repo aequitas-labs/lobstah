@@ -69,7 +69,8 @@ naming a dispatch id. Then:
 - Finish with `lobstah report <id> done "<note>" --pr <url>` (or `failed`).
   `--pr <url>` may be given on any report verb. It records the PR and registers
   its `pr:` watch for your chain; `--no-watch` opts out. Your PR is tracked
-  from its first push: the beat finds it on your branch.
+  from its first push: the beat finds it on your branch once you commit
+  there after taking the work.
 - A `needs-decision` or `blocked` report queues your question to the human.
   The answer arrives in the dispatch's inbox: `lobstah inbox <id>`.
 - Check `lobstah inbox <id>` at natural checkpoints.

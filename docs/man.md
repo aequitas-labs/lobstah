@@ -237,9 +237,12 @@ Which commands register a watch. Only these write points register one:
   daemon reads that PR while the dispatch waits on it.
 - `lobstah soak beat` registers the watch for a trap's PR from its first
   push. At most once a minute, it reads the trap's branch. When the branch
-  is not trunk and has an upstream, it asks `gh pr view <branch>` for the PR.
-  It records a new PR in the dispatch's evidence, where `lobstah catch` and
-  `lobstah status <id>` show it.
+  is not trunk, has an upstream, and its head commit is newer than the
+  dispatch's claim, it asks `gh pr view <branch>` for the PR. A trap that
+  takes new work on the branch of its last dispatch does not give that PR
+  to the new dispatch until the new dispatch commits. It records a new PR in
+  the dispatch's evidence, where `lobstah catch` and `lobstah status <id>`
+  show it.
 - `lobstah watch add <key>` registers the watch you name.
 - `lobstah watch backfill --apply` registers watches for PRs in old dispatch
   history, and fetches the title of each PR record that has none (one
