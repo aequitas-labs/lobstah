@@ -119,8 +119,13 @@ import {
   dispatchReportKey,
   readReport,
   releaseHeldQuestions,
+  askDecision,
+  withdrawDecision,
+  takeDecisionAnswers,
+  DecisionError,
+  decisionDir,
 } from '@lobstah/core';
-import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, WatchAttention } from '@lobstah/core';
+import type { DecisionAnsweredEvent, DecisionMeta, Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { runPickup } from '@lobstah/pick';
@@ -135,6 +140,8 @@ import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
+import { decisionEventFields, decisionLine } from './decisions.js';
+import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
 import { focusTrap } from './focus.js';
@@ -298,6 +305,13 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man file <file.md> [--attach <file> ...] [--title <text>]
                                   file the helm's own report under its
                                   grounds; the glass renders it on the deck.
+  man ask [<dispatch-id>] --title <q> [--detail <f.md>] [--option <label> ...] [--attach <file> ...]
+                                  put a decision to the human: a card in the
+                                  glass until answered or withdrawn
+                                  (--withdraw <key>). The answer wakes man
+                                  wait as a decision-answered event.
+  man answer <key> [--option <label>] [--text <text>] [--attach <file> ...]
+                                  answer a decision from the terminal.
   man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
                                   take the helm: one orchestrator per grounds
                                   (a named repo set from [grounds.*], or the
@@ -520,6 +534,24 @@ function emitReplies(replies: ReplyEvent[], sessionId?: string): void {
   );
 }
 
+function emitDecisions(events: DecisionAnsweredEvent[], sessionId?: string): void {
+  for (const e of events) console.log(toonKV(decisionEventFields(e)));
+  console.log(
+    'next: the human answered a decision — act on it (for a dispatch, usually `lobstah send <dispatch> "<instruction>"`), ' +
+      `then re-arm a background \`lobstah man wait${sessionId ? ` --session ${sessionId}` : ''}\`.`,
+  );
+}
+
+/**
+ * Which answered decisions a helm's wait or park takes: its own grounds'
+ * dispatches, and a decision about no dispatch that its grounds asked (or
+ * that no grounds asked).
+ */
+function decisionMatch(grounds: string | undefined, repos: Set<string> | undefined): ((d: DecisionMeta) => boolean) | undefined {
+  if (repos === undefined) return undefined;
+  return (d) => (d.repo !== undefined ? repos.has(d.repo) : d.grounds === undefined || d.grounds === grounds);
+}
+
 /** A haul line for a send's answer. */
 function replyLine(r: ReplyEvent): string {
   return `- reply ${r.id} (${r.entry.verb})${r.entry.note ? ` — ${r.entry.note}` : ''} · sent: ${r.sent}`;
@@ -529,6 +561,9 @@ function replyLine(r: ReplyEvent): string {
 function sentLine(e: SentExpectation, now = Date.now()): string {
   return `- sent · ${e.dispatchId} · ${e.line} · ${ageLabel(now - (Date.parse(e.sentAt) || now))}`;
 }
+
+const DECISION_HINT =
+  'A decision-answered line is the human\'s answer to `lobstah man ask`. Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.';
 
 const SENT_HINT = "A reply line is the worker's answer to your send. A sent line still waits on one; its next note wakes man wait.";
 
@@ -1328,6 +1363,92 @@ async function mainCli(): Promise<void> {
       console.log(toonHelp([`lobstah attention ack ${filed.key}   (when the human has read it)`]));
       break;
     }
+    case 'man:ask': {
+      const caller = callerSession(opt('--session'));
+      let groundsName = opt('--grounds');
+      // Framing a question for the human is steering: the claimed helm's alone.
+      gateHelm(caller, groundsName);
+      const withdraw = opt('--withdraw');
+      if (withdraw !== undefined) {
+        if (pos.length > 0 || opt('--title') !== undefined) throw new UsageError(`--withdraw takes only a decision key\n\n${usageFor('man:ask')!}`);
+        try {
+          const gone = withdrawDecision(withdraw);
+          console.log(toonKV({ key: gone.key, withdrawn: true, title: gone.title }));
+        } catch (err) {
+          if (err instanceof DecisionError) throw new UsageError(err.message);
+          throw err;
+        }
+        break;
+      }
+      const title = opt('--title');
+      if (title === undefined) throw new UsageError(`man ask requires --title "<question>"\n\n${usageFor('man:ask')!}`);
+      if (pos.length > 1) throw new UsageError(`man ask takes at most one dispatch id\n\n${usageFor('man:ask')!}`);
+      const dispatch = pos[0];
+      const lane = dispatch !== undefined ? findLane(dispatch) : undefined;
+      const repo = dispatch !== undefined ? repoOf(dispatch, lane!) : undefined;
+      if (groundsName === undefined && caller?.id !== undefined) groundsName = helmOf(caller.id)?.grounds;
+      const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName).name : undefined;
+      let asked: ReturnType<typeof askDecision>;
+      try {
+        asked = askDecision({
+          title,
+          detailFile: opt('--detail'),
+          options: values('--option'),
+          attach: values('--attach'),
+          ...(dispatch !== undefined ? { dispatch, lane } : {}),
+          ...(repo ? { repo } : {}),
+          ...(grounds ? { grounds } : {}),
+          askedBy: 'helm',
+          maxBytes: loadConfig().limits.attachmentMaxBytes,
+        });
+      } catch (err) {
+        if (err instanceof DecisionError) throw new UsageError(err.message);
+        throw err;
+      }
+      const { meta, replaced } = asked;
+      console.log(
+        toonKV({
+          key: meta.key,
+          title: meta.title,
+          ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
+          options: meta.options.join(' | '),
+          attachments: meta.attachments.length,
+          stored: decisionDir(meta.key)!,
+          ...(replaced.length ? { replaced: replaced.join(', ') } : {}),
+        }),
+      );
+      console.log(
+        toonHelp([
+          'the glass shows it as a card on the deck; the answer wakes man wait as a decision-answered event',
+          `lobstah man ask --withdraw ${meta.key}   (when it no longer needs the human)`,
+        ]),
+      );
+      break;
+    }
+    case 'man:answer': {
+      const key = pos[0];
+      if (!key || pos.length > 1) throw new UsageError(`man answer requires one decision key\n\n${usageFor('man:answer')!}`);
+      let result: ReturnType<typeof answerKey>;
+      try {
+        result = answerKey(key, { option: opt('--option'), text: opt('--text'), attach: values('--attach'), by: 'terminal' });
+      } catch (err) {
+        if (err instanceof DecisionError) throw new UsageError(err.message);
+        throw err;
+      }
+      const { decision, answer } = result;
+      console.log(
+        toonKV({
+          key: decision.key,
+          answered: true,
+          ...(decision.dispatch ? { dispatch: decision.dispatch } : {}),
+          option: answer.option ?? '',
+          text: answer.text ?? '',
+          attachments: answer.attachments.map((a) => a.path).join(', '),
+        }),
+      );
+      console.log(toonHelp(["the helm's man wait receives it as a decision-answered event"]));
+      break;
+    }
     case 'attention': {
       const sub = pos[0];
       const report = buildTendReport();
@@ -1548,6 +1669,7 @@ async function mainCli(): Promise<void> {
               }
             : undefined;
         const noticeFilter = groundsRepos !== undefined ? (n: Notice) => n.repo === undefined || groundsRepos.has(n.repo) : undefined;
+        const matchDecision = decisionMatch(groundsScope?.name, groundsRepos);
         // A helm's cursor starts at its sign-on: older notices and watch
         // events are consumed without waking. Standing questions and
         // standing conditions still wake (attentionNow, noticeWakes).
@@ -1561,16 +1683,26 @@ async function mainCli(): Promise<void> {
         const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
         // A send's answer: a working or paused note delivered once.
         const standingReplies = takeReplies(consume, matchGrounds);
-        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0) {
+        // A human's answer to a decision: delivered once.
+        const standingDecisions = takeDecisionAnswers(consume, matchDecision);
+        if (
+          standing.length > 0 ||
+          standingWatches.length > 0 ||
+          standingNotices.length > 0 ||
+          standingReplies.length > 0 ||
+          standingDecisions.length > 0
+        ) {
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
           if (standingNotices.length > 0) emitNotices(standingNotices, sid);
           if (standingReplies.length > 0) emitReplies(standingReplies, sid);
+          if (standingDecisions.length > 0) emitDecisions(standingDecisions, sid);
           delivered(
             ...standing.map((e) => e.entry.at),
             ...standingWatches.flatMap((a) => a.events.map((e) => e.at)),
             ...standingNotices.map((n) => n.at),
             ...standingReplies.map((r) => r.entry.at),
+            ...standingDecisions.map((d) => d.answer.answeredAt),
           );
           break;
         }
@@ -1597,10 +1729,12 @@ async function mainCli(): Promise<void> {
           // Taken after the wake scan: a send answered by a waking verb is
           // cleared here, and that verb is the wake.
           const replies = takeReplies(true, matchGrounds);
-          if (fresh.length > 0 || replies.length > 0) {
+          const answered = takeDecisionAnswers(true, matchDecision);
+          if (fresh.length > 0 || replies.length > 0 || answered.length > 0) {
             if (fresh.length > 0) emit(fresh);
             if (replies.length > 0) emitReplies(replies, sid);
-            delivered(...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at));
+            if (answered.length > 0) emitDecisions(answered, sid);
+            delivered(...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at), ...answered.map((d) => d.answer.answeredAt));
             return;
           }
           runDueManWatches(); // no pick running? this loop is the poller
@@ -1750,12 +1884,17 @@ async function mainCli(): Promise<void> {
             helm ? (n: Notice) => n.repo === undefined || helm.repos.includes(n.repo) : undefined,
             noticeWakes(helm),
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
-          if (idleNotices.length > 0) {
+          // An answered decision about no dispatch still wakes an idle helm.
+          const idleDecisions = takeDecisionAnswers(true, helm ? decisionMatch(helm.grounds, new Set(helm.repos)) : undefined);
+          if (idleNotices.length > 0 || idleDecisions.length > 0) {
             emit(
               [
-                'Fleet notices need a decision:',
+                ...(idleNotices.length > 0 ? ['Fleet notices need a decision:'] : []),
                 ...idleNotices.map((n) => `- ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
-                'Each notice names its own remedy. The Stop hook checks again at turn end.',
+                ...idleDecisions.map(decisionLine),
+                ...(idleNotices.length > 0 ? ['Each notice names its own remedy.'] : []),
+                ...(idleDecisions.length > 0 ? [DECISION_HINT] : []),
+                'The Stop hook checks again at turn end.',
               ].join('\n'),
             );
             break;
@@ -1775,6 +1914,7 @@ async function mainCli(): Promise<void> {
               }
             : undefined;
         const helmNoticeFilter = helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
+        const helmDecisions = decisionMatch(helm?.grounds, helmRepos);
         // The helm's cursor starts at its sign-on (see `man wait`).
         const helmWakes = noticeWakes(helm);
         const helmFloorMs = wakeFloorMs(helm);
@@ -1785,9 +1925,10 @@ async function mainCli(): Promise<void> {
           const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
           const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
           const replies = takeReplies(false, matchHelm);
+          const answered = takeDecisionAnswers(false, helmDecisions);
           // Listing an unanswered send is its reminder: paced like a question.
           const unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
-          if (evs.length || watched.length || notices.length || replies.length || unanswered.length) {
+          if (evs.length || watched.length || notices.length || replies.length || unanswered.length || answered.length) {
             emit(
               [
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
@@ -1797,6 +1938,8 @@ async function mainCli(): Promise<void> {
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
                 ...(replies.length || unanswered.length ? [SENT_HINT] : []),
+                ...answered.map(decisionLine),
+                ...(answered.length ? [DECISION_HINT] : []),
                 'Handle the standing item. The Stop hook will enforce a watcher at the next turn end.',
               ].join('\n'),
             );
@@ -1821,8 +1964,14 @@ async function mainCli(): Promise<void> {
         let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
         let replies = takeReplies(true, matchHelm);
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
+        let answered = takeDecisionAnswers(true, helmDecisions);
         const quiet = () =>
-          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0;
+          evs.length === 0 &&
+          watched.length === 0 &&
+          fleetNotices.length === 0 &&
+          replies.length === 0 &&
+          unanswered.length === 0 &&
+          answered.length === 0;
         if (quiet()) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
@@ -1835,6 +1984,7 @@ async function mainCli(): Promise<void> {
             fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
             replies = takeReplies(true, matchHelm);
             unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
+            answered = takeDecisionAnswers(true, helmDecisions);
             if (!quiet()) break;
           }
         }
@@ -1850,6 +2000,8 @@ async function mainCli(): Promise<void> {
           ...replies.map(replyLine),
           ...unanswered.map(sentLine),
           ...(replies.length || unanswered.length ? [SENT_HINT] : []),
+          ...answered.map(decisionLine),
+          ...(answered.length ? [DECISION_HINT] : []),
         ];
         emit(
           [

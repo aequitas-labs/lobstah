@@ -63,6 +63,7 @@ import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { reportAttention } from './report-file.js';
+import { decisionAttention, hideFramedQuestions } from './decisions.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
@@ -835,11 +836,13 @@ export function buildTendReport(now = Date.now()): TendReport {
     [],
     records,
   ).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now));
+  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now));
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
-  const shown = attention.filter((a) => a.kind === 'watch' || enabled.has(a.kind));
+  const walking = attention.filter((a) => a.kind === 'watch' || enabled.has(a.kind));
+  // A question the helm framed as a decision shows as that decision.
+  const shown = enabled.has('decision') ? hideFramedQuestions(walking) : walking;
   attention.length = 0;
   // Acks are display-only: they annotate, never remove. The verdict below
   // and every wake path ignore them.
@@ -857,7 +860,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     ? 'daemon-down'
     : stalled
       ? 'stalled'
-      : attention.some((a) => a.kind === 'question' || a.kind === 'watch')
+      : attention.some((a) => a.kind === 'question' || a.kind === 'decision' || a.kind === 'watch')
         ? 'needs-attention'
         : inFlight.length + queued.length > 0
           ? 'working'
