@@ -129,9 +129,9 @@ function dispatchModal(x: GlassDispatch, report: GlassReport | undefined, text: 
     x.claimedBy && x.claimedBy.startsWith('wt:')
       ? [
           html`<div class="sec">worked by trap</div>`,
-          html`<div>claimed by ${TrapName(x.claimedBy.slice('wt:'.length))}</div>`,
-          cmdRow(`lobstah send ${namedText(x.claimedBy)} "…"`),
-          html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead.</div>`,
+          html`<div class="claimedby">claimed by ${TrapName(x.claimedBy.slice('wt:'.length))}</div>`,
+          cmdRow(namedText(x.claimedBy)),
+          html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead: lobstah send ${namedText(x.claimedBy)} "…"</div>`,
         ]
       : [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
   return [

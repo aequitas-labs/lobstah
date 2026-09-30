@@ -776,6 +776,15 @@ same live trap in `dispatch --for`, `send`, and `stow --wt`. Unknown names
 list known names and never turn addressed bait into headless work. The id
 remains the key in dispatch and claim records.
 
+A dispatch shows its trap by name wherever it names the trap that claimed
+it, ran it, or is addressed to it, including notes such as
+`claimed by crisp-heron`. The name comes from the live registration, else
+from the name registry, so a signed-off trap keeps its name. A trap with no
+known name shows as `wt:<id>`. `lobstah status <id>` and `lobstah catch <id>`
+print `trap: crisp-heron (wt:68c5da5f)` and write notes the same way.
+`man tend`'s tables print the name alone. In the glass, the name carries
+`wt:<id>` as its hover text, and a click opens that trap's modal.
+
 The session id (from the plugin's session-start brief) lives inside the
 registration as the liveness principal. The harness (claude or codex) is
 inferred — from `CLAUDE*` / `CODEX*` in the environment, and when both are
