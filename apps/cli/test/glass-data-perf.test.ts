@@ -47,7 +47,7 @@ function doneDispatch(id: string, worktree: string): void {
 describe('the snapshot asks git once per worktree', () => {
   // A `#!/bin/sh` git on PATH that logs each call: POSIX only.
   it.skipIf(process.platform === 'win32')('two snapshots of 20 worktrees spawn git at most 3 times per worktree in all', () => {
-    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.web]\npath = "${home}"\ntrunk = "main"\n`);
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.web]\npath = '${home}'\ntrunk = "main"\n`);
     const bin = path.join(home, 'bin');
     fs.mkdirSync(bin);
     const log = path.join(home, 'git.log');
@@ -77,7 +77,7 @@ describe('the snapshot asks git once per worktree', () => {
   });
 
   it('a new commit in the worktree shows at once', () => {
-    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.web]\npath = "${home}"\ntrunk = "main"\n`);
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.web]\npath = '${home}'\ntrunk = "main"\n`);
     const wt = path.join(home, 'wt');
     fs.mkdirSync(wt);
     git(wt, 'init', '-q', '-b', 'main');
