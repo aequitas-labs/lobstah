@@ -151,7 +151,9 @@ export function Deck({ inp }: { inp: DeckInputs }) {
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
     title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
-    badge: { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
+    badge: t.starting
+      ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
+      : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
     meta: [t.repo || '', ' · ', trapNow(t)],
     metaText: `${t.repo || ''} · ${trapNowText(t)}`,
     action: windowAction(t),

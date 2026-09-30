@@ -209,7 +209,9 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   // changes. Signed-off traps follow in most-recently-signed-off order.
   const signedOffAt = (t: GlassTrap) =>
     Math.max(0, ...(t.notices || []).filter((n) => n.kind === 'trap-stowed' || n.kind === 'trap-ghosted').map((n) => Date.parse(n.at) || 0));
+  const seated = (t: GlassTrap) => t.live || !!t.starting;
   const orderedTraps = [...(d.traps || [])].sort((a, b) =>
+    Number(seated(b)) - Number(seated(a)) ||
     Number(b.live) - Number(a.live) ||
     (a.live ? (Date.parse(a.signedOnAt || '') || 0) - (Date.parse(b.signedOnAt || '') || 0)
       : signedOffAt(b) - signedOffAt(a)) ||
@@ -217,7 +219,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   const deckTraps = orderedTraps
     .filter(
       (t) =>
-        (t.live || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000))) &&
+        (seated(t) || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000))) &&
         hasQuery(t.name, t.trapId, t.repo, t.worktree),
     );
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
