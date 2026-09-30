@@ -1,5 +1,6 @@
 ---
 description: Volunteer this session as a trap — take work assigned by the helm, in a worktree (soak creates one from a primary checkout)
+argument-hint: [--ticket <ticket>]
 ---
 
 Volunteer this session as a worker (a trap).
@@ -7,6 +8,9 @@ Volunteer this session as a worker (a trap).
 1. Run `lobstah soak`. No session flag is needed: the CLI reads
    `$CLAUDE_CODE_SESSION_ID`. If it refuses for a missing session, re-run
    with `--session $CLAUDE_CODE_SESSION_ID`.
+   If `$ARGUMENTS` carries `--ticket <t>`, pass it on:
+   `lobstah soak --ticket <t>`. The session then signs on as the trap
+   reserved with that ticket.
    If this session has a link, pass `--link <url>`. Copy a Claude desktop
    session link from that session in the app; its app id is not the CLI
    session id. In the VS Code extension, use

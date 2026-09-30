@@ -17,6 +17,7 @@ lobstah soak --repo <key>     # outside any repo: create a worktree for that rep
 lobstah soak --link <url>     # record this session's link for the glass's ↗ open button
 lobstah soak --one            # sign off after the first finished catch
 lobstah soak --wait           # hookless: listen now; exit 3 = quiet, run again
+lobstah soak --ticket <t>     # sign on as a trap reserved with `lobstah trap reserve`
 lobstah stow                  # sign off; removes the worktree soak created
 lobstah stow --keep           # sign off; keep the worktree
 ```
@@ -28,6 +29,13 @@ lobstah stow --keep           # sign off; keep the worktree
 - When the output has `instruction: cd <path> ...`, run `cd <path>` before
   you take work. Work in that directory from now on: every task runs there.
 - Running `soak` again re-uses your trap. It never creates a second worktree.
+- When your opening prompt carries `--ticket <t>`, pass it to `soak`. The
+  ticket names a trap reserved before this session started: soak signs on
+  under that name and id, and any work already addressed to it arrives at
+  your first park. `LOBSTAH_TRAP_TICKET` in the environment works the same
+  way.
+- Soak names this session's Terminal.app or iTerm2 tab after the trap; stow
+  clears the name.
 - If the session has a link, pass `--link <url>` on sign-on or re-soak. Copy
   a Claude desktop session link from the session in the app; its app id is
   not the CLI session id. In the VS Code extension, form

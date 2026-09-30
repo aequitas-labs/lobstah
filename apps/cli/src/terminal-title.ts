@@ -76,12 +76,13 @@ export function titleCommand(
 
 export type TitleResult = { named: true; target: TitleTarget } | { named: false; reason: string };
 
-/** Name the trap's terminal tab, or clear the name with `''`. Never throws. */
+/** Name the trap's terminal tab, or clear the name with `''`. `LOBSTAH_TERMINAL_TITLE=0` turns it off. Never throws. */
 export async function setTerminalTitle(
   win: WindowRef | undefined,
   title: string,
-  options: { platform?: NodeJS.Platform; run?: ScriptRunner } = {},
+  options: { platform?: NodeJS.Platform; run?: ScriptRunner; env?: NodeJS.ProcessEnv } = {},
 ): Promise<TitleResult> {
+  if ((options.env ?? process.env).LOBSTAH_TERMINAL_TITLE === '0') return { named: false, reason: 'LOBSTAH_TERMINAL_TITLE=0' };
   const cmd = titleCommand(win, title, options.platform);
   if (!cmd) return { named: false, reason: 'not a Terminal.app or iTerm2 tab with a recorded tty' };
   try {

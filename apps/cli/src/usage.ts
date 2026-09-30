@@ -220,20 +220,15 @@ installs the shipped PR check; with --for, a check that fails after the first
 \`report --pr\`, a trap's beat, and \`watch backfill --apply\` register; reads never do.
 \`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
   soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
-Primary checkout or --repo creates worktrees/soak-<trap> from trunk
-(branch lobstah/soak-<trap>, with setup): cd there. Sessions reuse traps.
---one stows after a catch; --name sets its name; --link sets a validated URL.
---wait listens; quiet exit 3 means re-run. --ticket (or LOBSTAH_TRAP_TICKET)
-redeems a \`trap reserve\` ticket: the session signs on as the reserved trap.
-Sign-on names a Terminal.app or iTerm2 tab after the trap; stow clears it.
-\`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
-  trap: `\`trap reserve --repo <key>\` reserves a trap before its session starts: it
-picks the two-word name and wt: id, prints a one-time ticket and the command
-that starts the session, and shows the trap as starting. dispatch --for works on
-it at once. A session redeems the ticket with soak --ticket <t> (or
-LOBSTAH_TRAP_TICKET) within --deadline seconds (default 180); past that the
-helm gets a trap-start-failed notice and addressed work stays queued. The
-ticket still redeems late. stow --wt <name> withdraws the reservation.`,
+Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
+Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
+--wait listens (quiet exit 3: re-run). --ticket or LOBSTAH_TRAP_TICKET signs
+on as a reserved trap. Names the Terminal.app/iTerm2 tab. \`soak beat\`: hook.`,
+  trap: `\`trap reserve\` reserves a trap before its session starts: name, wt: id, a
+one-time ticket, and the start command. It shows as starting; dispatch --for
+works at once. soak --ticket <t> (or LOBSTAH_TRAP_TICKET) redeems it. Past
+--deadline (default 180s) a trap-start-failed notice posts and addressed work
+stays queued; a late ticket still redeems. stow --wt <name> withdraws it.`,
   stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
 requeues, unread messages bounce to the helm. Removes the worktree soak
 created unless --keep or it holds uncommitted changes, untracked files, or

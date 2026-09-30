@@ -70,3 +70,42 @@ describe('glass: a paused dispatch says what it waits on', () => {
     expect(text(g.$$('#dispatches .waiting')[0])).toBe('paused: waiting on external · 60s');
   });
 });
+
+describe('glass: a reserved trap shows as starting, then as failed', () => {
+  const reserved = (failed: boolean): GlassSnapshot => {
+    const d = acceptanceFleet();
+    d.traps.push({
+      trapId: 'abcd1234',
+      name: 'amber-gull',
+      label: 'amber-gull (wt:abcd1234)',
+      repo: 'web',
+      live: false,
+      starting: {
+        reservedAt: ago(60_000),
+        deadline: ago(-120_000),
+        ...(failed ? { failedAt: ago(1_000), reason: 'no session signed on by 12:03' } : {}),
+      },
+      messages: [],
+      notices: [],
+      catches: [],
+    });
+    return d;
+  };
+  for (const view of ['cards', 'table'] as const) {
+    it(`${view}: starting, with no window action`, async () => {
+      const g = await page(reserved(false), { hash: '#traps', prefs: { view } });
+      const el = view === 'cards' ? g.$$('#traps .card').find((c) => text(c).includes('amber-gull')) : g.$$('#traps tr').find((c) => text(c).includes('amber-gull'));
+      expect(text(el)).toContain('starting · waiting for its session to sign on');
+      expect(text(el)).toContain('Starting — no window yet');
+      expect(el?.className).not.toContain('dim');
+    });
+  }
+  it('failed: says why, on the traps tab and the deck', async () => {
+    const g = await page(reserved(true), { hash: '#traps', prefs: { view: 'cards' } });
+    const card = g.$$('#traps .card').find((c) => text(c).includes('amber-gull'));
+    expect(text(card)).toContain('start failed · no session signed on by 12:03');
+    expect(text(card?.querySelector('.badge'))).toBe('start failed');
+    await g.go('#deck');
+    expect(g.$$('#deck *').some((e) => text(e).includes('amber-gull'))).toBe(true);
+  });
+});

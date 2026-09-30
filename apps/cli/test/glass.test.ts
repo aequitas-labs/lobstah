@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { appendStatus, claimNext, enqueue, ensureLayout, laneDirs, mergeEvidence, postNotice, takeHelm, writeActivity } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, expireReservations, laneDirs, mergeEvidence, postNotice, reserveTrap, takeHelm, writeActivity } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 
@@ -69,6 +69,21 @@ describe('glass snapshot', () => {
     expect(t?.live).toBe(false);
     expect(t?.catches.map((c) => c.id)).toContain(UUID);
     expect(t?.notices.map((n) => n.kind)).toContain('trap-stowed');
+  });
+
+  it('a reserved trap shows as starting, once, with its addressed work; past its deadline as failed', () => {
+    const { reservation } = reserveTrap({ repo: 'web', name: 'amber-gull', harness: 'codex', startSecs: 60 });
+    enqueue({ id: UUID, repo: 'web', brief: 'addressed work', for: `wt:${reservation.trapId}` }, 'work');
+    const starting = buildGlassSnapshot().traps.filter((x) => x.trapId === reservation.trapId);
+    expect(starting).toHaveLength(1);
+    expect(starting[0]).toMatchObject({ live: false, name: 'amber-gull', repo: 'web', harness: 'codex', starting: { deadline: reservation.deadline } });
+    expect(starting[0]!.starting!.failedAt).toBeUndefined();
+    expect(starting[0]!.catches.map((c) => c.id)).toEqual([UUID]);
+    expireReservations(Date.now() + 61_000);
+    const failed = buildGlassSnapshot().traps.find((x) => x.trapId === reservation.trapId);
+    expect(failed?.starting?.failedAt).toBeDefined();
+    expect(failed?.starting?.reason).toContain('no session signed on');
+    expect(failed?.notices.map((n) => n.kind)).toEqual(['trap-start-failed', 'trap-starting']);
   });
 
   it('shows working, idle, and parked trap activity from one snapshot', () => {

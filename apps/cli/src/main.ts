@@ -344,7 +344,7 @@ workers (dispatched agents; injected into every brief):
                                   dispatch's report, images --attach'ed.
 
 soaking (interactive sessions volunteering as workers):
-  soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
+  soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--ticket <t>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
                                   volunteer this session as a worker.
                                   Identity is the worktree: sign-on anchors a
                                   trap id and two-word name (.lobstah-trap).
@@ -358,6 +358,15 @@ soaking (interactive sessions volunteering as workers):
                                   sessions without Stop hooks): work prints
                                   plain, a quiet timeout exits 3 — re-run it.
                                   prints this session's trap title.
+                                  --ticket (or LOBSTAH_TRAP_TICKET) signs on
+                                  as a reserved trap. Sign-on names a
+                                  Terminal.app or iTerm2 tab after the trap.
+  trap reserve --repo <key> [--harness claude|codex] [--name <word-word>] [--deadline <secs>]
+                                  reserve a trap before its session starts:
+                                  prints its name, id, a one-time ticket, and
+                                  the start command. dispatch --for works on
+                                  it at once; unredeemed past the deadline
+                                  (default 180s) it fails with a notice.
   stow [--wt <trap>|--session <id>] [--keep] [--quiet]
                                   sign the trap off; an unfinished
                                   assignment requeues, unread messages
