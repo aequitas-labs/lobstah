@@ -56,6 +56,10 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * The snapshot names each trap's catches by dispatch id; the old page read
  * full dispatch objects there, so the old page is served the ids expanded
  * back into those objects (legacyWire). Both pages render the same catches.
+ * /data sends dispatch summaries, and a dispatch modal fetches the rest
+ * from /data/dispatch/<id>; the old page read whole dispatches from /data,
+ * so it is served the whole snapshot (the harness's `whole` option). The
+ * built page's modal renders the same DOM once its detail lands.
  */
 /** Take the Reports tab out of a live page, so the page compares with the old one. */
 function withoutReportsTab(g: GlassDom): void {
@@ -276,7 +280,7 @@ function steps(d: GlassSnapshot): Step[] {
 }
 
 async function trace(page: string, d: GlassSnapshot, search = '') {
-  const g = await loadGlass(page, d, { now: NOW, search });
+  const g = await loadGlass(page, d, { now: NOW, search, whole: page === LEGACY });
   try {
     const views: Array<[string, Record<string, string>]> = [['load', capture(g)]];
     for (const s of steps(d)) {
@@ -308,7 +312,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
   it('every visible element computes the same style under glass.css as under the legacy stylesheet', async () => {
     const computed = async (page: string) => {
       const d = FIXTURES['every-attention']!();
-      const g = await loadGlass(page, page === LEGACY ? legacyWire(d) : legacyShape(d), { now: NOW });
+      const g = await loadGlass(page, page === LEGACY ? legacyWire(d) : legacyShape(d), { now: NOW, whole: page === LEGACY });
       const out: string[] = [];
       const snap = (label: string) => {
         withoutReportsTab(g);

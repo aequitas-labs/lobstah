@@ -56,7 +56,7 @@ import {
   ANSWER_FILES_MAX,
   ANSWER_TEXT_MAX,
 } from '@lobstah/core';
-import type { Attachment, Descriptor, GlassDispatch, GlassMessage, GlassReport, GlassSnapshot, GlassTrap, Lane } from '@lobstah/core';
+import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { reportAck } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { answerKey } from './decision-answer.js';
@@ -69,6 +69,8 @@ import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { startSnapshotThread } from './glass-snapshot-thread.js';
+import { briefTitle, olderPage, pollBody } from './glass-poll.js';
+import type { PollBody } from './glass-poll.js';
 import { focusRegistration, liveTrap } from './focus.js';
 import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
@@ -201,8 +203,16 @@ function wedgeSecs(): number {
   }
 }
 
-function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
-  const rows: Array<{ lane: Lane; bucket: 'queued' | 'active' | 'done'; d: Descriptor; sort: number }> = [];
+/** A dispatch on disk: its lane, where it sits, its descriptor, and its sort time. */
+interface DispatchOnDisk {
+  lane: Lane;
+  bucket: 'queued' | 'active' | 'done';
+  d: Descriptor;
+  sort: number;
+}
+
+function dispatchesOnDisk(): DispatchOnDisk[] {
+  const rows: DispatchOnDisk[] = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
     const dirs = laneDirs(lane);
     for (const id of pendingIds(lane)) {
@@ -222,61 +232,92 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
       if (d) rows.push({ lane, bucket: 'done', d, sort: at });
     }
   }
+  return rows;
+}
+
+/** One dispatch on disk, by id, in either lane. */
+function dispatchOnDisk(id: string): DispatchOnDisk | undefined {
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    const dirs = laneDirs(lane);
+    const queued = path.join(dirs.queue, `${id}.json`);
+    const q = readJson<Descriptor>(queued);
+    if (q) return { lane, bucket: 'queued', d: q, sort: mtime(queued) };
+    const a = readJson<Descriptor>(path.join(dirs.active, id, 'descriptor.json'));
+    if (a) return { lane, bucket: 'active', d: a, sort: mtime(path.join(dirs.active, id)) };
+    const d = readJson<Descriptor>(path.join(dirs.done, id, 'descriptor.json'));
+    if (d) return { lane, bucket: 'done', d, sort: mtime(path.join(dirs.done, id)) };
+  }
+  return undefined;
+}
+
+function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, staleSecs: number): Omit<GlassDispatch, 'prBadge' | 'prGate'> {
+  const id = r.d.id;
+  const log = readStatusLog(id, r.lane);
+  const last = log.at(-1);
+  const claim = r.bucket === 'active' ? readSessionClaim(id, r.lane) : undefined;
+  const evidence = readEvidence(id, r.lane);
+  const inboxDir = path.join(laneDirs(r.lane).inbox, id);
+  return {
+    id,
+    lane: r.lane,
+    bucket: r.bucket,
+    repo: r.d.repo,
+    for: r.d.for,
+    followUp: r.d.followUp,
+    title: briefTitle(r.d.brief),
+    brief: r.d.brief,
+    attachments: r.d.attachments ?? [],
+    messageAttachments: messageAttachments(inboxDir),
+    // A queued descriptor with no log is waiting, not unknown; its time
+    // is the queue time.
+    // An active dispatch a trap claimed, with no log, is working since
+    // the claim.
+    verb:
+      r.bucket === 'queued' && log.length === 0
+        ? ('queued' as const)
+        : (last?.verb ?? (claim ? ('working' as const) : ('unknown' as const))),
+    ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
+    // Held for free space: the note carries the reason.
+    note: (r.bucket === 'queued' && r.d.systemRepair?.trapWaitUntil && r.d.for
+      ? `repair chore waits for ${r.d.for} until ${r.d.systemRepair.trapWaitUntil}` : undefined) ??
+      (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
+    verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
+    activity: r.bucket === 'active' ? activityView(readActivity(id, r.lane), staleSecs) : undefined,
+    waiting: r.bucket === 'active' ? waitingView(last) : undefined,
+    claimedBy: claim?.by,
+    log,
+    inbox: listDir(inboxDir)
+      .filter((f) => f.endsWith('.msg'))
+      .sort()
+      .map((f) => fs.readFileSync(path.join(inboxDir, f), 'utf8').trim()),
+    ...awaitingOf(id),
+    evidence: Object.keys(evidence).length > 0 ? evidence : undefined,
+    ...(r.bucket === 'queued' ? {} : worktreeView(id, r.lane)),
+    ...(r.bucket === 'queued' ? {} : livenessView(id, r.lane)),
+    // A trap's catch: the trap's own checkout. A headless dispatch: the
+    // worktree it ran in, the origin's for a follow-up that reused it.
+    transcript: claim
+      ? transcriptPath(claim.harness, claim.worktree, claim.sessionId)
+      : transcriptPath(evidence.harness, evidence.sessionId ? dispatchWorktree(id, r.lane).path : undefined, evidence.sessionId),
+    sort: r.sort,
+  };
+}
+
+function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
   const hold = readHold();
   const staleSecs = wedgeSecs();
-  return rows
-    .map((r) => {
-      const id = r.d.id;
-      const log = readStatusLog(id, r.lane);
-      const last = log.at(-1);
-      const claim = r.bucket === 'active' ? readSessionClaim(id, r.lane) : undefined;
-      const evidence = readEvidence(id, r.lane);
-      const inboxDir = path.join(laneDirs(r.lane).inbox, id);
-      return {
-        id,
-        lane: r.lane,
-        bucket: r.bucket,
-        repo: r.d.repo,
-        for: r.d.for,
-        followUp: r.d.followUp,
-        brief: r.d.brief,
-        attachments: r.d.attachments ?? [],
-        messageAttachments: messageAttachments(inboxDir),
-        // A queued descriptor with no log is waiting, not unknown; its time
-        // is the queue time.
-        // An active dispatch a trap claimed, with no log, is working since
-        // the claim.
-        verb:
-          r.bucket === 'queued' && log.length === 0
-            ? ('queued' as const)
-            : (last?.verb ?? (claim ? ('working' as const) : ('unknown' as const))),
-        ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
-        // Held for free space: the note carries the reason.
-        note: (r.bucket === 'queued' && r.d.systemRepair?.trapWaitUntil && r.d.for
-          ? `repair chore waits for ${r.d.for} until ${r.d.systemRepair.trapWaitUntil}` : undefined) ??
-          (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
-        verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
-        activity: r.bucket === 'active' ? activityView(readActivity(id, r.lane), staleSecs) : undefined,
-        waiting: r.bucket === 'active' ? waitingView(last) : undefined,
-        claimedBy: claim?.by,
-        log,
-        inbox: listDir(inboxDir)
-          .filter((f) => f.endsWith('.msg'))
-          .sort()
-          .map((f) => fs.readFileSync(path.join(inboxDir, f), 'utf8').trim()),
-        ...awaitingOf(id),
-        evidence: Object.keys(evidence).length > 0 ? evidence : undefined,
-        ...(r.bucket === 'queued' ? {} : worktreeView(id, r.lane)),
-        ...(r.bucket === 'queued' ? {} : livenessView(id, r.lane)),
-        // A trap's catch: the trap's own checkout. A headless dispatch: the
-        // worktree it ran in, the origin's for a follow-up that reused it.
-        transcript: claim
-          ? transcriptPath(claim.harness, claim.worktree, claim.sessionId)
-          : transcriptPath(evidence.harness, evidence.sessionId ? dispatchWorktree(id, r.lane).path : undefined, evidence.sessionId),
-        sort: r.sort,
-      };
-    })
+  return dispatchesOnDisk()
+    .map((r) => dispatchRow(r, hold, staleSecs))
     .sort((a, b) => b.sort - a.sort);
+}
+
+/**
+ * One dispatch with everything its modal shows: `/data/dispatch/<id>`. Its
+ * PR badges and gate are in its summary.
+ */
+export function dispatchDetail(id: string): Omit<GlassDispatch, 'prBadge' | 'prGate'> | undefined {
+  const r = dispatchOnDisk(id);
+  return r && dispatchRow(r, readHold(), wedgeSecs());
 }
 
 function awaitingOf(id: string): Pick<GlassDispatch, 'awaitingReply'> {
@@ -461,7 +502,7 @@ export function serveAttachment(url: string, res: http.ServerResponse): boolean 
  * `local`: the snapshot goes to this machine's own glass page (a same-host
  * request), so starting cards may carry their start command and ticket.
  */
-export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnapshot {
+export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFullSnapshot {
   const cfg = loadConfig();
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const workSlots = slotUsage('work');
@@ -600,6 +641,26 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnap
   };
 }
 
+/** The /data body: the snapshot slimmed for the poll (glass-poll.ts). */
+export function glassPoll(local: boolean, snapshot: (o: { local?: boolean }) => GlassFullSnapshot = buildGlassSnapshot): PollBody {
+  return pollBody(snapshot({ local }), Date.now());
+}
+
+/** A `/data/older` page as JSON. */
+export function glassOlderJson(kind: GlassOlderKind, offset: number, limit: number, snapshot: (o: { local?: boolean }) => GlassFullSnapshot = buildGlassSnapshot): string {
+  return JSON.stringify(olderPage(snapshot({ local: false }), kind, offset, limit, Date.now()));
+}
+
+/** A `/data/dispatch/<id>` body as JSON, or null when there is no such dispatch. */
+export function glassDispatchJson(id: string, snapshot?: (o: { local?: boolean }) => GlassFullSnapshot): string | null {
+  const x = snapshot ? snapshot({ local: false }).dispatches.find((d) => d.id === id) : dispatchDetail(id);
+  return x ? JSON.stringify(x) : null;
+}
+
+/** `/data/dispatch/<id>`: a dispatch id is a uuid or another short safe name. */
+const DISPATCH_DETAIL_RE = /^\/data\/dispatch\/([A-Za-z0-9-]{1,64})$/;
+const OLDER_KINDS: readonly GlassOlderKind[] = ['dispatches', 'notices', 'prs'];
+
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /**
@@ -643,13 +704,15 @@ const PAGE = GLASS_PAGE;
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(
   port: number,
-  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: (options?: { local?: boolean }) => GlassSnapshot } = {},
+  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot } = {},
 ): http.Server {
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   // A caller's own snapshot function runs here; the default builds on the snapshot thread.
   const thread = options.snapshot ? undefined : startSnapshotThread();
   const logged = new Set<string>();
   const focusToken = randomBytes(32).toString('hex');
+  // In every ETag: a restarted glass (a new page token) never matches an old one.
+  const instance = randomBytes(6).toString('base64url');
   const icon = assetPath('favicon.png') ?? assetPath('lob-star.png');
   const lob = assetPath('lob.png');
   const sprite = assetPath('lob-sprite.png');
@@ -820,16 +883,66 @@ export function serveGlass(
       // machine's own page, not a rebound name) gets them.
       const local = req.headers.host === ownHost();
       const page = `"focusToken":${JSON.stringify(focusToken)},"focusSupported":${process.platform === 'darwin'}`;
-      const send = (snap: string) => {
-        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        res.end(snap === '{}' ? `{${page}}` : `${snap.slice(0, -1)},${page}}`);
+      const send = (p: PollBody) => {
+        // The ETag covers what a person reads, not the beats: a poll where
+        // only heartbeats and ages moved answers 304, and the beats header
+        // carries them either way.
+        const etag = `W/"${p.hash}.${instance}.${local ? 'l' : 'r'}"`;
+        const headers = {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+          etag,
+          'x-lobstah-beats': encodeURIComponent(JSON.stringify(p.beats)),
+        };
+        if (req.headers['if-none-match'] === etag) {
+          res.writeHead(304, headers);
+          res.end();
+          return;
+        }
+        res.writeHead(200, headers);
+        res.end(p.body === '{}' ? `{${page}}` : `${p.body.slice(0, -1)},${page}}`);
       };
-      const onThisThread = () => send(JSON.stringify(snapshot({ local })));
+      const onThisThread = () => send(glassPoll(local, snapshot));
       // The snapshot thread builds the body, so nothing else waits for it.
       if (!thread) return onThisThread();
-      void thread.build(local).then(send, () => {
+      void thread.poll(local).then(send, () => {
         try {
           onThisThread();
+        } catch (e) {
+          fail(req, res, e);
+        }
+      });
+    } else if (req.url?.startsWith('/data/')) {
+      // History the poll leaves out, and one dispatch's detail: built on the
+      // snapshot thread when there is one. Nothing else lives under /data/.
+      const reply = (json: string | null) => {
+        res.writeHead(json === null ? 404 : 200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(json ?? JSON.stringify({ error: 'not found' }));
+      };
+      if (req.method !== 'GET' || !(req.url.startsWith('/data/older?') || DISPATCH_DETAIL_RE.test(req.url))) return reply(null);
+      const detail = DISPATCH_DETAIL_RE.exec(req.url)?.[1];
+      let build: () => Promise<string | null>;
+      let onThisThread: () => string | null;
+      if (detail !== undefined) {
+        build = () => thread!.dispatch(detail);
+        onThisThread = () => glassDispatchJson(detail, options.snapshot ? snapshot : undefined);
+      } else {
+        const q = new URL(req.url!, 'http://glass').searchParams;
+        const kind = q.get('kind') as GlassOlderKind;
+        if (!OLDER_KINDS.includes(kind)) {
+          res.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          res.end(JSON.stringify({ error: `kind must be one of ${OLDER_KINDS.join(', ')}` }));
+          return;
+        }
+        const offset = Number(q.get('offset') ?? 0);
+        const limit = Number(q.get('limit') ?? 0);
+        build = () => thread!.older(kind, offset, limit);
+        onThisThread = () => glassOlderJson(kind, offset, limit, snapshot);
+      }
+      if (!thread) return reply(onThisThread());
+      void build().then(reply, () => {
+        try {
+          reply(onThisThread());
         } catch (e) {
           fail(req, res, e);
         }

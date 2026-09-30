@@ -43,7 +43,7 @@ describe('trap catches by id', () => {
     const d = acceptanceFleet();
     const view = trapView(d, { ...d.traps[0]!, catches: ['feedface-0000-4000-8000-000000000000'] });
     expect(view.catches).toEqual([missingCatch('feedface-0000-4000-8000-000000000000')]);
-    expect(view.catches[0]).toMatchObject({ id: 'feedface-0000-4000-8000-000000000000', verb: 'unknown', log: [] });
+    expect(view.catches[0]).toMatchObject({ id: 'feedface-0000-4000-8000-000000000000', verb: 'unknown', title: '' });
   });
 
   it('the trap modal lists a missing catch by its id; the card counts it', async () => {

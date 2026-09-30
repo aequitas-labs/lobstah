@@ -1,24 +1,79 @@
-import type { GlassSnapshot } from '@lobstah/core';
-import { answerSummary, decisionCards, modalItem } from '../../src/glass-diff.js';
-import type { GlassPrefs, ModalType } from '../../src/glass-diff.js';
+import type { GlassBeats, GlassDispatch, GlassOlderKind, GlassOlderPage, GlassSnapshot } from '@lobstah/core';
+import { addOlder, answerSummary, applyBeats, decisionCards, modalItem } from '../../src/glass-diff.js';
+import type { GlassPrefs, ModalRef, ModalType } from '../../src/glass-diff.js';
 import { saveLobHidden, savePrefs } from './prefs.js';
-import { getState, setState } from './store.js';
+import { getState, setState, viewOf } from './store.js';
+import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
 
 /** Everything the page can do: each action updates the store (and localStorage for preferences). */
 
+/**
+ * Whether the open modal still has something to show. A dispatch modal
+ * stays open while its detail loads or holds it, even for a dispatch the
+ * poll left out (an old catch opened from its trap).
+ */
+function modalLives(s: Pick<GlassState, 'snapshot' | 'older' | 'detail'>, modal: ModalRef): boolean {
+  const view = viewOf(s);
+  if (view && modalItem(view, modal, s.detail)) return true;
+  return modal.type === 'dispatch' && s.detail?.key === modal.key && !s.detail.error;
+}
+
 /** A new snapshot; an open modal whose item vanished closes and stays closed. */
 export function receive(snapshot: GlassSnapshot): void {
-  const { modal, drafts } = getState();
+  const { modal, drafts, older, detail } = getState();
   // A card that left the snapshot (answered, withdrawn) takes its draft with it.
   const live = new Set(decisionCards(snapshot.attention || [], snapshot.decisions || []).map((c) => c.key));
   const kept = Object.fromEntries(Object.entries(drafts).filter(([key]) => live.has(key)));
   setState({
     snapshot,
     stale: false,
-    modal: modal && modalItem(snapshot, modal) ? modal : null,
+    modal: modal && modalLives({ snapshot, older, detail }, modal) ? modal : null,
     ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
   });
+}
+
+/** A 304: nothing a person reads changed; only the server time and heartbeats ticked. */
+export function receiveBeats(beats: GlassBeats): void {
+  const { snapshot } = getState();
+  setState({ stale: false, ...(snapshot ? { snapshot: applyBeats(snapshot, beats) } : {}) });
+}
+
+/** Fetch the open dispatch modal's detail; a later modal or a newer answer wins. */
+export async function refreshDetail(): Promise<void> {
+  const { modal } = getState();
+  if (modal?.type !== 'dispatch') return;
+  const key = modal.key;
+  const id = key.slice(key.indexOf(':') + 1);
+  let next: { data?: GlassDispatch; error?: string };
+  try {
+    const r = await fetch(`/data/dispatch/${encodeURIComponent(id)}`, { cache: 'no-store' });
+    next = r.ok
+      ? { data: (await r.json()) as GlassDispatch }
+      : { error: r.status === 404 ? 'this dispatch is gone' : `the detail answered ${r.status}` };
+  } catch {
+    next = { error: 'the detail could not be read' };
+  }
+  const now = getState();
+  if (now.modal?.type !== 'dispatch' || now.modal.key !== key) return;
+  // A failed refresh keeps the detail already shown.
+  if (next.error && now.detail?.key === key && now.detail.data) return;
+  setState({ detail: { key, ...next } });
+}
+
+/** Page in the next `/data/older` page of a kind. */
+export async function loadOlder(kind: GlassOlderKind): Promise<void> {
+  const { olderLoading, older } = getState();
+  if (olderLoading) return;
+  setState({ olderLoading: kind, olderError: null });
+  try {
+    const r = await fetch(`/data/older?kind=${kind}&offset=${older[kind].length}&limit=50`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`/data/older answered ${r.status}`);
+    const page = (await r.json()) as GlassOlderPage;
+    setState({ older: addOlder(getState().older, page), olderLoading: null });
+  } catch {
+    setState({ olderLoading: null, olderError: { kind, text: 'older records could not be read' } });
+  }
 }
 
 const emptyDraft = (): DecisionDraft => ({ text: '', files: [] });
@@ -145,14 +200,21 @@ export const openLightbox = (src: string, name: string): void => setState({ ligh
 export const closeLightbox = (): void => setState({ lightbox: null });
 
 export function showModal(type: ModalType, key: string): void {
-  const { snapshot } = getState();
+  const state = getState();
   const modal = { type, key };
-  setState({ modal: !snapshot || modalItem(snapshot, modal) ? modal : null });
+  if (type === 'dispatch') {
+    // Its detail loads now; the modal shows the summary meanwhile.
+    setState({ modal, detail: state.detail?.key === key ? state.detail : { key } });
+    void refreshDetail();
+    return;
+  }
+  const view = viewOf(state);
+  setState({ modal: !view || modalItem(view, modal) ? modal : null, detail: null });
 }
 
 /** Close the modal. */
 export function closeModal(): void {
-  setState({ modal: null });
+  setState({ modal: null, detail: null });
 }
 
 /** Ask the local server to focus one live trap; it accepts no path, URL, or command. */

@@ -14,9 +14,11 @@ import {
   prMerge,
   prName,
   prReview,
+  ShowOlder,
   stackNumbers,
   watchCell,
 } from './common.js';
+import type { OlderControl } from './common.js';
 
 /**
  * The PRs tab: PRs grouped by stack, then the watches that are not PR
@@ -50,7 +52,7 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
   return [html`<h2>other watches</h2>`, Table(['key', 'owner', 'cursor', 'last check', 'error'], rows, 'no other watches')];
 }
 
-function prTable(inp: PrsInputs) {
+function prTable(inp: PrsInputs, older: unknown) {
   const rows = prGroups(inp).flatMap(({ s, prs }) => [
     html`<tr key=${'stack:' + s.id}><th colspan="8">${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}</th></tr>`,
     ...prs.map(
@@ -58,10 +60,10 @@ function prTable(inp: PrsInputs) {
         html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${p.title || ''}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
     ),
   ]);
-  return [Table(['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'], rows, 'no PR evidence'), otherWatches(inp)];
+  return [Table(['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'], rows, 'no PR evidence'), older, otherWatches(inp)];
 }
 
-function prCards(inp: PrsInputs) {
+function prCards(inp: PrsInputs, older: unknown) {
   const groups = prGroups(inp);
   const card = (p: GlassPr) =>
     html`<div key=${p.key} class="card" onClick=${opener('pr', p.key)}><div class="top">${prName(p)}<span class=${'badge ' + prBadgeClass(p.badge) + badgeLong(p.badge.text)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span></div><div class="meta" title=${`${p.repo} · ${stateText(p)}`}>${p.repo} · ${stateText(p)} · ${prMerge(p)}</div><div class="foot"><span>${prChecks(p)}</span><span>${watchCell(p.watch)}</span>${p.gate && html`<span>gate ${p.gate}</span>`}</div></div>`;
@@ -71,7 +73,10 @@ function prCards(inp: PrsInputs) {
           html`<${Fragment} key=${'stack:' + s.id}><h2>${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}</h2><div class="cards">${prs.map(card)}</div><//>`,
       )
     : html`<div class="empty">no PR evidence</div>`;
-  return [body, otherWatches(inp)];
+  return [body, older, otherWatches(inp)];
 }
 
-export const PRs = ({ inp }: { inp: PrsInputs }) => (inp.view === 'cards' ? prCards(inp) : prTable(inp));
+export function PRs({ inp, more }: { inp: PrsInputs; more?: OlderControl }) {
+  const older = more && html`<${ShowOlder} kind="prs" more=${more} />`;
+  return inp.view === 'cards' ? prCards(inp, older) : prTable(inp, older);
+}

@@ -1,5 +1,5 @@
 import { h, render } from 'preact';
-import { decisionFromHash, reportFromHash, reportFromPath, reportPageUrl } from '../../src/glass-diff.js';
+import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath, reportPageUrl } from '../../src/glass-diff.js';
 import { closeLightbox, closeModal } from './actions.js';
 import { App } from './components/app.js';
 import { ReportShell, loadReportView } from './components/report-view.js';
@@ -30,6 +30,10 @@ const initialState = (): GlassState => ({
   route: currentRoute(),
   prefs: loadPrefs(),
   modal: null,
+  detail: null,
+  older: NO_OLDER,
+  olderLoading: null,
+  olderError: null,
   stale: false,
   lobHidden: loadLobHidden(),
   spriteOk: null,

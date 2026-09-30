@@ -694,7 +694,7 @@ with [Preact](https://preactjs.com) and [htm](https://github.com/developit/htm)
 | `src/store.ts` | the one store: the latest snapshot, the route, the prefs, the open modal, the stale flag, the lob state |
 | `src/actions.ts` | every change the page can make (open or close a modal, set a preference, hide a lob, receive a snapshot) |
 | `src/main.ts` | the entry: builds the store from localStorage and the URL, renders `App` into the body on every change, starts polling |
-| `src/poll.ts` | `/data` polling: every 2s, one request at a time, paused while the tab is hidden |
+| `src/poll.ts` | `/data` polling: every 2s, one request at a time, paused while the tab is hidden; a 304 applies only the beats (server time and heartbeats) |
 | `src/route.ts` | the hash tabs (`#deck`, `#dispatches`, `#traps`, `#prs`, `#notices`) |
 | `src/prefs.ts` | the per-browser preferences and lob hides, in localStorage |
 | `src/components/*.ts` | `App`, `Header`, `Deck`, `Dispatches`, `Traps`, `PRs`, `Notices`, `Modal` (dispatch, trap, helm, PR, settings), `Lobs` |
@@ -710,9 +710,14 @@ the active tab's section renders.
 The pure helpers stay beside the server in `apps/cli/src` and are imported by
 both sides: `glass-diff.ts` (the per-section selectors, tab route, filters,
 PR modal data) and `glass-lobs.ts` (which lobs walk). The `/data` payload
-type, `GlassSnapshot`, lives in `@lobstah/core`: `buildGlassSnapshot()`
-returns it and every component reads it, so a renamed field fails typecheck
-on both sides. The client typechecks under its own
+type, `GlassSnapshot`, lives in `@lobstah/core`: `glass-poll.ts` builds it
+from `buildGlassSnapshot()` and every component reads it, so a renamed field
+fails typecheck on both sides. `/data` carries dispatch summaries and the
+last day's history (at least the newest few of each kind), with an ETag that
+leaves out heartbeats and ages; those ride in the `x-lobstah-beats` header
+of every answer, a 304 too. A dispatch modal fetches the rest from
+`/data/dispatch/<id>`, and `/data/older?kind=dispatches|notices|prs&offset=<n>`
+pages in older history. The client typechecks under its own
 `apps/cli/glass/tsconfig.json` (DOM lib). `preact` and `htm` are dev
 dependencies of `apps/cli`: they exist only inside the bundled page.
 

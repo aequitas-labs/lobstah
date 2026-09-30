@@ -152,31 +152,44 @@ export interface GlassStack {
   behind: number;
 }
 
-export interface GlassDispatch {
+/** The evidence fields a dispatch's row shows: where it went and its PRs. */
+export interface GlassEvidenceSummary {
+  deliveredTo?: string;
+  prUrl?: string;
+  prUrls?: string[];
+  pr?: { url?: string };
+}
+
+/**
+ * A dispatch as /data sends it: what its row, card, and deck entry show. The
+ * brief, log, inbox, attachments, and full evidence are in its detail
+ * (`/data/dispatch/<id>`), which the page fetches when its modal opens.
+ */
+export interface GlassDispatchSummary {
   id: string;
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';
   repo: string;
   for?: string;
   followUp?: string;
-  brief: string;
-  attachments: Attachment[];
-  messageAttachments: Attachment[];
+  /** The brief's first line. */
+  title: string;
   verb: Verb | 'unknown' | 'queued';
   /** A budget stop: work is saved for continuation, distinct from a worker failure. */
   outOfTimeWorkSaved?: boolean;
+  /** The last note; in /data, cut to NOTE_MAX characters. */
   note?: string;
+  /** /data cut the note; the detail has all of it. */
+  noteCut?: boolean;
   verbAt?: string;
   /** What the worker is doing now, from its event stream or its post-tool hook. Stale past wedgeThresholdSecs. */
   activity?: ActivityView;
   /** What a paused (or questioning) worker waits on outside lobstah (`report --waiting-on`). */
   waiting?: WaitingView;
   claimedBy?: string;
-  log: StatusEntry[];
-  inbox: string[];
   /** A send to it still waiting on the worker's next note. */
   awaitingReply?: { sentAt: string; from: string; line: string };
-  evidence?: Evidence;
+  evidence?: GlassEvidenceSummary;
   /** The checkout it ran in (the origin's, for a follow-up that reused it); `(removed)` once culled. */
   worktree?: string;
   /** The dispatch whose worktree it reused. */
@@ -199,6 +212,39 @@ export interface GlassDispatch {
   prGate?: string;
   /** Every PR of a dispatch with more than one, in stack order, each with its badge once observed. */
   prList?: Array<{ url: string; number: number; badge?: PrBadge }>;
+}
+
+/** A dispatch with everything: its summary plus the fields its modal shows. */
+export interface GlassDispatch extends GlassDispatchSummary {
+  brief: string;
+  attachments: Attachment[];
+  messageAttachments: Attachment[];
+  log: StatusEntry[];
+  inbox: string[];
+  evidence?: Evidence;
+}
+
+/** What /data leaves out as history: the `/data/older` kinds. */
+export type GlassOlderKind = 'dispatches' | 'notices' | 'prs';
+
+/** One page of history from `/data/older?kind=<kind>&offset=<n>`, newest first. A PR page carries its PRs' stacks. */
+export type GlassOlderPage =
+  | { kind: 'dispatches'; offset: number; total: number; items: GlassDispatchSummary[] }
+  | { kind: 'notices'; offset: number; total: number; items: Notice[] }
+  | { kind: 'prs'; offset: number; total: number; items: GlassPr[]; stacks: GlassStack[] };
+
+/**
+ * The fields that tick on every poll: the server time and heartbeats. The
+ * ETag leaves them out, and every /data answer, a 304 too, carries them in
+ * the `x-lobstah-beats` header.
+ */
+export interface GlassBeats {
+  now: string;
+  daemon?: string;
+  /** Helm grounds → heartbeatAt. */
+  helms: Record<string, string>;
+  /** Trap id → its beat fields. */
+  traps: Record<string, { heartbeatAt?: string; parkedAt?: string }>;
 }
 
 export interface GlassHelm extends HelmRegistration {
@@ -321,10 +367,17 @@ export interface GlassSnapshot {
    * name is absent; the page shows it as `wt:<id>`.
    */
   trapNames?: Record<string, string>;
-  /** Newest first. */
+  /** Newest first: the last day's, at least the newest few. */
   notices: Notice[];
+  /** How many records of each kind /data left out; `/data/older` pages them in. */
+  older?: Record<GlassOlderKind, number>;
   watches: Watch[];
-  dispatches: GlassDispatch[];
+  /**
+   * Queued and active dispatches, and finished ones from the last day (at
+   * least the newest few). Older ones page in from `/data/older`.
+   */
+  dispatches: GlassDispatchSummary[];
+  /** Open PRs, and merged or closed ones from the last day (at least the newest few). */
   prs: GlassPr[];
   stacks: GlassStack[];
   attention: TendAttention[];
@@ -339,3 +392,6 @@ export interface GlassSnapshot {
   decisions?: GlassDecision[];
   answerLimits?: GlassAnswerLimits;
 }
+
+/** A snapshot with every dispatch whole: what the server reads from disk before /data slims it (glass-poll.ts). */
+export type GlassFullSnapshot = Omit<GlassSnapshot, 'dispatches'> & { dispatches: GlassDispatch[] };

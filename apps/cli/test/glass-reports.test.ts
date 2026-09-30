@@ -11,6 +11,7 @@ import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass, serveReport } from '../src/glass.js';
 import { parseMarkdown, parseInline } from '../src/glass-markdown.js';
 import { lobItems } from '../src/glass-lobs.js';
+import { NOTE_MAX } from '../src/glass-poll.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
 import { NOW, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
@@ -241,7 +242,8 @@ describe('glass: cards keep their text inside', () => {
     const badge = card.querySelector('.top .badge')!;
     const meta = card.querySelector('.meta')!;
     expect(badge.getAttribute('title')).toBe(longBadge);
-    expect(meta.getAttribute('title')).toContain(longMeta);
+    // /data cuts a note to NOTE_MAX characters; the modal's detail has all of it.
+    expect(meta.getAttribute('title')).toContain(`${longMeta.slice(0, NOTE_MAX)}…`);
     const style = (el: Element) => g.window.getComputedStyle(el as never);
     expect(style(card)).toMatchObject({ overflow: 'hidden' });
     expect(style(card).getPropertyValue('overflow-wrap')).toBe('anywhere');
