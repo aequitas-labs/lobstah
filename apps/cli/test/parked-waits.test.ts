@@ -29,6 +29,7 @@ import { runDoctor } from '../src/doctor.js';
 import { finishResolvedWaits, registerWaitWatch } from '../src/pr-waits.js';
 import { daemonStatus } from '../src/restart.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * A dispatch parked on `paused` holds no slot, wakes when its wait ends, and
@@ -142,7 +143,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 describe('a merged or closed PR finishes the dispatches parked on it', () => {

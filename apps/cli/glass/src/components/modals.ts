@@ -1,5 +1,5 @@
 import type { GlassDispatch, GlassHelm, GlassReport, GlassSnapshot, GlassTrap } from '@lobstah/core';
-import { dispatchReport, modalItem, prBadgeClass, prModalView } from '../../../src/glass-diff.js';
+import { dispatchReport, modalItem, prBadgeClass, prModalView, trapFileUrl } from '../../../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal } from '../actions.js';
 import { html } from '../html.js';
@@ -10,8 +10,11 @@ import {
   addrCell,
   attachmentRows,
   cmdRow,
+  startCommands,
   detailBody,
-  logText,
+  LogLines,
+  TrapName,
+  namedText,
   prCell,
   prChecks,
   prLink,
@@ -127,8 +130,9 @@ function dispatchModal(x: GlassDispatch, report: GlassReport | undefined, text: 
     x.claimedBy && x.claimedBy.startsWith('wt:')
       ? [
           html`<div class="sec">worked by trap</div>`,
-          cmdRow(x.claimedBy),
-          html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead: lobstah send ${x.claimedBy} "…"</div>`,
+          html`<div class="claimedby">claimed by ${TrapName(x.claimedBy.slice('wt:'.length))}</div>`,
+          cmdRow(namedText(x.claimedBy)),
+          html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead: lobstah send ${namedText(x.claimedBy)} "…"</div>`,
         ]
       : [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
   return [
@@ -149,41 +153,71 @@ function dispatchModal(x: GlassDispatch, report: GlassReport | undefined, text: 
 
 function trapModal(t: GlassTrap) {
   const r = trapRow(t);
-  const sub = t.live
+  const sub = t.requested
     ? [
-        t.repo ?? 'addressed bait only',
-        ' · session ',
-        t.sessionId ?? '',
-        ' · signed on ',
-        Age(t.signedOnAt),
-        ' ago · ',
-        r.listen,
-        ' · heartbeat ',
-        r.hb,
+        t.repo ?? '',
+        ' · ',
+        t.harness ?? '',
+        ' · requested ',
+        Age(t.requested.at),
+        ' ago from the glass; the helm reserves it and starts its session.',
       ]
-    : 'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.';
+    : t.starting
+      ? t.starting.failedAt
+        ? [
+            t.repo ?? '',
+            ' · reserved ',
+            Age(t.starting.reservedAt),
+            ' ago · start failed: ',
+            t.starting.reason ?? '',
+            '. Its addressed work stays queued; a session can still redeem the ticket, or `lobstah stow --wt ',
+            t.name ?? t.trapId,
+            '` withdraws it.',
+          ]
+        : [
+            t.repo ?? '',
+            ' · reserved ',
+            Age(t.starting.reservedAt),
+            ' ago · starting: waiting for a session to redeem the ticket (due by ',
+            t.starting.deadline,
+            ')',
+          ]
+      : t.live
+        ? [
+            t.repo ?? 'addressed bait only',
+            ' · session ',
+            t.sessionId ?? '',
+            ' · signed on ',
+            Age(t.signedOnAt),
+            ' ago · ',
+            r.listen,
+            ' · heartbeat ',
+            r.hb,
+          ]
+        : 'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.';
   const lifecycle = t.notices.length
     ? t.notices.map((n) => html`<div key=${n.seq} class="loglines">${Age(n.at)} ago · <b>${n.kind}</b> — ${n.text}</div>`)
     : html`<div class="empty">none recorded</div>`;
   const messages = t.messages.length
     ? t.messages.map(
         (m) =>
-          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${m.text}${m.attachments?.length ? attachmentRows(m.attachments) : ''}</div>`,
+          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${m.text}${m.attachments?.length ? attachmentRows(m.attachments, (name) => trapFileUrl(t.trapId, name)) : ''}</div>`,
       )
     : html`<div class="empty">none</div>`;
   const catches = t.catches.length
     ? t.catches.map(
         (c) =>
-          html`<div key=${c.lane + ':' + c.id} class="catch"><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prCell(c)}</div><div class="loglines">${logText(c)}</div></div>`,
+          html`<div key=${c.lane + ':' + c.id} class="catch"><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prCell(c)}</div><div class="loglines">${LogLines(c)}</div></div>`,
       )
     : html`<div class="empty">none yet</div>`;
   return [
     close,
-    html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.harness ?? 'signed off'}</span></h3>`,
+    html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : (t.harness ?? 'signed off')}</span></h3>`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
     html`<div class="sec">window</div>`,
     windowAction(t),
+    startCommands(t),
     t.live &&
       t.sessionId && [
         html`<div class="sec">open this session</div>`,

@@ -19,7 +19,10 @@ import {
   listHelms,
   listNotices,
   listTraps,
+  listReservations,
   trapLabel,
+  trapNamer,
+  nameTrapsIn,
   listWatches,
   watchErrorCell,
   loadConfig,
@@ -63,6 +66,7 @@ import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { reportAttention } from './report-file.js';
+import { decisionAttention, hideFramedQuestions } from './decisions.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
@@ -156,8 +160,10 @@ export interface TendTrap {
   repo: string;
   worktree: string;
   claimed?: string;
-  /** never | now (parked) | <age>s ago */
+  /** never | now (parked) | <age>s ago | starting (due in <n>s) | start failed */
   listening: string;
+  /** Set for a reserved trap no session has signed on as yet. */
+  state?: 'starting' | 'start-failed';
 }
 
 export interface TendAwaiting {
@@ -835,11 +841,13 @@ export function buildTendReport(now = Date.now()): TendReport {
     [],
     records,
   ).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now));
+  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now));
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
-  const shown = attention.filter((a) => a.kind === 'watch' || enabled.has(a.kind));
+  const walking = attention.filter((a) => a.kind === 'watch' || enabled.has(a.kind));
+  // A question the helm framed as a decision shows as that decision.
+  const shown = enabled.has('decision') ? hideFramedQuestions(walking) : walking;
   attention.length = 0;
   // Acks are display-only: they annotate, never remove. The verdict below
   // and every wake path ignore them.
@@ -857,7 +865,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     ? 'daemon-down'
     : stalled
       ? 'stalled'
-      : attention.some((a) => a.kind === 'question' || a.kind === 'watch')
+      : attention.some((a) => a.kind === 'question' || a.kind === 'decision' || a.kind === 'watch')
         ? 'needs-attention'
         : inFlight.length + queued.length > 0
           ? 'working'
@@ -876,6 +884,20 @@ export function buildTendReport(now = Date.now()): TendReport {
       listening: r.firstParkedAt === undefined ? 'never' : hbAgeSecs <= 10 ? 'now' : `${hbAgeSecs}s ago`,
     };
   });
+  // Reserved traps: the address exists, no session has signed on as it yet.
+  for (const r of listReservations()) {
+    const failed = r.failedAt !== undefined || now > (Date.parse(r.deadline) || 0);
+    traps.push({
+      trap: `wt:${r.trapId}`,
+      name: r.name,
+      label: trapLabel(r),
+      session: '',
+      repo: r.repo,
+      worktree: '',
+      listening: failed ? 'start failed' : `starting (due in ${Math.max(0, Math.round(((Date.parse(r.deadline) || 0) - now) / 1000))}s)`,
+      state: failed ? 'start-failed' : 'starting',
+    });
+  }
 
   const notices: TendNotice[] = listNotices(5).map((n) => ({
     kind: n.kind,
@@ -938,6 +960,9 @@ export function buildTendReport(now = Date.now()): TendReport {
 
 export function renderTend(r: TendReport): string {
   const lines: string[] = [];
+  // Tables show each trap by name alone; `wt:<id>` only where no name is known.
+  const names = trapNamer();
+  const named = (text: string) => nameTrapsIn(text, 'name', names);
   lines.push(
     toonKV({
       verdict: r.verdict,
@@ -964,7 +989,7 @@ export function renderTend(r: TendReport): string {
           verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : a.kind,
           waitingMins: Math.round(a.ageSecs / 60),
           held: a.held ? 'yes' : '',
-          note: a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? ''),
+          note: named(a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? '')),
         })),
         ['id', 'verb', 'waitingMins', 'held', 'note'],
       ),
@@ -981,7 +1006,7 @@ export function renderTend(r: TendReport): string {
             .map(
               (d) =>
                 `${d.id.slice(0, 8)}:${d.outOfTimeWorkSaved ? 'out of time, work saved' : d.state}` +
-                (d.state === 'held' && d.note ? ` (${d.note.replace(/^held: /, '')})` : '') +
+                (d.state === 'held' && d.note ? ` (${named(d.note.replace(/^held: /, ''))})` : '') +
                 (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
                 (d.waiting ? ` (${waitingText(d.waiting)})` : '') +
                 (d.awaitingReply ? ` (awaiting reply · ${ageLabel(Date.now() - (Date.parse(d.awaitingReply.sentAt) || Date.now()))})` : ''),
@@ -1014,7 +1039,7 @@ export function renderTend(r: TendReport): string {
           waitingOn: p.waiting?.on ?? '',
           for: ageLabel(p.parkedSecs * 1000),
           link: p.waiting?.link ?? '',
-          note: `${p.note ?? ''}${p.trap ? ' (trap)' : ''}`.trim(),
+          note: named(`${p.note ?? ''}${p.trap ? ' (trap)' : ''}`.trim()),
         })),
         ['id', 'waitingOn', 'for', 'link', 'note'],
       ),
@@ -1025,7 +1050,7 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'repairs waiting',
-        r.repairsWaiting.map((w) => ({ pr: w.key, kind: w.kind, heldBy: w.heldBy, reason: w.reason, until: w.until ?? '' })),
+        r.repairsWaiting.map((w) => ({ pr: w.key, kind: w.kind, heldBy: named(w.heldBy), reason: named(w.reason), until: w.until ?? '' })),
         ['pr', 'kind', 'heldBy', 'reason', 'until'],
       ),
     );
@@ -1034,7 +1059,7 @@ export function renderTend(r: TendReport): string {
     lines.push('');
     lines.push(toonTable('repair chores', r.repairChores.map((c) => ({
       id: c.id.slice(0, 8), pr: c.pr, lane: c.lane, state: c.state,
-      worker: c.worker, waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
+      worker: named(c.worker), waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
     })), ['id', 'pr', 'lane', 'state', 'worker', 'waitingForTrap']));
   }
   if (r.watches.length > 0) {
@@ -1077,7 +1102,7 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'awaiting-trap (sticky — never claimed headless)',
-        r.awaiting.map((a) => ({ id: a.id.slice(0, 8), for: a.for, waitingMins: a.ageMins })),
+        r.awaiting.map((a) => ({ id: a.id.slice(0, 8), for: named(a.for), waitingMins: a.ageMins })),
         ['id', 'for', 'waitingMins'],
       ),
     );

@@ -1,5 +1,6 @@
 import { h, render } from 'preact';
-import { closeModal, loadOpenReport } from './actions.js';
+import { decisionFromHash } from '../../src/glass-diff.js';
+import { closeLightbox, closeModal, loadOpenReport } from './actions.js';
 import { App } from './components/app.js';
 import { startPolling } from './poll.js';
 import { loadLobHidden, loadPrefs } from './prefs.js';
@@ -22,6 +23,9 @@ initState({
   focusResults: {},
   preview: new URLSearchParams(location.search).has('lob'),
   reportText: {},
+  drafts: {},
+  focusDecision: decisionFromHash(location.hash),
+  lightbox: null,
 });
 
 let paintedRoute: ReturnType<typeof currentRoute> | undefined;
@@ -35,7 +39,18 @@ const paint = () => {
   // Hash navigation can target a hidden tab before it renders. Reset only on
   // entry, never on a poll that refreshes the tab someone is reading.
   if (enteredTab) window.scrollTo(0, 0);
+  scrollToDecision(state.focusDecision);
 };
+
+/** A `#decision/<key>` link scrolls to its card once, when the card first renders. */
+let scrolledTo: string | null = null;
+function scrollToDecision(key: string | null): void {
+  if (!key || key === scrolledTo) return;
+  const card = [...document.querySelectorAll('[data-decision]')].find((el) => el.getAttribute('data-decision') === key);
+  if (!card) return;
+  scrolledTo = key;
+  card.scrollIntoView?.({ block: 'center' });
+}
 subscribe(paint);
 paint();
 
@@ -47,10 +62,15 @@ sprite.src = '/lob-sprite.png';
 
 onRoute((route) => {
   const modal = currentModal();
-  setState(modal ? { route, modal } : { route });
+  const focusDecision = decisionFromHash(location.hash);
+  if (focusDecision !== getState().focusDecision) scrolledTo = null;
+  setState(modal ? { route, modal, focusDecision } : { route, focusDecision });
   if (modal) loadOpenReport();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModal();
+  if (e.key !== 'Escape') return;
+  // The image overlay sits above a modal: Escape closes it first.
+  if (getState().lightbox) closeLightbox();
+  else closeModal();
 });
 startPolling();

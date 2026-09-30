@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { ensureLayout, laneDirs, mergeEvidence } from '@lobstah/core';
 import type { Descriptor } from '@lobstah/core';
 import { boundPr } from '../src/run.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -14,7 +15,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 describe('boundPr: the existing PR a dispatch works on', () => {

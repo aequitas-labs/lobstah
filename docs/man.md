@@ -397,7 +397,7 @@ as a user service. `lobstah glass restart` restarts the service, or a
 detached glass (stop, then `--detach`).
 
 `lobstah glass [--port <n>]` serves tend as a live web page on 127.0.0.1
-(default port 4949): the fleet verdict and attention questions, every
+(default port 4949): the fleet verdict, decision cards, every
 dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
@@ -468,6 +468,13 @@ the helm files to keep.
   Raw HTML in the markdown shows as text. The glass serves the markdown and
   the images read-only, and an image only by basename from that report's
   own attachments.
+- **Images.** Every image in the glass (a decision card's, a report page's,
+  and an attachment's in the dispatch and trap modals) opens in an in-page
+  overlay: centered at up to 90% of the viewport over a dark backdrop, with
+  a link to open the original file. Escape, a click on the backdrop, or the
+  close button closes it. The glass serves a dispatch's and a trap's
+  attachment images read-only, by basename, from their own attachments
+  directories. Missing files, malformed names, and symlinks are not served.
 - **Attention.** A filed report with no ack stands as the `report` attention
   kind. Add `report` to `attentionKinds` to walk it. The desktop pet shows
   the report's title; a pet click opens the item and acks it through
@@ -479,6 +486,78 @@ the helm files to keep.
 - **Cull.** `lobstah cull` removes a dispatch's report with the rest of its
   state. A helm report is culled when it is older than the retention window,
   counted from when it was filed.
+
+### Decisions
+
+A decision is a question the helm puts to the human. Workers still ask in
+prose (`report needs-decision "<note>"`). The helm decides what it can and
+frames the rest as decisions.
+
+- **Asking.** `lobstah man ask [<dispatch-id>] --title "<question>"
+  [--detail <file.md>] [--option "<label>"]... [--attach <file>]...` stores a
+  decision: its key (`decision:<rid>`), title, detail markdown (at most
+  64 KiB), 0 to 6 option labels, attachments, the dispatch it is about (none
+  for a question such as "cut 0.6.0?"), who asked (`helm`), and when. It is
+  stored in `~/.lobstah/decisions/<rid>/`: `decision.json`, `detail.md`, and
+  `attachments/`. The claimed helm alone may ask.
+- **Standing.** A decision stands until it is answered or the helm withdraws
+  it with `lobstah man ask --withdraw <key>`, which removes its directory. A
+  newer `man ask` on the same dispatch replaces the older decision.
+- **Attention.** A standing decision is attention of kind `decision`, in
+  the default `attentionKinds`. It makes the verdict `needs-attention`. A
+  worker's raw `needs-decision` or `blocked` stays a `question` until the
+  helm frames it. While a decision on the same dispatch, asked at or after
+  the question, is on disk, the `question` item is hidden: the decision
+  replaces it. Withdrawing the decision shows the question again.
+- **In the glass.** The attention section of On deck is a list of
+  full-width decision cards, newest first. A card shows the title, the
+  detail rendered as markdown, the attachments (images inline), the
+  dispatch link and repo, and the age. The options are buttons. Below them
+  is an empty text box that grows with its content, and an attach control
+  for images and files (`.png .jpg .jpeg .gif .webp .pdf .txt .md .csv
+  .json .log .diff .patch .yaml .yml .toml .zip`, each at most
+  `[limits].attachmentMaxBytes`, at most 8). Click an option, write an
+  answer, attach files, or any mix; one **Send** submits it. With no options,
+  the text box is the whole answer. After sending, the card shows
+  `answered · <what was chosen>` and leaves on the next refresh. A raw
+  `question` the helm has not framed shows as a plain card with the
+  worker's note and the same text box. PR kinds stay in the PRs section.
+  `#decision/<key>` opens the deck at that card. Pasting with Cmd-V or
+  Ctrl-V in the text box adds each image on the clipboard as an attachment
+  named `pasted-<time>.png` (the extension follows the image format), with
+  the same size, type, and count checks as a picked file; pasted text stays
+  text.
+- **The answer is a request.** An answer is a glass request of kind
+  `decision-answer`, stored as `~/.lobstah/requests/<id>.json` with its
+  files in `~/.lobstah/requests/<id>/`. The payload is the decision `key`,
+  `title`, `dispatch`, `lane`, `repo`, the `option`, the `text`, and the
+  stored `attachments`. `answer.json` in the decision's directory marks it
+  answered and names the request.
+- **The POST.** Send is a same-origin POST to `/requests` with the page's
+  token (header `x-lobstah-token`), the guard the **↗ open** button uses.
+  The body is `{ "kind": "decision-answer", "payload": { "key", "option",
+  "text", "files": [{ "name", "data" }] } }`, with file data in base64. The
+  server checks the kind, the key, that the option is one of the decision's
+  labels, the text length (at most 20000 characters), and each file's size
+  and type (an image must also start with its format's signature). It
+  writes the request and runs nothing. Answering a raw question's key
+  (`<lane>:<id>`) first stores it as a decision asked by `worker`.
+- **The event.** Writing the request posts a `decision-answer` notice. It
+  wakes the helm's `man wait` (and the Stop-hook park) once, as a
+  `decision-answer` event: the request `id`, `key`, `dispatch`, `title`,
+  `option`, `text`, `attachments` (the stored paths), `from`, and `at`. The
+  helm acts on it, usually with `lobstah send <dispatch> "<instruction>"`.
+  Answering does not message the worker.
+- **From the terminal.** `lobstah man answer <key> [--option <label>]
+  [--text <text>] [--attach <file>]...` answers the same way, with the same
+  checks.
+- **The pet.** The desktop pet shows a decision as its title only. A click
+  opens the glass at the card and acks the item for the pet
+  (`lobstah attention ack <key> --by pet`). The card stays in the glass until
+  the decision is answered or withdrawn.
+- **Cull.** `lobstah cull` removes a decision once its answer is older than
+  the retention window, with the `decision-answer` request and its files. A
+  standing decision is never culled.
 
 ### The periodic report
 
@@ -779,6 +858,15 @@ same live trap in `dispatch --for`, `send`, and `stow --wt`. Unknown names
 list known names and never turn addressed bait into headless work. The id
 remains the key in dispatch and claim records.
 
+A dispatch shows its trap by name wherever it names the trap that claimed
+it, ran it, or is addressed to it, including notes such as
+`claimed by crisp-heron`. The name comes from the live registration, else
+from the name registry, so a signed-off trap keeps its name. A trap with no
+known name shows as `wt:<id>`. `lobstah status <id>` and `lobstah catch <id>`
+print `trap: crisp-heron (wt:68c5da5f)` and write notes the same way.
+`man tend`'s tables print the name alone. In the glass, the name carries
+`wt:<id>` as its hover text, and a click opens that trap's modal.
+
 The session id (from the plugin's session-start brief) lives inside the
 registration as the liveness principal. The harness (claude or codex) is
 inferred — from `CLAUDE*` / `CODEX*` in the environment, and when both are
@@ -831,6 +919,94 @@ enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 `soak --wait`) and left standing so the address keeps protecting its work.
 Nobody is conscripted: only a worktree whose session ran `soak` ever
 receives work.
+
+### Reserving a trap before its session starts
+
+```bash
+lobstah trap reserve --repo <key>       # reserve a trap; prints its name, id, and a one-time ticket
+        [--harness claude|codex]        # print only that harness's start command
+        [--name amber-gull]             # choose the name
+        [--deadline 180]                # seconds the session has to sign on (default 180)
+lobstah soak --ticket <ticket>          # in the new session: sign on as the reserved trap
+lobstah stow --wt amber-gull            # withdraw a reservation no session has redeemed
+```
+
+`trap reserve` picks the two-word name and the `wt:` id before any session
+exists and writes a **starting** reservation (`soaking/<id>.starting`) with a
+deadline. `dispatch --for <name>` works on it at once: the work waits, as it
+does for any addressed trap. `man tend` and the glass show the trap as
+`starting`.
+
+The output holds a one-time ticket and the command that starts the session in
+the repo's primary checkout:
+
+```bash
+cd <repo> && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:soak --ticket <ticket>"
+cd <repo> && codex '$lobstah:trap soak --ticket <ticket>'
+```
+
+Nothing starts the session for you: a person runs the command. The session's
+soak redeems the ticket, from `--ticket` or from the `LOBSTAH_TRAP_TICKET`
+environment variable. It creates a worktree named after the reserved id,
+signs on under the reserved name and id, and deletes the reservation. The
+ticket then redeems nothing. A spent ticket left in `LOBSTAH_TRAP_TICKET` is
+ignored; a spent `--ticket` is refused, except in the session that redeemed
+it. A session that already mans a trap cannot redeem a ticket.
+
+A reservation still unredeemed at its deadline **fails**: the daemon posts one
+`trap-start-failed` notice, and the glass shows the trap as `start failed`
+with the reason. Work addressed to it stays queued. The ticket still redeems
+after the deadline. `lobstah stow --wt <name>` withdraws the reservation; its
+addressed work is then orphaned bait and the helm gets a `bait-orphaned`
+notice.
+
+### Asking for a trap from the glass
+
+The Traps tab and the deck's traps block have a **+ New trap** button. It
+opens a small form: a repo (from the configured repo keys) and a harness
+(`claude` or `codex`). Submitting it files a **trap request**: the glass POSTs
+`{ kind: "trap-request", payload: { repo, harness } }` to `/requests` with
+the same same-origin and page token guard as the open-window button. The
+server checks the repo and harness, writes `~/.lobstah/requests/<id>.json`
+(kind `trap-request`), and runs nothing. `/requests` refuses a body larger
+than eight attachments (`[limits].attachmentMaxBytes` each, as base64) plus
+room for text, with 413. After it reads the kind, it refuses a `trap-request`
+larger than 4 KB with 413.
+
+A request wakes the helm's `man wait` (and the Stop-hook park) as a
+`trap-request` event with the request's id, repo, and harness. An open
+request also wakes a helm that signs on later. The glass shows it at once as a
+greyed card: `requested · <repo> · <harness> · waiting for the helm`, or
+`waiting for a helm` when no helm is signed on.
+
+```bash
+lobstah trap requests                  # open trap requests
+lobstah trap reserve --request <id>    # reserve what the request asks for, and close it
+```
+
+`trap reserve --request <id>` takes the repo and harness from the request,
+records the request on the reservation, and closes the request. The card
+becomes the starting card, then the live trap when the session signs on.
+
+Every starting card shows the start command `trap reserve` prints, with a copy
+button: paste it into a terminal to start the session by hand. The ticket in
+it is kept in `soaking/<id>.ticket` (mode 0600) until the reservation is
+redeemed or withdrawn. The glass sends it only to a page on this machine's
+own glass address, only on the starting card, and no notice or log carries
+it.
+
+### The terminal tab name
+
+At sign-on, soak names the session's terminal tab after the trap. It finds the
+tab by the tty recorded in the registration's window: a Terminal.app tab gets
+the name as its custom title, an iTerm2 session gets it as its session name.
+Other terminals are left alone. `lobstah stow` clears the name.
+`LOBSTAH_TERMINAL_TITLE=0` turns naming off.
+
+Claude Code writes its own title to the tab, and in Terminal.app that title
+replaces the custom title. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` on the
+command that starts Claude Code stops that for that one process; the start
+command `trap reserve` prints sets it. Codex also sets the terminal title.
 
 ### Culling and disk space
 

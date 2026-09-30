@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { setImmediate as yieldToWorker } from 'node:timers/promises';
 import { ensureLayout, heartbeatTrap, listNotices, listTraps, queuedDescriptor, readEvidence, readTrap, readTrapAnchor, sweepGhostTraps, unhandledTrapMessages, type TrapRegistration } from '@lobstah/core';
 import { planCull, planPressureCull, removeWorktree } from '../src/cull.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end: soak and stow through the built CLI, against throwaway repos
 // with a bare origin. Every test has its own LOBSTAH_HOME.
@@ -61,7 +62,7 @@ afterEach(async () => {
   // Sync subprocess tests can occupy the worker for over Vitest's RPC deadline
   // as a group on Windows. Let task-update replies run between tests.
   await yieldToWorker();
-  fs.rmSync(tmp, { recursive: true, force: true });
+  removeTempDir(tmp);
   delete process.env.LOBSTAH_HOME;
 });
 
@@ -237,7 +238,7 @@ describe('soak creates a worktree when the session has none', () => {
     expect(disk.status).not.toBe(0);
     expect(disk.stdout).toContain('[limits].minFreeGB');
     config();
-    fs.rmSync(origin, { recursive: true, force: true });
+    removeTempDir(origin);
     const fetch = soak(primary);
     expect(fetch.status).not.toBe(0);
     expect(fetch.stdout).toContain('could not create a worktree for repo r');

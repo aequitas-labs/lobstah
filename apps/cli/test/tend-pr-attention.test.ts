@@ -22,6 +22,7 @@ import { buildTendReport, humanPrAttention, landedCatches, onTheHook, prKinds, r
 import { advanceCursor } from '../src/reported.js';
 import { deriveGlassPrs } from '../src/glass-prs.js';
 import { stampRepairerBeat } from '../src/pr-repair.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -31,7 +32,7 @@ beforeEach(() => {
   fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 
@@ -287,7 +288,7 @@ describe('the on-the-hook rule', () => {
 
 describe('attentionKinds (config.toml)', () => {
   it('defaults to human-actionable kinds, excluding drafts', () => {
-    expect(loadConfig().attentionKinds).toEqual(['question', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks']);
+    expect(loadConfig().attentionKinds).toEqual(['question', 'decision', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks']);
   });
 
   it('honors a user list including draft unchanged', () => {
@@ -307,7 +308,7 @@ describe('attentionKinds (config.toml)', () => {
 
   it('rejects an unknown kind, naming the valid set', () => {
     config('attentionKinds = ["question", "pr:merged"]\n');
-    expect(() => loadConfig()).toThrow(/unknown kind "pr:merged".*question, landed, pr:draft, pr:review, pr:checks, pr:conflict, pr:ready/);
+    expect(() => loadConfig()).toThrow(/unknown kind "pr:merged".*question, decision, landed, pr:draft, pr:review, pr:checks, pr:conflict, pr:ready/);
   });
 
   it('prKinds is pure over one observation', () => {

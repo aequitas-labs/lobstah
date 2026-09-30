@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { claimNext, enqueue, ensureLayout, laneDirs, readEvidence, readWatch } from '@lobstah/core';
 import { checkpointAllowed, keepRemote } from '../src/remote.js';
 import { main } from '../src/run.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let root: string;
 let previousPath: string | undefined;
@@ -22,7 +23,7 @@ beforeEach(() => {
 afterEach(() => {
   process.env.PATH = previousPath;
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 function repo(): { dir: string; bare: string } {

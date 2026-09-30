@@ -9,13 +9,14 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parse } from 'smol-toml';
 import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from '../src/repos.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let dir: string;
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-repos-'));
 });
 afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTempDir(dir);
 });
 
 function makeRepo(name: string, opts: { origin?: string; lockfile?: string } = {}): string {

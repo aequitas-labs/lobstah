@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { appendStatus, claimNext, complete, dispatchAttachmentsDir, enqueue, ensureLayout } from '@lobstah/core';
 import { applyCull, planCull } from '../src/cull.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 const DAY = 86_400_000;
@@ -19,7 +20,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

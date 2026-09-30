@@ -97,7 +97,7 @@ describe('glass section selectors', () => {
     expect(deck.inflight.map((x: { id: string }) => x.id)).toEqual(['d1']);
   });
 
-  it('keeps PR standing out of On deck attention; the deck carries it with the open PRs', () => {
+  it('keeps PR standing out of On deck decisions; the deck carries it with the open PRs', () => {
     const d = {
       ...snapshot(),
       attention: [
@@ -110,7 +110,7 @@ describe('glass section selectors', () => {
       prs: [{ key: 'owner/repo#27', number: 27, stackId: 'owner/repo#27', state: 'OPEN', position: 0, badge: { text: 'checks 1/2 failed', tone: 'bad' } }],
     };
     const deck = diff.sectionInputs(d, ui(), NOW).deck;
-    expect(deck.attention.map((a: { kind: string }) => a.kind)).toEqual(['question', 'landed']);
+    expect(deck.decisions.map((a: { kind: string }) => a.kind)).toEqual(['question']);
     expect(deck.prAttention.map((a: { kind: string }) => a.kind)).toEqual(['pr:checks']);
     expect(deck.prs.map((p: { number: number }) => p.number)).toEqual([27]);
   });

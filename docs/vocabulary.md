@@ -429,7 +429,9 @@ worktree is refused (the session lock); a stale one is adopted.
 | beat | `lobstah soak beat`, run by the plugin's post-tool hook after every tool call. It resolves the trap from the working directory, else from the session id (files only: no git, no network), refreshes the trap's beat (`soaking/<trap>.beat`, separate from the registration), and writes the claimed catch's [activity](#activity). Throttled to one per 30 seconds per trap. Inert in a session that is not soaking, or with `[soak].beat = false`. Always exits 0; errors go to `logs/beat.log`. |
 | ghost trap | A registration whose heartbeat **and** beat lapsed past `[soak].ttlSecs` **after having parked at least once**. The sweep removes the registration, requeues only unfinished catches, finalizes done/failed in `done/`, and posts a `trap-ghosted` notice. It removes a soak-created checkout only when clean and pushed to its upstream; dirty, unpushed, no-upstream, or unreadable checkouts stay, protected from later culls too. The notice includes path, branch, modified-file and unpushed-commit counts, or `unknown` when unavailable. A kept anchor preserves the address on re-soaking. A fresh report or beat keeps a working session out of the sweep; a fresh beat also holds the session lock. A catch whose last report is `paused` keeps its trap until the pause expires ([Waiting on](#waiting-on)). A daemon tick gap longer than the soak TTL starts one full TTL of resume grace before any ghost sweep. |
 | defective enlistment | A stale registration that **never parked** — signed on but never listened (usually no Stop hook). Not swept: the helm gets a `trap-defective` notice with the remedy (`soak --wait`), and the registration stays so the address keeps protecting its work. |
-| notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): sign-ons, first parks, sign-offs, ghosts, defective enlistments, orphaned work, bounced messages, PRs merged or closed, watches held over the fork cap (`watch-held`), failing (`watch-failing`), and recovered (`watch-recovered`), free-space holds (`disk-held`, `disk-cleared`), worktrees released after their PR merged (`worktree-released`, one per cull pass), and a repair or rebase that could not push to its PR's branch (`push-failed`). A trap leaves the registry only through a `trap-stowed` or `trap-ghosted` notice — the end-state is always explicit. Consumed by `man wait`/the park; tend always shows the recent tail. |
+| reserved trap | A trap `lobstah trap reserve` created before any session signs on as it: a name, a `wt:` id, and a one-time ticket, shown as `starting`. Work addressed to it waits. A session redeems the ticket with `soak --ticket` (or `LOBSTAH_TRAP_TICKET`) and signs on as that trap. Unredeemed past its deadline, it fails with a `trap-start-failed` notice and its work stays queued. `stow --wt <name>` withdraws it. |
+| trap request | A trap the human asked for from the glass's **+ New trap** button: a `trap-request` request in `requests/<id>.json` with a repo and a harness. It wakes the helm as a `trap-request` event; the helm reserves it with `trap reserve --request <id>`, which closes it. |
+| notice | The helm's attention channel for non-status events (`~/.lobstah/notices/`): reservations (`trap-starting`), reservations that did not start (`trap-start-failed`), trap requests from the glass (`trap-request`), sign-ons, first parks, sign-offs, ghosts, defective enlistments, orphaned work, bounced messages, PRs merged or closed, watches held over the fork cap (`watch-held`), failing (`watch-failing`), and recovered (`watch-recovered`), free-space holds (`disk-held`, `disk-cleared`), worktrees released after their PR merged (`worktree-released`, one per cull pass), a repair or rebase that could not push to its PR's branch (`push-failed`), and a human's answer to a decision (`decision-answer`; its ref is the request id in `~/.lobstah/requests/`). A trap leaves the registry only through a `trap-stowed` or `trap-ghosted` notice — the end-state is always explicit. Consumed by `man wait`/the park; tend always shows the recent tail. |
 
 Delivery routes by ownership, same as watches: a continuation for a chain
 claimed by a live trap is addressed back to that trap and stays sticky.
@@ -463,6 +465,11 @@ verbs stay open. A stale helm reserves nothing.
 
 ## Attention contract
 
+An **image overlay** is the glass's in-page view of a decision, report, or
+dispatch or trap attachment image. It closes with Escape, its close button,
+or a click on its backdrop. Images pasted into a decision answer are
+attachments and use the same size, type, and count limits as picked files.
+
 **Attention** is what stands waiting for a human to look: `man tend`'s
 `attention` list, which the desktop pet and the glass walk across the
 screen. It is derived in one place (`apps/cli/src/tend.ts`) and nowhere
@@ -473,7 +480,8 @@ never until someone acknowledges it.
 
 | Kind | Stands while | Clears when |
 | ---- | ------------ | ----------- |
-| `question` | The dispatch's last status is `needs-decision` or `blocked`. Held (`held: true`; not in the pet, the glass, or notifyCommand) while a live helm for its grounds has not ended a turn since it was filed. | Any newer status entry, or a message newer than it. |
+| `question` | The dispatch's last status is `needs-decision` or `blocked`. Held (`held: true`; not in the pet, the glass, or notifyCommand) while a live helm for its grounds has not ended a turn since it was filed. Hidden while a decision on the same dispatch, asked at or after it, is on disk (when `decision` is enabled). | Any newer status entry, or a message newer than it. |
+| `decision` | The helm asked the human with `lobstah man ask` and no answer is recorded. Key `decision:<rid>`. | Answered (the glass or `man answer`), withdrawn (`man ask --withdraw`), or replaced by a newer ask on the same dispatch. |
 | `landed` | The dispatch is `done` or `failed` after its grounds' reported-through cursor (the grounds listing the repo, else `fleet`; at most 24 h back). Opt-in. | `man report` (or the helm park's digest) advances the cursor. |
 | `pr:draft` | An open PR is a draft, and the user opted into this kind. | Ready for review, merged, or closed. |
 | `pr:review` | An open PR has unresolved review questions, or requested changes that lobstah cannot repair, has exhausted, or is configured not to repair. | Every thread resolved and no changes requested, or merged / closed. |
@@ -485,8 +493,9 @@ never until someone acknowledges it.
 `pr:*` kinds read only the `pr:` watch's evidence — never a forge call —
 and carry `prUrl`, `number`, and the fields they derive from. Unconsumed
 man-owned watch events also list, as `watch`: machinery wakes, always on.
-Only `question` and `watch` make the verdict `needs-attention` or arise in
-the digest; the rest are things to look at, not stalls.
+Only `question`, `decision`, and `watch` make the verdict `needs-attention`;
+only `question` and `watch` arise in the digest. The rest are things to look
+at, not stalls.
 
 **The on-the-hook rule.** Repairable conflict, check, and requested-review
 conditions on an owned PR stay off attention while lobstah can act. A
@@ -507,7 +516,7 @@ reminder loop apply the same predicate.
 
 | Word | Meaning |
 | ---- | ------- |
-| ack | `~/.lobstah/acks/<item-key>.json` — `{ key, kind, stateHash, at, by }`, written only by `lobstah attention ack` (removed by `unack`, by the CLI's `man tend` / `attention` when its `stateHash` goes stale, and by `cull` when the item is gone). **Display-only**: it hides the item from the desktop pet and the glass lobs while the item's `stateHash` is unchanged; `man tend --json` keeps the item with `acked: { at, by }`, and `man wait`, the park, reminders, and `notifyCommand` never read acks. Item keys: `<lane>:<uuid>` (question, landed), `pr:<owner>/<repo>#<n>` (all of a PR's `pr:*` kinds — one ack covers them), `watch:<key>`. `stateHash` covers the status entry (question, landed) or the PR's head sha plus every evidence field a `pr:*` kind stands on (not `observedAt`). |
+| ack | `~/.lobstah/acks/<item-key>.json` — `{ key, kind, stateHash, at, by }`, written only by `lobstah attention ack` (removed by `unack`, by the CLI's `man tend` / `attention` when its `stateHash` goes stale, and by `cull` when the item is gone). **Display-only**: it hides the item from the desktop pet and the glass lobs while the item's `stateHash` is unchanged; `man tend --json` keeps the item with `acked: { at, by }`, and `man wait`, the park, reminders, and `notifyCommand` never read acks. Item keys: `<lane>:<uuid>` (question, landed), `decision:<rid>`, `pr:<owner>/<repo>#<n>` (all of a PR's `pr:*` kinds — one ack covers them), `watch:<key>`. `stateHash` covers the status entry (question, landed) or the PR's head sha plus every evidence field a `pr:*` kind stands on (not `observedAt`). |
 | pet state | `~/.lobstah/pet/state.json` — `{ pid, at, ok, command, reason, consecutiveFailures, items, lastOkAt }`. The desktop pet's one write: it rewrites the file after each attention read (about every six seconds). `command` is the command that worked (`attention --json`, or `man tend --json` from an older CLI). `reason` says why the last read failed (timed out, non-zero exit, output that does not decode). Only `lobstah doctor` reads it, for its `pet` row: running means `pid` is alive and `at` is less than two minutes old. |
 | budget stop | A headless runner's `failed` verb with a `budget:` note means its progress-extended active-work window reached the hard ceiling. This is out of time, not a code failure: the runner checkpoints eligible changes, pushes when enabled, names the saved branch/commit/draft PR, and invites `lobstah send <id> "continue"`. Paused `--waiting-on` time is excluded. |
 

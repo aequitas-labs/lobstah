@@ -37,6 +37,9 @@ The charter is re-injected at every session start. Keep inside its fences:
 ```
 lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
 lobstah dispatch ... --for <trap-name>             # address it to one trap
+lobstah trap reserve --repo <key>                 # reserve a trap before its session starts;
+                                                  # prints its name, a ticket, the start command
+lobstah trap reserve --request <id>               # reserve what a glass trap request asks for
 lobstah send <id>|<trap-name> "<instruction>"      # steer live/queued work; wake
                                                   # finished work as a follow-up
 lobstah dispatch --repo <key> --follow-up <id> --brief-text "<instruction>" --for <name>
@@ -59,9 +62,23 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   alone — the worker has no other context.
 - Addressed work is sticky: `--for <trap-name>` waits for that trap and never
   falls back to a headless worker. `man tend` lists live traps.
+- `trap reserve` shows the trap as `starting`; `--for <name>` works on it at
+  once. A person starts the session with the printed command, whose soak
+  redeems the ticket. Unredeemed past `--deadline` (default 180 seconds), a
+  `trap-start-failed` notice arrives and the work stays queued;
+  `lobstah stow --wt <name>` withdraws the reservation.
+- A `trap-request` event is a trap the human asked for from the glass. Run
+  `lobstah trap reserve --request <id>`, then start the session with the
+  printed command, trying these in order and stopping at the first that works
+  and is allowed: (1) a tool your harness gives for opening a terminal tab;
+  (2) from a CLI helm, a new Terminal.app or iTerm2 window or tab with
+  `osascript`, or `tmux new-window` when you run inside tmux; (3) leave it to
+  the human, who copies the command from the trap's card in the glass. Never
+  work around a refused permission.
 - `needs-decision` or `blocked` waits on the human: surface the question at
   once, then `lobstah send <id> "<answer>"`.
 - A question you do not answer walks to the human when your turn ends.
+- For a question only the human can answer, frame it with `lobstah man ask [<id>] --title "<question>" [--detail <file.md>] [--option "<label>"]...`: the glass shows it as a card the human answers in place, and it replaces the worker's raw question there. The answer wakes `man wait` as a `decision-answer` event with the request id, the option, text, and file paths; act on it, usually with `lobstah send <id> "<instruction>"`.
 - `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long. A paused headless dispatch is parked: its session ends and it holds no slot. A message (`lobstah send`) or its `--until` wakes it into the same session. When the PR it waits on merges, lobstah finishes it `done`; closed without merge, `failed`.
 - Before you wait on something external yourself, say what.
 For ume, push with its non-blocking form; Codex cannot run an await as a

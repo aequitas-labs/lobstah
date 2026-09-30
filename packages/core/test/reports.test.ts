@@ -19,6 +19,7 @@ import {
   reportDir,
   resolveReportFile,
 } from '../src/index.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 let src: string;
@@ -31,7 +32,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 const ID = 'aaaaaaaa-0000-4000-8000-000000000001';

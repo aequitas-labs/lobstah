@@ -5,26 +5,31 @@ import { html } from '../html.js';
 import type { Children } from '../html.js';
 import {
   Age,
+  NamedText,
+  WorkerAddress,
+  namedText,
   KIND_TONE,
-  Table,
   ageText,
   badgeLong,
   badgeTitle,
-  kindCell,
   kindLabel,
+  NewTrap,
   opener,
   prName,
   stackNumbers,
+  startCommands,
   trapNow,
   trapNowText,
   windowAction,
 } from './common.js';
 import { openReport, reportMeta } from './reports.js';
+import { DeckDecisions } from './decisions.js';
+import type { DecisionDraft } from '../store.js';
 
 /**
- * On deck: attention, in flight, landed in the last 24h, reports, traps,
+ * On deck: decisions (full-row cards), in flight, landed in the last 24h, reports, traps,
  * and open PR stacks. The dispatch, trap, and landed items follow the site-wide view;
- * attention is always a notices table; PRs have their own stack presentation.
+ * decisions are always full-row cards; PRs have their own stack presentation.
  */
 
 interface DeckItem {
@@ -36,40 +41,30 @@ interface DeckItem {
   metaText?: string;
   /** A control at the right end of the card's foot line, or the row's end. */
   action?: Children;
+  /** A block under the card or line: a starting trap's start commands. */
+  extra?: Children;
   open?: () => void;
   acked?: boolean;
 }
 
 type View = GlassPrefs['view'] | undefined;
 
-/** A note cut for one line, with an ellipsis when it was cut; the full text rides in the title. */
-const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n - 1) + '…' : s);
-
 function deckItem(it: DeckItem, view: View) {
   const badge =
     it.badge &&
     html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`;
   if (view === 'cards')
-    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
-  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}</div>`;
+    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
+  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
 }
 
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
 
-function deckBlock(title: string, items: DeckItem[], tab: string, max: number, view: View) {
+function deckBlock(title: string, items: DeckItem[], tab: string, max: number, view: View, headAction?: Children) {
   const shown = items.slice(0, max);
   const lines = shown.map((i) => deckItem(i, view));
   const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
-  return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${body}${more(items.length - shown.length, tab)}</section>`;
-}
-
-function deckNotices(list: DeckAttention[]) {
-  const shown = list.slice(0, 4);
-  const rows = shown.map(
-    (x) =>
-      html`<tr key=${x.kind + ':' + x.key} class=${'rowhead' + (x.acked ? ' acked' : '')} onClick=${opener('dispatch', x.lane + ':' + x.id)}><td>${kindCell(x)}</td><td class="grow">${x.note || x.verb}</td><td>${x.repo || ''}</td><td>${Age(x.at)}</td></tr>`,
-  );
-  return html`<section><h2><a href="#notices">attention →</a></h2>${Table(['kind', 'note', 'repo', 'age'], rows, 'none')}${more(list.length - shown.length, 'notices')}</section>`;
+  return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${headAction && html`<div class="tabhead">${headAction}</div>`}${body}${more(items.length - shown.length, tab)}</section>`;
 }
 
 function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, DeckAttention[]>, view: View) {
@@ -119,23 +114,39 @@ function deckPrs(inp: DeckInputs, view: View) {
   return html`<section><h2><a href="#prs">PRs →</a></h2>${body}${more(inp.stacks.length - shown.length, 'prs')}</section>`;
 }
 
-export function Deck({ inp }: { inp: DeckInputs }) {
+export function Deck({
+  inp,
+  drafts,
+  focus,
+  extensions,
+}: {
+  inp: DeckInputs;
+  drafts: Record<string, DecisionDraft>;
+  focus: string | null;
+  extensions: string[];
+}) {
   const view = inp.view;
   const flight = inp.inflight.map((x): DeckItem => ({
     key: x.lane + ':' + x.id,
     title: [x.id.slice(0, 8), ' ', x.repo || ''],
     badge: { text: x.verb, tone: x.verb === 'needs-decision' || x.verb === 'blocked' ? 'bad' : 'dim' },
     // No time at all (no log, no queue time): drop the fragment, not render "· ago".
-    meta: [clip(x.note || '', 90), x.verbAt && [' · ', Age(x.verbAt), ' ago'], (x.for || x.claimedBy) && ' · ' + (x.for || x.claimedBy)],
-    metaText: [x.note || '', x.verbAt && `${ageText(x.verbAt)} ago`, x.for || x.claimedBy].filter(Boolean).join(' · '),
+    meta: [
+      NamedText(x.note || '', 90),
+      x.verbAt && [' · ', Age(x.verbAt), ' ago'],
+      (x.for || x.claimedBy) && [' · ', WorkerAddress((x.for || x.claimedBy)!)],
+    ],
+    metaText: [namedText(x.note || ''), x.verbAt && `${ageText(x.verbAt)} ago`, namedText(x.for || x.claimedBy || '')]
+      .filter(Boolean)
+      .join(' · '),
     open: opener('dispatch', x.lane + ':' + x.id),
   }));
   const landed = inp.landed.map((x): DeckItem => ({
     key: x.key,
     title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
     badge: { text: x.verb, tone: x.verb === 'failed' ? 'bad' : 'ok' },
-    meta: [clip(x.note || '', 90), ' · ', Age(x.at), ' ago'],
-    metaText: `${x.note || ''} · ${ageText(x.at)} ago`,
+    meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
+    metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,
     open: opener('dispatch', x.lane + ':' + x.id),
   }));
   const reports = inp.reports.map((r): DeckItem => {
@@ -145,11 +156,16 @@ export function Deck({ inp }: { inp: DeckInputs }) {
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
     title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
-    badge: { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
+    badge: t.requested
+      ? { text: 'requested', tone: 'dim' }
+      : t.starting
+        ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
+        : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
     meta: [t.repo || '', ' · ', trapNow(t)],
     metaText: `${t.repo || ''} · ${trapNowText(t)}`,
     action: windowAction(t),
+    extra: startCommands(t),
     open: opener('trap', t.trapId),
   }));
-  return html`<div class="deckgrid">${deckNotices(inp.attention)}${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view)}${deckPrs(inp, view)}</div>`;
+  return html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} extensions=${extensions} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`;
 }

@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { ensureLayout, loadConfig, resolveGrounds, takeHelm } from '@lobstah/core';
 import { buildBriefContext } from '../src/brief.js';
 import { serveGlass } from '../src/glass.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -14,7 +15,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
   delete process.env.LOBSTAH_GLASS_PORT;
 });

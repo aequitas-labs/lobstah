@@ -9,6 +9,7 @@ import type { TendAttention } from '@lobstah/core';
 import { readAck } from '../src/acks.js';
 import { applyCull, planCull } from '../src/cull.js';
 import { buildTendReport } from '../src/tend.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -24,7 +25,7 @@ beforeEach(() => {
   fs.mkdirSync(src);
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

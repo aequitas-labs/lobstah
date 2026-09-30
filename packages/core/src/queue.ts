@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Descriptor, Lane } from './types.js';
-import { laneDirs } from './paths.js';
+import { laneDirs, readDirIfPresent } from './paths.js';
 import { appendStatus } from './status.js';
 
 function atomicWrite(file: string, content: string): void {
@@ -27,12 +27,24 @@ export function enqueue(d: Descriptor, lane: Lane = 'work'): void {
   atomicWrite(path.join(laneDirs(lane).queue, `${d.id}.json`), JSON.stringify(descriptor, null, 2));
 }
 
+/** A file's mtime, or undefined when it is gone (claimed or removed meanwhile). */
+function mtimeIfPresent(file: string): number | undefined {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw e;
+  }
+}
+
 export function pendingIds(lane: Lane): string[] {
   const dir = laneDirs(lane).queue;
-  return fs
-    .readdirSync(dir)
+  return readDirIfPresent(dir)
     .filter((f) => f.endsWith('.json'))
-    .map((f) => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .flatMap((f) => {
+      const m = mtimeIfPresent(path.join(dir, f));
+      return m === undefined ? [] : [{ f, m }];
+    })
     .sort((a, b) => a.m - b.m)
     .map(({ f }) => f.slice(0, -'.json'.length));
 }
@@ -131,7 +143,7 @@ export function storedDescriptor(id: string, lane: Lane): Descriptor | undefined
 }
 
 export function activeIds(lane: Lane): string[] {
-  return fs.readdirSync(laneDirs(lane).active).filter((f) => !f.startsWith('.'));
+  return readDirIfPresent(laneDirs(lane).active).filter((f) => !f.startsWith('.'));
 }
 
 export function complete(id: string, lane: Lane): void {

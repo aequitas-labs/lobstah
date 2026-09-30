@@ -6,6 +6,7 @@ import { activeIds, appendStatus, claimNext, enqueue, ensureLayout, GB, laneDirs
   readStatusLog, requestCancel, slotUsage } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 import { reconcileOne, tick } from '../src/daemon.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -15,7 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 function activeTrap(id: string, lane: Lane = 'work'): void {

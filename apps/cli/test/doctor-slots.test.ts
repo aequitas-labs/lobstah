@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { claimNext, enqueue, ensureLayout, laneDirs } from '@lobstah/core';
 import { runDoctor } from '../src/doctor.js';
 import { stampRepairerBeat } from '../src/pr-repair.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -15,7 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 it('adds slot usage to the existing daemon row without adding a new row', async () => {

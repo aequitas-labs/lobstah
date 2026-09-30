@@ -13,6 +13,7 @@ import { DEFAULT_MERGE_POLICY } from '../src/types.js';
 import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../src/types.js';
 import { readMergeView } from '../src/merge-view.js';
 import { cycle } from '../src/run.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -21,7 +22,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

@@ -8,6 +8,10 @@ import {
   laneDirs,
   listReleases,
   listReports,
+  listDecisions,
+  readDecisionAnswer,
+  removeAnsweredDecision,
+  decisionDir,
   listTraps,
   loadConfig,
   lobstahHome,
@@ -33,7 +37,7 @@ import type { FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
 
 export interface CullItem {
-  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report' | 'release';
+  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report' | 'decision' | 'release';
   id: string;
   target: string;
   ageDays: number;
@@ -184,6 +188,17 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     const filed = Date.parse(r.filedAt) || now;
     const dir = reportDir(r.key)!;
     if (filed < cutoff) items.push({ kind: 'report', id: r.key, target: dir, ageDays: Math.floor((now - filed) / DAY), bytes: size(dir), ageFrom: filed });
+  }
+
+  // A decision goes once it is answered and the answer is older than the
+  // window, with the request that carries the answer. A standing one never
+  // ages out.
+  for (const d of listDecisions()) {
+    const answer = readDecisionAnswer(d.key);
+    if (!answer) continue;
+    const at = Date.parse(answer.answeredAt) || now;
+    const dir = decisionDir(d.key)!;
+    if (at < cutoff) items.push({ kind: 'decision', id: d.key, target: dir, ageDays: Math.floor((now - at) / DAY), bytes: size(dir), ageFrom: at });
   }
 
   // Orphaned acks: the item is gone (dispatch culled — including by this
@@ -390,6 +405,7 @@ export function applyCull(items: CullItem[]): void {
   for (const item of items.filter((i) => i.kind === 'ack')) removeAck(item.target);
   for (const item of items.filter((i) => i.kind === 'pr')) removePr(item.target);
   for (const item of items.filter((i) => i.kind === 'report')) removeHelmReport(item.id);
+  for (const item of items.filter((i) => i.kind === 'decision')) removeAnsweredDecision(item.id);
   for (const item of items.filter((i) => i.kind === 'release')) removeRelease(item.id);
   for (const item of items.filter((i) => i.kind === 'state')) {
     const dir = path.dirname(item.target);

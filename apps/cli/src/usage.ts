@@ -109,6 +109,26 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--repo': { value: '<key>' },
       '--link': { value: '<url>' },
       '--name': { value: '<word-word>' },
+      '--ticket': { value: '<ticket>' },
+    },
+  },
+  trap: {
+    subverbs: ['reserve', 'requests'],
+    flags: {
+      '--repo': { value: '<key>' },
+      '--request': { value: '<id>' },
+      '--harness': { value: HARNESS },
+      '--name': { value: '<word-word>' },
+      '--deadline': { value: '<secs>' },
+      '--session': { value: '<id>' },
+    },
+    flagSubverbs: {
+      '--repo': ['reserve'],
+      '--request': ['reserve'],
+      '--harness': ['reserve'],
+      '--name': ['reserve'],
+      '--deadline': ['reserve'],
+      '--session': ['reserve'],
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--force': {}, '--quiet': {} } },
@@ -149,6 +169,22 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:file': {
     flags: { '--attach': { value: '<file>', repeatable: true }, '--title': { value: '<text>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } },
     positionals: '<file.md>',
+  },
+  'man:ask': {
+    flags: {
+      '--title': { value: '<question>' },
+      '--detail': { value: '<file.md>' },
+      '--option': { value: '<label>', repeatable: true },
+      '--attach': { value: '<file>', repeatable: true },
+      '--withdraw': { value: '<key>' },
+      '--grounds': { value: '<name>' },
+      '--session': { value: '<id>' },
+    },
+    positionals: '[<dispatch-id>]',
+  },
+  'man:answer': {
+    flags: { '--option': { value: '<label>' }, '--text': { value: '<text>' }, '--attach': { value: '<file>', repeatable: true } },
+    positionals: '<key>',
   },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
 };
@@ -209,18 +245,21 @@ installs the shipped PR check; with --for, a check that fails after the first
 \`report --pr\`, a trap's beat, and \`watch backfill --apply\` register; reads never do.
 \`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
   soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
-Primary checkout or --repo creates worktrees/soak-<trap> from trunk
-(branch lobstah/soak-<trap>, with setup): cd there. Sessions reuse traps.
---one stows after a catch; --name sets its name; --link sets a validated URL.
---wait listens; quiet exit 3 means re-run.
-\`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
-  stow: `Sign the trap off (in its worktree, or --wt/--session); an unfinished
-catch requeues, done/failed finalizes, unread messages bounce to the helm. Removes the worktree soak
-created unless --keep or it holds uncommitted changes, untracked files, or
-commits absent from its upstream, or no upstream (kept, with the reason).
---force discards unsaved checkout files; --keep still keeps it. Never removes a
-worktree soak did not create. Stowing another session's trap is steering:
-with a claimed helm, only the helm may (pass its --session).`,
+Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
+Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
+--wait listens (quiet exit 3: re-run). --ticket or LOBSTAH_TRAP_TICKET signs
+on as a reserved trap. Names the Terminal.app/iTerm2 tab. \`soak beat\`: hook.`,
+  trap: `\`trap reserve\` reserves a trap before its session starts: name, id, ticket,
+start command. dispatch --for works at once; soak --ticket <t> redeems it. Past
+--deadline (default 180s) trap-start-failed posts; work stays queued. stow --wt
+<name> withdraws it. --request <id> reserves what a glass request asks for and
+closes it; \`trap requests\` lists open requests.`,
+  stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
+finalizes; unread messages bounce. Removes only worktrees soak created, kept
+when dirty, untracked, unpushed to upstream, or without upstream (with reason).
+--force discards unsaved files; --keep keeps it. --wt withdraws reservations.
+Only a claimed helm may stow another session (pass its --session).
+Clears the tab name sign-on set.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
 writes + loads a launchd agent / systemd user unit; restart restarts it and
 waits for the new heartbeat (refused while dispatches are active, unless
@@ -274,6 +313,11 @@ work in flight requires a live watcher or the hook blocks with the arm command.
   'man:file': `File a markdown page as the helm's own report, under its grounds (reports/<grounds>/<rid>/).
 --attach copies images the page names by bare filename; --title overrides its first # heading.
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
+  'man:ask': `Put a decision to the human: a card in the glass (decisions/<rid>/) until
+answered or withdrawn. A newer ask on the same dispatch replaces it. The answer
+wakes man wait as decision-answer. Reserved for the claimed helm.`,
+  'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
+Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs

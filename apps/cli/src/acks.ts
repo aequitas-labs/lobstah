@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readReport, readWatch, statusStateHash } from '@lobstah/core';
+import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
 
 /**
@@ -123,6 +123,8 @@ export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string 
  */
 export function ackItemExists(key: string, culling: ReadonlySet<string> = new Set()): boolean {
   if (key.startsWith('watch:')) return readWatch(key.slice('watch:'.length)) !== undefined;
+  // An answered decision is no longer attention: its ack is orphaned.
+  if (key.startsWith('decision:')) return readDecision(key) !== undefined && readDecisionAnswer(key) === undefined;
   if (key.startsWith('report:')) {
     const r = readReport(key);
     return r !== undefined && !culling.has(key) && !(r.dispatch !== undefined && culling.has(r.dispatch));
