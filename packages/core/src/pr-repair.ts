@@ -145,13 +145,37 @@ export function conflictUpdate(base: string | undefined, branch: string | undefi
     : `This PR is stacked on its base branch ${b}. Fetch origin/${b} and rebase ${head} onto it, resolving the conflicts. Push with \`--force-with-lease=${head}:<the head you started from>\`.`;
 }
 
+/** A PR that had a review or an approval: a head change invalidates it. */
+export function prReviewed(pr: Pick<PrRecord, 'reviewDecision' | 'review'>): boolean {
+  return pr.reviewDecision === 'APPROVED' || pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.lastReviewAt !== undefined || pr.review?.changesRequested === true;
+}
+
+/**
+ * How a worker finishes after it changed the head of a reviewed PR: it
+ * re-requests review from the PR's current reviewers (named, or listed with
+ * gh), then parks on the review instead of reporting done.
+ */
+export function rerequestReview(pr: { url: string; number?: number; repo?: string }, id = '<dispatch id>', reviewers: readonly string[] = []): string {
+  const n = pr.number !== undefined ? String(pr.number) : pr.url;
+  const repo = pr.repo ? ` --repo ${pr.repo}` : '';
+  const who = reviewers.length
+    ? `its reviewers: \`gh pr edit ${n}${repo} --add-reviewer ${reviewers.join(',')}\``
+    : `its current reviewers: list them with \`gh pr view ${n}${repo} --json reviews,reviewRequests\`, then \`gh pr edit ${n}${repo} --add-reviewer <login>,<login>\``;
+  return (
+    `This PR had a review, and your push changes its head, which invalidates that review. After you push, re-request review from ${who}. ` +
+    `Then report \`lobstah report ${id} paused "<note>" --waiting-on review --link ${pr.url}\` instead of done.`
+  );
+}
+
 /** The repair prompt uses the PR's actual base branch, including stacked PRs. `trunk` tells a standalone PR from a stacked one. */
 export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?: string; checks?: readonly string[]; gates?: readonly string[]; trunk?: string } = {}): string {
   const opts = typeof arg === 'string' ? { id: arg } : arg;
   const intro = `Repair ${pr.url} on its existing branch ${pr.headRefName ?? '(see PR)'} at ${pr.headSha}. Do not open a new PR.`;
   const resolution = "For code already on main, take main's version. Keep only this PR's own changes. Never change behavior. If resolving a conflict would change code behavior, stop and report needs-decision.";
   const standalone = standalonePr(pr.baseRefName, opts.trunk);
-  const finish = (mode: 'rebase' | 'merge' = 'rebase') => `Run the relevant tests. ${pushRule(pr.headRefName, opts.id, mode)} Report done with the same PR URL.`;
+  // A reviewed PR's review goes stale at the new head: the worker asks again and parks.
+  const report = prReviewed(pr) ? rerequestReview(pr, opts.id) : 'Report done with the same PR URL.';
+  const finish = (mode: 'rebase' | 'merge' = 'rebase') => `Run the relevant tests. ${pushRule(pr.headRefName, opts.id, mode)} ${report}`;
   if (kind === 'conflict')
     return `${intro}\n${resolution} ${conflictUpdate(pr.baseRefName, pr.headRefName, standalone)} ${finish(standalone ? 'merge' : 'rebase')}`;
   if (kind === 'checks') {

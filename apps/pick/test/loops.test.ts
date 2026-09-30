@@ -659,6 +659,20 @@ describe('merge loop', () => {
     expect(rebaseBrief({ ...pr(), baseRef: 'feature/parent' }, 'x', 'main')).toContain('--force-with-lease');
   });
 
+  it("a reviewed PR's chore re-requests its reviewers and parks; an unreviewed one reports done", () => {
+    const reviewed = rebaseBrief(pr({ reviews: [
+      { id: 10, author: 'alice', state: 'APPROVED', sha: 'abc' },
+      { id: 11, author: 'bob', state: 'CHANGES_REQUESTED', sha: 'abc' },
+      { id: 12, author: 'alice', state: 'COMMENTED', sha: 'abc' },
+    ] }), 'c1', 'main');
+    expect(reviewed).toContain('gh pr edit 1 --add-reviewer alice,bob');
+    expect(reviewed).toContain('lobstah report c1 paused "<note>" --waiting-on review --link https://x/pr/1');
+    expect(reviewed).not.toContain('report status done');
+    const fresh = rebaseBrief(pr({ reviews: [] }), 'c2', 'main');
+    expect(fresh).toContain('When pushed, report status done.');
+    expect(fresh).not.toContain('re-request review');
+  });
+
   it("a rebase chore ends with the repo's rebase hook, then its all hook", async () => {
     fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/d"\n[repos.demo.briefHooks]\nrebase = "Run the rebase refresh."\nall = "Run /pr-refresh."\nchecks = "not this one"\n');
     const ms = new FakeMergeSource();

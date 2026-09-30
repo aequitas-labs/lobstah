@@ -53,3 +53,24 @@ describe('a conflict repair brings the PR up to date by the PR kind', () => {
     expect(standalonePr('main', undefined)).toBe(false);
   });
 });
+
+describe('a repair that changes the head of a reviewed PR', () => {
+  it('re-requests review from its current reviewers and parks on it, instead of done', () => {
+    for (const reviewed of [{ reviewDecision: 'APPROVED' }, { reviewDecision: 'CHANGES_REQUESTED' }, { review: { changesRequested: false, lastReviewAt: '2026-09-30T00:00:00Z' } }]) {
+      for (const kind of ['conflict', 'checks', 'review'] as const) {
+        const brief = repairBrief({ ...pr('main'), ...reviewed } as PrRecord, kind, { id: 'r1', trunk: 'main' });
+        expect(brief).toContain('re-request review from its current reviewers');
+        expect(brief).toContain('gh pr view 7 --repo acme/web --json reviews,reviewRequests');
+        expect(brief).toContain('gh pr edit 7 --repo acme/web --add-reviewer');
+        expect(brief).toContain('lobstah report r1 paused "<note>" --waiting-on review --link https://github.com/acme/web/pull/7');
+        expect(brief).not.toContain('Report done with the same PR URL.');
+      }
+    }
+  });
+
+  it('a PR with no review yet reports done as before', () => {
+    const brief = repairBrief(pr('main'), 'conflict', { id: 'r1', trunk: 'main' });
+    expect(brief).toContain('Report done with the same PR URL.');
+    expect(brief).not.toContain('re-request review');
+  });
+});
