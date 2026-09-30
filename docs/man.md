@@ -474,7 +474,7 @@ the helm files to keep.
   a link to open the original file. Escape, a click on the backdrop, or the
   close button closes it. The glass serves a dispatch's and a trap's
   attachment images read-only, by basename, from their own attachments
-  directories.
+  directories. Missing files, malformed names, and symlinks are not served.
 - **Attention.** A filed report with no ack stands as the `report` attention
   kind. Add `report` to `attentionKinds` to walk it. The desktop pet shows
   the report's title; a pet click opens the item and acks it through
@@ -524,8 +524,9 @@ frames the rest as decisions.
   worker's note and the same text box. PR kinds stay in the PRs section.
   `#decision/<key>` opens the deck at that card. Pasting with Cmd-V or
   Ctrl-V in the text box adds each image on the clipboard as an attachment
-  named `pasted-<time>.png`, with the same checks as a picked file; pasted
-  text stays text.
+  named `pasted-<time>.png` (the extension follows the image format), with
+  the same size, type, and count checks as a picked file; pasted text stays
+  text.
 - **The answer is a request.** An answer is a glass request of kind
   `decision-answer`, stored as `~/.lobstah/requests/<id>.json` with its
   files in `~/.lobstah/requests/<id>/`. The payload is the decision `key`,

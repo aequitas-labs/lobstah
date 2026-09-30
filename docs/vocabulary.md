@@ -463,6 +463,11 @@ verbs stay open. A stale helm reserves nothing.
 
 ## Attention contract
 
+An **image overlay** is the glass's in-page view of a decision, report, or
+dispatch or trap attachment image. It closes with Escape, its close button,
+or a click on its backdrop. Images pasted into a decision answer are
+attachments and use the same size, type, and count limits as picked files.
+
 **Attention** is what stands waiting for a human to look: `man tend`'s
 `attention` list, which the desktop pet and the glass walk across the
 screen. It is derived in one place (`apps/cli/src/tend.ts`) and nowhere

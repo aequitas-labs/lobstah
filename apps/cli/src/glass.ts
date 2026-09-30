@@ -398,16 +398,24 @@ export function serveAttachment(url: string, res: http.ServerResponse): boolean 
     : m[1]
       ? dispatchAttachmentsDir(id, m[1] as Lane)
       : trapAttachmentsDir(id);
-  const plain = name !== '' && name === path.basename(name) && name === path.win32.basename(name) && name !== '.' && name !== '..';
+  const plain = name !== '' && !name.includes('\0') && name === path.basename(name) && name === path.win32.basename(name) && name !== '.' && name !== '..';
   const file = dir && plain ? path.join(dir, name) : undefined;
   const type = file && REPORT_IMAGE_TYPES[path.extname(file).toLowerCase()];
-  if (!file || !type || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+  let data: Buffer | undefined;
+  try {
+    // A symlink is not an attachment image. Read before sending headers so
+    // a disappearing or unreadable file is a not-found response too.
+    if (file && type && fs.lstatSync(file, { throwIfNoEntry: false })?.isFile()) data = fs.readFileSync(file);
+  } catch {
+    // The attachments may be culled while the glass is open.
+  }
+  if (!data || !type) {
     res.writeHead(404, { ...headers, 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
     return true;
   }
   res.writeHead(200, { ...headers, 'content-type': type });
-  res.end(fs.readFileSync(file));
+  res.end(data);
   return true;
 }
 

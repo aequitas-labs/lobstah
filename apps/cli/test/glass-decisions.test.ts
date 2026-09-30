@@ -269,6 +269,17 @@ describe('glass: the image overlay', () => {
     expect(overlay(g)).toBeNull();
     expect(g.$('#overlay')!.className).toBe('open');
   });
+
+  it('opens a trap attachment in the same overlay without closing the trap modal', async () => {
+    const g = await page(everyAttentionFleet());
+    await g.go('#traps');
+    await click(g, g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1')));
+    await click(g, g.$('#modalbox button.thumb'));
+    expect(overlay(g)!.querySelector('img.lbimg')!.getAttribute('src')).toBe('/attachment/trap/t1/a.png');
+    await escape(g);
+    expect(overlay(g)).toBeNull();
+    expect(g.$('#overlay')!.className).toBe('open');
+  });
 });
 
 describe('glass: pasting into the answer box', () => {
@@ -314,5 +325,25 @@ describe('glass: pasting into the answer box', () => {
     await paste(g, Q, [image(g, [...PNG, ...new Array(2000).fill(0)])]);
     expect(card(g, Q)!.querySelectorAll('.dchip')).toHaveLength(0);
     expect(text(card(g, Q)!.querySelector('.derr'))).toMatch(/^pasted-.*\.png: larger than 1024 bytes$/);
+  });
+
+  it('multiple pasted images retain their format and obey the attachment count limit', async () => {
+    const d = fleet();
+    d.answerLimits = { maxBytes: 1024, maxFiles: 2, textMax: 20_000, extensions: ['.png', '.jpg'] };
+    const g = await page(d, { post: () => ({ status: 201, body: { ok: true, id: 'r1', key: Q } }) });
+    await paste(g, Q, [image(g, PNG), image(g, [0xff, 0xd8, 0xff], 'image/jpeg'), image(g, PNG)]);
+    expect(card(g, Q)!.querySelectorAll('.dchip')).toHaveLength(2);
+    expect(text(card(g, Q)!.querySelector('.derr'))).toContain('at most 2 files');
+    await click(g, card(g, Q)!.querySelector('.dsend'));
+    const body = JSON.parse(g.posts()[0]!.body) as { payload: { files: Array<{ name: string; data: string }> } };
+    expect(body.payload.files.map((f) => f.name)).toEqual([expect.stringMatching(/-1\.png$/), expect.stringMatching(/-2\.jpg$/)]);
+    expect(Buffer.from(body.payload.files[1]!.data, 'base64')).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+  });
+
+  it('refuses a pasted image type not allowed by the answer limits', async () => {
+    const g = await page(fleet());
+    await paste(g, KEY, [image(g, [0xff, 0xd8, 0xff], 'image/jpeg')]);
+    expect(card(g, KEY)!.querySelectorAll('.dchip')).toHaveLength(0);
+    expect(text(card(g, KEY)!.querySelector('.derr'))).toContain('.jpg: type not accepted');
   });
 });

@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import type { Server } from 'node:http';
+import type { Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
   appendStatus,
@@ -25,7 +25,7 @@ import {
 } from '@lobstah/core';
 import { buildTendReport } from '../src/tend.js';
 import { applyCull, planCull } from '../src/cull.js';
-import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
+import { buildGlassSnapshot, serveAttachment, serveGlass } from '../src/glass.js';
 
 /**
  * Decisions end to end: `man ask` stores one, a newer ask replaces it,
@@ -353,5 +353,24 @@ describe('the glass answer POST', () => {
     expect((await fetch(`${base}/decision/${encodeURIComponent(key)}/files/notes.txt`)).status).toBe(404);
     expect((await fetch(`${base}/decision/${encodeURIComponent(key)}/files/..%2Fdecision.json`)).status).toBe(404);
     expect((await fetch(`${base}/decision/${encodeURIComponent(key)}/md`)).status).toBe(404);
+  });
+
+  it('refuses malformed attachment filenames without throwing', () => {
+    let status: number | undefined;
+    const res = {
+      writeHead: (code: number) => { status = code; },
+      end: () => {},
+    } as unknown as ServerResponse;
+    for (const name of ['bad%00.png', '%E0%A4%A', '..%5Csecret.png']) {
+      expect(() => serveAttachment(`/attachment/dispatch/work/${A}/${name}`, res)).not.toThrow();
+      expect(status).toBe(404);
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')('does not serve a symlink to an image outside the attachments directory', async () => {
+    const dir = dispatchAttachmentsDir(A, 'work');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.symlinkSync(write('outside.png', PNG), path.join(dir, 'linked.png'));
+    expect((await fetch(`${base}/attachment/dispatch/work/${A}/linked.png`)).status).toBe(404);
   });
 });
