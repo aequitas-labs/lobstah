@@ -75,10 +75,9 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   `osascript`, or `tmux new-window` when you run inside tmux; (3) leave it to
   the human, who copies the command from the trap's card in the glass. Never
   work around a refused permission.
-- `needs-decision` or `blocked` waits on the human: surface the question at
-  once, then `lobstah send <id> "<answer>"`.
+- `needs-decision` or `blocked`: decide first. When the brief, the code, or your context gives the answer, and a reasonable lead would decide without asking, send it with `lobstah send <id> "<answer>"` and say what you decided in your next report. When you lack the context, or the choice is the human's (scope, product behavior, money, releases, merges, anything outward-facing or hard to undo), frame it with `lobstah man ask [<id>] --title "<question>" [--detail <file.md>] [--option "<label>"]...`. The detail gives the facts, the options, and your pick. Your own questions follow the same rule, with no `<id>`. You may mention a question briefly in chat; the card is where the human answers it.
+- The glass shows a `man ask` question as a card the human answers in place, and it replaces the worker's raw question there. The answer wakes `man wait` as a `decision-answer` event with the request id, the option, text, and file paths; act on it, usually with `lobstah send <id> "<instruction>"`.
 - A question you do not answer walks to the human when your turn ends.
-- For a question only the human can answer, frame it with `lobstah man ask [<id>] --title "<question>" [--detail <file.md>] [--option "<label>"]...`: the glass shows it as a card the human answers in place, and it replaces the worker's raw question there. The answer wakes `man wait` as a `decision-answer` event with the request id, the option, text, and file paths; act on it, usually with `lobstah send <id> "<instruction>"`.
 - `paused --waiting-on <kind> --link <url>` waits outside lobstah (a review, a deploy): a state, not a question. Nothing to answer; tend shows what and how long. A paused headless dispatch is parked: its session ends and it holds no slot. A message (`lobstah send`) or its `--until` wakes it into the same session. When the PR it waits on merges, lobstah finishes it `done`; closed without merge, `failed`.
 - Before you wait on something external yourself, say what.
 For ume, push with its non-blocking form; Codex cannot run an await as a
