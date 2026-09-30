@@ -11,7 +11,9 @@ import {
   attachmentRows,
   cmdRow,
   detailBody,
-  logText,
+  LogLines,
+  TrapName,
+  namedText,
   prCell,
   prChecks,
   prLink,
@@ -127,8 +129,9 @@ function dispatchModal(x: GlassDispatch, report: GlassReport | undefined, text: 
     x.claimedBy && x.claimedBy.startsWith('wt:')
       ? [
           html`<div class="sec">worked by trap</div>`,
-          cmdRow(x.claimedBy),
-          html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead: lobstah send ${x.claimedBy} "…"</div>`,
+          html`<div>claimed by ${TrapName(x.claimedBy.slice('wt:'.length))}</div>`,
+          cmdRow(`lobstah send ${namedText(x.claimedBy)} "…"`),
+          html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead.</div>`,
         ]
       : [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
   return [
@@ -174,7 +177,7 @@ function trapModal(t: GlassTrap) {
   const catches = t.catches.length
     ? t.catches.map(
         (c) =>
-          html`<div key=${c.lane + ':' + c.id} class="catch"><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prCell(c)}</div><div class="loglines">${logText(c)}</div></div>`,
+          html`<div key=${c.lane + ':' + c.id} class="catch"><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prCell(c)}</div><div class="loglines">${LogLines(c)}</div></div>`,
       )
     : html`<div class="empty">none yet</div>`;
   return [

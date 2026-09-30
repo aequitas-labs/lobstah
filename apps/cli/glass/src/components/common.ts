@@ -102,9 +102,76 @@ export const cmdRow = (text: string, key?: string) => html`<${CmdRow} key=${key}
 export const attachmentRows = (items: readonly Attachment[]) =>
   items.map((a) => [html`<div class="sub">${a.name} · ${a.type} · ${a.bytes} bytes</div>`, cmdRow(a.path)]);
 
-/** A dispatch's status log, one line per entry. */
+/** A `wt:<id>` address in free text. */
+const TRAP_ADDRESS = /\bwt:([a-z0-9][a-z0-9-]*)/g;
+
+/** The trap's name from the snapshot (the live registration's, else the name registry's), if known. */
+const knownTrapName = (trapId: string): string | undefined => getState().snapshot?.trapNames?.[trapId];
+
+/** Text with each `wt:<id>` shown by the trap's name; `wt:<id>` stays where no name is known. */
+export const namedText = (text: string): string =>
+  text.replace(TRAP_ADDRESS, (whole: string, id: string, at: number) => {
+    const name = knownTrapName(id);
+    return name && !labelled(text, at, whole.length, name) ? name : whole;
+  });
+
+/** The address at `at` already sits in its label, `<name> (wt:<id>)`: the name is shown. */
+const labelled = (text: string, at: number, length: number, name: string): boolean =>
+  text.slice(Math.max(0, at - name.length - 2), at) === `${name} (` && text[at + length] === ')';
+
+/** A trap shown by name, its full `wt:<id>` in the title. A click opens the trap's modal. */
+export function TrapName(trapId: string): Children {
+  const address = 'wt:' + trapId;
+  const name = knownTrapName(trapId) ?? address;
+  if (!getState().snapshot?.traps.some((t) => t.trapId === trapId)) return html`<span class="trapname" title=${address}>${name}</span>`;
+  const open = (e: Event) => {
+    e.preventDefault();
+    stop(e);
+    showModal('trap', trapId);
+  };
+  return html`<a class="trapname" href="#traps" title=${address} onClick=${open}>${name}</a>`;
+}
+
+/** A worker address: a `wt:<id>` shows as TrapName; any other address shows as it is. */
+export const WorkerAddress = (address: string): Children => {
+  const m = /^wt:([a-z0-9][a-z0-9-]*)$/.exec(address);
+  return m ? TrapName(m[1]!) : address;
+};
+
+/**
+ * Free text with each `wt:<id>` shown as TrapName. Past `max` shown
+ * characters it is cut with an ellipsis, counting names as shown.
+ */
+export function NamedText(text: string, max = Infinity): Children[] {
+  const parts: Array<{ text: string; trapId?: string }> = [];
+  let last = 0;
+  for (const m of text.matchAll(TRAP_ADDRESS)) {
+    if (m.index! > last) parts.push({ text: text.slice(last, m.index) });
+    const name = knownTrapName(m[1]!);
+    parts.push(name && labelled(text, m.index!, m[0].length, name) ? { text: m[0] } : { text: name ?? m[0], trapId: m[1] });
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) parts.push({ text: text.slice(last) });
+  const total = parts.reduce((n, p) => n + p.text.length, 0);
+  let budget = total > max ? max - 1 : Infinity;
+  const out: Children[] = [];
+  for (const p of parts) {
+    if (budget <= 0) break;
+    if (p.text.length <= budget) out.push(p.trapId ? TrapName(p.trapId) : p.text);
+    else out.push(p.text.slice(0, budget));
+    budget -= p.text.length;
+  }
+  if (total > max) out.push('…');
+  return out;
+}
+
+/** A dispatch's status log, one line per entry, each trap shown by name. */
 export const logText = (x: Pick<GlassDispatch, 'log'>): string =>
-  x.log.map((e) => e.at + '  ' + e.verb + (e.note ? '  ' + e.note : '')).join('\n');
+  x.log.map((e) => e.at + '  ' + e.verb + (e.note ? '  ' + namedText(e.note) : '')).join('\n');
+
+/** The status log as nodes: logText, with each trap's name opening its modal. */
+export const LogLines = (x: Pick<GlassDispatch, 'log'>): Children[] =>
+  x.log.flatMap((e, i) => [i ? '\n' : '', e.at + '  ' + e.verb, ...(e.note ? ['  ', ...NamedText(e.note)] : [])]);
 
 export function detailBody(x: GlassDispatch) {
   const progress = [
@@ -126,7 +193,7 @@ export function detailBody(x: GlassDispatch) {
       attachmentRows(x.messageAttachments),
     ]
   }${x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${x.followUp}</pre>`]}<div class="sec">log</div><div class="loglines">${
-    x.log.length ? logText(x) : 'no entries yet'
+    x.log.length ? LogLines(x) : 'no entries yet'
   }</div>${x.inbox.length > 0 && [html`<div class="sec">inbox</div>`, html`<div class="loglines">${x.inbox.join('\n---\n')}</div>`]}${
     x.awaitingReply && [
       html`<div class="sec">awaiting reply</div>`,
@@ -138,12 +205,12 @@ export function detailBody(x: GlassDispatch) {
 export function addrCell(x: GlassDispatch) {
   if (x.for)
     return [
-      x.for,
+      WorkerAddress(x.for),
       x.evidence && x.evidence.deliveredTo
         ? [' ', html`<span class="ok">✓delivered</span>`]
         : [' ', html`<span class="warn">waiting</span>`],
     ];
-  return x.claimedBy ? x.claimedBy : '';
+  return x.claimedBy ? WorkerAddress(x.claimedBy) : '';
 }
 
 export function prCell(x: GlassDispatch) {
