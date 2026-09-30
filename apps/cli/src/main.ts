@@ -348,7 +348,7 @@ soaking (interactive sessions volunteering as workers):
                                   sessions without Stop hooks): work prints
                                   plain, a quiet timeout exits 3 — re-run it.
                                   prints this session's trap title.
-  stow [--wt <trap>|--session <id>] [--keep] [--quiet]
+  stow [--wt <trap>|--session <id>] [--keep|--force] [--quiet]
                                   sign the trap off; an unfinished
                                   assignment requeues, unread messages
                                   bounce to the helm. Removes a worktree
@@ -2125,6 +2125,7 @@ async function mainCli(): Promise<void> {
           const removal = await removeIfSafe(wtDir, {
             ignore: [TRAP_ANCHOR_FILE],
             branches: anchor?.branch ? [anchor.branch] : [],
+            force: has('--force'),
           });
           worktreeOut = removal.removed
             ? {

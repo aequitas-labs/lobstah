@@ -10,6 +10,7 @@ import {
   dispatchWorktree,
   laneOf,
   listTraps,
+  inspectTrapWorktree,
   storedDescriptor,
   worktreeGitDir,
   worktreeHolder,
@@ -362,7 +363,8 @@ async function uniqueCommits(cwd: string, ref: string, exclude?: string): Promis
 /**
  * Remove a worktree only when it holds no work that exists nowhere else: no
  * uncommitted changes, no untracked files that are not ignored, and no
- * commit that is on no remote branch. Never forces. Paths in `ignore`
+ * commit that its upstream lacks (or a branch without an upstream).
+ * Only an explicit `force` bypasses these checks. Paths in `ignore`
  * (relative to the worktree root, e.g. lobstah's own anchor file) do not
  * count as untracked work; they are deleted before the removal and put back
  * when it fails.
@@ -373,7 +375,7 @@ async function uniqueCommits(cwd: string, ref: string, exclude?: string): Promis
  * it has no commit that is not on its upstream (without an upstream: on any
  * remote branch), and kept otherwise.
  */
-export async function removeIfSafe(dir: string, opts: { ignore?: string[]; branches?: string[] } = {}): Promise<SafeRemoval> {
+export async function removeIfSafe(dir: string, opts: { ignore?: string[]; branches?: string[]; force?: boolean } = {}): Promise<SafeRemoval> {
   if (!fs.existsSync(dir)) return { removed: false, reason: 'the worktree is already gone' };
   const common = await tryGit(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir');
   if (!common.ok || !common.out) return { removed: false, reason: 'not a readable git checkout' };
@@ -388,16 +390,20 @@ export async function removeIfSafe(dir: string, opts: { ignore?: string[]; branc
   const changed = lines.filter((l) => !l.startsWith('?? '));
   const strayUntracked = untracked.filter((p) => !ignore.has(p));
   const list = (paths: string[]) => paths.slice(0, 3).join(', ') + (paths.length > 3 ? `, and ${paths.length - 3} more` : '');
-  if (changed.length > 0) {
+  if (!opts.force && changed.length > 0) {
     const paths = changed.map((l) => l.slice(3));
     return { removed: false, reason: `uncommitted changes in ${changed.length} file(s): ${list(paths)}`, primary };
   }
-  if (strayUntracked.length > 0) {
+  if (!opts.force && strayUntracked.length > 0) {
     return { removed: false, reason: `${strayUntracked.length} untracked file(s) that are not ignored: ${list(strayUntracked)}`, primary };
   }
   const unpushed = await uniqueCommits(dir, 'HEAD');
-  if (unpushed === undefined) return { removed: false, reason: 'cannot tell which commits are on a remote', primary };
-  if (unpushed > 0) return { removed: false, reason: `${unpushed} commit(s) on no remote branch`, primary };
+  if (!opts.force && unpushed === undefined) return { removed: false, reason: 'cannot tell which commits are on a remote', primary };
+  if (!opts.force && unpushed! > 0) return { removed: false, reason: `${unpushed} commit(s) on no remote branch`, primary };
+  if (!opts.force) {
+    const safety = inspectTrapWorktree(dir);
+    if (safety.reason) return { removed: false, reason: safety.reason, primary };
+  }
 
   const head = await tryGit(dir, 'symbolic-ref', '--short', '-q', 'HEAD');
   const branches = [...new Set([...(head.ok && head.out ? [head.out] : []), ...(opts.branches ?? [])])];
@@ -425,7 +431,7 @@ export async function removeIfSafe(dir: string, opts: { ignore?: string[]; branc
   };
   const rel = path.relative(real(dir), real(process.cwd()));
   if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) process.chdir(primary);
-  const removed = await tryGit(primary, '--git-dir', commonDir, 'worktree', 'remove', dir);
+  const removed = await tryGit(primary, '--git-dir', commonDir, 'worktree', 'remove', ...(opts.force ? ['--force'] : []), dir);
   if (!removed.ok) {
     if (fs.existsSync(dir)) for (const [file, content] of saved) fs.writeFileSync(file, content);
     return { removed: false, reason: `git worktree remove refused: ${removed.err}`, primary };

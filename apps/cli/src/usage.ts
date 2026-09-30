@@ -111,7 +111,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--name': { value: '<word-word>' },
     },
   },
-  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
+  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--force': {}, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
   doctor: { flags: {} },
@@ -214,10 +214,11 @@ Primary checkout or --repo creates worktrees/soak-<trap> from trunk
 --one stows after a catch; --name sets its name; --link sets a validated URL.
 --wait listens; quiet exit 3 means re-run.
 \`soak beat\`: the post-tool hook (trap liveness, catch activity; exits 0).`,
-  stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
-requeues, unread messages bounce to the helm. Removes the worktree soak
+  stow: `Sign the trap off (in its worktree, or --wt/--session); an unfinished
+catch requeues, done/failed finalizes, unread messages bounce to the helm. Removes the worktree soak
 created unless --keep or it holds uncommitted changes, untracked files, or
-commits on no remote branch (kept, with the reason). Never removes a
+commits absent from its upstream, or no upstream (kept, with the reason).
+--force discards unsaved checkout files; --keep still keeps it. Never removes a
 worktree soak did not create. Stowing another session's trap is steering:
 with a claimed helm, only the helm may (pass its --session).`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install

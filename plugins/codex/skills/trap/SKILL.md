@@ -95,14 +95,19 @@ naming a dispatch id. Then:
 
 ## Signing off
 
-`lobstah stow` signs the trap off. An unfinished catch requeues; unread
+`lobstah stow` signs the trap off. An unfinished catch requeues; a catch
+whose last report is done or failed finalizes in done/ instead. Unread
 messages bounce back to the helm.
 
 - When soak created the worktree, stow removes it and prints `returnTo:`.
   Run `cd` to that path and work from there.
 - Stow keeps the worktree, and prints the reason, when it holds uncommitted
-  changes, untracked files that are not ignored, or commits on no remote
-  branch. `stow --keep` always keeps it.
+  changes, untracked files that are not ignored, commits absent from its
+  upstream, or no upstream. `stow --keep` always keeps it. `stow --force`
+  explicitly discards unsaved checkout files; use it only when instructed.
+- Ghost sweeping applies the same safety check without a force override.
+  Its notice names kept checkouts and their file/commit counts. The daemon
+  grants a full soak TTL after a long sleep before sweeping traps.
 - Stow never removes a worktree that soak did not create.
 - The plugin's SessionEnd hook stows for you when the session ends. It keeps
   the worktree.

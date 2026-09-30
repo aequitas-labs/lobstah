@@ -484,21 +484,31 @@ function claimable(lane: Lane, skip?: (d: Descriptor) => boolean): boolean {
 }
 
 const daemonStartedAt = Date.now();
+// Keep the observation per grounds; a delayed tick starts a full resume grace.
+const tickTimes = new Map<string, { last: number; resumed?: number }>();
 
 export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {}): void {
   const cfg = loadConfig();
   ensureLayout();
+  const now = hooks.now?.() ?? Date.now();
+  const ttl = cfg.soak.ttlSecs * 1000;
+  const home = lobstahHome();
+  const timing = tickTimes.get(home);
+  const resumed = timing && now - timing.last > ttl ? now : timing?.resumed;
+  tickTimes.set(home, { last: now, resumed });
   writeHeartbeat(cfg);
   hooks.prWatches?.(hooks.now?.() ?? Date.now(), log);
 
-  for (const action of sweepGhostTraps(cfg.soak.ttlSecs * 1000, Date.now(), cfg.soak.pausedTtlSecs * 1000)) {
+  for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {
     const label = trapLabel({ trapId: action.trapId, name: trapNameForId(action.trapId) });
     log(
       action.defective
         ? `trap ${label} never parked — defective enlistment noticed to the helm`
         : `ghost trap ${label} swept` +
             (action.pauseExpired ? ' (pause expired)' : '') +
-            (action.requeued ? ` — work ${action.requeued} back in the queue` : ''),
+            (action.requeued ? ` — work ${action.requeued} back in the queue` : '') +
+            (action.finalized ? ` — work ${action.finalized} finalized` : '') +
+            (action.worktree ? ` — worktree ${action.worktree}` : ''),
     );
   }
   // Addressed bait is sticky — never the daemon's; orphans surface as helm

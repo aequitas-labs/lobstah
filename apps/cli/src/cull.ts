@@ -25,6 +25,9 @@ import {
   toonKV,
   toonTable,
   worktreesDir,
+  readTrapAnchor,
+  inspectTrapWorktree,
+  removeGhostWorktree,
 } from '@lobstah/core';
 import type { FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
@@ -138,6 +141,7 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     const doneAt = usage.newest.get(id) ?? doneMtimes.get(id);
     if (doneAt !== undefined && doneAt >= cutoff) continue; // recent catch — keep for attach/swap
     const p = path.join(wtRoot, id);
+    if (readTrapAnchor(p)?.createdBy === 'soak' && inspectTrapWorktree(p).reason) continue;
     const from = doneAt ?? fs.statSync(p).mtimeMs;
     items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: measure ? sizing.worktree(p) : 0, ageFrom: from });
   }
@@ -332,6 +336,7 @@ export function planPressureCull(now = Date.now()): CullItem[] {
   for (const id of idsIn(wtRoot)) {
     if (live.has(id)) continue;
     const p = path.join(wtRoot, id);
+    if (readTrapAnchor(p)?.createdBy === 'soak' && inspectTrapWorktree(p).reason) continue;
     const from = usage.newest.get(id) ?? doneMtimes.get(id) ?? fs.statSync(p).mtimeMs;
     items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: 0, ageFrom: from });
   }
@@ -343,6 +348,10 @@ export function planPressureCull(now = Date.now()): CullItem[] {
  * `git worktree remove` keeps the branch: a culled dispatch's commits stay.
  */
 export function removeWorktree(id: string, dir: string): void {
+  if (readTrapAnchor(dir)?.createdBy === 'soak') {
+    removeGhostWorktree(dir);
+    return; // Never fall through to force removal of a trap checkout.
+  }
   for (const lane of ['work', 'chore'] as Lane[]) {
     const descFile = path.join(laneDirs(lane).done, id, 'descriptor.json');
     try {

@@ -754,8 +754,9 @@ worktree's HEAD commit and branch in evidence.
 `stow` removes a worktree only when soak created it and nothing in it exists
 elsewhere. It keeps the worktree and prints `worktree: kept` and a `reason:`
 when soak did not create the worktree, or when the worktree has uncommitted
-changes, untracked files that are not ignored, or commits on no remote
-branch. Ignored files do not block removal. Stow never forces a removal.
+changes, untracked files that are not ignored, commits its upstream lacks,
+or no upstream. Ignored files do not block removal. `stow --force` explicitly
+allows removal of unsaved checkout files; `--keep` still keeps the checkout.
 Stow runs the removal from the primary checkout, so it works from inside
 the worktree. On removal it prints `worktree: removed`, `path:`, and
 `returnTo: <primary checkout>`, with a help line `cd <primary>`. It
@@ -764,6 +765,8 @@ upstream: on some remote branch);
 otherwise it prints `branchKept: <branch> (<reason>)`. A deleted branch
 prints as `branchDeleted:`. `stow --wt <id>` follows the same rules. The
 SessionEnd hook (`lobstah stow --quiet`) signs off and keeps the worktree.
+Releasing a claim whose last report is `done` or `failed` moves it to `done/`;
+only an unfinished catch requeues (a cancelled catch finalizes as failed).
 
 **Identity is the worktree.** Sign-on anchors a short trap id and two-word
 name in `.lobstah-trap` and prints both, such as `amber-gull (wt:c32a245d)`; the address
@@ -815,7 +818,15 @@ in place.
 
 Liveness has two failure shapes with two remedies: a registration that
 parked before and went quiet (no park, report, or beat) past `[soak].ttlSecs` is a **ghost trap** —
-swept, catch requeued, noticed, its worktree kept; one that **never parked** is a **defective
+swept and noticed. An unfinished catch requeues; a `done` or `failed` catch
+finalizes in `done/`, never becoming orphaned bait. A soak-created worktree
+is removed only when Git verifies a clean checkout with no commits absent
+from its upstream. Dirty, unpushed, no-upstream, or unreadable checkouts stay.
+The ghost notice includes the path, branch, modified-file count and
+unpushed-commit count (or `unknown` when inspection fails). Other worktrees
+stay in place. After the daemon's own tick gap exceeds `[soak].ttlSecs`,
+it grants a full TTL after resume before sweeping any traps, allowing
+sessions to renew their heartbeats. One that **never parked** is a **defective
 enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 `soak --wait`) and left standing so the address keeps protecting its work.
 Nobody is conscripted: only a worktree whose session ran `soak` ever
@@ -829,9 +840,9 @@ whose dispatch is finished or gone, stale state files, merged or closed PR
 records, and orphaned acks. It never touches queued or active work, and
 `git worktree remove` keeps each dispatch's branch. A worktree that soak
 created counts as in use while a trap registration anchors it. After that,
-the cull and the daemon's retention and free-space culls treat it like any
-other worktree that no dispatch owns: it ages out after
-`[limits].retentionDays`. A worktree that follow-ups
+the cull and the daemon's retention and free-space culls can remove it only
+when the same clean-and-pushed safety check passes; unsaved soak checkouts
+remain protected even without a registration. A worktree that follow-ups
 reused is one worktree shared by the chain: it stays while any dispatch in
 the chain is queued or active, and it ages from the newest dispatch that
 used it.

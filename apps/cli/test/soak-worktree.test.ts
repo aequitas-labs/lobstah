@@ -4,8 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ensureLayout, listTraps, queuedDescriptor, readEvidence, readTrap, readTrapAnchor, unhandledTrapMessages, type TrapRegistration } from '@lobstah/core';
-import { planCull, planPressureCull } from '../src/cull.js';
+import { ensureLayout, heartbeatTrap, listNotices, listTraps, queuedDescriptor, readEvidence, readTrap, readTrapAnchor, sweepGhostTraps, unhandledTrapMessages, type TrapRegistration } from '@lobstah/core';
+import { planCull, planPressureCull, removeWorktree } from '../src/cull.js';
 
 // End to end: soak and stow through the built CLI, against throwaway repos
 // with a bare origin. Every test has its own LOBSTAH_HOME.
@@ -247,6 +247,7 @@ describe('stow removes the worktree soak created', () => {
   processTest('a clean one is removed, with its branch; stow by session id from the primary checkout', () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
+    git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
     fs.mkdirSync(path.join(reg.worktree, 'build'));
     fs.writeFileSync(path.join(reg.worktree, 'build', 'out.js'), 'ignored output');
     const res = lobstah(primary, 'stow', '--session', SESSION);
@@ -274,6 +275,7 @@ describe('stow removes the worktree soak created', () => {
   processTest('run from inside the worktree it removes', () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
+    git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
     const res = lobstah(reg.worktree, 'stow');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toMatch(/^worktree: removed$/m);
@@ -307,7 +309,7 @@ describe('stow removes the worktree soak created', () => {
     }, /1 commit\(s\) on no remote branch/, true),
   );
 
-  processTest('keeps the branch when it has commits its upstream lacks', () => {
+  processTest('keeps the checkout when commits pushed elsewhere are absent from its upstream', () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
     const wt = reg.worktree;
@@ -319,10 +321,26 @@ describe('stow removes the worktree soak created', () => {
     git(wt, 'branch', '-q', '--set-upstream-to=origin/main');
     const res = lobstah(primary, 'stow', '--session', SESSION);
     expect(res.status, res.stderr).toBe(0);
-    expect(res.stdout).toMatch(/^worktree: removed$/m);
-    expect(kv(res.stdout, 'branchKept')).toMatch(/^feature \(1 commit\(s\) not on origin\/main\)/);
-    expect(kv(res.stdout, 'branchDeleted')).toBe(`lobstah/soak-${reg.trapId}`);
+    expect(res.stdout).toMatch(/^worktree: kept$/m);
+    expect(kv(res.stdout, 'reason')).toMatch(/1 unpushed commit/);
+    expect(fs.existsSync(wt)).toBe(true);
     expect(hasBranch('feature')).toBe(true);
+  });
+
+  processTest('keeps a clean branch without an upstream', kept(() => {}, /no upstream/, true));
+
+  processTest('--force explicitly removes unsaved files but keeps unique commits on the branch', () => {
+    expect(soak(primary).status).toBe(0);
+    const reg = only();
+    fs.writeFileSync(path.join(reg.worktree, 'f.txt'), 'committed');
+    git(reg.worktree, 'commit', '-qam', 'local work');
+    fs.writeFileSync(path.join(reg.worktree, 'notes.md'), 'unsaved');
+    const res = lobstah(primary, 'stow', '--session', SESSION, '--force');
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stdout).toMatch(/^worktree: removed$/m);
+    expect(fs.existsSync(reg.worktree)).toBe(false);
+    expect(hasBranch(`lobstah/soak-${reg.trapId}`)).toBe(true);
+    expect(kv(res.stdout, 'branchKept')).toContain('1 commit(s)');
   });
 
   processTest('leaves a worktree soak did not create, and says so', () => {
@@ -356,6 +374,7 @@ describe('stow removes the worktree soak created', () => {
   processTest("the helm's stow --wt follows the same rules, and --keep works there", () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
+    git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
     const keep = lobstah(outside, 'stow', '--wt', reg.trapId, '--keep', '--session', OTHER);
     expect(keep.status, keep.stderr).toBe(0);
     expect(keep.stdout).toMatch(/^worktree: kept$/m);
@@ -410,6 +429,7 @@ describe('cull and the auto-cull see soak-created worktrees', () => {
   processTest("a live trap's worktree is in use; once the trap is gone it ages out", () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
+    git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
     const old = new Date(Date.now() - 30 * 86_400_000);
     fs.utimesSync(reg.worktree, old, old);
     const id = `soak-${reg.trapId}`;
@@ -418,5 +438,61 @@ describe('cull and the auto-cull see soak-created worktrees', () => {
     fs.rmSync(path.join(home, 'soaking', `${reg.trapId}.json`));
     expect(planCull(14, Date.now(), { measure: false }).some((i) => i.kind === 'worktree' && i.id === id)).toBe(true);
     expect(planPressureCull().some((i) => i.id === id)).toBe(true);
+  });
+
+  for (const kind of ['dirty', 'unpushed', 'no-upstream', 'clean', 'unreadable', 'detached'] as const) {
+    processTest(`ghost sweep ${kind === 'clean' ? 'removes' : 'preserves'} a ${kind} soak checkout`, () => {
+      expect(soak(primary).status).toBe(0);
+      const reg = only();
+      if (kind !== 'no-upstream') git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
+      if (kind === 'dirty') fs.writeFileSync(path.join(reg.worktree, 'f.txt'), 'unsaved');
+      if (kind === 'unpushed') {
+        fs.writeFileSync(path.join(reg.worktree, 'f.txt'), 'local');
+        git(reg.worktree, 'commit', '-qam', 'local work');
+        // A commit existing on another remote branch is still unpushed to its upstream.
+        git(reg.worktree, 'push', '-q', 'origin', 'HEAD:elsewhere');
+      }
+      if (kind === 'clean') {
+        fs.writeFileSync(path.join(reg.worktree, 'f.txt'), 'pushed work');
+        git(reg.worktree, 'commit', '-qam', 'pushed work');
+        git(reg.worktree, 'push', '-qu', 'origin', 'HEAD');
+      }
+      if (kind === 'unreadable') fs.rmSync(path.join(reg.worktree, '.git'));
+      if (kind === 'detached') git(reg.worktree, 'switch', '-q', '--detach');
+      heartbeatTrap(reg.trapId, { parked: true });
+      const actions = sweepGhostTraps(1000, Date.now() + 60_000);
+      expect(actions).toEqual([{ trapId: reg.trapId, worktree: kind === 'clean' ? 'removed' : 'kept' }]);
+      expect(readTrap(reg.trapId)).toBeUndefined();
+      expect(fs.existsSync(reg.worktree)).toBe(kind !== 'clean');
+      expect(hasBranch(`lobstah/soak-${reg.trapId}`)).toBe(true);
+      const notice = listNotices().find((n) => n.kind === 'trap-ghosted')!;
+      expect(notice.text).toContain(reg.worktree);
+      const unknown = kind === 'unreadable' || kind === 'detached';
+      expect(notice.text).toContain(`branch ${unknown ? 'unknown' : `lobstah/soak-${reg.trapId}`}`);
+      expect(notice.text).toContain(`modified files ${unknown ? 'unknown' : kind === 'dirty' ? 1 : 0}`);
+      expect(notice.text).toContain(`unpushed commits ${unknown ? 'unknown' : kind === 'unpushed' ? 1 : 0}`);
+      if (kind !== 'clean') {
+        const id = `soak-${reg.trapId}`;
+        expect(planCull(0, Date.now(), { measure: false }).some((i) => i.id === id)).toBe(false);
+        expect(planPressureCull().some((i) => i.id === id)).toBe(false);
+        removeWorktree(id, reg.worktree);
+        expect(fs.existsSync(reg.worktree)).toBe(true);
+        expect(readTrapAnchor(reg.worktree)?.trapId).toBe(reg.trapId);
+      }
+    });
+  }
+
+  processTest('culling rechecks safety when files change after planning', () => {
+    expect(soak(primary).status).toBe(0);
+    const reg = only();
+    git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
+    fs.rmSync(path.join(home, 'soaking', `${reg.trapId}.json`));
+    const id = `soak-${reg.trapId}`;
+    expect(planPressureCull().some((i) => i.id === id)).toBe(true);
+    const file = path.join(reg.worktree, 'notes with spaces.md');
+    fs.writeFileSync(file, 'unsaved');
+    removeWorktree(id, reg.worktree);
+    expect(fs.readFileSync(file, 'utf8')).toBe('unsaved');
+    expect(readTrapAnchor(reg.worktree)?.trapId).toBe(reg.trapId);
   });
 });

@@ -15,6 +15,7 @@ import { attachmentBlock } from './attachments.js';
 import { toolSummary, toolTarget, writeActivity } from './activity.js';
 import { knownTrapNames, reserveTrapName, trapIdForName, trapNameForId } from './trap-names.js';
 import { laneOf } from './worktrees.js';
+import { removeGhostWorktree } from './worktree-safety.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -352,14 +353,20 @@ export function hasOpenCatch(reg: TrapRegistration): boolean {
 }
 
 /**
- * Let go of an open catch: a cancelled one finalizes as failed, anything
- * else goes back to the queue. Used by `stow` and the ghost sweep — the two
+ * Release a claim: terminal catches finalize, cancelled catches fail, and
+ * only unfinished catches go back to the queue. Used by `stow` and the ghost sweep — the two
  * paths where a claimant stops answering for its claim.
  */
 export function releaseCatch(reg: TrapRegistration): { requeued?: string; finalized?: string } {
-  if (!hasOpenCatch(reg)) return {};
-  const id = reg.claimed!;
-  const lane = laneOf(id)!;
+  const id = reg.claimed;
+  if (!id) return {};
+  const lane = laneOf(id);
+  if (!lane || !fs.existsSync(path.join(laneDirs(lane).active, id))) return {};
+  const last = readStatusLog(id, lane).at(-1)?.verb;
+  if (last && TERMINAL_VERBS.includes(last)) {
+    complete(id, lane);
+    return { finalized: id };
+  }
   fs.rmSync(path.join(laneDirs(lane).active, id, 'claim.json'), { force: true });
   if (cancelRequested(id, lane)) {
     appendStatus(id, lane, 'failed', 'cancelled by request; claimant gone, work preserved');
@@ -436,8 +443,10 @@ export function daemonSkip(traps: TrapRegistration[], deferMs: number, now = Dat
 
 export interface GhostSweepAction {
   trapId: string;
-  /** The abandoned catch's id — requeued, or finalized as failed when it was cancelled. */
+  /** The unfinished catch's id, returned to the queue. */
   requeued?: string;
+  finalized?: string;
+  worktree?: 'kept' | 'removed';
   /** True when the trap never once parked — defective enlistment, noticed not swept. */
   defective?: boolean;
   /** True when the catch was paused and the pause expired. */
@@ -453,7 +462,8 @@ export function pauseExpiry(entry: StatusEntry, pausedTtlMs: number): number {
 /**
  * Traps whose heartbeat went stale past the TTL. One that HAS parked before
  * is a ghost: its open catch is released and the registration removed (the
- * worktree anchor survives, so a re-signed session gets the same address).
+ * worktree is removed only when clean and pushed; kept anchors preserve
+ * the address on re-signing).
  * One that NEVER parked is a defective enlistment — it gets a helm notice
  * with the diagnosis instead of a silent sweep, and the registration stays
  * so the address keeps protecting its bait. A session mid-catch proves
@@ -497,19 +507,22 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
         if (now < pauseExpiry(last, pausedTtlMs)) continue;
         pauseExpired = true;
       }
-      const released = releaseCatch(reg);
-      actions.push({ trapId: reg.trapId, requeued: released.requeued ?? released.finalized, ...(pauseExpired ? { pauseExpired } : {}) });
-    } else {
-      actions.push({ trapId: reg.trapId });
     }
+    const released = releaseCatch(reg);
+    const removal = reg.createdWorktree && fs.existsSync(reg.worktree) ? removeGhostWorktree(reg.worktree) : undefined;
+    const catchNote = released.requeued ? ', catch requeued' : released.finalized ? ', catch finalized' : '';
+    const worktreeNote = removal
+      ? `; worktree ${removal.removed ? 'removed' : 'kept'}: ${reg.worktree}; branch ${removal.branch}; modified files ${removal.modifiedFiles ?? 'unknown'}; unpushed commits ${removal.unpushedCommits ?? 'unknown'}${removal.reason ? ` (${removal.reason})` : ''}`
+      : '; worktree kept; re-soaking restores the same address';
+    actions.push({ trapId: reg.trapId, ...released, ...(pauseExpired ? { pauseExpired } : {}), ...(removal ? { worktree: removal.removed ? 'removed' : 'kept' } : {}) });
     fs.rmSync(regPath(reg.trapId), { force: true });
     fs.rmSync(beatPath(reg.trapId), { force: true });
     fs.rmSync(prProbePath(reg.trapId), { force: true });
     postNotice({
       kind: 'trap-ghosted',
-      text: pauseExpired
-        ? `trap ${trapLabel(reg)} ghosted: its pause expired (paused on ${reg.claimed!.slice(0, 8)} past --until or [soak].pausedTtlSecs, and quiet since) — registration removed, catch requeued; re-soaking the worktree restores the same address`
-        : `trap ${trapLabel(reg)} ghosted (went quiet mid-watch) — registration removed; re-soaking the worktree restores the same address`,
+      text: (pauseExpired
+        ? `trap ${trapLabel(reg)} ghosted: its pause expired (paused on ${reg.claimed!.slice(0, 8)} past --until or [soak].pausedTtlSecs, and quiet since)`
+        : `trap ${trapLabel(reg)} ghosted (went quiet mid-watch)`) + ` — registration removed${catchNote}${worktreeNote}`,
       refId: reg.trapId,
       repo: reg.repo,
     });

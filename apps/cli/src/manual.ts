@@ -54,11 +54,12 @@ your working set:
                                                 (no catch lifecycle; arrives
                                                 at its next park; bounces
                                                 back to you if undeliverable)
-  lobstah stow --wt <name> [--keep]             sign a trap off; removes the
+  lobstah stow --wt <name> [--keep|--force]     sign a trap off; removes the
                                                 worktree soak created for it
                                                 unless --keep or it holds
                                                 unpushed work (kept, with the
-                                                reason)
+                                                reason); --force discards
+                                                unsaved checkout files
 
 getting woken instead of asking:
   lobstah man wait          wait for attention; when the Stop hook asks for
