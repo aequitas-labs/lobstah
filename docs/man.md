@@ -470,10 +470,11 @@ the helm files to keep.
   own attachments.
 - **Attention.** A filed report with no ack stands as the `report` attention
   kind. Add `report` to `attentionKinds` to walk it. The desktop pet shows
-  the report's title; a click opens the glass at the report and does not
-  ack it. `lobstah attention ack <key>` acks a report, whether or not
-  `report` is in `attentionKinds`. Nothing else acks it, and opening it in
-  the glass does not. A report filed by a follow-up dispatch acks the report
+  the report's title; a pet click opens the item and acks it through
+  `lobstah attention ack <key> --by pet`. The pet's Acknowledge menu entry
+  acks without opening, and `lobstah attention ack <key>` acks a report
+  whether or not `report` is in `attentionKinds`. Opening a report in the
+  glass does not ack it. A report filed by a follow-up dispatch acks the report
   of each dispatch before it in the chain.
 - **Cull.** `lobstah cull` removes a dispatch's report with the rest of its
   state. A helm report is culled when it is older than the retention window,
@@ -774,6 +775,15 @@ names are refused. The bare name, `wt:<name>`, and `wt:<id>` all address the
 same live trap in `dispatch --for`, `send`, and `stow --wt`. Unknown names
 list known names and never turn addressed bait into headless work. The id
 remains the key in dispatch and claim records.
+
+A dispatch shows its trap by name wherever it names the trap that claimed
+it, ran it, or is addressed to it, including notes such as
+`claimed by crisp-heron`. The name comes from the live registration, else
+from the name registry, so a signed-off trap keeps its name. A trap with no
+known name shows as `wt:<id>`. `lobstah status <id>` and `lobstah catch <id>`
+print `trap: crisp-heron (wt:68c5da5f)` and write notes the same way.
+`man tend`'s tables print the name alone. In the glass, the name carries
+`wt:<id>` as its hover text, and a click opens that trap's modal.
 
 The session id (from the plugin's session-start brief) lives inside the
 registration as the liveness principal. The harness (claude or codex) is

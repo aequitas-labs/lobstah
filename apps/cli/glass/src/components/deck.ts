@@ -5,6 +5,9 @@ import { html } from '../html.js';
 import type { Children } from '../html.js';
 import {
   Age,
+  NamedText,
+  WorkerAddress,
+  namedText,
   KIND_TONE,
   Table,
   ageText,
@@ -46,9 +49,6 @@ interface DeckItem {
 
 type View = GlassPrefs['view'] | undefined;
 
-/** A note cut for one line, with an ellipsis when it was cut; the full text rides in the title. */
-const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n - 1) + '…' : s);
-
 function deckItem(it: DeckItem, view: View) {
   const badge =
     it.badge &&
@@ -71,7 +71,7 @@ function deckNotices(list: DeckAttention[]) {
   const shown = list.slice(0, 4);
   const rows = shown.map(
     (x) =>
-      html`<tr key=${x.kind + ':' + x.key} class=${'rowhead' + (x.acked ? ' acked' : '')} onClick=${opener('dispatch', x.lane + ':' + x.id)}><td>${kindCell(x)}</td><td class="grow">${x.note || x.verb}</td><td>${x.repo || ''}</td><td>${Age(x.at)}</td></tr>`,
+      html`<tr key=${x.kind + ':' + x.key} class=${'rowhead' + (x.acked ? ' acked' : '')} onClick=${opener('dispatch', x.lane + ':' + x.id)}><td>${kindCell(x)}</td><td class="grow">${x.note ? NamedText(x.note) : x.verb}</td><td>${x.repo || ''}</td><td>${Age(x.at)}</td></tr>`,
   );
   return html`<section><h2><a href="#notices">attention →</a></h2>${Table(['kind', 'note', 'repo', 'age'], rows, 'none')}${more(list.length - shown.length, 'notices')}</section>`;
 }
@@ -130,16 +130,22 @@ export function Deck({ inp }: { inp: DeckInputs }) {
     title: [x.id.slice(0, 8), ' ', x.repo || ''],
     badge: { text: x.verb, tone: x.verb === 'needs-decision' || x.verb === 'blocked' ? 'bad' : 'dim' },
     // No time at all (no log, no queue time): drop the fragment, not render "· ago".
-    meta: [clip(x.note || '', 90), x.verbAt && [' · ', Age(x.verbAt), ' ago'], (x.for || x.claimedBy) && ' · ' + (x.for || x.claimedBy)],
-    metaText: [x.note || '', x.verbAt && `${ageText(x.verbAt)} ago`, x.for || x.claimedBy].filter(Boolean).join(' · '),
+    meta: [
+      NamedText(x.note || '', 90),
+      x.verbAt && [' · ', Age(x.verbAt), ' ago'],
+      (x.for || x.claimedBy) && [' · ', WorkerAddress((x.for || x.claimedBy)!)],
+    ],
+    metaText: [namedText(x.note || ''), x.verbAt && `${ageText(x.verbAt)} ago`, namedText(x.for || x.claimedBy || '')]
+      .filter(Boolean)
+      .join(' · '),
     open: opener('dispatch', x.lane + ':' + x.id),
   }));
   const landed = inp.landed.map((x): DeckItem => ({
     key: x.key,
     title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
     badge: { text: x.verb, tone: x.verb === 'failed' ? 'bad' : 'ok' },
-    meta: [clip(x.note || '', 90), ' · ', Age(x.at), ' ago'],
-    metaText: `${x.note || ''} · ${ageText(x.at)} ago`,
+    meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
+    metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,
     open: opener('dispatch', x.lane + ':' + x.id),
   }));
   const reports = inp.reports.map((r): DeckItem => {
