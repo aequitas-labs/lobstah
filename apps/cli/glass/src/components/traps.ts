@@ -1,7 +1,7 @@
 import type { GlassTrap } from '@lobstah/core';
 import type { SectionInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
-import { Table, mailCell, opener, trapNow, trapNowText, trapRow, windowAction } from './common.js';
+import { badgeLong, badgeTitle, mailCell, opener, Table, trapNow, trapNowText, trapRow, windowAction } from './common.js';
 
 /** The Traps tab: live seats and the history of signed-off ones. */
 
@@ -14,7 +14,7 @@ function card(t: GlassTrap) {
   const r = trapRow(t);
   const mail = mailCell(t);
   const meta = `${t.repo ?? (t.live ? 'addressed bait only' : 'history')}${t.sessionId ? ' · session ' + t.sessionId.slice(0, 8) : ''}`;
-  return html`<div key=${t.trapId} class=${'card' + (t.live ? '' : ' dim')} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 ${t.label ?? `wt:${t.trapId}`}</b><span class="badge">${t.harness ?? (t.live ? '' : 'signed off')}</span></div><div class="meta" title=${meta}>${meta}</div>${t.worktree && html`<div class="note" title=${t.worktree}>${t.worktree}</div>`}<div class="note" title=${trapNowText(t)}>${trapNow(t)}</div><div class="foot"><span>${r.listen}${t.live && [' · heartbeat ', r.hb]} · ${t.catches.length} catch${t.catches.length === 1 ? '' : 'es'}${mail && [' · ', mail]}</span><span class="footact">${windowAction(t)}</span></div></div>`;
+  return html`<div key=${t.trapId} class=${'card' + (t.live ? '' : ' dim')} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 ${t.label ?? `wt:${t.trapId}`}</b><span class=${'badge' + badgeLong(t.harness ?? (t.live ? '' : 'signed off'))} title=${badgeTitle(t.harness ?? (t.live ? '' : 'signed off'))}>${t.harness ?? (t.live ? '' : 'signed off')}</span></div><div class="meta" title=${meta}>${meta}</div>${t.worktree && html`<div class="note" title=${t.worktree}>${t.worktree}</div>`}<div class="note" title=${trapNowText(t)}>${trapNow(t)}</div><div class="foot"><span>${r.listen}${t.live && [' · heartbeat ', r.hb]} · ${t.catches.length} catch${t.catches.length === 1 ? '' : 'es'}${mail && [' · ', mail]}</span><span class="footact">${windowAction(t)}</span></div></div>`;
 }
 
 export function Traps({ inp }: { inp: SectionInputs['traps'] }) {

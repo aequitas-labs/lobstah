@@ -413,7 +413,7 @@ describe('glass page: PRs', () => {
       '#42': 'badge warn',
       '#43': 'badge pr-draft',
       '#50': 'badge pr-conflicts',
-      '#60': 'badge bad',
+      '#60': 'badge bad long',
       '#61': 'badge pr-behind',
       '#30': 'badge pr-merged',
     });

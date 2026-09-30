@@ -8,6 +8,7 @@ import {
   KIND_TONE,
   Table,
   ageText,
+  badgeLong,
   badgeTitle,
   kindCell,
   kindLabel,
@@ -46,7 +47,8 @@ const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n - 1)
 
 function deckItem(it: DeckItem, view: View) {
   const badge =
-    it.badge && html`<span class=${'badge ' + (it.badge.tone || 'dim')} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`;
+    it.badge &&
+    html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`;
   if (view === 'cards')
     return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
   return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}</div>`;
@@ -80,7 +82,7 @@ function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, Deck
       const acked = kinds.length > 0 && kinds.every((a) => a.acked);
       const badges = kinds.length
         ? kinds.map((a) => html`<span class=${'badge ' + (KIND_TONE[a.kind] || 'dim')}>${kindLabel(a.kind)}</span>`)
-        : html`<span class=${'badge ' + prBadgeClass(p.badge)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span>`;
+        : html`<span class=${'badge ' + prBadgeClass(p.badge) + badgeLong(p.badge.text)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span>`;
       const meta = `${p.repo} · ${p.badge.text}${acked ? ' · acked' : ''}`;
       return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta" title=${meta}>${meta}</div></div>`;
     };
