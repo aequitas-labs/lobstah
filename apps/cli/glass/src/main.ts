@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import { decisionFromHash } from '../../src/glass-diff.js';
-import { closeModal, loadOpenReport } from './actions.js';
+import { closeLightbox, closeModal, loadOpenReport } from './actions.js';
 import { App } from './components/app.js';
 import { startPolling } from './poll.js';
 import { loadLobHidden, loadPrefs } from './prefs.js';
@@ -25,6 +25,7 @@ initState({
   reportText: {},
   drafts: {},
   focusDecision: decisionFromHash(location.hash),
+  lightbox: null,
 });
 
 let paintedRoute: ReturnType<typeof currentRoute> | undefined;
@@ -67,6 +68,9 @@ onRoute((route) => {
   if (modal) loadOpenReport();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModal();
+  if (e.key !== 'Escape') return;
+  // The image overlay sits above a modal: Escape closes it first.
+  if (getState().lightbox) closeLightbox();
+  else closeModal();
 });
 startPolling();

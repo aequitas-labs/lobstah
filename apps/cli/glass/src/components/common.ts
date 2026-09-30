@@ -1,8 +1,8 @@
 import type { Attachment, GlassDispatch, GlassPr, GlassTrap, TendAttention } from '@lobstah/core';
 import { useState } from 'preact/hooks';
-import { prBadgeClass, watchState } from '../../../src/glass-diff.js';
+import { dispatchFileUrl, isImageName, prBadgeClass, watchState } from '../../../src/glass-diff.js';
 import type { ModalType } from '../../../src/glass-diff.js';
-import { copyText, openTrapWindow, showModal } from '../actions.js';
+import { copyText, openLightbox, openTrapWindow, showModal } from '../actions.js';
 import { getState } from '../store.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -99,8 +99,31 @@ function CmdRow({ text }: { text: string }) {
 }
 export const cmdRow = (text: string, key?: string) => html`<${CmdRow} key=${key} text=${text} />`;
 
-export const attachmentRows = (items: readonly Attachment[]) =>
-  items.map((a) => [html`<div class="sub">${a.name} · ${a.type} · ${a.bytes} bytes</div>`, cmdRow(a.path)]);
+/** A clickable image that opens in the in-page overlay. */
+export const ImageThumb = (src: string, name: string, cls = 'thumb') =>
+  html`<button
+    type="button"
+    class=${cls}
+    title=${'view ' + name}
+    onClick=${(e: Event) => {
+      stop(e);
+      openLightbox(src, name);
+    }}
+  >
+    <img src=${src} alt=${name} loading="lazy" />
+  </button>`;
+
+/**
+ * Attachment rows: name, type, size, and the path to copy. With `fileUrl`
+ * (where the glass serves this list's files), an image also shows a thumb
+ * that opens in the overlay.
+ */
+export const attachmentRows = (items: readonly Attachment[], fileUrl?: (name: string) => string) =>
+  items.map((a) => [
+    html`<div class="sub">${a.name} · ${a.type} · ${a.bytes} bytes</div>`,
+    fileUrl && isImageName(a.name) && ImageThumb(fileUrl(a.name), a.name),
+    cmdRow(a.path),
+  ]);
 
 /** A `wt:<id>` address in free text. */
 const TRAP_ADDRESS = /\bwt:([a-z0-9][a-z0-9-]*)/g;
@@ -182,11 +205,14 @@ export function detailBody(x: GlassDispatch) {
     .filter(Boolean)
     .join('\n');
   return html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}${progress && [html`<div class="sec">progress</div>`, html`<pre>${progress}</pre>`]}<div class="sec">brief</div><pre>${x.brief}</pre>${
-    x.attachments.length > 0 && [html`<div class="sec">attachments (${x.attachments.length})</div>`, attachmentRows(x.attachments)]
+    x.attachments.length > 0 && [
+      html`<div class="sec">attachments (${x.attachments.length})</div>`,
+      attachmentRows(x.attachments, (name) => dispatchFileUrl(x.lane, x.id, name)),
+    ]
   }${
     x.messageAttachments.length > 0 && [
       html`<div class="sec">message attachments (${x.messageAttachments.length})</div>`,
-      attachmentRows(x.messageAttachments),
+      attachmentRows(x.messageAttachments, (name) => dispatchFileUrl(x.lane, x.id, name)),
     ]
   }${x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${x.followUp}</pre>`]}<div class="sec">log</div><div class="loglines">${
     x.log.length ? LogLines(x) : 'no entries yet'

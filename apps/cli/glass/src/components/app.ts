@@ -8,6 +8,7 @@ import { Deck } from './deck.js';
 import { Dispatches } from './dispatches.js';
 import { Footer, Header } from './header.js';
 import { Lobs } from './lobs.js';
+import { LightboxView } from './lightbox.js';
 import { Modal } from './modals.js';
 import { Notices } from './notices.js';
 import { PRs } from './prs.js';
@@ -44,6 +45,7 @@ export function App({ state }: { state: GlassState }) {
     ),
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
+    html`<${LightboxView} box=${state.lightbox} />`,
     html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} snapshot=${d} modal=${state.modal} prefs=${state.prefs} reportText=${state.reportText} /></div></div>`,
   ];
 }

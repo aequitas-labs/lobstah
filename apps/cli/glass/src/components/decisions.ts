@@ -1,10 +1,10 @@
 import type { Attachment } from '@lobstah/core';
 import { decisionFileUrl } from '../../../src/glass-diff.js';
 import type { DecisionCard } from '../../../src/glass-diff.js';
-import { addFiles, removeFile, sendAnswer, setDraft, toggleOption } from '../actions.js';
+import { addFiles, pasteImages, removeFile, sendAnswer, setDraft, toggleOption } from '../actions.js';
 import { html } from '../html.js';
 import type { DecisionDraft } from '../store.js';
-import { Age, NamedText, opener } from './common.js';
+import { Age, ImageThumb, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
 
 /**
@@ -26,7 +26,7 @@ function attachments(key: string, list: Attachment[]) {
   if (!list.length) return null;
   return html`<div class="dfiles">${list.map((a) =>
     IMAGE.test(a.name)
-      ? html`<a key=${a.name} class="dimg" href=${decisionFileUrl(key, a.name)} target="_blank" rel="noopener"><img src=${decisionFileUrl(key, a.name)} alt=${a.name} loading="lazy" /></a>`
+      ? html`<span key=${a.name}>${ImageThumb(decisionFileUrl(key, a.name), a.name, 'dimg')}</span>`
       : html`<div key=${a.name} class="dfile"><span>${a.name}</span> <span class="dim">· ${a.type} · ${a.bytes} bytes · </span><code>${a.path}</code></div>`,
   )}</div>`;
 }
@@ -54,6 +54,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         grow(el);
         setDraft(key, { text: el.value, error: undefined });
       }}
+      onPaste=${(e: ClipboardEvent) => void pasteImages(key, e)}
     ></textarea>`,
     html`<div class="dfoot">
       <label class="btn dattach" title="attach images or files">attach<input type="file" multiple accept=${accept} disabled=${sending} onChange=${(

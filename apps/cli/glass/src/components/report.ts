@@ -4,7 +4,7 @@ import type { MdBlock, MdInline } from '../../../src/glass-markdown.js';
 import { reportFileUrl, reportFrom } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
-import { Age, attachmentRows, cmdRow } from './common.js';
+import { Age, ImageThumb, attachmentRows, cmdRow } from './common.js';
 
 /**
  * A report page: its markdown as elements. Text stays text (raw HTML shows
@@ -35,7 +35,7 @@ function inline(fileUrl: FileUrl, nodes: MdInline[]): Children {
       case 'img': {
         const name = bareImageName(n.src);
         return name
-          ? html`<img src=${fileUrl(name)} alt=${n.alt} loading="lazy" />`
+          ? ImageThumb(fileUrl(name), n.alt || name, 'mdimg')
           : html`<span class="dim">[image not shown: ${n.alt || n.src}]</span>`;
       }
     }
@@ -112,7 +112,10 @@ export function ReportSection({
     heading && html`<div class="sec">report · ${r.title}</div>`,
     html`<div class="sub">${reportByline(r)}</div>`,
     html`<${ReportPage} r=${r} text=${text} />`,
-    r.attachments.length > 0 && [html`<div class="sec">report attachments (${r.attachments.length})</div>`, attachmentRows(r.attachments)],
+    r.attachments.length > 0 && [
+      html`<div class="sec">report attachments (${r.attachments.length})</div>`,
+      attachmentRows(r.attachments, (name) => reportFileUrl(r.key, name)),
+    ],
     !r.acked && [html`<div class="sec">ack</div>`, cmdRow('lobstah attention ack ' + r.key)],
   ];
 }

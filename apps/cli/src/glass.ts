@@ -41,6 +41,8 @@ import {
   readReportMarkdown,
   resolveReportFile,
   resolveDecisionFile,
+  dispatchAttachmentsDir,
+  trapAttachmentsDir,
   DecisionError,
   ANSWER_EXTENSIONS,
   ANSWER_FILES_MAX,
@@ -369,6 +371,46 @@ function trapNamesShown(
   return out;
 }
 
+/**
+ * `/attachment/dispatch/<lane>/<id>/<name>` and `/attachment/trap/<id>/<name>`:
+ * an image from a dispatch's or a trap's own attachments directory, by
+ * basename. Nothing but an image in that directory is served.
+ */
+export function serveAttachment(url: string, res: http.ServerResponse): boolean {
+  if (!url.startsWith('/attachment/')) return false;
+  const m = /^\/attachment\/(?:dispatch\/(work|chore)\/([^/?#]+)|trap\/([^/?#]+))\/([^/?#]+)$/.exec(url.split('?')[0] ?? '');
+  const headers = { 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'no-store' };
+  if (!m) {
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain; charset=utf-8' });
+    res.end('not found');
+    return true;
+  }
+  let id: string, name: string;
+  try {
+    id = decodeURIComponent(m[2] ?? m[3]!);
+    name = decodeURIComponent(m[4]!);
+  } catch {
+    id = '';
+    name = '';
+  }
+  const dir = !/^[A-Za-z0-9-]{1,64}$/.test(id)
+    ? undefined
+    : m[1]
+      ? dispatchAttachmentsDir(id, m[1] as Lane)
+      : trapAttachmentsDir(id);
+  const plain = name !== '' && name === path.basename(name) && name === path.win32.basename(name) && name !== '.' && name !== '..';
+  const file = dir && plain ? path.join(dir, name) : undefined;
+  const type = file && REPORT_IMAGE_TYPES[path.extname(file).toLowerCase()];
+  if (!file || !type || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain; charset=utf-8' });
+    res.end('not found');
+    return true;
+  }
+  res.writeHead(200, { ...headers, 'content-type': type });
+  res.end(fs.readFileSync(file));
+  return true;
+}
+
 /** One disk pass, everything the page renders. Pure read. */
 export function buildGlassSnapshot(): GlassSnapshot {
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
@@ -652,6 +694,8 @@ export function serveGlass(
         res.end(fallbackIcon);
       }
     } else if ((req.url?.startsWith('/report/') || req.url?.startsWith('/decision/')) && req.method === 'GET' && serveReport(req.url, res)) {
+      return;
+    } else if (req.url?.startsWith('/attachment/') && req.method === 'GET' && serveAttachment(req.url, res)) {
       return;
     } else if (req.url === '/data') {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });

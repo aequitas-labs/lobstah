@@ -67,6 +67,31 @@ export async function addFiles(key: string, list: FileList | File[] | null): Pro
   setDraft(key, { files: [...(getState().drafts[key]?.files ?? []), ...added], error: errors.length ? errors.join('; ') : undefined });
 }
 
+const PASTE_EXT: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' };
+
+/**
+ * A paste into an answer box: each image on the clipboard becomes an
+ * attachment named `pasted-<time>.png` (the extension follows the image
+ * type), with the same checks as a picked file. Text pastes as text: the
+ * text box's own paste is never prevented.
+ */
+export async function pasteImages(key: string, e: ClipboardEvent): Promise<void> {
+  const items = [...(e.clipboardData?.items ?? [])];
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .replace(/-\d{3}Z$/, 'Z');
+  const images = items
+    .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+    .map((it) => it.getAsFile())
+    .filter((f): f is File => f !== null)
+    .map((f, i, all) => {
+      const name = `pasted-${stamp}${all.length > 1 ? `-${i + 1}` : ''}${PASTE_EXT[f.type] ?? '.png'}`;
+      return new File([f], name, { type: f.type });
+    });
+  if (images.length) await addFiles(key, images);
+}
+
 export function removeFile(key: string, index: number): void {
   const files = (getState().drafts[key]?.files ?? []).filter((_, i) => i !== index);
   setDraft(key, { files });
@@ -139,6 +164,10 @@ export function loadOpenReport(): void {
 }
 
 export const markStale = (): void => setState({ stale: true });
+
+/** Show an image in the in-page overlay. */
+export const openLightbox = (src: string, name: string): void => setState({ lightbox: { src, name } });
+export const closeLightbox = (): void => setState({ lightbox: null });
 
 export function showModal(type: ModalType, key: string): void {
   const { snapshot } = getState();

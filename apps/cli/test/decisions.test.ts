@@ -20,6 +20,8 @@ import {
   listRequests,
   requestsDir,
   unseenNotices,
+  dispatchAttachmentsDir,
+  trapAttachmentsDir,
 } from '@lobstah/core';
 import { buildTendReport } from '../src/tend.js';
 import { applyCull, planCull } from '../src/cull.js';
@@ -322,6 +324,25 @@ describe('the glass answer POST', () => {
     expect((await post(key, { option: 'no' })).status).toBe(409);
     expect(buildGlassSnapshot().decisions!.some((d) => d.key === key)).toBe(false);
     expect(answerWakes().map((n) => n.refId)).toEqual([body.id]);
+  });
+
+  it("serves a dispatch's and a trap's attachment images by bare name, and nothing else", async () => {
+    const dir = dispatchAttachmentsDir(A, 'work');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'shot.png'), PNG);
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'n');
+    fs.mkdirSync(trapAttachmentsDir('t1'), { recursive: true });
+    fs.writeFileSync(path.join(trapAttachmentsDir('t1'), 'pic.png'), PNG);
+    const ok = await fetch(`${base}/attachment/dispatch/work/${A}/shot.png`);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await ok.arrayBuffer())).toEqual(PNG);
+    expect((await fetch(`${base}/attachment/trap/t1/pic.png`)).status).toBe(200);
+    expect((await fetch(`${base}/attachment/dispatch/work/${A}/notes.txt`)).status).toBe(404);
+    expect((await fetch(`${base}/attachment/dispatch/work/${A}/missing.png`)).status).toBe(404);
+    expect((await fetch(`${base}/attachment/dispatch/work/${A}/..%2F..%2Fshot.png`)).status).toBe(404);
+    expect((await fetch(`${base}/attachment/dispatch/other/${A}/shot.png`)).status).toBe(404);
+    expect((await fetch(`${base}/attachment/trap/..%2Fwork/shot.png`)).status).toBe(404);
   });
 
   it('serves a decision image by bare name and nothing else', async () => {

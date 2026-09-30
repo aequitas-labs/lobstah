@@ -4,7 +4,7 @@ import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { lobItems } from '../src/glass-lobs.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
-import { NOW, ago, emptyFleet } from './fixtures/glass-snapshots.js';
+import { NOW, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
 
 /**
  * The deck's decisions: a full-row card per framed decision (title, detail
@@ -198,5 +198,121 @@ describe('glass: decision lobs', () => {
     });
     expect(lob).toMatchObject({ text: 'Cut 0.6.0?', label: '', hash: `#decision/${encodeURIComponent(KEY)}` });
     expect(lob!.href).toBeUndefined();
+  });
+});
+
+describe('glass: the image overlay', () => {
+  const overlay = (g: GlassDom) => g.$('#lightbox');
+  const escape = async (g: GlassDom) => {
+    g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
+    await g.settle();
+  };
+  const imgSrc = `/decision/${encodeURIComponent(KEY)}/files/tray.png`;
+
+  it('a decision image opens in the page, centered over a backdrop, with a link to the original; no new window', async () => {
+    const g = await page(fleet());
+    const c = card(g, KEY)!;
+    expect(c.querySelector('a[target="_blank"] img')).toBeNull();
+    expect(overlay(g)).toBeNull();
+    await click(g, c.querySelector('.dfiles .dimg'));
+    const box = overlay(g)!;
+    expect(box).toBeTruthy();
+    expect(box.querySelector('img.lbimg')!.getAttribute('src')).toBe(imgSrc);
+    const original = box.querySelector('a.lboriginal')!;
+    expect(original.getAttribute('href')).toBe(imgSrc);
+    expect(original.getAttribute('target')).toBe('_blank');
+    expect(box.querySelector('button.lbclose')).toBeTruthy();
+  });
+
+  it('closes on Escape, on a click on the backdrop, and on the close button, but not on a click on the image', async () => {
+    const g = await page(fleet());
+    const open = () => click(g, card(g, KEY)!.querySelector('.dfiles .dimg'));
+    await open();
+    await escape(g);
+    expect(overlay(g)).toBeNull();
+    await open();
+    await click(g, overlay(g)!.querySelector('img.lbimg'));
+    expect(overlay(g)).toBeTruthy();
+    await click(g, overlay(g));
+    expect(overlay(g)).toBeNull();
+    await open();
+    await click(g, overlay(g)!.querySelector('button.lbclose'));
+    expect(overlay(g)).toBeNull();
+    // The detail page's image opens the same overlay.
+    await click(g, card(g, KEY)!.querySelector('.mdpage .mdimg'));
+    expect(overlay(g)!.querySelector('img.lbimg')!.getAttribute('src')).toBe(imgSrc);
+  });
+
+  it("report pages and the dispatch modal's attachments use the same overlay; Escape closes it before the modal", async () => {
+    const reportKey = 'report:work:cccccccc-0000-4000-8000-000000000003';
+    const g = await page(everyAttentionFleet(), {
+      files: { [`/report/${encodeURIComponent(reportKey)}/md`]: '# Tray findings\n\n![the tray](tray.png)\n' },
+    });
+    await g.go('#dispatches');
+    await click(g, g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc')));
+    expect(g.$('#overlay')!.className).toBe('open');
+    // The report page's image.
+    await click(g, g.$('#modalbox .mdpage .mdimg'));
+    expect(overlay(g)!.querySelector('img')!.getAttribute('src')).toBe(`/report/${encodeURIComponent(reportKey)}/files/tray.png`);
+    await escape(g);
+    expect(overlay(g)).toBeNull();
+    expect(g.$('#overlay')!.className).toBe('open');
+    // The dispatch's own attachment.
+    const thumbs = g.$$('#modalbox button.thumb');
+    const shot = thumbs.find((b) => b.querySelector('img')!.getAttribute('src')!.endsWith('/shot.png'))!;
+    expect(shot.querySelector('img')!.getAttribute('src')).toBe('/attachment/dispatch/work/cccccccc-0000-4000-8000-000000000003/shot.png');
+    await click(g, shot);
+    expect(overlay(g)!.querySelector('img')!.getAttribute('src')).toBe('/attachment/dispatch/work/cccccccc-0000-4000-8000-000000000003/shot.png');
+    // The modal stays open under it.
+    expect(g.$('#overlay')!.className).toBe('open');
+    await escape(g);
+    expect(overlay(g)).toBeNull();
+    expect(g.$('#overlay')!.className).toBe('open');
+  });
+});
+
+describe('glass: pasting into the answer box', () => {
+  const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3];
+  type Item = { kind: string; type: string; getAsFile: () => File | null; getAsString?: (cb: (s: string) => void) => void };
+  const paste = async (g: GlassDom, key: string, items: Item[]) => {
+    const w = g.window as unknown as { Event: typeof Event };
+    const ev = new w.Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'clipboardData', { value: { items, types: items.map((i) => i.type) } });
+    card(g, key)!.querySelector('textarea')!.dispatchEvent(ev);
+    await g.settle();
+    return ev;
+  };
+  const image = (g: GlassDom, bytes: number[], type = 'image/png'): Item => {
+    const W = g.window as unknown as { File: typeof File };
+    return { kind: 'file', type, getAsFile: () => new W.File([new Uint8Array(bytes)], 'image.png', { type }) };
+  };
+  const textItem: Item = { kind: 'string', type: 'text/plain', getAsFile: () => null };
+
+  it('a pasted image becomes an attachment named pasted-<time>.png, listed with picked files, and is sent', async () => {
+    const d = fleet();
+    d.answerLimits = { maxBytes: 1024, maxFiles: 8, textMax: 20_000, extensions: ['.png', '.txt'] };
+    const g = await page(d, { post: () => ({ status: 201, body: { ok: true, id: 'r1', key: Q } }) });
+    const ev = await paste(g, Q, [image(g, PNG), textItem]);
+    // Text still pastes as text: the box's own paste is not prevented.
+    expect(ev.defaultPrevented).toBe(false);
+    const chips = card(g, Q)!.querySelectorAll('.dfoot .dchip');
+    expect(chips).toHaveLength(1);
+    const name = (chips[0]!.firstChild as Text).textContent!;
+    expect(name).toMatch(/^pasted-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.png$/);
+    await click(g, card(g, Q)!.querySelector('.dsend'));
+    const body = JSON.parse(g.posts()[0]!.body) as { payload: { files: Array<{ name: string; data: string }> } };
+    expect(body.payload.files).toHaveLength(1);
+    expect(body.payload.files[0]!.name).toBe(name);
+    expect(Buffer.from(body.payload.files[0]!.data, 'base64')).toEqual(Buffer.from(PNG));
+  });
+
+  it('a text-only paste adds nothing; an oversized image is refused with the same check as a picked file', async () => {
+    const g = await page(fleet());
+    await paste(g, Q, [textItem]);
+    expect(card(g, Q)!.querySelectorAll('.dchip')).toHaveLength(0);
+    expect(card(g, Q)!.querySelector('.derr')).toBeNull();
+    await paste(g, Q, [image(g, [...PNG, ...new Array(2000).fill(0)])]);
+    expect(card(g, Q)!.querySelectorAll('.dchip')).toHaveLength(0);
+    expect(text(card(g, Q)!.querySelector('.derr'))).toMatch(/^pasted-.*\.png: larger than 1024 bytes$/);
   });
 });

@@ -31,6 +31,14 @@ export interface GlassState {
   drafts: Record<string, DecisionDraft>;
   /** The card a `#decision/<key>` link points at. */
   focusDecision: string | null;
+  /** The image open in the in-page overlay, if any. */
+  lightbox: Lightbox | null;
+}
+
+/** An image shown over the page: where it loads from, and its name. */
+export interface Lightbox {
+  src: string;
+  name: string;
 }
 
 /** A file picked for an answer, read as base64 for the POST. */

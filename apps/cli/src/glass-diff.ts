@@ -127,6 +127,14 @@ export function decisionFromHash(hash: string | undefined | null): string | null
   }
 }
 
+/** Where a dispatch's and a trap's attachment images are served (glass.ts serveAttachment). */
+export const dispatchFileUrl = (lane: string, id: string, name: string): string =>
+  `/attachment/dispatch/${encodeURIComponent(lane)}/${encodeURIComponent(id)}/${encodeURIComponent(name)}`;
+export const trapFileUrl = (trapId: string, name: string): string => `/attachment/trap/${encodeURIComponent(trapId)}/${encodeURIComponent(name)}`;
+
+/** An attachment name the glass shows as an image. */
+export const isImageName = (name: string): boolean => /\.(png|jpe?g|gif|webp)$/i.test(name);
+
 /** Where a decision's images are served (glass.ts). */
 export const decisionFileUrl = (key: string, name: string): string => `/decision/${encodeURIComponent(key)}/files/${encodeURIComponent(name)}`;
 
