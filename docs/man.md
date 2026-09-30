@@ -657,8 +657,9 @@ before the worker reads it; `man tend` then shows the dispatch as
 A newer `needs-decision` from the worker stands again. Set `remindSecs = 0`
 for pure at-most-once.
 
-A send still waiting on its reply stands in the `man haul` block as
-`sent · <id> · <first line> · <age>`. It is listed once, then every
+A send still waiting on its reply is listed in the `man haul` block as
+`sent · <id> · <first line> · <age>`. Alone, it blocks a stop only when no
+watcher is live, beside the arm command. It is listed once, then every
 `remindSecs` until the worker's next note answers it. `man tend` shows it on
 the dispatch as `awaiting reply · <age>`, and the glass dispatch modal shows
 it under the inbox.

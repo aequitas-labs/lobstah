@@ -8,6 +8,7 @@ import {
   appendStatus, awaitingReply, claimNext, complete, ensureLayout, laneDirs, markListed, readExpectation, takeHelm,
 } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { armWatcher } from '../src/watchers.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -177,5 +178,43 @@ describe('man haul and an unanswered send', () => {
     const settled = haul();
     expect(settled.stdout).not.toContain('sent · ');
     expect(settled.stdout).not.toContain('reply ');
+  });
+
+  it('with a live watcher, a send alone lets the stop pass', () => {
+    live(A);
+    send(A, '--session', helmSession, 'start the dev server');
+    const watcher = armWatcher(helmSession, 'man');
+    try {
+      const res = haul();
+      expect(res.status).toBe(0);
+      expect(res.stdout).toBe('');
+    } finally {
+      watcher.stop();
+    }
+    // The send still stands for tend and the next block.
+    expect(readExpectation(A)).toBeDefined();
+  });
+
+  it('with a live watcher, a reply still blocks', () => {
+    live(A);
+    send(A, '--session', helmSession, 'start the dev server');
+    report(A, 'working', 'http://localhost:5173');
+    const watcher = armWatcher(helmSession, 'man');
+    try {
+      const res = haul();
+      expect(JSON.parse(res.stdout)).toMatchObject({ decision: 'block' });
+      expect(res.stdout).toContain(`reply ${A} (working)`);
+    } finally {
+      watcher.stop();
+    }
+  });
+
+  it('with no watcher, a send alone blocks with the arm command and lists the send', () => {
+    live(A);
+    send(A, '--session', helmSession, 'start the dev server');
+    const res = haul();
+    expect(JSON.parse(res.stdout)).toMatchObject({ decision: 'block' });
+    expect(res.stdout).toContain(`Arm the watcher: run \`lobstah man wait --session ${helmSession} --timeout 900\``);
+    expect(res.stdout).toMatch(new RegExp(`sent · ${A} · start the dev server · \\d+s`));
   });
 });

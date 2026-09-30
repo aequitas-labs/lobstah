@@ -33,6 +33,12 @@ export type NoticeKind =
   | 'worktree-released'
   | 'push-failed';
 
+/**
+ * Notices that never wake a helm on their own. `trap-listening` follows its
+ * trap's `trap-signed-on` within seconds and asks nothing of the helm.
+ */
+export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening'];
+
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */
   seq: string;
@@ -124,7 +130,8 @@ export function listNotices(limit = 20): Notice[] {
  * (per-grounds consumption — one helm never eats another's notices).
  * `wakes` narrows what is returned among the owned notices: an owned notice
  * it rejects (e.g. one older than the helm's sign-on) is consumed without
- * waking anyone.
+ * waking anyone. A quiet kind (QUIET_NOTICE_KINDS) is consumed the same way:
+ * it shows in tend and the glass, and it never wakes.
  */
 export function unseenNotices(
   consume: boolean,
@@ -153,5 +160,6 @@ export function unseenNotices(
       if (through > seen) fs.writeFileSync(cursorFile(), through);
     }
   }
-  return wakes ? owned.filter(wakes) : owned;
+  const waking = owned.filter((n) => !QUIET_NOTICE_KINDS.includes(n.kind));
+  return wakes ? waking.filter(wakes) : waking;
 }
