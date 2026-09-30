@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { setImmediate as yieldToWorker } from 'node:timers/promises';
 import { ensureLayout, heartbeatTrap, listNotices, listTraps, queuedDescriptor, readEvidence, readTrap, readTrapAnchor, sweepGhostTraps, unhandledTrapMessages, type TrapRegistration } from '@lobstah/core';
 import { planCull, planPressureCull, removeWorktree } from '../src/cull.js';
 
@@ -56,7 +57,10 @@ beforeEach(() => {
   git(primary, 'push', '-q', 'origin', 'HEAD:main');
   config();
 });
-afterEach(() => {
+afterEach(async () => {
+  // Sync subprocess tests can occupy the worker for over Vitest's RPC deadline
+  // as a group on Windows. Let task-update replies run between tests.
+  await yieldToWorker();
   fs.rmSync(tmp, { recursive: true, force: true });
   delete process.env.LOBSTAH_HOME;
 });
