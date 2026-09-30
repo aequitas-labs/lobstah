@@ -299,6 +299,11 @@ function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[
 }
 
 /** Every filed report, newest first, with its ack. Never its markdown: the modal fetches that. */
+/** One report's row, as the Reports tab and the report page show it. */
+export function reportRow(key: string): GlassReport | undefined {
+  return reportRows().find((r) => r.key === key);
+}
+
 function reportRows(): GlassReport[] {
   return listReports().map((r) => {
     const acked = reportAck(r);
@@ -320,6 +325,9 @@ function reportRows(): GlassReport[] {
     };
   });
 }
+
+/** `/report/<key>` (the report's page) and `/report/<key>/meta` (its row as JSON). */
+const REPORT_PAGE_RE = /^\/report\/([^/?#]+)(\/meta)?\/?$/;
 
 /** Image types a report may serve. Anything else (an SVG, a script, HTML) is not served. */
 const REPORT_IMAGE_TYPES: Record<string, string> = {
@@ -771,6 +779,30 @@ export function serveGlass(
         res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-cache' });
         res.end(fallbackIcon);
       }
+    } else if (req.method === 'GET' && REPORT_PAGE_RE.test(req.url?.split('?')[0] ?? '')) {
+      // A report's own page, and its row as JSON. Only this machine's glass
+      // address gets them: a rebound name is refused. Opening a report never
+      // acks it.
+      if (req.headers.host !== ownHost()) {
+        res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        res.end('Not this glass.');
+        return;
+      }
+      const m = REPORT_PAGE_RE.exec(req.url!.split('?')[0]!)!;
+      let key: string;
+      try {
+        key = decodeURIComponent(m[1]!);
+      } catch {
+        key = '';
+      }
+      const row = key ? reportRow(key) : undefined;
+      if (m[2] === '/meta') {
+        res.writeHead(row ? 200 : 404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(row ?? { error: 'report not found' }));
+        return;
+      }
+      res.writeHead(row ? 200 : 404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(PAGE);
     } else if ((req.url?.startsWith('/report/') || req.url?.startsWith('/decision/')) && req.method === 'GET' && serveReport(req.url, res)) {
       return;
     } else if (req.url?.startsWith('/attachment/') && req.method === 'GET' && serveAttachment(req.url, res)) {

@@ -3,7 +3,7 @@
  * page's Lobs component. The page's bundle imports it, so the browser and
  * the tests run the same code — keep it free of Node imports.
  */
-import { decisionHash, reportModal } from './glass-diff.js';
+import { decisionHash, reportPageUrl } from './glass-diff.js';
 import type { ModalRef } from './glass-diff.js';
 
 export interface LobAttention {
@@ -67,7 +67,13 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
     .map((x) => {
       const label = labels[x.kind ?? ''] ?? '';
       const hide = x.key !== undefined ? { hideKey: x.key, hideHash: x.stateHash ?? '' } : {};
+      // A decision or a worker's raw question goes to its card on the deck,
+      // where it is answered in place.
       if (x.kind === 'decision' && x.key) return { key: 'decision:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
+      if ((x.kind ?? 'question') === 'question' && x.key)
+        return { key: 'question:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
+      // A report opens its own page in a new tab.
+      if (x.kind === 'report' && x.key) return { key: 'report:' + x.key, text: x.note || x.verb, label, href: reportPageUrl(x.key), ...hide };
       return typeof x.kind === 'string' && x.kind.startsWith('pr:') && x.prUrl
         ? { key: x.kind + ':' + (x.key ?? x.prUrl), text: x.note || x.kind, href: x.prUrl, label, ...hide }
         : {
@@ -76,7 +82,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
             label,
             ...(x.kind === 'watch'
               ? {}
-              : { open: x.kind === 'report' && x.key ? reportModal(x.key) : { type: 'dispatch' as const, key: x.lane + ':' + x.id } }),
+              : { open: { type: 'dispatch' as const, key: x.lane + ':' + x.id } }),
             ...hide,
           };
     });

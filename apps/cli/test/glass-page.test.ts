@@ -665,16 +665,21 @@ describe('glass page: header', () => {
 });
 
 describe('glass page: lobs', () => {
-  it('attention walks: a PR lob links out, a question lob opens its dispatch', async () => {
-    const g = await page(acceptanceFleet());
+  it('attention walks: a PR lob links out, a question lob goes to its card on the deck', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#dispatches' });
     const lobs = g.$$('#lobs .lob');
     expect(lobs.map((l) => [l.tagName, text(l.querySelector('.bub'))])).toEqual([
-      ['DIV', 'which base should #43 target?'],
+      ['A', 'which base should #43 target?'],
       ['A', 'draft #43 draft'],
     ]);
     expect(lobs[1]!.getAttribute('href')).toBe('https://github.com/acme/web/pull/43');
+    const key = acceptanceFleet().attention.find((a) => a.kind === 'question')!.key!;
+    expect(lobs[0]!.getAttribute('href')).toBe(`#decision/${encodeURIComponent(key)}`);
     await click(g, lobs[0]!);
-    expect(text(g.$('#modalbox h3'))).toBe('cccccccc needs-decision');
+    expect(g.$('.tabpage.on')!.id).toBe('page-deck');
+    expect(g.$('#overlay')!.className).not.toBe('open');
+    const card = g.$$('#deck [data-decision]').find((c) => c.getAttribute('data-decision') === key)!;
+    expect(card.className).toContain('focus');
   });
 
   it('acked items do not walk; a clicked lob hides in this browser until its state changes', async () => {
@@ -683,9 +688,9 @@ describe('glass page: lobs', () => {
     const bubs = g.$$('#lobs .lob .bub').map(text);
     expect(bubs).toHaveLength(4);
     expect(bubs.join(' ')).not.toMatch(/landed item 1|pr:checks item 4|watch item 7/);
-    // Clicking a question lob opens its dispatch and hides that lob here.
+    // Clicking a question lob goes to its card and hides that lob here.
     await click(g, g.$$('#lobs .lob').find((l) => text(l).includes('question item 0')) ?? null);
-    expect(text(g.$('#modalbox h3'))).toBe('cccccccc needs-decision');
+    expect(g.$('#overlay')!.className).not.toBe('open');
     expect(JSON.parse(g.window.localStorage.getItem('spyglass-lob-hidden')!)).toEqual({ 'work:cccccccc-0000-4000-8000-000000000003': 'h0' });
     expect(g.$$('#lobs .lob .bub').map(text).join(' ')).not.toContain('question item 0');
     // A new state hash walks it again.

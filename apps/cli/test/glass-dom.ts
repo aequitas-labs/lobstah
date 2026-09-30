@@ -15,6 +15,10 @@ export interface GlassDom {
   fetches(): number;
   /** The /report/ URLs the page fetched, in order. */
   reportFetches(): string[];
+  /** URLs the page opened with window.open, with target and features. */
+  opened(): Array<[string, string | undefined, string | undefined]>;
+  /** URLs the page navigated to with location.replace. */
+  replaced(): string[];
   /** The POSTs the page made, in order. */
   posts(): Array<{ url: string; headers: Record<string, string>; body: string }>;
   /** The poll intervals (ms) the page currently holds. */
@@ -40,6 +44,8 @@ export interface GlassDom {
 
 export interface GlassDomOptions {
   now: number;
+  /** The page path, e.g. `/report/<key>`; the default is `/`. */
+  path?: string;
   hash?: string;
   search?: string;
   prefs?: Record<string, unknown>;
@@ -53,7 +59,7 @@ export interface GlassDomOptions {
 
 export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: GlassDomOptions): Promise<GlassDom> {
   const window = new Window({
-    url: `http://127.0.0.1:7777/${opts.search ?? ''}${opts.hash ?? ''}`,
+    url: `http://127.0.0.1:7777${opts.path ?? '/'}${opts.search ?? ''}${opts.hash ?? ''}`,
     width: 1280,
     height: 800,
     settings: {
@@ -86,7 +92,12 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
     if (typeof url === 'string' && url.startsWith('/report/')) {
       fetched.push(url);
       const file = opts.files?.[url];
-      return { ok: file !== undefined, status: file !== undefined ? 200 : 404, text: async () => file ?? 'not found' };
+      return {
+        ok: file !== undefined,
+        status: file !== undefined ? 200 : 404,
+        text: async () => file ?? 'not found',
+        json: async () => JSON.parse(file ?? 'null'),
+      };
     }
     count++;
     const body = JSON.parse(JSON.stringify(current));
@@ -102,6 +113,17 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
       queueMicrotask(() => this.onload?.());
     }
   };
+  // New tabs and navigations are recorded, never followed. happy-dom follows
+  // an in-page link through window.open(url, '_self'): that one passes through.
+  const opened: Array<[string, string | undefined, string | undefined]> = [];
+  const open = (w.open as (...a: unknown[]) => unknown).bind(window);
+  w.open = (url: string, target?: string, features?: string) => {
+    if (target !== '_blank') return open(url, target, features);
+    opened.push([url, target, features]);
+    return null;
+  };
+  const replaced: string[] = [];
+  Object.defineProperty(window.location, 'replace', { value: (url: string) => void replaced.push(url), configurable: true });
   // Pin the page's clock: ages and staleness are computed from Date.now().
   w.Date.now = () => opts.now;
   // Polls run when the test says so, never on a real interval; the harness
@@ -137,6 +159,8 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
     },
     fetches: () => count,
     reportFetches: () => [...fetched],
+    opened: () => [...opened],
+    replaced: () => [...replaced],
     posts: () => [...posted],
     intervals: () => [...intervals.values()].map((i) => i.ms),
     hide: async (hidden: boolean) => {

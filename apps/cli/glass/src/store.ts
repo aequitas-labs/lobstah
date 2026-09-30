@@ -25,8 +25,6 @@ export interface GlassState {
   focusResults: Record<string, string>;
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */
   preview: boolean;
-  /** Report markdown fetched for an open modal, by key, for the filing (stateHash) it was fetched at. */
-  reportText: Record<string, ReportText>;
   /** Answers being written on the deck's decision cards, by card key. */
   drafts: Record<string, DecisionDraft>;
   /** The card a `#decision/<key>` link points at. */
@@ -57,12 +55,6 @@ export interface DecisionDraft {
   error?: string;
   /** Set once the server stored the answer: what the card says it sent. */
   sent?: string;
-}
-
-export interface ReportText {
-  hash: string;
-  text?: string;
-  error?: string;
 }
 
 let current: GlassState;

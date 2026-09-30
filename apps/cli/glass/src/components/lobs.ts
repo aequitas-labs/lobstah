@@ -39,10 +39,11 @@ function lob(it: LobItem, i: number, spriteOk: boolean | null) {
   // A PR lob is a plain link out (read-only: the glass opens, never acts);
   // a question lob opens its dispatch modal.
   const open = it.open;
+  // A decision or question goes to its card on the deck, scrolled to and flashed.
   if (it.hash)
     return html`<a key=${it.key} class="lob" style=${style} title="open the decision" href=${it.hash} onClick=${hide}>${body}</a>`;
   return it.href
-    ? html`<a key=${it.key} class="lob" style=${style} title="open the PR" href=${it.href} target="_blank" rel="noopener" onClick=${hide}>${body}</a>`
+    ? html`<a key=${it.key} class="lob" style=${style} title=${it.label === 'report' ? 'open the report' : 'open the PR'} href=${it.href} target="_blank" rel="noopener" onClick=${hide}>${body}</a>`
     : html`<div
         key=${it.key}
         class="lob"

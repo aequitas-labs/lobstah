@@ -25,7 +25,7 @@ final class ReportItemTests: XCTestCase {
     XCTAssertEqual(item.bubbleText, "report · Tray findings")
     XCTAssertNil(item.prLink)
     let link = item.reportLink(glass: URL(string: "http://127.0.0.1:4949")!)
-    XCTAssertEqual(link?.absoluteString, "http://127.0.0.1:4949/#report/report%3Awork%3Aabc")
+    XCTAssertEqual(link?.absoluteString, "http://127.0.0.1:4949/report/report%3Awork%3Aabc")
   }
 
   func testOtherKindsHaveNoReportLink() {
@@ -46,7 +46,7 @@ final class ReportItemTests: XCTestCase {
       open: { actions.append($0.absoluteString) },
       focusHelm: { _ in XCTFail("a report opens its glass URL") },
       acknowledge: { _ = ackOutcome(run($0)) })
-    XCTAssertEqual(actions, ["http://127.0.0.1:4949/#report/report%3Awork%3Aabc", "ack"])
+    XCTAssertEqual(actions, ["http://127.0.0.1:4949/report/report%3Awork%3Aabc", "ack"])
     XCTAssertEqual(commands, [["attention", "ack", "report:work:abc", "--by", "pet"]])
   }
 
