@@ -6,10 +6,10 @@ import type { Notice } from './notices.js';
 import { lobstahHome } from './paths.js';
 import type { WindowRef } from './window.js';
 import { listWatches } from './watch.js';
-import { readRequest } from './requests.js';
+import { readTrapRequest } from './trap-requests.js';
 
 const isOpenRequest = (id: string): boolean => {
-  const r = readRequest(id);
+  const r = readTrapRequest(id);
   return r !== undefined && r.closedAt === undefined;
 };
 
@@ -233,7 +233,7 @@ export function noticeStands(n: Notice): boolean {
           (w.key === n.refId || w.owner === `dispatch:${n.refId}`) &&
           (n.kind === 'watch-failing' ? w.failingNoticed === true : true),
       );
-    case 'trap-request':
+    case 'trap-requested':
       return n.refId !== undefined && isOpenRequest(n.refId);
     default:
       return false;

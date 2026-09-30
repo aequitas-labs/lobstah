@@ -64,7 +64,7 @@ function deckBlock(title: string, items: DeckItem[], tab: string, max: number, v
   const shown = items.slice(0, max);
   const lines = shown.map((i) => deckItem(i, view));
   const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
-  return html`<section><h2><a href=${'#' + tab}>${title} →</a>${headAction && [' ', headAction]}</h2>${body}${more(items.length - shown.length, tab)}</section>`;
+  return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${headAction && html`<div class="tabhead">${headAction}</div>`}${body}${more(items.length - shown.length, tab)}</section>`;
 }
 
 function deckNotices(list: DeckAttention[]) {

@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimNext, enqueue, ensureLayout } from '@lobstah/core';
+import { appendStatus, claimNext, closeTrapRequest, enqueue, ensureLayout, noticeStands, listNotices, writeTrapRequest } from '@lobstah/core';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`):
 // the bug was control flow in main.ts, so only a real invocation shows it.
@@ -59,5 +59,21 @@ describe('man wait --peek — a check, never a park', () => {
     const res = lobstah('man', 'wait', '--peek', '--timeout', '3');
     expect(res.status).toBe(2);
     expect(res.stdout).toContain('--peek never blocks');
+  });
+});
+
+describe('man wait: a trap request', () => {
+  it('is a trap-requested event carrying the id, repo, and harness, and stands until closed', () => {
+    const r = writeTrapRequest({ repo: 'web', harness: 'codex' });
+    const res = lobstah('man', 'wait', '--peek');
+    expect(res.status).toBe(0);
+    expect(res.stdout).toMatch(/^event: trap-requested$/m);
+    expect(res.stdout).toContain(`id: ${r.id}`);
+    expect(res.stdout).toMatch(/^repo: web$/m);
+    expect(res.stdout).toMatch(/^harness: codex$/m);
+    const notice = listNotices(10).find((n) => n.kind === 'trap-requested')!;
+    expect(noticeStands(notice)).toBe(true);
+    closeTrapRequest(r.id, 'reserved');
+    expect(noticeStands(notice)).toBe(false);
   });
 });
