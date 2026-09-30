@@ -135,6 +135,10 @@ import {
   dispatchReportKey,
   readReport,
   releaseHeldQuestions,
+  askDecision,
+  withdrawDecision,
+  DecisionError,
+  decisionDir,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
@@ -151,6 +155,8 @@ import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
+import { decisionEventFields, decisionLine } from './decisions.js';
+import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
 import { focusTrap } from './focus.js';
@@ -315,6 +321,13 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man file <file.md> [--attach <file> ...] [--title <text>]
                                   file the helm's own report under its
                                   grounds; the glass renders it on the deck.
+  man ask [<dispatch-id>] --title <q> [--detail <f.md>] [--option <label> ...] [--attach <file> ...]
+                                  put a decision to the human: a card in the
+                                  glass until answered or withdrawn
+                                  (--withdraw <key>). The answer wakes man
+                                  wait as a decision-answer event.
+  man answer <key> [--option <label>] [--text <text>] [--attach <file> ...]
+                                  answer a decision from the terminal.
   man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
                                   take the helm: one orchestrator per grounds
                                   (a named repo set from [grounds.*], or the
@@ -536,15 +549,12 @@ function trapRequestFields(n: Notice): Record<string, string> | undefined {
     : undefined;
 }
 
-/** A haul line for a fleet notice; a trap request names what it asks for. */
-function noticeLine(n: Notice): string {
-  const r = trapRequestFields(n);
-  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: reserve with \`lobstah trap reserve --request ${r.id}\`` : `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
-}
-
 function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
-    console.log(toonKV(trapRequestFields(n) ?? { notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
+    // A decision answer is an event with its request's payload.
+    const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
+    if (answer) console.log(toonKV(decisionEventFields(answer)));
+    else console.log(toonKV(trapRequestFields(n) ?? { notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
   }
   console.log(
     'next: each notice names its own decision or remedy — act on it (or note it and move on), ' +
@@ -561,6 +571,14 @@ function emitReplies(replies: ReplyEvent[], sessionId?: string): void {
     'next: the worker answered your send — act on its note, ' +
       `then re-arm a background \`lobstah man wait${sessionId ? ` --session ${sessionId}` : ''}\`.`,
   );
+}
+
+/** A haul line for a notice; requests carry their own payload and remedy. */
+function noticeLine(n: Notice, prefix = 'notice '): string {
+  const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
+  if (answer) return decisionLine(answer);
+  const r = trapRequestFields(n);
+  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: reserve with \`lobstah trap reserve --request ${r.id}\`` : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
 }
 
 /** A haul line for a send's answer. */
@@ -1480,6 +1498,93 @@ async function mainCli(): Promise<void> {
       console.log(toonHelp([`lobstah attention ack ${filed.key}   (when the human has read it)`]));
       break;
     }
+    case 'man:ask': {
+      const caller = callerSession(opt('--session'));
+      let groundsName = opt('--grounds');
+      // Framing a question for the human is steering: the claimed helm's alone.
+      gateHelm(caller, groundsName);
+      const withdraw = opt('--withdraw');
+      if (withdraw !== undefined) {
+        if (pos.length > 0 || opt('--title') !== undefined) throw new UsageError(`--withdraw takes only a decision key\n\n${usageFor('man:ask')!}`);
+        try {
+          const gone = withdrawDecision(withdraw);
+          console.log(toonKV({ key: gone.key, withdrawn: true, title: gone.title }));
+        } catch (err) {
+          if (err instanceof DecisionError) throw new UsageError(err.message);
+          throw err;
+        }
+        break;
+      }
+      const title = opt('--title');
+      if (title === undefined) throw new UsageError(`man ask requires --title "<question>"\n\n${usageFor('man:ask')!}`);
+      if (pos.length > 1) throw new UsageError(`man ask takes at most one dispatch id\n\n${usageFor('man:ask')!}`);
+      const dispatch = pos[0];
+      const lane = dispatch !== undefined ? findLane(dispatch) : undefined;
+      const repo = dispatch !== undefined ? repoOf(dispatch, lane!) : undefined;
+      if (groundsName === undefined && caller?.id !== undefined) groundsName = helmOf(caller.id)?.grounds;
+      const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName).name : undefined;
+      let asked: ReturnType<typeof askDecision>;
+      try {
+        asked = askDecision({
+          title,
+          detailFile: opt('--detail'),
+          options: values('--option'),
+          attach: values('--attach'),
+          ...(dispatch !== undefined ? { dispatch, lane } : {}),
+          ...(repo ? { repo } : {}),
+          ...(grounds ? { grounds } : {}),
+          askedBy: 'helm',
+          maxBytes: loadConfig().limits.attachmentMaxBytes,
+        });
+      } catch (err) {
+        if (err instanceof DecisionError) throw new UsageError(err.message);
+        throw err;
+      }
+      const { meta, replaced } = asked;
+      console.log(
+        toonKV({
+          key: meta.key,
+          title: meta.title,
+          ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
+          options: meta.options.join(' | '),
+          attachments: meta.attachments.length,
+          stored: decisionDir(meta.key)!,
+          ...(replaced.length ? { replaced: replaced.join(', ') } : {}),
+        }),
+      );
+      console.log(
+        toonHelp([
+          'the glass shows it as a card on the deck; the answer wakes man wait as a decision-answer event',
+          `lobstah man ask --withdraw ${meta.key}   (when it no longer needs the human)`,
+        ]),
+      );
+      break;
+    }
+    case 'man:answer': {
+      const key = pos[0];
+      if (!key || pos.length > 1) throw new UsageError(`man answer requires one decision key\n\n${usageFor('man:answer')!}`);
+      let result: ReturnType<typeof answerKey>;
+      try {
+        result = answerKey(key, { option: opt('--option'), text: opt('--text'), attach: values('--attach'), by: 'cli' });
+      } catch (err) {
+        if (err instanceof DecisionError) throw new UsageError(err.message);
+        throw err;
+      }
+      const { decision, answer } = result;
+      console.log(
+        toonKV({
+          key: decision.key,
+          answered: true,
+          request: answer.request,
+          ...(decision.dispatch ? { dispatch: decision.dispatch } : {}),
+          option: answer.option ?? '',
+          text: answer.text ?? '',
+          attachments: answer.attachments.map((a) => a.path).join(', '),
+        }),
+      );
+      console.log(toonHelp(["the helm's man wait receives it as a decision-answer event"]));
+      break;
+    }
     case 'attention': {
       const sub = pos[0];
       const report = buildTendReport();
@@ -1906,7 +2011,7 @@ async function mainCli(): Promise<void> {
             emit(
               [
                 'Fleet notices need a decision:',
-                ...idleNotices.map(noticeLine),
+                ...idleNotices.map((n) => noticeLine(n, '')),
                 'Each notice names its own remedy. The Stop hook checks again at turn end.',
               ].join('\n'),
             );
@@ -1945,7 +2050,7 @@ async function mainCli(): Promise<void> {
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
                 ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
-                ...notices.map(noticeLine),
+                ...notices.map((n) => noticeLine(n)),
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
                 ...(replies.length || unanswered.length ? [SENT_HINT] : []),
@@ -1998,7 +2103,7 @@ async function mainCli(): Promise<void> {
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
-          ...fleetNotices.map(noticeLine),
+          ...fleetNotices.map((n) => noticeLine(n)),
           ...replies.map(replyLine),
           ...unanswered.map(sentLine),
           ...(replies.length || unanswered.length ? [SENT_HINT] : []),

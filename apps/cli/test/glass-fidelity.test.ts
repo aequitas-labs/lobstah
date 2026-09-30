@@ -37,6 +37,9 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  *   table views only; glass-reports.test.ts checks the card rules.
  * - a card badge longer than 12 characters carries a `long` class (it may
  *   truncate); the class is dropped before comparing.
+ * - an attachment image grew a thumb that opens the in-page image overlay
+ *   (`button.thumb`); it is dropped before comparing, and
+ *   glass-decisions.test.ts covers it.
  * The glass also grew PR titles on purpose (glass-page.test.ts tests them):
  * a card's `<span class="prname"><b>#n</b> title</span>` folds back to the
  * old `<b>#n title</b>`, and a stack line's per-number `<span title>#n</span>`
@@ -83,6 +86,7 @@ function canon(node: Node, skeletonOnly = false): string {
     flush();
     const el = c as Element;
     if (el.tagName === 'SCRIPT') continue;
+    if (el.tagName === 'BUTTON' && el.classList.contains('thumb')) continue;
     const attrs = [...el.attributes]
       .filter((a) => !a.name.startsWith('on') && a.name !== 'selected' && a.name !== 'title')
       .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )long(?= |$)/, '').trim() : a.value] as const)

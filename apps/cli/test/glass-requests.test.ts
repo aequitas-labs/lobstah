@@ -6,11 +6,13 @@ import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
+  askDecision,
   closeRequest,
   dropReservation,
   ensureLayout,
   listNotices,
   listRequests,
+  readDecisionAnswer,
   reserveTrap,
   shellQuote,
   signOnTrap,
@@ -63,6 +65,26 @@ const withHost = (url: string, host: string, method = 'GET', body?: string, head
   });
 
 describe('glass /requests', () => {
+  it('accepts an image decision answer and a trap request through the same endpoint', async () => {
+    const { meta } = askDecision({ title: 'Which tray should we use?', askedBy: 'test', maxBytes: 25 * 1024 * 1024 });
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(5000)]);
+    const answerBody = { kind: 'decision-answer', payload: { key: meta.key, files: [{ name: 'tray.png', data: png.toString('base64') }] } };
+    expect(Buffer.byteLength(JSON.stringify(answerBody))).toBeGreaterThan(4096);
+    const answerResponse = await post(answerBody);
+    expect(answerResponse.status).toBe(201);
+    const { id: answerId } = (await answerResponse.json()) as { id: string };
+    const stored = readDecisionAnswer(meta.key)!;
+    expect(stored.request).toBe(answerId);
+    expect(stored.attachments).toHaveLength(1);
+    expect(fs.readFileSync(stored.attachments[0]!.path)).toEqual(png);
+
+    const trapResponse = await post(trapRequest({ repo: 'web', harness: 'codex' }));
+    expect(trapResponse.status).toBe(201);
+    const { id: trapId } = (await trapResponse.json()) as { id: string };
+    expect(listRequests().map((r) => [r.kind, r.id])).toEqual(expect.arrayContaining([['decision-answer', answerId], ['trap-request', trapId]]));
+    expect(listNotices(50).map((n) => [n.kind, n.refId])).toEqual(expect.arrayContaining([['decision-answer', answerId], ['trap-request', trapId]]));
+  });
+
   it('refuses a missing or wrong token, a foreign origin or host, and GET, writing nothing', async () => {
     const good = trapRequest({ repo: 'web', harness: 'claude' });
     expect((await post(good, { 'x-lobstah-token': '' })).status).toBe(403);

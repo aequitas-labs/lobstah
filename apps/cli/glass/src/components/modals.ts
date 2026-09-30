@@ -1,5 +1,5 @@
 import type { GlassDispatch, GlassHelm, GlassReport, GlassSnapshot, GlassTrap } from '@lobstah/core';
-import { dispatchReport, modalItem, prBadgeClass, prModalView } from '../../../src/glass-diff.js';
+import { dispatchReport, modalItem, prBadgeClass, prModalView, trapFileUrl } from '../../../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal } from '../actions.js';
 import { html } from '../html.js';
@@ -201,7 +201,7 @@ function trapModal(t: GlassTrap) {
   const messages = t.messages.length
     ? t.messages.map(
         (m) =>
-          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${m.text}${m.attachments?.length ? attachmentRows(m.attachments) : ''}</div>`,
+          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${m.text}${m.attachments?.length ? attachmentRows(m.attachments, (name) => trapFileUrl(t.trapId, name)) : ''}</div>`,
       )
     : html`<div class="empty">none</div>`;
   const catches = t.catches.length

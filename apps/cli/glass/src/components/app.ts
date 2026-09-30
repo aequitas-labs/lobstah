@@ -8,6 +8,7 @@ import { Deck } from './deck.js';
 import { Dispatches } from './dispatches.js';
 import { Footer, Header } from './header.js';
 import { Lobs } from './lobs.js';
+import { LightboxView } from './lightbox.js';
 import { Modal } from './modals.js';
 import { Notices } from './notices.js';
 import { PRs } from './prs.js';
@@ -25,7 +26,8 @@ export function App({ state }: { state: GlassState }) {
   const inp = d && sectionInputs(d, { st: state.prefs, modal: state.modal }, Date.now());
   const page = (t: GlassTab): Children => {
     if (!inp || t !== tab) return null;
-    if (t === 'deck') return html`<${Deck} inp=${inp.deck} />`;
+    if (t === 'deck')
+      return html`<${Deck} inp=${inp.deck} drafts=${state.drafts} focus=${state.focusDecision} extensions=${d?.answerLimits?.extensions ?? []} />`;
     if (t === 'dispatches') return html`<${Dispatches} inp=${inp.dispatches} />`;
     if (t === 'traps') return html`<${Traps} inp=${inp.traps} />`;
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} />`;
@@ -43,6 +45,7 @@ export function App({ state }: { state: GlassState }) {
     ),
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
+    html`<${LightboxView} box=${state.lightbox} />`,
     html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} snapshot=${d} modal=${state.modal} prefs=${state.prefs} reportText=${state.reportText} /></div></div>`,
   ];
 }

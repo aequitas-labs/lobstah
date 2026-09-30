@@ -15,7 +15,7 @@ public struct AttentionItem: Decodable, Equatable {
   public var key: String? = nil
   /** Acknowledged for display: the pet skips it (the helm's wakes never do). */
   public var acked: AckInfo? = nil
-  /** question | landed | watch | pr:draft | pr:review | pr:checks | pr:conflict | pr:ready | report — absent from an older lobstah. */
+  /** question | decision | landed | watch | pr:draft | pr:review | pr:checks | pr:conflict | pr:ready | report — absent from an older lobstah. */
   public var kind: String? = nil
   /** pr:* kinds: the PR this pet walks for. */
   public var prUrl: String? = nil
@@ -42,12 +42,22 @@ public struct AttentionItem: Decodable, Equatable {
     return URL(string: "\(glass.absoluteString)/#report/\(encoded)")
   }
 
+  /**
+   * A decision pet clicks through to the spyglass at the decision's card
+   * (#decision/<key>). The card stays until the decision is answered or
+   * withdrawn; the click's ack only stops this pet walking.
+   */
+  public func decisionLink(glass: URL) -> URL? {
+    guard kind == "decision", let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
+    return URL(string: "\(glass.absoluteString)/#decision/\(encoded)")
+  }
+
   /** The CLI acknowledgement for a pet click or its Acknowledge menu entry. */
   public var ackArguments: [String]? {
     key.map { ["attention", "ack", $0, "--by", "pet"] }
   }
 
-  /** The short kind label shown before the note; nothing for a question. */
+  /** The short kind label shown before the note; nothing for a question or a decision (its title only). */
   public var kindLabel: String? {
     switch kind {
     case "pr:draft": return "draft"
@@ -77,7 +87,7 @@ public func clickAttentionItem(
   focusHelm: () -> Void,
   acknowledge: ([String]) -> Void
 ) {
-  if let url = item.reportLink(glass: glass) ?? item.prLink {
+  if let url = item.reportLink(glass: glass) ?? item.decisionLink(glass: glass) ?? item.prLink {
     open(url)
   } else {
     focusHelm()

@@ -268,9 +268,35 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   catches: GlassDispatch[];
 }
 
+/** A standing decision as the glass renders it: the record plus its detail page. */
+export interface GlassDecision {
+  key: string;
+  title: string;
+  /** The detail markdown; images it names by bare filename load from the decision's attachments. */
+  detail: string;
+  options: string[];
+  attachments: Attachment[];
+  dispatch?: string;
+  lane?: Lane;
+  repo?: string;
+  askedBy: string;
+  askedAt: string;
+  stateHash: string;
+}
+
+/** What an answer from the glass may carry (the server checks the same limits). */
+export interface GlassAnswerLimits {
+  /** Per-file bytes (limits.attachmentMaxBytes). */
+  maxBytes: number;
+  maxFiles: number;
+  textMax: number;
+  /** Accepted file extensions. */
+  extensions: string[];
+}
+
 /** The /data payload: one disk pass, everything the page renders. */
 export interface GlassSnapshot {
-  /** Per-server secret for the same-origin focus action. */
+  /** Per-server secret for the same-origin actions: focusing a trap and answering a decision. */
   focusToken?: string;
   /** Native window selection is available on this host. Session links may work elsewhere. */
   focusSupported?: boolean;
@@ -306,4 +332,7 @@ export interface GlassSnapshot {
   /** A config error, surfaced on the page instead of failing /data. */
   attentionError?: string;
   mergeView?: MergeView;
+  /** Standing decisions, newest first. The deck's cards join them to `decision` attention items by key. */
+  decisions?: GlassDecision[];
+  answerLimits?: GlassAnswerLimits;
 }

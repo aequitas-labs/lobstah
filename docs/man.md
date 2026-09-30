@@ -397,7 +397,7 @@ as a user service. `lobstah glass restart` restarts the service, or a
 detached glass (stop, then `--detach`).
 
 `lobstah glass [--port <n>]` serves tend as a live web page on 127.0.0.1
-(default port 4949): the fleet verdict and attention questions, every
+(default port 4949): the fleet verdict, decision cards, every
 dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
@@ -468,6 +468,13 @@ the helm files to keep.
   Raw HTML in the markdown shows as text. The glass serves the markdown and
   the images read-only, and an image only by basename from that report's
   own attachments.
+- **Images.** Every image in the glass (a decision card's, a report page's,
+  and an attachment's in the dispatch and trap modals) opens in an in-page
+  overlay: centered at up to 90% of the viewport over a dark backdrop, with
+  a link to open the original file. Escape, a click on the backdrop, or the
+  close button closes it. The glass serves a dispatch's and a trap's
+  attachment images read-only, by basename, from their own attachments
+  directories. Missing files, malformed names, and symlinks are not served.
 - **Attention.** A filed report with no ack stands as the `report` attention
   kind. Add `report` to `attentionKinds` to walk it. The desktop pet shows
   the report's title; a pet click opens the item and acks it through
@@ -479,6 +486,78 @@ the helm files to keep.
 - **Cull.** `lobstah cull` removes a dispatch's report with the rest of its
   state. A helm report is culled when it is older than the retention window,
   counted from when it was filed.
+
+### Decisions
+
+A decision is a question the helm puts to the human. Workers still ask in
+prose (`report needs-decision "<note>"`). The helm decides what it can and
+frames the rest as decisions.
+
+- **Asking.** `lobstah man ask [<dispatch-id>] --title "<question>"
+  [--detail <file.md>] [--option "<label>"]... [--attach <file>]...` stores a
+  decision: its key (`decision:<rid>`), title, detail markdown (at most
+  64 KiB), 0 to 6 option labels, attachments, the dispatch it is about (none
+  for a question such as "cut 0.6.0?"), who asked (`helm`), and when. It is
+  stored in `~/.lobstah/decisions/<rid>/`: `decision.json`, `detail.md`, and
+  `attachments/`. The claimed helm alone may ask.
+- **Standing.** A decision stands until it is answered or the helm withdraws
+  it with `lobstah man ask --withdraw <key>`, which removes its directory. A
+  newer `man ask` on the same dispatch replaces the older decision.
+- **Attention.** A standing decision is attention of kind `decision`, in
+  the default `attentionKinds`. It makes the verdict `needs-attention`. A
+  worker's raw `needs-decision` or `blocked` stays a `question` until the
+  helm frames it. While a decision on the same dispatch, asked at or after
+  the question, is on disk, the `question` item is hidden: the decision
+  replaces it. Withdrawing the decision shows the question again.
+- **In the glass.** The attention section of On deck is a list of
+  full-width decision cards, newest first. A card shows the title, the
+  detail rendered as markdown, the attachments (images inline), the
+  dispatch link and repo, and the age. The options are buttons. Below them
+  is an empty text box that grows with its content, and an attach control
+  for images and files (`.png .jpg .jpeg .gif .webp .pdf .txt .md .csv
+  .json .log .diff .patch .yaml .yml .toml .zip`, each at most
+  `[limits].attachmentMaxBytes`, at most 8). Click an option, write an
+  answer, attach files, or any mix; one **Send** submits it. With no options,
+  the text box is the whole answer. After sending, the card shows
+  `answered · <what was chosen>` and leaves on the next refresh. A raw
+  `question` the helm has not framed shows as a plain card with the
+  worker's note and the same text box. PR kinds stay in the PRs section.
+  `#decision/<key>` opens the deck at that card. Pasting with Cmd-V or
+  Ctrl-V in the text box adds each image on the clipboard as an attachment
+  named `pasted-<time>.png` (the extension follows the image format), with
+  the same size, type, and count checks as a picked file; pasted text stays
+  text.
+- **The answer is a request.** An answer is a glass request of kind
+  `decision-answer`, stored as `~/.lobstah/requests/<id>.json` with its
+  files in `~/.lobstah/requests/<id>/`. The payload is the decision `key`,
+  `title`, `dispatch`, `lane`, `repo`, the `option`, the `text`, and the
+  stored `attachments`. `answer.json` in the decision's directory marks it
+  answered and names the request.
+- **The POST.** Send is a same-origin POST to `/requests` with the page's
+  token (header `x-lobstah-token`), the guard the **↗ open** button uses.
+  The body is `{ "kind": "decision-answer", "payload": { "key", "option",
+  "text", "files": [{ "name", "data" }] } }`, with file data in base64. The
+  server checks the kind, the key, that the option is one of the decision's
+  labels, the text length (at most 20000 characters), and each file's size
+  and type (an image must also start with its format's signature). It
+  writes the request and runs nothing. Answering a raw question's key
+  (`<lane>:<id>`) first stores it as a decision asked by `worker`.
+- **The event.** Writing the request posts a `decision-answer` notice. It
+  wakes the helm's `man wait` (and the Stop-hook park) once, as a
+  `decision-answer` event: the request `id`, `key`, `dispatch`, `title`,
+  `option`, `text`, `attachments` (the stored paths), `from`, and `at`. The
+  helm acts on it, usually with `lobstah send <dispatch> "<instruction>"`.
+  Answering does not message the worker.
+- **From the terminal.** `lobstah man answer <key> [--option <label>]
+  [--text <text>] [--attach <file>]...` answers the same way, with the same
+  checks.
+- **The pet.** The desktop pet shows a decision as its title only. A click
+  opens the glass at the card and acks the item for the pet
+  (`lobstah attention ack <key> --by pet`). The card stays in the glass until
+  the decision is answered or withdrawn.
+- **Cull.** `lobstah cull` removes a decision once its answer is older than
+  the retention window, with the `decision-answer` request and its files. A
+  standing decision is never culled.
 
 ### The periodic report
 

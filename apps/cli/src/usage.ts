@@ -170,6 +170,22 @@ export const COMMANDS: Record<string, CommandSpec> = {
     flags: { '--attach': { value: '<file>', repeatable: true }, '--title': { value: '<text>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } },
     positionals: '<file.md>',
   },
+  'man:ask': {
+    flags: {
+      '--title': { value: '<question>' },
+      '--detail': { value: '<file.md>' },
+      '--option': { value: '<label>', repeatable: true },
+      '--attach': { value: '<file>', repeatable: true },
+      '--withdraw': { value: '<key>' },
+      '--grounds': { value: '<name>' },
+      '--session': { value: '<id>' },
+    },
+    positionals: '[<dispatch-id>]',
+  },
+  'man:answer': {
+    flags: { '--option': { value: '<label>' }, '--text': { value: '<text>' }, '--attach': { value: '<file>', repeatable: true } },
+    positionals: '<key>',
+  },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
 };
 
@@ -298,6 +314,11 @@ work in flight requires a live watcher or the hook blocks with the arm command.
   'man:file': `File a markdown page as the helm's own report, under its grounds (reports/<grounds>/<rid>/).
 --attach copies images the page names by bare filename; --title overrides its first # heading.
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
+  'man:ask': `Put a decision to the human: a card in the glass (decisions/<rid>/) until
+answered or withdrawn. A newer ask on the same dispatch replaces it. The answer
+wakes man wait as decision-answer. Reserved for the claimed helm.`,
+  'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
+Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs

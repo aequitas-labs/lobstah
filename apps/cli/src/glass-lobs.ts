@@ -3,7 +3,7 @@
  * page's Lobs component. The page's bundle imports it, so the browser and
  * the tests run the same code — keep it free of Node imports.
  */
-import { reportModal } from './glass-diff.js';
+import { decisionHash, reportModal } from './glass-diff.js';
 import type { ModalRef } from './glass-diff.js';
 
 export interface LobAttention {
@@ -28,6 +28,8 @@ export interface LobItem {
   open?: ModalRef;
   /** A PR lob is a plain link out — the glass opens, never acts. */
   href?: string;
+  /** A decision lob goes to its card on the deck (`#decision/<key>`). */
+  hash?: string;
   /** The short kind label shown before the text (draft, review, checks, ready, landed, watch). */
   label?: string;
   /** For the per-browser hide a click records: the item key and its state hash. */
@@ -65,6 +67,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
     .map((x) => {
       const label = labels[x.kind ?? ''] ?? '';
       const hide = x.key !== undefined ? { hideKey: x.key, hideHash: x.stateHash ?? '' } : {};
+      if (x.kind === 'decision' && x.key) return { key: 'decision:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
       return typeof x.kind === 'string' && x.kind.startsWith('pr:') && x.prUrl
         ? { key: x.kind + ':' + (x.key ?? x.prUrl), text: x.note || x.kind, href: x.prUrl, label, ...hide }
         : {

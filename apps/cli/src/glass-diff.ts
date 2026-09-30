@@ -1,4 +1,6 @@
 import type {
+  Attachment,
+  GlassDecision,
   GlassDispatch,
   GlassHelm,
   GlassPr,
@@ -111,6 +113,101 @@ export function modalFromHash(hash: string | undefined | null): ModalRef | null 
   }
 }
 
+/** `#decision/<key>`: the deck, scrolled to that decision's card. */
+export const decisionHash = (key: string): string => `#decision/${encodeURIComponent(key)}`;
+
+/** The decision (or raw question) key a `#decision/<key>` hash names, else null. */
+export function decisionFromHash(hash: string | undefined | null): string | null {
+  const m = /^#?decision\/(.+)$/.exec(String(hash || ''));
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]!);
+  } catch {
+    return null;
+  }
+}
+
+/** Where a dispatch's and a trap's attachment images are served (glass.ts serveAttachment). */
+export const dispatchFileUrl = (lane: string, id: string, name: string): string =>
+  `/attachment/dispatch/${encodeURIComponent(lane)}/${encodeURIComponent(id)}/${encodeURIComponent(name)}`;
+export const trapFileUrl = (trapId: string, name: string): string => `/attachment/trap/${encodeURIComponent(trapId)}/${encodeURIComponent(name)}`;
+
+/** An attachment name the glass shows as an image. */
+export const isImageName = (name: string): boolean => /\.(png|jpe?g|gif|webp)$/i.test(name);
+
+/** Where a decision's images are served (glass.ts). */
+export const decisionFileUrl = (key: string, name: string): string => `/decision/${encodeURIComponent(key)}/files/${encodeURIComponent(name)}`;
+
+/**
+ * One card in the deck's decisions section: a decision the helm framed, or
+ * a worker's raw question the helm has not framed.
+ */
+export type DecisionCard =
+  | {
+      kind: 'decision';
+      key: string;
+      title: string;
+      detail: string;
+      options: string[];
+      attachments: Attachment[];
+      dispatch?: string;
+      lane?: string;
+      repo?: string;
+      at: string;
+    }
+  | { kind: 'question'; key: string; verb: string; note: string; dispatch: string; lane: string; repo?: string; at: string };
+
+/**
+ * The deck's cards, newest first: each `decision` attention item joined to
+ * its record, and each raw `question`. tend already hides a question its
+ * decision frames.
+ */
+export function decisionCards(attention: readonly TendAttention[], decisions: readonly GlassDecision[]): DecisionCard[] {
+  const byKey = new Map(decisions.map((d) => [d.key, d]));
+  const cards: DecisionCard[] = [];
+  for (const a of attention) {
+    if (a.kind === 'decision') {
+      const d = byKey.get(a.key);
+      if (!d) continue;
+      cards.push({
+        kind: 'decision',
+        key: d.key,
+        title: d.title,
+        detail: d.detail,
+        options: d.options,
+        attachments: d.attachments,
+        ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),
+        ...(d.repo ? { repo: d.repo } : {}),
+        at: d.askedAt,
+      });
+    } else if (a.kind === 'question') {
+      cards.push({
+        kind: 'question',
+        key: a.key,
+        verb: a.verb,
+        note: a.note || a.verb,
+        dispatch: a.id,
+        lane: a.lane,
+        ...(a.repo ? { repo: a.repo } : {}),
+        at: a.at ?? '',
+      });
+    }
+  }
+  return cards.sort((a, b) => b.at.localeCompare(a.at) || a.key.localeCompare(b.key));
+}
+
+/** What an answered card says it sent: the option, the text's first line, the files. */
+export function answerSummary(a: { option?: string; text?: string; files?: number }): string {
+  const line = (a.text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  return [
+    a.option,
+    line && (line.length > 80 ? line.slice(0, 79) + '…' : line),
+    a.files ? `${a.files} file${a.files === 1 ? '' : 's'}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 /** The report a dispatch filed, if any. */
 export function dispatchReport(d: Pick<GlassSnapshot, 'reports'>, x: Pick<GlassDispatch, 'lane' | 'id'>): GlassReport | undefined {
   return (d.reports || []).find((r) => r.key === `report:${x.lane}:${x.id}`);
@@ -167,7 +264,8 @@ export type DeckAttention = Omit<TendAttention, 'ageSecs'>;
 
 export interface DeckInputs {
   view: GlassPrefs['view'] | undefined;
-  attention: DeckAttention[];
+  /** Decision and raw question cards, newest first. */
+  decisions: DecisionCard[];
   prAttention: DeckAttention[];
   landed: LandedCatch[];
   /** Unacked first, then newest first; the deck shows REPORTS_MAX. */
@@ -227,9 +325,9 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat) },
     deck: {
       view: st.view,
-      attention: (d.attention || [])
-        .filter((a) => (a.kind === 'question' || a.kind === 'landed') && recent(a.at, 86400000) && hasQuery(a.kind, a.repo, a.note, a.id))
-        .map(noAge),
+      decisions: decisionCards(d.attention || [], d.decisions || []).filter((c) =>
+        c.kind === 'decision' ? hasQuery(c.kind, c.repo, c.title, c.dispatch, c.detail) : hasQuery(c.kind, c.repo, c.note, c.dispatch),
+      ),
       prAttention: (d.attention || []).filter((a) => a.kind && a.kind.startsWith('pr:')).map(noAge),
       landed: (d.landed || [])
         .filter((a) => recent(a.at, LANDED_WINDOW_MS) && hasQuery(a.repo, a.note, a.id))
