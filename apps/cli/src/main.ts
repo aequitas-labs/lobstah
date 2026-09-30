@@ -669,7 +669,6 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
   });
 }
 
-/** Activity past the wedge threshold shows stale. */
 /**
  * The trap a dispatch names — the one that claimed it, ran it, or is
  * addressed by it — as `crisp-heron (wt:68c5da5f)`, or `wt:<id>` when no
@@ -689,6 +688,7 @@ function dispatchTrap(id: string, lane: Lane, names: (trapId: string) => string 
   return address ? { trap: trapAddressText(address, 'label', names) } : {};
 }
 
+/** Activity past the wedge threshold shows stale. */
 function wedgeSecs(): number {
   try {
     return loadConfig().limits.wedgeThresholdSecs;

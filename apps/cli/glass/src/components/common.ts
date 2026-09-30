@@ -165,11 +165,7 @@ export function NamedText(text: string, max = Infinity): Children[] {
   return out;
 }
 
-/** A dispatch's status log, one line per entry, each trap shown by name. */
-export const logText = (x: Pick<GlassDispatch, 'log'>): string =>
-  x.log.map((e) => e.at + '  ' + e.verb + (e.note ? '  ' + namedText(e.note) : '')).join('\n');
-
-/** The status log as nodes: logText, with each trap's name opening its modal. */
+/** A dispatch's status log, one line per entry, each trap shown by name that opens its modal. */
 export const LogLines = (x: Pick<GlassDispatch, 'log'>): Children[] =>
   x.log.flatMap((e, i) => [i ? '\n' : '', e.at + '  ' + e.verb, ...(e.note ? ['  ', ...NamedText(e.note)] : [])]);
 
