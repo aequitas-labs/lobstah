@@ -54,6 +54,9 @@ import {
   signOnTrap,
   stowTrap,
   trapBySession,
+  trapIdAbove,
+  askTrapTitle,
+  confirmTrapTitle,
   trapIdAt,
   anchoredWorktree,
   readTrapAnchor,
@@ -152,7 +155,7 @@ import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
 import { charter } from './charter.js';
-import { buildBriefContext } from './brief.js';
+import { buildBriefContext, titleReminder } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { runCull } from './cull.js';
 import { worktreeView } from './worktree-view.js';
@@ -408,6 +411,10 @@ soaking (interactive sessions volunteering as workers):
   trap reserve --request <id>     reserve what a glass trap request asks for
                                   (repo, harness), and close the request.
   trap requests                   open trap requests from the glass.
+  trap title-set [--session <id>] confirm this session applied the title
+                                  sign-on printed. Sign-on is complete
+                                  after it; until then SessionStart and
+                                  Stop remind the session once per turn.
   stow [--wt <trap>|--session <id>] [--keep|--force] [--quiet]
                                   sign the trap off; an unfinished
                                   assignment requeues, unread messages
@@ -888,6 +895,14 @@ async function mainCli(): Promise<void> {
 
   switch (cmd) {
     case 'trap': {
+      if (pos[0] === 'title-set') {
+        const who = callerSession(opt('--session'));
+        const trapId = trapIdAbove(process.cwd()) ?? (who ? trapBySession(who.id)?.trapId : undefined);
+        const reg = trapId ? confirmTrapTitle(trapId) : undefined;
+        if (!reg) throw new Error("no trap here — run from the trap's worktree, or pass --session <id>");
+        console.log(toonKV({ trap: trapLabel(reg), title: reg.titleSet, signOn: 'complete' }));
+        break;
+      }
       if (pos[0] === 'requests') {
         const open = listRequests({ kind: 'trap-request', open: true });
         console.log(
@@ -2022,6 +2037,11 @@ async function mainCli(): Promise<void> {
       try {
         const hook = readHookStdin();
         const trapReg = hook?.session_id ? trapBySession(hook.session_id) : undefined;
+        // An unconfirmed sign-on title: remind once per turn (a continued turn is not reminded again).
+        if (trapReg?.titlePending && !hook?.stop_hook_active) {
+          console.log(JSON.stringify({ decision: 'block', reason: titleReminder(trapReg.titlePending) }));
+          break;
+        }
         if (trapReg) {
           const cfg = loadConfig();
           if (!has('--park') && hookParkMode(cfg.helm.park, trapReg.harness) === 'arm') {
@@ -2426,7 +2446,8 @@ async function mainCli(): Promise<void> {
             'one worker per worktree. Sign it off there (`lobstah stow`), or wait for it to go stale.',
         );
       }
-      const reg = res.ok;
+      // The session applies its title as a sign-on step, then confirms it.
+      const reg = askTrapTitle(res.ok.trapId, res.ok.name ?? `wt:${res.ok.trapId}`) ?? res.ok;
       if (reservation) dropReservation(reservation.trapId);
       // The terminal tab carries the trap's name while it soaks.
       const titled = reg.name ? await setTerminalTitle(reg.window, reg.name) : undefined;
@@ -2454,6 +2475,9 @@ async function mainCli(): Promise<void> {
           ...(titled?.named ? { terminal: `tab named ${reg.name}` } : {}),
           ...(reg.one ? { one: true } : {}),
           ...(inside ? {} : { instruction: `cd ${reg.worktree} and work in that directory from now on` }),
+          ...(reg.titlePending
+            ? { step: `Apply this title: ${reg.titlePending}. Then run \`lobstah trap title-set${sessionFlag}\`. Sign-on is complete after that.` }
+            : {}),
           note:
             'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
             'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ' +

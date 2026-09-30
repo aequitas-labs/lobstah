@@ -57,6 +57,11 @@ function sessionGrounds(cwd: string | undefined): { grounds?: Grounds; placehold
  * the persona survives restarts and compaction; the start counts as a
  * heartbeat), a trap, or neither (offered the two sign-ons).
  */
+/** The reminder SessionStart and Stop give a trap that has not confirmed its sign-on title. */
+export function titleReminder(title: string): string {
+  return `lobstah: sign-on is not complete. Apply this title: ${title}. Then run \`lobstah trap title-set\`.`;
+}
+
 export async function buildBriefContext(sessionId: string, cwd?: string): Promise<string> {
   let fleet = '';
   let glass = '';
@@ -90,7 +95,8 @@ export async function buildBriefContext(sessionId: string, cwd?: string): Promis
   }
   const workerTrap = trapBySession(sessionId);
   if (workerTrap) {
-    return `lobstah: session id ${sessionId} — this session mans trap ${trapLabel(workerTrap)} (it takes assigned work at turn end) and works in ${workerTrap.worktree}; \`lobstah stow\` signs it off.${fleet}`;
+    const title = workerTrap.titlePending ? `\n${titleReminder(workerTrap.titlePending)}` : '';
+    return `lobstah: session id ${sessionId} — this session mans trap ${trapLabel(workerTrap)} (it takes assigned work at turn end) and works in ${workerTrap.worktree}; \`lobstah stow\` signs it off.${fleet}${title}`;
   }
   let help: string;
   try {
