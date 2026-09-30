@@ -34,6 +34,18 @@ describe('helm notices', () => {
     expect(listNotices()).toHaveLength(1);
   });
 
+  it('trap-listening never wakes on its own, is consumed, and still lists; sign-on and start-failed wake', () => {
+    postNotice({ kind: 'trap-listening', text: 'listening' });
+    expect(unseenNotices(false)).toEqual([]);
+    expect(unseenNotices(true)).toEqual([]);
+    expect(listNotices().map((n) => n.kind)).toEqual(['trap-listening']);
+    postNotice({ kind: 'trap-signed-on', text: 'signed on' });
+    postNotice({ kind: 'trap-listening', text: 'listening again' });
+    postNotice({ kind: 'trap-start-failed', text: 'did not start' });
+    expect(unseenNotices(true).map((n) => n.kind)).toEqual(['trap-signed-on', 'trap-start-failed']);
+    expect(unseenNotices(true)).toEqual([]);
+  });
+
   it('unseen consumes on read; a peek does not', () => {
     postNotice({ kind: 'trap-ghosted', text: 'gone' });
     expect(unseenNotices(false)).toHaveLength(1); // peek
