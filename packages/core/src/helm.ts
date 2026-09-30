@@ -6,6 +6,12 @@ import type { Notice } from './notices.js';
 import { lobstahHome } from './paths.js';
 import type { WindowRef } from './window.js';
 import { listWatches } from './watch.js';
+import { readRequest } from './requests.js';
+
+const isOpenRequest = (id: string): boolean => {
+  const r = readRequest(id);
+  return r !== undefined && r.closedAt === undefined;
+};
 
 /**
  * The helm: one orchestrator session per grounds. `lobstah man helm` writes
@@ -211,7 +217,8 @@ export function wakeFloorMs(h: HelmRegistration | undefined): number {
 
 /**
  * True while the condition a notice announced still stands: a free-space
- * hold on queued dispatches, or a watch still failing. Such a notice wakes a
+ * hold on queued dispatches, a watch still failing, or a trap request not
+ * yet closed. Such a notice wakes a
  * helm even when it predates the helm's sign-on, because the condition is
  * current, not old news.
  */
@@ -226,6 +233,8 @@ export function noticeStands(n: Notice): boolean {
           (w.key === n.refId || w.owner === `dispatch:${n.refId}`) &&
           (n.kind === 'watch-failing' ? w.failingNoticed === true : true),
       );
+    case 'trap-request':
+      return n.refId !== undefined && isOpenRequest(n.refId);
     default:
       return false;
   }

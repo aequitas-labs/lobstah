@@ -870,6 +870,41 @@ after the deadline. `lobstah stow --wt <name>` withdraws the reservation; its
 addressed work is then orphaned bait and the helm gets a `bait-orphaned`
 notice.
 
+### Asking for a trap from the glass
+
+The Traps tab and the deck's traps block have a **+ New trap** button. It
+opens a small form: a repo (from the configured repo keys) and a harness
+(`claude` or `codex`). Submitting it files a **trap request**: the glass POSTs
+`{ kind: "trap-request", payload: { repo, harness } }` to `/requests` with
+the same same-origin and page token guard as the open-window button. The
+server checks the repo and harness, writes `~/.lobstah/requests/<id>.json`
+(kind `trap-request`), and runs nothing. `/requests` refuses a body larger
+than eight attachments (`[limits].attachmentMaxBytes` each, as base64) plus
+room for text, with 413. After it reads the kind, it refuses a `trap-request`
+larger than 4 KB with 413.
+
+A request wakes the helm's `man wait` (and the Stop-hook park) as a
+`trap-request` event with the request's id, repo, and harness. An open
+request also wakes a helm that signs on later. The glass shows it at once as a
+greyed card: `requested · <repo> · <harness> · waiting for the helm`, or
+`waiting for a helm` when no helm is signed on.
+
+```bash
+lobstah trap requests                  # open trap requests
+lobstah trap reserve --request <id>    # reserve what the request asks for, and close it
+```
+
+`trap reserve --request <id>` takes the repo and harness from the request,
+records the request on the reservation, and closes the request. The card
+becomes the starting card, then the live trap when the session signs on.
+
+Every starting card shows the start command `trap reserve` prints, with a copy
+button: paste it into a terminal to start the session by hand. The ticket in
+it is kept in `soaking/<id>.ticket` (mode 0600) until the reservation is
+redeemed or withdrawn. The glass sends it only to a page on this machine's
+own glass address, only on the starting card, and no notice or log carries
+it.
+
 ### The terminal tab name
 
 At sign-on, soak names the session's terminal tab after the trap. It finds the

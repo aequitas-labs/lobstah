@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ensureLayout, listTraps, queuedDescriptor, readTrapAnchor, type TrapRegistration } from '@lobstah/core';
+import { ensureLayout, listReservations, listTraps, queuedDescriptor, readTrapAnchor, readRequest, writeRequest, type TrapRegistration } from '@lobstah/core';
 
 // End to end: trap reserve and soak --ticket through the built CLI, against
 // a throwaway repo with a bare origin. Every test has its own LOBSTAH_HOME.
@@ -157,5 +157,36 @@ describe('trap reserve and soak --ticket', () => {
     expect(stow.status, stow.stderr).toBe(0);
     expect(stow.stdout).toContain(`withdrawn: ${r.trap}`);
     expect(lobstah(primary, 'soak', '--session', OTHER, '--harness', 'claude', '--ticket', r.ticket).status).not.toBe(0);
+  });
+});
+
+describe('trap requests from the glass', () => {
+  processTest('trap requests lists open ones; trap reserve --request links the reservation and closes the request', () => {
+    const empty = lobstah(outside, 'trap', 'requests');
+    expect(empty.stdout).toContain('requests: none open');
+    const req = writeRequest('trap-request', { repo: 'r', harness: 'codex' });
+    const listed = lobstah(outside, 'trap', 'requests');
+    expect(listed.status, listed.stderr).toBe(0);
+    expect(listed.stdout).toContain(req.id);
+    expect(listed.stdout).toContain('codex');
+    // Flags may repeat the request, never contradict it.
+    expect(lobstah(outside, 'trap', 'reserve', '--request', req.id, '--harness', 'claude').status).not.toBe(0);
+    const res = lobstah(outside, 'trap', 'reserve', '--request', req.id);
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stdout).toMatch(/^harness: codex$/m);
+    expect(res.stdout).toContain(`request: ${req.id} (closed)`);
+    expect(res.stdout).toContain("$lobstah:trap soak --ticket");
+    expect(res.stdout).not.toContain('CLAUDE_CODE_DISABLE_TERMINAL_TITLE');
+    const [reservation] = listReservations();
+    expect(reservation).toMatchObject({ repo: 'r', harness: 'codex', request: req.id });
+    expect(readRequest(req.id)).toMatchObject({ outcome: `reserved ${kv(res.stdout, 'label')}` });
+    expect(readRequest(req.id)?.closedAt).toBeDefined();
+    expect(lobstah(outside, 'trap', 'requests').stdout).toContain('requests: none open');
+    // A closed or unknown request reserves nothing more.
+    const again = lobstah(outside, 'trap', 'reserve', '--request', req.id);
+    expect(again.status).not.toBe(0);
+    expect(again.stdout + again.stderr).toContain('already closed');
+    expect(lobstah(outside, 'trap', 'reserve', '--request', '00000000-0000-4000-8000-000000000000').status).not.toBe(0);
+    expect(listReservations()).toHaveLength(1);
   });
 });

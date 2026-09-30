@@ -10,6 +10,7 @@ import {
   addrCell,
   attachmentRows,
   cmdRow,
+  startCommands,
   detailBody,
   LogLines,
   TrapName,
@@ -152,39 +153,48 @@ function dispatchModal(x: GlassDispatch, report: GlassReport | undefined, text: 
 
 function trapModal(t: GlassTrap) {
   const r = trapRow(t);
-  const sub = t.starting
-    ? t.starting.failedAt
-      ? [
-          t.repo ?? '',
-          ' · reserved ',
-          Age(t.starting.reservedAt),
-          ' ago · start failed: ',
-          t.starting.reason ?? '',
-          '. Its addressed work stays queued; a session can still redeem the ticket, or `lobstah stow --wt ',
-          t.name ?? t.trapId,
-          '` withdraws it.',
-        ]
-      : [
-          t.repo ?? '',
-          ' · reserved ',
-          Age(t.starting.reservedAt),
-          ' ago · starting: waiting for a session to redeem the ticket (due by ',
-          t.starting.deadline,
-          ')',
-        ]
-    : t.live
-      ? [
-          t.repo ?? 'addressed bait only',
-          ' · session ',
-          t.sessionId ?? '',
-          ' · signed on ',
-          Age(t.signedOnAt),
-          ' ago · ',
-          r.listen,
-          ' · heartbeat ',
-          r.hb,
-        ]
-      : 'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.';
+  const sub = t.requested
+    ? [
+        t.repo ?? '',
+        ' · ',
+        t.harness ?? '',
+        ' · requested ',
+        Age(t.requested.at),
+        ' ago from the glass; the helm reserves it and starts its session.',
+      ]
+    : t.starting
+      ? t.starting.failedAt
+        ? [
+            t.repo ?? '',
+            ' · reserved ',
+            Age(t.starting.reservedAt),
+            ' ago · start failed: ',
+            t.starting.reason ?? '',
+            '. Its addressed work stays queued; a session can still redeem the ticket, or `lobstah stow --wt ',
+            t.name ?? t.trapId,
+            '` withdraws it.',
+          ]
+        : [
+            t.repo ?? '',
+            ' · reserved ',
+            Age(t.starting.reservedAt),
+            ' ago · starting: waiting for a session to redeem the ticket (due by ',
+            t.starting.deadline,
+            ')',
+          ]
+      : t.live
+        ? [
+            t.repo ?? 'addressed bait only',
+            ' · session ',
+            t.sessionId ?? '',
+            ' · signed on ',
+            Age(t.signedOnAt),
+            ' ago · ',
+            r.listen,
+            ' · heartbeat ',
+            r.hb,
+          ]
+        : 'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.';
   const lifecycle = t.notices.length
     ? t.notices.map((n) => html`<div key=${n.seq} class="loglines">${Age(n.at)} ago · <b>${n.kind}</b> — ${n.text}</div>`)
     : html`<div class="empty">none recorded</div>`;
@@ -202,11 +212,12 @@ function trapModal(t: GlassTrap) {
     : html`<div class="empty">none yet</div>`;
   return [
     close,
-    html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : (t.harness ?? 'signed off')}</span></h3>`,
+    html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : (t.harness ?? 'signed off')}</span></h3>`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
     html`<div class="sec">window</div>`,
     windowAction(t),
+    startCommands(t),
     t.live &&
       t.sessionId && [
         html`<div class="sec">open this session</div>`,

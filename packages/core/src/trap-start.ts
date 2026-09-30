@@ -20,7 +20,7 @@ export interface TrapReservation {
   name: string;
   repo: string;
   harness?: string;
-  /** sha256 of the ticket; the ticket itself is shown once, at reserve. */
+  /** sha256 of the ticket. The ticket itself is kept only in `<trapId>.ticket` (mode 0600) for this machine's glass. */
   ticketHash: string;
   reservedAt: string;
   /** Sign-on is due by this time. Past it, the reservation fails. */
@@ -30,6 +30,8 @@ export interface TrapReservation {
   reason?: string;
   /** The session that reserved it. */
   by?: string;
+  /** The `trap-request` request this reservation answers. */
+  request?: string;
 }
 
 /** `<trapId>-<32 hex>`: the id prefix finds the reservation, the rest proves it. */
@@ -42,6 +44,39 @@ export const DEFAULT_TRAP_START_SECS = 180;
 
 function startPath(trapId: string): string {
   return path.join(soakingDir(), `${trapId}.starting`);
+}
+
+function ticketPath(trapId: string): string {
+  return path.join(soakingDir(), `${trapId}.ticket`);
+}
+
+/** A reservation's ticket, for the start command on this machine's glass. Never logged. */
+export function readReservationTicket(trapId: string): string | undefined {
+  if (!/^[0-9a-f]{8}$/.test(trapId)) return undefined;
+  try {
+    const ticket = fs.readFileSync(ticketPath(trapId), 'utf8').trim();
+    return TRAP_TICKET_RE.exec(ticket)?.[1] === trapId ? ticket : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A value as a POSIX shell word, for a command printed for a person to run. */
+export function shellQuote(value: string): string {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The commands that start a reserved trap's session in the repo's primary
+ * checkout, per harness: all harnesses, or only the reserved one.
+ */
+export function trapStartCommands(repoPath: string, ticket: string, harness?: string): Array<{ harness: 'claude' | 'codex'; command: string }> {
+  const cd = `cd ${shellQuote(repoPath)} && `;
+  const all: Array<{ harness: 'claude' | 'codex'; command: string }> = [
+    { harness: 'claude', command: `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:soak --ticket ${ticket}"` },
+    { harness: 'codex', command: `${cd}codex '$lobstah:trap soak --ticket ${ticket}'` },
+  ];
+  return harness === 'claude' || harness === 'codex' ? all.filter((c) => c.harness === harness) : all;
 }
 
 function writeReservation(r: TrapReservation): void {
@@ -94,6 +129,7 @@ export function reserveTrap(opts: {
   name?: string;
   startSecs?: number;
   by?: string;
+  request?: string;
   now?: number;
 }): { reservation: TrapReservation; ticket: string } {
   const now = opts.now ?? Date.now();
@@ -110,8 +146,10 @@ export function reserveTrap(opts: {
     reservedAt: new Date(now).toISOString(),
     deadline: new Date(now + (opts.startSecs ?? DEFAULT_TRAP_START_SECS) * 1000).toISOString(),
     ...(opts.by ? { by: opts.by } : {}),
+    ...(opts.request ? { request: opts.request } : {}),
   };
   writeReservation(reservation);
+  fs.writeFileSync(ticketPath(trapId), ticket, { mode: 0o600 });
   postNotice({
     kind: 'trap-starting',
     text: `trap ${trapLabel(reservation)} reserved for repo ${opts.repo} — starting, sign-on due by ${reservation.deadline}; address work with \`--for ${name}\``,
@@ -137,6 +175,7 @@ export function reservationForTicket(ticket: string): TrapReservation | undefine
 export function dropReservation(trapId: string): TrapReservation | undefined {
   const r = readReservation(trapId);
   if (r) fs.rmSync(startPath(trapId), { force: true });
+  fs.rmSync(ticketPath(trapId), { force: true });
   return r;
 }
 

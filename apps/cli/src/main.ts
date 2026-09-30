@@ -39,6 +39,10 @@ import {
   TRAP_TICKET_ENV,
   TRAP_TICKET_RE,
   DEFAULT_TRAP_START_SECS,
+  trapStartCommands,
+  listRequests,
+  readRequest,
+  closeRequest,
   trapLabel,
   trapNamer,
   trapAddressText,
@@ -370,6 +374,9 @@ soaking (interactive sessions volunteering as workers):
                                   the start command. dispatch --for works on
                                   it at once; unredeemed past the deadline
                                   (default 180s) it fails with a notice.
+  trap reserve --request <id>     reserve what a glass trap request asks for
+                                  (repo, harness), and close the request.
+  trap requests                   open trap requests from the glass.
   stow [--wt <trap>|--session <id>] [--keep] [--quiet]
                                   sign the trap off; an unfinished
                                   assignment requeues, unread messages
@@ -404,11 +411,6 @@ $CLAUDE_CODE_SESSION_ID — inside Claude Code no flag is needed.`;
  */
 function callerSession(flag: string | undefined, withStdin = false): ResolvedSession | undefined {
   return resolveSessionId({ flag, stdin: withStdin ? () => readHookStdin()?.session_id : undefined });
-}
-
-/** A path as a POSIX shell word, for a command printed for a person to run. */
-function shellQuote(value: string): string {
-  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /** The strict helm rule, with the caller's discovered identity in the refusal. */
@@ -526,9 +528,23 @@ function runDueManWatches(): void {
   // The daemon observes dispatch-owned PR watches even with no helm signed on.
 }
 
+/** A trap request as a man wait event: its id, repo, and harness. */
+function trapRequestFields(n: Notice): Record<string, string> | undefined {
+  const r = n.kind === 'trap-request' && n.refId ? readRequest(n.refId) : undefined;
+  return r?.kind === 'trap-request'
+    ? { event: 'trap-request', id: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), from: r.from, at: r.at }
+    : undefined;
+}
+
+/** A haul line for a fleet notice; a trap request names what it asks for. */
+function noticeLine(n: Notice): string {
+  const r = trapRequestFields(n);
+  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: reserve with \`lobstah trap reserve --request ${r.id}\`` : `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
+}
+
 function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
-    console.log(toonKV({ notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
+    console.log(toonKV(trapRequestFields(n) ?? { notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
   }
   console.log(
     'next: each notice names its own decision or remedy — act on it (or note it and move on), ' +
@@ -816,15 +832,42 @@ async function mainCli(): Promise<void> {
 
   switch (cmd) {
     case 'trap': {
+      if (pos[0] === 'requests') {
+        const open = listRequests({ kind: 'trap-request', open: true });
+        console.log(
+          open.length
+            ? toonTable(
+                'trap-requests',
+                open.map((r) => ({ id: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), from: r.from, at: r.at })),
+                ['id', 'repo', 'harness', 'from', 'at'],
+              )
+            : toonKV({ requests: 'none open' }),
+        );
+        if (open.length) console.log(toonHelp(['lobstah trap reserve --request <id>   (reserve the trap a request asks for, and close the request)']));
+        break;
+      }
       if (pos[0] !== 'reserve') throw new UsageError(usageFor('trap')!);
       const cfg = loadConfig();
-      const repoKey = opt('--repo');
-      if (!repoKey) throw new UsageError(`trap reserve needs --repo <key>\n\n${usageFor('trap')!}`);
+      // A request from the glass names the repo and harness; flags may repeat them, never contradict them.
+      const requestId = opt('--request');
+      const request = requestId !== undefined ? readRequest(requestId) : undefined;
+      if (requestId !== undefined) {
+        if (!request || request.kind !== 'trap-request') throw new Error(`no trap request ${requestId} — \`lobstah trap requests\` lists open ones`);
+        if (request.closedAt) throw new Error(`trap request ${requestId} is already closed: ${request.outcome ?? 'no outcome recorded'}`);
+      }
+      const asked = request?.payload as { repo?: string; harness?: string } | undefined;
+      for (const [flag, value] of [['--repo', asked?.repo], ['--harness', asked?.harness]] as const) {
+        if (value !== undefined && opt(flag) !== undefined && opt(flag) !== value) {
+          throw new UsageError(`${flag} ${opt(flag)} contradicts trap request ${requestId} (${flag} ${value}): drop ${flag}`);
+        }
+      }
+      const repoKey = opt('--repo') ?? asked?.repo;
+      if (!repoKey) throw new UsageError(`trap reserve needs --repo <key> or --request <id>\n\n${usageFor('trap')!}`);
       const repo = cfg.repos[repoKey];
       if (!repo) {
         throw new Error(`no repo "${repoKey}" is configured (configured: ${Object.keys(cfg.repos).join(', ') || 'none'}) — \`lobstah repos\` lists them`);
       }
-      const harness = opt('--harness');
+      const harness = opt('--harness') ?? asked?.harness;
       if (harness !== undefined && harness !== 'claude' && harness !== 'codex') {
         throw new UsageError(`--harness must be claude or codex, got "${harness}"`);
       }
@@ -837,10 +880,10 @@ async function mainCli(): Promise<void> {
         name: opt('--name'),
         startSecs,
         by: callerSession(opt('--session'))?.id,
+        ...(request ? { request: request.id } : {}),
       });
-      const cd = `cd ${shellQuote(repo.path)} && `;
-      const claudeStart = `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:soak --ticket ${ticket}"`;
-      const codexStart = `${cd}codex '$lobstah:trap soak --ticket ${ticket}'`;
+      if (request) closeRequest(request.id, `reserved ${trapLabel(reservation)}`);
+      const starts = trapStartCommands(repo.path, ticket, reservation.harness);
       console.log(
         toonKV({
           name: reservation.name,
@@ -849,6 +892,7 @@ async function mainCli(): Promise<void> {
           state: 'starting',
           repo: reservation.repo,
           ...(reservation.harness ? { harness: reservation.harness } : {}),
+          ...(request ? { request: `${request.id} (closed)` } : {}),
           ticket,
           deadline: reservation.deadline,
           note:
@@ -858,8 +902,9 @@ async function mainCli(): Promise<void> {
       );
       console.log(
         toonHelp([
-          ...(reservation.harness !== 'codex' ? [`${claudeStart}   (Claude Code; the variable keeps the tab named ${reservation.name})`] : []),
-          ...(reservation.harness !== 'claude' ? [`${codexStart}   (Codex)`] : []),
+          ...starts.map((s) =>
+            s.harness === 'claude' ? `${s.command}   (Claude Code; the variable keeps the tab named ${reservation.name})` : `${s.command}   (Codex)`,
+          ),
           `lobstah stow --wt ${reservation.name}   (withdraw the reservation)`,
         ]),
       );
@@ -1861,7 +1906,7 @@ async function mainCli(): Promise<void> {
             emit(
               [
                 'Fleet notices need a decision:',
-                ...idleNotices.map((n) => `- ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
+                ...idleNotices.map(noticeLine),
                 'Each notice names its own remedy. The Stop hook checks again at turn end.',
               ].join('\n'),
             );
@@ -1900,7 +1945,7 @@ async function mainCli(): Promise<void> {
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
                 ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
-                ...notices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
+                ...notices.map(noticeLine),
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
                 ...(replies.length || unanswered.length ? [SENT_HINT] : []),
@@ -1953,7 +1998,7 @@ async function mainCli(): Promise<void> {
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
-          ...fleetNotices.map((n) => `- notice ${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`),
+          ...fleetNotices.map(noticeLine),
           ...replies.map(replyLine),
           ...unanswered.map(sentLine),
           ...(replies.length || unanswered.length ? [SENT_HINT] : []),

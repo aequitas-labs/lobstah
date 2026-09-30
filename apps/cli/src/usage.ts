@@ -113,13 +113,22 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
   },
   trap: {
-    subverbs: ['reserve'],
+    subverbs: ['reserve', 'requests'],
     flags: {
       '--repo': { value: '<key>' },
+      '--request': { value: '<id>' },
       '--harness': { value: HARNESS },
       '--name': { value: '<word-word>' },
       '--deadline': { value: '<secs>' },
       '--session': { value: '<id>' },
+    },
+    flagSubverbs: {
+      '--repo': ['reserve'],
+      '--request': ['reserve'],
+      '--harness': ['reserve'],
+      '--name': ['reserve'],
+      '--deadline': ['reserve'],
+      '--session': ['reserve'],
     },
   },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--quiet': {} } },
@@ -224,11 +233,11 @@ Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
 --wait listens (quiet exit 3: re-run). --ticket or LOBSTAH_TRAP_TICKET signs
 on as a reserved trap. Names the Terminal.app/iTerm2 tab. \`soak beat\`: hook.`,
-  trap: `\`trap reserve\` reserves a trap before its session starts: name, wt: id, a
-one-time ticket, and the start command. It shows as starting; dispatch --for
-works at once. soak --ticket <t> (or LOBSTAH_TRAP_TICKET) redeems it. Past
---deadline (default 180s) a trap-start-failed notice posts and addressed work
-stays queued; a late ticket still redeems. stow --wt <name> withdraws it.`,
+  trap: `\`trap reserve\` reserves a trap before its session starts: name, id, ticket,
+start command. dispatch --for works at once; soak --ticket <t> redeems it. Past
+--deadline (default 180s) trap-start-failed posts; work stays queued. stow --wt
+<name> withdraws it. --request <id> reserves what a glass request asks for and
+closes it; \`trap requests\` lists open requests.`,
   stow: `Sign the trap off (in its worktree, or --wt/--session); an open catch
 requeues, unread messages bounce to the helm. Removes the worktree soak
 created unless --keep or it holds uncommitted changes, untracked files, or

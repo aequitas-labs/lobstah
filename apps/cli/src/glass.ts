@@ -18,6 +18,12 @@ import {
   listNotices,
   listTraps,
   listReservations,
+  listRequests,
+  liveHelms,
+  readReservationTicket,
+  trapRequestError,
+  trapStartCommands,
+  writeRequest,
   trapLastSeen,
   validSessionLink,
   trapLabel,
@@ -61,13 +67,38 @@ import type { TrapRegistration } from '@lobstah/core';
  * observational stance as `man tend`, with room for detail a terminal
  * can't afford. It binds 127.0.0.1 only; /data registers no watch, never
  * advances a cursor, and never consumes attention.
- * Look freely, steer only from the helm. The sole desktop action is a
- * same-origin, token-gated request to focus a live trap. The
+ * Look freely, steer only from the helm. The glass writes only through
+ * same-origin, token-gated POSTs: focus a live trap, and file a request
+ * (`/requests`) that wakes the helm. It runs nothing itself. The
  * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
  * own, kept in its localStorage — the server has nothing to write.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
+
+/** An answer's text, in characters, and the files it may carry: the largest request kind. */
+const ANSWER_TEXT_MAX = 20_000;
+const ANSWER_FILES_MAX = 8;
+
+/** limits.attachmentMaxBytes; a config error falls back to the default. */
+function attachmentLimit(): number {
+  try {
+    return loadConfig().limits.attachmentMaxBytes;
+  } catch {
+    return DEFAULT_LIMITS.attachmentMaxBytes;
+  }
+}
+
+/**
+ * The /requests body cap: room for the largest kind, an answer's files as
+ * base64 with its text. Each kind's own limit applies after parsing.
+ */
+export function requestBodyCap(): number {
+  return Math.ceil((attachmentLimit() * 4) / 3) * ANSWER_FILES_MAX + ANSWER_TEXT_MAX * 4 + 64 * 1024;
+}
+
+/** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
+export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([['trap-request', 4096]]);
 
 const readJson = <T>(f: string): T | undefined => {
   try {
@@ -358,7 +389,12 @@ function trapNamesShown(
 }
 
 /** One disk pass, everything the page renders. Pure read. */
-export function buildGlassSnapshot(): GlassSnapshot {
+/**
+ * `local`: the snapshot goes to this machine's own glass page (a same-host
+ * request), so starting cards may carry their start command and ticket.
+ */
+export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassSnapshot {
+  const cfg = loadConfig();
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
@@ -395,7 +431,8 @@ export function buildGlassSnapshot(): GlassSnapshot {
   // dir, notices, and delivery receipts survive — list those ids too so a
   // seat's story stays inspectable after sign-off.
   const reserved = listReservations();
-  const liveIds = new Set([...live.map((t) => t.trapId), ...reserved.map((r) => r.trapId)]);
+  const requested = listRequests({ kind: 'trap-request', open: true });
+  const liveIds = new Set([...live.map((t) => t.trapId), ...reserved.map((r) => r.trapId), ...requested.map((r) => r.id)]);
   const seenIds = new Set<string>();
   for (const f of listDir(laneDirs('work').inbox)) {
     const m = /^trap-(.+)$/.exec(f);
@@ -442,6 +479,11 @@ export function buildGlassSnapshot(): GlassSnapshot {
           starting: {
             reservedAt: r.reservedAt,
             deadline: r.deadline,
+            ...(() => {
+              const ticket = options.local ? readReservationTicket(r.trapId) : undefined;
+              const repoPath = cfg.repos[r.repo]?.path;
+              return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness) } : {};
+            })(),
             ...(r.failedAt || Date.now() > (Date.parse(r.deadline) || 0)
               ? { failedAt: r.failedAt ?? r.deadline, reason: r.reason ?? `no session signed on by ${r.deadline}` }
               : {}),
@@ -450,6 +492,7 @@ export function buildGlassSnapshot(): GlassSnapshot {
         false,
       ),
     ),
+    ...requested.map((r) => attach({ trapId: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), requested: { at: r.at } } as GlassTrap, false)),
     ...[...seenIds].filter((id) => !liveIds.has(id)).sort().map((id) => attach({ trapId: id } as GlassTrap, false)),
   ];
   const attention = attentionSnapshot();
@@ -463,6 +506,8 @@ export function buildGlassSnapshot(): GlassSnapshot {
     traps,
     trapNames: trapNamesShown(traps, dispatches, attention, names),
     notices: allNotices.slice().reverse(),
+    repoKeys: Object.keys(cfg.repos),
+    helmOn: liveHelms(cfg.helm.ttlSecs * 1000).length > 0,
     watches,
     dispatches,
     prs,
@@ -483,7 +528,7 @@ const PAGE = GLASS_PAGE;
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(
   port: number,
-  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: () => GlassSnapshot } = {},
+  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: (options?: { local?: boolean }) => GlassSnapshot } = {},
 ): http.Server {
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   const logged = new Set<string>();
@@ -495,8 +540,81 @@ export function serveGlass(
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
+  /** Same host, same origin, and this server's page token: the only writes the glass accepts. */
+  const ownHost = () => {
+    const address = server.address();
+    return `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
+  };
+  const authorized = (req: http.IncomingMessage, header: string): boolean => {
+    const supplied = req.headers[header];
+    const token = typeof supplied === 'string' ? supplied : '';
+    return (
+      req.headers.host === ownHost() &&
+      req.headers.origin === `http://${ownHost()}` &&
+      token.length === focusToken.length &&
+      timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
+    );
+  };
   const handle = (req: http.IncomingMessage, res: http.ServerResponse): void => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
+    if (req.url === '/requests') {
+      res.setHeader('cache-control', 'no-store');
+      const reply = (status: number, result: unknown) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      };
+      if (req.method !== 'POST') return reply(405, { ok: false, reason: 'POST required.' });
+      if (!authorized(req, 'x-lobstah-token')) {
+        req.resume();
+        return reply(403, { ok: false, reason: 'Request was not authorized.' });
+      }
+      if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) {
+        req.resume();
+        return reply(415, { ok: false, reason: 'JSON required.' });
+      }
+      const cap = requestBodyCap();
+      if (Number(req.headers['content-length'] ?? NaN) > cap) {
+        req.resume();
+        return reply(413, { ok: false, reason: 'The request is too large.' });
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let refused = false;
+      req.on('data', (chunk: Buffer) => {
+        if (refused) return;
+        size += chunk.length;
+        if (size <= cap) return void chunks.push(chunk);
+        refused = true;
+        chunks.length = 0;
+        reply(413, { ok: false, reason: 'The request is too large.' });
+      });
+      req.on('end', () => {
+        if (refused) return;
+        let body: { kind?: unknown; payload?: unknown };
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof body;
+        } catch {
+          return reply(400, { ok: false, reason: 'Invalid JSON.' });
+        }
+        const kindMax = typeof body?.kind === 'string' ? REQUEST_KIND_MAX_BYTES.get(body.kind) : undefined;
+        if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
+        // One switch per kind: each kind validates and stores its own payload.
+        switch (body?.kind) {
+          case 'trap-request': {
+            const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
+            if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
+            const { repo, harness } = body.payload as { repo: string; harness: string };
+            const request = writeRequest('trap-request', { repo, harness }, 'glass');
+            return reply(201, { ok: true, id: request.id });
+          }
+          default:
+            return reply(400, { ok: false, reason: 'Unknown request kind.' });
+        }
+      });
+      req.on('error', () => reply(400, { ok: false, reason: 'The request failed.' }));
+      return;
+    }
     if (req.url?.startsWith('/api/focus/')) {
       res.setHeader('cache-control', 'no-store');
       const reply = (status: number, result: unknown) => {
@@ -504,16 +622,8 @@ export function serveGlass(
         res.end(JSON.stringify(result));
       };
       if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required.' });
-      const address = server.address();
-      const ownHost = `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
-      const supplied = req.headers['x-lobstah-focus-token'];
-      const token = typeof supplied === 'string' ? supplied : '';
-      const validToken =
-        token.length === focusToken.length && timingSafeEqual(Buffer.from(token), Buffer.from(focusToken));
       if (
-        req.headers.host !== ownHost ||
-        req.headers.origin !== `http://${ownHost}` ||
-        !validToken ||
+        !authorized(req, 'x-lobstah-focus-token') ||
         (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
         req.headers['transfer-encoding'] !== undefined
       ) {
@@ -553,7 +663,9 @@ export function serveGlass(
     } else if (req.url?.startsWith('/report/') && req.method === 'GET' && serveReport(req.url, res)) {
       return;
     } else if (req.url === '/data') {
-      const body = JSON.stringify({ ...snapshot(), focusToken, focusSupported: process.platform === 'darwin' });
+      // Start commands carry a ticket: only a same-host request (this
+      // machine's own page, not a rebound name) gets them.
+      const body = JSON.stringify({ ...snapshot({ local: req.headers.host === ownHost() }), focusToken, focusSupported: process.platform === 'darwin' });
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(body);
     } else {
