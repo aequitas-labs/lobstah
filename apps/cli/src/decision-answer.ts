@@ -42,7 +42,6 @@ export function answerKey(key: string, req: AnswerRequest): { decision: Decision
     lane: q.lane as Lane,
     ...(q.repo ? { repo: q.repo } : {}),
     askedBy: 'worker',
-    replace: false,
     maxBytes,
   });
   try {

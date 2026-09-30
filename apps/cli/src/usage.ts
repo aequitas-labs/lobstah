@@ -177,6 +177,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--option': { value: '<label>', repeatable: true },
       '--attach': { value: '<file>', repeatable: true },
       '--withdraw': { value: '<key>' },
+      '--replace': { value: '<key>' },
       '--grounds': { value: '<name>' },
       '--session': { value: '<id>' },
     },
@@ -314,7 +315,7 @@ work in flight requires a live watcher or the hook blocks with the arm command.
 --attach copies images the page names by bare filename; --title overrides its first # heading.
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
   'man:ask': `Put a decision to the human: a card in the glass (decisions/<rid>/) until
-answered or withdrawn. A newer ask on the same dispatch replaces it. The answer
+answered or withdrawn. Asks stand side by side; --replace <key> replaces one. The answer
 wakes man wait as decision-answer. Reserved for the claimed helm.`,
   'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
 Stores the answer; the helm's man wait receives it as decision-answer.`,

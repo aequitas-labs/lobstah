@@ -78,6 +78,9 @@ naming a dispatch id. Then:
 - A `needs-decision` or `blocked` report queues your question to the human.
   The answer arrives in the dispatch's inbox: `lobstah inbox <id>`.
 - Check `lobstah inbox <id>` at natural checkpoints.
+- `report <id> done` refuses while the dispatch has unread messages: it
+  prints them, marks them read, and writes nothing. Act on them, then report
+  done again.
 - A dispatch whose output is findings rather than code ends with
   `done "<one-line note>" --report <file.md>`, its images added with `--attach`.
 - After you act on a message from the helm, say what you did in your next

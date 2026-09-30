@@ -103,6 +103,8 @@ describe('a send expects a reply', () => {
     const watcher = path.join(home, 'watchers', 'waiter.json');
     for (let i = 0; i < 100 && !fs.existsSync(watcher); i++) await new Promise((r) => setTimeout(r, 100));
     await new Promise((r) => setTimeout(r, 1500));
+    // The worker reads its message first: done refuses while one is unread.
+    expect(lobstah(['inbox', A]).status).toBe(0);
     report(A, 'done', 'shipped');
     const code = await exited;
     expect(code, out).toBe(0);
