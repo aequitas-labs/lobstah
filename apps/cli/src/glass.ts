@@ -70,6 +70,7 @@ import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { startSnapshotThread } from './glass-snapshot-thread.js';
 import { briefTitle, olderPage, pollBody } from './glass-poll.js';
+import { GlassPresence, PAGE_ID_RE, showSecretMatches, validShowHash } from './glass-presence.js';
 import type { PollBody } from './glass-poll.js';
 import { focusRegistration, liveTrap } from './focus.js';
 import type { FocusResult } from './focus.js';
@@ -82,7 +83,9 @@ import type { TrapRegistration } from '@lobstah/core';
  * advances a cursor, and never consumes attention.
  * Look freely, steer only from the helm. The glass writes only through
  * same-origin, token-gated POSTs: focus a live trap, and file a request
- * (`/requests`) that wakes the helm. It runs nothing itself. The
+ * (`/requests`) that wakes the helm. It runs nothing itself. Its pages report
+ * their presence (`/api/presence`), and the local pet or CLI may ask an open
+ * page to show an item (`/api/show`, glass-presence.ts). The
  * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
  * own, kept in its localStorage — the server has nothing to write.
  */
@@ -704,8 +707,13 @@ const PAGE = GLASS_PAGE;
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(
   port: number,
-  options: { focus?: (reg: TrapRegistration) => Promise<FocusResult>; snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot } = {},
+  options: {
+    focus?: (reg: TrapRegistration) => Promise<FocusResult>;
+    snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot;
+    presence?: GlassPresence;
+  } = {},
 ): http.Server {
+  const presence = options.presence ?? new GlassPresence();
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   // A caller's own snapshot function runs here; the default builds on the snapshot thread.
   const thread = options.snapshot ? undefined : startSnapshotThread();
@@ -803,6 +811,75 @@ export function serveGlass(
         }
       });
       req.on('error', () => reply(400, { ok: false, reason: 'The request failed.' }));
+      return;
+    }
+    if (req.url?.split('?')[0] === '/api/presence') {
+      // A glass page's poll or heartbeat, and its pagehide beacon. Same host
+      // and same origin only: another site can neither fake a page nor read
+      // what is queued for one.
+      res.setHeader('cache-control', 'no-store');
+      req.resume();
+      const reply = (status: number, result: unknown) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      };
+      if (req.method !== 'POST') return reply(405, { ok: false, reason: 'POST required.' });
+      if (req.headers.host !== ownHost() || req.headers.origin !== `http://${ownHost()}`) {
+        return reply(403, { ok: false, reason: 'Presence was not authorized.' });
+      }
+      const q = new URL(req.url, 'http://glass').searchParams;
+      const page = q.get('page') ?? '';
+      const vis = q.get('vis');
+      if (!PAGE_ID_RE.test(page) || (vis !== 'visible' && vis !== 'hidden' && vis !== 'gone')) {
+        return reply(400, { ok: false, reason: 'Invalid presence.' });
+      }
+      if (vis === 'gone') {
+        presence.gone(page);
+        return reply(200, { ok: true, show: null });
+      }
+      return reply(200, { ok: true, show: presence.seen(page, vis === 'visible', req.headers['user-agent'] ?? '') });
+    }
+    if (req.url === '/api/show') {
+      // Local only: the pet and the CLI, never a web page. The secret lives in
+      // a user-only file; a browser always sends Origin on a POST, so any
+      // request that carries one is refused.
+      res.setHeader('cache-control', 'no-store');
+      const reply = (status: number, result: unknown) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      };
+      if (req.method !== 'POST') {
+        req.resume();
+        return reply(405, { delivered: false, reason: 'POST required.' });
+      }
+      if (
+        req.headers.host !== ownHost() ||
+        req.headers.origin !== undefined ||
+        !showSecretMatches(req.headers['x-lobstah-show-secret']) ||
+        !/^application\/json\b/.test(req.headers['content-type'] ?? '')
+      ) {
+        req.resume();
+        return reply(403, { delivered: false, reason: 'Show request was not authorized.' });
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      req.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size <= 4096) chunks.push(chunk);
+      });
+      req.on('end', () => {
+        if (size > 4096) return reply(413, { delivered: false, reason: 'The request is too large.' });
+        let hash: unknown;
+        try {
+          hash = (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { hash?: unknown })?.hash;
+        } catch {
+          return reply(400, { delivered: false, reason: 'Invalid JSON.' });
+        }
+        if (!validShowHash(hash)) return reply(400, { delivered: false, reason: 'Invalid hash.' });
+        reply(200, presence.show(hash));
+      });
+      req.on('error', () => reply(400, { delivered: false, reason: 'The request failed.' }));
       return;
     }
     if (req.url?.startsWith('/api/focus/')) {

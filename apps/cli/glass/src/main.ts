@@ -5,6 +5,7 @@ import { App } from './components/app.js';
 import { ReportShell, loadReportView } from './components/report-view.js';
 import type { ReportViewState } from './components/report-view.js';
 import { startPolling } from './poll.js';
+import { startPresence } from './presence.js';
 import { loadLobHidden, loadPrefs } from './prefs.js';
 import { currentRoute, onRoute } from './route.js';
 import { getState, initState, setState, subscribe } from './store.js';
@@ -14,6 +15,7 @@ import type { GlassState } from './store.js';
  * The spyglass page's entry point. On `/report/<key>` it renders that report
  * once and stops. Otherwise it builds the store from localStorage and the
  * URL, renders App into the body on every change, and starts polling.
+ * Either page reports its presence, so the pet can show an item in it.
  * A `#report/<key>` link goes to the report's page.
  */
 
@@ -59,6 +61,7 @@ function startReportPage(key: string): void {
   document.title = 'report · lobstah glass';
   subscribe(paint);
   paint();
+  startPresence(2000);
   void loadReportView(key).then((loaded) => {
     view = loaded;
     if (loaded.state === 'ready') document.title = `${loaded.report.title} · lobstah glass`;
@@ -117,5 +120,6 @@ function startGlass(): void {
     if (getState().lightbox) closeLightbox();
     else closeModal();
   });
+  startPresence();
   startPolling();
 }

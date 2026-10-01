@@ -249,6 +249,20 @@ export function reportFromHash(hash: string | undefined | null): string | null {
   }
 }
 
+/**
+ * A hash a glass page may be asked to show (glass-presence.ts): a tab
+ * (`#prs`), a decision card (`#decision/<key>`), or a report
+ * (`#report/<key>`), read by the parsers the page reads `location.hash`
+ * with. Empty means "the glass as it is". The server checks it before it
+ * queues a show, and the page again before it applies one.
+ */
+export function validShowHash(hash: unknown): hash is string {
+  if (typeof hash !== 'string') return false;
+  if (hash === '') return true;
+  if (hash.length > 1024 || !hash.startsWith('#') || /[\s\x00-\x1f\x7f]/.test(hash)) return false;
+  return (GLASS_TABS as readonly string[]).includes(hash.slice(1)) || decisionFromHash(hash) !== null || reportFromHash(hash) !== null;
+}
+
 /** The report key a `/report/<key>` page path names, else null. */
 export function reportFromPath(pathname: string): string | null {
   const m = /^\/report\/([^/?#]+)\/?$/.exec(pathname);

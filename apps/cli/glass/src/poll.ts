@@ -1,12 +1,14 @@
 import type { GlassBeats, GlassSnapshot } from '@lobstah/core';
 import { markStale, receive, receiveBeats, refreshDetail } from './actions.js';
+import { sendPresence } from './presence.js';
 
 /**
  * Polling: /data every 2s, one request at a time, and not at all while the
  * tab is hidden. Each poll sends the last ETag: a 304 means nothing a person
  * reads changed, and only its beats (server time, heartbeats) apply. Each
  * snapshot goes to the store; rendering is Preact's. An open dispatch modal
- * refreshes its detail after every poll.
+ * refreshes its detail after every poll. Every poll also reports this page's
+ * presence (presence.ts).
  */
 
 let inflight = false;
@@ -26,6 +28,7 @@ function beatsOf(r: Response): GlassBeats | undefined {
 export async function poll(): Promise<void> {
   if (inflight) return;
   inflight = true;
+  void sendPresence();
   try {
     const r = await fetch('/data', { cache: 'no-store', headers: etag ? { 'if-none-match': etag } : {} });
     if (r.status === 304) {

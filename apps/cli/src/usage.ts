@@ -135,7 +135,11 @@ export const COMMANDS: Record<string, CommandSpec> = {
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
   doctor: { flags: {} },
-  glass: { subverbs: ['stop', 'status', 'install', 'uninstall', 'restart'], flags: { '--port': { value: '<n>' }, '--detach': {} } },
+  glass: {
+    subverbs: ['stop', 'status', 'install', 'uninstall', 'restart', 'show'],
+    flags: { '--port': { value: '<n>' }, '--detach': {}, '--json': {} },
+    flagSubverbs: { '--json': ['show'] },
+  },
   pet: { subverbs: ['install', 'uninstall'], flags: { '--binary': { value: '<path>' } } },
   repos: { subverbs: ['add'], flags: { '--pickup': {}, '--key': { value: '<k>' } }, positionals: '[<path>]' },
   init: { flags: { '--scan': {}, '--pickup': {} }, positionals: '[<dir>...]' },
@@ -281,7 +285,10 @@ traps with lifecycle and mail, notices, merge view; filters and a
 table/cards toggle. Read-only and binds 127.0.0.1 only: looking through it
 consumes no cursor and steers nothing. --detach starts it in the background;
 stop and status manage that process. install and uninstall manage a user service.
-restart restarts the service, or a detached glass (stop, then --detach).`,
+restart restarts the service, or a detached glass (stop, then --detach).
+show [<#hash>] asks a glass page that is already open to show a tab
+(#prs), a decision (#decision/<key>), or a report (#report/<key>); it prints
+whether a page was seen recently, and in which app (--json for the pet).`,
   repos: `List configured repos, or detect one and append its [repos.*] block.`,
   init: `Create ~/.lobstah + config; --scan appends a [repos.*] block per repo found
 under the given directories.`,

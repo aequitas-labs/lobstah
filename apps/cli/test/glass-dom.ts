@@ -26,8 +26,14 @@ export interface GlassDom {
   opened(): Array<[string, string | undefined, string | undefined]>;
   /** URLs the page navigated to with location.replace. */
   replaced(): string[];
-  /** The POSTs the page made, in order. */
+  /** The POSTs the page made, in order, other than its presence calls. */
   posts(): Array<{ url: string; headers: Record<string, string>; body: string }>;
+  /** The page's presence calls (`/api/presence?page=…&vis=…`), in order. */
+  presence(): string[];
+  /** Queue a show the page's next presence call receives, as the server hands one over. */
+  queueShow(show: { id: string; hash: string }): void;
+  /** URLs the page navigated to with location.assign. */
+  assigned(): string[];
   /** The poll intervals (ms) the page currently holds. */
   intervals(): number[];
   /** Hide or show the tab (visibilitychange). */
@@ -93,7 +99,15 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
   };
   const fetched: string[] = [];
   const posted: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+  const presenceCalls: string[] = [];
+  let queuedShow: { id: string; hash: string } | null = null;
   w.fetch = async (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => {
+    if (init?.method === 'POST' && typeof url === 'string' && url.startsWith('/api/presence?')) {
+      presenceCalls.push(url);
+      const show = queuedShow;
+      queuedShow = null;
+      return { ok: true, status: 200, json: async () => ({ ok: true, show }) };
+    }
     if (init?.method === 'POST') {
       const req = { url, headers: init.headers ?? {}, body: init.body ?? '' };
       posted.push(req);
@@ -158,6 +172,8 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
   };
   const replaced: string[] = [];
   Object.defineProperty(window.location, 'replace', { value: (url: string) => void replaced.push(url), configurable: true });
+  const assigned: string[] = [];
+  Object.defineProperty(window.location, 'assign', { value: (url: string) => void assigned.push(url), configurable: true });
   // Pin the page's clock: ages and staleness are computed from Date.now().
   w.Date.now = () => opts.now;
   // Polls run when the test says so, never on a real interval; the harness
@@ -198,6 +214,11 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
     opened: () => [...opened],
     replaced: () => [...replaced],
     posts: () => [...posted],
+    presence: () => [...presenceCalls],
+    queueShow: (show) => {
+      queuedShow = show;
+    },
+    assigned: () => [...assigned],
     intervals: () => [...intervals.values()].map((i) => i.ms),
     hide: async (hidden: boolean) => {
       Object.defineProperty(window.document, 'hidden', { value: hidden, configurable: true });

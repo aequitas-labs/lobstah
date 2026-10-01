@@ -486,6 +486,22 @@ only a trap id in a same-origin, token-protected POST. The ⚙ popover's two
 preferences — table or cards, and whether lobsters crawl the page — are
 per-browser, kept in that browser's localStorage and never on disk.
 
+Each open glass page, and each report's page, reports its presence: every
+poll, and every 30 s while its tab is hidden, it sends the server a random
+page id and whether it is visible; the server reads the browser's user
+agent from the request and forgets a page three minutes after it last
+reported, or at once when the page closes. `lobstah glass show '<#hash>'`
+asks the page most likely in front of you (the latest visible one, else the
+latest seen) to show a tab (`#prs`), a decision (`#decision/<key>`), or a
+report (`#report/<key>`). The page applies each show once, on its next poll
+or as soon as its tab is visible again. The command prints whether a page
+was seen and in which app (`claude` for the Claude desktop app's Browser
+pane, `chrome`, `safari`, `firefox`, `edge`, `electron`, or `other`);
+`--json` prints the same as JSON for the desktop pet. `POST /api/show` is
+local only: it needs the secret in `~/.lobstah/state/glass-show.secret`
+(user-only, created by the first `glass show`), the glass's own Host, and no
+`Origin` header, so no web page can send one.
+
 On a card, the title and the badge share one line. The title shrinks first,
 with an ellipsis, but always keeps its PR number or 8-character id. A badge of
 12 characters or fewer always shows whole. A longer badge truncates only
