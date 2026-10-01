@@ -34,6 +34,7 @@ import {
   trapLabel,
   trapNameForId,
   noticeOrphanedBait,
+  noticeIdleTrapClaims,
   readSessionClaim,
   isTrapCatch,
   isFinished,
@@ -535,6 +536,7 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   const signOffGraceMs = cfg.soak.signOffGraceSecs * 1000;
   for (const t of bounceExpiredSignOffs(signOffGraceMs)) log(`trap wt:${t} did not re-soak within the sign-off grace — its messages bounced to the helm`);
   noticeOrphanedBait(Date.now(), signOffGraceMs);
+  noticeIdleTrapClaims(now, cfg.soak.claimIdleNoticeSecs * 1000);
   const workSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
   const choreSkip = (d: Descriptor) => d.for !== undefined &&
     (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));

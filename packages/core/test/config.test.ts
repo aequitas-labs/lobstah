@@ -35,6 +35,11 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('defaults the idle-claim notice grace to 180 seconds and honors the soak override', () => {
+    expect(loadConfig().soak.claimIdleNoticeSecs).toBe(180);
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nclaimIdleNoticeSecs = 240\n');
+    expect(loadConfig().soak.claimIdleNoticeSecs).toBe(240);
+  });
   it('repo overrides global', () => {
     const r = resolveDispatch({ id: 'x', repo: 'myapp', brief: 'b' }, loadConfig());
     expect(r.harness).toBe('claude');

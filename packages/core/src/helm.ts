@@ -7,6 +7,8 @@ import { lobstahHome } from './paths.js';
 import type { WindowRef } from './window.js';
 import { listWatches } from './watch.js';
 import { readRequest } from './requests.js';
+import { cancelRequested } from './queue.js';
+import { listTraps, unreportedTrapBait } from './soak.js';
 
 const isOpenRequest = (id: string): boolean => {
   const r = readRequest(id);
@@ -237,6 +239,12 @@ export function noticeStands(n: Notice): boolean {
       );
     case 'trap-request':
       return n.refId !== undefined && isOpenRequest(n.refId);
+    case 'trap-claim-idle':
+      return listTraps().some((reg) => {
+        if (reg.claimed !== n.refId) return false;
+        const bait = unreportedTrapBait(reg);
+        return bait !== undefined && !cancelRequested(bait.id, bait.lane) && Date.parse(bait.claim.at) <= Date.parse(n.at);
+      });
     default:
       return false;
   }

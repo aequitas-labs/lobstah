@@ -23,6 +23,7 @@ import {
   baitBrief,
   cancelRequested,
   claimBait,
+  unreportedTrapBait,
   codexInvocation,
   hasOpenCatch,
   heartbeatTrap,
@@ -549,8 +550,16 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
         );
         return 'woke';
       }
-      if (unhandled(id, lane).length > 0) {
-        block(`New instruction for your dispatch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`);
+      const pending = unreportedTrapBait(reg);
+      const instruction = unhandled(id, lane).length > 0
+        ? `New instruction for your dispatch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`
+        : undefined;
+      if (pending || instruction) {
+        // Another waiter may have claimed while this Stop hook was parked,
+        // or exited after claiming without waking the session. An initial
+        // brief is not consumed until the worker's first report, so recover
+        // it here instead of waiting forever for an inbox nudge.
+        block([instruction, pending ? baitBrief(id, pending.descriptor) : undefined].filter(Boolean).join('\n\n'));
         return 'woke';
       }
     } else {
