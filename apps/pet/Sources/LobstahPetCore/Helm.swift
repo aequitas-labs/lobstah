@@ -24,13 +24,16 @@ public struct HelmRegistration: Decodable, Equatable {
   public var cwd: String?
   public var heartbeatAt: String
   public var window: HelmWindow?
+  /** The helm's own session link (`claude://claude.ai/...`), when its registration carries one. */
+  public var link: String?
 
-  public init(sessionId: String, harness: String? = nil, cwd: String? = nil, heartbeatAt: String, window: HelmWindow? = nil) {
+  public init(sessionId: String, harness: String? = nil, cwd: String? = nil, heartbeatAt: String, window: HelmWindow? = nil, link: String? = nil) {
     self.sessionId = sessionId
     self.harness = harness
     self.cwd = cwd
     self.heartbeatAt = heartbeatAt
     self.window = window
+    self.link = link
   }
 }
 

@@ -23,7 +23,23 @@ PR in your browser instead of the helm; right-click adds **Open PR**.
 Clicking a decision pet opens the glass at the decision's card; the card
 stays until the decision is answered or withdrawn.
 Clicking a report pet opens the glass at the report. Opening a report in
-the glass does not acknowledge it. Any pet
+the glass does not acknowledge it.
+
+A report or decision click (and **Open spyglass**) first uses a glass that
+is already open. The pet runs `lobstah glass show '<#hash>' --json`; when a
+glass page reported in the last three minutes, that page moves to the item
+and the pet brings its app forward instead of opening a new tab:
+
+- a page in the Claude desktop app's Browser pane (its user agent carries
+  `Claude/<version>`) raises the Claude app, and opens the helm's
+  `claude://claude.ai/...` session link when its registration has one;
+- a page in a browser raises that browser (the default browser first when it
+  fits the user agent). It does not pick the tab.
+
+With no page seen recently, or no glass running, the click opens a new tab
+as before (a decision with a live helm brings up the helm instead). A page
+hidden behind another tab or a closed pane applies the item when it is
+shown again; a pane or tab that closed says goodbye and is forgotten at once. Any pet
 click also acknowledges the item (`lobstah attention ack <key> --by pet`),
 so that pet stops walking until the item's state changes; right-click
 **Acknowledge** does only that. Acks are display-only — the helm is still

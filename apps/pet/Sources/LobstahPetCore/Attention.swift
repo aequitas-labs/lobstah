@@ -52,6 +52,18 @@ public struct AttentionItem: Decodable, Equatable {
     return URL(string: "\(glass.absoluteString)/#decision/\(encoded)")
   }
 
+  /**
+   * Where a report or decision pet shows in the glass: the hash an open glass
+   * page moves to (`#report/<key>`, `#decision/<key>`), and the URL a new tab
+   * opens when none is open. Nil for every other kind.
+   */
+  public func glassTarget(glass: URL) -> GlassTarget? {
+    guard let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
+    if let url = reportLink(glass: glass) { return GlassTarget(hash: "#report/\(encoded)", url: url) }
+    if let url = decisionLink(glass: glass) { return GlassTarget(hash: "#decision/\(encoded)", url: url) }
+    return nil
+  }
+
   /** The CLI acknowledgement for a pet click or its Acknowledge menu entry. */
   public var ackArguments: [String]? {
     key.map { ["attention", "ack", $0, "--by", "pet"] }
@@ -79,21 +91,28 @@ public struct AttentionItem: Decodable, Equatable {
   }
 }
 
-/// Opens a pet's target before acknowledging it. A decision brings up the
-/// live helm's session, which frames it; with no live helm it opens its glass
-/// card. Reports and PRs open their URLs. Other items focus the helm.
-/// `focusHelm` gets the glass URL to open when no helm step works.
+/// Opens a pet's target before acknowledging it. A report or a decision first
+/// asks `showGlass` to show it in a glass page that is already open (and to
+/// bring that page's app forward); `showGlass` runs the given fallback when
+/// no page is open. The fallback is the old click: a decision brings up the
+/// live helm's session, which frames it, or with no live helm opens its glass
+/// card; a report opens its page. PRs open their URLs. Other items focus the
+/// helm. `focusHelm` gets the glass URL to open when no helm step works.
 public func clickAttentionItem(
   _ item: AttentionItem,
   glass: URL,
   helmLive: Bool = false,
-  open: (URL) -> Void,
-  focusHelm: (URL) -> Void,
+  open: @escaping (URL) -> Void,
+  focusHelm: @escaping (URL) -> Void,
+  showGlass: (GlassTarget, @escaping () -> Void) -> Void = { _, otherwise in otherwise() },
   acknowledge: ([String]) -> Void
 ) {
-  if let card = item.decisionLink(glass: glass) {
-    if helmLive { focusHelm(card) } else { open(card) }
-  } else if let url = item.reportLink(glass: glass) ?? item.prLink {
+  if let target = item.glassTarget(glass: glass) {
+    let isDecision = item.kind == "decision"
+    showGlass(target) {
+      if isDecision && helmLive { focusHelm(target.url) } else { open(target.url) }
+    }
+  } else if let url = item.prLink {
     open(url)
   } else {
     focusHelm(glass)

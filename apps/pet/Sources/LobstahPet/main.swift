@@ -5,8 +5,11 @@
 // question pet runs the focus ladder against the helm registration lobstah
 // already keeps: exact iTerm pane -> Terminal tab by tty -> VS Code window
 // by cwd -> app by bundle id -> resume-if-stale -> the spyglass. Clicking a
-// decision pet brings up a live helm the same way (the Claude desktop app for
-// a desktop helm), else the decision's glass card. Clicking a
+// report or decision pet first shows it in a glass page that is already open
+// (the Claude desktop Browser pane or a browser tab) and brings that app
+// forward. With no open page, a decision brings up a live helm the same way
+// (the Claude desktop app for a desktop helm), else the decision's glass
+// card, and a report opens its page in a new tab. Clicking a
 // draft-PR pet opens the PR. The pet only ever reads lobstah state
 // (`attention --json`, or `man tend --json` from an older lobstah, plus the
 // helm files); it steers nothing. Its one write is ~/.lobstah/pet/state.json,
@@ -19,11 +22,51 @@ import LobstahPetCore
 
 // HelmRegistration and HelmWindow live in LobstahPetCore (Helm.swift).
 
-/** The spyglass: $LOBSTAH_GLASS_PORT (shared with `lobstah glass`), else 4949. */
-let glassURL: URL = {
-  let port = ProcessInfo.processInfo.environment["LOBSTAH_GLASS_PORT"].flatMap { Int($0) } ?? 4949
-  return URL(string: "http://127.0.0.1:\(port)")!
-}()
+/** The spyglass's port: $LOBSTAH_GLASS_PORT (shared with `lobstah glass`), else 4949. */
+let glassPort: Int = ProcessInfo.processInfo.environment["LOBSTAH_GLASS_PORT"].flatMap { Int($0) } ?? 4949
+let glassURL = URL(string: "http://127.0.0.1:\(glassPort)")!
+
+// MARK: - showing an item in an open glass
+
+/** The bundle id of the app that opens http URLs: the default browser. */
+func defaultBrowserBundle() -> String? {
+  guard let app = NSWorkspace.shared.urlForApplication(toOpen: glassURL) else { return nil }
+  return Bundle(url: app)?.bundleIdentifier
+}
+
+/** Bring the first running app of `bundles` forward; its bundle id, or nil when none runs. */
+func activateFirstRunning(_ bundles: [String]) -> String? {
+  for bundle in bundles {
+    if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first, app.activate() {
+      return bundle
+    }
+  }
+  return nil
+}
+
+/**
+ * Show `target` in a glass page that is already open (the Claude desktop
+ * app's Browser pane, or a browser tab) and bring that app forward; run
+ * `otherwise` (a new tab, as before) when no page was seen recently. The
+ * show runs `lobstah glass show` off the main thread; the rest runs on it.
+ */
+func showGlass(_ target: GlassTarget, otherwise: @escaping () -> Void) {
+  DispatchQueue.global().async {
+    let result = decodeGlassShow(execute("/usr/bin/env", ["lobstah"] + glassShowArguments(target.hash, port: glassPort), timeout: 4).outcome)
+    DispatchQueue.main.async {
+      showInGlass(target, helm: readHelm(), defaultBrowser: defaultBrowserBundle(),
+        show: { _ in result },
+        activate: activateFirstRunning,
+        open: { NSWorkspace.shared.open($0) },
+        otherwise: otherwise)
+    }
+  }
+}
+
+/** The spyglass, from a menu: an open glass page comes forward as it is, else a new tab. */
+func openSpyglass() {
+  showGlass(GlassTarget(hash: "", url: glassURL)) { NSWorkspace.shared.open(glassURL) }
+}
 
 /**
  * Acknowledge through lobstah's own write path — the pet never writes
@@ -146,6 +189,7 @@ final class PetView: NSView {
       helmLive: helmIsLive(readHelm()),
       open: { NSWorkspace.shared.open($0) },
       focusHelm: { focusHelm(fallback: $0) },
+      showGlass: showGlass,
       acknowledge: ackAttention)
   }
   override func updateTrackingAreas() {
@@ -183,7 +227,7 @@ final class PetView: NSView {
 
 extension NSApplication {
   @objc func petOpenGlass() {
-    NSWorkspace.shared.open(glassURL)
+    openSpyglass()
   }
   @objc func petOpenURL(_ sender: NSMenuItem) {
     if let url = sender.representedObject as? URL { NSWorkspace.shared.open(url) }
@@ -419,7 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   @objc func openGlass() {
-    NSWorkspace.shared.open(glassURL)
+    openSpyglass()
   }
 
   func poll() {
