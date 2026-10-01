@@ -1,5 +1,5 @@
 import type { GlassPr, GlassStack } from '@lobstah/core';
-import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
+import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, keeperCount, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -170,8 +170,14 @@ export function Deck({
       : t.starting
         ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
         : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
-    meta: [t.repo || '', ' · ', trapNow(t)],
-    metaText: `${t.repo || ''} · ${trapNowText(t)}`,
+    meta: [
+      t.repo || '',
+      ' · ',
+      trapNow(t),
+      ' · ',
+      html`<span title="All-time successful dispatches">🦞 ${keeperCount(t.keepers ?? 0)}</span>`,
+    ],
+    metaText: `${t.repo || ''} · ${trapNowText(t)} · 🦞 ${keeperCount(t.keepers ?? 0)}`,
     action: windowAction(t),
     extra: startCommands(t),
     open: opener('trap', t.trapId),

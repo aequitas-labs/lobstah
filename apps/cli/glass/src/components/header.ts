@@ -28,6 +28,8 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
     : html`<span class="bad">down</span>`;
   return [
     html`<span class="chip">daemon ${daemon}</span>`,
+    inp.stats &&
+      html`<span class="chip" title="All-time successful trap dispatches; includes signed-off traps">🦞 ${inp.stats.keepers} keepers · ${inp.stats.traps} traps</span>`,
     d.slots &&
       html`<span class="chip">active headless: ${d.slots.headless} of ${d.slots.limit}; traps: ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(

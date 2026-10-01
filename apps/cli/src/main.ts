@@ -222,6 +222,7 @@ work (humans and agents):
                                   never falls back headless; session:<id>
                                   resolves to its trap)
   ls [--all]                      queue, active, recent done      (alias: buoys)
+  stats [--json]                  all-time traps and successful keeper counts
   attention [--json | ack <item-key> [--by <label>] | unack <item-key>]
                                   standing attention with ack state (--json:
                                   { attention } as in man tend --json); an ack
@@ -907,6 +908,12 @@ async function mainCli(): Promise<void> {
   };
 
   switch (cmd) {
+    case 'stats': {
+      const { readStats, renderStats } = await import('./stats.js');
+      const stats = readStats();
+      console.log(has('--json') ? JSON.stringify(stats) : renderStats(stats));
+      break;
+    }
     case 'trap': {
       // `trap title-set` is the older name of `soak title-set`.
       if (pos[0] === 'title-set') {
