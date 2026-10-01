@@ -1029,13 +1029,16 @@ a.lob {
   border-radius: 3px;
   padding: 0 3px;
 }
+/* A code block keeps its lines and scrolls sideways inside its own box. */
 .mdpage pre.mdcode {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 8px;
+  max-width: 100%;
   overflow-x: auto;
   white-space: pre;
+  overflow-wrap: normal;
 }
 .mdpage pre.mdcode code {
   padding: 0;
@@ -1057,7 +1060,9 @@ a.lob {
   border: 0;
   border-top: 1px solid var(--line);
 }
+/* A table scrolls sideways inside its wrapper; its cells wrap, each at least 12ch wide (most words fit whole). */
 .mdpage .mdtable {
+  max-width: 100%;
   overflow-x: auto;
 }
 .mdpage table {
@@ -1069,6 +1074,9 @@ a.lob {
   border: 1px solid var(--line);
   padding: 3px 8px;
   text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 12ch;
 }
 
 /* New trap: a button on the Traps tab and the deck's traps heading, opening a small form. */
@@ -1092,11 +1100,17 @@ a.lob {
   cursor: default;
 }
 
-/* A report on its own page (/report/<key>): full width, rendered once. */
+/*
+ * A report on its own page (/report/<key>): full width, rendered once. A
+ * definite width, so a wide table or code line scrolls in its own box and
+ * never widens the page; long tokens (paths, hashes, URLs) wrap.
+ */
 .reportview {
+  width: 100%;
   max-width: 1100px;
   margin: 0 auto;
   padding: 20px 16px 48px;
+  overflow-wrap: anywhere;
 }
 .reportview h1 {
   font-size: 18px;
@@ -1116,4 +1130,13 @@ a.lob {
 }
 .reportview .mdpage {
   padding: 12px 20px;
+}
+/* A phone: the body's gutter is the page's only one. */
+@media (max-width: 600px) {
+  .reportview {
+    padding: 12px 0 32px;
+  }
+  .reportview .mdpage {
+    padding: 8px 12px;
+  }
 }
