@@ -1,9 +1,9 @@
-import type { Attachment, GlassDispatch, GlassPr, TendAttention } from '@lobstah/core';
+import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, TendAttention } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { useState } from 'preact/hooks';
 import { dispatchFileUrl, isImageName, prBadgeClass, watchState } from '../../../src/glass-diff.js';
-import type { ModalType } from '../../../src/glass-diff.js';
-import { copyText, openLightbox, openTrapWindow, requestTrap, showModal } from '../actions.js';
+import type { DispatchDetail, ModalType } from '../../../src/glass-diff.js';
+import { copyText, loadOlder, openLightbox, openTrapWindow, requestTrap, showModal } from '../actions.js';
 import { getState } from '../store.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -23,7 +23,7 @@ export const ageText = (iso: string | undefined | null): string => {
 export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
 
 /** The activity line under a dispatch's verb and note: what it is doing now, and how long ago. Stale shows dim. */
-export const ActivityLine = (x: Pick<GlassDispatch, 'activity'>) =>
+export const ActivityLine = (x: Pick<GlassDispatchSummary, 'activity'>) =>
   x.activity &&
   html`<div class=${'activity' + (x.activity.stale ? ' stale' : '')} title=${x.activity.stale ? 'no activity past the wedge threshold' : x.activity.kind}>${x.activity.stale ? 'stale · ' : ''}${x.activity.summary} · ${Age(x.activity.at)} ago</div>`;
 
@@ -31,7 +31,7 @@ export const ActivityLine = (x: Pick<GlassDispatch, 'activity'>) =>
 const safeHref = (u: string | undefined): string | undefined => (u && /^https?:\/\//i.test(u) ? u : undefined);
 
 /** `paused: waiting on review · 12m · <link>`: what the worker waits on outside lobstah, and for how long. */
-export const WaitingLine = (x: Pick<GlassDispatch, 'waiting' | 'verb'>) => {
+export const WaitingLine = (x: Pick<GlassDispatchSummary, 'waiting' | 'verb'>) => {
   const w = x.waiting;
   if (!w) return undefined;
   const href = safeHref(w.link);
@@ -88,6 +88,24 @@ export function windowAction(t: GlassTrap): Children {
 export function Table(headers: readonly string[], rows: Children[], empty: string) {
   if (!rows.length) return html`<div class="empty">${empty}</div>`;
   return html`<div class="wrap"><table><tbody><tr>${headers.map((h) => html`<th>${h}</th>`)}</tr>${rows}</tbody></table></div>`;
+}
+
+/** Paging in history /data leaves out: how many are left, and whether a page is on its way. */
+export interface OlderControl {
+  left: number;
+  loading: boolean;
+  error?: string;
+}
+
+/** `show 50 older (of 212)` under a list whose history pages in; nothing when none is left. */
+export function ShowOlder({ kind, more }: { kind: GlassOlderKind; more: OlderControl }) {
+  if (!more.left && !more.error) return null;
+  return html`<div class="older">${
+    more.left > 0 &&
+    html`<button class="btn" disabled=${more.loading} onClick=${() => void loadOlder(kind)}>${
+      more.loading ? 'loading…' : `show ${Math.min(more.left, 50)} older (of ${more.left})`
+    }</button>`
+  }${more.error && html` <span class="bad">${more.error}</span>`}</div>`;
 }
 
 /** A command the reader copies (the glass never runs anything): click the text or ⧉. */
@@ -195,7 +213,10 @@ export function NamedText(text: string, max = Infinity): Children[] {
 export const LogLines = (x: Pick<GlassDispatch, 'log'>): Children[] =>
   x.log.flatMap((e, i) => [i ? '\n' : '', e.at + '  ' + e.verb, ...(e.note ? ['  ', ...NamedText(e.note)] : [])]);
 
-export function detailBody(x: GlassDispatch) {
+/** Whether a dispatch modal's item has its detail: the brief, log, and full evidence. */
+export const hasDetail = (x: GlassDispatchSummary | GlassDispatch): x is GlassDispatch => 'brief' in x;
+
+export function detailBody(x: GlassDispatchSummary | GlassDispatch, detail?: DispatchDetail | null) {
   const progress = [
     x.elapsed && `elapsed: ${x.elapsed}`,
     x.attempt && `attempt: ${x.attempt}`,
@@ -207,7 +228,13 @@ export function detailBody(x: GlassDispatch) {
   ]
     .filter(Boolean)
     .join('\n');
-  return html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}${progress && [html`<div class="sec">progress</div>`, html`<pre>${progress}</pre>`]}<div class="sec">brief</div><pre>${x.brief}</pre>${
+  const head = html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}${progress && [html`<div class="sec">progress</div>`, html`<pre>${progress}</pre>`]}`;
+  // The brief, log, inbox, and evidence come with the detail, fetched when the modal opens.
+  if (!hasDetail(x))
+    return html`${head}<div class="sec">brief</div><div class=${detail?.error ? 'bad' : 'dim'}>${detail?.error ?? 'loading…'}</div>${
+      x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${x.followUp}</pre>`]
+    }${x.note && [html`<div class="sec">last note</div>`, html`<div class="loglines">${NamedText(x.note)}</div>`]}`;
+  return html`${head}<div class="sec">brief</div><pre>${x.brief}</pre>${
     x.attachments.length > 0 && [
       html`<div class="sec">attachments (${x.attachments.length})</div>`,
       attachmentRows(x.attachments, (name) => dispatchFileUrl(x.lane, x.id, name)),
@@ -227,7 +254,7 @@ export function detailBody(x: GlassDispatch) {
   }${x.evidence && [html`<div class="sec">evidence</div>`, html`<div class="loglines">${JSON.stringify(x.evidence)}</div>`]}`;
 }
 
-export function addrCell(x: GlassDispatch) {
+export function addrCell(x: GlassDispatchSummary) {
   if (x.for)
     return [
       WorkerAddress(x.for),
@@ -238,7 +265,7 @@ export function addrCell(x: GlassDispatch) {
   return x.claimedBy ? WorkerAddress(x.claimedBy) : '';
 }
 
-export function prCell(x: GlassDispatch) {
+export function prCell(x: GlassDispatchSummary) {
   // Several PRs: each in stack order with its own state; one not yet observed shows none.
   if (x.prList && x.prList.length > 1) {
     return [
@@ -384,8 +411,8 @@ type TrapState =
   | { kind: 'start failed'; reason: string }
   | { kind: 'signed off' }
   | { kind: 'idle'; listening: boolean }
-  | { kind: 'parked'; current: GlassDispatch }
-  | { kind: 'working'; current: GlassDispatch };
+  | { kind: 'parked'; current: GlassDispatchSummary }
+  | { kind: 'working'; current: GlassDispatchSummary };
 
 function trapState(t: GlassTrap): TrapState {
   if (t.requested) return { kind: 'requested', helmOn: !!getState().snapshot?.helmOn };
@@ -409,8 +436,8 @@ export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
   return s.kind === 'parked' || s.kind === 'starting' ? 'warn' : 'dim';
 }
 
-const parkedText = (c: GlassDispatch) => (c.waiting ? `waiting on ${c.waiting.on}` : c.note || 'waiting');
-const workTitle = (c: GlassDispatch) => c.brief.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '(no title)';
+const parkedText = (c: GlassDispatchSummary) => (c.waiting ? `waiting on ${c.waiting.on}` : c.note || 'waiting');
+const workTitle = (c: GlassDispatchSummary) => c.title.slice(0, 40) || '(no title)';
 
 /** One current activity line for deck and traps tab, from the shared snapshot, led by the state dot. */
 export function trapNow(t: GlassTrap): Children {

@@ -1,7 +1,21 @@
-import type { GlassDispatch } from '@lobstah/core';
+import type { GlassDispatchSummary as GlassDispatch } from '@lobstah/core';
 import type { SectionInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
-import { ActivityLine, Age, NamedText, WaitingLine, Table, addrCell, namedText, badgeLong, badgeTitle, opener, prCell } from './common.js';
+import {
+  ActivityLine,
+  Age,
+  NamedText,
+  ShowOlder,
+  WaitingLine,
+  Table,
+  addrCell,
+  namedText,
+  badgeLong,
+  badgeTitle,
+  opener,
+  prCell,
+} from './common.js';
+import type { OlderControl } from './common.js';
 
 /** The Dispatches tab: every dispatch, filtered, as a table or cards; optionally grouped by follow-up chain. Rows are keyed by lane:id. */
 
@@ -39,13 +53,17 @@ function card(x: GlassDispatch) {
   return html`<div key=${key} class="card" onClick=${opener('dispatch', key)}><div class="top"><b>${x.id.slice(0, 8)}</b><span class=${'badge v-' + x.verb + badgeLong(x.verb)} title=${badgeTitle(x.verb)}>${x.verb}</span></div><div class="meta" title=${`${x.repo} · ${x.lane} ${x.bucket}`}>${x.repo} · ${x.lane} ${x.bucket}${x.verbAt && [' · ', Age(x.verbAt)]}</div>${x.note && html`<div class="note" title=${namedText(x.note)}>${NamedText(x.note)}</div>`}${WaitingLine(x)}${ActivityLine(x)}<div class="foot">${addrCell(x)} ${prCell(x)}</div></div>`;
 }
 
-export function Dispatches({ inp }: { inp: SectionInputs['dispatches'] }) {
+export function Dispatches({ inp, more }: { inp: SectionInputs['dispatches']; more?: OlderControl }) {
   const list = inp.list;
+  const older = more && html`<${ShowOlder} kind="dispatches" more=${more} />`;
   if (inp.view === 'cards')
-    return list.length ? html`<div class="cards">${list.map(card)}</div>` : html`<div class="empty">no dispatches match</div>`;
-  return Table(
-    ['id', 'lane / bucket', 'repo', 'verb', 'note', 'age', 'addressed', 'pr'],
-    chainRows(list, inp.chain).map((x) => row(x, inp.chain)),
-    'no dispatches match',
-  );
+    return [list.length ? html`<div class="cards">${list.map(card)}</div>` : html`<div class="empty">no dispatches match</div>`, older];
+  return [
+    Table(
+      ['id', 'lane / bucket', 'repo', 'verb', 'note', 'age', 'addressed', 'pr'],
+      chainRows(list, inp.chain).map((x) => row(x, inp.chain)),
+      'no dispatches match',
+    ),
+    older,
+  ];
 }

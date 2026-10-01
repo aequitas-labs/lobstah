@@ -1,8 +1,12 @@
 import type {
   Attachment,
+  GlassBeats,
   GlassDecision,
   GlassDispatch,
+  GlassDispatchSummary,
   GlassHelm,
+  GlassOlderKind,
+  GlassOlderPage,
   GlassPr,
   GlassReport,
   GlassSnapshot,
@@ -57,6 +61,7 @@ export interface ModalRef {
 export interface GlassUi {
   st: Partial<GlassPrefs>;
   modal: ModalRef | null;
+  detail?: DispatchDetail | null;
 }
 
 /** An item and whether its heartbeat has gone stale. */
@@ -70,21 +75,21 @@ export interface SettingsItem {
   attentionKinds: string[];
   attentionError?: string;
 }
-export type ModalItem = GlassHelm | GlassDispatch | GlassPr | GlassTrapView | SettingsItem;
+/** A dispatch modal shows the summary until the detail lands, then both. */
+export type ModalItem = GlassHelm | GlassDispatchSummary | GlassDispatch | GlassPr | GlassTrapView | SettingsItem;
 
 /** A trap as the page renders it: its catch ids resolved against the snapshot's dispatches. */
-export type GlassTrapView = Omit<GlassTrap, 'catches'> & { catches: GlassDispatch[] };
+export type GlassTrapView = Omit<GlassTrap, 'catches'> & { catches: GlassDispatchSummary[] };
 
 /**
- * A catch id with no dispatch in the snapshot. The server builds each trap's
- * catches from `dispatches`, so this does not happen; if it does, the catch
- * still renders, as its id with an unknown state.
+ * A catch id with no dispatch in the snapshot: an old catch /data left out.
+ * It renders as its id with an unknown state; its modal fetches the rest.
  */
-export function missingCatch(id: string): GlassDispatch {
-  return { id, lane: 'work', bucket: 'done', repo: '', brief: '', attachments: [], messageAttachments: [], verb: 'unknown', log: [], inbox: [], sort: 0 };
+export function missingCatch(id: string): GlassDispatchSummary {
+  return { id, lane: 'work', bucket: 'done', repo: '', title: '', verb: 'unknown', sort: 0 };
 }
 
-const dispatchIndex = new WeakMap<GlassDispatch[], Map<string, GlassDispatch>>();
+const dispatchIndex = new WeakMap<GlassDispatchSummary[], Map<string, GlassDispatchSummary>>();
 
 /** The trap with its catches resolved, in the order the server sent the ids. */
 export function trapView(d: Pick<GlassSnapshot, 'dispatches'>, t: GlassTrap): GlassTrapView {
@@ -259,27 +264,100 @@ export function reportFromPath(pathname: string): string | null {
 export const reportMarkdownUrl = (key: string): string => `/report/${encodeURIComponent(key)}/md`;
 export const reportFileUrl = (key: string, name: string): string => `/report/${encodeURIComponent(key)}/files/${encodeURIComponent(name)}`;
 
+/** History the page paged in from `/data/older`, newest first per kind. */
+export interface GlassOlder {
+  dispatches: GlassDispatchSummary[];
+  notices: Notice[];
+  prs: GlassPr[];
+  stacks: GlassStack[];
+}
+export const NO_OLDER: GlassOlder = { dispatches: [], notices: [], prs: [], stacks: [] };
+
+/** Add a page of history, skipping what is there already. */
+export function addOlder(o: GlassOlder, page: GlassOlderPage): GlassOlder {
+  if (page.kind === 'dispatches') {
+    const seen = new Set(o.dispatches.map((x) => x.lane + ':' + x.id));
+    return { ...o, dispatches: [...o.dispatches, ...page.items.filter((x) => !seen.has(x.lane + ':' + x.id))] };
+  }
+  if (page.kind === 'notices') {
+    const seen = new Set(o.notices.map((n) => n.seq));
+    return { ...o, notices: [...o.notices, ...page.items.filter((n) => !seen.has(n.seq))] };
+  }
+  const seen = new Set(o.prs.map((p) => p.key));
+  const stacks = new Set(o.stacks.map((s) => s.id));
+  return {
+    ...o,
+    prs: [...o.prs, ...page.items.filter((p) => !seen.has(p.key))],
+    stacks: [...o.stacks, ...page.stacks.filter((s) => !stacks.has(s.id))],
+  };
+}
+
+/** The snapshot with paged-in history after its own records; the poll's copy of a record wins. */
+export function withOlder(d: GlassSnapshot, o: GlassOlder): GlassSnapshot {
+  if (o === NO_OLDER || (!o.dispatches.length && !o.notices.length && !o.prs.length)) return d;
+  const ids = new Set(d.dispatches.map((x) => x.lane + ':' + x.id));
+  const seqs = new Set(d.notices.map((n) => n.seq));
+  const keys = new Set(d.prs.map((p) => p.key));
+  const stackIds = new Set(d.stacks.map((s) => s.id));
+  return {
+    ...d,
+    dispatches: [...d.dispatches, ...o.dispatches.filter((x) => !ids.has(x.lane + ':' + x.id))],
+    notices: [...d.notices, ...o.notices.filter((n) => !seqs.has(n.seq))],
+    prs: [...d.prs, ...o.prs.filter((p) => !keys.has(p.key))],
+    stacks: [...d.stacks, ...o.stacks.filter((s) => !stackIds.has(s.id))],
+  };
+}
+
+/** How many records of a kind are still left out after what the page paged in. */
+export function olderLeft(d: GlassSnapshot, o: GlassOlder, kind: GlassOlderKind): number {
+  return Math.max(0, (d.older?.[kind] ?? 0) - o[kind].length);
+}
+
+/** A 304's beats: the snapshot the page holds, with the server time and heartbeats that ticked. */
+export function applyBeats(d: GlassSnapshot, b: GlassBeats): GlassSnapshot {
+  return {
+    ...d,
+    now: b.now,
+    daemon: d.daemon && b.daemon !== undefined ? { ...d.daemon, heartbeat: b.daemon } : d.daemon,
+    helms: d.helms.map((h) => (b.helms[h.grounds] !== undefined ? { ...h, heartbeatAt: b.helms[h.grounds]! } : h)),
+    traps: d.traps.map((t) => (b.traps[t.trapId] ? { ...t, ...b.traps[t.trapId] } : t)),
+  };
+}
+
 export function isStale(iso: string | undefined, ms: number, now: number): boolean {
   return !!iso && now - Date.parse(iso) > ms;
 }
 
-type Filterable = Pick<GlassDispatch, 'id' | 'lane' | 'repo' | 'verb' | 'note' | 'brief' | 'for'>;
+type Filterable = Pick<GlassDispatchSummary, 'id' | 'lane' | 'repo' | 'verb' | 'note' | 'title' | 'for'>;
 export function matches(x: Filterable, st: Partial<GlassPrefs>): boolean {
   if (st.lane && x.lane !== st.lane) return false;
   if (st.repo && x.repo !== st.repo) return false;
   if (st.verb && x.verb !== st.verb) return false;
   if (st.q) {
     const q = st.q.toLowerCase();
-    if (!(x.id + ' ' + (x.note || '') + ' ' + (x.brief || '') + ' ' + (x.repo || '') + ' ' + (x.for || '')).toLowerCase().includes(q))
+    if (!(x.id + ' ' + (x.note || '') + ' ' + (x.title || '') + ' ' + (x.repo || '') + ' ' + (x.for || '')).toLowerCase().includes(q))
       return false;
   }
   return true;
 }
 
-export function modalItem(d: GlassSnapshot, modal: ModalRef | null): ModalItem | null {
+/** The open dispatch modal's detail (`/data/dispatch/<id>`): loading, loaded, or failed. */
+export interface DispatchDetail {
+  /** The modal key it is for: `<lane>:<id>`. */
+  key: string;
+  data?: GlassDispatch;
+  error?: string;
+}
+
+export function modalItem(d: GlassSnapshot, modal: ModalRef | null, detail?: DispatchDetail | null): ModalItem | null {
   if (!modal) return null;
   if (modal.type === 'helm') return d.helms.find((v) => v.grounds === modal.key) || null;
-  if (modal.type === 'dispatch') return d.dispatches.find((v) => v.lane + ':' + v.id === modal.key) || null;
+  if (modal.type === 'dispatch') {
+    const summary = d.dispatches.find((v) => v.lane + ':' + v.id === modal.key);
+    const full = detail && detail.key === modal.key ? detail.data : undefined;
+    // The detail has the brief, log, and whole note; the summary keeps its PR badges.
+    return summary && full ? { ...summary, ...full } : (summary ?? full ?? null);
+  }
   if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError };
   const t = d.traps.find((v) => v.trapId === modal.key);
@@ -297,7 +375,7 @@ export interface DeckInputs {
   landed: LandedCatch[];
   /** Unacked first, then newest first; the deck shows REPORTS_MAX. */
   reports: GlassReport[];
-  inflight: GlassDispatch[];
+  inflight: GlassDispatchSummary[];
   traps: Seat<GlassTrapView>[];
   stacks: GlassStack[];
   prs: GlassPr[];
@@ -314,7 +392,7 @@ export interface PrsInputs {
 export interface SectionInputs {
   chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[] };
   deck: DeckInputs;
-  dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatch[] };
+  dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatchSummary[] };
   traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[] };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
@@ -328,7 +406,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   const query = String(st.q || '').toLowerCase();
   const hasQuery = (...parts: unknown[]) => !query || parts.join(' ').toLowerCase().includes(query);
   const seat = <T>(x: T): Seat<T> => ({ x, stale: isStale((x as { heartbeatAt?: string }).heartbeatAt, STALE_SEAT_MS, now) });
-  const item = modalItem(d, ui.modal);
+  const item = modalItem(d, ui.modal, ui.detail);
   const recent = (iso: string | undefined, ms: number) => !!iso && now - Date.parse(iso) <= ms;
   // A signed-on trap keeps its seat through heartbeat, claim, and listening
   // changes. Signed-off traps follow in most-recently-signed-off order.

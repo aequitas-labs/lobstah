@@ -1,7 +1,7 @@
 import type {
   GlassDispatch,
   GlassPr,
-  GlassSnapshot,
+  GlassFullSnapshot,
   GlassTrap,
   LandedCatch,
   Notice,
@@ -14,14 +14,15 @@ import { prBadge } from '@lobstah/core';
 /**
  * Three /data payloads for the glass DOM tests and the fidelity diff: an
  * empty fleet, an acceptance-style fleet with a PR stack, and a fleet with
- * attention of every kind. Every time is relative to NOW.
+ * attention of every kind; and bigFleet, a long-lived fleet sized like a
+ * real one, for the poll's size bounds. Every time is relative to NOW.
  */
 export const NOW = Date.parse('2026-09-24T12:00:00Z');
 export const ago = (ms: number): string => new Date(NOW - ms).toISOString();
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 
-const base = (): GlassSnapshot => ({
+const base = (): GlassFullSnapshot => ({
   now: ago(0),
   version: '0.5.5',
   repoUrl: 'https://github.com/aequitas-labs/lobstah',
@@ -39,7 +40,7 @@ const base = (): GlassSnapshot => ({
 });
 
 /** Nothing running: no daemon, no helm, nothing on disk. */
-export function emptyFleet(): GlassSnapshot {
+export function emptyFleet(): GlassFullSnapshot {
   return base();
 }
 
@@ -156,7 +157,7 @@ const trap = (id: string, over: Partial<GlassTrap> = {}): GlassTrap => ({
  * (one addressed to a trap, a follow-up chain), a live trap and a
  * signed-off one, and a three-PR stack (#41 → #42 → #43) with watches.
  */
-export function acceptanceFleet(): GlassSnapshot {
+export function acceptanceFleet(): GlassFullSnapshot {
   const d = base();
   d.daemon = { version: '0.5.5', heartbeat: ago(5_000) };
   d.helms = [helm()];
@@ -271,7 +272,7 @@ export function acceptanceFleet(): GlassSnapshot {
  * One trap in each live state: working a catch, idle and listening, parked on
  * a review wait, and idle with a stale heartbeat (not listening).
  */
-export function trapStatesFleet(): GlassSnapshot {
+export function trapStatesFleet(): GlassFullSnapshot {
   const d = acceptanceFleet();
   const c = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
   const working = { ...c, verb: 'working' as const, note: undefined, brief: 'Polish the glass trap deck' };
@@ -293,7 +294,7 @@ export function trapStatesFleet(): GlassSnapshot {
 }
 
 /** Every attention kind at once, some acked, plus a stale daemon and helm and more than a deck's worth of each list. */
-export function everyAttentionFleet(): GlassSnapshot {
+export function everyAttentionFleet(): GlassFullSnapshot {
   const d = acceptanceFleet();
   d.daemon = { version: '0.5.4', heartbeat: ago(10 * MIN) };
   d.helms = [{ ...helm(), heartbeatAt: ago(45 * MIN), harness: 'codex' }];
@@ -430,7 +431,85 @@ export function everyAttentionFleet(): GlassSnapshot {
   return d;
 }
 
-export const FIXTURES: Record<string, () => GlassSnapshot> = {
+/** Deterministic filler text of about `n` characters. */
+const prose = (seed: string, n: number): string =>
+  `${seed}: `.concat('Implement the change, run build, the full suite, and lint; report with the PR and the numbers. '.repeat(Math.ceil(n / 96))).slice(0, n);
+
+/**
+ * A fleet that has run for ten days, sized like a real one: 300 dispatches
+ * (5 queued, 5 active, 290 finished, about one an hour), each with a
+ * 2.7 KB brief, a seven-entry log, a 0.8 KB note, and PR evidence; 320
+ * notices over five days; 150 PRs in 120 stacks, 3 open; and 285 landed
+ * catches.
+ */
+export function bigFleet(): GlassFullSnapshot {
+  const d = acceptanceFleet();
+  const hex = (i: number) => i.toString(16).padStart(8, '0');
+  const pr = (n: number, state: string, at: string) =>
+    glassPr(evidencePr(n, { state, observedAt: at }), {
+      key: `pr:acme/web#${n}`,
+      stackId: `pr:acme/web#${n - (n % 5 === 1 ? 0 : 1)}`,
+      ...(state === 'MERGED' ? { mergedAt: at } : state === 'CLOSED' ? { closedAt: at } : {}),
+      title: prose(`PR ${n}`, 70),
+    });
+  const dispatches: GlassDispatch[] = [];
+  for (let i = 0; i < 300; i++) {
+    const bucket = i < 5 ? 'queued' : i < 10 ? 'active' : 'done';
+    const age = bucket === 'done' ? (i - 10) * 50 * MIN : i * MIN;
+    const id = `${hex(i)}-0000-4000-8000-000000000000`;
+    const n = 1000 + i;
+    const verb = bucket === 'queued' ? 'queued' : bucket === 'active' ? 'working' : i % 7 ? 'done' : 'failed';
+    dispatches.push(
+      dispatch(id, {
+        bucket,
+        verb,
+        brief: prose(`Task ${i}`, 2700),
+        note: prose(`${verb} ${i}`, 800),
+        verbAt: ago(age),
+        sort: NOW - age,
+        log: Array.from({ length: 7 }, (_, k) => ({ at: ago(age + (7 - k) * MIN), verb: 'working' as const, note: prose(`step ${k}`, 260) })),
+        inbox: bucket === 'done' ? [prose('message', 200)] : [],
+        ...(bucket === 'done'
+          ? {
+              evidence: {
+                harness: 'claude',
+                sessionId: `${id}-session`,
+                branch: `lobstah/${id}`,
+                prUrl: `https://github.com/acme/web/pull/${n}`,
+                pr: evidencePr(n, { state: 'MERGED', observedAt: ago(age) }),
+                commits: Array.from({ length: 3 }, (_, k) => `${hex(i * 3 + k)}a ${prose('commit', 60)}`),
+              },
+            }
+          : {}),
+      }),
+    );
+  }
+  d.dispatches = dispatches;
+  d.notices = Array.from({ length: 320 }, (_, i) => ({
+    seq: `${String(NOW - i * 22 * MIN).padStart(15, '0')}-${i}`,
+    kind: 'dispatch-done' as Notice['kind'],
+    at: ago(i * 22 * MIN),
+    text: prose(`notice ${i}`, 220),
+    refId: dispatches[i % 300]!.id,
+    repo: 'web',
+  }));
+  d.prs = [
+    ...[1, 2, 3].map((k) => pr(2000 + k, 'OPEN', ago(k * MIN))),
+    ...Array.from({ length: 147 }, (_, i) => pr(1000 + i, i % 9 ? 'MERGED' : 'CLOSED', ago((i + 1) * 90 * MIN))),
+  ];
+  const stackIds = [...new Set(d.prs.map((p) => p.stackId))];
+  d.stacks = stackIds.map((id) => {
+    const members = d.prs.filter((p) => p.stackId === id);
+    return { id, floor: 'main', repo: 'web', numbers: members.map((p) => p.number), open: members.some((p) => p.state === 'OPEN'), behind: 0 };
+  });
+  d.landed = dispatches
+    .filter((x) => x.bucket === 'done')
+    .slice(0, 285)
+    .map((x) => ({ key: `work:${x.id}`, id: x.id, lane: 'work' as const, verb: x.verb as 'done', at: x.verbAt!, note: x.note, repo: 'web', unreported: false }));
+  return d;
+}
+
+export const FIXTURES: Record<string, () => GlassFullSnapshot> = {
   empty: emptyFleet,
   acceptance: acceptanceFleet,
   'every-attention': everyAttentionFleet,

@@ -1,18 +1,25 @@
 import { Window } from 'happy-dom';
-import type { GlassSnapshot } from '@lobstah/core';
+import type { GlassFullSnapshot, GlassOlderKind } from '@lobstah/core';
+import { olderPage, pollBody } from '../src/glass-poll.js';
 
 /**
  * Load a spyglass page into happy-dom: /data answers with the snapshot the
- * test holds, the clock is pinned, localStorage and the URL hash are the
+ * test holds, slimmed as the server slims it (glass-poll.ts), with its ETag
+ * and beats; /data/dispatch/<id> and /data/older answer from the same
+ * snapshot. The clock is pinned, localStorage and the URL hash are the
  * test's. The page's own script runs exactly as it ships.
  */
 export interface GlassDom {
   window: Window;
   document: Window['document'];
   /** Swap the snapshot /data serves next. */
-  serve(d: GlassSnapshot): void;
+  serve(d: GlassFullSnapshot): void;
   /** How many times the page fetched /data. */
   fetches(): number;
+  /** How many of those /data fetches answered 304. */
+  notModified(): number;
+  /** The /data/dispatch/ and /data/older URLs the page fetched, in order. */
+  dataFetches(): string[];
   /** The /report/ URLs the page fetched, in order. */
   reportFetches(): string[];
   /** URLs the page opened with window.open, with target and features. */
@@ -53,11 +60,13 @@ export interface GlassDomOptions {
   initialScroll?: number;
   /** Other URLs the page fetches (a report's markdown), by path; any other /report/ path is a 404. */
   files?: Record<string, string>;
+  /** Serve /data whole, without an ETag, as the server did before it slimmed the poll: the legacy page reads whole dispatches. */
+  whole?: boolean;
   /** Answers a POST the page makes (an answer to a decision); the default is a 404. */
   post?: (url: string, init: { headers: Record<string, string>; body: string }) => { status: number; body: unknown };
 }
 
-export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: GlassDomOptions): Promise<GlassDom> {
+export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts: GlassDomOptions): Promise<GlassDom> {
   const window = new Window({
     url: `http://127.0.0.1:7777${opts.path ?? '/'}${opts.search ?? ''}${opts.hash ?? ''}`,
     width: 1280,
@@ -72,6 +81,8 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
   } as ConstructorParameters<typeof Window>[0]);
   let current = snapshot;
   let count = 0;
+  let unchanged = 0;
+  const dataFetched: string[] = [];
   const w = window as unknown as Record<string, unknown> & { Date: DateConstructor; setInterval: unknown };
   let scrollY = opts.initialScroll ?? 0;
   const scrolls: number[] = [];
@@ -99,9 +110,32 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
         json: async () => JSON.parse(file ?? 'null'),
       };
     }
+    const json = (status: number, body: unknown, headers: Record<string, string> = {}) => ({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+      json: async () => JSON.parse(JSON.stringify(body)),
+    });
+    if (typeof url === 'string' && url.startsWith('/data/dispatch/')) {
+      dataFetched.push(url);
+      const id = decodeURIComponent(url.slice('/data/dispatch/'.length));
+      const x = current.dispatches.find((d) => d.id === id);
+      return x ? json(200, x) : json(404, { error: 'not found' });
+    }
+    if (typeof url === 'string' && url.startsWith('/data/older?')) {
+      dataFetched.push(url);
+      const q = new URLSearchParams(url.slice(url.indexOf('?') + 1));
+      return json(200, olderPage(current, q.get('kind') as GlassOlderKind, Number(q.get('offset')), Number(q.get('limit')), opts.now));
+    }
     count++;
-    const body = JSON.parse(JSON.stringify(current));
-    return { ok: true, status: 200, json: async () => body };
+    if (opts.whole) return json(200, current);
+    const p = pollBody(current, opts.now);
+    const headers = { etag: `W/"${p.hash}"`, 'x-lobstah-beats': encodeURIComponent(JSON.stringify(p.beats)) };
+    if (init?.headers?.['if-none-match'] === headers.etag) {
+      unchanged++;
+      return json(304, null, headers);
+    }
+    return json(200, JSON.parse(p.body), headers);
   };
   // The page probes one sprite with `new Image()`. Resolve it immediately in
   // the DOM shim; there is no HTTP server for /lob-sprite.png in these tests.
@@ -158,6 +192,8 @@ export async function loadGlass(page: string, snapshot: GlassSnapshot, opts: Gla
       current = d;
     },
     fetches: () => count,
+    notModified: () => unchanged,
+    dataFetches: () => [...dataFetched],
     reportFetches: () => [...fetched],
     opened: () => [...opened],
     replaced: () => [...replaced],

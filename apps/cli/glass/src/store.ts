@@ -1,5 +1,6 @@
-import type { GlassSnapshot } from '@lobstah/core';
-import type { GlassPrefs, GlassTab, ModalRef } from '../../src/glass-diff.js';
+import type { GlassOlderKind, GlassSnapshot } from '@lobstah/core';
+import { withOlder } from '../../src/glass-diff.js';
+import type { DispatchDetail, GlassOlder, GlassPrefs, GlassTab, ModalRef } from '../../src/glass-diff.js';
 
 /**
  * The page's one store. Every component is a pure function of this state;
@@ -15,6 +16,12 @@ export interface GlassState {
   prefs: GlassPrefs;
   /** The open modal, if any. */
   modal: ModalRef | null;
+  /** The open dispatch modal's detail: its brief, log, inbox, and evidence. */
+  detail: DispatchDetail | null;
+  /** History paged in from /data/older, and the kind whose page is on its way. */
+  older: GlassOlder;
+  olderLoading: GlassOlderKind | null;
+  olderError: { kind: GlassOlderKind; text: string } | null;
   /** The last fetch failed. */
   stale: boolean;
   /** Lobs this browser clicked: item key → the state hash hidden (localStorage). */
@@ -58,6 +65,15 @@ export interface DecisionDraft {
 }
 
 let current: GlassState;
+let viewed: { snapshot: GlassSnapshot; older: GlassOlder; view: GlassSnapshot } | undefined;
+
+/** The snapshot the page renders: the last poll with the history paged in after it. */
+export function viewOf(s: Pick<GlassState, 'snapshot' | 'older'>): GlassSnapshot | undefined {
+  if (!s.snapshot) return undefined;
+  if (viewed?.snapshot !== s.snapshot || viewed.older !== s.older)
+    viewed = { snapshot: s.snapshot, older: s.older, view: withOlder(s.snapshot, s.older) };
+  return viewed.view;
+}
 const listeners = new Set<(s: GlassState) => void>();
 
 export const getState = (): GlassState => current;

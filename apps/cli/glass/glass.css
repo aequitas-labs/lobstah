@@ -489,6 +489,10 @@ tr.rowhead:hover {
   color: var(--dim);
   padding: 6px 2px;
 }
+/* Under a list whose history pages in from /data/older. */
+.older {
+  padding: 8px 2px;
+}
 #stale {
   display: none;
   color: var(--bad);
@@ -592,6 +596,9 @@ a {
   border-radius: var(--radius);
   padding: 6px 10px;
   margin: 8px 0;
+}
+.catch.click {
+  cursor: pointer;
 }
 .catch .hdr {
   display: flex;

@@ -1,7 +1,7 @@
-import type { GlassDispatch, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
+import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../../src/glass-diff.js';
-import type { GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
+import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
@@ -12,7 +12,8 @@ import {
   cmdRow,
   startCommands,
   detailBody,
-  LogLines,
+  NamedText,
+  opener,
   TrapName,
   namedText,
   prCell,
@@ -128,7 +129,7 @@ function reportLink(r: GlassReport) {
   ];
 }
 
-function dispatchModal(x: GlassDispatch, report: GlassReport | undefined) {
+function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassReport | undefined, detail: DispatchDetail | null) {
   const session =
     x.claimedBy && x.claimedBy.startsWith('wt:')
       ? [
@@ -150,7 +151,7 @@ function dispatchModal(x: GlassDispatch, report: GlassReport | undefined) {
     ],
     x.transcript && [html`<div class="sec">transcript</div>`, cmdRow(x.transcript)],
     report && reportLink(report),
-    detailBody(x),
+    detailBody(x, detail),
   ];
 }
 
@@ -207,10 +208,13 @@ function trapModal(t: GlassTrap) {
           html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${m.text}${m.attachments?.length ? attachmentRows(m.attachments, (name) => trapFileUrl(t.trapId, name)) : ''}</div>`,
       )
     : html`<div class="empty">none</div>`;
+  // Each catch's last note; its modal has the whole log.
   const catches = t.catches.length
     ? t.catches.map(
         (c) =>
-          html`<div key=${c.lane + ':' + c.id} class="catch"><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prCell(c)}</div><div class="loglines">${LogLines(c)}</div></div>`,
+          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prCell(c)}</div>${
+            c.note && html`<div class="loglines">${NamedText(c.note)}</div>`
+          }</div>`,
       )
     : html`<div class="empty">none yet</div>`;
   return [
@@ -237,16 +241,33 @@ function trapModal(t: GlassTrap) {
 }
 
 /** The open modal's body, or nothing. Preact keeps every unchanged node across ticks. */
-export function Modal({ snapshot, modal, prefs }: { snapshot: GlassSnapshot | undefined; modal: ModalRef | null; prefs: GlassPrefs }) {
+export function Modal({
+  snapshot,
+  modal,
+  prefs,
+  detail = null,
+}: {
+  snapshot: GlassSnapshot | undefined;
+  modal: ModalRef | null;
+  prefs: GlassPrefs;
+  detail?: DispatchDetail | null;
+}) {
   if (!snapshot || !modal) return null;
-  const item = modalItem(snapshot, modal);
+  const item = modalItem(snapshot, modal, detail);
+  // A dispatch the poll left out: its detail is on its way.
+  if (!item && modal.type === 'dispatch' && detail?.key === modal.key)
+    return [
+      close,
+      html`<h3>${modal.key.slice(modal.key.indexOf(':') + 1, modal.key.indexOf(':') + 9)}</h3>`,
+      html`<div class=${detail.error ? 'bad' : 'dim'}>${detail.error ?? 'loading…'}</div>`,
+    ];
   if (!item) return null;
   if (modal.type === 'settings') return settingsModal(item as SettingsItem, prefs);
   if (modal.type === 'pr') return prModal(snapshot, modal.key);
   if (modal.type === 'helm') return helmModal(item as GlassHelm);
   if (modal.type === 'dispatch') {
-    const report = dispatchReport(snapshot, item as GlassDispatch);
-    return dispatchModal(item as GlassDispatch, report);
+    const report = dispatchReport(snapshot, item as GlassDispatchSummary);
+    return dispatchModal(item as GlassDispatchSummary, report, detail);
   }
   return trapModal(item as GlassTrap);
 }
