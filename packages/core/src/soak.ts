@@ -508,6 +508,52 @@ export function hasOpenCatch(reg: TrapRegistration): boolean {
 }
 
 /**
+ * A claim is a queue receipt, not proof that the session read its brief.
+ * Keep delivery at-least-once until the worker reports for this claim epoch.
+ * A tool heartbeat (including the wait command itself) is not an acknowledgement.
+ */
+export function unreportedTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descriptor: Descriptor; claim: SessionClaim } | undefined {
+  if (!hasOpenCatch(reg)) return undefined;
+  const id = reg.claimed!;
+  const lane = laneOf(id)!;
+  const claim = readSessionClaim(id, lane);
+  if (!claim || claim.by !== `wt:${reg.trapId}` || claim.sessionId !== reg.sessionId) return undefined;
+  const log = readStatusLog(id, lane);
+  let receipt = -1;
+  for (let i = 0; i < log.length; i++) {
+    const s = log[i]!;
+    if (s.at === claim.at && s.note === `claimed by ${claim.by}` && !s.reported) receipt = i;
+  }
+  // Ordering handles a re-claim in the same millisecond as an old report.
+  // If the waiter died before appending its receipt, use the claim timestamp.
+  const reports = receipt >= 0 ? log.slice(receipt + 1) : log.filter((s) => Date.parse(s.at) >= Date.parse(claim.at));
+  if (reports.some((s) => s.reported)) return undefined;
+  try {
+    const descriptor = JSON.parse(fs.readFileSync(path.join(laneDirs(lane).active, id, 'descriptor.json'), 'utf8')) as Descriptor;
+    return { id, lane, descriptor, claim };
+  } catch {
+    return undefined; // finalized concurrently
+  }
+}
+
+/** Surface an unacknowledged claim even when its park keeps heartbeating. */
+export function noticeIdleTrapClaims(now = Date.now(), graceMs = 60_000): void {
+  for (const reg of listTraps()) {
+    const bait = unreportedTrapBait(reg);
+    if (!bait || cancelRequested(bait.id, bait.lane)) continue;
+    const age = now - Date.parse(bait.claim.at);
+    if (!Number.isFinite(age) || age < graceMs) continue;
+    postNotice({
+      kind: 'trap-claim-idle',
+      refId: bait.id,
+      repo: bait.descriptor.repo,
+      text: `${trapLabel(reg)} claimed ${bait.id} ${Math.floor(age / 1000)}s ago but has not reported. The brief will be re-delivered at its next park; check that the session is awake.`,
+      dedupeKey: `trap-claim-idle-${bait.id}-${bait.claim.at}`,
+    });
+  }
+}
+
+/**
  * Release a claim: terminal catches finalize, cancelled catches fail, and
  * only unfinished catches go back to the queue. Used by `stow` and the ghost sweep — the two
  * paths where a claimant stops answering for its claim.
@@ -719,7 +765,7 @@ export function baitBrief(id: string, d: Descriptor): string {
     `You are a lobstah worker session and have been assigned dispatch ${id}.`,
     '',
     'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
-    `Report progress with \`lobstah report ${id} working "<note>"\` at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" [--pr <url>]\` (or \`failed\`).`,
+    `Acknowledge this assignment now with \`lobstah report ${id} working "<note>"\`, then report at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" [--pr <url>]\` (or \`failed\`).`,
     'A needs-decision or blocked report queues your question to the human; the answer arrives in this dispatch\'s inbox.',
     `Before you wait on something outside lobstah (a human review, a PR review, a deploy), report \`lobstah report ${id} paused "<note>" --waiting-on review|pr|deploy|person|external --link <url>\`.`,
     'After EVERY report, run `lobstah soak --wait` again — it delivers inbox answers and your next assignment. Never end your turn without it unless you are signing off (`lobstah stow`).',
