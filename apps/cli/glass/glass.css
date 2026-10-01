@@ -691,16 +691,6 @@ a.lob {
   width: 72px;
   height: 56px;
 }
-.brand-pet {
-  display: inline-block;
-  width: 36px;
-  height: 28px;
-  vertical-align: middle;
-}
-.brand-pet .pet-art {
-  transform: scale(0.5);
-  transform-origin: top left;
-}
 .pet-art .sprite {
   width: 72px;
   height: 56px;

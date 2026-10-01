@@ -123,10 +123,9 @@ const STACK_NUMBER = /^#\d+$/;
 function foldPrTitles(el: Element): Node {
   const copy = el.cloneNode(true) as Element;
   const doc = el.ownerDocument;
-  // Branding and crawlers intentionally use the embedded pet art now.
+  // Crawlers intentionally use the embedded pet art now.
   // Compare unrelated markup with the frozen page; functional art tests
   // check that the real sprite and star are always paired.
-  for (const n of copy.querySelectorAll('.brand-pet')) n.replaceWith(doc.createTextNode('🦞✨' + (n.closest('footer') ? ' ' : '')));
   for (const n of copy.querySelectorAll('.lob .pet-art')) {
     n.querySelector('.sprite')?.removeAttribute('style');
     n.querySelector('.star')?.setAttribute('src', '/star.png');
@@ -331,7 +330,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
-          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, .brand-pet, .brand-pet *'))
+          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);
