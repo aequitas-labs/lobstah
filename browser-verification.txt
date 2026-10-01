@@ -1,0 +1,3 @@
+Header/footer: exact 🦞✨ brand; no sprite in either brand.
+Counts: 🦞 7 today; per-trap 🦞 12 / 🦞 999+.
+Crawler: embedded sprite and decoded star; moved 383.1 -> 416.1 px in 350ms, animation never paused.
