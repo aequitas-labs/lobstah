@@ -1,0 +1,6 @@
+traps: 3
+keepers: 3
+perTrap[3]{name,keepers,firstSeen,lastKeeperAt}:
+  kind-crab,2,2026-09-01T00:00:00.000Z,2026-09-02T00:00:00.000Z
+  stowed-crab,1,2026-09-01T00:00:00.000Z,2026-09-02T00:00:00.000Z
+  idle-crab,0,,
