@@ -44,8 +44,9 @@ import {
   withPrLock,
   writePr,
 } from '@lobstah/core';
-import type { Descriptor, GhPrView, Lane, Outcome, PrCommit, PrRecord, PrRepair, RepairStreak, Watch } from '@lobstah/core';
+import type { Descriptor, GhPrView, Lane, Outcome, PrCommit, PrRecord, PrRepair, RepairStreak, StackedPr, Watch } from '@lobstah/core';
 import { readWorkerHolds, repairHold } from './repair-holds.js';
+import { prsAbove, prsBelow } from './glass-prs.js';
 import type { RepairHold, WorkerHold } from './repair-holds.js';
 
 export interface RepairerBeat {
@@ -270,6 +271,22 @@ function progressStreak(pr: PrRecord): RepairStreak {
   return { count: s.count + 1 };
 }
 
+/**
+ * The open PRs stacked on a PR that its repair brings up to date: every PR
+ * above it in order, up to the first one a live worker holds (that PR and
+ * the ones above it are left to their workers).
+ */
+function stackedAbove(pr: PrRecord, records: readonly PrRecord[], workers: readonly WorkerHold[]): StackedPr[] {
+  const out: StackedPr[] = [];
+  for (const p of prsAbove(records, pr.key)) {
+    if (!p.headRefName || !p.baseRefName) break;
+    const rec = records.find((r) => r.key === p.key);
+    if (rec && repairHold({ ...rec }, [], workers)) break;
+    out.push({ url: p.url, number: p.number, headRefName: p.headRefName, baseRefName: p.baseRefName });
+  }
+  return out;
+}
+
 /** The trap (`wt:<id>`) that worked a dispatch: its claim, else its delivery receipt. */
 function trapAddressOf(id: string): string | undefined {
   const claim = readSessionClaim(id, 'work');
@@ -398,6 +415,13 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         (workers ??= (opts.workerHolds ?? readWorkerHolds)()).filter((w) => !(w.dispatchId === undefined && w.trapId !== undefined && `wt:${w.trapId}` === ownerTrap)),
       );
       if (held) return wait(held);
+      // A repair of a PR below this one also updates this PR: wait for it.
+      for (const below of prsBelow(records, pr.key)) {
+        const r = readPr(below.key)?.repair;
+        if (r?.status === 'repairing' && r.dispatchId && !isTerminal(r.dispatchId)) {
+          return wait({ heldBy: 'stack', reason: `a repair of #${below.number} below this PR also updates it (dispatch ${r.dispatchId.slice(0, 8)})` });
+        }
+      }
       const changed = Math.max(
         Date.parse(pr.headSince ?? pr.observedAt) || now,
         Date.parse(pr.baseSince ?? pr.observedAt) || now,
@@ -481,6 +505,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
             id,
             gates,
             trunk: config.repos[target.repo]?.trunk,
+            above: stackedAbove(pr, (records ??= readPrs()), workers ?? []),
             ...(kind === 'checks' && fresh.length > 0 ? { checks: fresh } : {}),
           }),
           config.repos[target.repo],

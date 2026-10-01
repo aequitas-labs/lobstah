@@ -234,6 +234,52 @@ describe('the repair circuit breaker', () => {
   });
 });
 
+describe('repairing the bottom of a stack updates the PRs above it', () => {
+  const [bottom, top] = [STACK[0]!, STACK[1]!];
+  const trunk = () => fs.writeFileSync(path.join(dir, 'config.toml'), '[repos.web]\npath = "/w"\ntrunk = "main"\n');
+
+  it('a two-PR stack whose bottom gets a merge repair: the brief merges the base into the top too, never force-pushing', () => {
+    trunk();
+    stand(bottom);
+    stand(top, { mergeStateStatus: 'BEHIND' });
+    expect(repair()).toBe(1);
+    const brief = queued()[0]!.brief;
+    expect(brief).toContain('Fetch origin/main and merge it into b1 with a merge commit');
+    expect(brief).toContain('Push only to the existing branch b1 and the branches of the PRs stacked on it named below.');
+    expect(brief).toContain('PRs are stacked on this PR: #2 (https://github.com/acme/web/pull/2, branch b2 on b1).');
+    expect(brief).toContain('merge its updated base into it with a merge commit (`git merge origin/<its base>`), and push with a normal push. Never force-push.');
+    expect(brief).not.toContain('--force-with-lease');
+    expect(brief).toContain('lobstah repairs a conflicting PR as its own repair');
+  });
+
+  it('a stacked bottom repaired by rebase: the PRs above rebase with a lease', () => {
+    stand(top);
+    stand(STACK[2]!, { mergeStateStatus: 'BEHIND' });
+    expect(repair()).toBe(1);
+    const brief = queued()[0]!.brief;
+    expect(brief).toContain('PRs are stacked on this PR: #3 (');
+    expect(brief).toContain('git rebase --onto origin/<its base>');
+    expect(brief).toContain('--force-with-lease=<its branch>:<its head you started from>');
+  });
+
+  it('a conflict in the top PR becomes that PR\'s own repair, after the bottom\'s', () => {
+    trunk();
+    stand(bottom);
+    stand(top);
+    expect(repair()).toBe(1);
+    const bottomRepair = readPr(key(1))!.repair!.dispatchId!;
+    expect(readPr(key(2))?.repair).toMatchObject({ status: 'waiting', heldBy: 'stack' });
+    // The bottom's repair finished; the top still conflicts with its updated base.
+    appendStatus(bottomRepair, 'chore', 'done', 'merged main; #2 conflicts, left for its own repair');
+    expect(repair(3, { now: later + 600_000 })).toBe(1);
+    const topRepair = queued().find((d) => d.followUp === top.owner)!;
+    expect(topRepair.pr?.url).toBe('https://github.com/acme/web/pull/2');
+    expect(readPr(key(2))?.repair).toMatchObject({ status: 'repairing', kind: 'conflict' });
+    // #2 is stacked on b1: its own repair rebases onto it.
+    expect(topRepair.brief).toContain('This PR is stacked on its base branch b1.');
+  });
+});
+
 describe('brief hooks', () => {
   it("a conflict repair's brief ends with the repo's conflict hook, then its all hook", () => {
     fs.writeFileSync(path.join(dir, 'config.toml'), '[repos.web]\npath = "/w"\n[repos.web.briefHooks]\nconflict = "Run the conflict refresh."\nall = "Run /pr-refresh."\nchecks = "not this one"\n');
@@ -311,18 +357,27 @@ describe('a live worker holds the branch', () => {
     expect(readPr(key(1))?.repair?.status).toBe('waiting');
   });
 
-  it('the same stack with no live worker: repairs are queued as today', () => {
+  it('the same stack with no live worker: the bottom is repaired, and the PRs above wait for it (it updates them)', () => {
     for (const p of STACK) stand(p);
-    expect(repair()).toBe(3);
-    expect(queued().map((d) => d.followUp).sort()).toEqual(STACK.map((p) => p.owner).sort());
+    expect(repair()).toBe(1);
+    expect(queued().map((d) => d.followUp)).toEqual([STACK[0]!.owner]);
+    expect(queued()[0]!.brief).toMatch(/PRs are stacked on this PR: #2 \(.*\), #3 \(/);
+    for (const n of [2, 3]) {
+      expect(readPr(key(n))?.repair).toMatchObject({ status: 'waiting', heldBy: 'stack' });
+      expect(readPr(key(n))?.repair?.reason).toContain('a repair of #');
+    }
   });
 
   it('a worker on a PR above does not hold the PR below it', () => {
     for (const p of STACK) stand(p);
     activeDispatch(uuid('c'), { prUrl: 'https://github.com/acme/web/pull/3' });
-    expect(repair()).toBe(2);
+    expect(repair()).toBe(1);
     expect(readPr(key(1))?.repair?.status).toBe('repairing');
-    expect(readPr(key(2))?.repair?.status).toBe('repairing');
+    // The bottom's repair updates #2 and stops below #3, which the worker holds.
+    const brief = queued()[0]!.brief;
+    expect(brief).toContain('PRs are stacked on this PR: #2 (');
+    expect(brief).not.toContain('#3 (');
+    expect(readPr(key(2))?.repair).toMatchObject({ status: 'waiting', heldBy: 'stack' });
     expect(readPr(key(3))?.repair).toMatchObject({ status: 'waiting', heldBy: 'dispatch:cccccccc' });
     expect(readPr(key(3))?.repair?.reason).toContain('works on this PR');
   });

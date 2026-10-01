@@ -185,6 +185,27 @@ export function prsBelow(records: readonly PrRecord[], key: string): GlassPr[] {
 }
 
 /**
+ * The open PRs stacked above a PR: those whose base is its head branch, then
+ * theirs, level by level (lower PRs first; within a level, by number).
+ */
+export function prsAbove(records: readonly PrRecord[], key: string): GlassPr[] {
+  const { prs } = deriveGlassPrs([], [], records);
+  const parent = stackParents(prs);
+  const out: GlassPr[] = [];
+  const seen = new Set([key]);
+  let level = [key];
+  while (level.length > 0) {
+    const next = prs
+      .filter((p) => p.state === 'OPEN' && !seen.has(p.key) && level.includes(parent.get(p.key)?.key ?? ''))
+      .sort((a, b) => a.number - b.number);
+    for (const p of next) seen.add(p.key);
+    out.push(...next);
+    level = next.map((p) => p.key);
+  }
+  return out;
+}
+
+/**
  * A dispatch's PRs in stack order: PRs in the same stack by position, stacks
  * in the order the dispatch reported their first PR; a PR not yet observed
  * keeps its report order after the observed ones.
