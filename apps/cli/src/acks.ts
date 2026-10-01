@@ -14,7 +14,7 @@ import type { Lane, PrEvidence } from '@lobstah/core';
  * `~/.lobstah/acks/<item-key>.json` holds { key, kind, stateHash, at, by }.
  * The ack holds only while the item's stateHash is unchanged; a new status
  * entry, head, failed check, or thread count re-stands the item and the
- * stale ack is pruned. The write path is `lobstah attention ack|unack`
+ * stale ack is pruned. A ready PR re-stands only when it becomes ready again. The write path is `lobstah attention ack|unack`
  * (plus pruning in `man tend` and `cull`); nothing else writes acks/.
  */
 
@@ -84,8 +84,16 @@ export { statusStateHash };
  * stands on. One PR is one item key, so one ack covers all of that PR's
  * kinds until any of those fields moves. observedAt and lastReviewAt are
  * deliberately out — re-observing an unchanged PR must not re-stand it.
+ *
+ * A ready PR (one whose record carries standingSince for pr:ready) hashes
+ * only when it became ready: evidence that moves while it stays ready (a
+ * thread count the query failed to read, CLEAN to UNSTABLE, another passing
+ * check) does not re-stand it, and ready, then not ready, then ready again
+ * gets a new standingSince and re-stands it once.
  */
 export function prStateHash(pr: PrEvidence): string {
+  const readySince = pr.standingSince?.['pr:ready'];
+  if (readySince) return sha({ 'pr:ready': readySince });
   return sha({
     headSha: pr.headSha,
     state: pr.state,

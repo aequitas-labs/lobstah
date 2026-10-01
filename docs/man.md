@@ -770,7 +770,9 @@ it under the inbox.
 **Acknowledging, display-only.** Clicking a desktop pet opens its target and
 runs `lobstah attention ack <item-key> --by pet`, so that pet stops walking
 the item until its state changes (a new status entry, head, failed check, or
-thread count). The ack changes only what the pet and the glass lobs display:
+thread count; a ready PR changes only by becoming ready again after it was
+not). The pet also hides the clicked item itself until its state changes, so
+an ack that times out does not leave it walking. The ack changes only what the pet and the glass lobs display:
 `man tend --json` still lists the item (marked `acked`), and `man wait`, the
 park, and reminders ignore acks entirely — a human having seen a question
 must never hide it from the orchestrator that has to answer it. The glass,

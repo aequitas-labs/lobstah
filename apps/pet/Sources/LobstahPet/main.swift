@@ -142,6 +142,7 @@ final class PetView: NSView {
   weak var pet: Pet?
   override func mouseDown(with event: NSEvent) {
     guard let item = pet?.item else { focusHelm(); return }
+    delegate.hideClicked(item)
     clickAttentionItem(item, glass: glassURL,
       helmLive: helmIsLive(readHelm()),
       open: { NSWorkspace.shared.open($0) },
@@ -155,7 +156,11 @@ final class PetView: NSView {
   }
   override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
   /** Ack without opening anything. */
-  @objc func acknowledge() { if let item = pet?.item { ackItem(item) } }
+  @objc func acknowledge() {
+    guard let item = pet?.item else { return }
+    delegate.hideClicked(item)
+    ackItem(item)
+  }
 
   override func rightMouseDown(with event: NSEvent) {
     let menu = NSMenu()
@@ -366,6 +371,8 @@ final class Pet {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   var petsByKey: [String: Pet] = [:]
+  /** Clicked items stay hidden while their state is unchanged, even if the ack fails. */
+  var clicked = ClickedItems()
   var statusItem: NSStatusItem?
   var preview = ProcessInfo.processInfo.environment["LOBSTAH_PET_PREVIEW"] != nil
   let diagnostics = ProcessInfo.processInfo.environment["LOBSTAH_PET_DIAGNOSTICS"] != nil
@@ -413,6 +420,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     poll()
   }
 
+  /** Stop walking a clicked item now; the next read keeps it hidden. */
+  func hideClicked(_ item: AttentionItem) {
+    clicked.hide(item)
+    guard item.stateHash != nil else { return }
+    // After the click handler returns: the window being clicked closes.
+    DispatchQueue.main.async { self.petsByKey.removeValue(forKey: item.identity)?.close() }
+  }
+
   @objc func togglePreview() {
     preview.toggle()
     poll()
@@ -434,7 +449,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.polling = false
         // A failed read is not an empty attention queue. Keep every current
         // window in place and try again on the next six-second poll.
-        guard var items = snapshot else { return }
+        guard let fresh = snapshot else { return }
+        var items = self.clicked.walking(fresh)
         if items.isEmpty && self.preview {
           items = [AttentionItem(id: "preview", verb: "needs-decision", note: "the lobster preview — questions crawl in here")]
         }
@@ -442,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var shown = Array(items.prefix(4))
         if extra > 0 {
           let last = shown.removeLast()
-          shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", key: last.key, kind: last.kind, prUrl: last.prUrl))
+          shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", key: last.key, kind: last.kind, prUrl: last.prUrl, stateHash: last.stateHash))
         }
         let visibleKeys = Set(shown.map(\.identity))
         for key in self.petsByKey.keys.filter({ !visibleKeys.contains($0) }) {

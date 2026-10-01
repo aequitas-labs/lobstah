@@ -19,8 +19,10 @@ public struct AttentionItem: Decodable, Equatable {
   public var kind: String? = nil
   /** pr:* kinds: the PR this pet walks for. */
   public var prUrl: String? = nil
+  /** The hash of the state the item stands on; a new one re-stands an acked item. */
+  public var stateHash: String? = nil
 
-  public init(id: String, verb: String, note: String?, key: String? = nil, acked: AckInfo? = nil, kind: String? = nil, prUrl: String? = nil) {
+  public init(id: String, verb: String, note: String?, key: String? = nil, acked: AckInfo? = nil, kind: String? = nil, prUrl: String? = nil, stateHash: String? = nil) {
     self.id = id
     self.verb = verb
     self.note = note
@@ -28,6 +30,7 @@ public struct AttentionItem: Decodable, Equatable {
     self.acked = acked
     self.kind = kind
     self.prUrl = prUrl
+    self.stateHash = stateHash
   }
 
   /** The identity stays fixed when labels, order, or acknowledgements change. */
@@ -99,6 +102,31 @@ public func clickAttentionItem(
     focusHelm(glass)
   }
   if let args = item.ackArguments { acknowledge(args) }
+}
+
+/// Items this pet clicked or acknowledged: identity → the stateHash it hid,
+/// as the glass hides a clicked lob per browser. A clicked pet stops walking
+/// at once, without waiting for `lobstah attention ack` to land (it can time
+/// out) or for the next read to see it. A new stateHash walks it again.
+public struct ClickedItems {
+  private var hidden: [String: String] = [:]
+
+  public init() {}
+
+  /// An item with no stateHash (an older lobstah) waits for the CLI's ack.
+  public mutating func hide(_ item: AttentionItem) {
+    if let hash = item.stateHash { hidden[item.identity] = hash }
+  }
+
+  /// The items still to walk. A hide is kept only while its item is read
+  /// with the same stateHash; once the CLI's ack lands (the read drops the
+  /// item) or the state moves, the hide is forgotten.
+  public mutating func walking(_ items: [AttentionItem]) -> [AttentionItem] {
+    var read: [String: String] = [:]
+    for item in items { if let hash = item.stateHash { read[item.identity] = hash } }
+    hidden = hidden.filter { read[$0.key] == $0.value }
+    return items.filter { item in item.stateHash == nil || hidden[item.identity] != item.stateHash }
+  }
 }
 
 /// The shape both reads share: `lobstah attention --json` prints
