@@ -2,8 +2,8 @@
 // one IIFE), minify apps/cli/glass/glass.css, inline both into
 // apps/cli/glass/index.html, and emit the result as one string module,
 // apps/cli/src/glass-page.generated.ts, which serveGlass imports. The page
-// stays one self-contained document: no external files beyond the assets
-// serveGlass already serves (icon, sprite, star).
+// stays one self-contained document, including the pet sprite and star;
+// branding and crawlers don't depend on an external asset server.
 //
 //   node scripts/build-glass.mjs           build once (apps/cli's `build` runs this)
 //   node scripts/build-glass.mjs --watch   rebuild on every change under apps/cli/glass (pnpm glass:dev)
@@ -40,6 +40,7 @@ export async function buildGlass({ minify: min = minify } = {}) {
     minify: min,
     legalComments: 'none',
     write: false,
+    loader: { '.png': 'dataurl' },
     logLevel: 'silent',
   });
   // Line endings are the checkout's (CRLF on Windows); the page is the same bytes everywhere.

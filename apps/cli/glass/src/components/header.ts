@@ -4,6 +4,7 @@ import type { GlassPrefs, GlassTab, SectionInputs } from '../../../src/glass-dif
 import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { Age, opener } from './common.js';
+import { BrandPet } from './pet-art.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -28,7 +29,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
     : html`<span class="bad">down</span>`;
   return [
     html`<span class="chip">daemon ${daemon}</span>`,
-    inp.stats && html`<span class="chip" title="catches today">🦞 ${inp.stats.catchesToday}</span>`,
+    inp.stats && html`<span class="chip" title="catches today">🦞 ${inp.stats.catchesToday} today</span>`,
     d.slots &&
       html`<span class="chip">active headless: ${d.slots.headless} of ${d.slots.limit}; traps: ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(
@@ -103,7 +104,7 @@ export function Header({
   stale: boolean;
 }) {
   return [
-    html`<div class="headerline"><h1>🦞✨ spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
+    html`<div class="headerline"><h1><${BrandPet} /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
     html`<nav class="tabs" id="tabs" aria-label="Spyglass views">${GLASS_TABS.map((t) => html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined}>${TAB_LABEL[t]}</a>`)}</nav>`,
     controls(d, tab, st),
@@ -112,6 +113,7 @@ export function Header({
 
 export const Footer = ({ d }: { d: GlassSnapshot | undefined }) =>
   d && [
-    '🦞✨ lobstah v' + d.version + ' · ',
+    html`<${BrandPet} />`,
+    'lobstah v' + d.version + ' · ',
     html`<a href=${d.repoUrl} target="_blank">${d.repoUrl.replace('https://github.com/', '')}</a>`,
   ];

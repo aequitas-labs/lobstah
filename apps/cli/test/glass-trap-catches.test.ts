@@ -40,7 +40,7 @@ describe('trap catches by id', () => {
       expect(text(g.$('#traps'))).toContain('🦞 12');
       expect(text(g.$('#traps'))).toContain('🦞 999+');
       const chip = g.$$('#chips .chip').find((c) => text(c).includes('🦞'))!;
-      expect(text(chip)).toBe('🦞 7');
+      expect(text(chip)).toBe('🦞 7 today');
       expect(text(g.$('#traps'))).not.toMatch(/keeper|\d+ catch/);
       await g.go('#deck');
       expect(text(g.$('#deck'))).toContain('🦞 12');

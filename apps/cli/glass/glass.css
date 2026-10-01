@@ -685,17 +685,30 @@ a.lob {
   display: inline-block;
   margin: 0 0 3px;
 }
-.lob .sprite {
+.pet-art {
+  display: block;
+  position: relative;
   width: 72px;
   height: 56px;
-  background: url(/lob-sprite.png) 0 0 no-repeat;
+}
+.brand-pet {
+  display: inline-block;
+  width: 36px;
+  height: 28px;
+  vertical-align: middle;
+}
+.brand-pet .pet-art {
+  transform: scale(0.5);
+  transform-origin: top left;
+}
+.pet-art .sprite {
+  width: 72px;
+  height: 56px;
+  background-position: 0 0;
+  background-repeat: no-repeat;
   background-size: 400% 100%;
   image-rendering: pixelated;
   animation: step 0.5s steps(4) infinite;
-}
-.lob .fallback {
-  display: inline-block;
-  animation: waddle 0.45s ease-in-out infinite alternate;
 }
 .lob .bub {
   display: none;
@@ -725,7 +738,7 @@ a.lob {
   white-space: normal;
   word-break: break-word;
 }
-.lob .star {
+.pet-art .star {
   position: absolute;
   left: 56px;
   top: -9px;
@@ -747,14 +760,6 @@ a.lob {
 @keyframes step {
   to {
     background-position-x: -288px;
-  }
-}
-@keyframes waddle {
-  from {
-    transform: rotate(-8deg) translateY(0);
-  }
-  to {
-    transform: rotate(8deg) translateY(-3px);
   }
 }
 #gearbtn {
