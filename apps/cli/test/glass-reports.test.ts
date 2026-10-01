@@ -136,9 +136,11 @@ describe('glass: a report page', () => {
     ]);
     expect(text(g.$('.reportview'))).toContain('lobstah attention ack ' + TRAP_KEY);
     expect(g.document.title).toBe('Tray findings · lobstah glass');
-    // It never polls: no /data fetch and no interval, so nothing re-renders while someone reads.
+    // It never polls: no /data fetch, so nothing re-renders while someone reads.
+    // Its one interval reports its presence, so the pet can show an item here.
     expect(g.fetches()).toBe(0);
-    expect(g.intervals()).toEqual([]);
+    expect(g.intervals()).toEqual([2000]);
+    expect(g.presence()[0]).toMatch(/^\/api\/presence\?page=[A-Za-z0-9_-]{8,64}&vis=visible$/);
     expect(g.$('#deck')).toBeNull();
   });
 

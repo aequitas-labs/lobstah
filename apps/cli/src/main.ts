@@ -170,6 +170,7 @@ import { decisionEventFields, decisionLine } from './decisions.js';
 import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
+import { requestShow, validShowHash } from './glass-presence.js';
 import { focusTrap } from './focus.js';
 import {
   glassLines,
@@ -317,7 +318,9 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   view. Open window focuses a live trap here;
                                   a signed-off trap shows a resume command.
                                   stop | status | install | uninstall |
-                                  restart manage it.
+                                  restart manage it. show <#hash> asks an
+                                  open glass page to show a tab, decision,
+                                  or report (the pet's click; --json).
                                   Port: --port, else $LOBSTAH_GLASS_PORT,
                                   else [glass].port (default 4949).
   man wait [--timeout <secs>] [--peek]
@@ -2779,6 +2782,23 @@ async function mainCli(): Promise<void> {
         break;
       }
       const port = requestedPort ?? glassPort();
+      if (pos[0] === 'show') {
+        const hash = pos[1] ?? '';
+        if (!validShowHash(hash) || pos.length > 2) {
+          throw new UsageError('glass show takes one hash: #<tab>, #decision/<key>, or #report/<key>');
+        }
+        const shown = await requestShow(port, hash);
+        if (has('--json')) console.log(JSON.stringify(shown));
+        else
+          console.log(
+            toonKV(
+              shown.delivered
+                ? { shown: hash || '(as it is)', page: shown.page, host: shown.host, visible: shown.visible, seenAgo: `${Math.round((shown.seenAgoMs ?? 0) / 1000)}s` }
+                : { shown: 'no — no glass page was seen recently', glass: glassUrl(port) },
+            ),
+          );
+        break;
+      }
       if (pos[0] === 'restart') {
         if (serviceInstalled('glass')) {
           const before = await probeGlass(port);

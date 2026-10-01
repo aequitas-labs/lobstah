@@ -287,7 +287,8 @@ describe('glass page: per-section change detection', () => {
     await Promise.all([g.poll(), g.poll()]);
     expect(g.fetches()).toBe(fetched + 1);
     await g.hide(true);
-    expect(g.intervals()).toEqual([]);
+    // Only the presence heartbeat runs while hidden (presence.ts).
+    expect(g.intervals()).toEqual([30_000]);
     await g.hide(false);
     expect(g.intervals()).toEqual([2000]);
     expect(g.fetches()).toBe(fetched + 2);
