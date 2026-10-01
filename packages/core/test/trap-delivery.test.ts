@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   appendStatus, beatTrap, claimBait, enqueue, ensureLayout, heartbeatTrap, laneDirs,
-  listNotices, noticeIdleTrapClaims, readTrap, releaseCatch, requestCancel, signOnTrap, unreportedTrapBait, unseenNotices,
+  listNotices, noticeIdleTrapClaims, noticeStands, noticeWakes, readTrap, releaseCatch, requestCancel,
+  signOnTrap, unreportedTrapBait, unseenNotices,
 } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -71,6 +72,13 @@ describe('unacknowledged trap claims', () => {
     expect(notices()).toHaveLength(1);
     expect(notices()[0]).toMatchObject({ refId: 'bait', repo: 'web' });
     expect(unseenNotices(false).some((n) => n.kind === 'trap-claim-idle')).toBe(true);
+    const notice = notices()[0]!;
+    const future = new Date(Date.now() + 1_000).toISOString();
+    const wakes = noticeWakes({ sessionId: 'new-helm', grounds: 'fleet', repos: ['web'], signedOnAt: future, heartbeatAt: future, wakesFrom: future })!;
+    expect(wakes(notice)).toBe(true); // still standing when a new helm signs on
+    appendStatus('bait', 'work', 'working', 'starting', undefined, undefined, true);
+    expect(noticeStands(notice)).toBe(false);
+    expect(wakes(notice)).toBe(false);
     expect(fs.existsSync(path.join(laneDirs('work').active, 'bait', 'claim.json'))).toBe(true);
     releaseCatch(reg);
     claimBait(reg);
@@ -90,9 +98,12 @@ describe('unacknowledged trap claims', () => {
 
   it('leaves cancellation to the park, not the idle notice', () => {
     caught();
-    requestCancel('bait', 'work');
     vi.setSystemTime(Date.now() + 120_000);
     noticeIdleTrapClaims();
-    expect(listNotices().some((n) => n.kind === 'trap-claim-idle')).toBe(false);
+    const notice = listNotices().find((n) => n.kind === 'trap-claim-idle')!;
+    requestCancel('bait', 'work');
+    expect(noticeStands(notice)).toBe(false);
+    noticeIdleTrapClaims();
+    expect(listNotices().filter((n) => n.kind === 'trap-claim-idle')).toHaveLength(1);
   });
 });
