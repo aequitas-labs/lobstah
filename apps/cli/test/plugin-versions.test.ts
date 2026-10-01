@@ -51,6 +51,8 @@ describe('plugin versions track the CLI', () => {
     const root = fixtureRepo();
     const claude = path.join(root, 'plugins/claude-code/.claude-plugin/plugin.json');
     const before = fs.readFileSync(claude, 'utf8');
+    const codex = path.join(root, 'plugins/codex/.codex-plugin/plugin.json');
+    const beforeInterface = JSON.parse(fs.readFileSync(codex, 'utf8')).interface;
     const changed = syncVersions(root, '9.1.0') as string[];
     expect(changed).toEqual(
       expect.arrayContaining(['apps/cli/package.json', 'plugins/claude-code/.claude-plugin/plugin.json', 'plugins/codex/.codex-plugin/plugin.json', 'apps/node/package.json']),
@@ -58,6 +60,7 @@ describe('plugin versions track the CLI', () => {
     expect(cliVersion(root)).toBe('9.1.0');
     expect(checkVersions(root)).toEqual([]);
     expect(fs.readFileSync(claude, 'utf8')).toBe(before.replace(/"version": "[^"]*"/, '"version": "9.1.0"'));
+    expect(JSON.parse(fs.readFileSync(codex, 'utf8'))).toMatchObject({ version: '9.1.0', interface: beforeInterface });
     expect(syncVersions(root)).toEqual([]); // idempotent
   });
 

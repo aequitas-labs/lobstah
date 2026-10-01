@@ -1,14 +1,24 @@
 {
   "name": "lobstah",
-  "displayName": "lobstah",
   "version": "0.6.6",
   "description": "Run a fleet of supervised coding agents from one session: dispatch work, get woken when something needs you, never watch the water.",
-  "shortDescription": "Dispatch and supervise a fleet of coding agents from one session.",
   "author": {
     "name": "aequitas labs LLC"
   },
   "license": "MIT",
-  "websiteURL": "https://github.com/aequitas-labs/lobstah",
-  "composerIcon": "./assets/icon.png",
-  "skills": "./skills"
+  "skills": "./skills",
+  "interface": {
+    "displayName": "lobstah",
+    "shortDescription": "Dispatch and supervise a fleet of coding agents from one session.",
+    "longDescription": "Dispatch work, supervise coding agents, and receive updates from a fleet through the lobstah helm and traps.",
+    "developerName": "aequitas labs LLC",
+    "category": "Coding",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/aequitas-labs/lobstah",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "defaultPrompt": ["Take the helm for this repo", "Trap this session"],
+    "brandColor": "#EB6643",
+    "screenshots": []
+  }
 }
