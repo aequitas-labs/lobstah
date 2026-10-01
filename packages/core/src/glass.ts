@@ -315,8 +315,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   notices: Notice[];
   /** The ids of this trap's catches, in `dispatches` order; the page reads each from `dispatches`. */
   catches: string[];
-  /** All-time successful dispatches, including filed plans and reports. */
-  keepers?: number;
+  /** This trap's catches (dispatches it finished done), all time. Unlike `catches`, survives cull. */
+  totalCatches?: number;
 }
 
 /** A standing decision as the glass renders it: the record plus its detail page. */
@@ -363,8 +363,8 @@ export interface GlassSnapshot {
   slots?: { headless: number; limit: number; traps: number; parked?: number };
   helms: GlassHelm[];
   traps: GlassTrap[];
-  /** Counts only; the CLI exposes the full historical per-trap table. */
-  stats?: { traps: number; keepers: number };
+  /** Catches (dispatches finished done): today, on the server's local day, and all time. */
+  stats?: { catchesToday: number; totalCatches: number };
   /**
    * Trap id → name for every `wt:<id>` the snapshot shows: the live
    * registration's name, else the name registry's. An id with no known

@@ -49,7 +49,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>|<trap-name>|wt:<trap>]' },
-  stats: { flags: { '--json': {} }, maxPositionals: 0 },
+  stats: { flags: { '--json': {}, '--per-trap': {} }, maxPositionals: 0 },
   focus: { flags: {}, positionals: '<trap>' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {} }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
@@ -239,9 +239,10 @@ claimed helm this requires --session <helm-id>.`,
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
 --waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes.
 A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page as the report; --attach adds the images it names.`,
-  stats: `All-time trap and keeper totals across this fleet, keyed by persistent name.
-Only successfully finished dispatches count as keepers. TOON by default; --json
-returns the same totals and per-trap table. No telemetry is sent.`,
+  stats: `Catches: dispatches that finished done. catchesToday counts the local day;
+totalCatches counts all time. Both live in stats.json, which cull folds into
+before deleting, so they survive it. --per-trap adds each trap's total under
+its persistent name. TOON by default; --json for the same fields. Nothing is sent.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,

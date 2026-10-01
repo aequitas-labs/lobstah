@@ -222,7 +222,9 @@ work (humans and agents):
                                   never falls back headless; session:<id>
                                   resolves to its trap)
   ls [--all]                      queue, active, recent done      (alias: buoys)
-  stats [--json]                  all-time traps and successful keeper counts
+  stats [--per-trap] [--json]     catches (dispatches finished done): today
+                                  and in total; --per-trap adds each trap's
+                                  total
   attention [--json | ack <item-key> [--by <label>] | unack <item-key>]
                                   standing attention with ack state (--json:
                                   { attention } as in man tend --json); an ack
@@ -909,9 +911,8 @@ async function mainCli(): Promise<void> {
 
   switch (cmd) {
     case 'stats': {
-      const { readStats, renderStats } = await import('./stats.js');
-      const stats = readStats();
-      console.log(has('--json') ? JSON.stringify(stats) : renderStats(stats));
+      const { readStats, statsOutput } = await import('./stats.js');
+      console.log(statsOutput(readStats(), { json: has('--json'), perTrap: has('--per-trap') }));
       break;
     }
     case 'trap': {

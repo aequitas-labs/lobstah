@@ -377,6 +377,10 @@ tr.rowhead:hover {
 .card .foot .footact {
   margin-left: auto;
 }
+/* A trap's catch count: the lobster stays with its number. */
+.catchn {
+  white-space: nowrap;
+}
 /* A small themed button, as the copy buttons are. */
 .btn {
   background: var(--card);

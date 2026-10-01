@@ -39,8 +39,8 @@ export const DECK_TRAPS_MAX = 8;
 export const REPORTS_MAX = 8;
 export const STALE_DAEMON_MS = 90000;
 export const STALE_SEAT_MS = 1800000;
-/** Keep tiny trap badges legible without changing the underlying total. */
-export const keeperCount = (count: number): string => count > 999 ? '999+' : String(count);
+/** A trap's catch count as its badge shows it: capped at 999+. */
+export const catchCount = (count: number): string => (count > 999 ? '999+' : String(count));
 
 /** This browser's preferences and filters (localStorage `spyglass`). */
 export interface GlassPrefs {

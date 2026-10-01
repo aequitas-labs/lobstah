@@ -568,7 +568,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const id = row.name.startsWith('wt:') ? row.name.slice(3) : trapIdForName(row.name);
     if (id) seenIds.add(id);
   }
-  const keepers = new Map(stats.perTrap.map((t) => [t.name, t.keepers]));
+  const catches = new Map(stats.perTrap.map((t) => [t.name, t.catches]));
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
@@ -576,7 +576,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     return {
       ...t,
       name,
-      keepers: keepers.get(name ?? `wt:${t.trapId}`) ?? 0,
+      totalCatches: catches.get(name ?? `wt:${t.trapId}`) ?? 0,
       label: trapLabel({ trapId: t.trapId, name }),
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
@@ -629,7 +629,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
     helms,
     traps,
-    stats: { traps: stats.traps, keepers: stats.keepers },
+    stats: { catchesToday: stats.catchesToday, totalCatches: stats.totalCatches },
     trapNames: trapNamesShown(traps, dispatches, attention, names),
     notices: allNotices.slice().reverse(),
     repoKeys: Object.keys(cfg.repos),
