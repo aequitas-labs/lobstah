@@ -26,7 +26,9 @@ Clicking a report pet opens the glass at the report. Opening a report in
 the glass does not acknowledge it. Any pet
 click also acknowledges the item (`lobstah attention ack <key> --by pet`),
 so that pet stops walking until the item's state changes; right-click
-**Acknowledge** does only that. Acks are display-only — the helm is still
+**Acknowledge** does only that. The pet hides a clicked item itself at
+once, keyed on its `stateHash` like the glass's clicked lobs, so a slow or
+failed ack never leaves it walking. Acks are display-only — the helm is still
 woken for every standing question. Each
 stops walking once its clear condition holds (docs/vocabulary.md,
 "Attention contract").

@@ -16,6 +16,7 @@ import {
   laneDirs,
   mergeEvidence,
   sendMessage,
+  upsertPr,
   unhandled,
 } from '@lobstah/core';
 import type { PrEvidence } from '@lobstah/core';
@@ -169,6 +170,45 @@ describe('part 2: click-to-ack, display-only', () => {
     lobstah('attention', 'ack', 'pr:acme/web#9');
     mergeEvidence(P, 'work', { pr: pr({ observedAt: new Date(Date.now() + 60_000).toISOString() }) });
     expect(petPayload()).toEqual([]);
+  });
+
+  describe('a ready PR', () => {
+    const at = (min: number) => new Date(Date.UTC(2026, 9, 1, 15, min)).toISOString();
+    const ready = (min: number, over: Partial<PrEvidence> = {}) =>
+      upsertPr(pr({ draft: false, mergeStateStatus: 'CLEAN', checks: { total: 2, passed: 2, failed: 0, pending: 0 }, observedAt: at(min), ...over }));
+    /** What `lobstah attention` does on each read: prune stale acks, then report. */
+    const read = () => {
+      expect(lobstah('attention').status).toBe(0);
+      return petPayload().map((a) => a.kind);
+    };
+
+    it('stays acked across repeat observations of the same ready state', () => {
+      ready(0);
+      expect(read()).toEqual(['pr:ready']);
+      expect(lobstah('attention', 'ack', 'pr:acme/web#9', '--by', 'pet').status).toBe(0);
+      expect(read()).toEqual([]);
+      ready(1);
+      expect(read()).toEqual([]);
+      // Still ready: a thread count the query failed to read, another passing
+      // check, CLEAN to UNSTABLE.
+      ready(2, { review: { changesRequested: false } });
+      ready(3, { checks: { total: 3, passed: 3, failed: 0, pending: 0 }, mergeStateStatus: 'UNSTABLE' });
+      expect(read()).toEqual([]);
+      expect(readAck('pr:acme/web#9')).toMatchObject({ by: 'pet' });
+    });
+
+    it('ready, not ready, ready again re-stands it once', () => {
+      ready(0);
+      lobstah('attention', 'ack', 'pr:acme/web#9', '--by', 'pet');
+      expect(read()).toEqual([]);
+      ready(1, { checks: { total: 2, passed: 1, failed: 0, pending: 1 } }); // a rerun on the same head
+      expect(read()).toEqual([]);
+      ready(2);
+      expect(read()).toEqual(['pr:ready']);
+      lobstah('attention', 'ack', 'pr:acme/web#9', '--by', 'pet');
+      ready(3);
+      expect(read()).toEqual([]);
+    });
   });
 
   it('unack restores it; a second unack and an unknown ack key exit 2', () => {
