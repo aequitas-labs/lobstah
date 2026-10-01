@@ -1,0 +1,13 @@
+$ lobstah stats
+catchesToday: 4
+totalCatches: 4
+
+$ lobstah stats --per-trap
+catchesToday: 4
+totalCatches: 4
+perTrap[2]{name,catches}:
+  kind-crab,2
+  stowed-crab,1
+
+$ lobstah stats --json
+{"catchesToday":4,"totalCatches":4}
