@@ -3,7 +3,7 @@
   "description": "Run a fleet of supervised coding agents from one session: dispatch work, get woken when something needs you, never watch the water.",
   "version": "0.6.6",
   "author": {
-    "name": "aequitas labs LLC"
+    "name": "Chris Hsu"
   },
   "homepage": "https://github.com/aequitas-labs/lobstah",
   "repository": "https://github.com/aequitas-labs/lobstah",

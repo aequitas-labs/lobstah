@@ -81,10 +81,18 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     }
     for (const field of ['composerIcon', 'logo']) {
       const asset = manifest.interface[field];
-      expect(asset).toBe('./assets/icon.png');
+      expect(asset).toBe(field === 'composerIcon' ? './assets/composer-icon.png' : './assets/logo.png');
       expect(fs.existsSync(`${root}/plugins/codex/${asset}`), field).toBe(true);
       expect(fs.statSync(`${root}/plugins/codex/${asset}`).isFile(), field).toBe(true);
+      const png = fs.readFileSync(`${root}/plugins/codex/${asset}`);
+      expect(png.subarray(0, 8).toString('hex'), field).toBe('89504e470d0a1a0a');
+      expect(png.readUInt32BE(16), field).toBe(512);
+      expect(png.readUInt32BE(20), field).toBe(512);
+      expect(png[25], field).toBe(6); // RGBA: composer cutout and rounded logo corners
     }
+    expect(manifest.author.name).toBe('Chris Hsu');
+    expect(JSON.parse(read('plugins/claude-code/.claude-plugin/plugin.json')).author.name).toBe('Chris Hsu');
+    expect(manifest.interface.developerName).toBe('aequitas labs');
   });
 
   it('both plugins expose the same four skills and no commands; Claude mentions are namespaced', () => {
