@@ -109,10 +109,10 @@ export const PUSH_REJECTED = 'push rejected:';
  * and pushes with a lease; `merge` mode (a standalone PR brought up to date
  * by a merge commit) fetches, merges the moved head, and pushes normally.
  */
-export function pushRule(branch: string | undefined, id = '<dispatch id>', mode: 'rebase' | 'merge' = 'rebase'): string {
+export function pushRule(branch: string | undefined, id = '<dispatch id>', mode: 'rebase' | 'merge' = 'rebase', also: readonly string[] = []): string {
   const b = branch ?? "the PR's head branch";
   return [
-    `Push only to the existing branch ${b}.`,
+    also.length ? `Push only to the existing branch ${b} and the branches of the PRs stacked on it named below.` : `Push only to the existing branch ${b}.`,
     mode === 'merge'
       ? `If the push is rejected as non-fast-forward because ${b} moved, fetch ${b}, merge the moved head into your branch, and push again with a normal push. Retry at most ${PUSH_RETRIES} times. Never force-push.`
       : `If the push is rejected as non-fast-forward because ${b} moved, fetch ${b}, rebase your commits onto the moved head again, and push with \`--force-with-lease=${b}:<the head you just fetched>\`. Retry at most ${PUSH_RETRIES} times.`,
@@ -145,6 +145,34 @@ export function conflictUpdate(base: string | undefined, branch: string | undefi
     : `This PR is stacked on its base branch ${b}. Fetch origin/${b} and rebase ${head} onto it, resolving the conflicts. Push with \`--force-with-lease=${head}:<the head you started from>\`.`;
 }
 
+/** A PR stacked above the one being repaired: the repair brings it up to date after it. */
+export interface StackedPr {
+  url: string;
+  number: number;
+  headRefName: string;
+  baseRefName: string;
+}
+
+/**
+ * After a repair pushes the PR, each PR stacked on it is behind its base.
+ * The brief names each one, in order, and how to update it: a merge-based
+ * stack merges each base in and pushes normally; a rebase-based stack
+ * rebases each one and pushes with a lease. An update that conflicts is
+ * aborted and left for that PR's own repair.
+ */
+export function stackUpdate(above: readonly StackedPr[], mode: 'rebase' | 'merge'): string {
+  if (above.length === 0) return '';
+  const list = above.map((p) => `#${p.number} (${p.url}, branch ${p.headRefName} on ${p.baseRefName})`).join(', ');
+  const how =
+    mode === 'merge'
+      ? 'fetch origin, check out its branch, merge its updated base into it with a merge commit (`git merge origin/<its base>`), and push with a normal push. Never force-push.'
+      : `fetch origin, check out its branch, rebase it onto its updated base (\`git rebase --onto origin/<its base> <its base's head before your push> <its branch>\`), and push with \`--force-with-lease=<its branch>:<its head you started from>\`; on a non-fast-forward rejection, fetch and redo the rebase, at most ${PUSH_RETRIES} times.`;
+  return (
+    `PRs are stacked on this PR: ${list}. After you push this PR, bring each of them up to date with its base, in that order: ${how} ` +
+    'If an update conflicts, abort it (`git merge --abort` or `git rebase --abort`), leave that PR and the PRs above it as they were, and name them in your report note: lobstah repairs a conflicting PR as its own repair.'
+  );
+}
+
 /** A PR that had a review or an approval: a head change invalidates it. */
 export function prReviewed(pr: Pick<PrRecord, 'reviewDecision' | 'review'>): boolean {
   return pr.reviewDecision === 'APPROVED' || pr.reviewDecision === 'CHANGES_REQUESTED' || pr.review?.lastReviewAt !== undefined || pr.review?.changesRequested === true;
@@ -168,14 +196,21 @@ export function rerequestReview(pr: { url: string; number?: number; repo?: strin
 }
 
 /** The repair prompt uses the PR's actual base branch, including stacked PRs. `trunk` tells a standalone PR from a stacked one. */
-export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?: string; checks?: readonly string[]; gates?: readonly string[]; trunk?: string } = {}): string {
+export function repairBrief(
+  pr: PrRecord,
+  kind: RepairKind,
+  arg: string | { id?: string; checks?: readonly string[]; gates?: readonly string[]; trunk?: string; above?: readonly StackedPr[] } = {},
+): string {
   const opts = typeof arg === 'string' ? { id: arg } : arg;
   const intro = `Repair ${pr.url} on its existing branch ${pr.headRefName ?? '(see PR)'} at ${pr.headSha}. Do not open a new PR.`;
   const resolution = "For code already on main, take main's version. Keep only this PR's own changes. Never change behavior. If resolving a conflict would change code behavior, stop and report needs-decision.";
   const standalone = standalonePr(pr.baseRefName, opts.trunk);
   // A reviewed PR's review goes stale at the new head: the worker asks again and parks.
   const report = prReviewed(pr) ? rerequestReview(pr, opts.id) : 'Report done with the same PR URL.';
-  const finish = (mode: 'rebase' | 'merge' = 'rebase') => `Run the relevant tests. ${pushRule(pr.headRefName, opts.id, mode)} ${report}`;
+  const above = opts.above ?? [];
+  // A conflict repair of a stacked PR rewrites its head: the PRs above rebase. Any other repair adds commits: they merge.
+  const finish = (mode: 'rebase' | 'merge' = 'rebase', stackMode: 'rebase' | 'merge' = mode) =>
+    `Run the relevant tests. ${pushRule(pr.headRefName, opts.id, mode, above.map((p) => p.headRefName))}${above.length ? ` ${stackUpdate(above, stackMode)}` : ''} ${report}`;
   if (kind === 'conflict')
     return `${intro}\n${resolution} ${conflictUpdate(pr.baseRefName, pr.headRefName, standalone)} ${finish(standalone ? 'merge' : 'rebase')}`;
   if (kind === 'checks') {
@@ -188,8 +223,8 @@ export function repairBrief(pr: PrRecord, kind: RepairKind, arg: string | { id?:
     return (
       `${intro}\n${resolution}\nLatest failing checks:\n${checks || '- Read the failing check from GitHub'}${gates}\n` +
       `Read each check log. Fix a real failure. If it is a flake, rerun it at most once. ` +
-      `If a check cannot pass until a person approves the change, it is a human gate: do not change code for it, and name it on your report with --human-gate "<check name>", once per check. ${finish()}`
+      `If a check cannot pass until a person approves the change, it is a human gate: do not change code for it, and name it on your report with --human-gate "<check name>", once per check. ${finish('rebase', 'merge')}`
     );
   }
-  return `${intro}\n${resolution} Read the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish()}`;
+  return `${intro}\n${resolution} Read the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish('rebase', 'merge')}`;
 }

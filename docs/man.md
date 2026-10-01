@@ -344,9 +344,11 @@ and the glass show the repair's PR, chore lane, worker, and trap wait.
   PR's watch. `lobstah watch hold <key> [--for <id>]`
   holds one PR's watch; with `--for`, the hold ends when that dispatch
   ends. `lobstah watch release <key>` ends any hold.
+- A repair of a PR below this one in the same stack is queued or running
+  (`heldBy: stack`): that repair also updates this PR.
 
 A waiting repair is recorded on the PR record as `repair.status: waiting`,
-with `heldBy` (`wt:<trap>`, `dispatch:<id8>`, `helm`, `hold`, `settle`,
+with `heldBy` (`wt:<trap>`, `dispatch:<id8>`, `helm`, `hold`, `settle`, `stack`,
 `checks`, `human-gate`, or `repaired`) and `reason`. `repaired` means each
 failing check already had its round at this head; a new commit ends it.
 Unlike the other waits, `repaired` also raises `pr:checks` attention with
@@ -378,7 +380,25 @@ base is another PR's branch) rebases onto that base and pushes with
 `--force-with-lease`; on a rejection it rebases onto the moved head again
 and pushes with a lease on the head just fetched. A checks or review
 repair follows the rebase rule on a rejection. Each retries at most three
-times. A push hook that fails with a real test or
+times.
+
+**A repair updates the PRs stacked on it.** When open PRs are stacked on
+the repaired PR (lobstah's PR records show PRs whose base is its head
+branch, and theirs), the brief names each one, in order, and the push rule
+allows their branches. After pushing the repaired PR, the worker brings
+each one up to date with its base:
+
+- After a merge-based repair (a standalone PR, or any checks or review
+  repair), it merges the updated base into each one and pushes normally,
+  never with force.
+- After a rebase-based repair (a conflict repair of a stacked PR), it
+  rebases each one onto its updated base and pushes with
+  `--force-with-lease`, with the same retries.
+
+An update that conflicts is aborted and left as it was, with the PRs above
+it. lobstah repairs that PR as its own conflict repair, under the same
+rules (`repairSettleSecs`, the attempt limit, and the no-progress breaker).
+The list stops below a PR that a live worker holds. A push hook that fails with a real test or
 type error is not retried: the worker fixes the error and pushes again.
 For code already on main, the repair keeps main's version and only this
 PR's own changes. It does not change behavior. If a conflict resolution
