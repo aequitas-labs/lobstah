@@ -151,9 +151,8 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
     }
     return json(200, JSON.parse(p.body), headers);
   };
-  // The page probes one sprite with `new Image()`. Resolve it immediately in
-  // the DOM shim; there is no HTTP server for /lob-sprite.png in these tests.
-  // This keeps image loading deterministic on slow Windows runners.
+  // The frozen legacy page probes its sprite. Resolve that probe immediately
+  // on slow Windows runners; the current page embeds the pet art instead.
   w.Image = class {
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;

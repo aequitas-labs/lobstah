@@ -39,6 +39,8 @@ export const DECK_TRAPS_MAX = 8;
 export const REPORTS_MAX = 8;
 export const STALE_DAEMON_MS = 90000;
 export const STALE_SEAT_MS = 1800000;
+/** A trap's catch count as its badge shows it: capped at 999+. */
+export const catchCount = (count: number): string => (count > 999 ? '999+' : String(count));
 
 /** This browser's preferences and filters (localStorage `spyglass`). */
 export interface GlassPrefs {
@@ -404,7 +406,7 @@ export interface PrsInputs {
 }
 
 export interface SectionInputs {
-  chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[] };
+  chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[]; stats: GlassSnapshot['stats'] };
   deck: DeckInputs;
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatchSummary[] };
   traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[] };
@@ -441,7 +443,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     );
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
   return {
-    chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat) },
+    chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat), stats: d.stats },
     deck: {
       view: st.view,
       decisions: decisionCards(d.attention || [], d.decisions || []).filter((c) =>

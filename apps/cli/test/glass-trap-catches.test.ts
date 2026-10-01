@@ -29,6 +29,25 @@ const click = async (g: GlassDom, el: Element | null | undefined) => {
 };
 
 describe('trap catches by id', () => {
+  for (const view of ['table', 'cards']) {
+    it(`shows each trap's catches in ${view}, including signed-off traps and the cap; the header shows today's`, async () => {
+      const d = acceptanceFleet();
+      d.stats = { catchesToday: 7, totalCatches: 1012 };
+      d.traps[0]!.totalCatches = 12;
+      d.traps[1]!.totalCatches = 1000;
+      d.traps[1]!.live = false;
+      const g = await page(d, { hash: '#traps', prefs: { view } });
+      expect(text(g.$('#traps'))).toContain('🦞 12');
+      expect(text(g.$('#traps'))).toContain('🦞 999+');
+      const chip = g.$$('#chips .chip').find((c) => text(c).includes('🦞'))!;
+      expect(text(chip)).toBe('🦞 7 today');
+      expect(text(g.$('#traps'))).not.toMatch(/keeper|\d+ catch/);
+      await g.go('#deck');
+      expect(text(g.$('#deck'))).toContain('🦞 12');
+      expect(text(g.$('#deck'))).toContain('🦞 999+');
+    });
+  }
+
   it('trapView resolves each id to its dispatch, in the order sent', () => {
     const d = acceptanceFleet();
     const ids = d.dispatches.slice(0, 3).map((x) => x.id).reverse();
@@ -46,14 +65,15 @@ describe('trap catches by id', () => {
     expect(view.catches[0]).toMatchObject({ id: 'feedface-0000-4000-8000-000000000000', verb: 'unknown', title: '' });
   });
 
-  it('the trap modal lists a missing catch by its id; the card counts it', async () => {
+  it('the trap modal lists a missing catch; the card shows the trap\'s catch total', async () => {
     const d = acceptanceFleet();
     const t = d.traps.find((x) => x.trapId === 't1')!;
     const known = t.catches[0]!;
     t.catches = [known, 'feedface-0000-4000-8000-000000000000'];
+    t.totalCatches = 1;
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
-    expect(text(card.querySelector('.foot'))).toContain('2 catches');
+    expect(text(card.querySelector('.foot'))).toContain('🦞 1');
     await click(g, card);
     const catches = g.$$('#modalbox .catch').map((c) => text(c.querySelector('.hdr')));
     expect(catches).toHaveLength(2);

@@ -32,8 +32,9 @@ import {
   readTrapAnchor,
   inspectTrapWorktree,
   removeGhostWorktree,
+  foldCatches,
 } from '@lobstah/core';
-import type { FreeBytesReader, Lane } from '@lobstah/core';
+import type { CatchRef, FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
 
 export interface CullItem {
@@ -398,7 +399,18 @@ export function removeWorktree(id: string, dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+/** The dispatches whose state files these items remove, with their lane. */
+function culledState(items: CullItem[]): CatchRef[] {
+  const lanes = new Map((['work', 'chore'] as Lane[]).map((lane) => [path.resolve(laneDirs(lane).state), lane]));
+  return items.flatMap((item) => {
+    const lane = item.kind === 'state' ? lanes.get(path.resolve(path.dirname(item.target))) : undefined;
+    return lane ? [{ id: item.id, lane }] : [];
+  });
+}
+
 export function applyCull(items: CullItem[]): void {
+  // Catches outlive their state: fold them into stats.json before anything goes.
+  foldCatches(culledState(items));
   // Worktrees first: their done/ descriptors are needed to find the owning repo.
   for (const item of items.filter((i) => i.kind === 'worktree')) removeWorktree(item.id, item.target);
   for (const item of items.filter((i) => i.kind === 'done')) fs.rmSync(item.target, { recursive: true, force: true });

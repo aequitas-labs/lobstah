@@ -3,6 +3,7 @@ import { VERBS, TERMINAL_VERBS, WAITING_ON, WAITING_ON_VERBS } from './types.js'
 import type { Lane, StatusEntry, Verb, WaitingOn } from './types.js';
 import { statusPath } from './paths.js';
 import { ageLabel } from './activity.js';
+import { recordCatch } from './stats.js';
 
 export function isVerb(v: string): v is Verb {
   return (VERBS as readonly string[]).includes(v);
@@ -86,6 +87,13 @@ export function appendStatus(
     ...(reported ? { reported: true as const } : {}),
   };
   fs.appendFileSync(statusPath(id, lane), `${JSON.stringify(entry)}\n`);
+  if (verb === 'done') {
+    try {
+      recordCatch(id, lane);
+    } catch {
+      // A count is never worth failing a report: cull folds any catch missed here.
+    }
+  }
   return entry;
 }
 

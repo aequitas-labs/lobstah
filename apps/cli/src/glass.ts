@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { readStats } from './stats.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as http from 'node:http';
@@ -29,6 +30,7 @@ import {
   linkMismatch,
   trapLabel,
   trapNamer,
+  trapIdForName,
   TRAP_ADDRESS_RE,
   listWatches,
   watchErrorCell,
@@ -564,6 +566,12 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     if (n.kind.startsWith('trap-') && n.refId) seenIds.add(n.refId);
   }
   const names = trapNamer();
+  const stats = readStats();
+  for (const row of stats.perTrap) {
+    const id = row.name.startsWith('wt:') ? row.name.slice(3) : trapIdForName(row.name);
+    if (id) seenIds.add(id);
+  }
+  const catches = new Map(stats.perTrap.map((t) => [t.name, t.catches]));
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
@@ -571,6 +579,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     return {
       ...t,
       name,
+      totalCatches: catches.get(name ?? `wt:${t.trapId}`) ?? 0,
       label: trapLabel({ trapId: t.trapId, name }),
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
@@ -623,6 +632,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
     helms,
     traps,
+    stats: { catchesToday: stats.catchesToday, totalCatches: stats.totalCatches },
     trapNames: trapNamesShown(traps, dispatches, attention, names),
     notices: allNotices.slice().reverse(),
     repoKeys: Object.keys(cfg.repos),

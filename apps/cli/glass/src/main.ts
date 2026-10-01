@@ -38,7 +38,6 @@ const initialState = (): GlassState => ({
   olderError: null,
   stale: false,
   lobHidden: loadLobHidden(),
-  spriteOk: null,
   focusResults: {},
   preview: new URLSearchParams(location.search).has('lob'),
   drafts: {},
@@ -101,12 +100,6 @@ function startGlass(): void {
   }
   subscribe(paint);
   paint();
-
-  // Probe the lob sprite once; either way the lobs re-render.
-  const sprite = new Image();
-  sprite.onload = () => setState({ spriteOk: true });
-  sprite.onerror = () => setState({ spriteOk: false });
-  sprite.src = '/lob-sprite.png';
 
   onRoute((route) => {
     if (reportRedirect()) return;
