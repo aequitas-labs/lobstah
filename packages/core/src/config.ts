@@ -120,6 +120,8 @@ export interface LimitsConfig {
 export interface SoakConfig {
   /** How long a fresh park heartbeat holds unaddressed matching bait for a soaking session. */
   deferSecs: number;
+  /** Grace after a claim before an absent worker report raises a helm notice. */
+  claimIdleNoticeSecs: number;
   /** Heartbeat age past which a registration is a ghost trap and gets swept. */
   ttlSecs: number;
   /**
@@ -234,6 +236,7 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
 
 export const DEFAULT_SOAK: SoakConfig = {
   deferSecs: 90,
+  claimIdleNoticeSecs: 180,
   ttlSecs: 1800,
   beat: true,
   pausedTtlSecs: 86400,

@@ -47,7 +47,8 @@ it.each([false, true])('gives every trap a full resume TTL (heartbeat renewed: %
   expect(listNotices().some((n) => n.kind === 'trap-ghosted')).toBe(!renewed);
 });
 
-it('a tick notices a claimed-but-unacknowledged dispatch despite its fresh park heartbeat', () => {
+it.each([undefined, 30, 240])('a tick honors the idle-claim notice grace (%s) despite a fresh park heartbeat', (configured) => {
+  if (configured !== undefined) fs.appendFileSync(path.join(home, 'config.toml'), `claimIdleNoticeSecs = ${configured}\n`);
   const worktree = path.join(home, 'checkout');
   fs.mkdirSync(worktree);
   const signed = signOnTrap({ worktree, cwd: worktree, harness: 'codex', repo: 'web', sessionId: 's', ttlMs: TTL });
@@ -55,7 +56,12 @@ it('a tick notices a claimed-but-unacknowledged dispatch despite its fresh park 
   enqueue({ id: 'idle-claim', repo: 'web', for: `wt:${signed.ok.trapId}`, brief: 'task' });
   claimBait(signed.ok);
   tick();
-  vi.setSystemTime(Date.now() + 60_000);
+  const graceMs = (configured ?? 180) * 1000;
+  vi.setSystemTime(Date.now() + graceMs - 1);
+  heartbeatTrap(signed.ok.trapId, { parked: true });
+  tick();
+  expect(listNotices().filter((n) => n.kind === 'trap-claim-idle')).toHaveLength(0);
+  vi.setSystemTime(Date.now() + 1);
   heartbeatTrap(signed.ok.trapId, { parked: true });
   tick();
   tick();

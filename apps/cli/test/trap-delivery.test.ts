@@ -6,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   appendStatus, claimBait, confirmTrapTitle, enqueue, ensureLayout, readStatusLog,
-  readTrap, requestCancel, sendMessage, signOnTrap,
+  readSessionClaim, readTrap, requestCancel, sendMessage, signOnTrap,
 } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -60,6 +60,23 @@ it('recovers the brief through foreground soak too', () => {
   const result = run('soak', '--session', session, '--wait', '--timeout', '0');
   expect(result.status).toBe(0);
   expect(result.stdout).toContain('unique original task');
+  expect(readStatusLog(id, 'work')).toHaveLength(1);
+});
+
+it('the Stop hook wakes a resumed session with its trap\'s original unreported claim', () => {
+  claimElsewhere();
+  const reg = readTrap(trapId)!;
+  const claim = readSessionClaim(id, 'work');
+  const resumed = signOnTrap({ ...reg, sessionId: 'resumed-trap', ttlMs: 60_000, now: Date.now() + 60_001 });
+  if (!('ok' in resumed)) throw new Error('unexpected hold');
+  const result = spawnSync(process.execPath, [cli, 'hook', 'stop', '--timeout', '0'], {
+    cwd: home, encoding: 'utf8', env: env(), timeout: 15_000,
+    input: JSON.stringify({ session_id: 'resumed-trap' }),
+  });
+  expect(result.status).toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ decision: 'block' });
+  expect(result.stdout).toContain('unique original task');
+  expect(readSessionClaim(id, 'work')).toEqual(claim);
   expect(readStatusLog(id, 'work')).toHaveLength(1);
 });
 

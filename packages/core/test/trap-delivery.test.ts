@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   appendStatus, beatTrap, claimBait, enqueue, ensureLayout, heartbeatTrap, laneDirs,
-  listNotices, noticeIdleTrapClaims, noticeStands, noticeWakes, readTrap, releaseCatch, requestCancel,
+  listNotices, noticeIdleTrapClaims, noticeStands, noticeWakes, readSessionClaim, readStatusLog, readTrap, releaseCatch, requestCancel,
   signOnTrap, unreportedTrapBait, unseenNotices,
 } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -40,7 +40,7 @@ describe('unacknowledged trap claims', () => {
     beatTrap({ cwd: reg.cwd, sessionId: reg.sessionId, toolName: 'Bash', toolInput: { command: 'lobstah soak --wait' } });
     expect(unreportedTrapBait(reg)?.descriptor.brief).toBe('original task');
     expect(claimBait(reg)).toBeNull();
-    expect(unreportedTrapBait({ ...reg, sessionId: 'foreign' })).toBeUndefined();
+    expect(unreportedTrapBait({ ...reg, trapId: 'foreign' })).toBeUndefined();
     appendStatus('bait', 'work', 'working', 'starting', undefined, undefined, true);
     expect(unreportedTrapBait(reg)).toBeUndefined();
   });
@@ -59,10 +59,10 @@ describe('unacknowledged trap claims', () => {
     expect(unreportedTrapBait(reg)).toBeDefined();
   });
 
-  it('notices an idle claim after 60s despite a fresh park, once per claim epoch', () => {
+  it('notices an idle claim after 180s despite a fresh park, once per claim epoch', () => {
     const reg = caught();
     const notices = () => listNotices(50).filter((n) => n.kind === 'trap-claim-idle');
-    vi.setSystemTime(Date.now() + 59_999);
+    vi.setSystemTime(Date.now() + 179_999);
     noticeIdleTrapClaims();
     expect(notices()).toHaveLength(0);
     vi.setSystemTime(Date.now() + 1);
@@ -82,7 +82,7 @@ describe('unacknowledged trap claims', () => {
     expect(fs.existsSync(path.join(laneDirs('work').active, 'bait', 'claim.json'))).toBe(true);
     releaseCatch(reg);
     claimBait(reg);
-    vi.setSystemTime(Date.now() + 60_000);
+    vi.setSystemTime(Date.now() + 180_000);
     noticeIdleTrapClaims();
     expect(notices()).toHaveLength(2);
   });
@@ -90,7 +90,7 @@ describe('unacknowledged trap claims', () => {
   it.each(['working', 'paused', 'done', 'failed'])('does not re-deliver or notice a worker report: %s', (verb) => {
     const reg = caught();
     appendStatus('bait', 'work', verb, 'worker acknowledgement', undefined, undefined, true);
-    vi.setSystemTime(Date.now() + 120_000);
+    vi.setSystemTime(Date.now() + 240_000);
     expect(unreportedTrapBait(reg)).toBeUndefined();
     noticeIdleTrapClaims();
     expect(listNotices().some((n) => n.kind === 'trap-claim-idle')).toBe(false);
@@ -98,12 +98,33 @@ describe('unacknowledged trap claims', () => {
 
   it('leaves cancellation to the park, not the idle notice', () => {
     caught();
-    vi.setSystemTime(Date.now() + 120_000);
+    vi.setSystemTime(Date.now() + 240_000);
     noticeIdleTrapClaims();
     const notice = listNotices().find((n) => n.kind === 'trap-claim-idle')!;
     requestCancel('bait', 'work');
     expect(noticeStands(notice)).toBe(false);
     noticeIdleTrapClaims();
     expect(listNotices().filter((n) => n.kind === 'trap-claim-idle')).toHaveLength(1);
+  });
+
+  it('recovers the same unreported claim after adoption by a new session and keeps its notice standing', () => {
+    const reg = caught();
+    const originalClaim = readSessionClaim('bait', 'work');
+    vi.setSystemTime(Date.now() + 180_000);
+    noticeIdleTrapClaims();
+    const notice = listNotices().find((n) => n.kind === 'trap-claim-idle')!;
+    const resumed = signOnTrap({ ...reg, sessionId: 'resumed', ttlMs: 60_000 });
+    if (!('ok' in resumed)) throw new Error('unexpected hold');
+    expect(resumed.ok.claimed).toBe('bait');
+    expect(unreportedTrapBait(resumed.ok)?.descriptor.brief).toBe('original task');
+    expect(noticeStands(notice)).toBe(true);
+    noticeIdleTrapClaims();
+    expect(listNotices().filter((n) => n.kind === 'trap-claim-idle')).toHaveLength(1);
+    expect(claimBait(resumed.ok)).toBeNull();
+    expect(readSessionClaim('bait', 'work')).toEqual(originalClaim);
+    expect(readStatusLog('bait', 'work')).toHaveLength(1);
+    appendStatus('bait', 'work', 'working', 'resumed and starting', undefined, undefined, true);
+    expect(unreportedTrapBait(resumed.ok)).toBeUndefined();
+    expect(noticeStands(notice)).toBe(false);
   });
 });

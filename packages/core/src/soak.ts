@@ -17,6 +17,7 @@ import { knownTrapNames, reserveTrapName, trapIdForName, trapNameForId } from '.
 import { laneOf } from './worktrees.js';
 import { removeGhostWorktree } from './worktree-safety.js';
 import { readReservation } from './trap-start.js';
+import { DEFAULT_SOAK } from './config.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -517,7 +518,9 @@ export function unreportedTrapBait(reg: TrapRegistration): { id: string; lane: L
   const id = reg.claimed!;
   const lane = laneOf(id)!;
   const claim = readSessionClaim(id, lane);
-  if (!claim || claim.by !== `wt:${reg.trapId}` || claim.sessionId !== reg.sessionId) return undefined;
+  // The worktree-anchored trap owns its claim across session restarts. A
+  // newly adopted session must recover the same brief, not silently park.
+  if (!claim || claim.by !== `wt:${reg.trapId}`) return undefined;
   const log = readStatusLog(id, lane);
   let receipt = -1;
   for (let i = 0; i < log.length; i++) {
@@ -537,7 +540,7 @@ export function unreportedTrapBait(reg: TrapRegistration): { id: string; lane: L
 }
 
 /** Surface an unacknowledged claim even when its park keeps heartbeating. */
-export function noticeIdleTrapClaims(now = Date.now(), graceMs = 60_000): void {
+export function noticeIdleTrapClaims(now = Date.now(), graceMs = DEFAULT_SOAK.claimIdleNoticeSecs * 1000): void {
   for (const reg of listTraps()) {
     const bait = unreportedTrapBait(reg);
     if (!bait || cancelRequested(bait.id, bait.lane)) continue;
