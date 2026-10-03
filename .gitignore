@@ -10,3 +10,4 @@ build/
 *.tgz
 .lobstah-trap
 apps/cli/src/glass-page.generated.ts
+__pycache__/
