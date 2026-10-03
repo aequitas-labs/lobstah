@@ -1,36 +1,81 @@
-# Trap props
+# Trap art
 
-Every trap name is `<first>-<last>` (`packages/core/src/trap-names.ts`). The
-trap image is `docs/assets/trap.svg` plus one prop chosen by the **last**
-word. This file lists the 64 props and the prompt used to generate them.
+Every trap name is `<first>-<last>` (`packages/core/src/trap-names.ts`).
+A trap's image is the trap illustration finished by its **first** word,
+plus a prop chosen by its **last** word.
 
-## Generating a prop
+| File | What it is |
+|---|---|
+| `source.webp` | The original trap illustration |
+| `base.png` | The trap cut out of its background and ground shadow (`scripts/trap-art/cutout.py`) |
+| `palettes.json` | One palette per colour word |
+| `textures/<word>.png` | One textured trap per texture word (to be generated) |
+| `props/<word>.png` | One prop per last word (to be generated) |
 
-Attach the trap reference image, then send the shared prompt with
-`{subject}` replaced by the subject from the table.
+The scripts need Python 3 with `numpy` and `pillow`.
+
+## First words: 52 colours, 12 textures
+
+**Colours (52).** `scripts/trap-art/recolor.py` recolours `base.png` with
+the word's palette from `palettes.json`. A palette sets up to four
+materials (`wood`, `rope` for rope and netting, `buoy`, `outline`) and an
+optional `contrast`. Shading, grain and edges carry over from the original,
+so no new art is needed.
+
+```bash
+python3 scripts/trap-art/recolor.py --sheet      # every palette -> build/trap-art/, plus _sheet.png
+python3 scripts/trap-art/recolor.py blue coral   # just these
+```
+
+**Textures (12).** These change the surface, so Gemini edits the
+original: attach `source.webp` and send the prompt below with `{texture}`
+replaced from the table. Then cut the result out with
+`python3 scripts/trap-art/cutout.py <gemini.png> docs/assets/traps/textures/<word>.png`.
+Textured traps keep the original colours.
+
+> Edit the attached lobster trap illustration. Keep the trap's shape,
+> outline, colours, camera angle, size and position exactly the same, and
+> keep the same illustration style. Change only its surface: {texture}.
+> Plain pure white background, no ground shadow, no other objects, no text.
+
+| Word | Texture |
+|---|---|
+| crisp | a light coating of white frost on the slat tops, rope and netting, as on a cold morning |
+| hardy | old weathered wood: sun-bleached and cracked along the grain, with scuffs, a few dark iron nail heads and slightly frayed rope |
+| leafy | a few small green and autumn-orange leaves caught in the netting and resting on the slats |
+| misty | tiny dew droplets beaded on the wood, rope and netting, with a cool damp sheen |
+| mossy | soft patches of green moss growing on the slat tops, the tops of the arches and the edges of the base |
+| reedy | thin marsh reeds and grass stalks tangled through the netting and poking out at the base |
+| sandy | a dusting of pale sand over the wood, with small drifts of sand on the base and caught in the netting corners |
+| smooth | freshly sanded, varnished wood with a soft gloss and clean highlights, and neat tight rope |
+| tidal | just hauled from the sea: the lower third darker and wet with a shine, white barnacles on the base and legs, and a few drips |
+| wavy | wood with a strong, wavy, driftwood-like grain |
+| willow | the slats and arches made of woven willow wicker instead of planks |
+| wispy | fine strands of green seaweed draped over the slats and trailing from the netting |
+
+## Last words: 64 props
+
+Attach the trap image as a style reference and send the prompt below with
+`{subject}` replaced from the table. Then cut it out with
+`python3 scripts/trap-art/cutout.py <gemini.png> docs/assets/traps/props/<word>.png`.
 
 > Use the attached lobster trap illustration as the style reference. Draw a
-> single {subject} as a standalone prop in exactly the same style: flat
-> vector illustration, warm muted coastal palette, clean rounded shapes, a
-> consistent reddish-brown outline (#8A3A1E) about 1% of the image width,
-> simple cel shading with one highlight tone and one shadow tone, no
-> gradients, no texture noise. Three-quarter view from slightly above, lit
-> from the upper left, matching the trap. Draw it at small diorama scale, as
-> if it sits on the ground beside the trap. Animals are friendly and simple,
-> with dot eyes. Square 1024×1024 canvas with a plain pure white background.
-> Centre the object horizontally and rest it on an invisible floor line 88%
-> of the way down, filling about 70% of the width. No ground, no cast
-> shadow, no text, no border and no other objects.
+> single {subject} as a standalone prop in exactly the same style: the same
+> hand-drawn flat illustration, warm muted coastal palette, clean rounded
+> shapes, a consistent reddish-brown outline (#8A3A1E) about 1% of the image
+> width, and simple shading with one highlight tone and one shadow tone.
+> Three-quarter view from slightly above, lit from the upper left, matching
+> the trap. Draw it at small diorama scale, as if it sits on the ground
+> beside the trap. Animals are friendly and simple, with dot eyes. Square
+> 1024×1024 canvas with a plain pure white background, the object centred
+> and filling about 70% of the width. No ground, no cast shadow, no text, no
+> border and no other objects.
 
-## Delivering a prop
+The cut-out is cropped to the prop. When composed, a prop is scaled to fit
+a 300×300 box and stands with its bottom centre at the trap's front-left
+corner, so props don't need matching framing.
 
-- Remove the white background and save a transparent PNG at 512×512 as
-  `docs/assets/props/<word>.png`, for example `crab.png`.
-- Keep the canvas framing: don't crop to the object. The trap places every
-  prop in the same box (`x=30 y=600 width=300 height=300` in `trap.svg`), so
-  the floor line and centring line them up.
-
-## The 64 props
+### The 64 props
 
 | Word | Subject |
 |---|---|
