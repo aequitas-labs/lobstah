@@ -118,6 +118,7 @@ send a continuation.
 | `ttlSecs` | `1800` | Heartbeat age past which a helm registration is stale: the next `man helm` claims it without `--take`. The park and `man brief` heartbeat it. |
 | `reportSecs` | `900` | Minimum seconds between park-delivered digests for a helm session. The digest is also change-gated — quiet grounds deliver nothing regardless of cadence. |
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
+| `questionGuard` | `"block"` | Stop-hook reminder for a helm's uncarded human questions in its final chat message: `"block"` nudges once per turn; `"warn"` leaves a quiet notice in tend; `"off"` skips detection. A decision created or replaced during the turn satisfies the guard. Traps and non-helms are unaffected. |
 
 ## `[glass]` — the spyglass
 

@@ -35,6 +35,13 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('defaults the question guard to block and honors warn and off', () => {
+    expect(loadConfig().helm.questionGuard).toBe('block');
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[helm]\nquestionGuard = "warn"\n');
+    expect(loadConfig().helm.questionGuard).toBe('warn');
+    fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\nquestionGuard = "off"\n');
+    expect(loadConfig().helm.questionGuard).toBe('off');
+  });
   it('defaults the idle-claim notice grace to 180 seconds and honors the soak override', () => {
     expect(loadConfig().soak.claimIdleNoticeSecs).toBe(180);
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nclaimIdleNoticeSecs = 240\n');

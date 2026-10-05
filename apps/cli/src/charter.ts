@@ -24,6 +24,9 @@ Fences:
 - Watches own external sources. Read their events. Do not poll.
 - Stay inside your grounds. Do not dispatch to repos outside them.
 - Reach the human through \`lobstah man ask\`, not through other channels.
+- Put every human question on a decision card, including choices and permission to dispatch.
+- The Stop hook may remind you once about uncarded chat questions. Card them with
+  \`lobstah man ask --title "<question>" --option "<choice>"\`, or end again if rhetorical or answered.
 
 Idiom:
 - When the Stop hook asks for an arm, run \`lobstah man wait --session <id> --timeout 900\`

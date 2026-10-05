@@ -151,6 +151,8 @@ export interface HelmConfig {
   park?: 'arm' | 'block';
   /** Arm mode: seconds the Stop hook polls for a watcher that is still starting before it blocks. */
   armGraceSecs: number;
+  /** Remind the helm once when its final chat asks an uncarded human question. */
+  questionGuard: 'block' | 'warn' | 'off';
 }
 
 export interface WatchConfig {
@@ -247,6 +249,7 @@ export const DEFAULT_HELM: HelmConfig = {
   ttlSecs: 1800,
   reportSecs: 900,
   armGraceSecs: 5,
+  questionGuard: 'block',
 };
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
