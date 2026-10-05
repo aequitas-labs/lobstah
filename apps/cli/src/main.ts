@@ -159,7 +159,7 @@ import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
-import { charter } from './charter.js';
+import { charter, HELM_REMINDER } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { runCull } from './cull.js';
@@ -366,7 +366,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   ~/.claude/settings.json with --global (any
                                   directory with a .lobstah-man file then
                                   parks); --marker touches .lobstah-man.
-  hook session-start|stop|post-tool-use|session-end
+  hook session-start|user-prompt-submit|stop|post-tool-use|session-end
                                   the plugin hook entry points: each
                                   detects the session's role (helm, trap,
                                   or neither). session-start = man brief,
@@ -827,6 +827,16 @@ const HOOK_COMMANDS: Record<string, string[]> = {
 
 async function mainCli(): Promise<void> {
   let [cmd, ...args] = process.argv.slice(2);
+  if (cmd === 'hook' && args[0] === 'user-prompt-submit') {
+    // Add context, never block a prompt or change fleet state.
+    try {
+      const hook = readHookStdin();
+      if (hook?.session_id && !trapBySession(hook.session_id) && helmOf(hook.session_id)) {
+        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: HELM_REMINDER } }));
+      }
+    } catch { /* a reminder never breaks the user's turn */ }
+    return;
+  }
   // The post-tool hook: before any layout or parsing work, and it never
   // fails. Errors go to the log; the exit code is always 0.
   if ((cmd === 'soak' && args[0] === 'beat') || (cmd === 'hook' && args[0] === 'post-tool-use')) {

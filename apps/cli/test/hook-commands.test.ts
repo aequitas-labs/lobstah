@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enqueue, ensureLayout, readBeat, readTrap, sendTrapMessage, signOnTrap, takeHelm } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { charter, HELM_REMINDER } from '../src/charter.js';
 
 /**
  * `lobstah hook <event>` runs what the older hook command runs, for a helm, a
@@ -74,6 +75,31 @@ describe('lobstah hook session-start (alias: man brief)', () => {
   }
 });
 
+describe('lobstah hook user-prompt-submit', () => {
+  for (const harness of ['claude', 'codex'] as const) {
+    it(`${harness}: adds the card reminder each turn for the helm, but not traps or other sessions`, () => {
+      takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness } });
+      trap('trap-session', harness);
+      for (const prompt of ['First turn', 'Another turn']) {
+        const res = hook(['hook', 'user-prompt-submit'], { session_id: HELM, hook_event_name: 'UserPromptSubmit', prompt });
+        expect(res.status, res.stderr).toBe(0);
+        expect(JSON.parse(res.stdout)).toEqual({
+          hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: HELM_REMINDER },
+        });
+      }
+      for (const session of ['trap-session', NOBODY]) {
+        const res = hook(['hook', 'user-prompt-submit'], { session_id: session, hook_event_name: 'UserPromptSubmit', prompt: 'A question?' });
+        expect(res.status, res.stderr).toBe(0);
+        expect(res.stdout).toBe('');
+      }
+    });
+  }
+
+  it('includes the same reminder in the helm charter Role section', () => {
+    expect(charter({ name: 'fleet', repos: ['web'] }).split('Role:')[1]?.split('Fences:')[0]).toContain(HELM_REMINDER);
+  });
+});
+
 describe('lobstah hook stop (alias: man haul)', () => {
   for (const [label, args] of [['hook stop', PAIRS.stop[0]], ['man haul', PAIRS.stop[1]]] as const) {
     it(`${label}: a trap wakes on its message; the helm is asked to arm; neither role is inert`, () => {
@@ -135,7 +161,7 @@ describe('lobstah hook', () => {
   it('bare prints its card; an unknown event is a usage error', () => {
     const bare = hook(['hook'], {});
     expect(bare.status).toBe(0);
-    expect(bare.stdout).toContain('session-start|stop|post-tool-use|session-end');
+    expect(bare.stdout).toContain('session-start|user-prompt-submit|stop|post-tool-use|session-end');
     const unknown = hook(['hook', 'pre-compact'], {});
     expect(unknown.status).toBe(2);
   });
@@ -146,6 +172,7 @@ describe('lobstah hook', () => {
       const hooks = (JSON.parse(fs.readFileSync(file, 'utf8')) as { hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>> }).hooks;
       expect(Object.fromEntries(Object.entries(hooks).map(([event, groups]) => [event, groups[0]!.hooks[0]!.command]))).toEqual({
         SessionStart: 'lobstah hook session-start',
+        UserPromptSubmit: 'lobstah hook user-prompt-submit',
         PostToolUse: 'lobstah hook post-tool-use',
         Stop: 'lobstah hook stop',
         SessionEnd: 'lobstah hook session-end',

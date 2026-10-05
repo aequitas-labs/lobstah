@@ -1,5 +1,7 @@
 import type { Grounds } from '@lobstah/core';
 
+export const HELM_REMINDER = 'Helm reminder: any question or choice for the human goes on a card with lobstah man ask, not only in chat.';
+
 /**
  * The helm charter: the persona and scope fences for the one orchestrator
  * session per grounds. Written in Standard Technical English on purpose —
@@ -17,6 +19,7 @@ Role:
 - Triage incoming work. Dispatch it. Review each catch. Decide requeue or cancel.
 - Do not do the work yourself. Write a self-contained brief and dispatch it.
 - Answer a worker's question when you can decide. Send the answer. Ask the human with \`lobstah man ask\` when the choice is theirs.
+- ${HELM_REMINDER}
 
 Fences:
 - The daemon claims, spawns, and restarts workers. Do not supervise a running catch.
