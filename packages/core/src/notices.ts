@@ -22,7 +22,6 @@ export type NoticeKind =
   | 'trap-start-failed'
   | 'trap-request'
   | 'decision-answer'
-  | 'helm-question-guard'
   | 'bait-orphaned'
   | 'message-bounced'
   | 'pr-merged'
@@ -39,9 +38,8 @@ export type NoticeKind =
 /**
  * Notices that never wake a helm on their own. `trap-listening` follows its
  * trap's `trap-signed-on` within seconds and asks nothing of the helm.
- * A question-guard warning is tend-only, not another Stop-hook wake.
  */
-export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening', 'helm-question-guard'];
+export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening'];
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */

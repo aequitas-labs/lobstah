@@ -42,8 +42,6 @@ export interface DecisionMeta {
   grounds?: string;
   /** `helm` for `man ask`; `worker` for a raw question answered in the glass. */
   askedBy: string;
-  /** The helm session that created this card, when known. */
-  askedBySession?: string;
   askedAt: string;
   /** Changes with every ask; an ack holds only while it matches. */
   stateHash: string;
@@ -228,7 +226,6 @@ export interface AskOptions {
   repo?: string;
   grounds?: string;
   askedBy: string;
-  askedBySession?: string;
   /** A standing decision this one replaces (`man ask --replace <key>`). Without it, every standing decision stays. */
   replace?: string;
   /** Per-file limit for attachments (limits.attachmentMaxBytes). */
@@ -310,7 +307,6 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     ...(opts.repo ? { repo: opts.repo } : {}),
     ...(opts.grounds ? { grounds: opts.grounds } : {}),
     askedBy: opts.askedBy,
-    ...(opts.askedBySession ? { askedBySession: opts.askedBySession } : {}),
     askedAt,
     stateHash: createHash('sha1').update(`${key}\n${askedAt}\n${title}`).digest('hex').slice(0, 16),
   };

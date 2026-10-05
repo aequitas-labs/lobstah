@@ -53,9 +53,6 @@ export interface HookInput {
   cwd?: string;
   hook_event_name?: string;
   stop_hook_active?: boolean;
-  transcript_path?: string | null;
-  last_assistant_message?: string | null;
-  turn_id?: string;
 }
 
 /**

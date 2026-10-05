@@ -159,7 +159,7 @@ import { runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
-import { charter } from './charter.js';
+import { charter, HELM_REMINDER } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { runCull } from './cull.js';
@@ -211,7 +211,6 @@ import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { armWatcher, awaitWatcher } from './watchers.js';
-import { helmQuestionGuard } from './question-guard.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -367,7 +366,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   ~/.claude/settings.json with --global (any
                                   directory with a .lobstah-man file then
                                   parks); --marker touches .lobstah-man.
-  hook session-start|stop|post-tool-use|session-end
+  hook session-start|user-prompt-submit|stop|post-tool-use|session-end
                                   the plugin hook entry points: each
                                   detects the session's role (helm, trap,
                                   or neither). session-start = man brief,
@@ -828,6 +827,16 @@ const HOOK_COMMANDS: Record<string, string[]> = {
 
 async function mainCli(): Promise<void> {
   let [cmd, ...args] = process.argv.slice(2);
+  if (cmd === 'hook' && args[0] === 'user-prompt-submit') {
+    // Add context, never block a prompt or change fleet state.
+    try {
+      const hook = readHookStdin();
+      if (hook?.session_id && !trapBySession(hook.session_id) && helmOf(hook.session_id)) {
+        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: HELM_REMINDER } }));
+      }
+    } catch { /* a reminder never breaks the user's turn */ }
+    return;
+  }
   // The post-tool hook: before any layout or parsing work, and it never
   // fails. Errors go to the log; the exit code is always 0.
   if ((cmd === 'soak' && args[0] === 'beat') || (cmd === 'hook' && args[0] === 'post-tool-use')) {
@@ -1681,7 +1690,6 @@ async function mainCli(): Promise<void> {
           ...(repo ? { repo } : {}),
           ...(grounds ? { grounds } : {}),
           askedBy: 'helm',
-          askedBySession: caller?.id,
           ...(opt('--replace') !== undefined ? { replace: opt('--replace') } : {}),
           maxBytes: loadConfig().limits.attachmentMaxBytes,
         });
@@ -2130,8 +2138,7 @@ async function mainCli(): Promise<void> {
           } else clearParkRenewal(trapReg.trapId);
           break;
         }
-        let questionReason: string | undefined;
-        const emit = (reason: string) => console.log(JSON.stringify({ decision: 'block', reason: [reason, questionReason].filter(Boolean).join('\n\n') }));
+        const emit = (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
         const relievedNotice = hook?.session_id ? consumeRelievedNotice(hook.session_id) : undefined;
@@ -2149,7 +2156,6 @@ async function mainCli(): Promise<void> {
         // The helm ended a turn: a question it left unanswered walks to the human.
         if (helm) releaseHeldQuestions(helm);
         const cfgHaul = loadConfig();
-        questionReason = helmQuestionGuard(hook, helm, cfgHaul.helm.questionGuard);
         // Strict helm rule: with a claimed lobstah man anywhere, no other
         // session parks as one — a marker-armed bystander would consume the
         // helm's wakes. Silent: a hook never breaks a stop with noise.
@@ -2187,7 +2193,6 @@ async function mainCli(): Promise<void> {
           }
           const d = dueDigest();
           if (d) blockDigest(d);
-          else if (questionReason) emit('');
           break; // otherwise conversational turns end free
         }
         const remindMs = (cfgHaul.remindSecs ?? 900) * 1000;
@@ -2234,10 +2239,7 @@ async function mainCli(): Promise<void> {
           }
           // A wait backgrounded just before the turn ended may still be starting.
           const graceSecs = cfgHaul.helm.armGraceSecs;
-          if (await awaitWatcher(hook.session_id, 'man', questionReason ? 0 : graceSecs * 1000)) {
-            if (questionReason) emit('');
-            break;
-          }
+          if (await awaitWatcher(hook.session_id, 'man', graceSecs * 1000)) break;
           const sent = dueUnanswered(true, remindMs, Date.now(), matchHelm);
           emit(
             [
@@ -2260,7 +2262,6 @@ async function mainCli(): Promise<void> {
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
         const quiet = () =>
           evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0;
-        if (quiet() && questionReason) { emit(''); break; }
         if (quiet()) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
