@@ -73,6 +73,17 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(read('plugins/claude-code/README.md')).toContain('lobstah for Claude Code');
   });
 
+  it('the Claude directory ships a real, square PNG of the lobster-and-star mark', () => {
+    const file = `${root}/plugins/claude-code/.claude-plugin/icon.png`;
+    expect(fs.lstatSync(file).isFile()).toBe(true); // not a symlink
+    const png = fs.readFileSync(file);
+    expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(png.readUInt32BE(16)).toBe(512);
+    expect(png.readUInt32BE(20)).toBe(512);
+    expect(png.length).toBeLessThan(256 * 1024);
+    expect(png.equals(fs.readFileSync(`${root}/plugins/codex/assets/logo.png`))).toBe(true);
+  });
+
   it('the Codex listing keeps presentation fields under interface and ships both icons', () => {
     const manifest = JSON.parse(read('plugins/codex/.codex-plugin/plugin.json'));
     for (const field of ['displayName', 'shortDescription', 'websiteURL', 'composerIcon', 'logo']) {
