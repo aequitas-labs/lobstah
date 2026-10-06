@@ -47,6 +47,7 @@ import {
   sweepGhostTraps,
   expireReservations,
   pausedWaiting,
+  sendTelemetry,
 } from '@lobstah/core';
 import type { Config, Descriptor, FreeBytesReader, Lane, RunnerInfo } from '@lobstah/core';
 import { classify, killGroup, pidAlive, processStartTime } from './liveness.js';
@@ -661,6 +662,9 @@ export function watchQueues(onChange: () => void): () => void {
   };
 }
 
+const TELEMETRY_CHECK_MS = 10 * 60_000;
+let telemetryCheckedAt = 0;
+
 export async function daemon(intervalMs = 5000, log: (m: string) => void = console.log, hooks: DaemonHooks = {}): Promise<never> {
   ensureLayout();
   acquireDaemonLock();
@@ -672,6 +676,12 @@ export async function daemon(intervalMs = 5000, log: (m: string) => void = conso
       tick(log, hooks);
     } catch (err) {
       log(`tick error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // Anonymous daily counts (PRIVACY.md): checked every few minutes, sent at
+    // most once per UTC day, fire and forget. Never awaited, never logged.
+    if (Date.now() - telemetryCheckedAt >= TELEMETRY_CHECK_MS) {
+      telemetryCheckedAt = Date.now();
+      void sendTelemetry().catch(() => {});
     }
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {

@@ -9,7 +9,7 @@
     "build": "pnpm -r run build",
     "glass:dev": "node scripts/build-glass.mjs --watch",
     "test": "vitest run",
-    "lint": "pnpm typecheck && prettier --check apps/cli/glass",
+    "lint": "pnpm typecheck && tsc -p services/telemetry && prettier --check apps/cli/glass",
     "typecheck": "pnpm -r run build --noEmit",
     "build:npm": "node scripts/build-npm.mjs",
     "build:plugin": "node scripts/build-plugin.mjs",

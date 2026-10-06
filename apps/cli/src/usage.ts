@@ -122,6 +122,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
   doctor: { flags: {} },
+  telemetry: { subverbs: ['status', 'enable', 'disable', 'show'], flags: { '--json': {} }, flagSubverbs: { '--json': ['status'] }, maxPositionals: 1 },
   glass: {
     subverbs: ['stop', 'status', 'install', 'uninstall', 'restart', 'show'],
     flags: { '--port': { value: '<n>' }, '--detach': {}, '--json': {} },
@@ -304,6 +305,12 @@ traps, notices, merge view. Read-only, on 127.0.0.1: looking steers nothing.
 --detach runs it in the background; stop, status, install, uninstall, and
 restart manage it. show <#hash> asks an open glass page to show a tab, a
 #decision/<key>, or a #report/<key> (--json for the pet).`,
+  telemetry: `Anonymous daily counts (PRIVACY.md). Once per UTC day the daemon sends
+catchesToday, totalCatches, the version, OS family, arch, UTC date, and a
+random install id; nothing else. status (default; --json) shows whether it is
+on and every off switch in effect. enable / disable set [telemetry] share in
+config.toml. show prints the exact JSON that would be sent. Any one switch
+turns it off: share = false, LOBSTAH_TELEMETRY=0, DO_NOT_TRACK=1, CI set.`,
   repos: `List configured repos, or detect one and append its [repos.*] block.`,
   init: `Create ~/.lobstah + config; --scan appends a [repos.*] block per repo found
 under the given directories.`,

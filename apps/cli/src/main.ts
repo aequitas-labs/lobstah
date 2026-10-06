@@ -162,6 +162,7 @@ import {
   withdrawDecision,
   DecisionError,
   decisionDir,
+  telemetryCliRun,
 } from '@lobstah/core';
 import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, Watch, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
@@ -174,6 +175,7 @@ import { charter, HELM_REMINDER } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { buildTendReport, renderTend } from './tend.js';
 import { runCull } from './cull.js';
+import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { cliCuller } from './auto-cull.js';
@@ -453,6 +455,11 @@ setup:
   doctor                          check binaries, config, repos, harnesses, and
                                   the daemon heartbeat; exit 1 on failures
   version | --version             the installed lobstah version
+  telemetry [status [--json] | enable | disable | show]
+                                  anonymous daily catch counts (PRIVACY.md):
+                                  status and every off switch; show prints
+                                  the exact JSON; disable turns it off
+                                  (also LOBSTAH_TELEMETRY=0, DO_NOT_TRACK=1, CI)
 
 Everything except daemon and pick works with both stopped: writes are files,
 reads are files. Output is TOON; agents can drive this CLI directly.
@@ -877,6 +884,15 @@ async function mainCli(): Promise<void> {
     args = args.slice(1);
   }
   ensureLayout();
+  // Telemetry's first-run notice (once, interactive runs only, on stderr) and
+  // the record of an environment off switch for the daemon. Never throws.
+  if (cmd !== '__runner') {
+    telemetryCliRun({
+      interactive: !!process.stdout.isTTY && !!process.stderr.isTTY,
+      notice: cmd !== 'telemetry',
+      write: (t) => process.stderr.write(t),
+    });
+  }
 
   // The one parsing step (axi.md P6/P10): registered flags are honored in
   // any position, unknown flags and subverbs fail loudly with the usage card
@@ -3154,6 +3170,10 @@ async function mainCli(): Promise<void> {
     }
     case 'version': {
       console.log(lobstahVersion());
+      break;
+    }
+    case 'telemetry': {
+      console.log(telemetryCommand(pos[0] ?? 'status', { json: has('--json') }));
       break;
     }
     case 'watch': {
