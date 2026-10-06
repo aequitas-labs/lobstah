@@ -42,6 +42,7 @@ import {
 } from '../src/index.js';
 import type { TrapRegistration } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { generatedTrapNameForId } from '../src/trap-names.js';
 
 let home: string;
 beforeEach(() => {
@@ -65,6 +66,38 @@ function trap(sessionId: string, repo?: string): TrapRegistration {
 }
 
 describe('trap registry (worktree-anchored)', () => {
+  it('records generated provenance and preserves it through re-soak, stow and ghosting', () => {
+    const first = trap('provenance');
+    expect(generatedTrapNameForId(first.trapId)).toBe(first.name);
+    signOnTrap({ sessionId: first.sessionId, harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    expect(generatedTrapNameForId(first.trapId)).toBe(first.name);
+    stowTrap(first.trapId);
+    signOnTrap({ sessionId: 'resumed', harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    expect(generatedTrapNameForId(first.trapId)).toBe(first.name);
+    sweepGhostTraps(1000, Date.now() + 60_000);
+    expect(generatedTrapNameForId(first.trapId)).toBe(first.name);
+  });
+
+  it('never infers provenance from a chosen or older generated-looking name', () => {
+    reserveTrapName('custom', 'kind-crab');
+    expect(generatedTrapNameForId('custom')).toBeUndefined();
+    fs.writeFileSync(path.join(home, 'trap-names', 'amber-gull.json'), JSON.stringify({ trapId: 'legacy' }));
+    reserveTrapName('legacy');
+    expect(generatedTrapNameForId('legacy')).toBeUndefined();
+    const first = trap('same-name');
+    signOnTrap({ sessionId: first.sessionId, harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS, name: first.name });
+    expect(generatedTrapNameForId(first.trapId)).toBeUndefined();
+  });
+
+  it('restores an anchor with a lost name record without claiming generated provenance', () => {
+    const first = trap('lost-record');
+    fs.unlinkSync(path.join(home, 'trap-names', `${first.name}.json`));
+    stowTrap(first.trapId);
+    const again = signOnTrap({ sessionId: 'resumed', harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    expect('ok' in again && again.ok.name).toBe(first.name);
+    expect(generatedTrapNameForId(first.trapId)).toBeUndefined();
+  });
+
   it('assigns distinct two-word names and resolves either address', () => {
     const one = trap('one');
     const two = trap('two');

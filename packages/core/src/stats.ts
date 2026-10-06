@@ -26,6 +26,8 @@ export interface StatsStore {
   /** The local day (YYYY-MM-DD) `catchesToday` counts. */
   day: string;
   catchesToday: number;
+  /** UTC-day counters for sharing; local-day glass/CLI stats stay unchanged. */
+  utc?: { date: string; catches: number; perTrap: Record<string, number> };
   /**
    * Counted dispatches whose state is still on disk, so a repeated done or a
    * later fold never counts one twice. Cull drops an id as it folds it: the
@@ -109,7 +111,10 @@ function readCatchFacts(stateDir: string, id: string): CatchFacts {
 }
 
 function emptyStore(now: number): StatsStore {
-  return { version: 1, totalCatches: 0, perTrap: {}, day: localDay(now), catchesToday: 0, counted: [], daily: {} };
+  return {
+    version: 1, totalCatches: 0, perTrap: {}, day: localDay(now), catchesToday: 0, counted: [], daily: {},
+    utc: { date: new Date(now).toISOString().slice(0, 10), catches: 0, perTrap: {} },
+  };
 }
 
 /** The local day a catch counts on: its done report's, else now's. */
@@ -142,6 +147,13 @@ function add(store: StatsStore, facts: CatchFacts, now: number): void {
   if (day === today) store.catchesToday++;
   addDaily(store, day, now);
   pruneDaily(store, now);
+  const at = facts.at && Number.isFinite(Date.parse(facts.at)) ? facts.at : undefined;
+  const utcDay = new Date(now).toISOString().slice(0, 10);
+  if (store.utc?.date !== utcDay) store.utc = { date: utcDay, catches: 0, perTrap: {} };
+  if ((at ? new Date(at).toISOString().slice(0, 10) : utcDay) === utcDay) {
+    store.utc.catches++;
+    if (facts.trap) store.utc.perTrap[facts.trap] = (store.utc.perTrap[facts.trap] ?? 0) + 1;
+  }
 }
 
 /** Retained state dirs, live lanes first so they win over any backup copy. */
@@ -156,7 +168,7 @@ function backfillSources(): Array<{ dir: string; live: boolean }> {
 }
 
 /** Build the store from history: every retained or backed-up dispatch that finished done, once. */
-export function backfillStats(now = Date.now()): StatsStore {
+export function backfillStats(now = Date.now(), alreadyCounted?: ReadonlySet<string>): StatsStore {
   const store = emptyStore(now);
   const seen = new Set<string>();
   for (const { dir, live } of backfillSources()) {
@@ -165,6 +177,9 @@ export function backfillStats(now = Date.now()): StatsStore {
       const id = file.slice(0, -'.status'.length);
       if (seen.has(id)) continue;
       seen.add(id);
+      // During an upgrade, a newly written done report may not yet be in
+      // the saved store. Its record/fold will add it, including UTC counts.
+      if (live && alreadyCounted && !alreadyCounted.has(id)) continue;
       const facts = readCatchFacts(dir, id);
       if (!facts.done) continue;
       add(store, facts, now);
@@ -219,6 +234,7 @@ function parseStore(text: string): (Omit<StatsStore, 'daily'> & { daily?: Record
       catchesToday: s.catchesToday,
       counted: s.counted ?? [],
       ...(isDaily(s.daily) ? { daily: s.daily } : {}),
+      ...(s.utc ? { utc: s.utc } : {}),
     };
   } catch {
     return undefined;
@@ -271,10 +287,16 @@ function loadOrBackfill(now: number): StatsStore {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   const saved = text === undefined ? undefined : parseStore(text);
-  if (complete(saved)) return saved;
+  if (complete(saved) && saved.utc) return saved;
   if (saved) {
-    // Saved before per-day history: add it once, from the records on disk.
-    const store = backfillDaily({ ...saved, daily: {} }, now);
+    // Upgrade local history and UTC counters independently; never reset a
+    // present history or all-time totals that include culled dispatches.
+    const store = complete(saved) ? saved : backfillDaily({ ...saved, daily: {} }, now);
+    if (!store.utc) {
+      // Upgrade only the new UTC counters from retained history; never reset
+      // all-time totals that already include culled dispatches.
+      store.utc = backfillStats(now, new Set(store.counted)).utc;
+    }
     writeStore(store);
     return store;
   }
@@ -289,7 +311,7 @@ function loadOrBackfill(now: number): StatsStore {
 export function readStatsStore(now = Date.now()): StatsStore {
   try {
     const saved = parseStore(fs.readFileSync(statsPath(), 'utf8'));
-    if (complete(saved)) return saved;
+    if (complete(saved) && saved.utc) return saved;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }

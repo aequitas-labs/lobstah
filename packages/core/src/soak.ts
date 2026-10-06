@@ -311,7 +311,7 @@ export function signOnTrap(opts: {
   }
   const anchor = readTrapAnchor(opts.worktree)!;
   // The roster holds the trap's canonical name: a returning trap keeps it.
-  const name = reserveTrapName(trapId, opts.name ?? prior?.name ?? readRoster(trapId)?.name ?? anchor.name);
+  const name = reserveTrapName(trapId, opts.name ?? prior?.name ?? readRoster(trapId)?.name ?? anchor.name, undefined, opts.name !== undefined);
   if (anchor.name !== name) writeTrapAnchor(opts.worktree, { ...anchor, name });
   const iso = new Date(now).toISOString();
   const sameSession = prior?.sessionId === opts.sessionId;

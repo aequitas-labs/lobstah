@@ -14,10 +14,20 @@ CREATE TABLE IF NOT EXISTS submissions (
   PRIMARY KEY (install_id, date)
 ) WITHOUT ROWID;
 
+-- At most 100 generated names per install per UTC date. Same 90-day expiry
+-- as submissions; no names are copied into the indefinite daily totals.
+CREATE TABLE IF NOT EXISTS trap_submissions (
+  install_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  name TEXT NOT NULL,
+  catches_today INTEGER NOT NULL,
+  PRIMARY KEY (install_id, date, name)
+) WITHOUT ROWID;
+
 -- Daily totals across all installs, with no install ids. Kept indefinitely.
 --   active_installs: installs that submitted for the date
---   catches_today:   sum of the installs' catchesToday for the date
---   new_catches:     growth of each install's totalCatches since its previous
+--   catches_today:   sum of the installs' catches.today for the date
+--   new_catches:     growth of each install's catches.total since its previous
 --                    retained submission; the badge is the sum of this column
 CREATE TABLE IF NOT EXISTS daily_totals (
   date TEXT PRIMARY KEY,

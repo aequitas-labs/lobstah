@@ -292,13 +292,17 @@ with a nudge.
 ## Telemetry 📊
 
 lobstah shares an anonymous daily count of its work, **on by default**. Once
-per UTC day the daemon sends the catches today and in total, plus the lobstah
+per UTC day the daemon sends `catches: {today, total}` for the UTC day and
+all-time, plus up to 100 `traps: [{name, today}]` entries with automatically
+generated names and recorded provenance. Custom names (`--name`) and older
+names with unknown provenance stay local; their catches remain in the totals.
+Names are not hashed. The payload also includes the lobstah
 version, OS family, CPU architecture, the UTC date, and a random install id
 made on your machine. It never sends repository names or paths, code, briefs,
-trap names, session ids, PR URLs, hostnames, or usernames. Hooks never send
+session ids, PR URLs, hostnames, or usernames. Hooks never send
 anything, and nothing is sent until a one-time notice has been shown in your
 terminal. The counts feed a project-wide `🦞 N` badge. Per-install rows are
-deleted after 90 days.
+deleted after 90 days, as are per-trap rows; retained daily totals have no names.
 
 - `lobstah telemetry show` prints the exact JSON that would be sent.
 - `lobstah telemetry status` shows whether it is on and why.

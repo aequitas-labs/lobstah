@@ -5,20 +5,21 @@ import type { D1Database, Env, ExecutionContext, ScheduledController } from './b
  * aggregate per install, serves the project-wide catches badge, and a
  * token-protected read of daily totals.
  *
- * - Strict schema: exactly the eight fields, each validated; unknown fields
- *   are rejected.
+ * - Strict schema: eight fields, including nested catches and traps, each
+ *   validated; unknown fields at every level are rejected.
  * - Idempotent: one row per install id + UTC date, upserted; a retry never
  *   adds to the totals twice.
  * - Stores no IP address, user agent, or other request metadata, and logs
  *   nothing (observability and logpush are off in wrangler.jsonc).
- * - Retention: per-install rows are deleted RETENTION_DAYS after their date
- *   by the daily cron, or at once by DELETE /v1/installs/<id>; daily_totals
- *   (no install ids) are kept.
+ * - Retention: per-install and per-trap rows are deleted RETENTION_DAYS
+ *   after their date by the daily cron; daily_totals (no ids or names) stay.
  */
 
 export const RETENTION_DAYS = 90;
-export const MAX_BODY_BYTES = 1024;
-export const FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catchesToday', 'totalCatches'] as const;
+export const MAX_BODY_BYTES = 8192;
+export const MAX_TRAPS = 100;
+export const FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'traps'] as const;
+const TRAP_NAME = /^[a-z]{2,8}-[a-z]{2,8}$/;
 const OS = ['macos', 'linux', 'windows', 'other'];
 const ARCH = ['x64', 'arm64', 'other'];
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -33,8 +34,8 @@ export interface Submission {
   arch: string;
   installId: string;
   date: string;
-  catchesToday: number;
-  totalCatches: number;
+  catches: { today: number; total: number };
+  traps: Array<{ name: string; today: number }>;
 }
 
 export function utcDate(ms: number): string {
@@ -45,10 +46,14 @@ function count(v: unknown, max: number): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= max;
 }
 
+function object(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
 /** The submission, or why it is refused. The date must be today (UTC) give or take a day of clock skew. */
 export function validate(body: unknown, now: number): { ok: true; value: Submission } | { ok: false; error: string } {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, error: 'body must be a JSON object' };
-  const b = body as Record<string, unknown>;
+  if (!object(body)) return { ok: false, error: 'body must be a JSON object' };
+  const b = body;
   const unknown = Object.keys(b).filter((k) => !(FIELDS as readonly string[]).includes(k));
   if (unknown.length > 0) return { ok: false, error: `unknown field: ${unknown[0]!.slice(0, 40)}` };
   const missing = FIELDS.filter((k) => !(k in b));
@@ -62,10 +67,23 @@ export function validate(body: unknown, now: number): { ok: true; value: Submiss
   if (typeof b.date !== 'string' || ![utcDate(now - day), utcDate(now), utcDate(now + day)].includes(b.date)) {
     return { ok: false, error: 'date must be the current UTC date' };
   }
-  if (!count(b.catchesToday, MAX_CATCHES_TODAY)) return { ok: false, error: 'invalid catchesToday' };
-  if (!count(b.totalCatches, MAX_TOTAL_CATCHES)) return { ok: false, error: 'invalid totalCatches' };
-  if (b.catchesToday > b.totalCatches) return { ok: false, error: 'catchesToday exceeds totalCatches' };
-  return { ok: true, value: b as unknown as Submission };
+  if (!object(b.catches) || Object.keys(b.catches).some((k) => k !== 'today' && k !== 'total')) return { ok: false, error: 'invalid catches' };
+  const { today, total } = b.catches;
+  if (!count(today, MAX_CATCHES_TODAY) || !count(total, MAX_TOTAL_CATCHES) || today > total) return { ok: false, error: 'invalid catches counts' };
+  if (!Array.isArray(b.traps) || b.traps.length > MAX_TRAPS) return { ok: false, error: 'invalid traps: maximum 100' };
+  const traps: Submission['traps'] = [];
+  const names = new Set<string>();
+  let trapCatches = 0;
+  for (const t of b.traps) {
+    if (!object(t) || Object.keys(t).some((k) => k !== 'name' && k !== 'today') ||
+        typeof t.name !== 'string' || t.name.length < 5 || t.name.length > 17 || t.name.trim() !== t.name || !TRAP_NAME.test(t.name) ||
+        !count(t.today, MAX_CATCHES_TODAY) || t.today === 0 || names.has(t.name)) return { ok: false, error: 'invalid trap' };
+    names.add(t.name);
+    trapCatches += t.today;
+    traps.push({ name: t.name, today: t.today });
+  }
+  if (trapCatches > today) return { ok: false, error: 'trap counts exceed catches.today' };
+  return { ok: true, value: { schema: 1, version: b.version, os: b.os, arch: b.arch, installId: b.installId, date: b.date, catches: { today, total }, traps } };
 }
 
 /**
@@ -91,7 +109,7 @@ export async function record(db: D1Database, s: Submission): Promise<void> {
            catches_today = catches_today + excluded.catches_today,
            new_catches = new_catches + excluded.new_catches`,
       )
-      .bind(s.installId, s.date, s.catchesToday, s.totalCatches),
+      .bind(s.installId, s.date, s.catches.today, s.catches.total),
     db
       .prepare(
         `INSERT INTO submissions (install_id, date, version, os, arch, catches_today, total_catches)
@@ -101,13 +119,22 @@ export async function record(db: D1Database, s: Submission): Promise<void> {
            catches_today = MAX(catches_today, excluded.catches_today),
            total_catches = MAX(total_catches, excluded.total_catches)`,
       )
-      .bind(s.installId, s.date, s.version, s.os, s.arch, s.catchesToday, s.totalCatches),
+      .bind(s.installId, s.date, s.version, s.os, s.arch, s.catches.today, s.catches.total),
+    // Replace the bounded snapshot, not a union that can grow beyond 100.
+    db.prepare('DELETE FROM trap_submissions WHERE install_id = ?1 AND date = ?2').bind(s.installId, s.date),
+    db.prepare(`INSERT INTO trap_submissions (install_id, date, name, catches_today)
+                SELECT ?1, ?2, json_extract(value, '$.name'), json_extract(value, '$.today') FROM json_each(?3)`)
+      .bind(s.installId, s.date, JSON.stringify(s.traps)),
   ]);
 }
 
-/** Delete per-install rows older than the retention period. Daily totals stay. */
+/** Delete per-install/trap rows older than the retention period. Nameless daily totals stay. */
 export async function prune(db: D1Database, now: number): Promise<void> {
-  await db.prepare('DELETE FROM submissions WHERE date < ?1').bind(utcDate(now - RETENTION_DAYS * 86_400_000)).run();
+  const cutoff = utcDate(now - RETENTION_DAYS * 86_400_000);
+  await db.batch([
+    db.prepare('DELETE FROM trap_submissions WHERE date < ?1').bind(cutoff),
+    db.prepare('DELETE FROM submissions WHERE date < ?1').bind(cutoff),
+  ]);
 }
 
 function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -120,8 +147,29 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
 async function submit(request: Request, env: Env, now: number): Promise<Response> {
   if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'content-type must be application/json' }, 415);
   if (Number(request.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) return json({ error: 'body too large' }, 413);
-  const text = await request.text();
-  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) return json({ error: 'body too large' }, 413);
+  // Do not buffer an unbounded request when Content-Length is absent or false.
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (reader) {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BODY_BYTES) {
+        await reader.cancel();
+        return json({ error: 'body too large' }, 413);
+      }
+      chunks.push(value);
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder().decode(bytes);
   let body: unknown;
   try {
     body = JSON.parse(text);
@@ -177,26 +225,11 @@ async function stats(request: Request, env: Env, url: URL, now: number): Promise
   return json({ totalCatches: total?.n ?? 0, retentionDays: RETENTION_DAYS, days: rows.results });
 }
 
-/**
- * DELETE /v1/installs/<installId>: remove that install's rows now instead of
- * at expiry. Knowing the random id is the credential: it exists only in the
- * install's ~/.lobstah/telemetry.json. Daily totals, which carry no id, stay.
- */
-async function forget(env: Env, installId: string): Promise<Response> {
-  if (!UUID_V4.test(installId)) return json({ error: 'invalid installId' }, 400);
-  if (env.SUBMIT_LIMITER && !(await env.SUBMIT_LIMITER.limit({ key: installId })).success) return json({ error: 'rate limited' }, 429);
-  await env.DB.prepare('DELETE FROM submissions WHERE install_id = ?1').bind(installId).run();
-  return new Response(null, { status: 204 });
-}
-
 export async function handle(request: Request, env: Env, now = Date.now()): Promise<Response> {
   const url = new URL(request.url);
   try {
     if (url.pathname === '/v1/daily') return request.method === 'POST' ? await submit(request, env, now) : json({ error: 'method not allowed' }, 405, { allow: 'POST' });
     if (url.pathname === '/badge/catches.json') return request.method === 'GET' ? await badge(env) : json({ error: 'method not allowed' }, 405, { allow: 'GET' });
-    if (url.pathname.startsWith('/v1/installs/')) {
-      return request.method === 'DELETE' ? await forget(env, url.pathname.slice('/v1/installs/'.length)) : json({ error: 'method not allowed' }, 405, { allow: 'DELETE' });
-    }
     if (url.pathname === '/v1/stats') return request.method === 'GET' ? await stats(request, env, url, now) : json({ error: 'method not allowed' }, 405, { allow: 'GET' });
     return json({ error: 'not found' }, 404);
   } catch {

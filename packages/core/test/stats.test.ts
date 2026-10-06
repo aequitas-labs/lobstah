@@ -28,6 +28,58 @@ function legacy(dir: string, id: string, verbs: string[], at: string, trap?: str
 }
 
 describe('catch store', () => {
+  it('keeps a UTC-day per-trap table through cull, and resets at UTC midnight', () => {
+    const now = Date.parse('2026-10-06T23:59:00Z');
+    legacy(path.join(home, 'state'), 'trap', ['done'], new Date(now).toISOString(), 'wt:a');
+    legacy(path.join(home, 'state'), 'headless', ['done'], new Date(now).toISOString());
+    legacy(path.join(home, 'state'), 'yesterday', ['done'], '2026-10-05T23:59:00Z', 'wt:b');
+    expect(readStatsStore(now).utc).toEqual({ date: '2026-10-06', catches: 2, perTrap: { 'wt:a': 1 } });
+    foldCatches([{ id: 'trap', lane: 'work' }], now);
+    fs.unlinkSync(path.join(home, 'state', 'trap.status'));
+    expect(readStatsStore(now).utc).toEqual({ date: '2026-10-06', catches: 2, perTrap: { 'wt:a': 1 } });
+    const tomorrow = now + 120_000;
+    legacy(path.join(home, 'state'), 'new', ['done'], new Date(tomorrow).toISOString(), 'wt:b');
+    recordCatch('new', 'work', tomorrow);
+    expect(readStatsStore(tomorrow)).toMatchObject({ totalCatches: 4, utc: { date: '2026-10-07', catches: 1, perTrap: { 'wt:b': 1 } } });
+  });
+
+  it('upgrades UTC counters from retained history without resetting totals or deduplication', () => {
+    const now = Date.parse('2026-10-06T01:00:00Z');
+    legacy(path.join(home, 'state'), 'kept', ['done'], new Date(now).toISOString(), 'wt:a');
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 90, perTrap: { 'wt:a': 40 }, day: '2026-10-05', catchesToday: 1, counted: ['kept'] }));
+    recordCatch('kept', 'work', now);
+    expect(readStatsStore(now)).toMatchObject({ totalCatches: 90, perTrap: { 'wt:a': 40 }, counted: ['kept'], utc: { date: '2026-10-06', catches: 1, perTrap: { 'wt:a': 1 } } });
+    // The saved new counters are authoritative, not rescanned on each poll.
+    legacy(path.join(home, 'state'), 'late', ['done'], new Date(now).toISOString());
+    expect(readStatsStore(now).utc?.catches).toBe(1);
+  });
+
+  it('does not double-count the first new done or missed fold while upgrading', () => {
+    const now = Date.parse('2026-10-06T01:00:00Z');
+    const oldStore = { version: 1, totalCatches: 90, perTrap: { 'wt:a': 40 }, day: localDay(now), catchesToday: 0, counted: [] };
+    fs.writeFileSync(statsPath(), JSON.stringify(oldStore));
+    legacy(path.join(home, 'state'), 'new', ['done'], new Date(now).toISOString(), 'wt:a');
+    recordCatch('new', 'work', now);
+    expect(readStatsStore(now)).toMatchObject({ totalCatches: 91, utc: { catches: 1, perTrap: { 'wt:a': 1 } } });
+    fs.writeFileSync(statsPath(), JSON.stringify(oldStore));
+    foldCatches([{ id: 'new', lane: 'work' }], now);
+    expect(readStatsStore(now)).toMatchObject({ totalCatches: 91, utc: { catches: 1, perTrap: { 'wt:a': 1 } } });
+  });
+
+  it('counts UTC separately when two catches share a local date across UTC midnight', () => {
+    const oldTz = process.env.TZ;
+    process.env.TZ = 'Pacific/Honolulu';
+    try {
+      const now = Date.parse('2026-10-06T01:00:00Z');
+      legacy(path.join(home, 'state'), 'before', ['done'], '2026-10-05T23:30:00Z', 'wt:a');
+      legacy(path.join(home, 'state'), 'after', ['done'], '2026-10-06T00:30:00Z', 'wt:a');
+      expect(readStatsStore(now)).toMatchObject({ catchesToday: 2, utc: { date: '2026-10-06', catches: 1, perTrap: { 'wt:a': 1 } } });
+    } finally {
+      if (oldTz === undefined) delete process.env.TZ;
+      else process.env.TZ = oldTz;
+    }
+  });
+
   it('backfills once from both lanes: done only, trap catches per trap, today by local day', () => {
     legacy(path.join(home, 'state'), 'plan', ['working', 'done'], EARLIER, 'wt:a');
     legacy(path.join(home, 'chores', 'state'), 'report', ['done'], new Date().toISOString(), 'wt:a');

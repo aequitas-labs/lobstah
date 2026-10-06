@@ -1,10 +1,13 @@
 # Privacy
 
-lobstah runs on your machine. Your repositories, code, briefs, agent
-transcripts, and dispatch records stay in your working trees and in
-`~/.lobstah`. The only data lobstah itself sends anywhere is the anonymous
-telemetry described below. The coding agents lobstah supervises (Claude
-Code, Codex) talk to their own providers under those providers' terms.
+Published by aequitas labs LLC. Last updated: 2026-10-06.
+
+lobstah runs on your machine and stores dispatch records and local stats
+under `~/.lobstah`. Telemetry is described below; it does not send code or
+briefs. Separately, configured PR watches and coding workflows use GitHub,
+and configured Linear watches use Linear. The coding agents lobstah
+supervises (Claude Code, Codex) talk to their own providers under those
+providers' terms. Contact: [GitHub issues](https://github.com/aequitas-labs/lobstah/issues).
 
 ## Telemetry
 
@@ -12,7 +15,7 @@ lobstah shares one small, anonymous count of its work once a day. It is **on
 by default** and turned off by any one of the switches listed below.
 
 > **Status in this version:** the endpoint is not set, so no version of
-> lobstah released so far sends anything. `lobstah telemetry status` shows
+> lobstah released so far sends telemetry. `lobstah telemetry status` shows
 > `endpoint: (none — this build sends nothing)`. This section describes what
 > happens once a release sets the endpoint.
 
@@ -29,8 +32,8 @@ JSON body and nothing else:
   "arch": "arm64",
   "installId": "3b0c8f9e-6a1d-4c2e-9f3a-1b2c3d4e5f60",
   "date": "2026-10-06",
-  "catchesToday": 3,
-  "totalCatches": 40
+  "catches": { "today": 3, "total": 40 },
+  "traps": [{ "name": "kind-crab", "today": 2 }]
 }
 ```
 
@@ -42,15 +45,25 @@ JSON body and nothing else:
 | `arch` | CPU architecture: `x64`, `arm64`, or `other`. |
 | `installId` | A random UUID created on this machine the first time it is needed and stored in `~/.lobstah/telemetry.json`. It is not derived from the machine, the user, or any repository. Delete the file to get a new one. |
 | `date` | The UTC date of the send. |
-| `catchesToday` | Catches (dispatches that finished `done`) so far on the local day, read from `~/.lobstah/stats.json`. |
-| `totalCatches` | All-time catches, read from `~/.lobstah/stats.json`. |
+| `catches` | `{today, total}`: catches (dispatches that finished `done`) so far on the UTC day and all-time, read from `~/.lobstah/stats.json`. Includes headless catches and traps omitted from the list. |
+| `traps` | Up to 100 `{name, today}` entries for that UTC day, only automatically generated names with recorded provenance and at least one catch. Sorted by count descending, then name; excess entries are omitted without reducing `catches`. |
+
+Trap names are not always generated: `--name` lets a user choose or change
+one. A reservation records whether it was generated automatically from
+lobstah's two built-in word lists. Only names with that explicit provenance
+are sent. Custom names (even if they look generated), and older names with
+unknown provenance, stay local; their catches still count in the totals.
+Names are not hashed. Both client and server enforce two lowercase words
+of 2–8 letters joined by a hyphen (5–17 characters), positive daily counts,
+and the 100-entry cap. The server rejects duplicate names, unknown nested
+keys, or a sum of trap counts greater than `catches.today`.
 
 `lobstah telemetry show` prints the exact JSON that would be sent now.
 
 ### What is never sent
 
-Repository names or paths, code, briefs, trap names, worktree paths, session
-ids, PR URLs, hostnames, usernames, per-trap counts, or any per-dispatch
+Repository names or paths, code, briefs, custom or unknown-provenance trap
+names, worktree paths, session ids, PR URLs, hostnames, usernames, or any per-dispatch
 record. The client serialises only the eight fields above, a test fails if
 any other key appears, and the server rejects any request with another field.
 
@@ -63,10 +76,13 @@ any other key appears, and the server rejects any request with another field.
 
   ```
   lobstah telemetry: once a day the lobstah daemon sends an anonymous count of
-  catches (dispatches finished done): today's count and the all-time total,
+  catches (dispatches finished done): the UTC-day count and the all-time total,
   with the lobstah version, OS family, CPU architecture, the UTC date, and a
-  random install id made on this machine. It never sends repository names or
-  paths, code, briefs, trap names, session ids, PR URLs, hostnames or user names.
+  random install id made on this machine. It also sends up to 100 automatically
+  generated trap names with recorded provenance and their UTC-day counts.
+  Custom names (--name) and older names with unknown provenance stay local;
+  their catches still count in the totals. Names are not hashed. It never sends
+  repository names or paths, code, briefs, session ids, PR URLs, hostnames or user names.
   See it exactly: lobstah telemetry show. Details: PRIVACY.md.
   Turn it off with any one of: lobstah telemetry disable · [telemetry] share = false
   in ~/.lobstah/config.toml · LOBSTAH_TELEMETRY=0 · DO_NOT_TRACK=1 · CI set.
@@ -87,16 +103,13 @@ Cloudflare processes the request to serve it.
   the validated fields. Workers Logs, invocation logs, and Logpush are
   turned off. Rate limits are keyed on the install id and one global key,
   not on your IP address.
-- **Per-install rows** (one per install per UTC date) are **deleted 90 days
-  after their date** by a daily job.
-- **Daily totals** carry no install id: for each date, the number of
-  installs that reported, the sum of their `catchesToday`, and how much the
-  installs' `totalCatches` grew. They are kept indefinitely.
-- To delete your per-install rows before they expire, turn telemetry off
-  first, then send `DELETE /v1/installs/<installId>` to the endpoint.
-  `lobstah telemetry status` prints both values. Knowing the random install
-  id is what authorises the deletion. If you delete your rows while sharing
-  is still on, your next report counts your total again.
+- **Per-install rows** (one per install per UTC date) and **per-trap rows**
+  (generated name and count for that install and date) expire under the same
+  **90-day** rule: the daily job deletes rows dated more than 90 days ago.
+- **Daily totals** carry no install id or trap names: for each date, the
+  number of installs that reported, the sum of their `catches.today`, and
+  how much the installs' `catches.total` grew. They are kept indefinitely.
+  No trap names are retained beyond the 90-day expiry pass.
 
 ### What it is used for
 
@@ -142,6 +155,9 @@ date of the last send.
 
 ### Local stats
 
-`lobstah stats` reads `~/.lobstah/stats.json`, which includes per-trap
-counts. The per-trap table never leaves the machine. Telemetry reads only
-`catchesToday` and `totalCatches` from that file.
+`lobstah stats` reads `~/.lobstah/stats.json`. Its glass and CLI counts use
+the local calendar day; telemetry uses a separate UTC-day total and per-trap
+table in that file. Both survive dispatch culling. On upgrade, new UTC
+counters backfill from retained dispatch history; all-time totals are kept.
+The telemetry payload is only the bounded, provenance-filtered snapshot
+above, not the whole stats file or its worktree ids.

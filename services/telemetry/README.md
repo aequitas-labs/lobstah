@@ -9,18 +9,16 @@ A small Cloudflare Worker that receives lobstah's anonymous daily counts
 
 | Route | What it does |
 | ----- | ------------ |
-| `POST /v1/daily` | Accepts one payload (`application/json`, ≤ 1 KB). The schema is strict: exactly `schema`, `version`, `os`, `arch`, `installId`, `date`, `catchesToday`, `totalCatches`, each validated, and any other field is refused with 400. Upserts one row per install id + UTC date, so a retry never double-counts. 204 on success, 429 when rate-limited. |
+| `POST /v1/daily` | Accepts one payload (`application/json`, ≤ 8 KiB). Schema stays `1`: exactly `schema`, `version`, `os`, `arch`, `installId`, `date`, `catches: {today, total}`, `traps: [{name, today}]`. At most 100 distinct names, two lowercase words of 2–8 letters joined by a hyphen (5–17 characters), positive counts whose sum cannot exceed `catches.today`. Unknown keys at any level are refused with 400. Upserts by install id + UTC date, so a retry never double-counts. 204 on success, 429 when rate-limited. |
 | `GET /badge/catches.json` | shields.io endpoint JSON: `{"schemaVersion":1,"label":"🦞","message":"N",...}`, where N is the catches across every sharing install. Use `https://img.shields.io/endpoint?url=<host>/badge/catches.json`. |
 | `GET /v1/stats?days=30` | Needs `Authorization: Bearer <READ_TOKEN>`. Returns `totalCatches` and, per day, `activeInstalls`, `catchesToday`, and `newCatches`. |
-| `DELETE /v1/installs/<installId>` | Deletes that install's per-install rows now. The random id is the credential. |
 
 ## Storage: D1, not Analytics Engine
 
 D1 is SQLite, so the Worker can **upsert by install id + date**. That makes
 submissions idempotent, and it lets the Worker count only the growth in an
-install's `totalCatches`, which is what the badge needs. It can also **delete
-rows on a schedule** for the 90-day retention, and delete one install's rows
-on request.
+install's `catches.total`, which is what the badge needs. It can also
+**delete rows on a schedule** for the 90-day retention.
 
 Analytics Engine fits high-volume event streams, not this. Its writes are
 append-only (a retry would count twice), its queries are sampled, and it has
@@ -31,19 +29,24 @@ Tables (`migrations/0001_init.sql`):
 
 - `submissions`: one row per install per UTC date, holding the payload fields
   only. There is no IP address, user agent, or request metadata column.
-- `daily_totals`: one row per date, with no install id: `active_installs`,
+- `trap_submissions`: up to 100 generated names and positive UTC-day counts
+  per install and date. The client sends only names whose automatic
+  reservation has recorded provenance; `--name` and older unknown-provenance
+  names stay local without hashing. Their catches, and headless catches,
+  still count in `catches`, so totals are not derived from the trap list.
+- `daily_totals`: one row per date, with no install id or trap names: `active_installs`,
   `catches_today` (sum), and `new_catches` (sum of each install's growth in
-  `totalCatches`). The badge is `SUM(new_catches)`.
+  `catches.total`). The badge is `SUM(new_catches)`.
 
 ## Retention
 
-A daily cron (`17 3 * * *`) deletes `submissions` rows whose date is more than
-**90 days** old (`RETENTION_DAYS`). `daily_totals` rows carry no install id
+A daily cron (`17 3 * * *`) deletes `submissions` and `trap_submissions` rows
+whose date is more than **90 days** old (`RETENTION_DAYS`). `daily_totals` rows carry no install id or name
 and are kept. Because they are updated on every submission, deleting
 per-install rows never changes a total.
 
 Known limit: an install that is silent for more than 90 days and then reports
-again has no retained row, so its full `totalCatches` counts as growth again.
+again has no retained row, so its full `catches.total` counts as growth again.
 
 ## No logs, no IPs
 
@@ -58,7 +61,8 @@ test checks the config and source for each of these.
 
 `pnpm test` runs `test/worker.test.ts`. Validation tests run everywhere. The
 storage tests run the real SQL against `node:sqlite` as a stand-in for D1,
-and skip on Node versions without it (before 22.5). `pnpm lint` typechecks
+and skip on Node versions without it (before 22.5). CI runs these again on
+Node 24 on Ubuntu and Windows so the SQL is tested on both. `pnpm lint` typechecks
 the Worker.
 
 ## Deploying (maintainers, later)

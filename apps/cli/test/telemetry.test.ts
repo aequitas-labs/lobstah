@@ -25,6 +25,7 @@ describe('lobstah telemetry', () => {
     const r = run(['show']);
     expect(r.status).toBe(0);
     expect(Object.keys(JSON.parse(r.stdout) as object)).toEqual([...TELEMETRY_FIELDS]);
+    expect(JSON.parse(r.stdout)).toMatchObject({ schema: 1, catches: { today: 0, total: 0 }, traps: [] });
     expect(r.stdout).not.toContain(home);
   });
 
@@ -50,5 +51,6 @@ describe('lobstah telemetry', () => {
     const unindented = privacy.replace(/^ {2}/gm, '');
     expect(unindented).toContain(TELEMETRY_NOTICE);
     for (const field of TELEMETRY_FIELDS) expect(privacy).toContain(`| \`${field}\` |`);
+    expect(privacy).toContain('unknown provenance, stay local');
   });
 });

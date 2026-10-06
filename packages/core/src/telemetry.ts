@@ -4,7 +4,8 @@ import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import { configPath } from './config.js';
 import { lobstahHome } from './paths.js';
-import { localDay, readStatsStore } from './stats.js';
+import { readStatsStore } from './stats.js';
+import { generatedTrapNames, TRAP_NAME_RE } from './trap-names.js';
 import { lobstahVersion } from './version.js';
 
 /**
@@ -12,8 +13,9 @@ import { lobstahVersion } from './version.js';
  * daemon (never by a hook) at most once per UTC day.
  *
  * - The payload is TELEMETRY_FIELDS and nothing else: no repository, path,
- *   brief, trap name, session, PR, host or user. The install id is a random
- *   UUID made here, unrelated to the machine, the user or any repository.
+ *   brief, custom/unknown trap name, session, PR, host or user. Generated
+ *   trap names with recorded provenance may carry UTC-day counts. The install
+ *   id is a random UUID, unrelated to the machine, user or any repository.
  * - Any one switch turns it off: `[telemetry] share = false` in config.toml,
  *   LOBSTAH_TELEMETRY=0, DO_NOT_TRACK=1, or CI set.
  * - Nothing is sent until a first-run notice has been shown on an
@@ -27,7 +29,8 @@ export const TELEMETRY_ENDPOINT = '';
 export const TELEMETRY_SCHEMA = 1;
 
 /** The only keys a payload may carry. The Worker rejects any other key. */
-export const TELEMETRY_FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catchesToday', 'totalCatches'] as const;
+export const TELEMETRY_FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'traps'] as const;
+export const TELEMETRY_MAX_TRAPS = 100;
 
 export interface TelemetryPayload {
   schema: typeof TELEMETRY_SCHEMA;
@@ -41,10 +44,10 @@ export interface TelemetryPayload {
   installId: string;
   /** The UTC date of the send, YYYY-MM-DD. */
   date: string;
-  /** Catches (dispatches finished done) so far on the local day, from stats.json. */
-  catchesToday: number;
-  /** All-time catches, from stats.json. */
-  totalCatches: number;
+  /** UTC-day and all-time catches, including headless and omitted traps. */
+  catches: { today: number; total: number };
+  /** At most 100 automatically generated names, with positive UTC-day counts. */
+  traps: Array<{ name: string; today: number }>;
 }
 
 /** Local telemetry state, `~/.lobstah/telemetry.json`. Never sent, apart from installId. */
@@ -186,15 +189,24 @@ export function utcDate(now: number = Date.now()): string {
 /** Exactly what a send would carry, built from stats.json. */
 export function buildTelemetryPayload(installId: string, now: number = Date.now()): TelemetryPayload {
   const store = readStatsStore(now);
+  const date = utcDate(now);
+  const utc = store.utc?.date === date ? store.utc : undefined;
+  const perName = new Map<string, number>();
+  const names = generatedTrapNames();
+  for (const [address, today] of Object.entries(utc?.perTrap ?? {})) {
+    if (!address.startsWith('wt:') || !Number.isSafeInteger(today) || today <= 0) continue;
+    const name = names.get(address.slice(3));
+    if (name && name.length >= 5 && name.length <= 17 && TRAP_NAME_RE.test(name)) perName.set(name, (perName.get(name) ?? 0) + today);
+  }
   return {
     schema: TELEMETRY_SCHEMA,
     version: lobstahVersion(),
     os: osFamily(),
     arch: archFamily(),
     installId,
-    date: utcDate(now),
-    catchesToday: store.day === localDay(now) ? store.catchesToday : 0,
-    totalCatches: store.totalCatches,
+    date,
+    catches: { today: utc?.catches ?? 0, total: store.totalCatches },
+    traps: [...perName].map(([name, today]) => ({ name, today })).sort((a, b) => b.today - a.today || a.name.localeCompare(b.name)).slice(0, TELEMETRY_MAX_TRAPS),
   };
 }
 
@@ -202,14 +214,21 @@ export function buildTelemetryPayload(installId: string, now: number = Date.now(
 export function serializeTelemetryPayload(p: TelemetryPayload): string {
   const out: Record<string, unknown> = {};
   for (const key of TELEMETRY_FIELDS) out[key] = p[key];
+  out.catches = { today: p.catches.today, total: p.catches.total };
+  out.traps = p.traps
+    .filter((t) => typeof t.name === 'string' && t.name.length >= 5 && t.name.length <= 17 && t.name.trim() === t.name && TRAP_NAME_RE.test(t.name) && Number.isSafeInteger(t.today) && t.today > 0)
+    .slice(0, TELEMETRY_MAX_TRAPS).map((t) => ({ name: t.name, today: t.today }));
   return JSON.stringify(out);
 }
 
 export const TELEMETRY_NOTICE = `lobstah telemetry: once a day the lobstah daemon sends an anonymous count of
-catches (dispatches finished done): today's count and the all-time total,
+catches (dispatches finished done): the UTC-day count and the all-time total,
 with the lobstah version, OS family, CPU architecture, the UTC date, and a
-random install id made on this machine. It never sends repository names or
-paths, code, briefs, trap names, session ids, PR URLs, hostnames or user names.
+random install id made on this machine. It also sends up to 100 automatically
+generated trap names with recorded provenance and their UTC-day counts.
+Custom names (--name) and older names with unknown provenance stay local;
+their catches still count in the totals. Names are not hashed. It never sends
+repository names or paths, code, briefs, session ids, PR URLs, hostnames or user names.
 See it exactly: lobstah telemetry show. Details: PRIVACY.md.
 Turn it off with any one of: lobstah telemetry disable · [telemetry] share = false
 in ~/.lobstah/config.toml · LOBSTAH_TELEMETRY=0 · DO_NOT_TRACK=1 · CI set.`;

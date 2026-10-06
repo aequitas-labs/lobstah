@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import type { D1Database, D1PreparedStatement, D1Result, Env, RateLimit } from '../src/bindings.js';
-import worker, { FIELDS, RETENTION_DAYS, handle, utcDate, validate } from '../src/index.js';
+import worker, { FIELDS, MAX_BODY_BYTES, MAX_TRAPS, RETENTION_DAYS, handle, utcDate, validate } from '../src/index.js';
 
 // The client's allowed keys and the Worker's must be the same list.
-import { TELEMETRY_FIELDS } from '../../../packages/core/src/telemetry.js';
+import { TELEMETRY_FIELDS, TELEMETRY_MAX_TRAPS } from '../../../packages/core/src/telemetry.js';
+import { TRAP_FIRST_WORDS, TRAP_LAST_WORDS } from '../../../packages/core/src/trap-names.js';
 
 const DAY = 86_400_000;
 const NOW = Date.parse('2026-10-06T12:00:00Z');
@@ -14,12 +15,13 @@ const ID = '3b0c8f9e-6a1d-4c2e-9f3a-1b2c3d4e5f60';
 const OTHER = '7e1d2c3b-4a5f-4e6d-8c7b-0a9f8e7d6c5b';
 
 function payload(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return { schema: 1, version: '0.6.9', os: 'macos', arch: 'arm64', installId: ID, date: TODAY, catchesToday: 3, totalCatches: 40, ...over };
+  return { schema: 1, version: '0.6.9', os: 'macos', arch: 'arm64', installId: ID, date: TODAY, catches: { today: 3, total: 40 }, traps: [{ name: 'kind-crab', today: 2 }], ...over };
 }
 
 describe('telemetry Worker validation', () => {
   it('accepts exactly the client payload fields', () => {
     expect([...FIELDS]).toEqual([...TELEMETRY_FIELDS]);
+    expect(MAX_TRAPS).toBe(TELEMETRY_MAX_TRAPS);
     expect(validate(payload(), NOW)).toMatchObject({ ok: true });
   });
 
@@ -34,13 +36,39 @@ describe('telemetry Worker validation', () => {
     ['an upper-case install id', { installId: ID.toUpperCase() }],
     ['a date in the past', { date: utcDate(NOW - 3 * DAY) }],
     ['a malformed date', { date: '2026-10-6' }],
-    ['a fractional count', { catchesToday: 1.5 }],
-    ['a negative count', { totalCatches: -1 }],
-    ['a string count', { totalCatches: '40' }],
-    ['a huge count', { totalCatches: 1e12 }],
-    ['today above the total', { catchesToday: 41 }],
+    ['old flat counts', { catchesToday: 3, totalCatches: 40 }],
+    ['a fractional count', { catches: { today: 1.5, total: 40 } }],
+    ['a negative count', { catches: { today: 3, total: -1 } }],
+    ['a string count', { catches: { today: 3, total: '40' } }],
+    ['a huge count', { catches: { today: 3, total: 1e12 } }],
+    ['today above the total', { catches: { today: 41, total: 40 } }],
+    ['a missing nested count', { catches: { total: 40 } }],
+    ['an extra nested key', { catches: { today: 3, total: 40, repo: 'secret' } }],
+    ['a missing trap count', { traps: [{ name: 'kind-crab' }] }],
+    ['an extra trap key', { traps: [{ name: 'kind-crab', today: 1, repo: 'secret' }] }],
+    ['a zero trap count', { traps: [{ name: 'kind-crab', today: 0 }] }],
+    ['a fractional trap count', { traps: [{ name: 'kind-crab', today: 0.5 }] }],
+    ['a negative trap count', { traps: [{ name: 'kind-crab', today: -1 }] }],
+    ['a string trap count', { traps: [{ name: 'kind-crab', today: '1' }] }],
+    ['a short name', { traps: [{ name: 'x-crab', today: 1 }] }],
+    ['a long name', { traps: [{ name: 'toolonggg-crab', today: 1 }] }],
+    ['an uppercase name', { traps: [{ name: 'Kind-crab', today: 1 }] }],
+    ['a newline name', { traps: [{ name: 'kind-crab\n', today: 1 }] }],
+    ['a name with punctuation', { traps: [{ name: 'kind.crab', today: 1 }] }],
+    ['duplicate names', { traps: [{ name: 'kind-crab', today: 1 }, { name: 'kind-crab', today: 1 }] }],
+    ['trap counts above the total today', { traps: [{ name: 'kind-crab', today: 4 }] }],
+    ['a non-array table', { traps: { name: 'kind-crab', today: 1 } }],
   ])('rejects %s', (_name, over) => {
     expect(validate(payload(over), NOW)).toMatchObject({ ok: false });
+  });
+
+  it('accepts 100 names within the body bound, rejects 101, and accepts headless-only totals', () => {
+    const traps = Array.from({ length: 101 }, (_, i) => ({ name: `${TRAP_FIRST_WORDS[Math.floor(i / 64)]}-${TRAP_LAST_WORDS[i % 64]}`, today: 1 }));
+    const accepted = payload({ catches: { today: 100, total: 100 }, traps: traps.slice(0, 100) });
+    expect(validate(accepted, NOW).ok).toBe(true);
+    expect(new TextEncoder().encode(JSON.stringify(accepted)).length).toBeLessThan(MAX_BODY_BYTES);
+    expect(validate(payload({ catches: { today: 101, total: 101 }, traps }), NOW).ok).toBe(false);
+    expect(validate(payload({ traps: [] }), NOW).ok).toBe(true);
   });
 
   it('rejects a missing field and a non-object', () => {
@@ -140,13 +168,13 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
 
   it('counts each install once per day and only growth in its total', async () => {
     const e = env();
-    await post(e, payload({ date: utcDate(NOW - DAY), catchesToday: 1, totalCatches: 37 }), NOW - DAY);
+    await post(e, payload({ date: utcDate(NOW - DAY), catches: { today: 1, total: 37 }, traps: [] }), NOW - DAY);
     await post(e, payload());
-    await post(e, payload({ installId: OTHER, catchesToday: 2, totalCatches: 5 }));
+    await post(e, payload({ installId: OTHER, catches: { today: 2, total: 5 } }));
     // A later same-day submission with higher counts adds only the difference.
-    await post(e, payload({ installId: OTHER, catchesToday: 4, totalCatches: 7 }));
+    await post(e, payload({ installId: OTHER, catches: { today: 4, total: 7 } }));
     // A total that went down (a reset store) adds nothing.
-    await post(e, payload({ date: utcDate(NOW + DAY), catchesToday: 0, totalCatches: 10 }), NOW + DAY);
+    await post(e, payload({ date: utcDate(NOW + DAY), catches: { today: 0, total: 10 }, traps: [] }), NOW + DAY);
     expect((await badge(e)).message).toBe(String(40 + 7));
     const s = await stats(e, 30, NOW + DAY);
     expect(s.totalCatches).toBe(47);
@@ -162,7 +190,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     expect((await post(e, payload({ path: '/Users/me/src/app' }))).status).toBe(400);
     expect((await post(e, 'not json')).status).toBe(400);
     expect((await post(e, payload(), NOW, { 'content-type': 'text/plain' })).status).toBe(415);
-    expect((await post(e, JSON.stringify({ ...payload(), pad: 'x'.repeat(2000) }))).status).toBe(413);
+    expect((await post(e, JSON.stringify({ ...payload(), pad: 'x'.repeat(MAX_BODY_BYTES) }))).status).toBe(413);
     expect((await get(e, '/v1/daily')).status).toBe(405);
     expect((await get(e, '/elsewhere')).status).toBe(404);
     expect((await badge(e)).message).toBe('0');
@@ -187,13 +215,15 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
   it(`deletes per-install rows after ${RETENTION_DAYS} days and keeps the daily totals`, async () => {
     const e = env();
     const old = NOW - (RETENTION_DAYS + 1) * DAY;
-    await post(e, payload({ date: utcDate(old), totalCatches: 10, catchesToday: 1 }), old);
+    await post(e, payload({ date: utcDate(old), catches: { today: 1, total: 10 }, traps: [{ name: 'amber-gull', today: 1 }] }), old);
     await post(e, payload());
     const waits: Promise<unknown>[] = [];
     worker.scheduled({ scheduledTime: NOW, cron: '17 3 * * *' }, e, { waitUntil: (p) => waits.push(p) });
     await Promise.all(waits);
     const rows = await e.DB.prepare('SELECT date FROM submissions ORDER BY date').all<{ date: string }>();
     expect(rows.results.map((r) => r.date)).toEqual([TODAY]);
+    const trapRows = await e.DB.prepare('SELECT date, name FROM trap_submissions ORDER BY date').all<{ date: string; name: string }>();
+    expect(trapRows.results).toEqual([{ date: TODAY, name: 'kind-crab' }]);
     const s = await stats(e, RETENTION_DAYS + 5);
     expect(s.days.map((d) => d.date)).toEqual([utcDate(old), TODAY]);
     expect(s.totalCatches).toBe(40);
@@ -202,15 +232,26 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     expect(cols.results.map((c) => c.name)).toEqual(['install_id', 'date', 'version', 'os', 'arch', 'catches_today', 'total_catches']);
   });
 
-  it('forgets an install on request, keeping the daily totals', async () => {
+  it('replaces the per-trap snapshot atomically and keeps totals independent of it', async () => {
     const e = env();
     await post(e, payload());
-    await post(e, payload({ installId: OTHER }));
-    const del = (id: string) => handle(new Request(`https://t.example/v1/installs/${id}`, { method: 'DELETE' }), e, NOW);
-    expect((await del('not-a-uuid')).status).toBe(400);
-    expect((await del(ID)).status).toBe(204);
-    const rows = await e.DB.prepare('SELECT install_id FROM submissions').all<{ install_id: string }>();
-    expect(rows.results.map((r) => r.install_id)).toEqual([OTHER]);
-    expect((await badge(e)).message).toBe('80');
+    await post(e, payload());
+    expect((await e.DB.prepare('SELECT name, catches_today FROM trap_submissions').all()).results).toEqual([{ name: 'kind-crab', catches_today: 2 }]);
+    await post(e, payload({ traps: [{ name: 'amber-gull', today: 1 }] }));
+    expect((await e.DB.prepare('SELECT name FROM trap_submissions').all()).results).toEqual([{ name: 'amber-gull' }]);
+    await post(e, payload({ traps: [] }));
+    expect((await e.DB.prepare('SELECT name FROM trap_submissions').all()).results).toEqual([]);
+    expect((await badge(e)).message).toBe('40');
+    const cols = await e.DB.prepare("SELECT name FROM pragma_table_info('daily_totals')").all<{ name: string }>();
+    expect(cols.results.map((c) => c.name)).toEqual(['date', 'active_installs', 'catches_today', 'new_catches']);
+  });
+
+  it('rolls back the install and totals if the per-trap write fails', async () => {
+    const e = env();
+    await e.DB.prepare("CREATE TRIGGER fail_trap BEFORE INSERT ON trap_submissions BEGIN SELECT RAISE(ABORT, 'fixture failure'); END").run();
+    expect((await post(e, payload())).status).toBe(500);
+    expect((await e.DB.prepare('SELECT install_id FROM submissions').all()).results).toEqual([]);
+    expect((await e.DB.prepare('SELECT name FROM trap_submissions').all()).results).toEqual([]);
+    expect((await badge(e)).message).toBe('0');
   });
 });

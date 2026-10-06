@@ -8,6 +8,7 @@ import {
   TELEMETRY_ENDPOINT,
   TELEMETRY_FIELDS,
   TELEMETRY_NOTICE,
+  TELEMETRY_MAX_TRAPS,
   buildTelemetryPayload,
   disableTelemetry,
   enableTelemetry,
@@ -21,6 +22,8 @@ import {
   telemetryStatus,
 } from '../src/telemetry.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { reserveTrapName } from '../src/trap-names.js';
+import { statsPath } from '../src/stats.js';
 
 const ENDPOINT = 'https://telemetry.example.test/v1/daily';
 const DAY = 86_400_000;
@@ -74,18 +77,56 @@ describe('telemetry payload', () => {
     const state = ensureTelemetryState();
     const payload = buildTelemetryPayload(state.installId);
     // Even an object carrying extra keys serialises to the allowed ones only.
-    const json = serializeTelemetryPayload({ ...payload, repo: 'secret-repo-name', hostname: os.hostname() } as never);
+    const json = serializeTelemetryPayload({ ...payload, repo: 'secret-repo-name', hostname: os.hostname(), catches: { ...payload.catches, path: home } } as never);
     const parsed = JSON.parse(json) as Record<string, unknown>;
     const allowed = new Set<string>(TELEMETRY_FIELDS);
     const unexpected = Object.keys(parsed).filter((k) => !allowed.has(k));
     expect(unexpected, `payload carries keys outside the allowed list: ${unexpected.join(', ')}`).toEqual([]);
     expect(Object.keys(parsed)).toEqual([...TELEMETRY_FIELDS]);
     for (const s of secrets) expect(json, `payload leaks ${s}`).not.toContain(s);
-    expect(parsed).toMatchObject({ schema: 1, catchesToday: 2, totalCatches: 2 });
+    expect(parsed).toMatchObject({ schema: 1, catches: { today: 2, total: 2 }, traps: [] });
+    expect(Object.keys(parsed.catches as object)).toEqual(['today', 'total']);
     expect(parsed.installId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(['macos', 'linux', 'windows', 'other']).toContain(parsed.os);
     expect(['x64', 'arm64', 'other']).toContain(parsed.arch);
     expect(parsed.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('shares only proven generated names, with positive UTC-day catches; headless/custom/unknown stay in totals', () => {
+    const generated = reserveTrapName('auto', undefined, 0);
+    reserveTrapName('custom', 'kind-crab');
+    fs.writeFileSync(path.join(home, 'trap-names', 'amber-gull.json'), JSON.stringify({ trapId: 'legacy' }));
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 99, perTrap: {}, day: '2026-10-05', catchesToday: 77, counted: [], utc: { date: '2026-10-06', catches: 10, perTrap: { 'wt:auto': 2, 'wt:custom': 3, 'wt:legacy': 1 } } }));
+    const p = buildTelemetryPayload(ensureTelemetryState().installId, NOON);
+    expect(p.catches).toEqual({ today: 10, total: 99 });
+    expect(p.traps).toEqual([{ name: generated, today: 2 }]);
+    expect(buildTelemetryPayload(p.installId, NOON + DAY)).toMatchObject({ catches: { today: 0, total: 99 }, traps: [] });
+  });
+
+  it('bounds names on the client, strips nested extras, and caps the highest-count table at 100', () => {
+    const perTrap: Record<string, number> = {};
+    for (let i = 0; i < 105; i++) {
+      reserveTrapName(String(i), undefined, i);
+      perTrap[`wt:${i}`] = i + 1;
+    }
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 6000, perTrap, day: '2026-10-06', catchesToday: 6000, counted: [], utc: { date: '2026-10-06', catches: 6000, perTrap } }));
+    const p = buildTelemetryPayload(ensureTelemetryState().installId, NOON);
+    expect(p.traps).toHaveLength(TELEMETRY_MAX_TRAPS);
+    expect(p.traps[0]?.today).toBe(105);
+    expect(p.traps.at(-1)?.today).toBe(6);
+    const invalid = ['x-crab', 'toolonggg-crab', 'Amber-crab', 'amber/../crab', 'amber-crab\n', 'secret repo'];
+    const traps = invalid.map((name) => ({ name, today: 1 })).concat([{ name: p.traps[0]!.name, today: 0 }], p.traps.map((t) => ({ ...t, secret: home })));
+    const json = serializeTelemetryPayload({ ...p, traps });
+    expect(JSON.parse(json).traps).toEqual(p.traps);
+    expect(json).not.toContain(home);
+    expect(json).not.toContain('secret');
+    expect(Buffer.byteLength(json)).toBeLessThan(8192);
+  });
+
+  it('notice explains name provenance, omitted catches and no hashing', () => {
+    expect(TELEMETRY_NOTICE).toContain('up to 100 automatically');
+    expect(TELEMETRY_NOTICE).toContain('Custom names (--name) and older names with unknown provenance stay local');
+    expect(TELEMETRY_NOTICE).toContain('Names are not hashed');
   });
 
   it('keeps one random install id, stored under the home', () => {
