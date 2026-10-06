@@ -25,7 +25,7 @@ export interface PrRecord extends PrEvidence {
   repo: string;
   /** Dispatches whose pr: watch observed this PR, oldest first; empty for an untracked/human PR. */
   dispatches: string[];
-  /** First observation of each currently standing kind; absent kinds have cleared. */
+  /** First observation of each current condition; pr:ready settles from here. Absent kinds have cleared. */
   standingSince: Partial<Record<PrStandingKind, string>>;
   /** Number of observations. The first is a baseline, never a repair trigger. */
   observations?: number;
@@ -191,7 +191,10 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
     const merged = { ...(before ?? {}), ...pr, failingChecks: pr.failingChecks } as PrEvidence;
     const standingSince: PrRecord['standingSince'] = {};
     for (const kind of prStandingKinds(merged)) {
-      standingSince[kind] = before?.standingSince?.[kind] ?? pr.observedAt;
+      // A new head must settle again, even if its first observation is green.
+      standingSince[kind] = kind === 'pr:ready' && before?.headSha !== pr.headSha
+        ? pr.observedAt
+        : before?.standingSince?.[kind] ?? pr.observedAt;
     }
     const after: PrRecord = {
       ...merged,

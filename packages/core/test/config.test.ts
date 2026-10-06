@@ -35,6 +35,17 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('defaults ready settling to 600 seconds, accepts 0, and rejects invalid periods', () => {
+    expect(loadConfig().readySettleSecs).toBe(600);
+    for (const secs of [0, 30]) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `readySettleSecs = ${secs}\n`);
+      expect(loadConfig().readySettleSecs).toBe(secs);
+    }
+    for (const value of ['-1', '"soon"', 'true', 'inf', 'nan']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `readySettleSecs = ${value}\n`);
+      expect(() => loadConfig()).toThrow(/readySettleSecs must be a non-negative number/);
+    }
+  });
   it('defaults the idle-claim notice grace to 180 seconds and honors the soak override', () => {
     expect(loadConfig().soak.claimIdleNoticeSecs).toBe(180);
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nclaimIdleNoticeSecs = 240\n');

@@ -235,7 +235,7 @@ export interface PrEvidence {
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
   observedAt: string;
-  /** First observation at which each currently standing pr:* kind became true (persisted in PR records). */
+  /** First observation at which each pr:* condition became true; pr:ready's settle starts here. */
   standingSince?: Partial<Record<PrStandingKind, string>>;
   /** Forge's last update, when the observation captured it. */
   updatedAt?: string;
@@ -245,7 +245,7 @@ export interface PrEvidence {
 }
 
 /** Which pr:* kinds stand on this observation, independent of display suppression. */
-export function prStandingKinds(pr: PrEvidence): PrStandingKind[] {
+export function prStandingKinds(pr: PrEvidence, settle?: { readySettleSecs: number; now: number }): PrStandingKind[] {
   if (pr.state !== 'OPEN') return [];
   const out: PrStandingKind[] = [];
   const { failed, pending, total } = pr.checks;
@@ -263,8 +263,12 @@ export function prStandingKinds(pr: PrEvidence): PrStandingKind[] {
     failed === 0 &&
     pending === 0 &&
     (pr.reviewDecision === 'APPROVED' || total > 0)
-  )
-    out.push('pr:ready');
+  ) {
+    // Without settle options, return the raw conditions for the record writer.
+    // Readers re-evaluate the persisted start on every poll, even without a forge event.
+    const since = Date.parse(pr.standingSince?.['pr:ready'] ?? pr.observedAt);
+    if (!settle || settle.readySettleSecs === 0 || settle.now >= since + settle.readySettleSecs * 1000) out.push('pr:ready');
+  }
   return out;
 }
 

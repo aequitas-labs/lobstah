@@ -197,15 +197,15 @@ describe('part 2: click-to-ack, display-only', () => {
       expect(readAck('pr:acme/web#9')).toMatchObject({ by: 'pet' });
     });
 
-    it('ready, not ready, ready again re-stands it once', () => {
+    it('ready, not ready, ready again on the same head keeps the ack', () => {
       ready(0);
       lobstah('attention', 'ack', 'pr:acme/web#9', '--by', 'pet');
       expect(read()).toEqual([]);
       ready(1, { checks: { total: 2, passed: 1, failed: 0, pending: 1 } }); // a rerun on the same head
       expect(read()).toEqual([]);
       ready(2);
-      expect(read()).toEqual(['pr:ready']);
-      lobstah('attention', 'ack', 'pr:acme/web#9', '--by', 'pet');
+      expect(read()).toEqual([]);
+      expect(readAck('pr:acme/web#9')).toMatchObject({ by: 'pet', kind: 'pr:ready' });
       ready(3);
       expect(read()).toEqual([]);
     });

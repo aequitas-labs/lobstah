@@ -29,6 +29,8 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-attn-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  // These condition/stack tests exercise the immediate compatibility mode.
+  fs.writeFileSync(path.join(home, 'config.toml'), 'readySettleSecs = 0\n');
   fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
 });
 afterEach(() => {
@@ -65,7 +67,7 @@ function prDispatch(over: Partial<PrEvidence>): void {
 }
 const restamp = (over: Partial<PrEvidence>) => mergeEvidence(P, 'work', { pr: pr(over) });
 const kinds = () => buildTendReport().attention.map((a) => a.kind);
-const config = (toml: string) => fs.writeFileSync(path.join(home, 'config.toml'), toml);
+const config = (toml: string) => fs.writeFileSync(path.join(home, 'config.toml'), `readySettleSecs = 0\n${toml}`);
 
 describe('attention kinds — stand and clear', () => {
   it('question stands on needs-decision and clears on any newer status', () => {

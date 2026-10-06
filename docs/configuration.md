@@ -16,6 +16,7 @@ keys of that section.
 | `notifyVerbs` | `["needs-decision", "blocked", "done", "failed"]` | Which verbs fire `notifyCommand`. |
 | `attentionKinds` | `["question", "decision", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` | Which kinds `man tend`, the glass, and the desktop pet show. `decision` is a question the helm put to the human with `lobstah man ask`; the glass shows it as a card to answer, and it hides the raw `question` it frames. Without `decision`, framed decisions do not show and raw questions do. `pr:draft`, `landed`, and `report` are valid opt-in kinds. An explicit list is used unchanged. Unknown kinds are errors. See the [attention contract](vocabulary.md#attention-contract). |
 | `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
+| `readySettleSecs` | `600` | `pr:ready` stands after continuously meeting the ready conditions on the same head for this many seconds. Any not-ready observation or new head resets the timer. Each attention read re-evaluates expiry from the persisted start, even without a new forge event. `0` restores immediate ready attention; other `pr:*` kinds are unchanged. |
 
 ## `[repos.<key>]` — workspace definitions
 
