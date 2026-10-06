@@ -46,7 +46,7 @@ describe('lobstah telemetry', () => {
   });
 
   it('PRIVACY.md quotes the notice word for word and documents every field', () => {
-    const privacy = fs.readFileSync(fileURLToPath(new URL('../../../PRIVACY.md', import.meta.url)), 'utf8');
+    const privacy = fs.readFileSync(fileURLToPath(new URL('../../../PRIVACY.md', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
     const unindented = privacy.replace(/^ {2}/gm, '');
     expect(unindented).toContain(TELEMETRY_NOTICE);
     for (const field of TELEMETRY_FIELDS) expect(privacy).toContain(`| \`${field}\` |`);
