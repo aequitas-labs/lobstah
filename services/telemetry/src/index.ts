@@ -12,7 +12,8 @@ import type { D1Database, Env, ExecutionContext, ScheduledController } from './b
  * - Stores no IP address, user agent, or other request metadata, and logs
  *   nothing (observability and logpush are off in wrangler.jsonc).
  * - Retention: per-install rows are deleted RETENTION_DAYS after their date
- *   by the daily cron; daily_totals (no install ids) are kept.
+ *   by the daily cron, or at once by DELETE /v1/installs/<id>; daily_totals
+ *   (no install ids) are kept.
  */
 
 export const RETENTION_DAYS = 90;
@@ -176,11 +177,26 @@ async function stats(request: Request, env: Env, url: URL, now: number): Promise
   return json({ totalCatches: total?.n ?? 0, retentionDays: RETENTION_DAYS, days: rows.results });
 }
 
+/**
+ * DELETE /v1/installs/<installId>: remove that install's rows now instead of
+ * at expiry. Knowing the random id is the credential: it exists only in the
+ * install's ~/.lobstah/telemetry.json. Daily totals, which carry no id, stay.
+ */
+async function forget(env: Env, installId: string): Promise<Response> {
+  if (!UUID_V4.test(installId)) return json({ error: 'invalid installId' }, 400);
+  if (env.SUBMIT_LIMITER && !(await env.SUBMIT_LIMITER.limit({ key: installId })).success) return json({ error: 'rate limited' }, 429);
+  await env.DB.prepare('DELETE FROM submissions WHERE install_id = ?1').bind(installId).run();
+  return new Response(null, { status: 204 });
+}
+
 export async function handle(request: Request, env: Env, now = Date.now()): Promise<Response> {
   const url = new URL(request.url);
   try {
     if (url.pathname === '/v1/daily') return request.method === 'POST' ? await submit(request, env, now) : json({ error: 'method not allowed' }, 405, { allow: 'POST' });
     if (url.pathname === '/badge/catches.json') return request.method === 'GET' ? await badge(env) : json({ error: 'method not allowed' }, 405, { allow: 'GET' });
+    if (url.pathname.startsWith('/v1/installs/')) {
+      return request.method === 'DELETE' ? await forget(env, url.pathname.slice('/v1/installs/'.length)) : json({ error: 'method not allowed' }, 405, { allow: 'DELETE' });
+    }
     if (url.pathname === '/v1/stats') return request.method === 'GET' ? await stats(request, env, url, now) : json({ error: 'method not allowed' }, 405, { allow: 'GET' });
     return json({ error: 'not found' }, 404);
   } catch {

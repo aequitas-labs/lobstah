@@ -201,4 +201,16 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     const cols = await e.DB.prepare("SELECT name FROM pragma_table_info('submissions')").all<{ name: string }>();
     expect(cols.results.map((c) => c.name)).toEqual(['install_id', 'date', 'version', 'os', 'arch', 'catches_today', 'total_catches']);
   });
+
+  it('forgets an install on request, keeping the daily totals', async () => {
+    const e = env();
+    await post(e, payload());
+    await post(e, payload({ installId: OTHER }));
+    const del = (id: string) => handle(new Request(`https://t.example/v1/installs/${id}`, { method: 'DELETE' }), e, NOW);
+    expect((await del('not-a-uuid')).status).toBe(400);
+    expect((await del(ID)).status).toBe(204);
+    const rows = await e.DB.prepare('SELECT install_id FROM submissions').all<{ install_id: string }>();
+    expect(rows.results.map((r) => r.install_id)).toEqual([OTHER]);
+    expect((await badge(e)).message).toBe('80');
+  });
 });

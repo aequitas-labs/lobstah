@@ -1,0 +1,147 @@
+# Privacy
+
+lobstah runs on your machine. Your repositories, code, briefs, agent
+transcripts, and dispatch records stay in your working trees and in
+`~/.lobstah`. The only data lobstah itself sends anywhere is the anonymous
+telemetry described below. The coding agents lobstah supervises (Claude
+Code, Codex) talk to their own providers under those providers' terms.
+
+## Telemetry
+
+lobstah shares one small, anonymous count of its work once a day. It is **on
+by default** and turned off by any one of the switches listed below.
+
+> **Status in this version:** the endpoint is not set, so no version of
+> lobstah released so far sends anything. `lobstah telemetry status` shows
+> `endpoint: (none — this build sends nothing)`. This section describes what
+> happens once a release sets the endpoint.
+
+### What is sent
+
+Once per UTC day at most, the lobstah daemon sends one HTTPS `POST` with this
+JSON body and nothing else:
+
+```json
+{
+  "schema": 1,
+  "version": "0.6.9",
+  "os": "macos",
+  "arch": "arm64",
+  "installId": "3b0c8f9e-6a1d-4c2e-9f3a-1b2c3d4e5f60",
+  "date": "2026-10-06",
+  "catchesToday": 3,
+  "totalCatches": 40
+}
+```
+
+| Field | What it is |
+| ----- | ---------- |
+| `schema` | The payload format version, `1`. |
+| `version` | The lobstah version. |
+| `os` | OS family: `macos`, `linux`, `windows`, or `other`. |
+| `arch` | CPU architecture: `x64`, `arm64`, or `other`. |
+| `installId` | A random UUID created on this machine the first time it is needed and stored in `~/.lobstah/telemetry.json`. It is not derived from the machine, the user, or any repository. Delete the file to get a new one. |
+| `date` | The UTC date of the send. |
+| `catchesToday` | Catches (dispatches that finished `done`) so far on the local day, read from `~/.lobstah/stats.json`. |
+| `totalCatches` | All-time catches, read from `~/.lobstah/stats.json`. |
+
+`lobstah telemetry show` prints the exact JSON that would be sent now.
+
+### What is never sent
+
+Repository names or paths, code, briefs, trap names, worktree paths, session
+ids, PR URLs, hostnames, usernames, per-trap counts, or any per-dispatch
+record. The client serialises only the eight fields above, a test fails if
+any other key appears, and the server rejects any request with another field.
+
+### When it is sent
+
+- Only by the daemon (`lobstah daemon`), never by a hook or by a command you
+  run.
+- Only after the first-run notice has been printed on an interactive run of
+  `lobstah` in a terminal. The notice is printed once, to stderr:
+
+  ```
+  lobstah telemetry: once a day the lobstah daemon sends an anonymous count of
+  catches (dispatches finished done): today's count and the all-time total,
+  with the lobstah version, OS family, CPU architecture, the UTC date, and a
+  random install id made on this machine. It never sends repository names or
+  paths, code, briefs, trap names, session ids, PR URLs, hostnames or user names.
+  See it exactly: lobstah telemetry show. Details: PRIVACY.md.
+  Turn it off with any one of: lobstah telemetry disable · [telemetry] share = false
+  in ~/.lobstah/config.toml · LOBSTAH_TELEMETRY=0 · DO_NOT_TRACK=1 · CI set.
+  ```
+
+- At most one attempt per UTC day, with a 2-second timeout and no retry. A
+  network failure is silent and never blocks or fails a command. The next
+  attempt is the next UTC day.
+
+### Who receives it, and how long it is kept
+
+The endpoint is a small Cloudflare Worker run by the lobstah maintainers
+(aequitas labs LLC). Its source is in this repository at
+[`services/telemetry`](services/telemetry). It stores data in Cloudflare D1.
+Cloudflare processes the request to serve it.
+
+- **No IP addresses and no request logs are stored.** The Worker writes only
+  the validated fields. Workers Logs, invocation logs, and Logpush are
+  turned off. Rate limits are keyed on the install id and one global key,
+  not on your IP address.
+- **Per-install rows** (one per install per UTC date) are **deleted 90 days
+  after their date** by a daily job.
+- **Daily totals** carry no install id: for each date, the number of
+  installs that reported, the sum of their `catchesToday`, and how much the
+  installs' `totalCatches` grew. They are kept indefinitely.
+- To delete your per-install rows before they expire, turn telemetry off
+  first, then send `DELETE /v1/installs/<installId>` to the endpoint.
+  `lobstah telemetry status` prints both values. Knowing the random install
+  id is what authorises the deletion. If you delete your rows while sharing
+  is still on, your next report counts your total again.
+
+### What it is used for
+
+- A public README badge, `🦞 N`. N is the total catches across every
+  install that shares, served as shields.io endpoint JSON at
+  `/badge/catches.json`. The badge reveals overall lobstah activity, but not
+  who produced it, from which repositories, or what the work was.
+- Maintainer totals: catches and active installs per day, at
+  `/v1/stats`, which requires a maintainer token.
+
+The counts are anonymous and self-reported, so they show rough activity and
+are not exact. Each install reports separately: one person with two machines
+is two installs. An install that stops reporting for more than 90 days and
+then starts again is counted as new, so its earlier catches can be counted
+twice in the badge total.
+
+### Turning it off
+
+Any one of these turns it off:
+
+| Switch | How |
+| ------ | --- |
+| Command | `lobstah telemetry disable` (writes the config switch below; `enable` undoes it) |
+| Config | `[telemetry]` then `share = false` in `~/.lobstah/config.toml` |
+| Environment | `LOBSTAH_TELEMETRY=0` |
+| Environment | `DO_NOT_TRACK=1` |
+| Environment | `CI` set (any value) |
+
+The daemon usually runs as a launchd or systemd service, which does not
+inherit your shell's environment. When any `lobstah` command sees
+`LOBSTAH_TELEMETRY=0`, `DO_NOT_TRACK=1`, or `CI` in its environment, it
+records that in `~/.lobstah/telemetry.json`. The daemon then stays off until
+a `lobstah` command runs interactively in a terminal without that variable.
+Setting the variable in your shell profile is enough to keep it off. To stay
+off permanently, use the command or the config switch.
+
+A config file that cannot be read, or a `share` value that is not `true` or
+`false`, also counts as off.
+
+`lobstah telemetry status` shows whether sharing is on, every switch in
+effect, the endpoint, whether the notice was shown, your install id, and the
+date of the last send.
+
+### Local stats
+
+`lobstah stats` reads `~/.lobstah/stats.json`, which includes per-trap
+counts. The per-trap table never leaves the machine. Telemetry reads only
+`catchesToday` and `totalCatches` from that file.

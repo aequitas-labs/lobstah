@@ -289,10 +289,33 @@ harnesses, and by fault-injection drills. A SIGKILL'd runner respawns and
 completes. A SIGSTOP'd one is classified wedged, killed cleanly, and recovers
 with a nudge.
 
+## Telemetry 📊
+
+lobstah shares an anonymous daily count of its work, **on by default**. Once
+per UTC day the daemon sends the catches today and in total, plus the lobstah
+version, OS family, CPU architecture, the UTC date, and a random install id
+made on your machine. It never sends repository names or paths, code, briefs,
+trap names, session ids, PR URLs, hostnames, or usernames. Hooks never send
+anything, and nothing is sent until a one-time notice has been shown in your
+terminal. The counts feed a project-wide `🦞 N` badge. Per-install rows are
+deleted after 90 days.
+
+- `lobstah telemetry show` prints the exact JSON that would be sent.
+- `lobstah telemetry status` shows whether it is on and why.
+- Turn it off with any one of: `lobstah telemetry disable`,
+  `[telemetry] share = false` in `~/.lobstah/config.toml`,
+  `LOBSTAH_TELEMETRY=0`, `DO_NOT_TRACK=1`, or `CI` set.
+
+No release sends anything yet: the endpoint is not set. Everything about it,
+including who receives it and how long it is kept, is in
+[PRIVACY.md](PRIVACY.md).
+
 ## Non-goals
 
 No webhooks or inbound listeners, no merge decisions in core, no tracker
-vocabulary in core, no hosted service.
+vocabulary in core, no hosted service (the one exception is the small
+anonymous telemetry endpoint in [`services/telemetry`](services/telemetry),
+which you can turn off).
 
 ## License
 

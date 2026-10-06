@@ -265,7 +265,8 @@ A trap's done records its HEAD (--session). done|failed --report <file.md> files
 totalCatches counts all time. Both live in stats.json, which cull folds into
 before deleting, so they survive it; so does a per-local-day count (400 days),
 which the glass's Stats tab draws. --per-trap adds each trap's total under
-its persistent name. TOON by default; --json for the same fields. Nothing is sent.`,
+its persistent name. TOON by default; --json for the same fields. Per-trap
+counts never leave the machine; see \`lobstah telemetry\` for the daily totals.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,

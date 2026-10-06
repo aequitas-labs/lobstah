@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { TELEMETRY_FIELDS } from '@lobstah/core';
+import { TELEMETRY_FIELDS, TELEMETRY_NOTICE } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -43,5 +43,12 @@ describe('lobstah telemetry', () => {
   it('prints no notice on a non-interactive run', () => {
     const r = spawnSync(process.execPath, [cli, 'version'], { encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home } });
     expect(r.stderr).not.toContain('lobstah telemetry');
+  });
+
+  it('PRIVACY.md quotes the notice word for word and documents every field', () => {
+    const privacy = fs.readFileSync(fileURLToPath(new URL('../../../PRIVACY.md', import.meta.url)), 'utf8');
+    const unindented = privacy.replace(/^ {2}/gm, '');
+    expect(unindented).toContain(TELEMETRY_NOTICE);
+    for (const field of TELEMETRY_FIELDS) expect(privacy).toContain(`| \`${field}\` |`);
   });
 });
