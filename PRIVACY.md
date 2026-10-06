@@ -2,12 +2,66 @@
 
 Published by aequitas labs LLC. Last updated: 2026-10-07.
 
-lobstah runs on your machine and stores dispatch records and local stats
-under `~/.lobstah`. Telemetry is described below; it does not send code or
-briefs. Separately, configured PR watches and coding workflows use GitHub,
-and configured Linear watches use Linear. The coding agents lobstah
-supervises (Claude Code, Codex) talk to their own providers under those
-providers' terms. Contact: [GitHub issues](https://github.com/aequitas-labs/lobstah/issues).
+## What runs
+
+The Claude Code and Codex plugins provide skills that tell your coding agent
+how to run the local `lobstah` CLI. Their hooks run `lobstah hook` commands at
+session start, prompt submission, after tool use, turn end and session end.
+These commands supply fleet context, remind the helm to use decision cards,
+record worker liveness and activity, deliver work and messages, and sign off
+workers. Post-tool hooks can also look up a worker's PR through `gh`.
+The CLI and daemon coordinate local workers, create Git worktrees and run
+coding-agent CLIs or SDKs for assigned work.
+
+## Local data
+
+By default, lobstah stores its configuration and operational data under
+`~/.lobstah`; `LOBSTAH_HOME` can select another directory. This includes
+dispatch briefs, messages, session and repository identifiers, local paths,
+status notes, activity and event logs, PR/watch metadata, decision cards and
+answers, reports and supplied attachments, and local catch counts. Headless
+event logs can include assistant text. Worktrees contain repository files
+and edits; configured repositories can live elsewhere, and Git bookkeeping
+is also written in their Git directories.
+
+Credentials come from your existing agent/`gh` setup or configured token
+environment variables, files or commands. For headless Codex runs, lobstah
+creates `~/.lobstah/codex-home` and links the existing `~/.codex/auth.json`
+(or copies it where symlinks are unavailable). Agent tools may keep their
+own session files separately. Treat briefs, logs and attachments as
+potentially sensitive; activity-summary redaction does not sanitize all
+stored content.
+
+Local records remain until removed by cleanup commands or applicable
+retention settings. Finished work has no age-based retention cleanup by
+default. Finished chore records default to seven days, but their separate
+state and logs can remain. Local aggregate catch counts can survive cleanup.
+
+## What can leave your machine
+
+- **GitHub:** PR watches use your `gh` CLI to read PR and review/check
+  metadata. Optional GitHub pickup calls `https://api.github.com` using your
+  configured token to read issues and PR feedback and write labels, comments
+  and, when configured, merges. Comments can contain status notes, activity
+  summaries, commit summaries, branch names and PR links. Workers and the
+  runner can push commits and create PRs using your Git/`gh` setup.
+- **Linear, if configured:** pickup calls `https://api.linear.app/graphql`
+  with your token to read issues and comments, update issue states and post
+  progress comments, including notes, activity/commit summaries and PR links.
+- **Your coding-agent services:** dispatch briefs, messages and attachment
+  paths are passed to Claude Code or Codex through their CLIs or SDKs.
+  Those agents can read repository files and attachments and send content
+  to the providers or services configured for them. Their data handling
+  is separate from lobstah's.
+- **Destinations you configure:** Git clone/fetch/push contacts your
+  repository remotes. Setup, watch/stream, token and notification commands
+  can contact other services; notification commands receive dispatch
+  identifiers and status notes. Tasks can also instruct agents to use other
+  tools or services. Opening external links in the glass or pet contacts
+  the linked site through your browser.
+
+The glass serves local state and reports on `127.0.0.1`; its browser requests
+go to that local server. The separate telemetry behavior is described below.
 
 ## Telemetry
 
@@ -206,3 +260,9 @@ table and headless worker buckets in that file. Both survive dispatch culling. O
 counters backfill from retained dispatch history; all-time totals are kept.
 The telemetry payload is only the bounded, provenance-filtered snapshot
 above, not the whole stats file or its worktree ids.
+
+## Contact
+
+For privacy questions or support, use
+[GitHub issues](https://github.com/aequitas-labs/lobstah/issues).
+Issues are public, so do not include secrets, private code or sensitive logs.
