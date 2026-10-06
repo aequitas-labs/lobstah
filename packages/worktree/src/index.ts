@@ -306,6 +306,28 @@ export async function allocate(repo: RepoConfig, id: string, fromRemoteBranch = 
   return dir;
 }
 
+/**
+ * Recover an allocation whose dispatch record was lost or never written.
+ * The exact dispatch branch in a linked checkout of the configured repo is
+ * ownership evidence. A directory name alone is not. Never reset or clean it.
+ */
+export async function recoverWorktree(repo: RepoConfig, id: string): Promise<string> {
+  const dir = worktreePath(id);
+  try {
+    if (fs.statSync(path.join(dir, '.git')).isFile()) {
+      const branch = await git(dir, 'symbolic-ref', '--quiet', 'HEAD');
+      const root = await git(dir, 'rev-parse', '--show-toplevel');
+      const common = await git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+      const mine = await git(repo.path, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+      if (branch === `refs/heads/lobstah/${id}` && realpath(root) === realpath(dir) && realpath(common) === realpath(mine)) return dir;
+    }
+  } catch { /* unreadable or non-git paths do not prove ownership */ }
+  throw new Error(
+    `unrecorded worktree at ${dir} for ${id} — ownership not proven (expected lobstah/${id} in ${repo.path}); ` +
+    'inspect and preserve it, then relocate the conflicting checkout before retrying',
+  );
+}
+
 async function runSetup(repo: RepoConfig, dir: string): Promise<void> {
   for (const cmd of repo.setup ?? []) {
     await shell(cmd, { cwd: dir, env: { ...process.env, ...(repo.env ?? {}) } });

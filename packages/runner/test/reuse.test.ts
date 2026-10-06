@@ -5,12 +5,14 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   addWatch,
+  acquireWorktreeLock,
   appendStatus,
   claimNext,
   dispatchWorktree,
   enqueue,
   ensureLayout,
   laneDirs,
+  loadConfig,
   mergeEvidence,
   readEvidence,
   readWatch,
@@ -24,6 +26,7 @@ import type { NormalizedEvent, PrEvidence } from '@lobstah/core';
 import { AsyncQueue } from '@lobstah/adapters';
 import type { Adapter, AdapterRun, AdapterStartOpts } from '@lobstah/adapters';
 import { main } from '../src/run.js';
+import { allocate } from '@lobstah/worktree';
 import { processTest as it } from '../../../test/process-test.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -142,6 +145,103 @@ async function run(id: string, followUp: string | undefined, h: ReturnType<typeo
 }
 
 const firstNote = (id: string) => readStatusLog(id, 'work')[0]?.note ?? '';
+
+describe('a restarted dispatch recovers its unrecorded worktree', () => {
+  for (const dirty of [false, true]) it(`keeps the earlier attempt's branch and commits${dirty ? ' and uncommitted changes' : ''}`, async () => {
+    const id = 'interrupted';
+    enqueue({ id, repo: 'r', brief: 'do it' });
+    expect(claimNext('work')).toBe(id);
+    const active = path.join(laneDirs('work').active, id);
+    const wt = worktreePath(id);
+    const first = harness();
+    // Attempt 1 dies after allocation but before the runner records its path.
+    await expect(main(active, 'work', {
+      ...first.deps,
+      allocate: async (repo, dispatch) => {
+        const dir = await allocate(repo, dispatch);
+        commit('earlier local work')(dir);
+        throw new Error('interrupted before worktree.json');
+      },
+    })).rejects.toThrow('interrupted before worktree.json');
+    expect(first.seen).toEqual([]);
+    expect(fs.existsSync(path.join(active, 'worktree.json'))).toBe(false);
+    const head = git(wt, 'rev-parse', 'HEAD');
+    if (dirty) {
+      fs.writeFileSync(path.join(wt, 'work.txt'), 'unfinished edit');
+      fs.writeFileSync(path.join(wt, 'untracked.txt'), 'unfinished new file');
+    }
+    const worker = harness();
+    await main(active, 'work', worker.deps);
+    expect(worker.seen[0]).toEqual({ cwd: wt, head, branch: 'lobstah/interrupted' });
+    expect(setupRuns()).toBe(1);
+    expect(readEvidence(id, 'work')).toMatchObject({ worktree: wt, branch: 'lobstah/interrupted' });
+    expect(readEvidence(id, 'work').commits).toHaveLength(1);
+    expect(JSON.parse(fs.readFileSync(path.join(laneDirs('work').done, id, 'worktree.json'), 'utf8'))).toEqual({ path: wt });
+    if (dirty) {
+      expect(fs.readFileSync(path.join(wt, 'work.txt'), 'utf8')).toBe('unfinished edit');
+      expect(fs.readFileSync(path.join(wt, 'untracked.txt'), 'utf8')).toBe('unfinished new file');
+      expect(git(wt, 'status', '--porcelain')).toContain('work.txt');
+    }
+  });
+
+  for (const foreign of ['another dispatch', 'another repo', 'unowned directory', 'detached checkout']) {
+    it(`refuses ${foreign} at the dispatch path, naming the path and remedy`, async () => {
+      const id = 'interrupted';
+      enqueue({ id, repo: 'r', brief: 'do it' });
+      expect(claimNext('work')).toBe(id);
+      const active = path.join(laneDirs('work').active, id);
+      const wt = worktreePath(id);
+      const clone = path.join(root, 'clone');
+      if (foreign === 'unowned directory') {
+        fs.mkdirSync(wt, { recursive: true });
+      } else if (foreign === 'another repo') {
+        const other = path.join(root, 'other');
+        git(root, 'init', '-q', '-b', 'main', other);
+        git(other, 'commit', '-q', '--allow-empty', '-m', 'foreign');
+        git(other, 'worktree', 'add', '-q', '-b', `lobstah/${id}`, wt);
+      } else {
+        git(clone, 'worktree', 'add', '-q', '-b', foreign === 'another dispatch' ? 'lobstah/other' : `lobstah/${id}`, wt);
+        if (foreign === 'detached checkout') git(wt, 'checkout', '-q', '--detach');
+      }
+      fs.writeFileSync(path.join(wt, 'keep.txt'), 'foreign work');
+      const worker = harness();
+      const result = main(active, 'work', worker.deps);
+      await expect(result).rejects.toThrow(wt);
+      await expect(result).rejects.toThrow('relocate the conflicting checkout before retrying');
+      expect(worker.seen).toEqual([]);
+      expect(fs.existsSync(path.join(active, 'worktree.json'))).toBe(false);
+      expect(fs.readFileSync(path.join(wt, 'keep.txt'), 'utf8')).toBe('foreign work');
+    });
+  }
+
+  it('finishes setup that was interrupted before the worktree record', async () => {
+    const id = 'interrupted';
+    enqueue({ id, repo: 'r', brief: 'do it' });
+    expect(claimNext('work')).toBe(id);
+    const active = path.join(laneDirs('work').active, id);
+    const repo = loadConfig().repos.r!;
+    await expect(allocate({ ...repo, setup: ['node -e "process.exit(1)"'] }, id)).rejects.toThrow();
+    expect(fs.existsSync(path.join(active, 'worktree.json'))).toBe(false);
+    const worker = harness();
+    await main(active, 'work', worker.deps);
+    expect(worker.seen[0]?.cwd).toBe(worktreePath(id));
+    expect(setupRuns()).toBe(1);
+  });
+
+  it('refuses a proven checkout while another dispatch holds its live lock', async () => {
+    const id = 'interrupted';
+    enqueue({ id, repo: 'r', brief: 'do it' });
+    expect(claimNext('work')).toBe(id);
+    const wt = await allocate(loadConfig().repos.r!, id);
+    enqueue({ id: 'other', repo: 'r', brief: 'other work' });
+    expect(claimNext('work')).toBe('other');
+    expect(acquireWorktreeLock(wt, 'other', 'work')).toBeUndefined();
+    const worker = harness();
+    await expect(main(path.join(laneDirs('work').active, id), 'work', worker.deps)).rejects.toThrow(`worktree at ${wt} is in use by other`);
+    expect(worker.seen).toEqual([]);
+    expect(readWorktreeLock(wt)?.id).toBe('other');
+  });
+});
 
 describe('a follow-up reuses its origin chain’s worktree', () => {
   for (const [kind, brief] of [

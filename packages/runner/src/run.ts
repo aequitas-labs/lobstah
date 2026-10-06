@@ -34,7 +34,7 @@ import {
 import type { ChainPr, Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
 import { loadAdapter } from '@lobstah/adapters';
 import type { Adapter, AdapterRun } from '@lobstah/adapters';
-import { allocate, chooseWorktree, collectEvidence, prepareReuse, worktreePath } from '@lobstah/worktree';
+import { allocate, chooseWorktree, collectEvidence, prepareReuse, recoverWorktree, worktreePath } from '@lobstah/worktree';
 import type { ChooseInput, WorktreeChoice } from '@lobstah/worktree';
 import { buildPrompt } from './contract.js';
 import { drive, settle } from './drive.js';
@@ -170,12 +170,14 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   // the note can say which it was. Allocation itself runs after the note.
   const wtFile = path.join(activeDir, 'worktree.json');
   let recorded: string | undefined;
+  let recovered = false;
   let choice: WorktreeChoice | undefined;
   if (fs.existsSync(wtFile)) {
     recorded = (JSON.parse(fs.readFileSync(wtFile, 'utf8')) as { path: string }).path;
     if (!fs.existsSync(recorded)) throw new Error(`recorded worktree ${recorded} is gone`);
   } else if (fs.existsSync(worktreePath(id))) {
-    throw new Error(`unrecorded worktree already exists for ${id} — refusing to proceed`);
+    recorded = await recoverWorktree(repo, id);
+    recovered = true;
   } else if (descriptor.followUp && cfg.limits.reuseWorktree !== false) {
     choice = await deps.chooseWorktree({ id, lane, repoKey: descriptor.repo, repo, followUp: descriptor.followUp });
   }
@@ -183,7 +185,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     ? choice.reuse
       ? `reusing worktree of ${short(choice.from)}`
       : `fresh worktree (${choice.reason})`
-    : undefined;
+    : recovered ? 'recovered own unrecorded worktree' : undefined;
 
   // A model never crosses harnesses: one that belongs to another harness is
   // dropped for the adapter's default rather than failing the dispatch.
@@ -212,7 +214,14 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   let cwd: string;
   if (recorded) {
     cwd = recorded;
-    acquireWorktreeLock(cwd, id, lane);
+    const held = acquireWorktreeLock(cwd, id, lane);
+    if (held) throw new Error(`worktree at ${cwd} is in use by ${held.id} — wait for that dispatch to release it before retrying`);
+    if (recovered) {
+      // Allocation may have died during setup as well as before the record.
+      // Retry only unfinished/changed setup, without touching branch or HEAD.
+      await deps.prepareReuse(repo, cwd);
+      fs.writeFileSync(wtFile, JSON.stringify({ path: cwd }, null, 2));
+    }
   } else if (choice?.reuse) {
     // The follow-up continues where the origin stopped: same branch, same
     // HEAD. Only trunk is fetched, and setup runs only for a changed lockfile.
