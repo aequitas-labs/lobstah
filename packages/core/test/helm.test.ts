@@ -34,6 +34,7 @@ afterEach(() => {
 
 const TTL_MS = 1800_000;
 const BASE: Config = {
+  readySettleSecs: 600,
   repos: {
     web: { path: '/x/web', trunk: 'main' },
     api: { path: '/x/api', trunk: 'main' },

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { laneDirs, lobstahHome, parsePrRef, readEvidence, readPr, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
+import { laneDirs, lobstahHome, parsePrRef, prStandingKinds, readEvidence, readPr, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
 
 /**
@@ -14,7 +14,8 @@ import type { Lane, PrEvidence } from '@lobstah/core';
  * `~/.lobstah/acks/<item-key>.json` holds { key, kind, stateHash, at, by }.
  * The ack holds only while the item's stateHash is unchanged; a new status
  * entry, head, failed check, or thread count re-stands the item and the
- * stale ack is pruned. A ready PR re-stands only when it becomes ready again. The write path is `lobstah attention ack|unack`
+ * stale ack is pruned. A ready ack survives not-ready flaps on the same head,
+ * without hiding other PR kinds. The write path is `lobstah attention ack|unack`
  * (plus pruning in `man tend` and `cull`); nothing else writes acks/.
  */
 
@@ -85,15 +86,11 @@ export { statusStateHash };
  * kinds until any of those fields moves. observedAt and lastReviewAt are
  * deliberately out — re-observing an unchanged PR must not re-stand it.
  *
- * A ready PR (one whose record carries standingSince for pr:ready) hashes
- * only when it became ready: evidence that moves while it stays ready (a
- * thread count the query failed to read, CLEAN to UNSTABLE, another passing
- * check) does not re-stand it, and ready, then not ready, then ready again
- * gets a new standingSince and re-stands it once.
+ * A ready PR hashes only its head SHA: a same-head flap or another passing
+ * check does not re-stand it. Other kinds still hash their evidence as before.
  */
 export function prStateHash(pr: PrEvidence): string {
-  const readySince = pr.standingSince?.['pr:ready'];
-  if (readySince) return sha({ 'pr:ready': readySince });
+  if (prStandingKinds(pr).includes('pr:ready')) return prReadyStateHash(pr.headSha);
   return sha({
     headSha: pr.headSha,
     state: pr.state,
@@ -107,6 +104,8 @@ export function prStateHash(pr: PrEvidence): string {
   });
 }
 
+const prReadyStateHash = (headSha: string) => sha({ 'pr:ready': headSha });
+
 /** The ack an item currently has: only one whose stateHash still matches. */
 export function currentAck(key: string, stateHash: string): Ack | undefined {
   const a = readAck(key);
@@ -114,11 +113,15 @@ export function currentAck(key: string, stateHash: string): Ack | undefined {
 }
 
 /** Remove acks whose stateHash no longer matches a standing item's. Returns the pruned keys. */
-export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string }>): string[] {
-  const hashes = new Map(standing.map((s) => [s.key, s.stateHash]));
+export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string; headSha?: string }>): string[] {
+  const items = new Map(standing.map((s) => [s.key, s]));
   const pruned: string[] = [];
   for (const a of listAcks()) {
-    const h = hashes.get(a.key);
+    // Different hashes keep checks/review/draft visible, but must not discard
+    // an acknowledgement of ready on this same head.
+    const item = items.get(a.key);
+    if (a.kind === 'pr:ready' && item?.headSha && a.stateHash === prReadyStateHash(item.headSha)) continue;
+    const h = item?.stateHash;
     if (h !== undefined && h !== a.stateHash && removeAck(a.key)) pruned.push(a.key);
   }
   return pruned;

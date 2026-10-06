@@ -192,7 +192,8 @@ export interface TendNotice {
  * - `pr:checks`: open, with failed checks on the observed head.
  * - `pr:conflict`: open, and GitHub reports it conflicting with its base (mergeStateStatus DIRTY).
  * - `pr:ready`: open, not draft, no pr:review standing, merge state mergeable (CLEAN / HAS_HOOKS /
- *   UNSTABLE), check results readable, and approved or all checks passed with none pending.
+ *   UNSTABLE), check results readable, and approved or all checks passed with none pending,
+ *   continuously for readySettleSecs on the same head.
  * - `watch`: an unconsumed man-owned watch event — machinery, always on.
  * Only `question` and `watch` drive the verdict; the rest are things to look at.
  */
@@ -369,7 +370,7 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
   );
   const out: TendAttention[] = [];
   for (const { id, lane, pr, dispatch } of observed) {
-    const kinds = prKinds(pr).filter(
+    const kinds = prKinds(pr, { readySettleSecs: cfg.readySettleSecs, now }).filter(
       (kind) =>
         kind !== 'pr:ready' ||
         !readyBlockedByStack(
@@ -390,7 +391,10 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
       if (!repairCannotAct && onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
       // Older dispatch evidence has no record; its observation is the best
       // available approximation until a PR record is written.
-      const standingSince = pr.standingSince?.[kind] ?? pr.observedAt;
+      const conditionSince = pr.standingSince?.[kind] ?? pr.observedAt;
+      const standingSince = kind === 'pr:ready'
+        ? new Date(Date.parse(conditionSince) + cfg.readySettleSecs * 1000).toISOString()
+        : conditionSince;
       out.push({
         kind,
         key: ref?.key ?? pr.url,

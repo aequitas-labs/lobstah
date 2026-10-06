@@ -207,6 +207,8 @@ export interface Config {
   notifyVerbs?: string[];
   /** Re-fire an unanswered attention state every this many seconds (0 disables). Default 900. */
   remindSecs?: number;
+  /** Continuous-ready seconds before pr:ready stands; 0 disables settling. Default 600. */
+  readySettleSecs: number;
   /** Which attention kinds tend (and so the pet and the glass) walk. Default DEFAULT_ATTENTION_KINDS. */
   attentionKinds: AttentionKind[];
 }
@@ -283,6 +285,10 @@ function expandHome(p: string): string {
 export function loadConfig(): Config {
   const file = configPath();
   const raw = fs.existsSync(file) ? (parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
+  const readySettleSecs = raw.readySettleSecs ?? 600;
+  if (typeof readySettleSecs !== 'number' || !Number.isFinite(readySettleSecs) || readySettleSecs < 0) {
+    throw new Error(`readySettleSecs must be a non-negative number in ${configPath()}`);
+  }
   const reposRaw = (raw.repos ?? {}) as Record<string, Record<string, unknown>>;
   const repos: Record<string, RepoConfig> = {};
   for (const [key, r] of Object.entries(reposRaw)) {
@@ -319,6 +325,7 @@ export function loadConfig(): Config {
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
+    readySettleSecs,
     attentionKinds: parseAttentionKinds(raw.attentionKinds),
   };
 }
