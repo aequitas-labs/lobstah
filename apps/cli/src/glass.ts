@@ -61,7 +61,7 @@ import {
 import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { reportAck } from './report-file.js';
 import { glassDecisions } from './decisions.js';
-import { answerKey } from './decision-answer.js';
+import { answerKey, viewKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { buildTendReport, landedCatches } from './tend.js';
@@ -112,7 +112,10 @@ export function requestBodyCap(): number {
 }
 
 /** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
-export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([['trap-request', 4096]]);
+export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
+  ['trap-request', 4096],
+  ['decision-viewed', 1024],
+]);
 
 const readJson = <T>(f: string): T | undefined => {
   try {
@@ -808,6 +811,18 @@ export function serveGlass(
             } catch (err) {
               if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });
               return reply(500, { ok: false, reason: 'The answer could not be stored.' });
+            }
+          }
+          case 'decision-viewed': {
+            // The decision modal showed it: record the first view. No request, no wake.
+            const key = (body.payload as { key?: unknown } | undefined)?.key;
+            if (typeof key !== 'string' || key.length > 120) return reply(400, { ok: false, reason: 'A decision key is required.' });
+            try {
+              const viewed = viewKey(key);
+              return reply(200, { ok: true, ...viewed });
+            } catch (err) {
+              if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });
+              return reply(500, { ok: false, reason: 'The view could not be stored.' });
             }
           }
           case 'trap-request': {

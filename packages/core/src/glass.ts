@@ -28,6 +28,8 @@ export interface TendAttention {
   stateHash: string;
   /** A human acknowledged this state (display-only: the pet and glass lobs skip it; nothing else does). */
   acked?: { at: string; by: string };
+  /** decision and question: when the human first viewed it in the glass's decision modal. State only, never a wake. */
+  viewedAt?: string;
   /**
    * question: held on the helm's turn (question-hold.ts). `man tend` lists it;
    * the pet, the glass, and notifyCommand do not, until the helm ends a turn
@@ -335,6 +337,8 @@ export interface GlassDecision {
   askedBy: string;
   askedAt: string;
   stateHash: string;
+  /** When the human first viewed it in the decision modal; absent = unread. */
+  viewedAt?: string;
 }
 
 /** What an answer from the glass may carry (the server checks the same limits). */

@@ -72,7 +72,7 @@ describe('a question on the helm’s turn', () => {
     expect(pet()).toEqual([]);
     expect(tend()).toEqual([expect.objectContaining({ key: KEY, held: true, repo: 'r' })]);
     expect(lobstah(['attention']).stdout).toMatch(/work:51151151[^\n]*,question,,yes,which tray\?/);
-    expect(lobstah(['man', 'tend']).stdout).toMatch(/51151151[^\n]*needs-decision,\d+,yes,which tray\?/);
+    expect(lobstah(['man', 'tend']).stdout).toMatch(/51151151[^\n]*needs-decision,\d+,yes,no,which tray\?/);
     // The glass reads the pet's list; notifyCommand waits too.
     expect(buildGlassSnapshot().attention.filter((a) => a.kind === 'question')).toEqual([]);
     expect(pendingNotifications(ID, 'work')).toEqual([]);

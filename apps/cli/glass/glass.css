@@ -64,6 +64,8 @@
   /* modal */
   --modal-radius: 10px;
   --modal-width: 780px;
+  /* an unread decision: a red-ish tint mixed from the palette, so it follows the theme */
+  --unread-bg: color-mix(in srgb, var(--bad) 16%, var(--card));
 }
 * {
   box-sizing: border-box;
@@ -831,23 +833,218 @@ a.lob {
   margin-top: 2px;
 }
 
-/* The deck's decisions: one full-row card each (components/decisions.ts). */
-.dcards {
+/* The deck's decisions: a compact row each; the decision modal takes the answer (components/decisions.ts). */
+.dlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
-.dcard {
-  width: 100%;
+.drow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--card-radius);
-  padding: var(--card-pad);
+  padding: 8px 12px;
 }
-/* A decision card someone followed a link to: it flashes once, then settles. */
-.dcard.focus {
+.drow.unread {
+  background: var(--unread-bg);
+  border-color: var(--bad);
+}
+.drow.answered {
+  opacity: 0.7;
+}
+/* A row someone followed a link to: it flashes once, then settles. */
+.drow.focus {
   animation: dflash 1.6s ease-out 1;
 }
+.drow .dopen {
+  flex: 1 1 280px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.drow .dopen:hover .dtitle {
+  text-decoration: underline;
+}
+.drow .dtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drow .dmeta,
+.drow .dage {
+  font-size: 11px;
+}
+.drow .dlink,
+.dmodal .dlink {
+  color: var(--link);
+}
+.dstate {
+  font-size: var(--badge-font);
+  border-radius: var(--badge-radius);
+  padding: var(--badge-pad);
+  border: 1px solid var(--line);
+  color: var(--dim);
+}
+.dstate.unread {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.dstate.answered {
+  color: var(--ok);
+}
+/* The unread count: on the deck tab and the decisions heading. */
+.dbadge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 1.6em;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: bold;
+  background: var(--bad);
+  color: var(--on-fill);
+}
+/* The decision modal, above any other modal and below the image overlay. */
+#doverlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: 15;
+  padding: 28px 16px;
+  overflow: auto;
+}
+.dmodal:focus {
+  outline: none;
+}
+.dmodal .x {
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 18px;
+  color: var(--dim);
+}
+.dnav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 28px var(--space-3) 0;
+}
+.dnav .dpos {
+  color: var(--dim);
+  font-size: 11px;
+}
+.dmodal .dtop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.dmodal .dtitle {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.dmodal .dmeta {
+  font-size: 11px;
+}
+.ddone {
+  padding: 28px 8px;
+  text-align: center;
+  cursor: pointer;
+}
+.ddone .ok {
+  font-size: 15px;
+  margin-bottom: var(--space-2);
+}
+/* The new-decision alert: a corner toast on every tab, never taking focus. */
+.dalert-live {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 16;
+}
+.dalert {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--bad);
+  border-radius: var(--card-radius);
+  padding: 8px 10px;
+  box-shadow: 0 6px 24px var(--scrim);
+}
+.dalert .dalert-open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.dalert .dx {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.dcount {
+  display: inline-block;
+  min-width: 1.8em;
+  text-align: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-weight: bold;
+  background: var(--bad);
+  color: var(--on-fill);
+  animation: dglow 1.8s ease-in-out infinite;
+}
+@keyframes dglow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 10px 3px var(--bad);
+  }
+}
+/* No pulsing for reduced motion: the red stays. */
+@media (prefers-reduced-motion: reduce) {
+  .dcount,
+  .drow.focus {
+    animation: none;
+  }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The decision modal's body: detail, files, options, and the answer form. */
 @keyframes dflash {
   0%,
   35% {
@@ -858,29 +1055,6 @@ a.lob {
     border-color: var(--line);
     box-shadow: 0 0 0 0 transparent;
   }
-}
-.dcard.answered {
-  opacity: 0.7;
-}
-.dcard .dtop {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-.dcard .dtop .badge {
-  margin-top: 0;
-}
-.dcard .dtitle {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.dcard .dmeta {
-  font-size: 11px;
-  margin-left: auto;
-}
-.dcard .dlink {
-  color: var(--link);
 }
 .dfiles {
   display: flex;

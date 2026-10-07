@@ -1,5 +1,5 @@
 import type { GlassBeats, GlassDispatch, GlassOlderKind, GlassOlderPage, GlassSnapshot, StatsPage } from '@lobstah/core';
-import { addOlder, answerSummary, applyBeats, decisionCards, modalItem } from '../../src/glass-diff.js';
+import { addOlder, answerSummary, applyBeats, decisionCards, modalItem, openDecisionOrder, unreadDecisions } from '../../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, ModalType } from '../../src/glass-diff.js';
 import { saveLobHidden, savePrefs } from './prefs.js';
 import { getState, setState, viewOf } from './store.js';
@@ -21,16 +21,101 @@ function modalLives(s: Pick<GlassState, 'snapshot' | 'older' | 'detail'>, modal:
 
 /** A new snapshot; an open modal whose item vanished closes and stays closed. */
 export function receive(snapshot: GlassSnapshot): void {
-  const { modal, drafts, older, detail } = getState();
+  const { modal, drafts, older, detail, decisionModal } = getState();
   // A card that left the snapshot (answered, withdrawn) takes its draft with it.
-  const live = new Set(decisionCards(snapshot.attention || [], snapshot.decisions || []).map((c) => c.key));
+  const cards = decisionCards(snapshot.attention || [], snapshot.decisions || []);
+  const live = new Set(cards.map((c) => c.key));
   const kept = Object.fromEntries(Object.entries(drafts).filter(([key]) => live.has(key)));
   setState({
     snapshot,
     stale: false,
     modal: modal && modalLives({ snapshot, older, detail }, modal) ? modal : null,
     ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
+    // The shown decision left (answered elsewhere, withdrawn): show the oldest open one, or close.
+    ...(decisionModal?.key && !live.has(decisionModal.key) && !drafts[decisionModal.key]?.sent
+      ? { decisionModal: nextOpen(cards, kept, decisionModal.key) }
+      : {}),
   });
+}
+
+/** The decision after `key` in the modal's order (oldest first), else the first; null key when none is open. */
+function nextOpen(
+  cards: ReturnType<typeof decisionCards>,
+  drafts: Record<string, DecisionDraft>,
+  key: string | null,
+): { key: string | null } | null {
+  const order = openDecisionOrder(cards, (k) => !!drafts[k]?.sent || k === key);
+  if (!order.length) return null;
+  const at = cards.find((c) => c.key === key)?.at ?? '';
+  return { key: (order.find((c) => c.at > at || (c.at === at && c.key > (key ?? ''))) ?? order[0]!).key };
+}
+
+/** The cards the page shows now. */
+function currentCards() {
+  const view = viewOf(getState());
+  return view ? decisionCards(view.attention || [], view.decisions || []) : [];
+}
+
+/** The open decisions the modal steps through, oldest first. */
+export function modalOrder(): ReturnType<typeof decisionCards> {
+  const { drafts } = getState();
+  return openDecisionOrder(currentCards(), (k) => !!drafts[k]?.sent);
+}
+
+/** The unread decisions, oldest first: the alert's and the badge's count. */
+export function unreadOrder(): ReturnType<typeof decisionCards> {
+  const { drafts, viewedHere } = getState();
+  return unreadDecisions(
+    currentCards(),
+    (k) => !!drafts[k]?.sent,
+    (k) => !!viewedHere[k],
+  );
+}
+
+/** Open the decision modal at `key`, else at the oldest unread decision, else the oldest open one. */
+export function openDecision(key?: string): void {
+  const target = key ?? unreadOrder()[0]?.key ?? modalOrder()[0]?.key;
+  if (!target) return;
+  setState({ decisionModal: { key: target } });
+}
+
+/** Previous (-1) or next (+1) in the modal's order. It never wraps and never sends anything. */
+export function stepDecision(dir: -1 | 1): void {
+  const open = getState().decisionModal;
+  if (!open?.key) return;
+  const order = modalOrder();
+  const i = order.findIndex((c) => c.key === open.key);
+  const next = order[i + dir];
+  if (i >= 0 && next) setState({ decisionModal: { key: next.key } });
+}
+
+export const closeDecision = (): void => setState({ decisionModal: null });
+
+/**
+ * The modal displayed a decision: record its first view on the server
+ * (`decision-viewed`), once per page. State only: it answers nothing.
+ */
+export async function markViewed(key: string): Promise<void> {
+  const state = getState();
+  if (state.viewedHere[key]) return;
+  setState({ viewedHere: { ...state.viewedHere, [key]: true } });
+  if (currentCards().find((c) => c.key === key)?.viewedAt) return;
+  const token = state.snapshot?.focusToken;
+  if (!token) return;
+  try {
+    await fetch('/requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
+      body: JSON.stringify({ kind: 'decision-viewed', payload: { key } }),
+    });
+  } catch {
+    // The next view tries again on a fresh page; the count here already treats it as seen.
+  }
+}
+
+/** Dismiss the new-decision alert for the decisions unread now. It marks nothing read. */
+export function dismissAlert(): void {
+  setState({ alertDismissed: unreadOrder().map((c) => c.key) });
 }
 
 /** A 304: nothing a person reads changed; only the server time and heartbeats ticked. */
@@ -209,6 +294,9 @@ export async function sendAnswer(key: string): Promise<void> {
       return;
     }
     setDraft(key, { sending: false, sent: answerSummary({ option: draft.option, text: draft.text, files: draft.files.length }) });
+    // Answered in the modal: the next open decision loads, or the all-answered state.
+    const open = getState().decisionModal;
+    if (open?.key === key) setState({ decisionModal: nextOpen(currentCards(), getState().drafts, key) ?? { key: null } });
   } catch {
     setDraft(key, { sending: false, error: 'The answer could not be sent.' });
   }

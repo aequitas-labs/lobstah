@@ -84,130 +84,272 @@ const click = async (g: GlassDom, el: Element | null | undefined) => {
   (el as HTMLElement).click();
   await g.settle();
 };
-const card = (g: GlassDom, key: string) => g.$$('#deck .dcard').find((c) => c.getAttribute('data-decision') === key);
+/** The decision modal, when it shows `key`. */
+const card = (g: GlassDom, key: string) => g.$$('.dmodal').find((c) => c.getAttribute('data-decision') === key);
+/** The deck's row for `key`. */
+const row = (g: GlassDom, key: string) => g.$$('#deck .drow').find((c) => c.getAttribute('data-decision') === key);
+/** Open the decision modal at `key` from its row. */
+const show = async (g: GlassDom, key: string) => {
+  if (!row(g, key)) await g.go('#deck');
+  await click(g, row(g, key)!.querySelector('.dopen'));
+  expect(card(g, key)).toBeTruthy();
+};
+/** The answers the page posted (not its view records). */
+const answers = (g: GlassDom) => g.posts().filter((p) => (JSON.parse(p.body) as { kind: string }).kind === 'decision-answer');
+const views = (g: GlassDom) => g.posts().filter((p) => (JSON.parse(p.body) as { kind: string }).kind === 'decision-viewed').map((p) => (JSON.parse(p.body) as { payload: { key: string } }).payload.key);
+const key = async (g: GlassDom, k: string, target?: Element | null) => {
+  const W = g.window as unknown as { KeyboardEvent: typeof KeyboardEvent };
+  (target ?? g.document).dispatchEvent(new W.KeyboardEvent('keydown', { key: k, bubbles: true }));
+  await g.settle();
+};
+const type = async (g: GlassDom, box: Element, value: string) => {
+  (box as HTMLTextAreaElement).value = value;
+  box.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('input'));
+  await g.settle();
+};
+const ok = () => ({ status: 201, body: { ok: true, id: 'r1' } });
 
-describe('glass: decision cards', () => {
-  it('the decisions section comes first and lists cards newest first, full row', async () => {
+describe('glass: the decisions list', () => {
+  it('the decisions section comes first: one compact row per open decision, newest first, no answering in the list', async () => {
     const g = await page(fleet());
     const first = g.$('#deck .deckgrid > section')!;
     expect(first.className).toBe('decisions');
-    expect(text(first.querySelector('h2'))).toBe('decisions');
-    expect(g.$$('#deck .dcards > .dcard').map((c) => c.getAttribute('data-decision'))).toEqual([KEY, Q]);
+    expect(g.$$('#deck .dlist > .drow').map((c) => c.getAttribute('data-decision'))).toEqual([KEY, Q]);
+    const r = row(g, KEY)!;
+    expect(text(r.querySelector('.dtitle'))).toBe('Which schema should the tray use?');
+    expect(text(r.querySelector('.dmeta'))).toBe('aaaaaaaa · web');
+    expect(text(r.querySelector('.dage'))).toBe('2m ago');
+    expect(text(r.querySelector('.dstate'))).toBe('unread');
+    expect(r.className).toContain('unread');
+    expect(text(row(g, Q)!.querySelector('.badge'))).toBe('needs-decision');
+    expect(g.$('#deck textarea')).toBeNull();
+    expect(g.$('#deck .dsend')).toBeNull();
   });
 
-  it('a decision with detail, options, and an attachment renders as a full card', async () => {
-    const g = await page(fleet());
+  it('a decision viewed before is read; the unread count is on the heading and the deck tab', async () => {
+    const d = fleet();
+    d.decisions[0]!.viewedAt = ago(60_000);
+    const g = await page(d);
+    expect(text(row(g, KEY)!.querySelector('.dstate'))).toBe('read');
+    expect(row(g, KEY)!.className).not.toContain('unread');
+    expect(row(g, Q)!.className).toContain('unread');
+    expect(text(g.$('#deck .decisions h2 .dbadge'))).toBe('1');
+    const badge = g.$('#tabs a[data-tab="deck"] .dbadge')!;
+    expect(text(badge)).toBe('1');
+    expect(badge.getAttribute('aria-label')).toBe('1 new decision');
+  });
+
+  it('an empty fleet says none, with no badge and no alert', async () => {
+    const g = await page(emptyFleet());
+    expect(text(g.$('#deck .decisions .empty'))).toBe('none');
+    expect(g.$('.dbadge')).toBeNull();
+    expect(g.$('.dalert')).toBeNull();
+  });
+});
+
+describe('glass: the decision modal', () => {
+  it('a row opens the full decision: detail, files, options, text, attach, Send, its position; viewing records it once and answers nothing', async () => {
+    const g = await page(fleet(), { post: ok });
+    await show(g, KEY);
     const c = card(g, KEY)!;
-    expect(c.className).toBe('dcard');
+    expect(c.getAttribute('role')).toBe('dialog');
+    expect(c.getAttribute('aria-modal')).toBe('true');
+    expect(text(g.$('#' + c.getAttribute('aria-labelledby')!))).toBe('Which schema should the tray use?');
     expect(text(c.querySelector('.dtitle'))).toBe('Which schema should the tray use?');
     expect(text(c.querySelector('.dmeta'))).toBe('aaaaaaaa · web · 2m ago');
     const md = c.querySelector('.mdpage')!;
     expect(text(md.querySelector('h1'))).toBe('Context');
-    expect(text(md.querySelector('strong'))).toBe('fits');
     expect(md.querySelector('img')!.getAttribute('src')).toBe(`/decision/${encodeURIComponent(KEY)}/files/tray.png`);
-    expect(c.querySelector('.dfiles .dimg img')!.getAttribute('src')).toBe(`/decision/${encodeURIComponent(KEY)}/files/tray.png`);
     expect(text(c.querySelector('.dfiles .dfile'))).toContain('notes.txt');
     expect([...c.querySelectorAll('.doptions .dopt')].map(text)).toEqual(['v1', 'v2']);
-    const box = c.querySelector('textarea.danswer') as HTMLTextAreaElement;
-    expect(box).toBeTruthy();
-    expect(box.value).toBe('');
-    const attach = c.querySelector('.dattach input[type="file"]')!;
-    expect(attach.hasAttribute('multiple')).toBe(true);
-    expect(attach.getAttribute('accept')).toBe('.png,.txt');
+    expect((c.querySelector('textarea.danswer') as HTMLTextAreaElement).value).toBe('');
+    expect(c.querySelector('.dattach input[type="file"]')!.getAttribute('accept')).toBe('.png,.txt');
     expect(text(c.querySelector('.dsend'))).toBe('Send');
+    // Oldest first: the question (10m), then this decision (2m).
+    expect(text(c.querySelector('.dpos'))).toBe('2 of 2');
+    expect(views(g)).toEqual([KEY]);
+    expect(answers(g)).toEqual([]);
+    expect(text(row(g, KEY)!.querySelector('.dstate'))).toBe('read');
+    // Closing and opening again records nothing more.
+    await key(g, 'Escape');
+    expect(card(g, KEY)).toBeUndefined();
+    await show(g, KEY);
+    expect(views(g)).toEqual([KEY]);
   });
 
-  it("a raw question renders as a plain card: the worker's note, the text box, the attach control, no options", async () => {
-    const g = await page(fleet());
-    const c = card(g, Q)!;
-    expect(c.className).toBe('dcard plain');
-    expect(text(c.querySelector('.badge'))).toBe('needs-decision');
-    expect(text(c.querySelector('.dtitle'))).toBe('which port should the api bind?');
-    expect(c.querySelector('.doptions')).toBeNull();
-    expect(c.querySelector('.mdpage')).toBeNull();
-    expect(c.querySelector('textarea.danswer')).toBeTruthy();
-    expect(c.querySelector('.dattach input[type="file"]')).toBeTruthy();
+  it('previous and next step oldest first, with buttons and arrow keys; arrows in the text box stay there; nothing is sent', async () => {
+    const g = await page(fleet(), { post: ok });
+    await show(g, Q);
+    expect(text(card(g, Q)!.querySelector('.dpos'))).toBe('1 of 2');
+    expect((card(g, Q)!.querySelector('.dprev') as HTMLButtonElement).disabled).toBe(true);
+    await click(g, card(g, Q)!.querySelector('.dnext'));
+    expect(text(card(g, KEY)!.querySelector('.dpos'))).toBe('2 of 2');
+    expect((card(g, KEY)!.querySelector('.dnext') as HTMLButtonElement).disabled).toBe(true);
+    await key(g, 'ArrowLeft');
+    expect(card(g, Q)).toBeTruthy();
+    await key(g, 'ArrowRight');
+    expect(card(g, KEY)).toBeTruthy();
+    await key(g, 'ArrowRight'); // the last one: it stays
+    expect(card(g, KEY)).toBeTruthy();
+    const box = card(g, KEY)!.querySelector('textarea')!;
+    await type(g, box, 'half an answer');
+    await key(g, 'ArrowLeft', box);
+    expect(card(g, KEY)).toBeTruthy();
+    expect(answers(g)).toEqual([]);
+    expect(views(g)).toEqual([Q, KEY]);
+    // The typed text stays with its decision while the modal moves.
+    await click(g, card(g, KEY)!.querySelector('.dprev'));
+    await click(g, card(g, Q)!.querySelector('.dnext'));
+    expect((card(g, KEY)!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('half an answer');
   });
 
-  it('an option, text, and one Send post the answer; the card says what was chosen and leaves on the next refresh', async () => {
+  it('a sent answer loads the next open decision; after the last, the all-answered state closes on the next click', async () => {
     const d = fleet();
-    const g = await page(d, { post: () => ({ status: 201, body: { ok: true, id: 'r1', key: KEY } }) });
+    const g = await page(d, { post: ok });
+    await show(g, Q);
+    await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
+    await click(g, card(g, Q)!.querySelector('.dsend'));
+    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: Q, text: '8080', files: [] } });
+    // The next open one loads; the answered one left the order.
+    expect(card(g, KEY)).toBeTruthy();
+    expect(text(card(g, KEY)!.querySelector('.dpos'))).toBe('1 of 1');
+    expect(text(row(g, Q)!.querySelector('.dstate'))).toBe('answered · 8080');
     await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b) === 'v2'));
-    expect(card(g, KEY)!.querySelector('.dopt.on')!.textContent).toBe('v2');
-    const box = card(g, KEY)!.querySelector('textarea') as HTMLTextAreaElement;
-    box.value = 'keep v1 readable\nfor a week';
-    box.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('input'));
-    await g.settle();
     await click(g, card(g, KEY)!.querySelector('.dsend'));
-    const [sent] = g.posts();
-    expect(sent!.url).toBe('/requests');
-    expect(sent!.headers['x-lobstah-token']).toBe('tok');
-    expect(JSON.parse(sent!.body)).toEqual({
-      kind: 'decision-answer',
-      payload: { key: KEY, option: 'v2', text: 'keep v1 readable\nfor a week', files: [] },
-    });
-    expect(text(card(g, KEY)!.querySelector('.danswered'))).toBe('answered · v2 · keep v1 readable');
-    expect(card(g, KEY)!.querySelector('textarea')).toBeNull();
-    // The next snapshot no longer carries it.
-    d.attention = d.attention.filter((a) => a.key !== KEY);
+    expect(JSON.parse(answers(g)[1]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option: 'v2', files: [] } });
+    const done = g.$('.dmodal .ddone')!;
+    expect(text(done)).toContain('All decisions answered');
+    await click(g, done);
+    expect(g.$('.dmodal')).toBeNull();
+    // The next snapshot no longer carries them.
+    d.attention = [];
     d.decisions = [];
     g.serve(d);
     await g.poll();
-    expect(card(g, KEY)).toBeUndefined();
-    expect(card(g, Q)).toBeTruthy();
+    expect(g.$$('#deck .drow')).toEqual([]);
   });
 
-  it("a raw question's text alone is the answer; a refusal shows the server's reason and keeps the text", async () => {
-    const g = await page(fleet(), { post: () => ({ status: 404, body: { ok: false, reason: 'no standing decision or question' } }) });
-    const box = card(g, Q)!.querySelector('textarea') as HTMLTextAreaElement;
-    box.value = '8080';
-    box.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('input'));
-    await g.settle();
+  it("a failed send keeps the decision and the typed text, and shows the server's reason", async () => {
+    const g = await page(fleet(), { post: (url, init) => ((JSON.parse(init.body) as { kind: string }).kind === 'decision-answer' ? { status: 404, body: { ok: false, reason: 'no standing decision or question' } } : ok()) });
+    await show(g, Q);
+    await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
     await click(g, card(g, Q)!.querySelector('.dsend'));
-    expect(g.posts()[0]!.url).toBe('/requests');
-    expect(JSON.parse(g.posts()[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: Q, text: '8080', files: [] } });
+    expect(card(g, Q)).toBeTruthy();
     expect(text(card(g, Q)!.querySelector('.derr'))).toBe('no standing decision or question');
     expect((card(g, Q)!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('8080');
   });
 
   it('an empty answer is not sent', async () => {
-    const g = await page(fleet());
+    const g = await page(fleet(), { post: ok });
+    await show(g, KEY);
     await click(g, card(g, KEY)!.querySelector('.dsend'));
-    expect(g.posts()).toEqual([]);
+    expect(answers(g)).toEqual([]);
     expect(text(card(g, KEY)!.querySelector('.derr'))).toContain('Choose an option');
   });
 
-  it('#decision/<key> opens the deck and marks that card', async () => {
-    const g = await page(fleet(), { hash: `#decision/${encodeURIComponent(KEY)}` });
-    expect(g.$('.tabpage.on')!.id).toBe('page-deck');
-    expect(card(g, KEY)!.className).toContain('focus');
-    expect(card(g, Q)!.className).not.toContain('focus');
+  it('a raw question shows its badge and note, the text box and attach control, and no options', async () => {
+    const g = await page(fleet(), { post: ok });
+    await show(g, Q);
+    const c = card(g, Q)!;
+    expect(text(c.querySelector('.badge'))).toBe('needs-decision');
+    expect(text(c.querySelector('.dtitle'))).toBe('which port should the api bind?');
+    expect(c.querySelector('.doptions')).toBeNull();
+    expect(c.querySelector('.mdpage')).toBeNull();
+    expect(c.querySelector('.dattach input[type="file"]')).toBeTruthy();
   });
 
-  it('a decision lob scrolls to its card and flashes it, with no modal; following the link again flashes it again', async () => {
-    const g = await page(fleet(), { hash: '#prs' });
-    const scrolled: string[] = [];
-    (g.window as unknown as { Element: { prototype: { scrollIntoView: unknown } } }).Element.prototype.scrollIntoView = function (this: Element) {
-      scrolled.push(this.getAttribute('data-decision') ?? '');
-    };
+  it('Tab stays inside the modal; closing gives focus back', async () => {
+    const g = await page(fleet(), { post: ok });
+    await g.go('#deck');
+    const opener = row(g, KEY)!.querySelector('.dopen') as HTMLElement;
+    opener.focus();
+    await click(g, opener);
+    const c = card(g, KEY)!;
+    expect(g.document.activeElement).toBe(c);
+    const focusables = [...c.querySelectorAll('button:not([disabled]), textarea, input')] as HTMLElement[];
+    const W = g.window as unknown as { KeyboardEvent: typeof KeyboardEvent };
+    const tab = new W.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    focusables.at(-1)!.focus();
+    c.dispatchEvent(tab);
+    await g.settle();
+    expect(tab.defaultPrevented).toBe(true);
+    expect(g.document.activeElement).toBe(focusables[0]);
+    await key(g, 'Escape');
+    expect(g.document.activeElement).toBe(opener);
+  });
+
+  it('#decision/<key> opens the deck, marks that row, and opens it in the modal', async () => {
+    const g = await page(fleet(), { hash: `#decision/${encodeURIComponent(KEY)}`, post: ok });
+    expect(g.$('.tabpage.on')!.id).toBe('page-deck');
+    expect(row(g, KEY)!.className).toContain('focus');
+    expect(row(g, Q)!.className).not.toContain('focus');
+    expect(card(g, KEY)).toBeTruthy();
+  });
+
+  it('a decision lob opens its decision over any tab and flashes its row', async () => {
+    const g = await page(fleet(), { hash: '#prs', post: ok });
     const lob = g.$$('#lobs a.lob').find((l) => l.getAttribute('href') === `#decision/${encodeURIComponent(KEY)}`)!;
     expect(lob).toBeTruthy();
     await click(g, lob);
     expect(g.$('.tabpage.on')!.id).toBe('page-deck');
-    expect(card(g, KEY)!.className).toContain('focus');
-    expect(scrolled).toEqual([KEY]);
+    expect(row(g, KEY)!.className).toContain('focus');
+    expect(card(g, KEY)).toBeTruthy();
     expect(g.$('#overlay')!.className).not.toBe('open');
-    // Leave the card, then follow its link again: it scrolls and flashes again.
-    await g.go('#prs');
-    expect(card(g, KEY)).toBeFalsy();
-    await g.go(`#decision/${encodeURIComponent(KEY)}`);
-    expect(scrolled).toEqual([KEY, KEY]);
-    expect(card(g, KEY)!.className).toContain('focus');
+  });
+});
+
+describe('glass: the new-decision alert', () => {
+  it('counts the unread decisions on any tab, politely, without taking focus; a click opens the oldest unread', async () => {
+    const d = fleet();
+    d.decisions[0]!.viewedAt = ago(30_000);
+    const g = await page(d, { hash: '#prs', post: ok });
+    const live = g.$('.dalert-live')!;
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(text(g.$('.dalert .dalert-open'))).toBe('1 1 new decision');
+    expect(g.$('.dalert .dcount')!.getAttribute('aria-hidden')).toBe('true');
+    expect(g.document.activeElement).toBe(g.document.body);
+    await click(g, g.$('.dalert .dalert-open'));
+    expect(card(g, Q)).toBeTruthy();
+    expect(g.$('.dalert')).toBeNull();
   });
 
-  it('an empty fleet says none', async () => {
-    const g = await page(emptyFleet());
-    expect(text(g.$('#deck .decisions .empty'))).toBe('none');
+  it('dismissing hides it and marks nothing read; a new decision shows it again with the new count', async () => {
+    const d = fleet();
+    const g = await page(d, { hash: '#traps', post: ok });
+    expect(text(g.$('.dalert .dalert-open'))).toBe('2 2 new decisions');
+    await click(g, g.$('.dalert .dx'));
+    expect(g.$('.dalert')).toBeNull();
+    expect(views(g)).toEqual([]);
+    expect(text(g.$('#tabs a[data-tab="deck"] .dbadge'))).toBe('2');
+    // The same decisions on the next poll: still dismissed.
+    await g.poll();
+    expect(g.$('.dalert')).toBeNull();
+    // A new one arrives (a replace: a new key, unread).
+    const NEW = 'decision:99999999';
+    d.attention = [...d.attention, { ...d.attention.find((a) => a.key === KEY)!, key: NEW, at: ago(1000), standingSince: ago(1000) }];
+    d.decisions = [...d.decisions, { ...d.decisions[0]!, key: NEW, title: 'A newer question', askedAt: ago(1000) }];
+    g.serve(d);
+    await g.poll();
+    expect(text(g.$('.dalert .dalert-open'))).toBe('3 3 new decisions');
+  });
+
+  it('does not close an open trap modal; while the decision modal is open the modal carries the count instead', async () => {
+    const d = everyAttentionFleet();
+    const g = await page(d, { post: ok });
+    await g.go('#traps');
+    await click(g, g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1')));
+    expect(g.$('#overlay')!.className).toBe('open');
+    // The alert shows beside the open trap modal, which stays open.
+    expect(g.$('.dalert')).toBeTruthy();
+    expect(g.$('#overlay')!.className).toBe('open');
+    await click(g, g.$('.dalert .dalert-open'));
+    expect(g.$('.dmodal')).toBeTruthy();
+    expect(g.$('.dalert')).toBeNull();
+    // Escape closes the decision modal first; the trap modal stays.
+    await key(g, 'Escape');
+    expect(g.$('.dmodal')).toBeNull();
+    expect(g.$('#overlay')!.className).toBe('open');
   });
 });
 
@@ -231,7 +373,8 @@ describe('glass: the image overlay', () => {
   const imgSrc = `/decision/${encodeURIComponent(KEY)}/files/tray.png`;
 
   it('a decision image opens in the page, centered over a backdrop, with a link to the original; no new window', async () => {
-    const g = await page(fleet());
+    const g = await page(fleet(), { post: ok });
+    await show(g, KEY);
     const c = card(g, KEY)!;
     expect(c.querySelector('a[target="_blank"] img')).toBeNull();
     expect(overlay(g)).toBeNull();
@@ -246,7 +389,8 @@ describe('glass: the image overlay', () => {
   });
 
   it('closes on Escape, on a click on the backdrop, and on the close button, but not on a click on the image', async () => {
-    const g = await page(fleet());
+    const g = await page(fleet(), { post: ok });
+    await show(g, KEY);
     const open = () => click(g, card(g, KEY)!.querySelector('.dfiles .dimg'));
     await open();
     await escape(g);
@@ -316,6 +460,7 @@ describe('glass: pasting into the answer box', () => {
     const w = g.window as unknown as { Event: typeof Event };
     const ev = new w.Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(ev, 'clipboardData', { value: { items, types: items.map((i) => i.type) } });
+    if (!card(g, key)) await show(g, key);
     card(g, key)!.querySelector('textarea')!.dispatchEvent(ev);
     await g.settle();
     return ev;
@@ -338,14 +483,14 @@ describe('glass: pasting into the answer box', () => {
     const name = (chips[0]!.firstChild as Text).textContent!;
     expect(name).toMatch(/^pasted-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.png$/);
     await click(g, card(g, Q)!.querySelector('.dsend'));
-    const body = JSON.parse(g.posts()[0]!.body) as { payload: { files: Array<{ name: string; data: string }> } };
+    const body = JSON.parse(answers(g)[0]!.body) as { payload: { files: Array<{ name: string; data: string }> } };
     expect(body.payload.files).toHaveLength(1);
     expect(body.payload.files[0]!.name).toBe(name);
     expect(Buffer.from(body.payload.files[0]!.data, 'base64')).toEqual(Buffer.from(PNG));
   });
 
   it('a text-only paste adds nothing; an oversized image is refused with the same check as a picked file', async () => {
-    const g = await page(fleet());
+    const g = await page(fleet(), { post: ok });
     await paste(g, Q, [textItem]);
     expect(card(g, Q)!.querySelectorAll('.dchip')).toHaveLength(0);
     expect(card(g, Q)!.querySelector('.derr')).toBeNull();
@@ -362,13 +507,13 @@ describe('glass: pasting into the answer box', () => {
     expect(card(g, Q)!.querySelectorAll('.dchip')).toHaveLength(2);
     expect(text(card(g, Q)!.querySelector('.derr'))).toContain('at most 2 files');
     await click(g, card(g, Q)!.querySelector('.dsend'));
-    const body = JSON.parse(g.posts()[0]!.body) as { payload: { files: Array<{ name: string; data: string }> } };
+    const body = JSON.parse(answers(g)[0]!.body) as { payload: { files: Array<{ name: string; data: string }> } };
     expect(body.payload.files.map((f) => f.name)).toEqual([expect.stringMatching(/-1\.png$/), expect.stringMatching(/-2\.jpg$/)]);
     expect(Buffer.from(body.payload.files[1]!.data, 'base64')).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
   });
 
   it('refuses a pasted image type not allowed by the answer limits', async () => {
-    const g = await page(fleet());
+    const g = await page(fleet(), { post: ok });
     await paste(g, KEY, [image(g, [0xff, 0xd8, 0xff], 'image/jpeg')]);
     expect(card(g, KEY)!.querySelectorAll('.dchip')).toHaveLength(0);
     expect(text(card(g, KEY)!.querySelector('.derr'))).toContain('.jpg: type not accepted');

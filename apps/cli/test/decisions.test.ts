@@ -16,6 +16,7 @@ import {
   listDecisions,
   readDecision,
   readDecisionAnswer,
+  decisionViewedAt,
   readDecisionDetail,
   listRequests,
   requestsDir,
@@ -23,7 +24,7 @@ import {
   dispatchAttachmentsDir,
   trapAttachmentsDir,
 } from '@lobstah/core';
-import { buildTendReport } from '../src/tend.js';
+import { buildTendReport, renderTend } from '../src/tend.js';
 import { applyCull, planCull } from '../src/cull.js';
 import { buildGlassSnapshot, serveAttachment, serveGlass } from '../src/glass.js';
 
@@ -325,6 +326,55 @@ describe('the glass answer POST', () => {
     expect(readDecisionAnswer(key)).toBeUndefined();
     expect(answerRequests()).toEqual([]);
     expect(answerWakes()).toEqual([]);
+  });
+
+  it('decision-viewed records the first view once: no request, no wake, never an answer; tend shows it', async () => {
+    const key = ask();
+    const view = (k: string, headers: Record<string, string> = {}) => send({ kind: 'decision-viewed', payload: { key: k } }, headers);
+    expect(renderTend(buildTendReport())).toMatch(new RegExp(`decision,\\d+,,no,Cut 0\\.6\\.0\\?`));
+    expect((await view(key, { 'x-lobstah-token': 'wrong' })).status).toBe(403);
+    expect(decisionViewedAt(key)).toBeUndefined();
+    const first = await view(key);
+    expect(first.status).toBe(200);
+    const body = (await first.json()) as { ok: boolean; viewedAt: string; first: boolean };
+    expect(body).toMatchObject({ ok: true, first: true });
+    expect(decisionViewedAt(key)).toBe(body.viewedAt);
+    expect(JSON.parse(fs.readFileSync(path.join(decisionDir(key)!, 'viewed.json'), 'utf8'))).toEqual({ key, viewedAt: body.viewedAt });
+    // A second view leaves the first time.
+    const again = (await (await view(key)).json()) as { viewedAt: string; first: boolean };
+    expect(again).toMatchObject({ first: false, viewedAt: body.viewedAt });
+    expect(readDecisionAnswer(key)).toBeUndefined();
+    expect(answerRequests()).toEqual([]);
+    expect(answerWakes()).toEqual([]);
+    expect(unseenNotices(false)).toEqual([]);
+    // The API and tend carry it.
+    expect(buildGlassSnapshot().decisions!.find((d) => d.key === key)?.viewedAt).toBe(body.viewedAt);
+    expect(buildTendReport().attention.find((a) => a.key === key)?.viewedAt).toBe(body.viewedAt);
+    expect(renderTend(buildTendReport())).toContain(`,yes ${body.viewedAt},Cut 0.6.0?`);
+    expect((await view('decision:00000000')).status).toBe(404);
+    expect((await send({ kind: 'decision-viewed', payload: {} })).status).toBe(400);
+  });
+
+  it('a replaced decision starts unread; a raw question is viewed by its key until it is asked again', async () => {
+    const key = ask();
+    await send({ kind: 'decision-viewed', payload: { key } });
+    expect(decisionViewedAt(key)).toBeDefined();
+    const replaced = keyOf(lobstah('man', 'ask', '--title', 'Cut 0.6.1?', '--replace', key).stdout)!;
+    expect(replaced).not.toBe(key);
+    expect(decisionViewedAt(replaced)).toBeUndefined();
+    expect(buildGlassSnapshot().decisions!.find((d) => d.key === replaced)?.viewedAt).toBeUndefined();
+
+    question('which port?');
+    const q = `work:${A}`;
+    expect(buildTendReport().attention.find((a) => a.key === q)?.viewedAt).toBeUndefined();
+    expect((await send({ kind: 'decision-viewed', payload: { key: q } })).status).toBe(200);
+    const seen = buildTendReport().attention.find((a) => a.key === q)?.viewedAt;
+    expect(seen).toBeDefined();
+    expect(buildGlassSnapshot().attention!.find((a) => a.key === q)?.viewedAt).toBe(seen);
+    // The worker asks again: a new question, unread.
+    appendStatus(A, 'work', 'needs-decision', 'which port, really?', new Date(Date.now() + 1000).toISOString());
+    expect(buildTendReport().attention.find((a) => a.key === q)?.viewedAt).toBeUndefined();
+    expect(answerRequests()).toEqual([]);
   });
 
   it('a valid answer writes a decision-answer request with its files in the request directory, and one wake', async () => {

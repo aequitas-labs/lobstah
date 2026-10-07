@@ -88,7 +88,7 @@ describe('attention kinds — stand and clear', () => {
       expect.objectContaining({ kind: 'pr:draft', id: P, verb: 'pr:draft', note: '#9 draft', prUrl: URL_, number: 9, draft: true }),
     ]);
     expect(r.verdict).not.toBe('needs-attention'); // things to look at never flip the verdict
-    expect(renderTend(r)).toContain(`pr:draft,0,,#9 draft ${URL_}`);
+    expect(renderTend(r)).toContain(`pr:draft,0,,,#9 draft ${URL_}`);
     restamp({ draft: false });
     expect(kinds()).toEqual([]);
     restamp({ draft: true, state: 'MERGED' });

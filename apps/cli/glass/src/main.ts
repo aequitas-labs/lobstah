@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath, reportPageUrl } from '../../src/glass-diff.js';
-import { closeLightbox, closeModal, loadStats } from './actions.js';
+import { closeDecision, closeLightbox, closeModal, loadStats, openDecision, stepDecision } from './actions.js';
 import { App } from './components/app.js';
 import { ReportShell, loadReportView } from './components/report-view.js';
 import type { ReportViewState } from './components/report-view.js';
@@ -42,6 +42,9 @@ const initialState = (): GlassState => ({
   preview: new URLSearchParams(location.search).has('lob'),
   drafts: {},
   focusDecision: decisionFromHash(location.hash),
+  decisionModal: decisionFromHash(location.hash) ? { key: decisionFromHash(location.hash) } : null,
+  viewedHere: {},
+  alertDismissed: [],
   lightbox: null,
   stats: null,
   statsError: null,
@@ -109,13 +112,26 @@ function startGlass(): void {
     const focusDecision = decisionFromHash(location.hash);
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({ route, focusDecision });
+    // A `#decision/<key>` link (a lob, the pet) opens that decision too.
+    if (focusDecision) openDecision(focusDecision);
     if (route === 'stats') void loadStats();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    // The image overlay sits above a modal: Escape closes it first.
-    if (getState().lightbox) closeLightbox();
-    else closeModal();
+    const state = getState();
+    if (e.key === 'Escape') {
+      // Topmost first: the image overlay, then the decision modal, then the modal.
+      if (state.lightbox) closeLightbox();
+      else if (state.decisionModal) closeDecision();
+      else closeModal();
+      return;
+    }
+    // Left and right step through decisions, but never out of a text field.
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && state.decisionModal && !state.lightbox) {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.closest?.('textarea, input, select, [contenteditable]') || t.isContentEditable)) return;
+      e.preventDefault();
+      stepDecision(e.key === 'ArrowLeft' ? -1 : 1);
+    }
   });
   startPresence();
   startPolling();

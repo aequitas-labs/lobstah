@@ -1,4 +1,4 @@
-import { listDecisions, readDecisionDetail, standingDecisions } from '@lobstah/core';
+import { decisionViewedAt, listDecisions, readDecisionDetail, standingDecisions } from '@lobstah/core';
 import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, LobstahRequest, TendAttention } from '@lobstah/core';
 
 /**
@@ -10,7 +10,9 @@ import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, LobstahRequest
 
 /** One `decision` attention item per standing decision: it stands until answered or withdrawn. */
 export function decisionAttention(now: number, decisions: DecisionMeta[] = standingDecisions()): TendAttention[] {
-  return decisions.map((d) => ({
+  return decisions.map((d) => {
+    const viewedAt = decisionViewedAt(d.key);
+    return {
     kind: 'decision',
     key: d.key,
     stateHash: d.stateHash,
@@ -22,7 +24,9 @@ export function decisionAttention(now: number, decisions: DecisionMeta[] = stand
     standingSince: d.askedAt,
     note: d.title,
     ...(d.repo ? { repo: d.repo } : {}),
-  }));
+    ...(viewedAt ? { viewedAt } : {}),
+    };
+  });
 }
 
 /**
@@ -41,7 +45,9 @@ export function hideFramedQuestions(attention: TendAttention[], decisions: Decis
 
 /** Standing decisions as the glass renders them, newest first. */
 export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()): GlassDecision[] {
-  return decisions.map((d) => ({
+  return decisions.map((d) => {
+    const viewedAt = decisionViewedAt(d.key);
+    return {
     key: d.key,
     title: d.title,
     detail: readDecisionDetail(d.key) ?? '',
@@ -53,7 +59,9 @@ export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()):
     askedBy: d.askedBy,
     askedAt: d.askedAt,
     stateHash: d.stateHash,
-  }));
+    ...(viewedAt ? { viewedAt } : {}),
+    };
+  });
 }
 
 /** The fields of one `decision-answer` event, in print order: the request id and its payload. */
