@@ -18,6 +18,9 @@ const TAB_LABEL: Record<GlassTab, string> = {
 };
 const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed', 'unknown'];
 
+/** An emoji standing in for a word: screen readers and hover still say the word. */
+const icon = (glyph: string, word: string) => html`<span role="img" aria-label=${word} title=${word}>${glyph}</span>`;
+
 function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
   const hbOld = inp.daemonStale;
   const daemon = d.daemon
@@ -31,7 +34,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
     html`<span class="chip">daemon ${daemon}</span>`,
     inp.stats && html`<span class="chip" title="catches today">🦞 ${inp.stats.catchesToday} today</span>`,
     d.slots &&
-      html`<span class="chip">active headless: ${d.slots.headless} of ${d.slots.limit}; traps: ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
+      html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
         html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <b>${h.man}</b> <span class="dim">helm ${h.grounds}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
