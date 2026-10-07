@@ -44,9 +44,6 @@ The charter is re-injected at every session start. Keep inside its fences:
 ```
 lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
 lobstah dispatch ... --for <trap-name>             # address it to one trap
-lobstah trap reserve --repo <key>                 # reserve a trap before its session starts;
-                                                  # prints its name, a ticket, the start command
-lobstah trap reserve --request <id>               # reserve what a glass trap request asks for
 lobstah send <id>|<trap-name> "<instruction>"      # steer live/queued work; wake
                                                   # finished work as a follow-up
 lobstah dispatch --repo <key> --follow-up <id> --brief-text "<instruction>" --for <name>
@@ -56,9 +53,11 @@ lobstah catch <id>                                # evidence: branch, commits, P
 lobstah cancel <id>                               # cut one away
 lobstah man throw <trap>                          # bring one stowed trap back; waits until
                                                   # it listens (resume or cold, and why)
-lobstah man throw --plan --all | <trap>...         # what a throw would do per stowed trap:
-                                                  # resume, cold (and why), skip, unresolved
+lobstah man throw --all | --repo <key>            # every eligible stowed trap, at once
+lobstah man throw --new --repo <key> [--count N]  # start fresh traps; a glass request: --request <id>
+lobstah man throw --dry-run ...                   # what a throw would do; launches nothing
 lobstah man roster [set <trap> --model <m> ...]   # every trap kept; save how a throw starts it
+lobstah man roster forget <trap>                  # drop a stowed trap for good (refuses unpushed work)
 lobstah man tend                                  # whole fleet: verdict, questions,
                                                   # chains, PRs, live traps
 lobstah man report                                # the delta since your last report
@@ -74,20 +73,19 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   alone — the worker has no other context.
 - Addressed work is sticky: `--for <trap-name>` waits for that trap and never
   falls back to a headless worker. `man tend` lists live traps.
-- `trap reserve` shows the trap as `starting`; `--for <name>` works on it at
-  once. A person starts the session with the printed command, whose soak
-  redeems the ticket. Unredeemed past `--deadline` (default 180 seconds), a
-  `trap-start-failed` notice arrives and the work stays queued;
-  `lobstah stow --wt <name>` withdraws the reservation.
+- `man throw` opens each trap's session in Terminal.app or iTerm2 and returns
+  when it listens. A starting trap takes `--for <name>` at once. A trap that
+  does not sign on by `--timeout` (default 180 seconds) gets a
+  `trap-start-failed` notice and its reservation is withdrawn. If the
+  terminal cannot open (a refused Automation permission), say so; the human
+  can copy the start command from the trap's card in the glass. Never work
+  around a refused permission.
+- A trap's start wakes you once, with `trap-available`; a batch wakes you
+  once, with `trap-batch`, when every throw settled. Sign-offs and idle
+  ghosts are in the digest and the glass, not wakes.
 - A PR stack wakes once with `stack-ready`, in bottom-first merge order. Its individual ready PRs stay visible but quiet; tend and the glass show partial readiness. Follow an external stack from any member with `lobstah watch add pr:<owner>/<repo>#<n>`.
 - A `trap-request` event is a trap the human asked for from the glass. Run
-  `lobstah trap reserve --request <id>`, then start the session with the
-  printed command, trying these in order and stopping at the first that works
-  and is allowed: (1) a tool your harness gives for opening a terminal tab;
-  (2) from a CLI helm, a new Terminal.app or iTerm2 window or tab with
-  `osascript`, or `tmux new-window` when you run inside tmux; (3) leave it to
-  the human, who copies the command from the trap's card in the glass. Never
-  work around a refused permission.
+  `lobstah man throw --new --request <id>`.
 - `needs-decision` or `blocked`: decide first. When the brief, the code, or your context gives the answer, and a reasonable lead would decide without asking, send it with `lobstah send <id> "<answer>"` and say what you decided in your next report. When you lack the context, or the choice is the human's (scope, product behavior, money, releases, merges, anything outward-facing or hard to undo), frame it with `lobstah man ask [<id>] --title "<question>" [--detail <file.md>] [--option "<label>"]...`. The detail gives the facts, the options, and your pick. Your own questions follow the same rule, with no `<id>`. You may mention a question briefly in chat; the card is where the human answers it.
 - The glass shows a `man ask` question as a card the human answers in place, and it replaces the worker's raw question there. Asks on the same dispatch stand side by side; to reframe one, pass `--replace <key>`. The answer wakes `man wait` as a `decision-answer` event with the request id, the option, text, and file paths; act on it, usually with `lobstah send <id> "<instruction>"`.
 - A question you do not answer walks to the human when your turn ends.

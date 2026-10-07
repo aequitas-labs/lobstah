@@ -16,7 +16,7 @@ import { codexDesktopThread, codexRolloutFile } from './resume.js';
  *
  *   resume      the harness reopens the trap's saved session
  *   cold        a new session in the same trap (same name, id, checkout); `why` says why
- *   skip        nothing to do: the trap is live, starting, or forgotten
+ *   skip        nothing to do: the trap is live or starting
  *   unresolved  a throw would refuse until a person resolves `why`
  */
 export type ThrowAction = 'resume' | 'cold' | 'skip' | 'unresolved';
@@ -156,7 +156,6 @@ function planEntry(entry: RosterEntry, cfg: Config, opts: ThrowPlanOptions): Thr
   };
   const done = (action: ThrowAction, why: string): ThrowPlanRow => ({ ...row, action, why });
 
-  if (entry.forgottenAt) return done('skip', `forgotten at ${entry.forgottenAt}`);
   const reg = readTrap(entry.trapId);
   if (reg) {
     const fresh = now - trapLastSeen(reg) <= cfg.soak.ttlSecs * 1000;

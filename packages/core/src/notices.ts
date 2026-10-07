@@ -16,6 +16,8 @@ import { loadConfig } from './config.js';
 export type NoticeKind =
   | 'trap-signed-on'
   | 'trap-listening'
+  | 'trap-available'
+  | 'trap-batch'
   | 'trap-claim-idle'
   | 'trap-stowed'
   | 'trap-defective'
@@ -39,10 +41,15 @@ export type NoticeKind =
   | 'repair-stopped';
 
 /**
- * Notices that never wake a helm on their own. `trap-listening` follows its
- * trap's `trap-signed-on` within seconds and asks nothing of the helm.
+ * Notices that never wake a helm on their own: they show in tend, the
+ * digest, and the glass. A trap's start is one wake, `trap-available`, when
+ * it is listening; its reservation (`trap-starting`), sign-on
+ * (`trap-signed-on`), and first park (`trap-listening`, older homes) ask
+ * nothing of the helm, and neither does a sign-off (`trap-stowed`). A notice
+ * can also be posted `quiet` on its own (a trap that ghosted while idle, a
+ * trap available as part of a batch).
  */
-export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening'];
+export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening', 'trap-starting', 'trap-signed-on', 'trap-stowed'];
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */

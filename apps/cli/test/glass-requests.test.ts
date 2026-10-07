@@ -162,7 +162,7 @@ describe('glass /requests', () => {
     expect(requests[0]!.closedAt).toBeUndefined();
     const notices = listNotices(50);
     expect(notices.map((n) => [n.kind, n.refId])).toEqual([['trap-request', id]]);
-    expect(notices[0]!.text).toContain(`lobstah trap reserve --request ${id}`);
+    expect(notices[0]!.text).toContain(`lobstah man throw --new --request ${id}`);
     expect(notices[0]!.text).toContain('repo web, harness codex');
   });
 

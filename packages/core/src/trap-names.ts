@@ -88,3 +88,8 @@ export function reserveTrapName(trapId: string, requested?: string, start = rand
   }
   throw new Error('all trap names in this lobstah home are taken');
 }
+
+/** Free a name (a forgotten trap). Only the registry entry goes. */
+export function releaseTrapName(name: string): void {
+  if (TRAP_NAME_RE.test(name)) fs.rmSync(nameFile(name), { force: true });
+}

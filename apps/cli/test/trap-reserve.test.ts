@@ -4,9 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ensureLayout, listReservations, listTraps, queuedDescriptor, readTrapAnchor, readRequest, writeRequest, type TrapRegistration } from '@lobstah/core';
+import { closeRequest, ensureLayout, listReservations, listTraps, queuedDescriptor, readTrapAnchor, reserveTrap, writeRequest, type TrapRegistration } from '@lobstah/core';
 
-// End to end: trap reserve and soak --ticket through the built CLI, against
+// End to end: reservations (what `man throw` makes) and soak --ticket through the built CLI, against
 // a throwaway repo with a bare origin. Every test has its own LOBSTAH_HOME.
 // Kept apart from soak-worktree.test.ts: each file's synchronous CLI runs
 // block its vitest worker, and one file must stay well under the worker's
@@ -84,24 +84,20 @@ const only = (): TrapRegistration => {
   return traps[0]!;
 };
 
-describe('trap reserve and soak --ticket', () => {
+describe('reservations and soak --ticket', () => {
   /** The CLI with extra environment (a ticket in LOBSTAH_TRAP_TICKET). */
   const withEnv = (cwd: string, env: Record<string, string>, ...args: string[]) => {
     const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE') && !k.startsWith('CODEX')));
     return spawnSync(process.execPath, [cli, ...args], { cwd, encoding: 'utf8', env: { ...base, LOBSTAH_HOME: home, ...env }, input: '', timeout: 60_000 });
   };
-  const reserve = (...args: string[]) => {
-    const res = lobstah(outside, 'trap', 'reserve', '--repo', 'r', ...args);
-    expect(res.status, res.stderr).toBe(0);
-    return { name: kv(res.stdout, 'name')!, trap: kv(res.stdout, 'trap')!, ticket: kv(res.stdout, 'ticket')!, out: res.stdout };
+  const reserve = (opts: { name?: string; harness?: string } = {}) => {
+    const { reservation, ticket } = reserveTrap({ repo: 'r', ...opts });
+    return { name: reservation.name, trap: `wt:${reservation.trapId}`, ticket };
   };
 
-  processTest('reserves a starting trap that dispatch --for and man tend see before any session', () => {
-    const r = reserve('--name', 'amber-gull', '--harness', 'claude');
+  processTest('a starting trap is seen by dispatch --for and man tend before any session; trap reserve is gone', () => {
+    const r = reserve({ name: 'amber-gull', harness: 'claude' });
     expect(r.name).toBe('amber-gull');
-    expect(r.out).toMatch(/^state: starting$/m);
-    expect(r.out).toContain(`CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${r.ticket}"`);
-    expect(r.out).not.toContain('$lobstah:trap soak'); // --harness claude prints only the Claude Code command
     expect(listTraps()).toEqual([]);
     const id = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
     const sent = lobstah(primary, 'dispatch', '--repo', 'r', '--id', id, '--brief-text', 'do it', '--for', 'amber-gull');
@@ -110,12 +106,12 @@ describe('trap reserve and soak --ticket', () => {
     expect(queuedDescriptor(id, 'work')?.for).toBe(r.trap);
     const tend = JSON.parse(lobstah(primary, 'man', 'tend', '--json').stdout) as { traps: Array<{ name?: string; state?: string }> };
     expect(tend.traps.find((t) => t.name === 'amber-gull')?.state).toBe('starting');
-    expect(lobstah(outside, 'trap', 'reserve', '--repo', 'nope').status).not.toBe(0);
-    expect(lobstah(outside, 'trap', 'reserve', '--repo', 'r', '--harness', 'vim').status).not.toBe(0);
+    expect(lobstah(outside, 'trap', 'reserve', '--repo', 'r').status).toBe(2);
+    expect(lobstah(outside, 'trap', 'requests').status).toBe(2);
   });
 
   processTest('soak --ticket signs on as the reserved name and id; the ticket redeems once', () => {
-    const r = reserve('--name', 'amber-gull');
+    const r = reserve({ name: 'amber-gull' });
     const res = soak(primary, '--ticket', r.ticket);
     expect(res.status, res.stderr).toBe(0);
     expect(kv(res.stdout, 'name')).toBe('amber-gull');
@@ -142,7 +138,7 @@ describe('trap reserve and soak --ticket', () => {
     expect(kv(res.stdout, 'trap')).toBe(r.trap);
     // A clean, pushed checkout can be removed; a no-upstream checkout is kept.
     git(only().worktree, 'branch', '--set-upstream-to=origin/main');
-    const stowed = lobstah(primary, 'stow', '--session', SESSION);
+    const stowed = lobstah(primary, 'stow', '--session', SESSION, '--remove');
     expect(stowed.status, stowed.stderr).toBe(0);
     expect(stowed.stdout).toMatch(/^worktree: removed$/m);
     // The session stays alive with the spent ticket in its environment: soak works as usual.
@@ -153,7 +149,7 @@ describe('trap reserve and soak --ticket', () => {
 
   processTest('a session that already mans a trap cannot redeem another; stow --wt withdraws a reservation', () => {
     expect(soak(primary).status).toBe(0);
-    const r = reserve('--name', 'amber-gull');
+    const r = reserve({ name: 'amber-gull' });
     const res = soak(primary, '--ticket', r.ticket);
     expect(res.status).not.toBe(0);
     expect(res.stdout + res.stderr).toContain('already mans trap');
@@ -165,32 +161,20 @@ describe('trap reserve and soak --ticket', () => {
 });
 
 describe('trap requests from the glass', () => {
-  processTest('trap requests lists open ones; trap reserve --request links the reservation and closes the request', () => {
-    const empty = lobstah(outside, 'trap', 'requests');
-    expect(empty.stdout).toContain('requests: none open');
+  processTest('man throw --new --request takes the request\'s repo and harness; flags may repeat it, never contradict it', () => {
     const req = writeRequest('trap-request', { repo: 'r', harness: 'codex' });
-    const listed = lobstah(outside, 'trap', 'requests');
-    expect(listed.status, listed.stderr).toBe(0);
-    expect(listed.stdout).toContain(req.id);
-    expect(listed.stdout).toContain('codex');
-    // Flags may repeat the request, never contradict it.
-    expect(lobstah(outside, 'trap', 'reserve', '--request', req.id, '--harness', 'claude').status).not.toBe(0);
-    const res = lobstah(outside, 'trap', 'reserve', '--request', req.id);
-    expect(res.status, res.stderr).toBe(0);
-    expect(res.stdout).toMatch(/^harness: codex$/m);
-    expect(res.stdout).toContain(`request: ${req.id} (closed)`);
-    expect(res.stdout).toContain("$lobstah:trap soak --ticket");
-    expect(res.stdout).not.toContain('CLAUDE_CODE_DISABLE_TERMINAL_TITLE');
-    const [reservation] = listReservations();
-    expect(reservation).toMatchObject({ repo: 'r', harness: 'codex', request: req.id });
-    expect(readRequest(req.id)).toMatchObject({ outcome: `reserved ${kv(res.stdout, 'label')}` });
-    expect(readRequest(req.id)?.closedAt).toBeDefined();
-    expect(lobstah(outside, 'trap', 'requests').stdout).toContain('requests: none open');
-    // A closed or unknown request reserves nothing more.
-    const again = lobstah(outside, 'trap', 'reserve', '--request', req.id);
+    const dry = lobstah(outside, 'man', 'throw', '--new', '--request', req.id, '--dry-run');
+    expect(dry.status, dry.stderr).toBe(0);
+    expect(dry.stdout).toContain('new: 1 fresh r trap(s)');
+    expect(dry.stdout).toContain(',r,new,codex,');
+    expect(dry.stdout).toContain("$lobstah:trap soak --ticket <ticket>");
+    expect(lobstah(outside, 'man', 'throw', '--new', '--request', req.id, '--harness', 'claude', '--dry-run').status).toBe(2);
+    expect(lobstah(outside, 'man', 'throw', '--new', '--request', req.id, '--harness', 'codex', '--dry-run').status).toBe(0);
+    closeRequest(req.id, 'thrown');
+    const again = lobstah(outside, 'man', 'throw', '--new', '--request', req.id, '--dry-run');
     expect(again.status).not.toBe(0);
     expect(again.stdout + again.stderr).toContain('already closed');
-    expect(lobstah(outside, 'trap', 'reserve', '--request', '00000000-0000-4000-8000-000000000000').status).not.toBe(0);
-    expect(listReservations()).toHaveLength(1);
+    expect(lobstah(outside, 'man', 'throw', '--new', '--request', '00000000-0000-4000-8000-000000000000', '--dry-run').status).not.toBe(0);
+    expect(listReservations()).toHaveLength(0);
   });
 });

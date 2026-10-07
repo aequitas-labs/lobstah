@@ -35,8 +35,9 @@ describe('helm notices', () => {
   });
 
   it('a per-notice quiet flag persists and consumes without changing other notices of the same kind', () => {
-    postNotice({ kind: 'trap-signed-on', text: 'quiet', quiet: true });
-    postNotice({ kind: 'trap-signed-on', text: 'normal' });
+    // trap-ghosted: a kind that wakes unless the notice itself is quiet.
+    postNotice({ kind: 'trap-ghosted', text: 'quiet', quiet: true });
+    postNotice({ kind: 'trap-ghosted', text: 'normal' });
     expect(listNotices()[0]?.quiet).toBe(true);
     expect(listNotices()[1]?.quiet).toBeUndefined();
     expect(unseenNotices(true).map((n) => n.text)).toEqual(['normal']);
@@ -44,16 +45,27 @@ describe('helm notices', () => {
     expect(listNotices().map((n) => n.text)).toEqual(['quiet', 'normal']);
   });
 
-  it('trap-listening never wakes on its own, is consumed, and still lists; sign-on and start-failed wake', () => {
-    postNotice({ kind: 'trap-listening', text: 'listening' });
+  it("a trap's start wakes once, as trap-available; starting, sign-on, listening, and stow are quiet but listed", () => {
+    postNotice({ kind: 'trap-starting', text: 'starting' });
+    postNotice({ kind: 'trap-signed-on', text: 'signed on' });
+    postNotice({ kind: 'trap-listening', text: 'listening (older homes)' });
+    postNotice({ kind: 'trap-stowed', text: 'stowed' });
     expect(unseenNotices(false)).toEqual([]);
     expect(unseenNotices(true)).toEqual([]);
-    expect(listNotices().map((n) => n.kind)).toEqual(['trap-listening']);
-    postNotice({ kind: 'trap-signed-on', text: 'signed on' });
-    postNotice({ kind: 'trap-listening', text: 'listening again' });
+    expect(listNotices().map((n) => n.kind)).toEqual(['trap-starting', 'trap-signed-on', 'trap-listening', 'trap-stowed']);
+    // Notice ids order by millisecond, then an unpadded counter: step past this millisecond so the cursor's order holds.
+    const ms = Date.now();
+    while (Date.now() === ms) {
+      // wait for the next millisecond
+    }
+    postNotice({ kind: 'trap-available', text: 'available' });
+    postNotice({ kind: 'trap-available', text: 'available in a batch', quiet: true });
+    postNotice({ kind: 'trap-ghosted', text: 'ghosted idle', quiet: true });
     postNotice({ kind: 'trap-start-failed', text: 'did not start' });
-    expect(unseenNotices(true).map((n) => n.kind)).toEqual(['trap-signed-on', 'trap-start-failed']);
+    postNotice({ kind: 'trap-batch', text: 'batch settled' });
+    expect(unseenNotices(true).map((n) => n.text).sort()).toEqual(['available', 'batch settled', 'did not start']);
     expect(unseenNotices(true)).toEqual([]);
+    expect(listNotices(20).find((n) => n.text === 'ghosted idle')?.quiet).toBe(true);
   });
 
   it('unseen consumes on read; a peek does not', () => {
@@ -75,8 +87,8 @@ describe('helm notices', () => {
   });
 
   it('an owned notice the wake predicate rejects is consumed without waking, and never stalls the cursor', () => {
-    postNotice({ kind: 'trap-stowed', text: 'old', repo: 'a' });
-    postNotice({ kind: 'trap-stowed', text: 'new', repo: 'a' });
+    postNotice({ kind: 'bait-orphaned', text: 'old', repo: 'a' });
+    postNotice({ kind: 'bait-orphaned', text: 'new', repo: 'a' });
     const mine = (n: { repo?: string }) => n.repo === 'a';
     const wakes = (n: { text: string }) => n.text !== 'old';
     expect(unseenNotices(true, mine, wakes).map((n) => n.text)).toEqual(['new']);

@@ -306,7 +306,7 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   live: boolean;
   /** Parked and recently beating; false for a stale or never-parked registration. */
   listening?: boolean;
-  /** A reserved trap no session has signed on as yet (`trap reserve`); `live` is false. */
+  /** A reserved trap no session has signed on as yet (`man throw`); `live` is false. */
   starting?: {
     reservedAt: string;
     deadline: string;

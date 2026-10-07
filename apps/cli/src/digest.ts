@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { laneDirs, loadConfig, repoKey, readEvidence, readHelm, wakeFloorMs, readStatusLog, toonKV, toonTable, TERMINAL_VERBS } from '@lobstah/core';
+import { laneDirs, listNotices, loadConfig, repoKey, readEvidence, readHelm, wakeFloorMs, readStatusLog, toonKV, toonTable, TERMINAL_VERBS, QUIET_NOTICE_KINDS } from '@lobstah/core';
 import type { Descriptor, Lane } from '@lobstah/core';
 import { buildTendReport, repoOf } from './tend.js';
 import type { TendReport } from './tend.js';
@@ -14,6 +14,15 @@ export interface DigestLanding {
   repo?: string;
   note?: string;
   prUrl?: string;
+}
+
+/** A trap lifecycle event that woke no one: a sign-off, or a ghost sweep of an idle trap. */
+export interface DigestTrapEvent {
+  kind: string;
+  at: string;
+  trap?: string;
+  repo?: string;
+  text: string;
 }
 
 export interface DigestAttention {
@@ -40,6 +49,8 @@ export interface Digest {
   standing: DigestAttention[];
   /** Current stack progress, using the same observation-only derivation as tend. */
   stacks: string[];
+  /** Quiet trap events since the cursor (stowed, ghosted while idle): reported here, never a wake. */
+  traps: DigestTrapEvent[];
   verdict: TendReport['verdict'];
   counts: TendReport['counts'];
 }
@@ -111,15 +122,23 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
     note: a.note,
   }));
   const arisen = standing.filter((a) => a.at !== undefined && (Date.parse(a.at) || 0) > sinceMs);
+  const traps: DigestTrapEvent[] = listNotices(500)
+    .filter((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)))
+    .filter((n) => {
+      const at = Date.parse(n.at) || 0;
+      return at > sinceMs && at <= now && inGrounds(n.repo);
+    })
+    .map((n) => ({ kind: n.kind, at: n.at, ...(n.refId ? { trap: n.refId } : {}), ...(n.repo ? { repo: n.repo } : {}), text: n.text }));
 
   return {
     since,
     now: new Date(now).toISOString(),
-    changed: landed.length > 0 || arisen.length > 0,
+    changed: landed.length > 0 || arisen.length > 0 || traps.length > 0,
     landed,
     arisen,
     standing,
     stacks: tend.stacks.filter((s) => inGrounds(repoKey(loadConfig(), s.repo)) && s.readiness).map((s) => s.readiness!.text),
+    traps,
     verdict: tend.verdict,
     counts: tend.counts,
   };
@@ -168,6 +187,9 @@ export function renderDigest(d: Digest): string {
         ['id', 'verb', 'note'],
       ),
     );
+  }
+  if (d.traps.length > 0) {
+    lines.push(toonTable('traps', d.traps.map((t) => ({ kind: t.kind, at: t.at, note: t.text })), ['kind', 'at', 'note']));
   }
   const quiet = d.standing.filter((s) => !d.arisen.includes(s));
   if (quiet.length > 0) {

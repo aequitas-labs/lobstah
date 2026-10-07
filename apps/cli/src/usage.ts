@@ -114,25 +114,11 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
   },
   trap: {
-    subverbs: ['reserve', 'requests', 'title-set'],
-    flags: {
-      '--repo': { value: '<key>' },
-      '--request': { value: '<id>' },
-      '--harness': { value: HARNESS },
-      '--name': { value: '<word-word>' },
-      '--deadline': { value: '<secs>' },
-      '--session': { value: '<id>' },
-    },
-    flagSubverbs: {
-      '--repo': ['reserve'],
-      '--request': ['reserve'],
-      '--harness': ['reserve'],
-      '--name': ['reserve'],
-      '--deadline': ['reserve'],
-      '--session': ['reserve', 'title-set'],
-    },
+    subverbs: ['title-set'],
+    flags: { '--session': { value: '<id>' } },
+    flagSubverbs: { '--session': ['title-set'] },
   },
-  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--keep': {}, '--force': {}, '--quiet': {} } },
+  stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--remove': {}, '--keep': {}, '--force': {}, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
   doctor: { flags: {} },
@@ -150,6 +136,11 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:throw': {
     flags: {
       '--plan': {},
+      '--dry-run': {},
+      '--new': {},
+      '--count': { value: '<n>' },
+      '--harness': { value: HARNESS },
+      '--request': { value: '<id>' },
       '--timeout': { value: '<secs>' },
       '--all': {},
       '--repo': { value: '<key>' },
@@ -160,7 +151,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<trap>...]',
   },
   'man:roster': {
-    subverbs: ['set'],
+    subverbs: ['set', 'forget'],
     flags: {
       '--repo': { value: '<key>' },
       '--harness': { value: `${HARNESS}|default` },
@@ -168,8 +159,9 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--terminal': { value: 'terminal|iterm|default' },
       '--config': { value: '<key>=<value>', repeatable: true },
       '--session': { value: '<id>' },
+      '--force': {},
     },
-    flagSubverbs: { '--harness': ['set'], '--model': ['set'], '--terminal': ['set'], '--config': ['set'], '--session': ['set'] },
+    flagSubverbs: { '--harness': ['set'], '--model': ['set'], '--terminal': ['set'], '--config': ['set'], '--session': ['set', 'forget'], '--force': ['forget'] },
     positionals: '[<trap>]',
   },
   'man:report': {
@@ -286,15 +278,11 @@ Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
 --wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours.
 --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
-  trap: `\`trap reserve\` reserves a trap before its session starts: name, id, ticket,
-start command. dispatch --for works at once; soak --ticket <t> redeems it. Past
---deadline (default 180s) trap-start-failed posts; work stays queued. stow --wt
-<name> withdraws it. --request <id> reserves what a glass request asks for and
-closes it; \`trap requests\` lists them. \`trap title-set\` = \`soak title-set\`.`,
+  trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.`,
   stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
-finalizes; unread messages bounce. Removes only worktrees soak created, kept
-when dirty, untracked, unpushed to upstream, or without upstream (with reason).
---force discards unsaved files; --keep keeps it. --wt withdraws reservations.
+finalizes; unread messages wait the grace. Keeps the worktree; --remove removes one
+soak created unless dirty, untracked, unpushed, or without upstream (says why);
+--remove --force discards unsaved files. --wt withdraws reservations.
 Only a claimed helm may stow another session (pass its --session).
 Clears the tab name sign-on set.`,
   daemon: `The supervisor process (claims, worktrees, liveness, restarts). install
@@ -323,13 +311,13 @@ under the given directories.`,
   'man:manual': `The lobstah man's manual.`,
   'man:tend': `The whole-fleet pass: verdict, unanswered questions, each work item's chain,
 PR, and merge gate. Pure disk read.`,
-  'man:throw': `Bring one rostered trap back under its own id and name, and wait until it
-listens: resume its session or start cold (says why), in its checkout (recreated
-from refs/lobstah/traps/<id> if gone), from its profile, in Terminal.app or iTerm2.
-A trap live or starting refuses. --plan only shows the plan (names, --all, --repo).`,
-  'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull: repo,
-harness, session, revision (refs/lobstah/traps/<id>), saved profile. set (the
-helm's) saves how a throw starts it; default or key= clears a field.`,
+  'man:throw': `Bring roster traps back under their own id and name, or start fresh ones, and
+wait until they listen. <trap>: one; --all: every eligible trap in the grounds; --repo:
+one repo's; --new [--count N] [--request <id>]: fresh traps from the harness defaults.
+Live or starting traps refuse. --dry-run (or --plan) shows each trap's plan and launches nothing.`,
+  'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull. set (the
+helm's) saves how a throw starts it; default or key= clears a field. forget removes a
+stowed trap's record, worktree, and protected ref (refused while it has unpushed commits).`,
   'man:report': `The delta since the last report: landed, arisen, still-waiting, verdict.
 Advances the cursor unless --peek — the acknowledgment man wait's timeout
 digest defers to. --grounds scopes digest and cursor to one helm's territory

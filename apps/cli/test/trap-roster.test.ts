@@ -146,7 +146,7 @@ describe('the roster outlives the registration', () => {
     const reg = only();
     const head = pushedCommit(reg);
     const branch = `lobstah/soak-${reg.trapId}`;
-    const stow = lobstah(reg.worktree, 'stow', '--session', SESSION);
+    const stow = lobstah(reg.worktree, 'stow', '--session', SESSION, '--remove');
     expect(stow.status, stow.stderr).toBe(0);
     expect(stow.stdout).toMatch(/^worktree: removed$/m);
     expect(stow.stdout).toContain(`branchDeleted: ${branch}`);
@@ -236,7 +236,7 @@ describe('man throw --plan', () => {
       return listTraps().find((t) => t.name === 'blue-heron')!;
     })();
     const head = pushedCommit(reg2);
-    expect(lobstah(reg2.worktree, 'stow', '--session', OTHER).status).toBe(0);
+    expect(lobstah(reg2.worktree, 'stow', '--session', OTHER, '--remove').status).toBe(0);
     expect(fs.existsSync(reg2.worktree)).toBe(false);
     rows = plan('blue-heron');
     expect(rows[0]).toMatchObject({ action: 'cold', checkout: 'recreate', revision: head });
@@ -260,14 +260,17 @@ describe('man throw --plan', () => {
     expect(listTraps().map((t) => t.name)).toEqual(['amber-gull']);
   });
 
-  processTest('batches need --plan, and the TOON output names the plan read-only', () => {
+  processTest('--dry-run (or --plan) names the plan a dry run; a batch of only live traps skips them all', () => {
     expect(soak(primary).status).toBe(0);
-    const bare = lobstah(primary, 'man', 'throw', '--all');
-    expect(bare.status).toBe(2);
-    expect(bare.stdout + bare.stderr).toContain('--all and --repo work only with --plan');
+    // Only a live trap: the batch skips it, so no terminal can open.
+    const batch = lobstah(primary, 'man', 'throw', '--all');
+    expect(batch.status, batch.stderr).toBe(0);
+    expect(batch.stdout).toMatch(/^throw\[1\]\{trap,result,seconds,why\}:$/m);
+    expect(batch.stdout).toMatch(/,skipped,,live: session/);
+    expect(lobstah(primary, 'man', 'throw', '--dry-run', '--all').stdout).toContain('plan: dry run — launches nothing');
     const res = lobstah(primary, 'man', 'throw', '--plan', '--all');
     expect(res.status, res.stderr).toBe(0);
-    expect(res.stdout).toContain('plan: read-only — launches nothing');
+    expect(res.stdout).toContain('plan: dry run — launches nothing');
     expect(res.stdout).toMatch(/^throw\[1\]\{trap,repo,action,harness,model,config,terminal,checkout,revision,held,why\}:$/m);
   });
 });

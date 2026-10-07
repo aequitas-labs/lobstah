@@ -37,6 +37,8 @@ export interface TrapReservation {
    * this worktree (kept or recreated) instead of a new one.
    */
   worktree?: string;
+  /** The batch throw this reservation belongs to. */
+  batch?: string;
 }
 
 /** `<trapId>-<32 hex>`: the id prefix finds the reservation, the rest proves it. */
@@ -142,6 +144,7 @@ export function reserveTrap(opts: {
   by?: string;
   request?: string;
   returning?: { trapId: string; worktree: string };
+  batch?: string;
   now?: number;
 }): { reservation: TrapReservation; ticket: string } {
   const now = opts.now ?? Date.now();
@@ -190,6 +193,7 @@ export function reserveTrap(opts: {
     ...(opts.by ? { by: opts.by } : {}),
     ...(opts.request ? { request: opts.request } : {}),
     ...(opts.returning ? { worktree: opts.returning.worktree } : {}),
+    ...(opts.batch ? { batch: opts.batch } : {}),
   };
   writeReservation(reservation);
   fs.writeFileSync(ticketPath(trapId), ticket, { mode: 0o600 });
