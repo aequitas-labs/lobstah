@@ -4,6 +4,7 @@ import type { Notice } from './notices.js';
 import type { PrBadge, PrEvidence } from './pr.js';
 import type { TrapRegistration } from './soak.js';
 import type { Attachment, Evidence, Lane, StatusEntry, Verb } from './types.js';
+import type { WorkerMetadata } from './worker-metadata.js';
 import type { WaitingView } from './status.js';
 import type { Watch } from './watch.js';
 import type { ActivityView } from './activity.js';
@@ -166,6 +167,7 @@ export interface GlassEvidenceSummary {
  * (`/data/dispatch/<id>`), which the page fetches when its modal opens.
  */
 export interface GlassDispatchSummary {
+  worker?: WorkerMetadata;
   id: string;
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';

@@ -7,6 +7,7 @@ import { html } from '../html.js';
 import { reportByline } from './report.js';
 import {
   Age,
+  WorkerDetails,
   addrCell,
   attachmentRows,
   cmdRow,
@@ -115,7 +116,8 @@ function helmModal(h: GlassHelm) {
   const stale = Date.now() - Date.parse(h.heartbeatAt) > 1800000;
   return [
     close,
-    html`<h3>⛵ ${h.man}</h3><div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.harness ?? '?'} · ${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
+    html`<h3>⛵ ${h.man}</h3><div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
+    html`<${WorkerDetails} worker=${h} />`,
     h.sessionId && [html`<div class="sec">open this session</div>`, cmdRow(resumeCmd(h.harness, h.sessionId))],
     h.transcript && [html`<div class="sec">transcript</div>`, cmdRow(h.transcript)],
   ];
@@ -144,6 +146,7 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
     html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
     html`<div class="sub">${x.repo} · ${x.lane} ${x.bucket} · ${Age(x.verbAt)}${x.for && [' · ', addrCell(x)]} ${prCell(x)}</div>`,
     session,
+    x.worker && html`<${WorkerDetails} worker=${x.worker} headless=${!x.claimedBy?.startsWith('wt:')} />`,
     x.worktree && [
       html`<div class="sec">worktree${x.worktreeOf ? ' (reused from ' + x.worktreeOf.slice(0, 8) + ')' : ''}</div>`,
       cmdRow(x.worktree),
@@ -219,7 +222,8 @@ function trapModal(t: GlassTrap) {
     : html`<div class="empty">none yet</div>`;
   return [
     close,
-    html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : (t.harness ?? 'signed off')}</span></h3>`,
+    html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'}</span></h3>`,
+    html`<${WorkerDetails} worker=${t} />`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
     html`<div class="sec">window</div>`,

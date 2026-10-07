@@ -1,4 +1,5 @@
 import type { PrEvidence } from './pr.js';
+import type { WorkerMetadata } from './worker-metadata.js';
 import type { PushRecord } from './pushes.js';
 export const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed'] as const;
 export type Verb = (typeof VERBS)[number];
@@ -83,6 +84,8 @@ export interface StatusEntry {
 }
 
 export interface Evidence {
+  /** Actual headless launch options, refreshed on each attempt. */
+  worker?: WorkerMetadata;
   sessionId?: string;
   /** The harness that owns `sessionId` — stamped on first run (the adapter's
    * for a headless run, the trap's for a trap-claimed catch). A resume only

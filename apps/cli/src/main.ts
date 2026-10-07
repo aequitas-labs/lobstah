@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  workerLabel,
   acknowledge,
   isParked,
   isVerb,
@@ -1852,6 +1853,7 @@ async function mainCli(): Promise<void> {
         toonKV({
           helm: grounds.name,
           man: helmLabel(res.ok),
+          worker: workerLabel(res.ok),
           session: sessionId,
           ...(res.ok.tookFrom
             ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` }
@@ -2568,6 +2570,7 @@ async function mainCli(): Promise<void> {
           title: reg.name,
           trap: `wt:${reg.trapId}`,
           label: trapLabel(reg),
+          worker: workerLabel(reg),
           session: sessionId,
           harness: `${reg.harness} (${resolved.source === 'flag' ? '--harness' : resolved.source === 'prior' ? (sameSession ? 'as signed on' : 'as reserved') : resolved.source === 'env' ? 'from the environment' : 'from the session id format'})`,
           ...(harnessChanged ? { harnessChanged: `${harnessChanged} → ${reg.harness} (registration updated)` } : {}),

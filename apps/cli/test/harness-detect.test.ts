@@ -103,7 +103,7 @@ describe('soak — the harness is inferred', () => {
     expect(res.status, res.stdout).toBe(0);
     expect(res.stdout).toContain('harness: codex (from the session id format)');
     expect(trap().harness).toBe('codex');
-    expect(listNotices(10).find((n) => n.kind === 'trap-signed-on')?.text).toContain('(codex, ');
+    expect(listNotices(10).find((n) => n.kind === 'trap-signed-on')?.text).toContain('(codex · unknown model, ');
   });
 
   it('the same with a v4 id registers claude', () => {

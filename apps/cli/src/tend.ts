@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
+  workerLabel,
   activeIds,
   questionHeld,
   waitingText,
@@ -157,6 +158,7 @@ export interface TendRepairWaiting {
 }
 
 export interface TendTrap {
+  worker?: string;
   trap: string;
   name?: string;
   label: string;
@@ -528,7 +530,7 @@ export interface TendReport {
   /** Addressed bait waiting for its trap — sticky, never the daemon's. */
   awaiting: TendAwaiting[];
   notices: TendNotice[];
-  helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number }>;
+  helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number; worker?: string }>;
   merge?: MergeView;
   stacks: GlassStack[];
   /** Dispatches parked on `paused`, oldest first: what each waits on, and for how long. They hold no slot. */
@@ -900,6 +902,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       name: r.name,
       label: trapLabel(r),
       session: r.sessionId.slice(0, 8),
+      worker: workerLabel(r),
       repo: r.repo ?? '(addressed only)',
       worktree: r.worktree,
       claimed: r.claimed,
@@ -931,6 +934,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     grounds: h.grounds,
     man: helmLabel(h),
     session: h.sessionId.slice(0, 8),
+    worker: workerLabel(h),
     heartbeatAgeSecs: Math.max(0, Math.round((now - (Date.parse(h.heartbeatAt) || 0)) / 1000)),
   }));
 
@@ -1110,12 +1114,13 @@ export function renderTend(r: TendReport): string {
           name: s.name ?? '',
           trap: s.trap,
           session: s.session,
+          worker: s.worker ?? '',
           repo: s.repo,
           claimed: s.claimed ? s.claimed.slice(0, 8) : '',
           listening: s.listening,
           worktree: s.worktree,
         })),
-        ['name', 'trap', 'session', 'repo', 'claimed', 'listening', 'worktree'],
+        ['name', 'trap', 'session', 'worker', 'repo', 'claimed', 'listening', 'worktree'],
       ),
     );
   }
@@ -1143,7 +1148,7 @@ export function renderTend(r: TendReport): string {
     lines.push('');
     lines.push(
       toonKV({
-        helm: r.helms.map((h) => `${h.grounds}=${h.man} [${h.session}] (${h.heartbeatAgeSecs}s ago)`).join(', '),
+        helm: r.helms.map((h) => `${h.grounds}=${h.man} [${h.session}] ${h.worker ?? ''} (${h.heartbeatAgeSecs}s ago)`).join(', '),
       }),
     );
   }

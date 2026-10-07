@@ -307,6 +307,40 @@ tr.rowhead:hover {
 .card:hover {
   border-color: var(--line-hover);
 }
+.worker-harness {
+  cursor: help;
+}
+.worker-harness:focus-visible {
+  outline: 2px solid var(--ok);
+  outline-offset: 3px;
+}
+.worker-tooltip {
+  position: fixed;
+  z-index: 20;
+  max-width: 264px;
+  padding: 6px 9px;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--line-hover);
+  border-radius: var(--badge-radius);
+  box-shadow: 0 3px 12px var(--scrim);
+  font-size: 12px;
+  white-space: normal;
+  pointer-events: none;
+}
+.worker-details dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  font-size: 12px;
+}
+.worker-details dt {
+  color: var(--dim);
+}
+.worker-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .card .top {
   display: flex;
   justify-content: space-between;

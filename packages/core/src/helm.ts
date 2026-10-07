@@ -9,6 +9,9 @@ import { listWatches } from './watch.js';
 import { readRequest } from './requests.js';
 import { cancelRequested } from './queue.js';
 import { listTraps, unreportedTrapBait } from './soak.js';
+import { sessionWorker } from './session-workers.js';
+import { workerMetadata } from './worker-metadata.js';
+import type { WorkerConfig, WorkerMetadata } from './worker-metadata.js';
 
 const isOpenRequest = (id: string): boolean => {
   const r = readRequest(id);
@@ -30,6 +33,9 @@ export interface HelmRegistration {
   heartbeatAt: string;
   /** Who the man is, captured at sign-on: harness, working directory, host. */
   harness?: string;
+  model?: string | null;
+  config?: WorkerConfig;
+  observedAt?: string;
   cwd?: string;
   host?: string;
   /** Human-friendly name; helmLabel() derives one when absent. */
@@ -201,6 +207,9 @@ export function takeHelm(opts: {
     // Identity refreshes on every sign-on; a re-sign without one keeps what
     // the registration already knows.
     harness: opts.identity?.harness ?? (same ? existing.harness : undefined),
+    model: sessionWorker(opts.sessionId, opts.identity?.harness ?? (same ? existing.harness : undefined)).model,
+    config: sessionWorker(opts.sessionId).config,
+    observedAt: sessionWorker(opts.sessionId).observedAt,
     cwd: opts.identity?.cwd ?? (same ? existing.cwd : undefined),
     host: opts.identity?.host ?? (same ? existing.host : undefined),
     label: opts.identity?.label ?? (same ? existing.label : undefined),
@@ -212,6 +221,14 @@ export function takeHelm(opts: {
   };
   atomicWrite(helmPath(opts.grounds.name), JSON.stringify(reg, null, 2));
   return { ok: reg };
+}
+
+export function updateHelmWorker(session: string, observation: WorkerMetadata): void {
+  for (const reg of listHelms().filter((h) => h.sessionId === session)) {
+    const next = workerMetadata({ ...observation, harness: reg.harness ?? observation.harness });
+    if (reg.model === next.model && reg.observedAt === next.observedAt && reg.harness === next.harness && JSON.stringify(reg.config) === JSON.stringify(next.config)) continue;
+    atomicWrite(helmPath(reg.grounds), JSON.stringify({ ...reg, harness: next.harness ?? undefined, model: next.model, config: next.config, observedAt: next.observedAt }, null, 2));
+  }
 }
 
 /** The helm's wake floor in epoch ms; 0 when it has none. */

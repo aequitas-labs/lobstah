@@ -3,6 +3,7 @@ import type { SectionInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import {
   ActivityLine,
+  WorkerIndicator,
   Age,
   NamedText,
   ShowOlder,
@@ -45,12 +46,12 @@ export function chainRows(list: GlassDispatch[], chain: boolean | undefined): Gl
 
 function row(x: GlassDispatch, chain: boolean | undefined) {
   const key = x.lane + ':' + x.id;
-  return html`<tr key=${key} class="rowhead" onClick=${opener('dispatch', key)}><td>${chain && x.followUp && html`<span class="dim">↳ </span>`}${x.id.slice(0, 8)}</td><td>${x.lane} / ${x.bucket}</td><td>${x.repo}</td><td class=${'v-' + x.verb}>${x.verb}</td><td class="grow">${NamedText(x.note ?? '', 90)}${WaitingLine(x)}${ActivityLine(x)}</td><td>${Age(x.verbAt)}</td><td>${addrCell(x)}</td><td>${prCell(x)}</td></tr>`;
+  return html`<tr key=${key} class="rowhead" onClick=${opener('dispatch', key)}><td>${chain && x.followUp && html`<span class="dim">↳ </span>`}${x.id.slice(0, 8)}</td><td>${x.lane} / ${x.bucket}</td><td>${x.repo}</td><td class=${'v-' + x.verb}>${x.verb}</td><td class="grow">${NamedText(x.note ?? '', 90)}${WaitingLine(x)}${WorkerIndicator(x)}${ActivityLine(x)}</td><td>${Age(x.verbAt)}</td><td>${addrCell(x)}</td><td>${prCell(x)}</td></tr>`;
 }
 
 function card(x: GlassDispatch) {
   const key = x.lane + ':' + x.id;
-  return html`<div key=${key} class="card" onClick=${opener('dispatch', key)}><div class="top"><b>${x.id.slice(0, 8)}</b><span class=${'badge v-' + x.verb + badgeLong(x.verb)} title=${badgeTitle(x.verb)}>${x.verb}</span></div><div class="meta" title=${`${x.repo} · ${x.lane} ${x.bucket}`}>${x.repo} · ${x.lane} ${x.bucket}${x.verbAt && [' · ', Age(x.verbAt)]}</div>${x.note && html`<div class="note" title=${namedText(x.note)}>${NamedText(x.note)}</div>`}${WaitingLine(x)}${ActivityLine(x)}<div class="foot">${addrCell(x)} ${prCell(x)}</div></div>`;
+  return html`<div key=${key} class="card" onClick=${opener('dispatch', key)}><div class="top"><b>${x.id.slice(0, 8)}</b>${WorkerIndicator(x)}<span class=${'badge v-' + x.verb + badgeLong(x.verb)} title=${badgeTitle(x.verb)}>${x.verb}</span></div><div class="meta" title=${`${x.repo} · ${x.lane} ${x.bucket}`}>${x.repo} · ${x.lane} ${x.bucket}${x.verbAt && [' · ', Age(x.verbAt)]}</div>${x.note && html`<div class="note" title=${namedText(x.note)}>${NamedText(x.note)}</div>`}${WaitingLine(x)}${ActivityLine(x)}<div class="foot">${addrCell(x)} ${prCell(x)}</div></div>`;
 }
 
 export function Dispatches({ inp, more }: { inp: SectionInputs['dispatches']; more?: OlderControl }) {

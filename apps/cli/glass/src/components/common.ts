@@ -7,6 +7,8 @@ import { copyText, loadOlder, openLightbox, openTrapWindow, requestTrap, showMod
 import { getState } from '../store.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
+import { workerMetadata } from '../../../../../packages/core/src/worker-metadata.js';
+import type { WorkerMetadata, WorkerConfig } from '@lobstah/core';
 
 /** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
 
@@ -21,6 +23,42 @@ export const ageText = (iso: string | undefined | null): string => {
 
 /** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
 export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
+
+type WorkerInfo = { harness?: string | null; model?: string | null; config?: WorkerConfig; observedAt?: string };
+
+/** Only the existing harness indicator at rest; model/effort on hover or focus. */
+export function Harness({ worker, label, cls = 'badge' }: { worker: WorkerInfo; label?: Children; cls?: string }) {
+  const w = workerMetadata(worker);
+  const text = [w.model ?? 'model unknown', w.config.effort].filter(Boolean).join(' · ');
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const show = (e: Event) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 280)), top: r.bottom + 6 });
+  };
+  return html`<span class=${cls + ' worker-harness'} tabindex="0" aria-label=${text}
+    onMouseEnter=${show} onFocus=${show} onBlur=${() => setPos(null)}
+    onMouseLeave=${(e: Event) => {
+      if (document.activeElement !== e.currentTarget) setPos(null);
+    }}
+    onKeyDown=${(e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPos(null);
+    }}>
+    ${label ?? w.harness ?? 'unknown harness'}${pos && !getState().modal && html`<span class="worker-tooltip" role="tooltip" aria-hidden="true" style=${pos}>${text}</span>`}
+  </span>`;
+}
+export const WorkerIndicator = (x: Pick<GlassDispatchSummary, 'worker'>) => x.worker && html`<${Harness} worker=${x.worker} />`;
+
+/** One details section in the modal, including headless launch observations. */
+export function WorkerDetails({ worker, headless = false }: { worker: WorkerInfo | WorkerMetadata; headless?: boolean }) {
+  const w = workerMetadata(worker);
+  return html`<section class="worker-details"><div class="sec">${headless ? 'headless worker · launch / observation' : 'worker observation'}</div><dl>
+    <dt>harness</dt><dd>${w.harness ?? 'unknown'}</dd>
+    <dt>model</dt><dd>${w.model ?? 'model unknown'}</dd>
+    <dt>effort</dt><dd>${w.config.effort ?? 'unknown'}</dd>
+    <dt>permission mode</dt><dd>${w.config.permissionMode ?? 'unknown'}</dd>
+    <dt>observed</dt><dd>${w.observedAt ?? 'unknown'}</dd>
+  </dl></section>`;
+}
 
 /** The activity line under a dispatch's verb and note: what it is doing now, and how long ago. Stale shows dim. */
 export const ActivityLine = (x: Pick<GlassDispatchSummary, 'activity'>) =>
@@ -230,6 +268,13 @@ export function detailBody(x: GlassDispatchSummary | GlassDispatch, detail?: Dis
     .join('\n');
   const head = html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}${progress && [html`<div class="sec">progress</div>`, html`<pre>${progress}</pre>`]}`;
   // The brief, log, inbox, and evidence come with the detail, fetched when the modal opens.
+  // Worker fields have a single labeled section above; don't repeat them in
+  // the raw evidence dump. Leave all other evidence intact.
+  const evidence: Record<string, unknown> | undefined = x.evidence && { ...x.evidence };
+  if (evidence?.worker) {
+    delete evidence.worker;
+    delete evidence.harness;
+  }
   if (!hasDetail(x))
     return html`${head}<div class="sec">brief</div><div class=${detail?.error ? 'bad' : 'dim'}>${detail?.error ?? 'loading…'}</div>${
       x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${x.followUp}</pre>`]
@@ -251,7 +296,7 @@ export function detailBody(x: GlassDispatchSummary | GlassDispatch, detail?: Dis
       html`<div class="sec">awaiting reply</div>`,
       html`<div>${x.awaitingReply.line} · from ${x.awaitingReply.from} · ${Age(x.awaitingReply.sentAt)} ago</div>`,
     ]
-  }${x.evidence && [html`<div class="sec">evidence</div>`, html`<div class="loglines">${JSON.stringify(x.evidence)}</div>`]}`;
+  }${evidence && [html`<div class="sec">evidence</div>`, html`<div class="loglines">${JSON.stringify(evidence)}</div>`]}`;
 }
 
 export function addrCell(x: GlassDispatchSummary) {

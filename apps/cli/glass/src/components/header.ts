@@ -3,7 +3,7 @@ import { GLASS_TABS } from '../../../src/glass-diff.js';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../../src/glass-diff.js';
 import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
-import { Age, opener } from './common.js';
+import { Age, Harness, opener } from './common.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -37,7 +37,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
-        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <b>${h.man}</b> <span class="dim">helm ${h.grounds}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
+        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
     ),
   ];
 }

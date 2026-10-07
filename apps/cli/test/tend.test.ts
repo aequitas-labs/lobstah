@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { addWatch, appendStatus, claimNext, enqueue, ensureLayout, executorPath, holdWatch, laneDirs } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { observeSessionWorker, signOnTrap, takeHelm } from '@lobstah/core';
 
 let home: string;
 beforeEach(() => {
@@ -22,6 +23,16 @@ function heartbeat(agoMs = 0): void {
 }
 
 describe('man tend — the fleet verdict', () => {
+  it('lists local metadata for traps and the helm without telemetry enabled', () => {
+    observeSessionWorker({ session_id: 's', model: 'local-model', permission_mode: 'plan' }, 'codex');
+    const wt = path.join(home, 'wt'); fs.mkdirSync(wt);
+    signOnTrap({ sessionId: 's', harness: 'codex', worktree: wt, cwd: wt, ttlMs: 60_000 });
+    takeHelm({ sessionId: 's', grounds: { name: 'fleet', repos: [] }, ttlMs: 60_000, identity: { harness: 'codex' } });
+    const r = buildTendReport();
+    expect(r.traps[0]?.worker).toBe('codex · local-model · plan');
+    expect(r.helms[0]?.worker).toBe('codex · local-model · plan');
+    expect(renderTend(r)).toContain('codex · local-model · plan');
+  });
   it('labels a budget stop as out of time with work saved, not a generic failure', () => {
     heartbeat();
     enqueue({ id: 'budget-stop', repo: 'r', brief: 'b' });

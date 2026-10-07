@@ -1,10 +1,11 @@
-import type { GlassPr, GlassStack } from '@lobstah/core';
+import type { GlassPr, GlassStack, WorkerMetadata } from '@lobstah/core';
 import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, catchCount, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 import {
   Age,
+  Harness,
   NamedText,
   WorkerAddress,
   namedText,
@@ -35,7 +36,8 @@ import type { DecisionDraft } from '../store.js';
 interface DeckItem {
   key: string;
   title: Children;
-  badge?: { text: string; tone?: string };
+  badge?: { text: string; tone?: string; worker?: Partial<WorkerMetadata> };
+  worker?: WorkerMetadata;
   meta?: Children;
   /** The meta line as text: a card clamps it to two lines and shows the rest on hover. */
   metaText?: string;
@@ -54,7 +56,10 @@ type View = GlassPrefs['view'] | undefined;
 function deckItem(it: DeckItem, view: View) {
   const badge =
     it.badge &&
-    html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`;
+    (it.badge.worker
+      ? html`<${Harness} worker=${it.badge.worker} label=${it.badge.text} cls=${'badge ' + (it.badge.tone || 'dim')} />`
+      : html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`);
+  const worker = it.worker && html`<${Harness} worker=${it.worker} />`;
   if (it.href) {
     // A page of its own, in a new tab (a report).
     const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
@@ -63,8 +68,8 @@ function deckItem(it: DeckItem, view: View) {
       : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
   }
   if (view === 'cards')
-    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
-  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
+    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
+  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${worker && [' ', worker]}${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
 }
 
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
@@ -138,6 +143,7 @@ export function Deck({
   const flight = inp.inflight.map((x): DeckItem => ({
     key: x.lane + ':' + x.id,
     title: [x.id.slice(0, 8), ' ', x.repo || ''],
+    worker: x.worker,
     badge: { text: x.verb, tone: x.verb === 'needs-decision' || x.verb === 'blocked' ? 'bad' : 'dim' },
     // No time at all (no log, no queue time): drop the fragment, not render "· ago".
     meta: [
@@ -169,7 +175,7 @@ export function Deck({
       ? { text: 'requested', tone: 'dim' }
       : t.starting
         ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
-        : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim' },
+        : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim', worker: t.live ? t : undefined },
     meta: [t.repo || '', ' · ', html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`, ' · ', trapNow(t)],
     metaText: `${t.repo || ''} · 🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
     action: windowAction(t),
