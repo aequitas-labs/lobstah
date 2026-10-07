@@ -15,7 +15,8 @@ import { attachmentBlock } from './attachments.js';
 import { toolSummary, toolTarget, writeActivity } from './activity.js';
 import { knownTrapNames, reserveTrapName, trapIdForName, trapNameForId } from './trap-names.js';
 import { laneOf } from './worktrees.js';
-import { removeGhostWorktree } from './worktree-safety.js';
+import { protectTrapRevision, removeGhostWorktree } from './worktree-safety.js';
+import { readRoster, recordRosterDeparture, recordRosterSignOn } from './roster.js';
 import { readReservation } from './trap-start.js';
 import { DEFAULT_SOAK } from './config.js';
 import { sessionWorker } from './session-workers.js';
@@ -305,7 +306,8 @@ export function signOnTrap(opts: {
     if (fresh) return { held: prior };
   }
   const anchor = readTrapAnchor(opts.worktree)!;
-  const name = reserveTrapName(trapId, opts.name ?? prior?.name ?? anchor.name);
+  // The roster holds the trap's canonical name: a returning trap keeps it.
+  const name = reserveTrapName(trapId, opts.name ?? prior?.name ?? readRoster(trapId)?.name ?? anchor.name);
   if (anchor.name !== name) writeTrapAnchor(opts.worktree, { ...anchor, name });
   const iso = new Date(now).toISOString();
   const sameSession = prior?.sessionId === opts.sessionId;
@@ -336,6 +338,7 @@ export function signOnTrap(opts: {
     ...(sameSession && prior.titlePending ? { titlePending: prior.titlePending } : {}),
   };
   atomicWrite(regPath(trapId), JSON.stringify(reg, null, 2));
+  recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: protectTrapRevision(opts.worktree, trapId, now), now });
   // Back within the grace: held messages deliver at the next park.
   releaseSignedOff(trapId);
   if (!prior) {
@@ -412,6 +415,10 @@ export function recentlySignedOff(trapId: string, graceMs: number, now = Date.no
 export function stowTrap(trapId: string, reason = 'signed off', by?: string): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
+  // The roster keeps the trap, and a protected ref its revision, before the
+  // registration goes and stow may remove the checkout.
+  const revision = fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, trapId) : undefined;
+  recordRosterDeparture(reg, 'stowed', reason, { revision });
   fs.mkdirSync(signedOffDir(), { recursive: true });
   atomicWrite(signedOffPath(trapId), JSON.stringify({ trapId, name: reg.name, worktree: reg.worktree, at: new Date().toISOString() } satisfies SignedOff));
   fs.rmSync(regPath(trapId), { force: true });
@@ -732,6 +739,8 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     }
     const released = releaseCatch(reg);
     const removal = reg.createdWorktree && fs.existsSync(reg.worktree) ? removeGhostWorktree(reg.worktree) : undefined;
+    const revision = removal?.revision ?? (fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, reg.trapId, now) : undefined);
+    recordRosterDeparture(reg, 'ghosted', pauseExpired ? 'ghosted: its pause expired' : 'ghosted: went quiet mid-watch', { revision, now });
     const catchNote = released.requeued ? ', catch requeued' : released.finalized ? ', catch finalized' : '';
     const worktreeNote = removal
       ? `; worktree ${removal.removed ? 'removed' : 'kept'}: ${reg.worktree}; branch ${removal.branch}; modified files ${removal.modifiedFiles ?? 'unknown'}; unpushed commits ${removal.unpushedCommits ?? 'unknown'}${removal.reason ? ` (${removal.reason})` : ''}`

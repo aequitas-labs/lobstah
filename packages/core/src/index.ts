@@ -39,6 +39,8 @@ export * from './models.js';
 export * from './disk.js';
 export * from './worktrees.js';
 export * from './worktree-safety.js';
+export * from './roster.js';
+export * from './throw-plan.js';
 export * from './activity.js';
 export * from './slots.js';
 export * from './worker-metadata.js';

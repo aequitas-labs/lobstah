@@ -1157,6 +1157,55 @@ redeemed or withdrawn. The glass sends it only to a page on this machine's
 own glass address, only on the starting card, and no notice or log carries
 it.
 
+### The roster, and what a throw would do
+
+Every trap that signs on gets a **roster** record
+(`~/.lobstah/roster/<trapId>.json`). A registration lasts while a session
+mans the trap, and the signed-off hold lasts for the mail grace. The roster
+record stays through stow, the end of the grace, a ghost sweep, and `cull`.
+It keeps the trap's name, repo, worktree, branch and HEAD, harness, session,
+the registration's model and config, and why the trap left. Its name is the
+trap's name: a trap that signs on again in its worktree keeps it, from any
+session.
+
+Before stow, a ghost sweep, or `cull` removes a trap's checkout, lobstah
+writes the checkout's HEAD to the **protected ref**
+`refs/lobstah/traps/<trapId>` in the repository. It is not a branch:
+removing the worktree or deleting its branch leaves the ref and its commit in
+place.
+
+```bash
+lobstah man roster                                  # every trap the roster keeps
+lobstah man roster set <trap> --harness codex --model <m> --terminal iterm --config effort=high
+                                                    # save how a throw starts it; `default` or `key=` clears
+lobstah man throw --plan <trap>...                  # what a throw would do for these traps
+lobstah man throw --plan --all                      # ... for every eligible trap in your grounds
+lobstah man throw --plan --repo <key>               # ... for one repo's traps
+```
+
+`man throw --plan` launches nothing and writes nothing. Each row says what a
+throw would do and why:
+
+- `resume`: the harness reopens the saved session (`claude --resume`, `codex
+  resume`) in the trap's checkout.
+- `cold`: a new session under the same name, id, and checkout. The reason is
+  one of: no saved history for the session, a session that ran in an app (the
+  Claude desktop app's Code tab, the VS Code extension, the Codex app), or a
+  saved profile whose harness is not the one that wrote the session.
+- `skip`: the trap is live, starting (reserved), or forgotten.
+- `unresolved`: a throw would refuse. The repo is no longer configured or now
+  points at another repository, the record is incomplete, the checkout is
+  gone and no protected ref keeps its revision, or the path now anchors
+  another trap. A trap stowed before the roster existed is listed here until
+  a session soaks in its worktree once.
+
+`checkout` is `kept` (the checkout is adopted as it is) or `recreate` (it is
+added back at the protected revision). The harness, model, config, and
+terminal come from the saved profile, else from the trap's last sign-on. The
+terminal is the profile's, else `[soak].terminal`, else the app the trap last
+signed on from, else Terminal.app. `--all` and `--repo` stay inside the
+grounds: `--grounds`, else the caller's helm grounds, else every repo.
+
 ### The sign-on title
 
 Sign-on asks the session to apply a title: `lobstah soak` prints

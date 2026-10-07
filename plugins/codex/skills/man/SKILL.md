@@ -54,6 +54,9 @@ lobstah dispatch --repo <key> --follow-up <id> --brief-text "<instruction>" --fo
 lobstah status <id>                               # reconciled state + last note
 lobstah catch <id>                                # evidence: branch, commits, PR
 lobstah cancel <id>                               # cut one away
+lobstah man throw --plan --all | <trap>...         # what a throw would do per stowed trap:
+                                                  # resume, cold (and why), skip, unresolved
+lobstah man roster [set <trap> --model <m> ...]   # every trap kept; save how a throw starts it
 lobstah man tend                                  # whole fleet: verdict, questions,
                                                   # chains, PRs, live traps
 lobstah man report                                # the delta since your last report

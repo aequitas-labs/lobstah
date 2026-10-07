@@ -55,6 +55,15 @@ import {
   releaseCatch,
   signOnTrap,
   stowTrap,
+  protectTrapRevision,
+  recordRosterRevision,
+  planThrow,
+  throwTerminalText,
+  listRoster,
+  rosterByAddress,
+  setRosterProfile,
+  isTerminalApp,
+  terminalAppName,
   trapBySession,
   trapIdAbove,
   askTrapTitle,
@@ -468,6 +477,19 @@ function callerSession(flag: string | undefined, withStdin = false): ResolvedSes
 }
 
 /** The strict helm rule, with the caller's discovered identity in the refusal. */
+/** A roster profile as `harness=codex model=… terminal=iTerm2 effort=high`. */
+function profileText(profile: ReturnType<typeof listRoster>[number]['profile']): string {
+  if (!profile) return '';
+  return [
+    profile.harness ? `harness=${profile.harness}` : '',
+    profile.model ? `model=${profile.model}` : '',
+    profile.terminal ? `terminal=${terminalAppName(profile.terminal)}` : '',
+    ...Object.entries(profile.config ?? {}).map(([k, v]) => `${k}=${v}`),
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 function gateHelm(who: ResolvedSession | undefined, grounds?: string): void {
   const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), who?.id, grounds);
   if (refusal) throw new Error(explainRefusal(refusal, who));
@@ -1796,6 +1818,120 @@ async function mainCli(): Promise<void> {
       console.log(has('--json') ? JSON.stringify(report, null, 2) : renderTend(report));
       break;
     }
+    case 'man:throw': {
+      // PR 1 of trap pools: the plan only. A throw that launches is not built yet.
+      if (!has('--plan')) {
+        throw new UsageError(`man throw launches nothing yet — pass --plan to see what a throw would do\n\n${usageFor('man:throw')!}`);
+      }
+      const all = has('--all');
+      const repo = opt('--repo');
+      if (pos.length === 0 && !all && repo === undefined) {
+        throw new UsageError(`man throw --plan needs trap names, --all, or --repo <key>\n\n${usageFor('man:throw')!}`);
+      }
+      if (pos.length > 0 && (all || repo !== undefined)) {
+        throw new UsageError(`name traps, or select with --all / --repo, not both\n\n${usageFor('man:throw')!}`);
+      }
+      const cfg = loadConfig();
+      if (repo !== undefined && !cfg.repos[repo]) {
+        throw new Error(`no repo "${repo}" is configured (configured: ${Object.keys(cfg.repos).join(', ') || 'none'})`);
+      }
+      // --all and --repo stay inside a grounds: --grounds, else the caller's helm grounds, else every repo.
+      const caller = callerSession(opt('--session'));
+      const groundsName = opt('--grounds') ?? (caller?.id !== undefined ? helmOf(caller.id)?.grounds : undefined);
+      const grounds = groundsName !== undefined ? resolveGrounds(cfg, groundsName) : undefined;
+      const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos });
+      if (has('--json')) {
+        console.log(JSON.stringify({ plan: 'read-only', grounds: grounds?.name ?? 'all', traps: rows }, null, 2));
+        break;
+      }
+      const count = (action: string) => rows.filter((r) => r.action === action).length;
+      console.log(
+        toonKV({
+          plan: 'read-only — launches nothing',
+          grounds: grounds ? `${grounds.name} (${grounds.repos.join(', ') || 'no repos'})` : 'all repos',
+          resume: count('resume'),
+          cold: count('cold'),
+          skip: count('skip'),
+          unresolved: count('unresolved'),
+        }),
+      );
+      console.log(
+        toonTable(
+          'throw',
+          rows.map((r) => ({
+            trap: trapLabel({ trapId: r.trapId, name: r.name }),
+            repo: r.repo ?? '',
+            action: r.action,
+            harness: r.harness ? `${r.harness} (${r.harnessFrom})` : '',
+            model: r.model ?? '',
+            config: Object.entries(r.config ?? {}).map(([k, v]) => `${k}=${v}`).join(' '),
+            terminal: throwTerminalText(r) ?? '',
+            checkout: r.checkout ?? '',
+            revision: r.revision ? `${r.revision.slice(0, 12)}${r.branch ? ` (${r.branch})` : ''}` : '',
+            held: r.held ?? '',
+            why: r.why,
+          })),
+          ['trap', 'repo', 'action', 'harness', 'model', 'config', 'terminal', 'checkout', 'revision', 'held', 'why'],
+        ),
+      );
+      console.log(
+        toonHelp([
+          'lobstah man roster   (every trap the roster keeps, with its saved profile)',
+          'lobstah man roster set <trap> --harness|--model|--terminal|--config <value>   (save how a throw starts it)',
+        ]),
+      );
+      break;
+    }
+    case 'man:roster': {
+      if (pos[0] === 'set') {
+        const address = pos[1];
+        if (!address) throw new UsageError(`man roster set needs a trap name\n\n${usageFor('man:roster')!}`);
+        // Editing a saved profile is steering: the claimed helm's alone.
+        gateHelm(callerSession(opt('--session')));
+        const entry = rosterByAddress(address);
+        if (!entry) throw new Error(`no roster record for ${address} — a trap joins the roster when it signs on`);
+        const clear = (v: string | undefined) => (v === undefined ? undefined : v === 'default' ? null : v);
+        const harness = clear(opt('--harness'));
+        if (harness && harness !== 'claude' && harness !== 'codex') throw new UsageError('--harness takes claude, codex, or default');
+        const terminal = clear(opt('--terminal'));
+        if (terminal && !isTerminalApp(terminal)) throw new UsageError('--terminal takes terminal, iterm, or default');
+        const config: Record<string, string | null> = {};
+        for (const pair of values('--config')) {
+          const eq = pair.indexOf('=');
+          if (eq <= 0) throw new UsageError(`--config takes key=value (key= clears the key): ${pair}`);
+          config[pair.slice(0, eq)] = pair.slice(eq + 1) || null;
+        }
+        const patch = { harness, model: clear(opt('--model')), terminal: terminal as 'terminal' | 'iterm' | null | undefined, ...(Object.keys(config).length ? { config } : {}) };
+        if (Object.values(patch).every((v) => v === undefined)) {
+          throw new UsageError(`man roster set needs --harness, --model, --terminal, or --config\n\n${usageFor('man:roster')!}`);
+        }
+        const next = setRosterProfile(entry.trapId, patch)!;
+        console.log(toonKV({ trap: trapLabel(next), profile: profileText(next.profile) || '(none: a throw uses what the trap last signed on with)' }));
+        console.log(toonHelp([`lobstah man throw --plan ${next.name}   (see how a throw would start it)`]));
+        break;
+      }
+      const repo = opt('--repo');
+      const entries = listRoster().filter((e) => repo === undefined || e.repo === repo);
+      console.log(
+        toonTable(
+          'roster',
+          entries.map((e) => ({
+            trap: trapLabel(e),
+            repo: e.repo ?? '',
+            state: e.forgottenAt ? 'forgotten' : e.state,
+            harness: e.harness,
+            model: e.model ?? '',
+            session: e.sessionId.slice(0, 8),
+            revision: e.head ? `${e.head.slice(0, 12)}${e.branch ? ` (${e.branch})` : ''}` : '',
+            left: e.leftAt ? `${e.leftAt} (${e.leftReason ?? ''})` : '',
+            profile: profileText(e.profile),
+          })),
+          ['trap', 'repo', 'state', 'harness', 'model', 'session', 'revision', 'left', 'profile'],
+        ),
+      );
+      console.log(toonHelp(['lobstah man throw --plan --all   (what a throw would do for every eligible trap)']));
+      break;
+    }
     case 'man:report': {
       // The delta since the last report, then advance the cursor — the
       // explicit acknowledgment every carrier defers to (man wait's timeout
@@ -2703,6 +2839,8 @@ async function mainCli(): Promise<void> {
         if (keepReason) {
           worktreeOut = { worktree: 'kept', path: wtDir, reason: keepReason };
         } else {
+          // Branch cleanup may follow: keep the revision under the trap's protected ref.
+          recordRosterRevision(trapId, protectTrapRevision(wtDir, trapId));
           const removal = await removeIfSafe(wtDir, {
             ignore: [TRAP_ANCHOR_FILE],
             branches: anchor?.branch ? [anchor.branch] : [],
