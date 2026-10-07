@@ -210,7 +210,7 @@ import { explainRefusal, resolveSessionId, type ResolvedSession } from './sessio
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
-import { armWatcher, awaitWatcher } from './watchers.js';
+import { alreadyArmed, armWatcher, awaitWatcher, sessionWatcher, stopWatcher } from './watchers.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -422,6 +422,10 @@ soaking (interactive sessions volunteering as workers):
   trap reserve --request <id>     reserve what a glass trap request asks for
                                   (repo, harness), and close the request.
   trap requests                   open trap requests from the glass.
+  soak stop-listener [--session <id>]
+                                  end this session's own soak --wait listener
+                                  (SIGTERM to the pid it recorded). Never
+                                  pkill: other sessions run the same command.
   soak title-set [--session <id>] confirm this session applied the title
                                   sign-on printed. Sign-on is complete
                                   after it; until then SessionStart and
@@ -2330,6 +2334,28 @@ async function mainCli(): Promise<void> {
         confirmTitle(opt('--session'));
         break;
       }
+      // End this session's own `soak --wait` listener by the pid its
+      // registration records. Every session on the machine runs the same
+      // command line, so a pattern match (pkill -f) would hit theirs too.
+      if (pos[0] === 'stop-listener') {
+        const here = trapIdAbove(process.cwd());
+        const sid = callerSession(opt('--session'))?.id ?? (here !== undefined ? readTrap(here)?.sessionId : undefined);
+        if (!sid) throw new Error("no session to stop a listener for — pass --session <id>, or run from the trap's worktree");
+        const res = await stopWatcher(sid, 'trap');
+        if (!res) {
+          console.log(toonKV({ session: sid, listener: 'none', note: 'no soak --wait listener is running for this session' }));
+          break;
+        }
+        if (!res.exited) throw new Error(`sent SIGTERM to this session's listener (pid ${res.watcher.pid}), but it is still running after 3s`);
+        console.log(
+          toonKV({
+            session: sid,
+            listener: `stopped (pid ${res.watcher.pid})`,
+            note: 'only this session\'s listener was stopped. Listen again with `lobstah soak --wait --timeout 900` as a background task.',
+          }),
+        );
+        break;
+      }
       if (opt('--link') !== undefined && !validSessionLink(opt('--link'))) {
         throw new UsageError('invalid --link: use a supported claude://, vscode://, or codex:// session URL');
       }
@@ -2476,6 +2502,12 @@ async function mainCli(): Promise<void> {
         );
       }
       const harnessChanged = prior && prior.harness !== resolved.harness ? prior.harness : undefined;
+      // One listener per session: a second `soak --wait` refuses before any
+      // sign-on side effect, naming the live one and how to end it.
+      if (has('--wait')) {
+        const live = sessionWatcher(sessionId);
+        if (live) throw new Error(alreadyArmed(live));
+      }
       // Created last, after every check that can refuse: a refusal leaves
       // nothing behind.
       const made = create
