@@ -240,14 +240,15 @@ export function DecisionModal({
 
 /**
  * The new-decision alert, on every tab: a count of unread decisions, polite
- * to screen readers, never taking focus or closing another modal. A click
- * opens the decision modal at the oldest unread one; × dismisses it until
- * another decision arrives, and marks nothing read. While the decision
- * modal is open, the modal itself carries the count.
+ * to screen readers, never taking focus or closing another modal. Its layer
+ * (`--layer-alert`) sits below every modal and backdrop, so an open modal
+ * covers it and it shows again when the modal closes. A click opens the
+ * decision modal at the oldest unread one; × dismisses it until another
+ * decision arrives, and marks nothing read.
  */
-export function DecisionAlert({ unread, dismissed, modalOpen }: { unread: DecisionCard[]; dismissed: string[]; modalOpen: boolean }) {
+export function DecisionAlert({ unread, dismissed }: { unread: DecisionCard[]; dismissed: string[] }) {
   const fresh = unread.some((c) => !dismissed.includes(c.key));
-  const show = unread.length > 0 && fresh && !modalOpen;
+  const show = unread.length > 0 && fresh;
   const n = unread.length;
   const words = `${n} new decision${n === 1 ? '' : 's'}`;
   return html`<div class="dalert-live" role="status" aria-live="polite">${

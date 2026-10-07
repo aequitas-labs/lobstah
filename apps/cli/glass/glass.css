@@ -64,6 +64,10 @@
   /* modal */
   --modal-radius: 10px;
   --modal-width: 780px;
+  /* stacking: every modal's layer, the decision modal above it, and the new-decision alert always below both */
+  --layer-modal: 10;
+  --layer-decision-modal: 15;
+  --layer-alert: calc(var(--layer-modal) - 1);
   /* an unread decision: a red-ish tint mixed from the palette, so it follows the theme */
   --unread-bg: color-mix(in srgb, var(--bad) 16%, var(--card));
 }
@@ -576,7 +580,7 @@ a {
   inset: 0;
   background: var(--scrim);
   display: none;
-  z-index: 10;
+  z-index: var(--layer-modal);
   padding: 28px 16px;
   overflow: auto;
 }
@@ -925,7 +929,7 @@ a.lob {
   position: fixed;
   inset: 0;
   background: var(--scrim);
-  z-index: 15;
+  z-index: var(--layer-decision-modal);
   padding: 28px 16px;
   overflow: auto;
 }
@@ -973,12 +977,12 @@ a.lob {
   font-size: 15px;
   margin-bottom: var(--space-2);
 }
-/* The new-decision alert: a corner toast on every tab, never taking focus. */
+/* The new-decision alert: a corner toast on every tab, never taking focus, always below any open modal and its backdrop. */
 .dalert-live {
   position: fixed;
   right: var(--space-4);
   bottom: var(--space-4);
-  z-index: 16;
+  z-index: var(--layer-alert);
 }
 .dalert {
   display: flex;

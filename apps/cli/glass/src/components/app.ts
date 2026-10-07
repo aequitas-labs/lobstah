@@ -61,6 +61,6 @@ export function App({ state }: { state: GlassState }) {
     html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
     d &&
       html`<${DecisionModal} open=${state.decisionModal} order=${modalOrder()} drafts=${state.drafts} extensions=${d.answerLimits?.extensions ?? []} />`,
-    d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} modalOpen=${!!state.decisionModal} />`,
+    d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`,
   ];
 }

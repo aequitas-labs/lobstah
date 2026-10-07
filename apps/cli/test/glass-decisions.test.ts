@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GlassSnapshot, TendAttention } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
@@ -334,22 +335,49 @@ describe('glass: the new-decision alert', () => {
     expect(text(g.$('.dalert .dalert-open'))).toBe('3 3 new decisions');
   });
 
-  it('does not close an open trap modal; while the decision modal is open the modal carries the count instead', async () => {
+  it('stays behind an open trap modal or decision modal, never taking focus, and is there again when they close', async () => {
     const d = everyAttentionFleet();
     const g = await page(d, { post: ok });
+    const count = () => Number(text(g.$('.dalert .dcount')));
+    const before = count();
+    expect(before).toBeGreaterThan(1);
     await g.go('#traps');
     await click(g, g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1')));
+    // The trap modal is open; the alert is still rendered (its layer is below the modal's) and has not taken focus.
     expect(g.$('#overlay')!.className).toBe('open');
-    // The alert shows beside the open trap modal, which stays open.
     expect(g.$('.dalert')).toBeTruthy();
-    expect(g.$('#overlay')!.className).toBe('open');
-    await click(g, g.$('.dalert .dalert-open'));
+    expect(g.$('.dalert')!.contains(g.document.activeElement)).toBe(false);
+    // The decision modal opens over the trap modal; the alert stays behind both, its count one less.
+    const first = g.$$('#lobs a.lob').map((l) => l.getAttribute('href')!).find((h) => h.startsWith('#decision/'))!;
+    await g.go(first);
     expect(g.$('.dmodal')).toBeTruthy();
-    expect(g.$('.dalert')).toBeNull();
-    // Escape closes the decision modal first; the trap modal stays.
+    expect(g.$('#overlay')!.className).toBe('open');
+    expect(g.$('.dalert')).toBeTruthy();
+    expect(count()).toBe(before - 1);
+    expect(g.$('.dalert')!.contains(g.document.activeElement)).toBe(false);
+    // Escape closes the decision modal first, then the trap modal; the alert is still there.
     await key(g, 'Escape');
     expect(g.$('.dmodal')).toBeNull();
     expect(g.$('#overlay')!.className).toBe('open');
+    await key(g, 'Escape');
+    expect(g.$('#overlay')!.className).not.toBe('open');
+    expect(g.$('.dalert')).toBeTruthy();
+  });
+
+  it("is layered below every modal and backdrop by the stylesheet's layer tokens", () => {
+    const css = fs.readFileSync(new URL('../glass/glass.css', import.meta.url), 'utf8');
+    const zOf = (sel: string) => {
+      const at = css.indexOf(`\n${sel} {`);
+      expect(at).toBeGreaterThanOrEqual(0);
+      return /z-index: ([^;]+);/.exec(css.slice(at, css.indexOf('}', at)))?.[1]?.trim();
+    };
+    expect(zOf('.dalert-live')).toBe('var(--layer-alert)');
+    expect(zOf('#overlay')).toBe('var(--layer-modal)');
+    expect(zOf('#doverlay')).toBe('var(--layer-decision-modal)');
+    const root = css.slice(css.indexOf(':root {'), css.indexOf('}', css.indexOf(':root {')));
+    const token = (name: string) => new RegExp(`--${name}: ([^;]+);`).exec(root)?.[1];
+    expect(token('layer-alert')).toBe('calc(var(--layer-modal) - 1)');
+    expect(Number(token('layer-decision-modal'))).toBeGreaterThan(Number(token('layer-modal')));
   });
 });
 
