@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { gitPushTargets, onPath, toolTarget } from '@lobstah/core';
+import { gitPushTargets, onPath, toolTarget, localModel } from '@lobstah/core';
 import type { NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
@@ -25,6 +25,7 @@ interface StreamMessage {
   type?: string;
   subtype?: string;
   session_id?: string;
+  model?: unknown;
   total_cost_usd?: number;
   message?: { content?: Array<{ type?: string; name?: string; text?: string; input?: unknown }> };
   /** `background_tasks_changed`: every live background task, replacing the last set. */
@@ -44,7 +45,7 @@ export function pumpClaudeMessage(
   const at = now();
   if (msg.type === 'system' && msg.subtype === 'init') {
     if (msg.session_id) onSession(msg.session_id);
-    push({ at, type: 'session', data: { sessionId: msg.session_id } });
+    push({ at, type: 'session', data: { sessionId: msg.session_id, ...(msg.model === undefined ? {} : { model: localModel(msg.model) }) } });
   } else if (msg.type === 'system' && msg.subtype === 'background_tasks_changed') {
     // A level signal, not paired start/stop edges. Ambient tasks (watchers,
     // live-update monitors) are not activity, so they do not count as work

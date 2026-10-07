@@ -141,6 +141,15 @@ async function runFollowUp(id: string, d: Partial<Descriptor>, deps: Partial<Run
 const notes = (id: string) => readStatusLog(id, 'work').map((e) => `${e.verb}${e.note ? `: ${e.note}` : ''}`);
 
 describe('runner — a follow-up resumes with the origin session’s harness', () => {
+  for (const harness of ['claude', 'codex']) {
+    it(`${harness}: records resolved launch options, and does not guess through arbitrary flags`, async () => {
+      const deps = mockDeps({ owns: {} });
+      await runFollowUp('metadata', { harness, model: harness === 'claude' ? 'claude-custom' : 'gpt-custom', effort: 'high' }, deps.deps);
+      expect(readEvidence('metadata', 'work').worker).toEqual({ harness, model: harness === 'claude' ? 'claude-custom' : 'gpt-custom', config: { effort: 'high', permissionMode: harness === 'claude' ? 'bypassPermissions' : null } });
+      await runFollowUp('overrides', { harness, model: 'gpt-custom', effort: 'high', flags: ['--some-setting', 'anything'] }, deps.deps);
+      expect(readEvidence('overrides', 'work').worker).toEqual({ harness, model: null, config: { effort: null, permissionMode: null } });
+    });
+  }
   it('a follow-up on a Codex-claimed origin resumes with codex despite a legacy (unrecorded) --harness claude', async () => {
     trapBuiltOrigin('origin', 'codex', CODEX_SID);
     expect(readEvidence('origin', 'work').harness).toBe('codex'); // the trap's claim stamps it

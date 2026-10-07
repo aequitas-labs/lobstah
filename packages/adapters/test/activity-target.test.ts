@@ -6,6 +6,11 @@ import { pumpCodexEvent } from '../src/codex.js';
 const TOKEN = 'ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
 
 describe('adapters put the primary target, never the input, into the stream', () => {
+  it('Claude init records the observed local model, including custom identifiers', () => {
+    const seen: NormalizedEvent[] = [];
+    pumpClaudeMessage({ type: 'system', subtype: 'init', session_id: 's', model: 'custom/model' }, (e) => seen.push(e), () => {});
+    expect(seen[0]?.data).toEqual({ sessionId: 's', model: 'custom/model' });
+  });
   it('claude: tool_use carries a target; thinking carries no content', () => {
     const seen: NormalizedEvent[] = [];
     pumpClaudeMessage(

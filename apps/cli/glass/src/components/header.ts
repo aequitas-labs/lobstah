@@ -1,3 +1,4 @@
+import { workerLabel } from '../../../../../packages/core/src/worker-metadata.js';
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_TABS } from '../../../src/glass-diff.js';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../../src/glass-diff.js';
@@ -37,7 +38,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
-        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <b>${h.man}</b> <span class="dim">helm ${h.grounds}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
+        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <b>${h.man}</b> <span class="dim">helm ${h.grounds}${h.config && [' · ', workerLabel(h)]}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
     ),
   ];
 }

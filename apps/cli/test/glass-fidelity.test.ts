@@ -123,6 +123,9 @@ const STACK_NUMBER = /^#\d+$/;
 function foldPrTitles(el: Element): Node {
   const copy = el.cloneNode(true) as Element;
   const doc = el.ownerDocument;
+  // The trap table now labels the old harness column 'worker'; metadata
+  // behavior is exercised separately in glass-worker-metadata.test.ts.
+  for (const th of copy.querySelectorAll('th')) if (th.textContent === 'worker') th.textContent = 'harness';
   // Crawlers intentionally use the embedded pet art now.
   // Compare unrelated markup with the frozen page; functional art tests
   // check that the real sprite and star are always paired.

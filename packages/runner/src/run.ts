@@ -30,6 +30,7 @@ import {
   resolveDispatch,
   unhandled,
   worktreeProgress,
+  workerMetadata,
 } from '@lobstah/core';
 import type { ChainPr, Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
 import { loadAdapter } from '@lobstah/adapters';
@@ -360,6 +361,13 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   }
 
   const runOnce = async (harness: string, prompt: string, resumeSession: string | undefined) => {
+    // Arbitrary flags can override launch options: do not claim to know their
+    // model/config. The Claude init event can still supply its actual model.
+    const explicit = resolved.flags.length === 0;
+    mergeEvidence(id, lane, { worker: workerMetadata({ harness,
+      model: explicit ? modelForHarness(harness, resolved.model).model : undefined,
+      config: { effort: explicit ? resolved.effort : null, permissionMode: explicit && harness === 'claude' ? 'bypassPermissions' : null },
+    }) });
     const run = await deps.loadAdapter(harness).start({
       id,
       cwd,

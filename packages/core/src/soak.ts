@@ -18,6 +18,9 @@ import { laneOf } from './worktrees.js';
 import { removeGhostWorktree } from './worktree-safety.js';
 import { readReservation } from './trap-start.js';
 import { DEFAULT_SOAK } from './config.js';
+import { sessionWorker } from './session-workers.js';
+import { workerLabel, workerMetadata } from './worker-metadata.js';
+import type { WorkerConfig, WorkerMetadata } from './worker-metadata.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -37,6 +40,8 @@ export interface TrapRegistration {
   /** Config repo key this trap fishes for; without one it only takes addressed bait. */
   repo?: string;
   harness: string;
+  model?: string | null;
+  config?: WorkerConfig;
   /** The session currently manning the trap — the liveness principal. */
   sessionId: string;
   /** Stow after the first catch instead of re-parking. */
@@ -313,6 +318,8 @@ export function signOnTrap(opts: {
     cwd: opts.cwd,
     repo: opts.repo,
     harness: opts.harness,
+    model: sessionWorker(opts.sessionId, opts.harness).model,
+    config: sessionWorker(opts.sessionId, opts.harness).config,
     sessionId: opts.sessionId,
     one: opts.one,
     signedOnAt: sameSession ? prior.signedOnAt : iso,
@@ -332,13 +339,22 @@ export function signOnTrap(opts: {
   if (!prior) {
     postNotice({
       kind: 'trap-signed-on',
-      text: `trap ${trapLabel(reg)} signed on (${opts.harness}, ${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for ${name}\``,
+      text: `trap ${trapLabel(reg)} signed on (${workerLabel(reg)}, ${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for ${name}\``,
       refId: trapId,
       repo: opts.repo,
       by: opts.sessionId,
     });
   }
   return { ok: reg };
+}
+
+/** Refresh observations without changing liveness, ownership or claim state. */
+export function updateTrapWorker(session: string, observation: WorkerMetadata): void {
+  const reg = trapBySession(session);
+  if (!reg) return;
+  const next = workerMetadata({ ...observation, harness: reg.harness });
+  if (reg.model === next.model && JSON.stringify(reg.config) === JSON.stringify(next.config)) return;
+  atomicWrite(regPath(reg.trapId), JSON.stringify({ ...reg, model: next.model, config: next.config }, null, 2));
 }
 
 /**

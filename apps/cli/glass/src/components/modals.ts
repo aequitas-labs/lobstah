@@ -1,3 +1,4 @@
+import { workerLabel } from '../../../../../packages/core/src/worker-metadata.js';
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../../src/glass-diff.js';
@@ -115,7 +116,7 @@ function helmModal(h: GlassHelm) {
   const stale = Date.now() - Date.parse(h.heartbeatAt) > 1800000;
   return [
     close,
-    html`<h3>⛵ ${h.man}</h3><div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.harness ?? '?'} · ${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
+    html`<h3>⛵ ${h.man}</h3><div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.config ? workerLabel(h) : (h.harness ?? '?')} · ${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
     h.sessionId && [html`<div class="sec">open this session</div>`, cmdRow(resumeCmd(h.harness, h.sessionId))],
     h.transcript && [html`<div class="sec">transcript</div>`, cmdRow(h.transcript)],
   ];
@@ -144,6 +145,7 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
     html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
     html`<div class="sub">${x.repo} · ${x.lane} ${x.bucket} · ${Age(x.verbAt)}${x.for && [' · ', addrCell(x)]} ${prCell(x)}</div>`,
     session,
+    x.worker && html`<div class="sub">${workerLabel(x.worker)}</div>`,
     x.worktree && [
       html`<div class="sec">worktree${x.worktreeOf ? ' (reused from ' + x.worktreeOf.slice(0, 8) + ')' : ''}</div>`,
       cmdRow(x.worktree),
@@ -220,6 +222,7 @@ function trapModal(t: GlassTrap) {
   return [
     close,
     html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : (t.harness ?? 'signed off')}</span></h3>`,
+    t.config && html`<div class="sub">${workerLabel(t)}</div>`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
     html`<div class="sec">window</div>`,

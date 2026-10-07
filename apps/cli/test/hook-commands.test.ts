@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { enqueue, ensureLayout, readBeat, readTrap, sendTrapMessage, signOnTrap, takeHelm } from '@lobstah/core';
+import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { charter, HELM_REMINDER } from '../src/charter.js';
 
@@ -76,6 +76,19 @@ describe('lobstah hook session-start (alias: man brief)', () => {
 });
 
 describe('lobstah hook user-prompt-submit', () => {
+  for (const harness of ['claude', 'codex'] as const) {
+    it(`${harness}: captures only observed fields on hooks for both registered roles`, () => {
+      takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: [] }, ttlMs: 60_000, identity: { harness } });
+      const id = trap('trap-session', harness);
+      for (const session of [HELM, 'trap-session']) {
+        const r = hook(['hook', 'user-prompt-submit'], { session_id: session, hook_event_name: 'UserPromptSubmit', model: 'custom/local-model', permission_mode: 'plan', effort: 'high', prompt: 'do not save', env: { token: 'secret' } });
+        expect(r.status, r.stderr).toBe(0);
+      }
+      expect(readHelm('fleet')).toMatchObject({ model: 'custom/local-model', config: { effort: null, permissionMode: 'plan' } });
+      expect(readTrap(id)).toMatchObject({ model: 'custom/local-model', config: { effort: null, permissionMode: 'plan' } });
+      expect(fs.readFileSync(path.join(home, 'session-workers', `${HELM}.json`), 'utf8')).not.toMatch(/do not save|secret|token|high/);
+    });
+  }
   for (const harness of ['claude', 'codex'] as const) {
     it(`${harness}: adds the card reminder each turn for the helm, but not traps or other sessions`, () => {
       takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness } });

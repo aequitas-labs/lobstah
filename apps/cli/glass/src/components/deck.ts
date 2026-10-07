@@ -1,3 +1,4 @@
+import { workerLabel } from '../../../../../packages/core/src/worker-metadata.js';
 import type { GlassPr, GlassStack } from '@lobstah/core';
 import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, catchCount, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
@@ -138,6 +139,7 @@ export function Deck({
   const flight = inp.inflight.map((x): DeckItem => ({
     key: x.lane + ':' + x.id,
     title: [x.id.slice(0, 8), ' ', x.repo || ''],
+    extra: x.worker && html`<div class="dim">${workerLabel(x.worker)}</div>`,
     badge: { text: x.verb, tone: x.verb === 'needs-decision' || x.verb === 'blocked' ? 'bad' : 'dim' },
     // No time at all (no log, no queue time): drop the fragment, not render "· ago".
     meta: [
@@ -173,7 +175,7 @@ export function Deck({
     meta: [t.repo || '', ' · ', html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`, ' · ', trapNow(t)],
     metaText: `${t.repo || ''} · 🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
     action: windowAction(t),
-    extra: startCommands(t),
+    extra: [t.config && html`<div class="dim">${workerLabel(t)}</div>`, startCommands(t)],
     open: opener('trap', t.trapId),
   }));
   return html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} extensions=${extensions} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`;

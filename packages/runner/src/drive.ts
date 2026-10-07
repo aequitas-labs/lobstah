@@ -5,6 +5,8 @@ import {
   appendStatus,
   cancelRequested,
   mergeEvidence,
+  readEvidence,
+  workerMetadata,
   readStatusLog,
   recordPush,
   resolvePushTargets,
@@ -297,7 +299,10 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
       recordPush(id, lane, resolvePushTargets(ev.data.pushes.map(String), opts.cwd), ev.at);
     }
     if (ev.type === 'session' && ev.data?.sessionId) {
-      mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId) });
+      const prior = readEvidence(id, lane).worker;
+      mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId),
+        ...(ev.data.model === undefined ? {} : { worker: workerMetadata({ ...prior, model: ev.data.model }) }),
+      });
     }
     if (ev.type !== 'turn-end' || cancelled || stopped() || final || parked) continue;
     const lastVerb = readStatusLog(id, lane).at(-1)?.verb;

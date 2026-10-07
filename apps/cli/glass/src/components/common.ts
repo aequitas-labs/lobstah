@@ -7,6 +7,7 @@ import { copyText, loadOlder, openLightbox, openTrapWindow, requestTrap, showMod
 import { getState } from '../store.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
+import { workerLabel } from '../../../../../packages/core/src/worker-metadata.js';
 
 /** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
 
@@ -21,6 +22,8 @@ export const ageText = (iso: string | undefined | null): string => {
 
 /** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
 export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
+
+export const WorkerLine = (x: Pick<GlassDispatchSummary, 'worker'>) => x.worker && html`<div class="dim">${workerLabel(x.worker)}</div>`;
 
 /** The activity line under a dispatch's verb and note: what it is doing now, and how long ago. Stale shows dim. */
 export const ActivityLine = (x: Pick<GlassDispatchSummary, 'activity'>) =>

@@ -290,6 +290,7 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     activity: r.bucket === 'active' ? activityView(readActivity(id, r.lane), staleSecs) : undefined,
     waiting: r.bucket === 'active' ? waitingView(last) : undefined,
     claimedBy: claim?.by,
+    worker: evidence.worker,
     log,
     inbox: listDir(inboxDir)
       .filter((f) => f.endsWith('.msg'))
