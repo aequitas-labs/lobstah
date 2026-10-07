@@ -100,7 +100,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<key>]',
   },
   soak: {
-    subverbs: ['beat', 'title-set'],
+    subverbs: ['beat', 'title-set', 'stop-listener'],
     flags: {
       '--session': { value: '<id>' },
       '--one': {},
@@ -258,8 +258,8 @@ installs the shipped PR check; with --for, a check that fails after the first
   soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
 Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
---wait listens (quiet exit 3: re-run). --ticket or LOBSTAH_TRAP_TICKET signs
-on as a reserved trap. Names the Terminal.app/iTerm2 tab. \`soak beat\`: hook.`,
+--wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours.
+--ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap reserve\` reserves a trap before its session starts: name, id, ticket,
 start command. dispatch --for works at once; soak --ticket <t> redeems it. Past
 --deadline (default 180s) trap-start-failed posts; work stays queued. stow --wt

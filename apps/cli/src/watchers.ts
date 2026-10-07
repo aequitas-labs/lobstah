@@ -49,6 +49,63 @@ export async function awaitWatcher(
   }
 }
 
+/**
+ * The refusal for a second watcher. A trap is told how to end its own
+ * listener: by session, never by a pattern match on the command line, which
+ * would also hit other sessions' listeners on the machine.
+ */
+export function alreadyArmed(w: SessionWatcher): string {
+  const base = `watcher already armed for session ${w.sessionId} (pid ${w.pid})`;
+  return w.kind === 'trap'
+    ? `${base} — it is still listening, so leave it running; to end it run \`lobstah soak stop-listener --session ${w.sessionId}\` (never pkill or killall)`
+    : base;
+}
+
+/** The session's live watcher of any kind, if one is heartbeating. */
+export function sessionWatcher(sessionId: string, now = Date.now()): SessionWatcher | undefined {
+  return liveRegistration(sessionId, now);
+}
+
+const pidAlive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
+};
+
+/**
+ * End this session's own watcher: SIGTERM to the pid its registration
+ * records, then wait up to graceMs for it to exit. Nothing else is touched —
+ * the pid comes from this session's file, heartbeated within seconds, so it
+ * cannot name another session's listener.
+ */
+export async function stopWatcher(
+  sessionId: string, kind: SessionWatcher['kind'], graceMs = 3_000, pollMs = 50,
+): Promise<{ watcher: SessionWatcher; exited: boolean } | undefined> {
+  const w = liveWatcher(sessionId, kind);
+  if (!w) return undefined;
+  if (w.pid === process.pid) throw new Error('refusing to stop the calling process');
+  try {
+    process.kill(w.pid, 'SIGTERM');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err;
+  }
+  const deadline = Date.now() + Math.max(0, graceMs);
+  const file = watcherFile(sessionId);
+  const claimed = () => {
+    try { return (JSON.parse(fs.readFileSync(file, 'utf8')) as SessionWatcher).pid === w.pid; } catch { return false; }
+  };
+  for (;;) {
+    // Its SIGTERM handler drops the claim before exit (an unreaped exited
+    // child can still answer kill 0, so the claim is the first signal).
+    if (!claimed()) return { watcher: w, exited: true };
+    if (!pidAlive(w.pid)) {
+      // A listener that died without its exit handler leaves its claim behind.
+      if (claimed()) fs.rmSync(file, { force: true });
+      return { watcher: w, exited: true };
+    }
+    if (Date.now() >= deadline) return { watcher: w, exited: false };
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
 /** One watcher per session. The file is an atomic claim, heartbeated until exit. */
 export function armWatcher(sessionId: string, kind: SessionWatcher['kind'], trapId?: string): { stop: () => void } {
   fs.mkdirSync(watcherDir(), { recursive: true });
@@ -63,7 +120,7 @@ export function armWatcher(sessionId: string, kind: SessionWatcher['kind'], trap
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       const live = liveRegistration(sessionId);
-      if (live) throw new Error(`watcher already armed for session ${sessionId} (pid ${live.pid})`);
+      if (live) throw new Error(alreadyArmed(live));
       // A stale watcher cannot keep the session unarmed forever.
       try { fs.rmSync(file); } catch { /* a concurrent owner may have moved it */ }
     }
