@@ -145,9 +145,9 @@ describe('runner — a follow-up resumes with the origin session’s harness', (
     it(`${harness}: records resolved launch options, and does not guess through arbitrary flags`, async () => {
       const deps = mockDeps({ owns: {} });
       await runFollowUp('metadata', { harness, model: harness === 'claude' ? 'claude-custom' : 'gpt-custom', effort: 'high' }, deps.deps);
-      expect(readEvidence('metadata', 'work').worker).toEqual({ harness, model: harness === 'claude' ? 'claude-custom' : 'gpt-custom', config: { effort: 'high', permissionMode: harness === 'claude' ? 'bypassPermissions' : null } });
+      expect(readEvidence('metadata', 'work').worker).toMatchObject({ harness, model: harness === 'claude' ? 'claude-custom' : 'gpt-custom', config: { effort: 'high', permissionMode: harness === 'claude' ? 'bypassPermissions' : null }, observedAt: expect.any(String) });
       await runFollowUp('overrides', { harness, model: 'gpt-custom', effort: 'high', flags: ['--some-setting', 'anything'] }, deps.deps);
-      expect(readEvidence('overrides', 'work').worker).toEqual({ harness, model: null, config: { effort: null, permissionMode: null } });
+      expect(readEvidence('overrides', 'work').worker).toMatchObject({ harness, model: null, config: { effort: null, permissionMode: null }, observedAt: expect.any(String) });
     });
   }
   it('a follow-up on a Codex-claimed origin resumes with codex despite a legacy (unrecorded) --harness claude', async () => {

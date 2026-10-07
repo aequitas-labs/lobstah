@@ -301,7 +301,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     if (ev.type === 'session' && ev.data?.sessionId) {
       const prior = readEvidence(id, lane).worker;
       mergeEvidence(id, lane, { sessionId: String(ev.data.sessionId),
-        ...(ev.data.model === undefined ? {} : { worker: workerMetadata({ ...prior, model: ev.data.model }) }),
+        ...(ev.data.model === undefined ? {} : { worker: workerMetadata({ ...prior, model: ev.data.model, observedAt: ev.at }) }),
       });
     }
     if (ev.type !== 'turn-end' || cancelled || stopped() || final || parked) continue;

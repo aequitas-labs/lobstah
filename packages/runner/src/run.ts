@@ -365,6 +365,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
     // model/config. The Claude init event can still supply its actual model.
     const explicit = resolved.flags.length === 0;
     mergeEvidence(id, lane, { worker: workerMetadata({ harness,
+      observedAt: new Date().toISOString(),
       model: explicit ? modelForHarness(harness, resolved.model).model : undefined,
       config: { effort: explicit ? resolved.effort : null, permissionMode: explicit && harness === 'claude' ? 'bypassPermissions' : null },
     }) });

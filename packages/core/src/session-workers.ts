@@ -30,6 +30,7 @@ export function observeSessionWorker(input: { session_id?: string; model?: unkno
     const next = workerMetadata({ harness: harness ?? old.harness,
       model: input.model === undefined && !starting ? old.model : input.model,
       config: { effort: null, permissionMode: input.permission_mode === undefined && !starting ? old.config.permissionMode : input.permission_mode },
+      observedAt: starting || input.model !== undefined || input.permission_mode !== undefined ? new Date().toISOString() : old.observedAt,
     });
     const text = JSON.stringify(next);
     if (!fs.existsSync(p) || fs.readFileSync(p, 'utf8') !== text) {

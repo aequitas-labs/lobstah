@@ -42,6 +42,7 @@ export interface TrapRegistration {
   harness: string;
   model?: string | null;
   config?: WorkerConfig;
+  observedAt?: string;
   /** The session currently manning the trap — the liveness principal. */
   sessionId: string;
   /** Stow after the first catch instead of re-parking. */
@@ -320,6 +321,7 @@ export function signOnTrap(opts: {
     harness: opts.harness,
     model: sessionWorker(opts.sessionId, opts.harness).model,
     config: sessionWorker(opts.sessionId, opts.harness).config,
+    observedAt: sessionWorker(opts.sessionId, opts.harness).observedAt,
     sessionId: opts.sessionId,
     one: opts.one,
     signedOnAt: sameSession ? prior.signedOnAt : iso,
@@ -353,8 +355,8 @@ export function updateTrapWorker(session: string, observation: WorkerMetadata): 
   const reg = trapBySession(session);
   if (!reg) return;
   const next = workerMetadata({ ...observation, harness: reg.harness });
-  if (reg.model === next.model && JSON.stringify(reg.config) === JSON.stringify(next.config)) return;
-  atomicWrite(regPath(reg.trapId), JSON.stringify({ ...reg, model: next.model, config: next.config }, null, 2));
+  if (reg.model === next.model && reg.observedAt === next.observedAt && JSON.stringify(reg.config) === JSON.stringify(next.config)) return;
+  atomicWrite(regPath(reg.trapId), JSON.stringify({ ...reg, model: next.model, config: next.config, observedAt: next.observedAt }, null, 2));
 }
 
 /**

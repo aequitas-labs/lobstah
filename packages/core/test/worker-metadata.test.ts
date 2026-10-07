@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -7,7 +7,7 @@ import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'lob-worker-')); process.env.LOBSTAH_HOME = home; ensureLayout(); });
-afterEach(() => { removeTempDir(home); delete process.env.LOBSTAH_HOME; });
+afterEach(() => { vi.useRealTimers(); removeTempDir(home); delete process.env.LOBSTAH_HOME; });
 describe('local worker observations', () => {
   for (const harness of ['claude', 'codex']) {
     it(`${harness}: seeds registrations at sign-on and refreshes both roles mid-session`, () => {
@@ -37,5 +37,23 @@ describe('local worker observations', () => {
     expect(workerMetadata({ config: { effort: 'secret', permissionMode: 'secret' } }).config).toEqual({ effort: null, permissionMode: null });
     observeSessionWorker({ session_id: '../escape', model: 'x' }, 'claude');
     expect(sessionWorker('../escape', 'claude').model).toBeNull();
+    for (const observedAt of ['free text', '2026-99-99T99:99:99.000Z']) expect(workerMetadata({ observedAt }).observedAt).toBeUndefined();
+  });
+  for (const harness of ['claude', 'codex']) it(`${harness}: preserves observation time through sign-on and hooks without metadata`, () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-07T12:00:00.000Z'));
+    observeSessionWorker({ session_id: 's', hook_event_name: 'SessionStart', model: 'model' }, harness);
+    const first = sessionWorker('s').observedAt;
+    expect(first).toBe('2026-10-07T12:00:00.000Z');
+    const worktree = path.join(home, 'wt'); fs.mkdirSync(worktree);
+    const signed = signOnTrap({ sessionId: 's', harness, worktree, cwd: worktree, ttlMs: 60_000 });
+    if (!('ok' in signed)) throw Error('hold');
+    takeHelm({ sessionId: 's', grounds: { name: 'fleet', repos: [] }, ttlMs: 60_000, identity: { harness } });
+    expect(readTrap(signed.ok.trapId)?.observedAt).toBe(first);
+    vi.advanceTimersByTime(1000);
+    observeSessionWorker({ session_id: 's', hook_event_name: 'Stop' }, harness);
+    expect(readHelm('fleet')?.observedAt).toBe(first);
+    observeSessionWorker({ session_id: 's', hook_event_name: 'PostToolUse', model: 'model' }, harness);
+    expect(readTrap(signed.ok.trapId)?.observedAt).toBe('2026-10-07T12:00:01.000Z');
+    expect(readHelm('fleet')?.observedAt).toBe('2026-10-07T12:00:01.000Z');
   });
 });

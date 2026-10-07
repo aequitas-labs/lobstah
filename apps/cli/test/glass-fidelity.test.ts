@@ -123,9 +123,25 @@ const STACK_NUMBER = /^#\d+$/;
 function foldPrTitles(el: Element): Node {
   const copy = el.cloneNode(true) as Element;
   const doc = el.ownerDocument;
-  // The trap table now labels the old harness column 'worker'; metadata
-  // behavior is exercised separately in glass-worker-metadata.test.ts.
-  for (const th of copy.querySelectorAll('th')) if (th.textContent === 'worker') th.textContent = 'harness';
+  // Intentional worker UI additions have functional coverage separately.
+  // Keep comparing the unrelated UI against the frozen pre-metadata page.
+  for (const n of copy.querySelectorAll('.worker-details')) {
+    const harness = n.querySelector('dd')?.textContent ?? '';
+    const h3 = copy.querySelector('h3');
+    if (h3?.textContent?.startsWith('🪤 ')) {
+      const badge = h3.querySelector('.badge');
+      if (badge?.textContent === 'live' || badge?.textContent === 'signed off') badge.textContent = harness === 'unknown' ? 'signed off' : harness;
+    }
+    if (h3?.textContent?.startsWith('⛵ ')) {
+      const sub = copy.querySelectorAll('.sub')[1];
+      if (sub) sub.textContent = (harness === 'unknown' ? '?' : harness) + ' · ' + sub.textContent;
+    }
+    n.remove();
+  }
+  for (const n of copy.querySelectorAll('.worker-harness')) {
+    n.removeAttribute('aria-label'); n.removeAttribute('tabindex'); n.classList.remove('worker-harness');
+    if (!n.className) n.replaceWith(...n.childNodes);
+  }
   // Crawlers intentionally use the embedded pet art now.
   // Compare unrelated markup with the frozen page; functional art tests
   // check that the real sprite and star are always paired.
@@ -333,7 +349,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
-          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *'))
+          .filter((el) => !el.matches('#prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);

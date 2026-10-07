@@ -35,6 +35,7 @@ export interface HelmRegistration {
   harness?: string;
   model?: string | null;
   config?: WorkerConfig;
+  observedAt?: string;
   cwd?: string;
   host?: string;
   /** Human-friendly name; helmLabel() derives one when absent. */
@@ -208,6 +209,7 @@ export function takeHelm(opts: {
     harness: opts.identity?.harness ?? (same ? existing.harness : undefined),
     model: sessionWorker(opts.sessionId, opts.identity?.harness ?? (same ? existing.harness : undefined)).model,
     config: sessionWorker(opts.sessionId).config,
+    observedAt: sessionWorker(opts.sessionId).observedAt,
     cwd: opts.identity?.cwd ?? (same ? existing.cwd : undefined),
     host: opts.identity?.host ?? (same ? existing.host : undefined),
     label: opts.identity?.label ?? (same ? existing.label : undefined),
@@ -224,8 +226,8 @@ export function takeHelm(opts: {
 export function updateHelmWorker(session: string, observation: WorkerMetadata): void {
   for (const reg of listHelms().filter((h) => h.sessionId === session)) {
     const next = workerMetadata({ ...observation, harness: reg.harness ?? observation.harness });
-    if (reg.model === next.model && reg.harness === next.harness && JSON.stringify(reg.config) === JSON.stringify(next.config)) continue;
-    atomicWrite(helmPath(reg.grounds), JSON.stringify({ ...reg, harness: next.harness ?? undefined, model: next.model, config: next.config }, null, 2));
+    if (reg.model === next.model && reg.observedAt === next.observedAt && reg.harness === next.harness && JSON.stringify(reg.config) === JSON.stringify(next.config)) continue;
+    atomicWrite(helmPath(reg.grounds), JSON.stringify({ ...reg, harness: next.harness ?? undefined, model: next.model, config: next.config, observedAt: next.observedAt }, null, 2));
   }
 }
 
