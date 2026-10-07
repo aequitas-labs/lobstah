@@ -1,4 +1,4 @@
-import type { GlassOlderKind, GlassSnapshot } from '@lobstah/core';
+import type { GlassOlderKind, GlassSnapshot, StatsPage } from '@lobstah/core';
 import { withOlder } from '../../src/glass-diff.js';
 import type { DispatchDetail, GlassOlder, GlassPrefs, GlassTab, ModalRef } from '../../src/glass-diff.js';
 
@@ -36,6 +36,11 @@ export interface GlassState {
   focusDecision: string | null;
   /** The image open in the in-page overlay, if any. */
   lightbox: Lightbox | null;
+  /** The Stats tab's data (/data/stats), fetched while that tab is open. */
+  stats: StatsPage | null;
+  statsError: string | null;
+  /** The heatmap day that holds keyboard focus (the grid's one tab stop). */
+  statsFocus: string | null;
 }
 
 /** An image shown over the page: where it loads from, and its name. */

@@ -114,7 +114,7 @@ export function prBadgeClass(b: Partial<PrBadge> | undefined | null): string {
   return state === 'open' && b.tone && b.tone !== 'ok' ? b.tone : 'pr-' + state;
 }
 
-export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'prs', 'reports', 'notices'] as const;
+export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'prs', 'reports', 'notices', 'stats'] as const;
 export type GlassTab = (typeof GLASS_TABS)[number];
 
 export function tabFromHash(hash: string | undefined | null): GlassTab {

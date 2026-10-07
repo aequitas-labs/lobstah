@@ -1,5 +1,6 @@
 import type { GlassBeats, GlassSnapshot } from '@lobstah/core';
-import { markStale, receive, receiveBeats, refreshDetail } from './actions.js';
+import { loadStats, markStale, receive, receiveBeats, refreshDetail } from './actions.js';
+import { getState } from './store.js';
 import { sendPresence } from './presence.js';
 
 /**
@@ -7,7 +8,8 @@ import { sendPresence } from './presence.js';
  * tab is hidden. Each poll sends the last ETag: a 304 means nothing a person
  * reads changed, and only its beats (server time, heartbeats) apply. Each
  * snapshot goes to the store; rendering is Preact's. An open dispatch modal
- * refreshes its detail after every poll. Every poll also reports this page's
+ * refreshes its detail after every poll, and an open Stats tab its numbers
+ * (/data/stats). Every poll also reports this page's
  * presence (presence.ts).
  */
 
@@ -41,6 +43,7 @@ export async function poll(): Promise<void> {
       receive((await r.json()) as GlassSnapshot);
     }
     void refreshDetail();
+    if (getState().route === 'stats') void loadStats();
   } catch (e) {
     markStale();
   } finally {

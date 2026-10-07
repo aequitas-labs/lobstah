@@ -473,7 +473,9 @@ dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
 and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
-PRs, Reports, and Notices. The Reports tab lists every report, unacked first,
+PRs, Reports, Notices, and Stats. The Stats tab shows catches per day as a
+53-week heatmap, with today, this week, the total, and the top traps; it
+reads `stats.json` from `GET /data/stats` and sends nothing. The Reports tab lists every report, unacked first,
 then newest first, and the repo filter and the search box (title, author,
 dispatch id, repo) apply to it. Reading the glass consumes no cursor. Each
 live trap has a **↗ open** button at the end of its foot line. It asks the local server to focus

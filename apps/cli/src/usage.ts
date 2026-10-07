@@ -245,7 +245,8 @@ claimed helm this requires --session <helm-id>.`,
 A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page as the report; --attach adds the images it names.`,
   stats: `Catches: dispatches that finished done. catchesToday counts the local day;
 totalCatches counts all time. Both live in stats.json, which cull folds into
-before deleting, so they survive it. --per-trap adds each trap's total under
+before deleting, so they survive it; so does a per-local-day count (400 days),
+which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. Nothing is sent.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is

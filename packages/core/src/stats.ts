@@ -13,6 +13,10 @@ import type { Lane } from './types.js';
  *   deleting it (foldCatches), so a catch the report hook missed still counts.
  * - The first read with no store backfills from retained state and from any
  *   `state-backup-*` copy of a state dir, de-duplicated by dispatch id.
+ * - `daily` counts catches per local day through the same path, so the same
+ *   de-duplication covers it. A store saved before `daily` existed gets it
+ *   once, from the done records still on disk (backfillDaily); a catch whose
+ *   record is gone has no day, and stays in `totalCatches` only.
  */
 export interface StatsStore {
   version: 1;
@@ -28,7 +32,15 @@ export interface StatsStore {
    * store stays as small as the retained state.
    */
   counted: string[];
+  /**
+   * Catches per local day (YYYY-MM-DD → count), the last DAILY_RETENTION_DAYS
+   * days. Days with no catch are absent.
+   */
+  daily: Record<string, number>;
 }
+
+/** How many local days `daily` keeps: at least the 53 weeks (371 days) a heatmap shows, and some slack. */
+export const DAILY_RETENTION_DAYS = 400;
 
 /** One trap's catches, under its persistent name (or `wt:<id>` with none). */
 export interface TrapCatches {
@@ -50,6 +62,12 @@ export interface CatchRef {
 
 export function statsPath(): string {
   return path.join(lobstahHome(), 'stats.json');
+}
+
+/** The local calendar day `days` days before (or, negative, after) a local day. DST-safe: it steps calendar days. */
+export function shiftDay(day: string, days: number): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return localDay(new Date(y, m - 1, d - days));
 }
 
 /** The local calendar day of a time, as YYYY-MM-DD. */
@@ -91,7 +109,24 @@ function readCatchFacts(stateDir: string, id: string): CatchFacts {
 }
 
 function emptyStore(now: number): StatsStore {
-  return { version: 1, totalCatches: 0, perTrap: {}, day: localDay(now), catchesToday: 0, counted: [] };
+  return { version: 1, totalCatches: 0, perTrap: {}, day: localDay(now), catchesToday: 0, counted: [], daily: {} };
+}
+
+/** The local day a catch counts on: its done report's, else now's. */
+function catchDay(facts: CatchFacts, now: number): string {
+  return facts.at && Number.isFinite(Date.parse(facts.at)) ? localDay(facts.at) : localDay(now);
+}
+
+/** Count a catch on its local day, unless that day is past retention. */
+function addDaily(store: StatsStore, day: string, now: number): void {
+  if (day < shiftDay(localDay(now), DAILY_RETENTION_DAYS - 1)) return;
+  store.daily[day] = (store.daily[day] ?? 0) + 1;
+}
+
+/** Drop days past retention. */
+function pruneDaily(store: StatsStore, now: number): void {
+  const oldest = shiftDay(localDay(now), DAILY_RETENTION_DAYS - 1);
+  for (const day of Object.keys(store.daily)) if (day < oldest) delete store.daily[day];
 }
 
 /** Count one catch into the store. */
@@ -103,8 +138,10 @@ function add(store: StatsStore, facts: CatchFacts, now: number): void {
     store.day = today;
     store.catchesToday = 0;
   }
-  const at = facts.at && Number.isFinite(Date.parse(facts.at)) ? facts.at : undefined;
-  if ((at ? localDay(at) : today) === today) store.catchesToday++;
+  const day = catchDay(facts, now);
+  if (day === today) store.catchesToday++;
+  addDaily(store, day, now);
+  pruneDaily(store, now);
 }
 
 /** Retained state dirs, live lanes first so they win over any backup copy. */
@@ -138,15 +175,57 @@ export function backfillStats(now = Date.now()): StatsStore {
   return store;
 }
 
-function parseStore(text: string): StatsStore | undefined {
+/**
+ * Give a store saved before `daily` existed its per-day history, once: each
+ * dispatch that finished done and whose record is still on disk counts on
+ * the local day of its done report. Live state comes first, then each
+ * `state-backup-*`, one count per dispatch id. A live done the store has not
+ * counted yet is skipped: recordCatch or a fold counts it (and its day) later.
+ * A catch whose record was culled has no day; it stays in the totals only.
+ */
+export function backfillDaily(store: StatsStore, now = Date.now()): StatsStore {
+  const daily: Record<string, number> = {};
+  const counted = new Set(store.counted);
+  const seen = new Set<string>();
+  const into = { ...store, daily };
+  for (const { dir, live } of backfillSources()) {
+    for (const file of readDirIfPresent(dir).sort()) {
+      if (!file.endsWith('.status')) continue;
+      const id = file.slice(0, -'.status'.length);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (live && !counted.has(id)) continue;
+      const facts = readCatchFacts(dir, id);
+      if (facts.done) addDaily(into, catchDay(facts, now), now);
+    }
+  }
+  pruneDaily(into, now);
+  return into;
+}
+
+const isDaily = (v: unknown): v is Record<string, number> =>
+  !!v && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every((n) => typeof n === 'number');
+
+/** A saved store; `daily` is undefined when it predates per-day history. */
+function parseStore(text: string): (Omit<StatsStore, 'daily'> & { daily?: Record<string, number> }) | undefined {
   try {
     const s = JSON.parse(text) as Partial<StatsStore>;
     if (s.version !== 1 || typeof s.totalCatches !== 'number' || typeof s.catchesToday !== 'number' || typeof s.day !== 'string') return undefined;
-    return { version: 1, totalCatches: s.totalCatches, perTrap: s.perTrap ?? {}, day: s.day, catchesToday: s.catchesToday, counted: s.counted ?? [] };
+    return {
+      version: 1,
+      totalCatches: s.totalCatches,
+      perTrap: s.perTrap ?? {},
+      day: s.day,
+      catchesToday: s.catchesToday,
+      counted: s.counted ?? [],
+      ...(isDaily(s.daily) ? { daily: s.daily } : {}),
+    };
   } catch {
     return undefined;
   }
 }
+
+const complete = (s: ReturnType<typeof parseStore>): s is StatsStore => !!s && s.daily !== undefined;
 
 function writeStore(store: StatsStore): void {
   const file = statsPath();
@@ -192,7 +271,13 @@ function loadOrBackfill(now: number): StatsStore {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   const saved = text === undefined ? undefined : parseStore(text);
-  if (saved) return saved;
+  if (complete(saved)) return saved;
+  if (saved) {
+    // Saved before per-day history: add it once, from the records on disk.
+    const store = backfillDaily({ ...saved, daily: {} }, now);
+    writeStore(store);
+    return store;
+  }
   // Keep an unreadable store for inspection rather than overwriting it silently.
   if (text !== undefined) fs.renameSync(statsPath(), `${statsPath()}.unreadable-${now}`);
   const store = backfillStats(now);
@@ -204,7 +289,7 @@ function loadOrBackfill(now: number): StatsStore {
 export function readStatsStore(now = Date.now()): StatsStore {
   try {
     const saved = parseStore(fs.readFileSync(statsPath(), 'utf8'));
-    if (saved) return saved;
+    if (complete(saved)) return saved;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
@@ -260,5 +345,89 @@ export function statsView(store: StatsStore, names: ReadonlyMap<string, string>,
     catchesToday: store.day === localDay(now) ? store.catchesToday : 0,
     totalCatches: store.totalCatches,
     perTrap: [...perTrap].map(([name, catches]) => ({ name, catches })).sort((a, b) => b.catches - a.catches || a.name.localeCompare(b.name)),
+  };
+}
+
+/** One heatmap cell: a local day, its catches, and its intensity step (0 = none, 4 = most). */
+export interface StatsDay {
+  date: string;
+  count: number;
+  level: 0 | 1 | 2 | 3 | 4;
+}
+
+/** What the glass's Stats tab shows (`GET /data/stats`). */
+export interface StatsPage {
+  /** The local day the page was built for. */
+  today: string;
+  catchesToday: number;
+  /** Catches since Sunday, local time: the heatmap's last column. */
+  catchesThisWeek: number;
+  totalCatches: number;
+  /** HEATMAP_WEEKS columns, oldest first; each Sunday → Saturday, the last ending today. */
+  weeks: StatsDay[][];
+  /** A month label over the column where that month starts. */
+  months: Array<{ week: number; label: string }>;
+  /** The most catches on one heatmap day: what level 4 means. */
+  max: number;
+  /** Each trap's all-time catches, most first (the store keeps no per-day split). */
+  perTrap: TrapCatches[];
+  /** Catches with no recorded day: culled before per-day history began, or past retention. */
+  undated: number;
+  /** The earliest day with a recorded catch, if any. */
+  historyFrom: string | null;
+}
+
+export const HEATMAP_WEEKS = 53;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const weekday = (day: string): number => {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(y, m - 1, d).getDay();
+};
+
+/** A count's intensity step against the busiest day: 0 for none, else 1 to 4 in equal quarters. */
+export function heatLevel(count: number, max: number): StatsDay['level'] {
+  if (count <= 0 || max <= 0) return 0;
+  return Math.min(4, Math.max(1, Math.ceil((count / max) * 4))) as StatsDay['level'];
+}
+
+/** The Stats tab's numbers and heatmap, from the store. Read-only. */
+export function statsPage(store: StatsStore, names: ReadonlyMap<string, string>, now = Date.now()): StatsPage {
+  const view = statsView(store, names, now);
+  const today = localDay(now);
+  const count = (day: string) => store.daily[day] ?? 0;
+  const start = shiftDay(today, weekday(today) + (HEATMAP_WEEKS - 1) * 7);
+  const dates: string[][] = [];
+  for (let w = 0; w < HEATMAP_WEEKS; w++) {
+    const week: string[] = [];
+    for (let d = 0; d < 7; d++) {
+      const date = shiftDay(start, -(w * 7 + d));
+      if (date > today) break;
+      week.push(date);
+    }
+    dates.push(week);
+  }
+  const max = Math.max(0, ...dates.flat().map(count));
+  const weeks = dates.map((week) => week.map((date) => ({ date, count: count(date), level: heatLevel(count(date), max) })));
+  const months: StatsPage['months'] = [];
+  dates.forEach((week, w) => {
+    const month = Number(week[0]!.slice(5, 7)) - 1;
+    if (w === 0 || month !== Number(dates[w - 1]![0]!.slice(5, 7)) - 1) months.push({ week: w, label: MONTHS[month]! });
+  });
+  // A first label squeezed against the next one would overlap it.
+  if (months.length > 1 && months[1]!.week - months[0]!.week < 3) months.shift();
+  const recorded = Object.keys(store.daily).filter((d) => store.daily[d]! > 0 && d <= today);
+  const dated = Object.values(store.daily).reduce((a, n) => a + n, 0);
+  return {
+    today,
+    catchesToday: view.catchesToday,
+    catchesThisWeek: weeks[weeks.length - 1]!.reduce((a, d) => a + d.count, 0),
+    totalCatches: view.totalCatches,
+    weeks,
+    months,
+    max,
+    perTrap: view.perTrap,
+    undated: Math.max(0, store.totalCatches - dated),
+    historyFrom: recorded.length ? recorded.sort()[0]! : null,
   };
 }
