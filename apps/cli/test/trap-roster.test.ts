@@ -260,11 +260,11 @@ describe('man throw --plan', () => {
     expect(listTraps().map((t) => t.name)).toEqual(['amber-gull']);
   });
 
-  processTest('refuses without --plan, and the TOON output names the plan read-only', () => {
+  processTest('batches need --plan, and the TOON output names the plan read-only', () => {
     expect(soak(primary).status).toBe(0);
     const bare = lobstah(primary, 'man', 'throw', '--all');
     expect(bare.status).toBe(2);
-    expect(bare.stdout + bare.stderr).toContain('launches nothing yet');
+    expect(bare.stdout + bare.stderr).toContain('--all and --repo work only with --plan');
     const res = lobstah(primary, 'man', 'throw', '--plan', '--all');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toContain('plan: read-only — launches nothing');

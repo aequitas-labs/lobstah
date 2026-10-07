@@ -59,6 +59,7 @@ import {
   recordRosterRevision,
   planThrow,
   throwTerminalText,
+  TrapStartingError,
   listRoster,
   rosterByAddress,
   setRosterProfile,
@@ -212,6 +213,7 @@ import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReporte
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
+import { backText, launchedText, throwTrap } from './throw.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { setTerminalTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
@@ -1819,9 +1821,39 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'man:throw': {
-      // PR 1 of trap pools: the plan only. A throw that launches is not built yet.
       if (!has('--plan')) {
-        throw new UsageError(`man throw launches nothing yet — pass --plan to see what a throw would do\n\n${usageFor('man:throw')!}`);
+        // One trap back, then wait until it listens. Batches come later.
+        if (has('--all') || opt('--repo') !== undefined) {
+          throw new UsageError(`man throw launches one named trap; --all and --repo work only with --plan\n\n${usageFor('man:throw')!}`);
+        }
+        if (pos.length !== 1) throw new UsageError(`man throw launches exactly one trap: name it\n\n${usageFor('man:throw')!}`);
+        const caller = callerSession(opt('--session'));
+        gateHelm(caller);
+        const timeout = opt('--timeout');
+        const timeoutSecs = timeout === undefined ? undefined : Number(timeout);
+        if (timeoutSecs !== undefined && !(timeoutSecs > 0)) throw new UsageError('--timeout takes a number of seconds');
+        const json = has('--json');
+        let result: Awaited<ReturnType<typeof throwTrap>>;
+        try {
+          result = await throwTrap({
+            address: pos[0]!,
+            cfg: loadConfig(),
+            by: caller?.id,
+            timeoutSecs,
+            onLaunch: (launched) => {
+              if (!json) console.log(launchedText(launched, timeoutSecs));
+            },
+          });
+        } catch (err) {
+          if (err instanceof TrapStartingError) throw new Error(`refused: ${err.message} — one launch per trap`);
+          throw err;
+        }
+        if (json) {
+          console.log(JSON.stringify({ ...result, registration: undefined, session: result.registration.sessionId }, null, 2));
+          break;
+        }
+        console.log(backText(result));
+        break;
       }
       const all = has('--all');
       const repo = opt('--repo');
@@ -2552,7 +2584,14 @@ async function mainCli(): Promise<void> {
           );
         }
         repoKey = reservation.repo;
-        if (site && !site.primary && site.repoKey === reservation.repo && trapIdAt(site.worktree) === undefined) {
+        if (reservation.worktree !== undefined) {
+          // A thrown trap comes back in its own worktree, wherever the
+          // session started (Claude resumes from its transcript's directory).
+          if (!fs.existsSync(reservation.worktree) || trapIdAt(reservation.worktree) !== reservation.trapId) {
+            throw new Error(`the thrown trap ${trapLabel(reservation)} has no checkout anchoring it at ${reservation.worktree} — withdraw it with \`lobstah stow --wt ${reservation.name}\` and throw it again`);
+          }
+          worktree = canon(reservation.worktree);
+        } else if (site && !site.primary && site.repoKey === reservation.repo && trapIdAt(site.worktree) === undefined) {
           worktree = site.worktree;
         } else {
           create = { key: reservation.repo, repo: cfg.repos[reservation.repo]! };

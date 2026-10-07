@@ -32,6 +32,11 @@ export interface TrapReservation {
   by?: string;
   /** The `trap-request` request this reservation answers. */
   request?: string;
+  /**
+   * A thrown trap coming back under its roster id: the session signs on in
+   * this worktree (kept or recreated) instead of a new one.
+   */
+  worktree?: string;
 }
 
 /** `<trapId>-<32 hex>`: the id prefix finds the reservation, the rest proves it. */
@@ -119,9 +124,15 @@ export function reservationByAddress(address: string): TrapReservation | undefin
   return readReservation(trapIdForName(value) ?? value);
 }
 
+/** A second reservation for a trap that already has one: a double launch. */
+export class TrapStartingError extends Error {}
+
 /**
  * Reserve a trap: a fresh id, a reserved name, and a one-time ticket. The
- * ticket is returned once and stored only as a hash.
+ * ticket is returned once and stored only as a hash. `returning` reserves
+ * an existing trap (a throw) under its own id and name, in its worktree;
+ * the reservation file is created exclusively, so a second reservation for
+ * the same trap refuses with TrapStartingError.
  */
 export function reserveTrap(opts: {
   repo: string;
@@ -130,12 +141,43 @@ export function reserveTrap(opts: {
   startSecs?: number;
   by?: string;
   request?: string;
+  returning?: { trapId: string; worktree: string };
   now?: number;
 }): { reservation: TrapReservation; ticket: string } {
   const now = opts.now ?? Date.now();
-  let trapId = newTrapId();
-  while (readTrap(trapId) || readReservation(trapId)) trapId = newTrapId();
-  const name = reserveTrapName(trapId, opts.name);
+  let trapId = opts.returning?.trapId ?? newTrapId();
+  if (opts.returning) {
+    if (readTrap(trapId)) throw new TrapStartingError(`trap wt:${trapId} is signed on — it is not stowed`);
+    fs.mkdirSync(soakingDir(), { recursive: true });
+    const claim = (): void => fs.writeFileSync(startPath(trapId), '{}', { flag: 'wx' });
+    try {
+      try {
+        claim();
+      } catch (err) {
+        // A placeholder a crashed throw left (created, never written) blocks nothing for long.
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST' || readReservation(trapId) || now - fs.statSync(startPath(trapId)).mtimeMs < 60_000) throw err;
+        fs.rmSync(startPath(trapId), { force: true });
+        claim();
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      const held = readReservation(trapId);
+      throw new TrapStartingError(
+        held
+          ? `trap ${trapLabel(held)} is already starting (reserved ${held.reservedAt}${held.failedAt ? `, start failed: ${held.reason ?? 'unknown'}` : `, sign-on due by ${held.deadline}`})`
+          : `trap wt:${trapId} is already starting`,
+      );
+    }
+  } else {
+    while (readTrap(trapId) || readReservation(trapId)) trapId = newTrapId();
+  }
+  let name: string;
+  try {
+    name = reserveTrapName(trapId, opts.name);
+  } catch (err) {
+    if (opts.returning) fs.rmSync(startPath(trapId), { force: true });
+    throw err;
+  }
   const ticket = `${trapId}-${randomBytes(16).toString('hex')}`;
   const reservation: TrapReservation = {
     trapId,
@@ -147,12 +189,15 @@ export function reserveTrap(opts: {
     deadline: new Date(now + (opts.startSecs ?? DEFAULT_TRAP_START_SECS) * 1000).toISOString(),
     ...(opts.by ? { by: opts.by } : {}),
     ...(opts.request ? { request: opts.request } : {}),
+    ...(opts.returning ? { worktree: opts.returning.worktree } : {}),
   };
   writeReservation(reservation);
   fs.writeFileSync(ticketPath(trapId), ticket, { mode: 0o600 });
   postNotice({
     kind: 'trap-starting',
-    text: `trap ${trapLabel(reservation)} reserved for repo ${opts.repo} — starting, sign-on due by ${reservation.deadline}; address work with \`--for ${name}\``,
+    text: opts.returning
+      ? `trap ${trapLabel(reservation)} thrown back for repo ${opts.repo} — starting, sign-on due by ${reservation.deadline}`
+      : `trap ${trapLabel(reservation)} reserved for repo ${opts.repo} — starting, sign-on due by ${reservation.deadline}; address work with \`--for ${name}\``,
     refId: trapId,
     repo: opts.repo,
     by: opts.by,
