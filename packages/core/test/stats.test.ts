@@ -6,6 +6,8 @@ import { appendStatus, ensureLayout, mergeEvidence } from '../src/index.js';
 import { DAILY_RETENTION_DAYS, HEATMAP_WEEKS, foldCatches, heatLevel, localDay, readStatsStore, recordCatch, shiftDay, statsPage, statsPath, statsView } from '../src/stats.js';
 import type { StatsStore } from '../src/stats.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { workerProfile } from '../src/worker-profile.js';
+import { observeSessionWorker } from '../src/session-workers.js';
 
 let home: string;
 beforeEach(() => {
@@ -28,15 +30,42 @@ function legacy(dir: string, id: string, verbs: string[], at: string, trap?: str
 }
 
 describe('catch store', () => {
+  it('preserves completed worker settings through stow/cull, counts headless combinations once and resets at UTC midnight', () => {
+    const now = Date.parse('2026-10-06T12:00:00Z');
+    const at = new Date(now).toISOString();
+    const dir = path.join(home, 'state');
+    observeSessionWorker({ session_id: 'trap-session', model: 'gpt-5.2-codex', permission_mode: 'default' }, 'codex');
+    legacy(dir, 'trap', ['done'], at, 'wt:a');
+    fs.writeFileSync(path.join(dir, 'trap.evidence'), JSON.stringify({ deliveredTo: 'wt:a', sessionId: 'trap-session', harness: 'codex' }));
+    const w = workerProfile({ harness: 'claude', model: 'sonnet', effort: 'high' });
+    for (const id of ['headless-a', 'headless-b']) {
+      legacy(dir, id, ['done'], at);
+      fs.writeFileSync(path.join(dir, `${id}.evidence`), JSON.stringify({ worker: w }));
+    }
+    legacy(dir, 'failed', ['failed'], at);
+    const store = readStatsStore(now);
+    expect(store.utc?.trapWorkers?.['wt:a']).toEqual(workerProfile({ harness: 'codex', model: 'gpt-5.2-codex', permissionMode: 'default' }));
+    expect(store.utc?.byWorker).toEqual([{ ...w, today: 2 }]);
+    recordCatch('headless-a', 'work', now);
+    foldCatches([{ id: 'trap', lane: 'work' }, { id: 'headless-a', lane: 'work' }], now);
+    fs.unlinkSync(path.join(dir, 'trap.status'));
+    fs.unlinkSync(path.join(dir, 'headless-a.status'));
+    expect(readStatsStore(now).utc).toEqual(store.utc);
+    const next = now + 86400000;
+    legacy(dir, 'next', ['done'], new Date(next).toISOString());
+    recordCatch('next', 'work', next);
+    expect(readStatsStore(next).utc?.byWorker).toEqual([{ ...workerProfile(), today: 1 }]);
+  });
+
   it('keeps a UTC-day per-trap table through cull, and resets at UTC midnight', () => {
     const now = Date.parse('2026-10-06T23:59:00Z');
     legacy(path.join(home, 'state'), 'trap', ['done'], new Date(now).toISOString(), 'wt:a');
     legacy(path.join(home, 'state'), 'headless', ['done'], new Date(now).toISOString());
     legacy(path.join(home, 'state'), 'yesterday', ['done'], '2026-10-05T23:59:00Z', 'wt:b');
-    expect(readStatsStore(now).utc).toEqual({ date: '2026-10-06', catches: 2, perTrap: { 'wt:a': 1 } });
+    expect(readStatsStore(now).utc).toMatchObject({ date: '2026-10-06', catches: 2, perTrap: { 'wt:a': 1 } });
     foldCatches([{ id: 'trap', lane: 'work' }], now);
     fs.unlinkSync(path.join(home, 'state', 'trap.status'));
-    expect(readStatsStore(now).utc).toEqual({ date: '2026-10-06', catches: 2, perTrap: { 'wt:a': 1 } });
+    expect(readStatsStore(now).utc).toMatchObject({ date: '2026-10-06', catches: 2, perTrap: { 'wt:a': 1 } });
     const tomorrow = now + 120_000;
     legacy(path.join(home, 'state'), 'new', ['done'], new Date(tomorrow).toISOString(), 'wt:b');
     recordCatch('new', 'work', tomorrow);

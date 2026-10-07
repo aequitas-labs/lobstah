@@ -2,11 +2,17 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
-import { configPath } from './config.js';
+import { configPath, loadConfig } from './config.js';
 import { lobstahHome } from './paths.js';
 import { readStatsStore } from './stats.js';
 import { generatedTrapNames, TRAP_NAME_RE } from './trap-names.js';
 import { lobstahVersion } from './version.js';
+import { liveHelms } from './helm.js';
+import { listTraps } from './soak.js';
+import { sessionWorker } from './session-workers.js';
+import { sanitizeWorker, workerProfile } from './worker-profile.js';
+import type { WorkerProfile } from './worker-profile.js';
+import type { WorkerCatches } from './stats.js';
 
 /**
  * Anonymous telemetry: one small daily aggregate of catch counts, sent by the
@@ -29,8 +35,9 @@ export const TELEMETRY_ENDPOINT = '';
 export const TELEMETRY_SCHEMA = 1;
 
 /** The only keys a payload may carry. The Worker rejects any other key. */
-export const TELEMETRY_FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'traps'] as const;
+export const TELEMETRY_FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'helm', 'traps', 'byWorker'] as const;
 export const TELEMETRY_MAX_TRAPS = 100;
+export const TELEMETRY_MAX_WORKERS = 100;
 
 export interface TelemetryPayload {
   schema: typeof TELEMETRY_SCHEMA;
@@ -47,7 +54,10 @@ export interface TelemetryPayload {
   /** UTC-day and all-time catches, including headless and omitted traps. */
   catches: { today: number; total: number };
   /** At most 100 automatically generated names, with positive UTC-day counts. */
-  traps: Array<{ name: string; today: number }>;
+  helm: WorkerProfile | null;
+  traps: Array<WorkerCatches & { name: string }>;
+  /** Headless UTC-day catches, grouped by safe worker settings (max 100). */
+  byWorker: WorkerCatches[];
 }
 
 /** Local telemetry state, `~/.lobstah/telemetry.json`. Never sent, apart from installId. */
@@ -191,13 +201,28 @@ export function buildTelemetryPayload(installId: string, now: number = Date.now(
   const store = readStatsStore(now);
   const date = utcDate(now);
   const utc = store.utc?.date === date ? store.utc : undefined;
-  const perName = new Map<string, number>();
+  const perName = new Map<string, WorkerCatches>();
   const names = generatedTrapNames();
+  const registrations = new Map(listTraps().map((t) => [t.trapId, t]));
   for (const [address, today] of Object.entries(utc?.perTrap ?? {})) {
     if (!address.startsWith('wt:') || !Number.isSafeInteger(today) || today <= 0) continue;
     const name = names.get(address.slice(3));
-    if (name && name.length >= 5 && name.length <= 17 && TRAP_NAME_RE.test(name)) perName.set(name, (perName.get(name) ?? 0) + today);
+    if (name && name.length >= 5 && name.length <= 17 && TRAP_NAME_RE.test(name)) {
+      const reg = registrations.get(address.slice(3));
+      const worker = reg ? sessionWorker(reg.sessionId, reg.harness) : sanitizeWorker(utc?.trapWorkers?.[address]);
+      const previous = perName.get(name);
+      // A reused name with conflicting settings must not acquire guessed metadata.
+      perName.set(name, { ...(previous && JSON.stringify(sanitizeWorker(previous)) !== JSON.stringify(worker) ? workerProfile() : worker), today: (previous?.today ?? 0) + today });
+    }
   }
+  const byWorker = (utc?.byWorker ?? []).map((w) => ({ ...sanitizeWorker(w), today: w.today }));
+  // Old/cull-lost evidence stays attributable as unknown, not as a guessed model.
+  const headless = Math.max(0, (utc?.catches ?? 0) - Object.values(utc?.perTrap ?? {}).reduce((a, b) => a + b, 0));
+  const missing = headless - byWorker.reduce((n, w) => n + w.today, 0);
+  if (missing > 0) byWorker.push({ ...workerProfile(), today: missing });
+  const helms = liveHelms(loadConfig().helm.ttlSecs * 1000, now);
+  // An install can oversee multiple grounds. Never invent one representative.
+  const helm = helms.length === 1 ? sessionWorker(helms[0]!.sessionId, helms[0]!.harness) : null;
   return {
     schema: TELEMETRY_SCHEMA,
     version: lobstahVersion(),
@@ -206,7 +231,9 @@ export function buildTelemetryPayload(installId: string, now: number = Date.now(
     installId,
     date,
     catches: { today: utc?.catches ?? 0, total: store.totalCatches },
-    traps: [...perName].map(([name, today]) => ({ name, today })).sort((a, b) => b.today - a.today || a.name.localeCompare(b.name)).slice(0, TELEMETRY_MAX_TRAPS),
+    helm,
+    traps: [...perName].map(([name, row]) => ({ name, ...row })).sort((a, b) => b.today - a.today || a.name.localeCompare(b.name)).slice(0, TELEMETRY_MAX_TRAPS),
+    byWorker: boundedWorkers(byWorker),
   };
 }
 
@@ -215,10 +242,33 @@ export function serializeTelemetryPayload(p: TelemetryPayload): string {
   const out: Record<string, unknown> = {};
   for (const key of TELEMETRY_FIELDS) out[key] = p[key];
   out.catches = { today: p.catches.today, total: p.catches.total };
+  out.helm = p.helm ? sanitizeWorker(p.helm) : null;
   out.traps = p.traps
     .filter((t) => typeof t.name === 'string' && t.name.length >= 5 && t.name.length <= 17 && t.name.trim() === t.name && TRAP_NAME_RE.test(t.name) && Number.isSafeInteger(t.today) && t.today > 0)
-    .slice(0, TELEMETRY_MAX_TRAPS).map((t) => ({ name: t.name, today: t.today }));
+    .slice(0, TELEMETRY_MAX_TRAPS).map((t) => ({ name: t.name, today: t.today, ...sanitizeWorker(t) }));
+  out.byWorker = boundedWorkers(p.byWorker);
   return JSON.stringify(out);
+}
+
+function boundedWorkers(rows: readonly WorkerCatches[]): WorkerCatches[] {
+  const grouped = new Map<string, WorkerCatches>();
+  for (const r of rows) {
+    if (!Number.isSafeInteger(r.today) || r.today <= 0) continue;
+    const worker = sanitizeWorker(r);
+    const key = JSON.stringify(worker);
+    const previous = grouped.get(key);
+    grouped.set(key, { ...worker, today: (previous?.today ?? 0) + r.today });
+  }
+  const sorted = [...grouped.values()].sort((a, b) => b.today - a.today || JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  if (sorted.length <= TELEMETRY_MAX_WORKERS) return sorted;
+  const kept = sorted.slice(0, TELEMETRY_MAX_WORKERS - 1);
+  // Fold overflow into unknown, retaining every headless catch.
+  const unknown = workerProfile();
+  const remainder = sorted.slice(TELEMETRY_MAX_WORKERS - 1).reduce((n, r) => n + r.today, 0);
+  const existing = kept.find((r) => JSON.stringify(sanitizeWorker(r)) === JSON.stringify(unknown));
+  if (existing) existing.today += remainder;
+  else kept.push({ ...unknown, today: remainder });
+  return kept;
 }
 
 export const TELEMETRY_NOTICE = `lobstah telemetry: once a day the lobstah daemon sends an anonymous count of
@@ -226,6 +276,9 @@ catches (dispatches finished done): the UTC-day count and the all-time total,
 with the lobstah version, OS family, CPU architecture, the UTC date, and a
 random install id made on this machine. It also sends up to 100 automatically
 generated trap names with recorded provenance and their UTC-day counts.
+It includes the signed-on helm's and traps' harness, known model and fixed-choice
+config (reasoning effort and permission mode), plus headless counts by those
+settings. Missing observations are null; custom/unrecognized models are other.
 Custom names (--name) and older names with unknown provenance stay local;
 their catches still count in the totals. Names are not hashed. It never sends
 repository names or paths, code, briefs, session ids, PR URLs, hostnames or user names.

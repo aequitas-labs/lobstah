@@ -24,6 +24,9 @@ import {
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { reserveTrapName } from '../src/trap-names.js';
 import { statsPath } from '../src/stats.js';
+import { workerProfile } from '../src/worker-profile.js';
+import { observeSessionWorker } from '../src/session-workers.js';
+import { takeHelm } from '../src/helm.js';
 
 const ENDPOINT = 'https://telemetry.example.test/v1/daily';
 const DAY = 86_400_000;
@@ -72,6 +75,33 @@ function consented(): void {
 }
 
 describe('telemetry payload', () => {
+  it('includes the live helm and safe trap/headless metadata, with unknown legacy catches preserved', () => {
+    const name = reserveTrapName('auto', undefined, 0);
+    takeHelm({ sessionId: 'helm-1', grounds: { name: 'fleet', repos: [] }, ttlMs: 60000, now: NOON, identity: { harness: 'claude' } });
+    observeSessionWorker({ session_id: 'helm-1', hook_event_name: 'SessionStart', model: 'opus', permission_mode: 'plan' }, 'claude');
+    const trap = workerProfile({ harness: 'codex', model: 'gpt-6.1-sol', permissionMode: 'default' });
+    const headless = workerProfile({ harness: 'claude', model: 'sonnet', effort: 'high', permissionMode: 'bypassPermissions' });
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 5, perTrap: { 'wt:auto': 2 }, day: '2026-10-06', catchesToday: 5, counted: [], utc: { date: '2026-10-06', catches: 5, perTrap: { 'wt:auto': 2 }, trapWorkers: { 'wt:auto': trap }, byWorker: [{ ...headless, today: 2 }] } }));
+    const p = buildTelemetryPayload(ensureTelemetryState().installId, NOON);
+    expect(p).toMatchObject({ helm: workerProfile({ harness: 'claude', model: 'opus', permissionMode: 'plan' }), traps: [{ name, today: 2, ...trap }] });
+    expect(p.byWorker).toEqual([{ ...headless, today: 2 }, { ...workerProfile(), today: 1 }]);
+    const json = serializeTelemetryPayload({ ...p, helm: { ...p.helm!, org: 'secret-org', model: 'gpt-secret-model', config: { ...p.helm!.config, effort: 'secret effort', apiHost: 'private-host' } }, traps: p.traps.map((t) => ({ ...t, prompt: 'secret prompt' })), byWorker: p.byWorker.map((w) => ({ ...w, systemPrompt: 'secret system' })) } as never);
+    expect(json).not.toMatch(/secret|private-host|systemPrompt|apiHost|org/);
+    expect(JSON.parse(json).helm).toEqual(workerProfile({ harness: 'claude', model: 'other', permissionMode: 'plan' }));
+  });
+
+  it('caps headless combinations without losing counts and sends no helm representative for multiple grounds', () => {
+    takeHelm({ sessionId: 'a', grounds: { name: 'a', repos: [] }, ttlMs: 60000, now: NOON, identity: { harness: 'claude' } });
+    takeHelm({ sessionId: 'b', grounds: { name: 'b', repos: [] }, ttlMs: 60000, now: NOON, identity: { harness: 'codex' } });
+    const p = buildTelemetryPayload(ensureTelemetryState().installId, NOON);
+    expect(p.helm).toBeNull();
+    const rows = Array.from({ length: 120 }, (_, i) => ({ ...workerProfile({ harness: i % 2 ? 'claude' : 'codex', model: ['opus', 'sonnet', 'gpt-5', 'gpt-6.1-sol'][Math.floor(i / 2) % 4], effort: ['low', 'medium', 'high', 'xhigh', 'max'][Math.floor(i / 8) % 5], permissionMode: ['default', 'plan', 'bypassPermissions'][Math.floor(i / 40)] }), today: 1 }));
+    const out = JSON.parse(serializeTelemetryPayload({ ...p, byWorker: rows }));
+    expect(out.byWorker.length).toBeLessThanOrEqual(100);
+    expect(out.byWorker.reduce((n: number, r: { today: number }) => n + r.today, 0)).toBe(120);
+    expect(out.byWorker.some((r: { harness: string | null }) => r.harness === null)).toBe(true);
+  });
+
   it('serialises only the allowed keys, with nothing from the fleet in it', () => {
     const { secrets } = fleet();
     const state = ensureTelemetryState();
@@ -99,7 +129,7 @@ describe('telemetry payload', () => {
     fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 99, perTrap: {}, day: '2026-10-05', catchesToday: 77, counted: [], utc: { date: '2026-10-06', catches: 10, perTrap: { 'wt:auto': 2, 'wt:custom': 3, 'wt:legacy': 1 } } }));
     const p = buildTelemetryPayload(ensureTelemetryState().installId, NOON);
     expect(p.catches).toEqual({ today: 10, total: 99 });
-    expect(p.traps).toEqual([{ name: generated, today: 2 }]);
+    expect(p.traps).toEqual([{ name: generated, today: 2, ...workerProfile() }]);
     expect(buildTelemetryPayload(p.installId, NOON + DAY)).toMatchObject({ catches: { today: 0, total: 99 }, traps: [] });
   });
 
@@ -116,11 +146,11 @@ describe('telemetry payload', () => {
     expect(p.traps.at(-1)?.today).toBe(6);
     const invalid = ['x-crab', 'toolonggg-crab', 'Amber-crab', 'amber/../crab', 'amber-crab\n', 'secret repo'];
     const traps = invalid.map((name) => ({ name, today: 1 })).concat([{ name: p.traps[0]!.name, today: 0 }], p.traps.map((t) => ({ ...t, secret: home })));
-    const json = serializeTelemetryPayload({ ...p, traps });
+    const json = serializeTelemetryPayload({ ...p, traps } as never);
     expect(JSON.parse(json).traps).toEqual(p.traps);
     expect(json).not.toContain(home);
     expect(json).not.toContain('secret');
-    expect(Buffer.byteLength(json)).toBeLessThan(8192);
+    expect(Buffer.byteLength(json)).toBeLessThan(65536);
   });
 
   it('notice explains name provenance, omitted catches and no hashing', () => {

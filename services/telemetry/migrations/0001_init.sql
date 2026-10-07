@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   arch TEXT NOT NULL,
   catches_today INTEGER NOT NULL,
   total_catches INTEGER NOT NULL,
+  helm TEXT,
   PRIMARY KEY (install_id, date)
 ) WITHOUT ROWID;
 
@@ -21,7 +22,32 @@ CREATE TABLE IF NOT EXISTS trap_submissions (
   date TEXT NOT NULL,
   name TEXT NOT NULL,
   catches_today INTEGER NOT NULL,
+  harness TEXT,
+  model TEXT,
+  effort TEXT,
+  permission_mode TEXT,
   PRIMARY KEY (install_id, date, name)
+) WITHOUT ROWID;
+
+-- Headless settings and the install's aggregate attribution snapshot share
+-- the 90-day expiry. Empty string is the internal key for a JSON null.
+CREATE TABLE IF NOT EXISTS worker_submissions (
+  install_id TEXT NOT NULL, date TEXT NOT NULL,
+  harness TEXT NOT NULL, model TEXT NOT NULL, effort TEXT NOT NULL, permission_mode TEXT NOT NULL,
+  catches_today INTEGER NOT NULL,
+  PRIMARY KEY (install_id, date, harness, model, effort, permission_mode)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS attribution_submissions (
+  install_id TEXT NOT NULL, date TEXT NOT NULL,
+  harness TEXT NOT NULL, model TEXT NOT NULL, catches_today INTEGER NOT NULL,
+  PRIMARY KEY (install_id, date, harness, model)
+) WITHOUT ROWID;
+
+-- Indefinite daily counts, with no identity, names or config.
+CREATE TABLE IF NOT EXISTS daily_worker_totals (
+  date TEXT NOT NULL, harness TEXT NOT NULL, model TEXT NOT NULL,
+  catches_today INTEGER NOT NULL,
+  PRIMARY KEY (date, harness, model)
 ) WITHOUT ROWID;
 
 -- Daily totals across all installs, with no install ids. Kept indefinitely.

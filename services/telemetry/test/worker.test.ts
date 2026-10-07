@@ -5,7 +5,8 @@ import type { D1Database, D1PreparedStatement, D1Result, Env, RateLimit } from '
 import worker, { FIELDS, MAX_BODY_BYTES, MAX_TRAPS, RETENTION_DAYS, handle, utcDate, validate } from '../src/index.js';
 
 // The client's allowed keys and the Worker's must be the same list.
-import { TELEMETRY_FIELDS, TELEMETRY_MAX_TRAPS } from '../../../packages/core/src/telemetry.js';
+import { TELEMETRY_FIELDS, TELEMETRY_MAX_TRAPS, TELEMETRY_MAX_WORKERS } from '../../../packages/core/src/telemetry.js';
+import { workerProfile } from '../../../packages/core/src/worker-profile.js';
 import { TRAP_FIRST_WORDS, TRAP_LAST_WORDS } from '../../../packages/core/src/trap-names.js';
 
 const DAY = 86_400_000;
@@ -15,13 +16,34 @@ const ID = '3b0c8f9e-6a1d-4c2e-9f3a-1b2c3d4e5f60';
 const OTHER = '7e1d2c3b-4a5f-4e6d-8c7b-0a9f8e7d6c5b';
 
 function payload(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return { schema: 1, version: '0.6.9', os: 'macos', arch: 'arm64', installId: ID, date: TODAY, catches: { today: 3, total: 40 }, traps: [{ name: 'kind-crab', today: 2 }], ...over };
+  return { schema: 1, version: '0.6.9', os: 'macos', arch: 'arm64', installId: ID, date: TODAY, catches: { today: 3, total: 40 }, helm: null, traps: [{ name: 'kind-crab', today: 2, ...workerProfile() }], byWorker: [], ...over };
 }
 
 describe('telemetry Worker validation', () => {
+  it('accepts known profiles or explicit nulls, rejects all free text and extra nested keys', () => {
+    const safe = workerProfile({ harness: 'codex', model: 'gpt-6.1-sol', effort: 'high', permissionMode: 'default' });
+    expect(validate(payload({ helm: safe, traps: [{ name: 'kind-crab', today: 2, ...safe }], byWorker: [{ ...workerProfile(), today: 1 }] }), NOW).ok).toBe(true);
+    for (const bad of [
+      { ...safe, harness: 'company harness' }, { ...safe, model: 'gpt-private' },
+      { ...safe, model: 'opus\n' }, { ...safe, model: 'x'.repeat(65) }, { ...safe, model: 'openai/gpt-5' },
+      { ...safe, config: { ...safe.config, effort: 'custom' } },
+      { ...safe, config: { ...safe.config, permissionMode: 'custom' } },
+      { ...safe, config: { effort: 'high' } }, { ...safe, config: { ...safe.config, apiHost: 'private' } },
+      { ...safe, prompt: 'private' }, { ...safe, config: null }, { model: 'opus' },
+    ]) {
+      expect(validate(payload({ helm: bad }), NOW).ok).toBe(false);
+      expect(validate(payload({ traps: [{ ...bad, name: 'kind-crab', today: 1 }] }), NOW).ok).toBe(false);
+      expect(validate(payload({ byWorker: [{ ...bad, today: 1 }] }), NOW).ok).toBe(false);
+    }
+    expect(validate(payload({ byWorker: [{ ...safe, today: 2 }] }), NOW).ok).toBe(false); // trap + headless > today
+    expect(validate(payload({ traps: [], byWorker: [{ ...safe, today: 1 }, { ...safe, today: 1 }] }), NOW).ok).toBe(false);
+    expect(validate(payload({ traps: [], byWorker: Array.from({ length: 101 }, () => ({ ...safe, today: 1 })) }), NOW).ok).toBe(false);
+  });
+
   it('accepts exactly the client payload fields', () => {
     expect([...FIELDS]).toEqual([...TELEMETRY_FIELDS]);
     expect(MAX_TRAPS).toBe(TELEMETRY_MAX_TRAPS);
+    expect(TELEMETRY_MAX_WORKERS).toBe(100);
     expect(validate(payload(), NOW)).toMatchObject({ ok: true });
   });
 
@@ -63,7 +85,7 @@ describe('telemetry Worker validation', () => {
   });
 
   it('accepts 100 names within the body bound, rejects 101, and accepts headless-only totals', () => {
-    const traps = Array.from({ length: 101 }, (_, i) => ({ name: `${TRAP_FIRST_WORDS[Math.floor(i / 64)]}-${TRAP_LAST_WORDS[i % 64]}`, today: 1 }));
+    const traps = Array.from({ length: 101 }, (_, i) => ({ name: `${TRAP_FIRST_WORDS[Math.floor(i / 64)]}-${TRAP_LAST_WORDS[i % 64]}`, today: 1, ...workerProfile() }));
     const accepted = payload({ catches: { today: 100, total: 100 }, traps: traps.slice(0, 100) });
     expect(validate(accepted, NOW).ok).toBe(true);
     expect(new TextEncoder().encode(JSON.stringify(accepted)).length).toBeLessThan(MAX_BODY_BYTES);
@@ -157,6 +179,44 @@ const stats = async (e: Env, days = 30, now = NOW) =>
   };
 
 describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
+  it('stores config for 90 days, retains only anonymous harness/model counts, and corrects retries atomically', async () => {
+    const e = env();
+    const trap = workerProfile({ harness: 'codex', model: 'gpt-5', effort: 'high', permissionMode: 'default' });
+    const headless = workerProfile({ harness: 'claude', model: 'sonnet', effort: 'max', permissionMode: 'bypassPermissions' });
+    const s = payload({ helm: trap, traps: [{ name: 'kind-crab', today: 2, ...trap }], byWorker: [{ ...headless, today: 1 }] });
+    expect((await post(e, s)).status).toBe(204);
+    expect((await post(e, s)).status).toBe(204);
+    expect((await e.DB.prepare('SELECT harness, model, catches_today FROM daily_worker_totals ORDER BY harness').all()).results).toEqual([
+      { harness: 'claude', model: 'sonnet', catches_today: 1 }, { harness: 'codex', model: 'gpt-5', catches_today: 2 },
+    ]);
+    expect((await e.DB.prepare('SELECT effort, permission_mode FROM worker_submissions').all()).results).toEqual([{ effort: 'max', permission_mode: 'bypassPermissions' }]);
+    // A corrected model snapshot subtracts the old bucket: no second catch.
+    const revised = payload({ helm: null, traps: [{ name: 'kind-crab', today: 2, ...trap }], byWorker: [{ ...headless, model: 'opus', today: 1 }] });
+    await post(e, revised);
+    await post(e, revised);
+    const totals = (await e.DB.prepare('SELECT model, catches_today FROM daily_worker_totals WHERE catches_today > 0 ORDER BY model').all()).results;
+    expect(totals).toEqual([{ model: 'gpt-5', catches_today: 2 }, { model: 'opus', catches_today: 1 }]);
+    const columns = (await e.DB.prepare("SELECT name FROM pragma_table_info('daily_worker_totals')").all<{ name: string }>()).results.map((r) => r.name);
+    expect(columns).toEqual(['date', 'harness', 'model', 'catches_today']);
+    const waits: Promise<unknown>[] = [];
+    worker.scheduled({ scheduledTime: NOW + (RETENTION_DAYS + 1) * DAY, cron: '17 3 * * *' }, e, { waitUntil: (p) => waits.push(p) });
+    await Promise.all(waits);
+    for (const table of ['submissions', 'trap_submissions', 'worker_submissions', 'attribution_submissions']) {
+      expect((await e.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n).toBe(0);
+    }
+    expect((await e.DB.prepare('SELECT SUM(catches_today) AS n FROM daily_worker_totals').first<{ n: number }>())?.n).toBe(3);
+    expect((await badge(e)).message).toBe('40');
+  });
+
+  it('attributes omitted traps to unknown without deriving totals from the bounded list', async () => {
+    const e = env();
+    const w = workerProfile({ harness: 'claude', model: 'sonnet' });
+    await post(e, payload({ traps: [], byWorker: [{ ...w, today: 1 }] }));
+    expect((await e.DB.prepare('SELECT harness, model, catches_today FROM daily_worker_totals ORDER BY harness').all()).results).toEqual([
+      { harness: '', model: '', catches_today: 2 }, { harness: 'claude', model: 'sonnet', catches_today: 1 },
+    ]);
+  });
+
   it('upserts by install and date: a retry never double-counts', async () => {
     const e = env();
     expect((await post(e, payload())).status).toBe(204);
@@ -215,7 +275,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
   it(`deletes per-install rows after ${RETENTION_DAYS} days and keeps the daily totals`, async () => {
     const e = env();
     const old = NOW - (RETENTION_DAYS + 1) * DAY;
-    await post(e, payload({ date: utcDate(old), catches: { today: 1, total: 10 }, traps: [{ name: 'amber-gull', today: 1 }] }), old);
+    await post(e, payload({ date: utcDate(old), catches: { today: 1, total: 10 }, traps: [{ name: 'amber-gull', today: 1, ...workerProfile() }] }), old);
     await post(e, payload());
     const waits: Promise<unknown>[] = [];
     worker.scheduled({ scheduledTime: NOW, cron: '17 3 * * *' }, e, { waitUntil: (p) => waits.push(p) });
@@ -229,7 +289,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     expect(s.totalCatches).toBe(40);
     // The table keeps no IP or request metadata column.
     const cols = await e.DB.prepare("SELECT name FROM pragma_table_info('submissions')").all<{ name: string }>();
-    expect(cols.results.map((c) => c.name)).toEqual(['install_id', 'date', 'version', 'os', 'arch', 'catches_today', 'total_catches']);
+    expect(cols.results.map((c) => c.name)).toEqual(['install_id', 'date', 'version', 'os', 'arch', 'catches_today', 'total_catches', 'helm']);
   });
 
   it('replaces the per-trap snapshot atomically and keeps totals independent of it', async () => {
@@ -237,7 +297,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     await post(e, payload());
     await post(e, payload());
     expect((await e.DB.prepare('SELECT name, catches_today FROM trap_submissions').all()).results).toEqual([{ name: 'kind-crab', catches_today: 2 }]);
-    await post(e, payload({ traps: [{ name: 'amber-gull', today: 1 }] }));
+    await post(e, payload({ traps: [{ name: 'amber-gull', today: 1, ...workerProfile() }] }));
     expect((await e.DB.prepare('SELECT name FROM trap_submissions').all()).results).toEqual([{ name: 'amber-gull' }]);
     await post(e, payload({ traps: [] }));
     expect((await e.DB.prepare('SELECT name FROM trap_submissions').all()).results).toEqual([]);

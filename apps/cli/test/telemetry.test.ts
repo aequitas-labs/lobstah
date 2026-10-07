@@ -25,7 +25,7 @@ describe('lobstah telemetry', () => {
     const r = run(['show']);
     expect(r.status).toBe(0);
     expect(Object.keys(JSON.parse(r.stdout) as object)).toEqual([...TELEMETRY_FIELDS]);
-    expect(JSON.parse(r.stdout)).toMatchObject({ schema: 1, catches: { today: 0, total: 0 }, traps: [] });
+    expect(JSON.parse(r.stdout)).toMatchObject({ schema: 1, catches: { today: 0, total: 0 }, helm: null, traps: [], byWorker: [] });
     expect(r.stdout).not.toContain(home);
   });
 

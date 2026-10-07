@@ -9,9 +9,9 @@ A small Cloudflare Worker that receives lobstah's anonymous daily counts
 
 | Route | What it does |
 | ----- | ------------ |
-| `POST /v1/daily` | Accepts one payload (`application/json`, ≤ 8 KiB). Schema stays `1`: exactly `schema`, `version`, `os`, `arch`, `installId`, `date`, `catches: {today, total}`, `traps: [{name, today}]`. At most 100 distinct names, two lowercase words of 2–8 letters joined by a hyphen (5–17 characters), positive counts whose sum cannot exceed `catches.today`. Unknown keys at any level are refused with 400. Upserts by install id + UTC date, so a retry never double-counts. 204 on success, 429 when rate-limited. |
+| `POST /v1/daily` | Accepts one payload (`application/json`, ≤ 64 KiB). Schema stays `1`: exactly `schema`, `version`, `os`, `arch`, `installId`, `date`, `catches`, `helm`, `traps`, `byWorker`. Worker metadata is `{harness, model, config: {effort, permissionMode}}`: enums/catalog-only identifiers (64 characters max), or null. At most 100 distinct generated trap names and 100 headless settings buckets. Trap names are two lowercase words of 2–8 letters joined by a hyphen; all counts are positive and their sum cannot exceed `catches.today`. Unknown keys at any level are refused with 400. Upserts by install id + UTC date, so a retry never double-counts. 204 on success, 429 when rate-limited. |
 | `GET /badge/catches.json` | shields.io endpoint JSON: `{"schemaVersion":1,"label":"🦞","message":"N",...}`, where N is the catches across every sharing install. Use `https://img.shields.io/endpoint?url=<host>/badge/catches.json`. |
-| `GET /v1/stats?days=30` | Needs `Authorization: Bearer <READ_TOKEN>`. Returns `totalCatches` and, per day, `activeInstalls`, `catchesToday`, and `newCatches`. |
+| `GET /v1/stats?days=30` | Needs `Authorization: Bearer <READ_TOKEN>`. Returns `totalCatches` and, per day, `activeInstalls`, `catchesToday`, and `newCatches`, plus daily `byWorker` harness/model counts without config or identities. |
 
 ## Storage: D1, not Analytics Engine
 
@@ -37,11 +37,17 @@ Tables (`migrations/0001_init.sql`):
 - `daily_totals`: one row per date, with no install id or trap names: `active_installs`,
   `catches_today` (sum), and `new_catches` (sum of each install's growth in
   `catches.total`). The badge is `SUM(new_catches)`.
+- `worker_submissions`: headless counts per install/date and harness/model/config.
+- `attribution_submissions`: bounded per-install/date harness/model contributions,
+  used to replace a retry or corrected snapshot atomically without double-counting.
+- `daily_worker_totals`: indefinite counts by date/harness/model only, with no
+  names, install ids or config. Omitted trap metadata contributes to null/null.
 
 ## Retention
 
-A daily cron (`17 3 * * *`) deletes `submissions` and `trap_submissions` rows
-whose date is more than **90 days** old (`RETENTION_DAYS`). `daily_totals` rows carry no install id or name
+A daily cron (`17 3 * * *`) deletes `submissions`, `trap_submissions`,
+`worker_submissions` and `attribution_submissions` rows whose date is more than
+**90 days** old (`RETENTION_DAYS`). `daily_totals` and `daily_worker_totals` carry no install id, name or config
 and are kept. Because they are updated on every submission, deleting
 per-install rows never changes a total.
 

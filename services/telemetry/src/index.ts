@@ -1,4 +1,6 @@
 import type { D1Database, Env, ExecutionContext, ScheduledController } from './bindings.js';
+import { WORKER_HARNESSES, WORKER_MODELS, WORKER_MODEL_RE, WORKER_EFFORTS, WORKER_PERMISSIONS } from '../../../packages/core/src/worker-profile.js';
+import type { WorkerProfile } from '../../../packages/core/src/worker-profile.js';
 
 /**
  * lobstah telemetry Worker (PRIVACY.md). Receives one anonymous daily
@@ -16,9 +18,10 @@ import type { D1Database, Env, ExecutionContext, ScheduledController } from './b
  */
 
 export const RETENTION_DAYS = 90;
-export const MAX_BODY_BYTES = 8192;
+export const MAX_BODY_BYTES = 65536;
 export const MAX_TRAPS = 100;
-export const FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'traps'] as const;
+export const MAX_WORKERS = 100;
+export const FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'helm', 'traps', 'byWorker'] as const;
 const TRAP_NAME = /^[a-z]{2,8}-[a-z]{2,8}$/;
 const OS = ['macos', 'linux', 'windows', 'other'];
 const ARCH = ['x64', 'arm64', 'other'];
@@ -35,7 +38,9 @@ export interface Submission {
   installId: string;
   date: string;
   catches: { today: number; total: number };
-  traps: Array<{ name: string; today: number }>;
+  helm: WorkerProfile | null;
+  traps: Array<WorkerProfile & { name: string; today: number }>;
+  byWorker: Array<WorkerProfile & { today: number }>;
 }
 
 export function utcDate(ms: number): string {
@@ -49,6 +54,21 @@ function count(v: unknown, max: number): v is number {
 function object(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
+
+function enumOrNull(v: unknown, choices: readonly string[]): boolean {
+  return v === null || typeof v === 'string' && choices.includes(v);
+}
+
+/** Reject instead of coercing arbitrary model/config input on the server. */
+function profile(v: Record<string, unknown>): WorkerProfile | undefined {
+  if (!enumOrNull(v.harness, WORKER_HARNESSES) ||
+      !(v.model === null || typeof v.model === 'string' && WORKER_MODEL_RE.test(v.model) && (WORKER_MODELS as readonly string[]).includes(v.model)) ||
+      !object(v.config) || Object.keys(v.config).some((k) => k !== 'effort' && k !== 'permissionMode') ||
+      !enumOrNull(v.config.effort, WORKER_EFFORTS) || !enumOrNull(v.config.permissionMode, WORKER_PERMISSIONS)) return undefined;
+  return { harness: v.harness, model: v.model, config: { effort: v.config.effort, permissionMode: v.config.permissionMode } } as WorkerProfile;
+}
+
+const PROFILE_KEYS = ['harness', 'model', 'config'];
 
 /** The submission, or why it is refused. The date must be today (UTC) give or take a day of clock skew. */
 export function validate(body: unknown, now: number): { ok: true; value: Submission } | { ok: false; error: string } {
@@ -70,20 +90,55 @@ export function validate(body: unknown, now: number): { ok: true; value: Submiss
   if (!object(b.catches) || Object.keys(b.catches).some((k) => k !== 'today' && k !== 'total')) return { ok: false, error: 'invalid catches' };
   const { today, total } = b.catches;
   if (!count(today, MAX_CATCHES_TODAY) || !count(total, MAX_TOTAL_CATCHES) || today > total) return { ok: false, error: 'invalid catches counts' };
+  let helm: WorkerProfile | null = null;
+  if (b.helm !== null) {
+    if (!object(b.helm) || Object.keys(b.helm).some((k) => !PROFILE_KEYS.includes(k))) return { ok: false, error: 'invalid helm' };
+    const p = profile(b.helm);
+    if (!p) return { ok: false, error: 'invalid helm worker' };
+    helm = p;
+  }
   if (!Array.isArray(b.traps) || b.traps.length > MAX_TRAPS) return { ok: false, error: 'invalid traps: maximum 100' };
   const traps: Submission['traps'] = [];
   const names = new Set<string>();
   let trapCatches = 0;
   for (const t of b.traps) {
-    if (!object(t) || Object.keys(t).some((k) => k !== 'name' && k !== 'today') ||
+    if (!object(t) || Object.keys(t).some((k) => !['name', 'today', ...PROFILE_KEYS].includes(k)) ||
         typeof t.name !== 'string' || t.name.length < 5 || t.name.length > 17 || t.name.trim() !== t.name || !TRAP_NAME.test(t.name) ||
         !count(t.today, MAX_CATCHES_TODAY) || t.today === 0 || names.has(t.name)) return { ok: false, error: 'invalid trap' };
     names.add(t.name);
     trapCatches += t.today;
-    traps.push({ name: t.name, today: t.today });
+    const p = profile(t);
+    if (!p) return { ok: false, error: 'invalid trap worker' };
+    traps.push({ name: t.name, today: t.today, ...p });
   }
-  if (trapCatches > today) return { ok: false, error: 'trap counts exceed catches.today' };
-  return { ok: true, value: { schema: 1, version: b.version, os: b.os, arch: b.arch, installId: b.installId, date: b.date, catches: { today, total }, traps } };
+  if (!Array.isArray(b.byWorker) || b.byWorker.length > MAX_WORKERS) return { ok: false, error: 'invalid byWorker: maximum 100' };
+  const byWorker: Submission['byWorker'] = [];
+  const workers = new Set<string>();
+  for (const w of b.byWorker) {
+    if (!object(w) || Object.keys(w).some((k) => !['today', ...PROFILE_KEYS].includes(k)) || !count(w.today, MAX_CATCHES_TODAY) || w.today === 0) return { ok: false, error: 'invalid headless worker' };
+    const p = profile(w);
+    if (!p || workers.has(JSON.stringify(p))) return { ok: false, error: 'invalid/duplicate headless worker' };
+    workers.add(JSON.stringify(p));
+    trapCatches += w.today;
+    byWorker.push({ ...p, today: w.today });
+  }
+  if (trapCatches > today) return { ok: false, error: 'worker counts exceed catches.today' };
+  return { ok: true, value: { schema: 1, version: b.version, os: b.os, arch: b.arch, installId: b.installId, date: b.date, catches: { today, total }, helm, traps, byWorker } };
+}
+
+/** Counts only: the indefinite table has neither names, config nor identities.
+ * Omitted traps/legacy evidence contribute to the null/null bucket. */
+function attribution(s: Submission): Array<{ harness: string; model: string; today: number }> {
+  const rows = new Map<string, { harness: string; model: string; today: number }>();
+  const add = (harness: string | null, model: string | null, today: number) => {
+    const key = JSON.stringify([harness, model]);
+    const previous = rows.get(key);
+    rows.set(key, { harness: harness ?? '', model: model ?? '', today: (previous?.today ?? 0) + today });
+  };
+  for (const r of [...s.traps, ...s.byWorker]) add(r.harness, r.model, r.today);
+  const missing = s.catches.today - [...rows.values()].reduce((n, r) => n + r.today, 0);
+  if (missing > 0) add(null, null, missing);
+  return [...rows.values()];
 }
 
 /**
@@ -93,7 +148,22 @@ export function validate(body: unknown, now: number): { ok: true; value: Submiss
  * growth in its counts.
  */
 export async function record(db: D1Database, s: Submission): Promise<void> {
+  const attributed = JSON.stringify(attribution(s));
   await db.batch([
+    // Replace this install/date's previous contribution, including buckets
+    // removed by a correction. One transaction makes retries idempotent.
+    db.prepare(`INSERT INTO daily_worker_totals (date, harness, model, catches_today)
+      SELECT ?2, harness, model, SUM(n) FROM (
+        SELECT json_extract(value, '$.harness') AS harness, json_extract(value, '$.model') AS model,
+               json_extract(value, '$.today') AS n FROM json_each(?3)
+        UNION ALL SELECT harness, model, -catches_today FROM attribution_submissions WHERE install_id = ?1 AND date = ?2
+      ) WHERE true GROUP BY harness, model
+      ON CONFLICT(date, harness, model) DO UPDATE SET catches_today = catches_today + excluded.catches_today`)
+      .bind(s.installId, s.date, attributed),
+    db.prepare('DELETE FROM attribution_submissions WHERE install_id = ?1 AND date = ?2').bind(s.installId, s.date),
+    db.prepare(`INSERT INTO attribution_submissions (install_id, date, harness, model, catches_today)
+      SELECT ?1, ?2, json_extract(value, '$.harness'), json_extract(value, '$.model'), json_extract(value, '$.today') FROM json_each(?3)`)
+      .bind(s.installId, s.date, attributed),
     db
       .prepare(
         `INSERT INTO daily_totals (date, active_installs, catches_today, new_catches)
@@ -112,19 +182,26 @@ export async function record(db: D1Database, s: Submission): Promise<void> {
       .bind(s.installId, s.date, s.catches.today, s.catches.total),
     db
       .prepare(
-        `INSERT INTO submissions (install_id, date, version, os, arch, catches_today, total_catches)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        `INSERT INTO submissions (install_id, date, version, os, arch, catches_today, total_catches, helm)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(install_id, date) DO UPDATE SET
-           version = excluded.version, os = excluded.os, arch = excluded.arch,
+           version = excluded.version, os = excluded.os, arch = excluded.arch, helm = excluded.helm,
            catches_today = MAX(catches_today, excluded.catches_today),
            total_catches = MAX(total_catches, excluded.total_catches)`,
       )
-      .bind(s.installId, s.date, s.version, s.os, s.arch, s.catches.today, s.catches.total),
+      .bind(s.installId, s.date, s.version, s.os, s.arch, s.catches.today, s.catches.total, s.helm === null ? null : JSON.stringify(s.helm)),
     // Replace the bounded snapshot, not a union that can grow beyond 100.
     db.prepare('DELETE FROM trap_submissions WHERE install_id = ?1 AND date = ?2').bind(s.installId, s.date),
-    db.prepare(`INSERT INTO trap_submissions (install_id, date, name, catches_today)
-                SELECT ?1, ?2, json_extract(value, '$.name'), json_extract(value, '$.today') FROM json_each(?3)`)
+    db.prepare(`INSERT INTO trap_submissions (install_id, date, name, catches_today, harness, model, effort, permission_mode)
+                SELECT ?1, ?2, json_extract(value, '$.name'), json_extract(value, '$.today'), json_extract(value, '$.harness'),
+                       json_extract(value, '$.model'), json_extract(value, '$.config.effort'), json_extract(value, '$.config.permissionMode') FROM json_each(?3)`)
       .bind(s.installId, s.date, JSON.stringify(s.traps)),
+    db.prepare('DELETE FROM worker_submissions WHERE install_id = ?1 AND date = ?2').bind(s.installId, s.date),
+    db.prepare(`INSERT INTO worker_submissions (install_id, date, harness, model, effort, permission_mode, catches_today)
+      SELECT ?1, ?2, COALESCE(json_extract(value, '$.harness'), ''), COALESCE(json_extract(value, '$.model'), ''),
+             COALESCE(json_extract(value, '$.config.effort'), ''), COALESCE(json_extract(value, '$.config.permissionMode'), ''),
+             json_extract(value, '$.today') FROM json_each(?3)`)
+      .bind(s.installId, s.date, JSON.stringify(s.byWorker)),
   ]);
 }
 
@@ -133,6 +210,8 @@ export async function prune(db: D1Database, now: number): Promise<void> {
   const cutoff = utcDate(now - RETENTION_DAYS * 86_400_000);
   await db.batch([
     db.prepare('DELETE FROM trap_submissions WHERE date < ?1').bind(cutoff),
+    db.prepare('DELETE FROM worker_submissions WHERE date < ?1').bind(cutoff),
+    db.prepare('DELETE FROM attribution_submissions WHERE date < ?1').bind(cutoff),
     db.prepare('DELETE FROM submissions WHERE date < ?1').bind(cutoff),
   ]);
 }
@@ -214,15 +293,17 @@ async function stats(request: Request, env: Env, url: URL, now: number): Promise
   }
   const days = Math.min(Math.max(Number.parseInt(url.searchParams.get('days') ?? '30', 10) || 30, 1), 3660);
   const since = utcDate(now - (days - 1) * 86_400_000);
-  const [total, rows] = await Promise.all([
+  const [total, rows, workers] = await Promise.all([
     env.DB.prepare('SELECT COALESCE(SUM(new_catches), 0) AS n FROM daily_totals').first<{ n: number }>(),
     env.DB.prepare(
       'SELECT date, active_installs AS activeInstalls, catches_today AS catchesToday, new_catches AS newCatches FROM daily_totals WHERE date >= ?1 ORDER BY date',
     )
       .bind(since)
       .all(),
+    env.DB.prepare(`SELECT date, NULLIF(harness, '') AS harness, NULLIF(model, '') AS model, catches_today AS catchesToday
+                    FROM daily_worker_totals WHERE date >= ?1 AND catches_today > 0 ORDER BY date, harness, model`).bind(since).all(),
   ]);
-  return json({ totalCatches: total?.n ?? 0, retentionDays: RETENTION_DAYS, days: rows.results });
+  return json({ totalCatches: total?.n ?? 0, retentionDays: RETENTION_DAYS, days: rows.results, byWorker: workers.results });
 }
 
 export async function handle(request: Request, env: Env, now = Date.now()): Promise<Response> {

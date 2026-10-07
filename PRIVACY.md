@@ -1,6 +1,6 @@
 # Privacy
 
-Published by aequitas labs LLC. Last updated: 2026-10-06.
+Published by aequitas labs LLC. Last updated: 2026-10-07.
 
 lobstah runs on your machine and stores dispatch records and local stats
 under `~/.lobstah`. Telemetry is described below; it does not send code or
@@ -33,7 +33,9 @@ JSON body and nothing else:
   "installId": "3b0c8f9e-6a1d-4c2e-9f3a-1b2c3d4e5f60",
   "date": "2026-10-06",
   "catches": { "today": 3, "total": 40 },
-  "traps": [{ "name": "kind-crab", "today": 2 }]
+  "helm": { "harness": "claude", "model": "opus", "config": { "effort": null, "permissionMode": "default" } },
+  "traps": [{ "name": "kind-crab", "today": 2, "harness": "codex", "model": "gpt-6.1-sol", "config": { "effort": null, "permissionMode": "default" } }],
+  "byWorker": [{ "today": 1, "harness": "claude", "model": "sonnet", "config": { "effort": "high", "permissionMode": "bypassPermissions" } }]
 }
 ```
 
@@ -46,7 +48,39 @@ JSON body and nothing else:
 | `installId` | A random UUID created on this machine the first time it is needed and stored in `~/.lobstah/telemetry.json`. It is not derived from the machine, the user, or any repository. Delete the file to get a new one. |
 | `date` | The UTC date of the send. |
 | `catches` | `{today, total}`: catches (dispatches that finished `done`) so far on the UTC day and all-time, read from `~/.lobstah/stats.json`. Includes headless catches and traps omitted from the list. |
-| `traps` | Up to 100 `{name, today}` entries for that UTC day, only automatically generated names with recorded provenance and at least one catch. Sorted by count descending, then name; excess entries are omitted without reducing `catches`. |
+| `helm` | One live signed-on helm's `{harness, model, config}` snapshot. Null if no live helm or multiple grounds hold live helms (no representative is guessed). No grounds name or session id is sent. |
+| `traps` | Up to 100 `{name, today, harness, model, config}` entries for that UTC day, only automatically generated names with recorded provenance and at least one catch. Current session metadata when signed on, otherwise the last catch's snapshot. Sorted by count descending, then name; excess entries are omitted without reducing `catches`. |
+| `byWorker` | Headless UTC-day catches grouped by `{harness, model, config}`, with a positive `today` count per combination. Up to 100 combinations; overflow folds into an unknown/null bucket without dropping catches. |
+
+`harness` is `claude`, `codex`, `other`, or null when unknown. Model ids must
+match a checked, explicit catalog in `packages/core/src/worker-profile.ts`,
+start with a lowercase letter or digit, contain only lowercase letters,
+digits, `.`, `_`, or `-`, and be at most 64 characters. A custom or
+unrecognised model becomes `other`, even if it looks like a standard id.
+No provider prefix, user-typed identifier, account id or API host is copied
+through. A missing model observation is null. Both client and server enforce
+this boundary.
+
+`config` has exactly two fixed-choice fields, each nullable: `effort`
+(`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`) and
+`permissionMode` (`default`, `acceptEdits`, `plan`, `dontAsk`,
+`bypassPermissions`, `auto`). Hooks record only the supplied model and
+permission-mode fields under `~/.lobstah/session-workers`; they never read
+transcripts or settings files for telemetry. Claude SessionStart can supply
+model; Codex's common hook input can supply it on later events too. Neither
+documents reasoning effort, so live-session effort stays null. Older hooks
+or omitted fields produce null, not an inferred harness default.
+
+Headless workers snapshot resolved model/effort options per attempt, after
+cross-harness model filtering. Claude's stream init can refine the model;
+Codex's event stream does not expose the resolved model. Unspecified model
+or effort defaults stay null. Arbitrary dispatch flags can override options,
+so these settings are null when flags are present unless the stream later
+observes the model. Claude's fixed headless permission mode is
+`bypassPermissions` without overrides; Codex permission mode stays null
+(its adapter's approval/sandbox options are not mapped to a hook mode).
+Trap day counts carry a session snapshot, not a per-model history of that
+trap's individual catches.
 
 Trap names are not always generated: `--name` lets a user choose or change
 one. A reservation records whether it was generated automatically from
@@ -56,7 +90,7 @@ unknown provenance, stay local; their catches still count in the totals.
 Names are not hashed. Both client and server enforce two lowercase words
 of 2–8 letters joined by a hyphen (5–17 characters), positive daily counts,
 and the 100-entry cap. The server rejects duplicate names, unknown nested
-keys, or a sum of trap counts greater than `catches.today`.
+keys, or a sum of trap and headless counts greater than `catches.today`.
 
 `lobstah telemetry show` prints the exact JSON that would be sent now.
 
@@ -64,7 +98,8 @@ keys, or a sum of trap counts greater than `catches.today`.
 
 Repository names or paths, code, briefs, custom or unknown-provenance trap
 names, worktree paths, session ids, PR URLs, hostnames, usernames, or any per-dispatch
-record. The client serialises only the eight fields above, a test fails if
+record, prompts or system prompts, environment values, API hosts, account
+or organisation identifiers, or arbitrary config text. The client serialises only the ten fields above, a test fails if
 any other key appears, and the server rejects any request with another field.
 
 ### When it is sent
@@ -80,6 +115,9 @@ any other key appears, and the server rejects any request with another field.
   with the lobstah version, OS family, CPU architecture, the UTC date, and a
   random install id made on this machine. It also sends up to 100 automatically
   generated trap names with recorded provenance and their UTC-day counts.
+  It includes the signed-on helm's and traps' harness, known model and fixed-choice
+  config (reasoning effort and permission mode), plus headless counts by those
+  settings. Missing observations are null; custom/unrecognized models are other.
   Custom names (--name) and older names with unknown provenance stay local;
   their catches still count in the totals. Names are not hashed. It never sends
   repository names or paths, code, briefs, session ids, PR URLs, hostnames or user names.
@@ -103,13 +141,17 @@ Cloudflare processes the request to serve it.
   the validated fields. Workers Logs, invocation logs, and Logpush are
   turned off. Rate limits are keyed on the install id and one global key,
   not on your IP address.
-- **Per-install rows** (one per install per UTC date) and **per-trap rows**
-  (generated name and count for that install and date) expire under the same
+- **Per-install rows** (including the helm snapshot), **per-trap rows**,
+  **headless harness/model/config rows**, and the install's attribution
+  snapshots expire under the same
   **90-day** rule: the daily job deletes rows dated more than 90 days ago.
 - **Daily totals** carry no install id or trap names: for each date, the
   number of installs that reported, the sum of their `catches.today`, and
-  how much the installs' `catches.total` grew. They are kept indefinitely.
-  No trap names are retained beyond the 90-day expiry pass.
+  how much the installs' `catches.total` grew. A separate daily table keeps
+  aggregate catch counts by harness and model only, with no names, install
+  ids or config. Omitted traps contribute to an unknown bucket. These totals
+  are kept indefinitely. No trap names, linked worker settings or config are
+  retained beyond the 90-day expiry pass.
 
 ### What it is used for
 
@@ -117,7 +159,8 @@ Cloudflare processes the request to serve it.
   install that shares, served as shields.io endpoint JSON at
   `/badge/catches.json`. The badge reveals overall lobstah activity, but not
   who produced it, from which repositories, or what the work was.
-- Maintainer totals: catches and active installs per day, at
+- Maintainer totals: catches and active installs per day, plus anonymous
+  daily harness/model catch counts, at
   `/v1/stats`, which requires a maintainer token.
 
 The counts are anonymous and self-reported, so they show rough activity and
@@ -157,7 +200,7 @@ date of the last send.
 
 `lobstah stats` reads `~/.lobstah/stats.json`. Its glass and CLI counts use
 the local calendar day; telemetry uses a separate UTC-day total and per-trap
-table in that file. Both survive dispatch culling. On upgrade, new UTC
+table and headless worker buckets in that file. Both survive dispatch culling. On upgrade, new UTC
 counters backfill from retained dispatch history; all-time totals are kept.
 The telemetry payload is only the bounded, provenance-filtered snapshot
 above, not the whole stats file or its worktree ids.
