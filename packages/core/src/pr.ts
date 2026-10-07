@@ -51,7 +51,7 @@ export function parsePrRef(s: string): PrRef | undefined {
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
-  'title,state,isDraft,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
+  'title,state,isDraft,isCrossRepository,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
 
 /** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
 export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',')
@@ -87,6 +87,7 @@ export interface GhReview {
 }
 
 export interface GhPrView {
+  isCrossRepository?: boolean;
   title?: string;
   state: string;
   isDraft: boolean;
@@ -209,6 +210,9 @@ export interface PrRepair {
 }
 
 export interface PrEvidence {
+  isCrossRepository?: boolean;
+  /** Branch discovery's list result awaits the normal watch's full review-thread check. */
+  discoveryPending?: boolean;
   url: string;
   number: number;
   /** The PR's title as last observed. Not part of the PR's state: a change is never news. */
@@ -256,6 +260,7 @@ export function prStandingKinds(pr: PrEvidence, settle?: { readySettleSecs: numb
   if (isConflicting(pr.mergeStateStatus)) out.push('pr:conflict');
   // Unknown checks (no permission to read them) never stand as ready.
   if (
+    !pr.discoveryPending &&
     !pr.checks.unknown &&
     !pr.draft &&
     !review &&
@@ -315,6 +320,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
     number: ref.number,
     ...(view.title ? { title: view.title } : {}),
     state: view.state,
+    ...(view.isCrossRepository !== undefined ? { isCrossRepository: view.isCrossRepository } : {}),
     draft: view.isDraft,
     reviewDecision: view.reviewDecision ?? '',
     mergeStateStatus: view.mergeStateStatus ?? '',

@@ -74,6 +74,13 @@ final class ReadAttentionTests: XCTestCase {
     XCTAssertEqual(read.items?.map(\.key), ["work:a"])
   }
 
+  func testQuietStackChildrenDoNotWalkAndTheStackLinksToItsTop() {
+    let json = #"{"attention":[{"id":"child","verb":"pr:ready","kind":"pr:ready","quiet":true},{"id":"stack","verb":"stack-ready","kind":"stack-ready","prUrl":"https://github.com/acme/web/pull/3"}]}"#
+    let read = readAttention { _ in .exited(status: 0, stdout: Data(json.utf8)) }
+    XCTAssertEqual(read.items?.map(\.id), ["stack"])
+    XCTAssertEqual(read.items?.first?.prLink?.absoluteString, "https://github.com/acme/web/pull/3")
+  }
+
   func testEveryCommandFailingNamesEachReason() {
     let read = readAttention { args in
       args == ["attention", "--json"] ? .exited(status: 0, stdout: Data("not json".utf8)) : .timedOut

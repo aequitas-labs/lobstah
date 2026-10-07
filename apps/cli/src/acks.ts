@@ -133,6 +133,7 @@ export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string;
  * watch is still registered, or the report is still filed.
  */
 export function ackItemExists(key: string, culling: ReadonlySet<string> = new Set()): boolean {
+  if (key.startsWith('stack:')) return readPr(key.slice('stack:'.length))?.state === 'OPEN';
   if (key.startsWith('watch:')) return readWatch(key.slice('watch:'.length)) !== undefined;
   // An answered decision is no longer attention: its ack is orphaned.
   if (key.startsWith('decision:')) return readDecision(key) !== undefined && readDecisionAnswer(key) === undefined;

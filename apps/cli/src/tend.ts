@@ -49,6 +49,13 @@ import {
   slotUsage,
   parkedDispatches,
   isFinished,
+  derivePrStacks,
+  prStackTrunk,
+  readStackEpochs,
+  stackReadyEnabled,
+  stackStateHash,
+  quietStackTailUrls,
+  repoKey as forgeRepoKey,
 } from '@lobstah/core';
 import type {
   ActivityView,
@@ -227,22 +234,6 @@ export function onTheHook(
 /** Which pr:* kinds a PR's evidence stands on right now. Pure. */
 export const prKinds = prStandingKinds;
 
-/** Ready is a merge invitation only when no tracked open PR is its base. */
-export function readyBlockedByStack(pr: PrEvidence, tracked: readonly PrEvidence[]): boolean {
-  if (pr.state !== 'OPEN' || !pr.baseRefName) return false;
-  const ref = parsePrRef(pr.url);
-  return tracked.some((other) => {
-    const parent = parsePrRef(other.url);
-    return (
-      other.url !== pr.url &&
-      other.state === 'OPEN' &&
-      other.headRefName === pr.baseRefName &&
-      ref?.owner === parent?.owner &&
-      ref?.repo === parent?.repo
-    );
-  });
-}
-
 const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
   'pr:draft': (pr) => `#${pr.number} draft`,
   'pr:review': (pr) =>
@@ -371,15 +362,24 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
       .map((e) => e.uuid),
   );
   const out: TendAttention[] = [];
+  const stacks = derivePrStacks(observed.map((x) => x.pr), {
+    trunk: (repo) => prStackTrunk(cfg, repo), readySettleSecs: cfg.readySettleSecs, now,
+  });
+  const epochs = readStackEpochs();
+  const quietReady = new Set([...stacks.flatMap((s) => s.members.map((p) => p.url)),
+    ...quietStackTailUrls(observed.map((x) => x.pr), epochs)]);
+  for (const s of stacks.filter((s) => s.allReady)) {
+    const top = s.members.at(-1)!, ref = parsePrRef(top.url)!;
+    const epoch = epochs[s.id];
+    const at = epoch?.ready ? epoch.at : new Date(now).toISOString();
+    const source = observed.find((x) => x.pr.url === top.url)!;
+    out.push({ kind: 'stack-ready', key: `stack:${s.id}`, stateHash: stackStateHash(s, epoch?.epoch),
+      id: source.id, lane: source.lane, verb: 'stack-ready', at, standingSince: at,
+      ageSecs: Math.max(0, Math.round((now - Date.parse(at)) / 1000)), note: s.text,
+      repo: source.dispatch ? repoOf(source.id, source.lane) : forgeRepoKey(cfg, s.repo), prUrl: ref.url });
+  }
   for (const { id, lane, pr, dispatch } of observed) {
-    const kinds = prKinds(pr, { readySettleSecs: cfg.readySettleSecs, now }).filter(
-      (kind) =>
-        kind !== 'pr:ready' ||
-        !readyBlockedByStack(
-          pr,
-          observed.map((x) => x.pr),
-        ),
-    );
+    const kinds = prKinds(pr, { readySettleSecs: cfg.readySettleSecs, now });
     if (kinds.length === 0) continue;
     const ref = parsePrRef(pr.url);
     const prWatch = ref ? readWatch(ref.key) : undefined;
@@ -399,6 +399,7 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
         : conditionSince;
       out.push({
         kind,
+        ...(kind === 'pr:ready' && quietReady.has(pr.url) ? { quiet: true } : {}),
         key: ref?.key ?? pr.url,
         stateHash: prStateHash(pr),
         id,
@@ -864,12 +865,14 @@ export function buildTendReport(now = Date.now()): TendReport {
     legacy.map(({ id, pr }) => ({ id, pr })),
     [],
     records,
+    { readySettleSecs: cfg.readySettleSecs, now, trunk: (r) => prStackTrunk(cfg, r) },
   ).stacks.filter((s) => s.open);
   attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now));
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
-  const walking = attention.filter((a) => a.kind === 'watch' || enabled.has(a.kind));
+  const walking = attention.filter((a) => a.kind === 'watch' ||
+    (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) : enabled.has(a.kind)));
   // A question the helm framed as a decision shows as that decision.
   const shown = enabled.has('decision') ? hideFramedQuestions(walking) : walking;
   attention.length = 0;
@@ -1004,6 +1007,7 @@ export function renderTend(r: TendReport): string {
   if (r.queueWait) lines.push(r.queueWait);
   for (const stack of r.stacks) {
     lines.push(`stack ${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
+    if (stack.readiness) lines.push(stack.readiness.text);
   }
   if (r.attention.length > 0) {
     lines.push('');

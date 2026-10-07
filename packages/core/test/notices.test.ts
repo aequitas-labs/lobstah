@@ -34,6 +34,16 @@ describe('helm notices', () => {
     expect(listNotices()).toHaveLength(1);
   });
 
+  it('a per-notice quiet flag persists and consumes without changing other notices of the same kind', () => {
+    postNotice({ kind: 'trap-signed-on', text: 'quiet', quiet: true });
+    postNotice({ kind: 'trap-signed-on', text: 'normal' });
+    expect(listNotices()[0]?.quiet).toBe(true);
+    expect(listNotices()[1]?.quiet).toBeUndefined();
+    expect(unseenNotices(true).map((n) => n.text)).toEqual(['normal']);
+    expect(unseenNotices(false)).toEqual([]);
+    expect(listNotices().map((n) => n.text)).toEqual(['quiet', 'normal']);
+  });
+
   it('trap-listening never wakes on its own, is consumed, and still lists; sign-on and start-failed wake', () => {
     postNotice({ kind: 'trap-listening', text: 'listening' });
     expect(unseenNotices(false)).toEqual([]);

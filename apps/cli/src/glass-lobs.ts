@@ -19,6 +19,7 @@ export interface LobAttention {
   stateHash?: string;
   /** Acknowledged (the pet's shared ack): it doesn't walk. */
   acked?: unknown;
+  quiet?: boolean;
 }
 
 export interface LobItem {
@@ -57,13 +58,14 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
     'pr:checks': 'checks',
     'pr:conflict': 'conflicts',
     'pr:ready': 'ready',
+    'stack-ready': 'stack ready',
     landed: 'landed',
     watch: 'watch',
     report: 'report',
   };
   const hidden = opts.hidden ?? {};
   let items: LobItem[] = att
-    .filter((x) => !x.acked && !(x.key !== undefined && hidden[x.key] === x.stateHash))
+    .filter((x) => !x.quiet && !x.acked && !(x.key !== undefined && hidden[x.key] === x.stateHash))
     .map((x) => {
       const label = labels[x.kind ?? ''] ?? '';
       const hide = x.key !== undefined ? { hideKey: x.key, hideHash: x.stateHash ?? '' } : {};
@@ -74,7 +76,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
         return { key: 'question:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
       // A report opens its own page in a new tab.
       if (x.kind === 'report' && x.key) return { key: 'report:' + x.key, text: x.note || x.verb, label, href: reportPageUrl(x.key), ...hide };
-      return typeof x.kind === 'string' && x.kind.startsWith('pr:') && x.prUrl
+      return typeof x.kind === 'string' && (x.kind.startsWith('pr:') || x.kind === 'stack-ready') && x.prUrl
         ? { key: x.kind + ':' + (x.key ?? x.prUrl), text: x.note || x.kind, href: x.prUrl, label, ...hide }
         : {
             key: (x.kind ?? 'question') + ':' + (x.key ?? x.lane + ':' + x.id),

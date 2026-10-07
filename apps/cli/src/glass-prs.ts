@@ -1,4 +1,4 @@
-import { parsePrRef, prBadge, prNewestFirst } from '@lobstah/core';
+import { derivePrStacks, parsePrRef, prBadge, prNewestFirst } from '@lobstah/core';
 import type { GlassPr, GlassPrWatch, GlassStack, PrEvidence, PrRecord } from '@lobstah/core';
 
 /**
@@ -21,6 +21,7 @@ export function deriveGlassPrs(
   dispatches: readonly GlassPrDispatch[],
   watches: readonly GlassPrWatch[] = [],
   records: readonly PrRecord[] = [],
+  stackOptions: Parameters<typeof derivePrStacks>[1] = {},
 ): { prs: GlassPr[]; stacks: GlassStack[] } {
   const byId = new Map(dispatches.map((d) => [d.id, d]));
   const rootOf = (id: string): string => {
@@ -81,6 +82,7 @@ export function deriveGlassPrs(
       state: pr.state, draft: pr.draft, checks: pr.checks, review: pr.review,
       reviewDecision: pr.reviewDecision, mergeStateStatus: pr.mergeStateStatus,
       baseRefName: pr.baseRefName, headRefName: pr.headRefName, observedAt: pr.observedAt,
+      ...(pr.isCrossRepository !== undefined ? { isCrossRepository: pr.isCrossRepository } : {}),
       ...(record?.firstSeenAt ? { firstSeenAt: record.firstSeenAt } : {}),
       updatedAt: pr.updatedAt, mergedAt: pr.mergedAt, closedAt: pr.closedAt,
       badge: prBadge(pr),
@@ -117,6 +119,12 @@ export function deriveGlassPrs(
     groupedStacks.set(root.key, group);
   }
   const stacks: GlassStack[] = [];
+  const evidenceByUrl = new Map(records.map((p) => [p.url, p as PrEvidence]));
+  for (const d of dispatches) if (d.pr && !recordByUrl.has(d.pr.url) &&
+    (!evidenceByUrl.has(d.pr.url) || evidenceByUrl.get(d.pr.url)!.observedAt < d.pr.observedAt)) {
+    evidenceByUrl.set(d.pr.url, d.pr);
+  }
+  const readiness = derivePrStacks([...evidenceByUrl.values()], stackOptions);
   for (const [id, members] of groupedStacks) {
     const root = members.find((p) => p.key === id)!;
     const ordered: GlassPr[] = [];
@@ -129,7 +137,7 @@ export function deriveGlassPrs(
     // A cyclic or ambiguous relation must never drop a PR from the list.
     for (const p of members) if (!ordered.includes(p)) ordered.push(p);
     const eligible = ordered.find((p) => p.state === 'OPEN' &&
-      (p.baseRefName === 'main' || parent.get(p.key)?.state === 'MERGED'));
+      (p.baseRefName === (stackOptions.trunk?.(p.forgeRepo) ?? 'main') || parent.get(p.key)?.state === 'MERGED'));
     ordered.forEach((p, i) => {
       p.stackId = id;
       p.floor = root.baseRefName ?? '?';
@@ -143,6 +151,10 @@ export function deriveGlassPrs(
     stacks.push({ id, floor: root.baseRefName ?? '?', repo: root.repo,
       numbers: ordered.map((p) => p.number), open: open.length > 0,
       nextNumber: eligible?.number, behind: eligible ? open.filter((p) => p.position > eligible.position).length : 0 });
+    const status = readiness.find((s) => s.members.some((p) => members.some((m) => p.url === m.url)));
+    if (status) stacks.at(-1)!.readiness = {
+      ready: status.ready, total: status.members.length, allReady: status.allReady, text: status.text,
+    };
   }
   // Open stacks first, then finished ones; within each group, the stack whose
   // newest member sorts first leads.
@@ -160,11 +172,13 @@ export function deriveGlassPrs(
 export function stackParents(rows: readonly GlassPr[]): Map<string, GlassPr> {
   const byHead = new Map<string, GlassPr>();
   for (const row of [...rows].sort(prNewestFirst(rows))) {
+    if (row.isCrossRepository) continue;
     const head = `${row.forgeRepo}:${row.headRefName}`;
     if (row.headRefName && !byHead.has(head)) byHead.set(head, row);
   }
   const parent = new Map<string, GlassPr>();
   for (const row of rows) {
+    if (row.isCrossRepository) continue;
     const candidate = byHead.get(`${row.forgeRepo}:${row.baseRefName ?? ''}`);
     if (candidate && candidate.key !== row.key) parent.set(row.key, candidate);
   }

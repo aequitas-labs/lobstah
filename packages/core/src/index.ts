@@ -23,6 +23,7 @@ export * from './trap-names.js';
 export * from './trap-start.js';
 export * from './requests.js';
 export * from './notices.js';
+export * from './pr-stacks.js';
 export * from './window.js';
 export * from './helm.js';
 export * from './sent.js';

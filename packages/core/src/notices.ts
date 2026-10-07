@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { lobstahHome } from './paths.js';
+import { readStackEpochs, stackReadyEnabled, stackStateHash } from './pr-stacks.js';
+import { loadConfig } from './config.js';
 
 /**
  * Helm notices: the attention channel for events that are not status-log
@@ -26,6 +28,7 @@ export type NoticeKind =
   | 'message-bounced'
   | 'pr-merged'
   | 'pr-closed'
+  | 'stack-ready'
   | 'watch-held'
   | 'watch-failing'
   | 'watch-recovered'
@@ -55,6 +58,10 @@ export interface Notice {
    *  woken back at its own author (a helm's stow should not wake the helm
    *  to announce itself). */
   by?: string;
+  /** Shown in tend, the digest, and the glass; never wakes a helm. */
+  quiet?: boolean;
+  /** A stack notice is delivered only while this epoch still stands. */
+  stateHash?: string;
 }
 
 export function noticesDir(): string {
@@ -84,6 +91,9 @@ export function postNotice(n: {
   /** The session whose action caused this — its own wakes skip the echo. */
   by?: string;
   dedupeKey?: string;
+  /** Never wakes a helm (see Notice.quiet). */
+  quiet?: boolean;
+  stateHash?: string;
 }): Notice | undefined {
   const dir = noticesDir();
   fs.mkdirSync(dir, { recursive: true });
@@ -104,6 +114,8 @@ export function postNotice(n: {
     refId: n.refId,
     repo: n.repo,
     by: n.by,
+    ...(n.quiet ? { quiet: true } : {}),
+    ...(n.stateHash ? { stateHash: n.stateHash } : {}),
   };
   const file = path.join(dir, `${seq}.json`);
   const tmp = `${file}.tmp`;
@@ -162,6 +174,11 @@ export function unseenNotices(
       if (through > seen) fs.writeFileSync(cursorFile(), through);
     }
   }
-  const waking = owned.filter((n) => !QUIET_NOTICE_KINDS.includes(n.kind));
+  const waking = owned.filter((n) => {
+    if (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)) return false;
+    if (n.kind !== 'stack-ready') return true;
+    const epoch = n.refId ? readStackEpochs()[n.refId] : undefined;
+    return !!epoch?.ready && n.stateHash === stackStateHash({ id: n.refId! }, epoch.epoch) && stackReadyEnabled(loadConfig());
+  });
   return wakes ? waking.filter(wakes) : waking;
 }
