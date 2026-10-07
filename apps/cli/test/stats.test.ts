@@ -131,12 +131,12 @@ describe('lobstah stats', () => {
       expect(r.headers.get('cache-control')).toBe('no-store');
       const page = (await r.json()) as Record<string, unknown>;
       expect(Object.keys(page).sort()).toEqual(
-        ['catchesThisWeek', 'catchesToday', 'currentStreak', 'historyFrom', 'longestStreak', 'max', 'months', 'perTrap', 'today', 'totalCatches', 'undated', 'weeks'].sort(),
+        ['catchesThisWeek', 'catchesToday', 'historyFrom', 'max', 'months', 'perTrap', 'today', 'totalCatches', 'undated', 'weeks'].sort(),
       );
       const today = new Date();
       const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
       expect(page).toMatchObject({
-        today: day, catchesToday: 4, catchesThisWeek: 4, totalCatches: 4, currentStreak: 1, longestStreak: 1, max: 4, undated: 0, historyFrom: day,
+        today: day, catchesToday: 4, catchesThisWeek: 4, totalCatches: 4, max: 4, undated: 0, historyFrom: day,
         perTrap: [{ name: 'kind-crab', catches: 2 }, { name: 'stowed-crab', catches: 1 }],
       });
       const weeks = page.weeks as Array<Array<{ date: string; count: number; level: number }>>;

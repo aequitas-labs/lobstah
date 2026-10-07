@@ -98,18 +98,13 @@ const Legend = () =>
   </div>`;
 
 function Tiles({ page }: { page: StatsPage }) {
-  const tiles: Array<[string, number, string?]> = [
+  const tiles: Array<[string, number]> = [
     ['today', page.catchesToday],
     ['this week', page.catchesThisWeek],
     ['total', page.totalCatches],
-    ['current streak', page.currentStreak, page.currentStreak === 1 ? 'day' : 'days'],
-    ['longest streak', page.longestStreak, page.longestStreak === 1 ? 'day' : 'days'],
   ];
   return html`<div class="stat-tiles">
-    ${tiles.map(
-      ([label, n, unit]) =>
-        html`<div key=${label} class="stat-tile"><div class="n">${n}${unit && html`<span class="unit"> ${unit}</span>`}</div><div class="dim">${label}</div></div>`,
-    )}
+    ${tiles.map(([label, n]) => html`<div key=${label} class="stat-tile"><div class="n">${n}</div><div class="dim">${label}</div></div>`)}
   </div>`;
 }
 

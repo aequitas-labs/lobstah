@@ -193,24 +193,19 @@ describe('stats page', () => {
     expect(all.every((d, i) => i === 0 || shiftDay(all[i - 1]!, -1) === d)).toBe(true);
     expect(page.months.map((m) => m.label)).toEqual(['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct']);
     expect(page.months[0]).toEqual({ week: 0, label: 'Oct' });
-    expect(page).toMatchObject({ totalCatches: 0, currentStreak: 0, longestStreak: 0, max: 0, undated: 0, historyFrom: null });
+    expect(page).toMatchObject({ totalCatches: 0, max: 0, undated: 0, historyFrom: null });
   });
 
-  it('counts the week, both streaks, levels against the busiest day, and catches with no day', () => {
+  it('counts the week, levels against the busiest day, and catches with no day', () => {
     const daily = { '2026-09-01': 1, '2026-09-02': 1, '2026-09-03': 8, '2026-09-04': 2, '2026-10-05': 4, '2026-10-06': 2, '2026-10-07': 1 };
     const page = statsPage(base(daily, { totalCatches: 25, perTrap: { 'wt:a': 3, 'wt:b': 5 } }), new Map([['wt:a', 'kind-crab']]), NOW);
     expect(page).toMatchObject({
-      today: '2026-10-07', catchesToday: 1, catchesThisWeek: 7, totalCatches: 25, currentStreak: 3, longestStreak: 4,
+      today: '2026-10-07', catchesToday: 1, catchesThisWeek: 7, totalCatches: 25,
       max: 8, undated: 6, historyFrom: '2026-09-01',
       perTrap: [{ name: 'wt:b', catches: 5 }, { name: 'kind-crab', catches: 3 }],
     });
     const level = (date: string) => page.weeks.flat().find((d) => d.date === date)!.level;
     expect(['2026-09-03', '2026-10-05', '2026-09-04', '2026-09-01', '2026-08-01'].map(level)).toEqual([4, 2, 1, 1, 0]);
     expect([0, 1, 2, 3, 4, 5, 8].map((n) => heatLevel(n, 8))).toEqual([0, 1, 1, 2, 2, 3, 4]);
-  });
-
-  it('a streak stays current until a whole day passes without a catch', () => {
-    expect(statsPage(base({ '2026-10-05': 1, '2026-10-06': 1 }), new Map(), NOW).currentStreak).toBe(2);
-    expect(statsPage(base({ '2026-10-05': 1 }), new Map(), NOW).currentStreak).toBe(0);
   });
 });

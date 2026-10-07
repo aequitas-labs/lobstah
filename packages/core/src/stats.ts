@@ -363,10 +363,6 @@ export interface StatsPage {
   /** Catches since Sunday, local time: the heatmap's last column. */
   catchesThisWeek: number;
   totalCatches: number;
-  /** Consecutive days with a catch, ending today (or yesterday, while today has none yet). */
-  currentStreak: number;
-  /** The longest run of days with a catch in the retained history. */
-  longestStreak: number;
   /** HEATMAP_WEEKS columns, oldest first; each Sunday → Saturday, the last ending today. */
   weeks: StatsDay[][];
   /** A month label over the column where that month starts. */
@@ -395,19 +391,6 @@ export function heatLevel(count: number, max: number): StatsDay['level'] {
   return Math.min(4, Math.max(1, Math.ceil((count / max) * 4))) as StatsDay['level'];
 }
 
-/** The longest run of consecutive days in a set of local days. */
-function longestRun(days: string[]): number {
-  let best = 0;
-  let run = 0;
-  let prev: string | undefined;
-  for (const day of [...days].sort()) {
-    run = prev !== undefined && shiftDay(prev, -1) === day ? run + 1 : 1;
-    best = Math.max(best, run);
-    prev = day;
-  }
-  return best;
-}
-
 /** The Stats tab's numbers and heatmap, from the store. Read-only. */
 export function statsPage(store: StatsStore, names: ReadonlyMap<string, string>, now = Date.now()): StatsPage {
   const view = statsView(store, names, now);
@@ -433,8 +416,6 @@ export function statsPage(store: StatsStore, names: ReadonlyMap<string, string>,
   });
   // A first label squeezed against the next one would overlap it.
   if (months.length > 1 && months[1]!.week - months[0]!.week < 3) months.shift();
-  let currentStreak = 0;
-  for (let day = count(today) > 0 ? today : shiftDay(today, 1); count(day) > 0; day = shiftDay(day, 1)) currentStreak++;
   const recorded = Object.keys(store.daily).filter((d) => store.daily[d]! > 0 && d <= today);
   const dated = Object.values(store.daily).reduce((a, n) => a + n, 0);
   return {
@@ -442,8 +423,6 @@ export function statsPage(store: StatsStore, names: ReadonlyMap<string, string>,
     catchesToday: view.catchesToday,
     catchesThisWeek: weeks[weeks.length - 1]!.reduce((a, d) => a + d.count, 0),
     totalCatches: view.totalCatches,
-    currentStreak,
-    longestStreak: longestRun(recorded),
     weeks,
     months,
     max,
