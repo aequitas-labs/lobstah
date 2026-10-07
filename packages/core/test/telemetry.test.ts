@@ -137,6 +137,20 @@ describe('telemetry payload', () => {
     expect(parsed.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it('ignores local daily history when building and serialising the wire payload', () => {
+    const state = ensureTelemetryState();
+    const store = { version: 1, totalCatches: 40, perTrap: {}, day: '2026-10-06', catchesToday: 3, counted: [], utc: { date: '2026-10-06', catches: 3, perTrap: {}, trapWorkers: {}, byWorker: [] }, daily: { '2026-09-01': 37, '2026-10-06': 3 } };
+    fs.writeFileSync(statsPath(), JSON.stringify(store));
+    const before = serializeTelemetryPayload(buildTelemetryPayload(state.installId, NOON));
+    fs.writeFileSync(statsPath(), JSON.stringify({ ...store, daily: { '2026-09-01': 99999 } }));
+    const payload = buildTelemetryPayload(state.installId, NOON);
+    expect(serializeTelemetryPayload(payload)).toBe(before);
+    expect(payload.catches).toEqual({ today: 3, total: 40 });
+    expect(serializeTelemetryPayload({ ...payload, daily: store.daily } as never)).toBe(before);
+    expect(before).not.toContain('daily');
+    expect(before).not.toContain('2026-09-01');
+  });
+
   it('shares only proven generated names, with positive UTC-day catches; headless/custom/unknown stay in totals', () => {
     const generated = reserveTrapName('auto', undefined, 0);
     reserveTrapName('custom', 'kind-crab');

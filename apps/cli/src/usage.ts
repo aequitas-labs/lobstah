@@ -265,8 +265,8 @@ A trap's done records its HEAD (--session). done|failed --report <file.md> files
 totalCatches counts all time. Both live in stats.json, which cull folds into
 before deleting, so they survive it; so does a per-local-day count (400 days),
 which the glass's Stats tab draws. --per-trap adds each trap's total under
-its persistent name. TOON by default; --json for the same fields. Per-trap
-counts never leave the machine; see \`lobstah telemetry\` for the daily totals.`,
+its persistent name. TOON by default; --json for the same fields. This command
+sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,
@@ -307,8 +307,9 @@ traps, notices, merge view. Read-only, on 127.0.0.1: looking steers nothing.
 restart manage it. show <#hash> asks an open glass page to show a tab, a
 #decision/<key>, or a #report/<key> (--json for the pet).`,
   telemetry: `Anonymous daily counts (PRIVACY.md). Once per UTC day the daemon sends
-catchesToday, totalCatches, the version, OS family, arch, UTC date, and a
-random install id; nothing else. status (default; --json) shows whether it is
+catches {today,total}, generated trap names/counts, helm/trap worker metadata,
+headless counts by worker, version, OS family, arch, UTC date, and a random
+install id. Daily local history stays local. status (default; --json) shows whether it is
 on and every off switch in effect. enable / disable set [telemetry] share in
 config.toml. show prints the exact JSON that would be sent. Any one switch
 turns it off: share = false, LOBSTAH_TELEMETRY=0, DO_NOT_TRACK=1, CI set.`,

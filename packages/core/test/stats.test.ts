@@ -30,6 +30,29 @@ function legacy(dir: string, id: string, verbs: string[], at: string, trap?: str
 }
 
 describe('catch store', () => {
+  it('upgrades UTC metadata without replacing saved local daily history', () => {
+    const now = Date.parse('2026-10-06T12:00:00Z');
+    const daily = { [localDay(now)]: 4 };
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 4, perTrap: {}, day: localDay(now), catchesToday: 4, counted: [], daily }));
+    const store = readStatsStore(now);
+    expect(store.daily).toEqual(daily);
+    expect(store.totalCatches).toBe(4);
+    expect(store.utc).toMatchObject({ catches: 0, trapWorkers: {}, byWorker: [] });
+    expect(readStatsStore(now).daily).toEqual(daily);
+  });
+
+  it('backfills missing local daily history without replacing saved UTC attribution', () => {
+    const now = Date.parse('2026-10-06T12:00:00Z');
+    const utc = { date: '2026-10-06', catches: 4, perTrap: {}, trapWorkers: {}, byWorker: [{ ...workerProfile({ harness: 'claude', model: 'sonnet' }), today: 4 }] };
+    legacy(path.join(home, 'state'), 'kept', ['done'], new Date(now).toISOString());
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 4, perTrap: {}, day: localDay(now), catchesToday: 4, counted: ['kept'], utc }));
+    const store = readStatsStore(now);
+    expect(store.daily).toEqual({ [localDay(now)]: 1 });
+    expect(store.utc).toEqual(utc);
+    expect(store.totalCatches).toBe(4);
+    expect(readStatsStore(now).utc).toEqual(utc);
+  });
+
   it('preserves an existing attribution table when upgrading a missing sibling', () => {
     const now = Date.parse('2026-10-06T12:00:00Z');
     const byWorker = [{ ...workerProfile({ harness: 'claude', model: 'sonnet', effort: 'high' }), today: 4 }];
