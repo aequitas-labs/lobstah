@@ -85,6 +85,8 @@ const only = (): TrapRegistration => {
   expect(traps).toHaveLength(1);
   return traps[0]!;
 };
+/** Paths as registrations store them: native realpath, lowercased on Windows. */
+const canon = (p: string) => (process.platform === 'win32' ? fs.realpathSync.native(p).toLowerCase() : fs.realpathSync.native(p));
 const refOf = (trapId: string) => spawnSync('git', ['-C', primary, 'rev-parse', '--verify', '-q', `refs/lobstah/traps/${trapId}`], { encoding: 'utf8' });
 const hasBranch = (b: string) => spawnSync('git', ['-C', primary, 'rev-parse', '--verify', '-q', `refs/heads/${b}`]).status === 0;
 
@@ -128,7 +130,7 @@ describe('the roster outlives the registration', () => {
       ref: `refs/lobstah/traps/${reg.trapId}`,
       state: 'live',
     });
-    expect(readRoster(reg.trapId)!.gitDir).toBe(fs.realpathSync(path.join(primary, '.git')));
+    expect(readRoster(reg.trapId)!.gitDir).toBe(canon(path.join(primary, '.git')));
 
     const stow = lobstah(reg.worktree, 'stow', '--session', SESSION, '--keep');
     expect(stow.status, stow.stderr).toBe(0);
@@ -174,7 +176,7 @@ describe('the roster outlives the registration', () => {
     // Point the ref back at trunk: the cull itself must move it to the checkout's HEAD.
     git(primary, 'update-ref', `refs/lobstah/traps/${reg.trapId}`, git(primary, 'rev-parse', 'main'));
     const items = planPressureCull();
-    expect(items.map((i) => i.target)).toContain(reg.worktree);
+    expect(items.map((i) => canon(i.target))).toContain(canon(reg.worktree));
     applyCull(items);
     expect(fs.existsSync(reg.worktree)).toBe(false);
     expect(readRoster(reg.trapId)).toMatchObject({ state: 'stowed', head });

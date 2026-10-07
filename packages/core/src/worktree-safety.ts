@@ -53,6 +53,16 @@ export interface TrapRevision {
   at: string;
 }
 
+/**
+ * A git directory's canonical form, comparable across calls: native realpath
+ * expands Windows 8.3 names (RUNNER~1), lowercased on Windows like
+ * registrations store their worktrees.
+ */
+function canonicalGitDir(dir: string): string {
+  const real = fs.realpathSync.native(dir);
+  return process.platform === 'win32' ? real.toLowerCase() : real;
+}
+
 /** The protected ref that keeps a trap's last revision. Not a branch: no cleanup deletes it. */
 export function trapRef(trapId: string): string {
   return `refs/lobstah/traps/${trapId}`;
@@ -67,7 +77,7 @@ export function trapRef(trapId: string): string {
 export function protectTrapRevision(dir: string, trapId: string, now = Date.now()): TrapRevision | undefined {
   try {
     const head = git(dir, 'rev-parse', '--verify', '-q', 'HEAD^{commit}').trim();
-    const gitDir = fs.realpathSync(git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir').trim());
+    const gitDir = canonicalGitDir(git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir').trim());
     let branch: string | undefined;
     try { branch = git(dir, 'symbolic-ref', '--short', '-q', 'HEAD').trim() || undefined; } catch { /* detached */ }
     const ref = trapRef(trapId);
@@ -94,7 +104,7 @@ export function protectedRevision(gitDir: string, trapId: string): string | unde
 /** A directory's canonical git common directory, if it is in a repository. */
 export function gitCommonDir(dir: string): string | undefined {
   try {
-    return fs.realpathSync(git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir').trim());
+    return canonicalGitDir(git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir').trim());
   } catch {
     return undefined;
   }
