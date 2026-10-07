@@ -1,8 +1,8 @@
 /** Pure, shared telemetry vocabulary. Never accept a provider prefix as proof:
  * custom identifiers (even gpt-* or claude-*) collapse to `other`. */
 export const WORKER_HARNESSES = ['claude', 'codex', 'other'] as const;
-export const WORKER_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
-export const WORKER_PERMISSIONS = ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions', 'auto'] as const;
+import { WORKER_EFFORTS, WORKER_PERMISSIONS } from './worker-metadata.js';
+import type { WorkerMetadata } from './worker-metadata.js';
 export const WORKER_MODEL_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const WORKER_MODELS = [
   'other', 'opus', 'sonnet', 'haiku', 'fable', 'opusplan',
@@ -46,6 +46,6 @@ export function workerProfile(input: { harness?: unknown; model?: unknown; effor
 }
 
 /** Revalidate even local records before crossing the serialization boundary. */
-export function sanitizeWorker(value: Partial<WorkerProfile> | undefined): WorkerProfile {
+export function sanitizeWorker(value: Partial<WorkerMetadata> | undefined): WorkerProfile {
   return workerProfile({ harness: value?.harness, model: value?.model, effort: value?.config?.effort, permissionMode: value?.config?.permissionMode });
 }

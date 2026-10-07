@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, ensureLayout, mergeEvidence } from '../src/index.js';
+import { appendStatus, ensureLayout, mergeEvidence, signOnTrap, stowTrap } from '../src/index.js';
 import { DAILY_RETENTION_DAYS, HEATMAP_WEEKS, foldCatches, heatLevel, localDay, readStatsStore, recordCatch, shiftDay, statsPage, statsPath, statsView } from '../src/stats.js';
 import type { StatsStore } from '../src/stats.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -30,11 +30,20 @@ function legacy(dir: string, id: string, verbs: string[], at: string, trap?: str
 }
 
 describe('catch store', () => {
+  it('preserves an existing attribution table when upgrading a missing sibling', () => {
+    const now = Date.parse('2026-10-06T12:00:00Z');
+    const byWorker = [{ ...workerProfile({ harness: 'claude', model: 'sonnet', effort: 'high' }), today: 4 }];
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 4, perTrap: {}, day: '2026-10-06', catchesToday: 4, counted: [], utc: { date: '2026-10-06', catches: 4, perTrap: {}, byWorker } }));
+    expect(readStatsStore(now).utc).toMatchObject({ byWorker, trapWorkers: {} });
+  });
+
   it('preserves completed worker settings through stow/cull, counts headless combinations once and resets at UTC midnight', () => {
     const now = Date.parse('2026-10-06T12:00:00Z');
     const at = new Date(now).toISOString();
     const dir = path.join(home, 'state');
     observeSessionWorker({ session_id: 'trap-session', model: 'gpt-5.2-codex', permission_mode: 'default' }, 'codex');
+    const worktree = path.join(home, 'wt'); fs.mkdirSync(worktree);
+    signOnTrap({ trapId: 'a', sessionId: 'trap-session', harness: 'codex', worktree, cwd: worktree, ttlMs: 60_000, now });
     legacy(dir, 'trap', ['done'], at, 'wt:a');
     fs.writeFileSync(path.join(dir, 'trap.evidence'), JSON.stringify({ deliveredTo: 'wt:a', sessionId: 'trap-session', harness: 'codex' }));
     const w = workerProfile({ harness: 'claude', model: 'sonnet', effort: 'high' });
@@ -48,6 +57,7 @@ describe('catch store', () => {
     expect(store.utc?.byWorker).toEqual([{ ...w, today: 2 }]);
     recordCatch('headless-a', 'work', now);
     foldCatches([{ id: 'trap', lane: 'work' }, { id: 'headless-a', lane: 'work' }], now);
+    stowTrap('a');
     fs.unlinkSync(path.join(dir, 'trap.status'));
     fs.unlinkSync(path.join(dir, 'headless-a.status'));
     expect(readStatsStore(now).utc).toEqual(store.utc);

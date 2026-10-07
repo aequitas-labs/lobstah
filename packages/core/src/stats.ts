@@ -5,7 +5,7 @@ import type { Lane } from './types.js';
 import type { Evidence } from './types.js';
 import { sanitizeWorker, workerProfile } from './worker-profile.js';
 import type { WorkerProfile } from './worker-profile.js';
-import { sessionWorker } from './session-workers.js';
+import { readTrap } from './soak.js';
 
 export type WorkerCatches = WorkerProfile & { today: number };
 
@@ -113,7 +113,8 @@ function readCatchFacts(stateDir: string, id: string): CatchFacts {
     const evidence = JSON.parse(fs.readFileSync(path.join(stateDir, `${id}.evidence`), 'utf8')) as Evidence;
     const to = evidence.deliveredTo;
     if (typeof to === 'string' && to.startsWith('wt:')) trap = to;
-    worker = trap && evidence.sessionId ? sessionWorker(evidence.sessionId, evidence.harness) : sanitizeWorker(evidence.worker ?? workerProfile({ harness: evidence.harness }));
+    const reg = trap ? readTrap(trap.slice('wt:'.length)) : undefined;
+    worker = sanitizeWorker(reg ?? evidence.worker ?? workerProfile({ harness: evidence.harness }));
   } catch {
     /* no receipt: a headless catch */
   }
@@ -320,11 +321,11 @@ function loadOrBackfill(now: number): StatsStore {
     if (store.utc.trapWorkers === undefined || store.utc.byWorker === undefined) {
       const history = backfillStats(now, new Set(store.counted)).utc;
       if (history?.date === store.utc.date) {
-        store.utc.trapWorkers = history.trapWorkers ?? {};
-        store.utc.byWorker = history.byWorker ?? [];
+        store.utc.trapWorkers ??= history.trapWorkers ?? {};
+        store.utc.byWorker ??= history.byWorker ?? [];
       } else {
-        store.utc.trapWorkers = {};
-        store.utc.byWorker = [];
+        store.utc.trapWorkers ??= {};
+        store.utc.byWorker ??= [];
       }
     }
     writeStore(store);

@@ -9,7 +9,6 @@ import { generatedTrapNames, TRAP_NAME_RE } from './trap-names.js';
 import { lobstahVersion } from './version.js';
 import { liveHelms } from './helm.js';
 import { listTraps } from './soak.js';
-import { sessionWorker } from './session-workers.js';
 import { sanitizeWorker, workerProfile } from './worker-profile.js';
 import type { WorkerProfile } from './worker-profile.js';
 import type { WorkerCatches } from './stats.js';
@@ -53,8 +52,9 @@ export interface TelemetryPayload {
   date: string;
   /** UTC-day and all-time catches, including headless and omitted traps. */
   catches: { today: number; total: number };
-  /** At most 100 automatically generated names, with positive UTC-day counts. */
+  /** The single live helm's recorded metadata, or null when absent/ambiguous. */
   helm: WorkerProfile | null;
+  /** At most 100 automatically generated names, with positive UTC-day counts. */
   traps: Array<WorkerCatches & { name: string }>;
   /** Headless UTC-day catches, grouped by safe worker settings (max 100). */
   byWorker: WorkerCatches[];
@@ -209,7 +209,7 @@ export function buildTelemetryPayload(installId: string, now: number = Date.now(
     const name = names.get(address.slice(3));
     if (name && name.length >= 5 && name.length <= 17 && TRAP_NAME_RE.test(name)) {
       const reg = registrations.get(address.slice(3));
-      const worker = reg ? sessionWorker(reg.sessionId, reg.harness) : sanitizeWorker(utc?.trapWorkers?.[address]);
+      const worker = sanitizeWorker(reg ?? utc?.trapWorkers?.[address]);
       const previous = perName.get(name);
       // A reused name with conflicting settings must not acquire guessed metadata.
       perName.set(name, { ...(previous && JSON.stringify(sanitizeWorker(previous)) !== JSON.stringify(worker) ? workerProfile() : worker), today: (previous?.today ?? 0) + today });
@@ -222,7 +222,7 @@ export function buildTelemetryPayload(installId: string, now: number = Date.now(
   if (missing > 0) byWorker.push({ ...workerProfile(), today: missing });
   const helms = liveHelms(loadConfig().helm.ttlSecs * 1000, now);
   // An install can oversee multiple grounds. Never invent one representative.
-  const helm = helms.length === 1 ? sessionWorker(helms[0]!.sessionId, helms[0]!.harness) : null;
+  const helm = helms.length === 1 ? sanitizeWorker(helms[0]) : null;
   return {
     schema: TELEMETRY_SCHEMA,
     version: lobstahVersion(),

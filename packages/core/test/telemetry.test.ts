@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, ensureLayout, mergeEvidence } from '../src/index.js';
+import { appendStatus, ensureLayout, mergeEvidence, signOnTrap } from '../src/index.js';
 import { configPath } from '../src/config.js';
 import {
   TELEMETRY_ENDPOINT,
@@ -75,6 +75,21 @@ function consented(): void {
 }
 
 describe('telemetry payload', () => {
+  it('reads registrations, not session caches, and scrubs custom local models', () => {
+    const wt = path.join(home, 'wt'); fs.mkdirSync(wt);
+    observeSessionWorker({ session_id: 's', model: 'custom-local-model', permission_mode: 'plan' }, 'codex');
+    signOnTrap({ trapId: 'a', worktree: wt, cwd: wt, sessionId: 's', harness: 'codex', ttlMs: 60000, now: NOON });
+    takeHelm({ sessionId: 's', grounds: { name: 'fleet', repos: [] }, ttlMs: 60000, now: NOON, identity: { harness: 'codex' } });
+    // A stale/unassociated session cache is not an independent telemetry detector.
+    fs.writeFileSync(path.join(home, 'session-workers', 's.json'), JSON.stringify({ harness: 'claude', model: 'sonnet', config: { effort: 'high', permissionMode: 'default' } }));
+    const name = reserveTrapName('a');
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 1, perTrap: { 'wt:a': 1 }, day: '2026-10-06', catchesToday: 1, counted: [], utc: { date: '2026-10-06', catches: 1, perTrap: { 'wt:a': 1 } } }));
+    const p = buildTelemetryPayload(ensureTelemetryState().installId, NOON);
+    const expected = workerProfile({ harness: 'codex', model: 'other', permissionMode: 'plan' });
+    expect(p.helm).toEqual(expected);
+    expect(p.traps).toEqual([{ name, today: 1, ...expected }]);
+  });
+
   it('includes the live helm and safe trap/headless metadata, with unknown legacy catches preserved', () => {
     const name = reserveTrapName('auto', undefined, 0);
     takeHelm({ sessionId: 'helm-1', grounds: { name: 'fleet', repos: [] }, ttlMs: 60000, now: NOON, identity: { harness: 'claude' } });

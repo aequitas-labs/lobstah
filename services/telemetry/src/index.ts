@@ -1,5 +1,6 @@
 import type { D1Database, Env, ExecutionContext, ScheduledController } from './bindings.js';
-import { WORKER_HARNESSES, WORKER_MODELS, WORKER_MODEL_RE, WORKER_EFFORTS, WORKER_PERMISSIONS } from '../../../packages/core/src/worker-profile.js';
+import { WORKER_HARNESSES, WORKER_MODELS, WORKER_MODEL_RE } from '../../../packages/core/src/worker-profile.js';
+import { WORKER_EFFORTS, WORKER_PERMISSIONS } from '../../../packages/core/src/worker-metadata.js';
 import type { WorkerProfile } from '../../../packages/core/src/worker-profile.js';
 
 /**
@@ -7,7 +8,7 @@ import type { WorkerProfile } from '../../../packages/core/src/worker-profile.js
  * aggregate per install, serves the project-wide catches badge, and a
  * token-protected read of daily totals.
  *
- * - Strict schema: eight fields, including nested catches and traps, each
+ * - Strict schema: ten fields, including nested catches and worker metadata, each
  *   validated; unknown fields at every level are rejected.
  * - Idempotent: one row per install id + UTC date, upserted; a retry never
  *   adds to the totals twice.

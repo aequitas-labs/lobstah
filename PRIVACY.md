@@ -64,9 +64,11 @@ this boundary.
 `config` has exactly two fixed-choice fields, each nullable: `effort`
 (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`) and
 `permissionMode` (`default`, `acceptEdits`, `plan`, `dontAsk`,
-`bypassPermissions`, `auto`). Hooks record only the supplied model and
-permission-mode fields under `~/.lobstah/session-workers`; they never read
-transcripts or settings files for telemetry. Claude SessionStart can supply
+`bypassPermissions`, `auto`). Telemetry reads metadata already recorded on
+local helm/trap registrations and headless attempt evidence, not a second
+session detector. Hooks record supplied model and permission-mode fields
+under `~/.lobstah/session-workers` and refresh the registrations; they never
+read transcripts or settings files for telemetry. Claude SessionStart can supply
 model; Codex's common hook input can supply it on later events too. Neither
 documents reasoning effort, so live-session effort stays null. Older hooks
 or omitted fields produce null, not an inferred harness default.
