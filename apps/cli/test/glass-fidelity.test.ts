@@ -61,9 +61,9 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * so it is served the whole snapshot (the harness's `whole` option). The
  * built page's modal renders the same DOM once its detail lands.
  */
-/** Take the Reports tab out of a live page, so the page compares with the old one. */
-function withoutReportsTab(g: GlassDom): void {
-  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports')) el.remove();
+/** Take the tabs the old page never had (Reports, Stats) out of a live page, so the page compares with the old one. */
+function withoutNewTabs(g: GlassDom): void {
+  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="stats"], #page-stats')) el.remove();
 }
 const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
 /** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */
@@ -160,7 +160,7 @@ const activeTab = (g: GlassDom) => (g.$('.tabpage.on')?.id ?? 'page-deck').slice
 
 /** The static skeleton: every region, tab page, and select emptied, then canonical. */
 function skeleton(g: GlassDom): string {
-  withoutReportsTab(g);
+  withoutNewTabs(g);
   const body = g.document.body.cloneNode(true) as unknown as HTMLElement;
   for (const id of [...REGIONS, ...TABS]) {
     const el = body.querySelector('#' + id);
@@ -172,7 +172,7 @@ function skeleton(g: GlassDom): string {
 
 /** Everything the reader can see in the page right now, section by section. */
 function capture(g: GlassDom): Record<string, string> {
-  withoutReportsTab(g);
+  withoutNewTabs(g);
   const out: Record<string, string> = {};
   for (const id of REGIONS) {
     const el = g.$('#' + id);
@@ -324,7 +324,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
       const g = await loadGlass(page, page === LEGACY ? legacyWire(d) : legacyShape(d), { now: NOW, whole: page === LEGACY });
       const out: string[] = [];
       const snap = (label: string) => {
-        withoutReportsTab(g);
+        withoutNewTabs(g);
         const hidden = [...g.$$('.tabpage:not(.on)'), ...(g.$('#overlay')!.className === 'open' ? [] : [g.$('#modalbox')!])];
         g.$$('body *')
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome, readDirIfPresent, readStatsStore, statsView, toonKV, toonTable } from '@lobstah/core';
-import type { Stats } from '@lobstah/core';
+import { lobstahHome, readDirIfPresent, readStatsStore, statsPage, statsView, toonKV, toonTable } from '@lobstah/core';
+import type { Stats, StatsPage } from '@lobstah/core';
 
 /** Trap address → persistent name, from the name registry (stowed and swept traps included). */
 function trapNames(): Map<string, string> {
@@ -21,6 +21,11 @@ function trapNames(): Map<string, string> {
 /** Catches from the durable store (stats.json), which outlives cull. */
 export function readStats(now = Date.now()): Stats {
   return statsView(readStatsStore(now), trapNames(), now);
+}
+
+/** The glass's Stats tab (`GET /data/stats`): the heatmap and headline numbers, read from the store only. */
+export function readStatsPage(now = Date.now()): StatsPage {
+  return statsPage(readStatsStore(now), trapNames(), now);
 }
 
 /** `lobstah stats [--per-trap] [--json]`: today's catches and the total; per trap only on request. */

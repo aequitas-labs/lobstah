@@ -1,7 +1,7 @@
 import { tabFromHash } from '../../src/glass-diff.js';
 import type { GlassTab } from '../../src/glass-diff.js';
 
-/** The tabs are hash routes: #deck (the default), #dispatches, #traps, #prs, #notices. */
+/** The tabs are hash routes: #deck (the default), #dispatches, #traps, #prs, #reports, #notices, #stats. */
 export const currentRoute = (): GlassTab => tabFromHash(location.hash);
 
 /** Call fn with the new tab on every route change. */

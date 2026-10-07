@@ -1,4 +1,4 @@
-import type { GlassBeats, GlassDispatch, GlassOlderKind, GlassOlderPage, GlassSnapshot } from '@lobstah/core';
+import type { GlassBeats, GlassDispatch, GlassOlderKind, GlassOlderPage, GlassSnapshot, StatsPage } from '@lobstah/core';
 import { addOlder, answerSummary, applyBeats, decisionCards, modalItem } from '../../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, ModalType } from '../../src/glass-diff.js';
 import { saveLobHidden, savePrefs } from './prefs.js';
@@ -60,6 +60,27 @@ export async function refreshDetail(): Promise<void> {
   if (next.error && now.detail?.key === key && now.detail.data) return;
   setState({ detail: { key, ...next } });
 }
+
+/** Fetch the Stats tab's numbers and heatmap (local stats.json, read-only). One request at a time. */
+let statsInflight = false;
+export async function loadStats(): Promise<void> {
+  if (statsInflight) return;
+  statsInflight = true;
+  try {
+    const r = await fetch('/data/stats', { cache: 'no-store' });
+    if (!r.ok) throw new Error(`/data/stats answered ${r.status}`);
+    setState({ stats: (await r.json()) as StatsPage, statsError: null });
+  } catch {
+    setState({ statsError: 'stats could not be read' });
+  } finally {
+    statsInflight = false;
+  }
+}
+
+/** Move the heatmap's keyboard focus to a day. */
+export const focusStatsDay = (date: string): void => {
+  if (getState().statsFocus !== date) setState({ statsFocus: date });
+};
 
 /** Page in the next `/data/older` page of a kind. */
 export async function loadOlder(kind: GlassOlderKind): Promise<void> {

@@ -27,6 +27,16 @@
   --pr-open: #238636;
   --pr-draft: #6e7681;
   --pr-closed: #da3633;
+  /* the lobster's own red (the pet sprite's shell) */
+  --lobstah: #eb6644;
+  /* the Stats heatmap's five steps: none, then the accent at rising strength */
+  --heat-0: var(--inset);
+  --heat-1: color-mix(in srgb, var(--lobstah) 30%, var(--card));
+  --heat-2: color-mix(in srgb, var(--lobstah) 55%, var(--card));
+  --heat-3: color-mix(in srgb, var(--lobstah) 78%, var(--card));
+  --heat-4: var(--lobstah);
+  --heat-cell: 11px;
+  --heat-gap: 3px;
 
   /* type */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1137,5 +1147,242 @@ a.lob {
   }
   .reportview .mdpage {
     padding: 8px 12px;
+  }
+}
+
+/* The Stats tab: headline tiles, the catch heatmap, its legend, the top traps. */
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 100%;
+}
+.stats h2 {
+  margin: 0 0 var(--space-2);
+}
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--space-2);
+}
+.stat-tile {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+}
+.stat-tile .n {
+  font-size: 22px;
+  font-weight: bold;
+  color: var(--fg);
+}
+.stat-tile .unit {
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--dim);
+}
+.stats-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+.stats-empty .pet-art {
+  flex: none;
+  margin-top: 6px;
+}
+.heat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+  min-width: 0;
+}
+/* A window narrower than 53 weeks scrolls the weeks; it opens on the newest. */
+.heat-scroll {
+  overflow-x: auto;
+  padding: 2px 0 4px;
+}
+.heatmap {
+  border-collapse: separate;
+  border-spacing: var(--heat-gap);
+  width: auto;
+  margin: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  /* the day tooltips reach past their cells */
+  overflow: visible;
+}
+.heatmap td {
+  padding: 0;
+  border: 0;
+  vertical-align: middle;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--dim);
+}
+.heatmap .month {
+  position: relative;
+  height: 14px;
+}
+/* A label never widens its column: the last month's may span one week. */
+.heatmap .month span {
+  position: absolute;
+  left: 0;
+  bottom: 3px;
+  white-space: nowrap;
+}
+/* The weekday labels stay in view while a narrow window scrolls the weeks. */
+.heatmap .wd {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card);
+  padding-right: var(--space-1);
+  white-space: nowrap;
+}
+.heatmap .day,
+.heatmap .pad,
+.heat-legend .swatch {
+  width: var(--heat-cell);
+  min-width: var(--heat-cell);
+  height: var(--heat-cell);
+  border-radius: 2px;
+}
+.heatmap .day {
+  position: relative;
+  cursor: default;
+  outline: 1px solid rgba(255, 255, 255, 0.04);
+  outline-offset: -1px;
+}
+.heatmap .day:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 0;
+}
+.l0 {
+  background: var(--heat-0);
+}
+.l1 {
+  background: var(--heat-1);
+}
+.l2 {
+  background: var(--heat-2);
+}
+.l3 {
+  background: var(--heat-3);
+}
+.l4 {
+  background: var(--heat-4);
+}
+/* A day's tooltip on hover or keyboard focus: its count and date. */
+.heatmap .day:hover::after,
+.heatmap .day:focus::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  background: var(--bg);
+  border: 1px solid var(--line-hover);
+  border-radius: var(--badge-radius);
+  color: var(--fg);
+  font-size: 11px;
+  padding: 3px 7px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.heatmap .day.below:hover::after,
+.heatmap .day.below:focus::after {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+.heatmap .day.tl:hover::after,
+.heatmap .day.tl:focus::after {
+  left: 0;
+  transform: none;
+}
+.heatmap .day.tr:hover::after,
+.heatmap .day.tr:focus::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.heat-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11px;
+  margin-top: var(--space-1);
+}
+.heat-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--heat-gap);
+  color: var(--dim);
+  margin-left: auto;
+}
+.heat-legend .swatch {
+  display: inline-block;
+}
+.heat-legend .swatch:first-of-type {
+  margin-left: var(--space-1);
+}
+.heat-legend .swatch:last-of-type {
+  margin-right: var(--space-1);
+}
+.top-traps {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+}
+.top-traps ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.top-traps li {
+  display: grid;
+  grid-template-columns: minmax(0, 14em) minmax(40px, 32em) auto;
+  justify-content: start;
+  align-items: center;
+  gap: var(--space-3);
+}
+.top-traps .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.top-traps .bar {
+  height: 6px;
+  background: var(--inset);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.top-traps .bar span {
+  display: block;
+  height: 100%;
+  background: var(--lobstah);
+}
+.top-traps .n {
+  color: var(--dim);
+  white-space: nowrap;
+}
+/* A narrow window wraps the tabs rather than pushing the page sideways. */
+@media (max-width: 600px) {
+  .tabs {
+    flex-wrap: wrap;
+  }
+  .tabs a {
+    white-space: nowrap;
   }
 }

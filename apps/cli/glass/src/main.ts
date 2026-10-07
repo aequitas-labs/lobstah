@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath, reportPageUrl } from '../../src/glass-diff.js';
-import { closeLightbox, closeModal } from './actions.js';
+import { closeLightbox, closeModal, loadStats } from './actions.js';
 import { App } from './components/app.js';
 import { ReportShell, loadReportView } from './components/report-view.js';
 import type { ReportViewState } from './components/report-view.js';
@@ -43,6 +43,9 @@ const initialState = (): GlassState => ({
   drafts: {},
   focusDecision: decisionFromHash(location.hash),
   lightbox: null,
+  stats: null,
+  statsError: null,
+  statsFocus: null,
 });
 
 const reportKey = reportFromPath(location.pathname);
@@ -106,6 +109,7 @@ function startGlass(): void {
     const focusDecision = decisionFromHash(location.hash);
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({ route, focusDecision });
+    if (route === 'stats') void loadStats();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
@@ -115,4 +119,5 @@ function startGlass(): void {
   });
   startPresence();
   startPolling();
+  if (getState().route === 'stats') void loadStats();
 }

@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { appendStatus, ensureLayout, mergeEvidence } from '@lobstah/core';
 import { readStats, statsOutput } from '../src/stats.js';
 import { applyCull, planCull } from '../src/cull.js';
-import { buildGlassSnapshot } from '../src/glass.js';
+import type { AddressInfo } from 'node:net';
+import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { catchCount } from '../src/glass-diff.js';
 import { pollBody } from '../src/glass-poll.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -116,5 +117,39 @@ describe('lobstah stats', () => {
 
   it('caps trap badges only above 999', () => {
     expect([0, 12, 999, 1000, 12000].map(catchCount)).toEqual(['0', '12', '999', '999+', '999+']);
+  });
+
+  it('GET /data/stats serves the Stats tab read-only from the local store', async () => {
+    fixture();
+    const server = serveGlass(0, { snapshot: buildGlassSnapshot });
+    await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const r = await fetch(`${base}/data/stats`);
+      expect(r.status).toBe(200);
+      expect(r.headers.get('content-type')).toBe('application/json');
+      expect(r.headers.get('cache-control')).toBe('no-store');
+      const page = (await r.json()) as Record<string, unknown>;
+      expect(Object.keys(page).sort()).toEqual(
+        ['catchesThisWeek', 'catchesToday', 'currentStreak', 'historyFrom', 'longestStreak', 'max', 'months', 'perTrap', 'today', 'totalCatches', 'undated', 'weeks'].sort(),
+      );
+      const today = new Date();
+      const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      expect(page).toMatchObject({
+        today: day, catchesToday: 4, catchesThisWeek: 4, totalCatches: 4, currentStreak: 1, longestStreak: 1, max: 4, undated: 0, historyFrom: day,
+        perTrap: [{ name: 'kind-crab', catches: 2 }, { name: 'stowed-crab', catches: 1 }],
+      });
+      const weeks = page.weeks as Array<Array<{ date: string; count: number; level: number }>>;
+      expect(weeks).toHaveLength(53);
+      expect(weeks.at(-1)!.at(-1)).toEqual({ date: day, count: 4, level: 4 });
+      expect((page.months as Array<{ week: number; label: string }>).every((m) => typeof m.week === 'number' && /^[A-Z][a-z]{2}$/.test(m.label))).toBe(true);
+      // The same numbers the header chip and `lobstah stats` read.
+      expect({ catchesToday: page.catchesToday, totalCatches: page.totalCatches }).toEqual(buildGlassSnapshot().stats);
+      // Read-only: nothing else is accepted, and reading writes no new catch.
+      expect((await fetch(`${base}/data/stats`, { method: 'POST' })).status).toBe(405);
+      expect(readStats().totalCatches).toBe(4);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

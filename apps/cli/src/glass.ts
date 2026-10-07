@@ -1,5 +1,5 @@
 import * as fs from 'node:fs';
-import { readStats } from './stats.js';
+import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as http from 'node:http';
@@ -999,6 +999,11 @@ export function serveGlass(
           fail(req, res, e);
         }
       });
+    } else if (req.url === '/data/stats') {
+      // The Stats tab: read from stats.json only, on this machine; nothing is sent anywhere.
+      const ok = req.method === 'GET';
+      res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(ok ? readStatsPage() : { error: 'GET required' }));
     } else if (req.url?.startsWith('/data/')) {
       // History the poll leaves out, and one dispatch's detail: built on the
       // snapshot thread when there is one. Nothing else lives under /data/.

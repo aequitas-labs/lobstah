@@ -16,6 +16,7 @@ import { Modal } from './modals.js';
 import { Notices } from './notices.js';
 import { PRs } from './prs.js';
 import { Reports } from './reports.js';
+import { Stats } from './stats.js';
 import { Traps } from './traps.js';
 
 /**
@@ -40,6 +41,7 @@ export function App({ state }: { state: GlassState }) {
     if (t === 'traps') return html`<${Traps} inp=${inp.traps} />`;
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} more=${more('prs')} />`;
     if (t === 'reports') return html`<${Reports} inp=${inp.reports} />`;
+    if (t === 'stats') return html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`;
     return html`<${Notices} inp=${inp.notices} more=${more('notices')} />`;
   };
   const onOverlay = (e: Event) => {
