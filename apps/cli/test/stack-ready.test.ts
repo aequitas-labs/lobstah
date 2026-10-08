@@ -142,17 +142,20 @@ describe('stack watch discovery and shared presentation', () => {
     expect(ackItemExists(item.key)).toBe(true);
     expect(lobItems([remaining], { lobs: true, preview: false })).toEqual([]);
   });
-  it('offers one keyboard-expandable glass item with a top link and individual member links', async () => {
+  it.each(['rows', 'cards'])('uses the unchanged glass %s rendering with one stack state and one top-linked crawler', async (viewMode) => {
     [1, 2, 3].forEach((n) => put(n)); syncStackReadiness(undefined, now);
-    const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), attention: buildTendReport(now).attention, now: new Date(now).toISOString() };
-    const g = await loadGlass(GLASS_PAGE, d, { now });
+    const report = buildTendReport(now);
+    const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), attention: report.attention, notices: report.notices, now: new Date(now).toISOString() };
+    const g = await loadGlass(GLASS_PAGE, d, { now, prefs: { view: viewMode } });
     try {
-      expect(g.$$('details.deckstack')).toHaveLength(1);
-      expect(g.$('details.deckstack summary a')?.getAttribute('href')).toBe(view(3).url);
-      expect(g.$('details.deckstack')?.hasAttribute('open')).toBe(false);
-      g.$('details.deckstack')?.setAttribute('open', '');
-      expect(g.$$('details.deckstack .deckline a').map((a) => a.getAttribute('href'))).toEqual([view(1).url, view(2).url, view(3).url]);
+      expect(g.$$('details.deckstack')).toHaveLength(0);
+      const stackRows = g.$$('.deckgrid .deckline, .deckgrid .deckstack')
+        .filter((el) => el.textContent?.includes('stack ready to merge: acme/web #1 → #2 → #3'));
+      expect(stackRows).toHaveLength(1);
       expect(g.$$('.lob')).toHaveLength(1);
+      expect(g.$('.lob')?.getAttribute('href')).toBe(view(3).url);
+      await g.go('#notices');
+      expect(g.$$('#notices tbody tr').filter((el) => el.textContent?.includes('stack ready to merge:'))).toHaveLength(1);
     } finally { await g.close(); }
   });
   it('renders the shared readiness once in its existing PR group', async () => {

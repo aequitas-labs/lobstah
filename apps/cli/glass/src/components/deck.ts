@@ -85,20 +85,6 @@ function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, Deck
   const next = members.find((p) => p.number === s.nextNumber) || members[0];
   const chain = stackNumbers(s.numbers, new Map(members.map((p) => [p.number, p.title])));
   const nextText = next ? 'next #' + next.number : 'nothing mergeable';
-  if (s.readiness) {
-    const r = s.readiness;
-    return html`<details key=${r.id} class="deckstack"><summary><a href=${r.url} target="_blank" rel="noopener" class=${r.allReady ? 'ok' : 'dim'}>${r.text}</a></summary><div class=${view === 'cards' ? 'cards' : ''}>${members.map(
-      (p) => {
-        const items = standing.get(p.key) || [];
-        return html`<div key=${p.key} class=${view === 'cards' ? 'card' : 'deckline'}><a href=${p.url} target="_blank" rel="noopener">${prName(p)}</a><div class="meta">${
-          items
-            .map((a) => a.note)
-            .filter(Boolean)
-            .join('; ') || p.badge.text
-        }</div><button class="btn" onClick=${opener('pr', p.key)}>details</button></div>`;
-      },
-    )}</div></details>`;
-  }
   if (view === 'cards') {
     const card = (p: GlassPr) => {
       const kinds = standing.get(p.key) || [];
@@ -109,7 +95,7 @@ function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, Deck
       const meta = `${p.repo} · ${p.badge.text}${acked ? ' · acked' : ''}`;
       return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta" title=${meta}>${meta}</div></div>`;
     };
-    return html`<div key=${s.id} class="deckstack"><div class="dim">${chain} · ${nextText}</div><div class="cards">${members.map(card)}</div></div>`;
+    return html`<div key=${s.id} class="deckstack"><div class="dim">${chain} · ${nextText}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}<div class="cards">${members.map(card)}</div></div>`;
   }
   const badges = members.flatMap((p) =>
     (standing.get(p.key) || []).map(
@@ -118,17 +104,13 @@ function deckStack(s: GlassStack, members: GlassPr[], standing: Map<string, Deck
     ),
   );
   const spaced = badges.flatMap((b, i) => (i ? [' ', b] : [b]));
-  return html`<div key=${s.id} class=${'deckline' + (next ? ' click' : '')} onClick=${next && opener('pr', next.key)}><b>${chain}</b> <span class="dim">· ${nextText}</span>${badges.length > 0 && [' · ', spaced]}</div>`;
+  return html`<div key=${s.id} class=${'deckline' + (next ? ' click' : '')} onClick=${next && opener('pr', next.key)}><b>${chain}</b> <span class="dim">· ${nextText}</span>${badges.length > 0 && [' · ', spaced]}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}</div>`;
 }
 
 function deckPrs(inp: DeckInputs, view: View) {
   const shown = inp.stacks.slice(0, 3);
   const standing = new Map<string, DeckAttention[]>();
   for (const a of inp.prAttention) {
-    if (a.stack) {
-      for (const m of a.stack.members) standing.set(m.key, [{ ...a, key: m.key, note: m.note }]);
-      continue;
-    }
     const kinds = standing.get(a.key) || [];
     kinds.push(a);
     standing.set(a.key, kinds);
