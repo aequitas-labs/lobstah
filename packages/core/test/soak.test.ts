@@ -25,6 +25,8 @@ import {
   readSessionClaim,
   readTrap,
   readTrapAnchor,
+  readRoster,
+  observeSessionWorker,
   reserveTrapName,
   trapByAddress,
   trapLabel,
@@ -66,6 +68,20 @@ function trap(sessionId: string, repo?: string): TrapRegistration {
 }
 
 describe('trap registry (worktree-anchored)', () => {
+  it('shares the observed model and config with the roster while preserving generated provenance', () => {
+    observeSessionWorker({ session_id: 'roster-worker', hook_event_name: 'SessionStart', model: 'claude-opus-5-5', permission_mode: 'acceptEdits' }, 'claude');
+    const first = trap('roster-worker');
+    expect(first).toMatchObject({ model: 'claude-opus-5-5', config: { effort: null, permissionMode: 'acceptEdits' } });
+    expect(readRoster(first.trapId)).toMatchObject({ name: first.name, model: first.model, config: { permissionMode: first.config!.permissionMode } });
+    stowTrap(first.trapId);
+    // A returning trap restores the roster name even if the anchor lost it.
+    writeTrapAnchor(first.worktree, { trapId: first.trapId });
+    const back = signOnTrap({ sessionId: first.sessionId, harness: 'claude', worktree: first.worktree, cwd: first.worktree, ttlMs: TTL_MS });
+    expect(back).toMatchObject({ ok: { name: first.name, model: first.model, config: first.config } });
+    expect(generatedTrapNameForId(first.trapId)).toBe(first.name);
+    expect(readRoster(first.trapId)).toMatchObject({ state: 'live', name: first.name, model: first.model });
+  });
+
   it('records generated provenance and preserves it through re-soak, stow and ghosting', () => {
     const first = trap('provenance');
     expect(generatedTrapNameForId(first.trapId)).toBe(first.name);

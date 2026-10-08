@@ -318,6 +318,7 @@ export function signOnTrap(opts: {
   const window = opts.window ?? (sameSession ? prior.window : undefined);
   // A link, new or kept from an earlier sign-on, must fit the window.
   const link = opts.link ?? (sameSession && validSessionLink(prior?.link) ? prior.link : undefined);
+  const worker = sessionWorker(opts.sessionId, opts.harness);
   const reg: TrapRegistration = {
     trapId,
     name,
@@ -325,9 +326,9 @@ export function signOnTrap(opts: {
     cwd: opts.cwd,
     repo: opts.repo,
     harness: opts.harness,
-    model: sessionWorker(opts.sessionId, opts.harness).model,
-    config: sessionWorker(opts.sessionId, opts.harness).config,
-    observedAt: sessionWorker(opts.sessionId, opts.harness).observedAt,
+    model: worker.model,
+    config: worker.config,
+    observedAt: worker.observedAt,
     sessionId: opts.sessionId,
     one: opts.one,
     signedOnAt: sameSession ? prior.signedOnAt : iso,
