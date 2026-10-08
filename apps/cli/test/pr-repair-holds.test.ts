@@ -9,9 +9,12 @@ import {
   appendStatus,
   beatTrap,
   cancelQueued,
+  claimNext,
+  enqueue,
   ensureLayout,
   gitPushTargets,
   laneDirs,
+  loadConfig,
   listNotices,
   mergeEvidence,
   readEvidence,
@@ -24,12 +27,13 @@ import {
   sendTrapMessage,
   soakingDir,
   upsertPr,
+  writePr,
 } from '@lobstah/core';
 import type { Descriptor, PrEvidence, PrRecord } from '@lobstah/core';
 import { pumpClaudeMessage } from '../../../packages/adapters/src/claude.js';
 import { deliverPrRepairs, holdCancelledRepair, stampRepairerBeat } from '../src/pr-repair.js';
 import type { LatestChecks } from '../src/pr-repair.js';
-import { buildTendReport, renderTend } from '../src/tend.js';
+import { buildTendReport, humanPrAttention, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -144,6 +148,133 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
   removeTempDir(dir);
+});
+
+describe('the per-PR repair cooldown', () => {
+  const P = STACK[0]!;
+  const end = later + 60_000;
+  const configure = (extra = '') => fs.writeFileSync(path.join(dir, 'config.toml'), `[watch]\nrepairSettleSecs = 0\nrepairCooldownSecs = 120\n${extra}`);
+  const finish = (head: string, at = end, verb: 'done' | 'failed' = 'done') => {
+    const id = readPr(key(1))!.repair!.dispatchId!;
+    expect(claimNext('chore')).toBe(id);
+    mergeEvidence(id, 'chore', { commits: [`${head.slice(0, 7)} repair`] });
+    appendStatus(id, 'chore', verb, 'repair ended', iso(at));
+    fs.renameSync(path.join(laneDirs('chore').active, id), path.join(laneDirs('chore').done, id));
+    upsertPr(observed(P, { headSha: head, observedAt: iso(at + 1_000) }), P.owner);
+    upsertPr(observed(P, { headSha: head, observedAt: iso(at + 2_000) }), P.owner);
+  };
+
+  it('waits across head changes from the repair end, shows tend reason without attention, then queues at expiry', () => {
+    configure();
+    stand(P);
+    expect(repair()).toBe(1);
+    finish(sha('9'));
+    stampRepairerBeat();
+    expect(repair(3, { now: end + 119_000 })).toBe(0);
+    expect(readPr(key(1))?.repairCooldown?.endedAt).toBe(iso(end));
+    expect(readPr(key(1))?.repair).toMatchObject({ status: 'waiting', heldBy: 'cooldown', attempts: 0, until: iso(end + 120_000), reason: `cooldown until ${iso(end + 120_000)}` });
+    const tend = buildTendReport();
+    expect(renderTend(tend)).toContain(`cooldown until ${iso(end + 120_000)}`);
+    expect(humanPrAttention(readPr(key(1))!, 'pr:conflict', loadConfig())).toEqual({ show: false, reason: `repair waits: cooldown until ${iso(end + 120_000)}` });
+    expect(tend.attention.some((a) => a.key === key(1))).toBe(false);
+    expect(listNotices()).toEqual([]);
+    expect(repair(3, { now: end + 120_000 })).toBe(1);
+  });
+
+  it('watch release skips the window once; the next completed repair has its own cooldown', () => {
+    configure('maxRepairsWithoutProgress = 10\n');
+    stand(P);
+    expect(repair()).toBe(1);
+    finish(sha('9'));
+    expect(repair(3, { now: end + 10_000 })).toBe(0);
+    const out = spawnSync(process.execPath, [cli, 'watch', 'release', key(1)], { env: { ...process.env, LOBSTAH_HOME: dir }, encoding: 'utf8' });
+    expect(out.status, out.stderr).toBe(0);
+    expect(readPr(key(1))?.repairCooldown?.released).toBe(true);
+    expect(repair(3, { now: end + 11_000 })).toBe(1);
+    expect(readPr(key(1))?.repairCooldown?.released).toBeUndefined();
+    finish(sha('9'), end + 12_000);
+    expect(repair(3, { now: end + 13_000 })).toBe(0);
+    expect(readPr(key(1))?.repair?.heldBy).toBe('cooldown');
+  });
+
+  it.each(['checks', 'review'] as const)('also measures a completed %s repair before a subsequent conflict', (kind) => {
+    configure();
+    const over = kind === 'checks'
+      ? { mergeStateStatus: 'BLOCKED', checks: { total: 1, passed: 0, failed: 1, pending: 0 }, failingChecks: [{ name: 'test' }] }
+      : { mergeStateStatus: 'CLEAN', review: { changesRequested: true } };
+    stand(P, over);
+    expect(repair(3, { readChecks: (p) => ({ headSha: p.headSha, checks: [{ name: 'test', outcome: 'failed' }] }) })).toBe(1);
+    expect(readPr(key(1))?.repair?.kind).toBe(kind);
+    finish(sha('9'));
+    expect(repair(3, { now: end + 30_000 })).toBe(0);
+    expect(readPr(key(1))?.repair?.heldBy).toBe('cooldown');
+  });
+
+  it('a failed repair also starts the cooldown', () => {
+    configure();
+    stand(P);
+    expect(repair()).toBe(1);
+    finish(sha('9'), end, 'failed');
+    expect(repair(3, { now: end + 30_000 })).toBe(0);
+    expect(readPr(key(1))?.repair?.heldBy).toBe('cooldown');
+  });
+
+  it('default zero changes no scheduling', () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nrepairSettleSecs = 0\n');
+    stand(P);
+    expect(repair()).toBe(1);
+    finish(sha('9'));
+    expect(repair(3, { now: end + 3_000 })).toBe(1);
+  });
+
+  it('hand-dispatched repairs ignore an active daemon cooldown', () => {
+    configure();
+    stand(P);
+    expect(repair()).toBe(1);
+    finish(sha('9'));
+    expect(repair(3, { now: end + 10_000 })).toBe(0);
+    expect(readPr(key(1))?.repair?.heldBy).toBe('cooldown');
+    // A hand dispatch goes straight to the queue, not through deliverPrRepairs.
+    enqueue({ id: uuid('a'), repo: 'web', brief: 'repair by hand', pr: { url: observed(P).url } }, 'chore');
+    expect(claimNext('chore')).toBe(uuid('a'));
+  });
+
+  it('recovers older repair history and honors a release before that recovery', () => {
+    configure();
+    stand(P);
+    expect(repair()).toBe(1);
+    finish(sha('9'));
+    const { repairCooldown: _old, ...legacy } = readPr(key(1))!;
+    writePr(legacy);
+    expect(repair(3, { now: end + 10_000 })).toBe(0);
+    expect(readPr(key(1))?.repairCooldown?.endedAt).toBe(iso(end));
+    writePr(legacy);
+    expect(resetRepairStreaks(key(1))).toEqual([key(1)]);
+    expect(repair(3, { now: end + 11_000 })).toBe(1);
+  });
+
+  it('release bypasses neither settle time nor the per-head attempt cap', () => {
+    configure('maxRepairsPerPr = 1\n');
+    stand(P);
+    expect(repair()).toBe(1);
+    finish(P.sha);
+    expect(resetRepairStreaks(key(1))).toEqual([key(1)]);
+    expect(repair(3, { now: end + 10_000 })).toBe(0);
+    expect(readPr(key(1))?.repair?.status).toBe('gave-up');
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nrepairSettleSecs = 60\nrepairCooldownSecs = 120\n');
+    upsertPr(observed(P, { headSha: sha('9'), observedAt: iso(end + 11_000) }), P.owner);
+    expect(repair(3, { now: end + 20_000 })).toBe(0);
+    expect(readPr(key(1))?.repair?.heldBy).toBe('settle');
+  });
+
+  it('the no-progress cap still applies after a cooldown expires', () => {
+    configure('maxRepairsWithoutProgress = 1\n');
+    stand(P);
+    expect(repair()).toBe(1);
+    finish(sha('9'));
+    expect(repair(3, { now: end + 120_000 })).toBe(0);
+    expect(readPr(key(1))?.repair).toMatchObject({ status: 'gave-up', reason: expect.stringContaining('no merge progress') });
+  });
 });
 
 describe('the repair circuit breaker', () => {

@@ -3265,7 +3265,7 @@ async function mainCli(): Promise<void> {
         const key = pos[1];
         if (!key && !has('--all')) throw new Error('watch release requires a key or --all');
         const released = releaseHeldWatches(has('--all') ? undefined : key);
-        // A release also starts a PR's run of repairs without progress over.
+        // A release resets stopped repairs and skips the remaining cooldown once.
         const resumed = resetRepairStreaks(has('--all') ? undefined : key);
         console.log(toonKV({ released: released.length, ...(resumed.length ? { repairsResumed: resumed.join(', ') } : {}) }));
         break;

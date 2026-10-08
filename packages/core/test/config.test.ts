@@ -35,6 +35,15 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('defaults repair cooldown off and validates the watch override', () => {
+    expect(loadConfig().watch.repairCooldownSecs).toBe(0);
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[watch]\nrepairCooldownSecs = 3600\n');
+    expect(loadConfig().watch.repairCooldownSecs).toBe(3600);
+    for (const value of ['-1', '"later"', 'true', 'inf', 'nan']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[watch]\nrepairCooldownSecs = ${value}\n`);
+      expect(() => loadConfig()).toThrow(/repairCooldownSecs must be a non-negative number/);
+    }
+  });
   it('defaults ready settling to 600 seconds, accepts 0, and rejects invalid periods', () => {
     expect(loadConfig().readySettleSecs).toBe(600);
     for (const secs of [0, 30]) {

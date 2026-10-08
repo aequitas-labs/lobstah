@@ -185,6 +185,8 @@ export interface WatchConfig {
    * must stay unchanged before a repair is queued.
    */
   repairSettleSecs: number;
+  /** Minimum time between daemon repairs of one PR, from the previous repair's end, across heads. */
+  repairCooldownSecs: number;
   /** Maximum time a daemon repair waits for its owning trap. */
   repairTrapWaitSecs: number;
 }
@@ -267,7 +269,7 @@ export const DEFAULT_HELM: HelmConfig = {
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
 
-export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, maxRepairsWithoutProgress: 2, repairSettleSecs: 600, repairTrapWaitSecs: 600 };
+export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, maxRepairsWithoutProgress: 2, repairSettleSecs: 600, repairCooldownSecs: 0, repairTrapWaitSecs: 600 };
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxConcurrent: 2,
@@ -299,6 +301,10 @@ function expandHome(p: string): string {
 export function loadConfig(): Config {
   const file = configPath();
   const raw = fs.existsSync(file) ? (parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
+  const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
+  if (typeof watch.repairCooldownSecs !== 'number' || !Number.isFinite(watch.repairCooldownSecs) || watch.repairCooldownSecs < 0) {
+    throw new Error(`[watch].repairCooldownSecs must be a non-negative number in ${configPath()}`);
+  }
   const readySettleSecs = raw.readySettleSecs ?? 600;
   if (typeof readySettleSecs !== 'number' || !Number.isFinite(readySettleSecs) || readySettleSecs < 0) {
     throw new Error(`readySettleSecs must be a non-negative number in ${configPath()}`);
@@ -334,7 +340,7 @@ export function loadConfig(): Config {
     soak: parseSoak(raw.soak),
     helm: { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) },
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
-    watch: { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) },
+    watch,
     grounds,
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,

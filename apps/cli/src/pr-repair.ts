@@ -271,6 +271,19 @@ function progressStreak(pr: PrRecord): RepairStreak {
   return { count: s.count + 1 };
 }
 
+/** Completion survives new-head observations that clear the per-head repair.
+ * Older records recover their last repair from the existing streak/repair.
+ */
+function completedRepair(pr: PrRecord, now: number): PrRecord {
+  const id = pr.repairCooldown?.dispatchId ?? pr.repairStreak?.lastRepairId ?? pr.repair?.dispatchId;
+  if (!id || pr.repairCooldown?.endedAt || !isTerminal(id)) return pr;
+  const last = readStatusLog(id, laneOf(id) ?? 'chore').at(-1);
+  const at = last && ['done', 'failed'].includes(last.verb) ? Date.parse(last.at) : NaN;
+  const after = { ...pr, repairCooldown: { ...pr.repairCooldown, dispatchId: id, endedAt: new Date(Number.isFinite(at) ? at : now).toISOString() } };
+  writePr(after);
+  return after;
+}
+
 /**
  * The open PRs stacked on a PR that its repair brings up to date: every PR
  * above it in order, up to the first one a live worker holds (that PR and
@@ -316,8 +329,9 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
     }
     const watch = w;
     withPrLock(watch.key, () => {
-      const pr = readPr(watch.key);
+      let pr = readPr(watch.key);
       if (!pr || pr.state !== 'OPEN' || pr.dispatches.length === 0 || (pr.observations ?? 0) <= 1) return;
+      pr = completedRepair(pr, now);
       // A repair's stray PR must not become a second repair chain. Its
       // ancestor chain already owns a different PR.
       const owner = watch.owner.slice('dispatch:'.length);
@@ -482,9 +496,16 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         log(`repair ${watch.key}: stopped — ${reason}`);
         return;
       }
+      const end = Date.parse(pr.repairCooldown?.endedAt ?? '');
+      const cooldownUntil = end + cfg.repairCooldownSecs * 1000;
+      if (cfg.repairCooldownSecs > 0 && !pr.repairCooldown?.released && now < cooldownUntil) {
+        const until = new Date(cooldownUntil).toISOString();
+        return wait({ heldBy: 'cooldown', reason: `cooldown until ${until}` }, until);
+      }
       const id = randomUUID();
       writePr({
         ...pr,
+        repairCooldown: { dispatchId: id },
         repairStreak: { count: streak.count, lastRepairId: id, startHead: pr.headSha },
         repair: {
           headSha: pr.headSha,
