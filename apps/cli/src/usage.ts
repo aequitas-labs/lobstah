@@ -147,6 +147,30 @@ export const COMMANDS: Record<string, CommandSpec> = {
   version: { flags: {} },
   'man:manual': { flags: {} },
   'man:tend': { flags: { '--json': {} } },
+  'man:throw': {
+    flags: {
+      '--plan': { required: true },
+      '--all': {},
+      '--repo': { value: '<key>' },
+      '--grounds': { value: '<name>' },
+      '--session': { value: '<id>' },
+      '--json': {},
+    },
+    positionals: '[<trap>...]',
+  },
+  'man:roster': {
+    subverbs: ['set'],
+    flags: {
+      '--repo': { value: '<key>' },
+      '--harness': { value: `${HARNESS}|default` },
+      '--model': { value: '<m>|default' },
+      '--terminal': { value: 'terminal|iterm|default' },
+      '--config': { value: '<key>=<value>', repeatable: true },
+      '--session': { value: '<id>' },
+    },
+    flagSubverbs: { '--harness': ['set'], '--model': ['set'], '--terminal': ['set'], '--config': ['set'], '--session': ['set'] },
+    positionals: '[<trap>]',
+  },
   'man:report': {
     flags: {
       '--grounds': { value: '<name>' },
@@ -298,6 +322,13 @@ under the given directories.`,
   'man:manual': `The lobstah man's manual.`,
   'man:tend': `The whole-fleet pass: verdict, unanswered questions, each work item's chain,
 PR, and merge gate. Pure disk read.`,
+  'man:throw': `What a throw would do per trap, from the roster: resume its session, start
+cold (same name, id, checkout; says why), skip (live, starting, forgotten), or
+unresolved (repo, checkout, or record missing). --all: every eligible trap in the
+grounds (--grounds, else your helm's, else all); --repo narrows. --plan only: launches nothing.`,
+  'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull: repo,
+harness, session, revision (refs/lobstah/traps/<id>), saved profile. set (the
+helm's) saves how a throw starts it; default or key= clears a field.`,
   'man:report': `The delta since the last report: landed, arisen, still-waiting, verdict.
 Advances the cursor unless --peek — the acknowledgment man wait's timeout
 digest defers to. --grounds scopes digest and cursor to one helm's territory

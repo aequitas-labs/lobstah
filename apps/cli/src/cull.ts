@@ -33,6 +33,7 @@ import {
   inspectTrapWorktree,
   removeGhostWorktree,
   foldCatches,
+  recordRosterRevision,
 } from '@lobstah/core';
 import type { CatchRef, FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
@@ -364,8 +365,10 @@ export function planPressureCull(now = Date.now()): CullItem[] {
  * `git worktree remove` keeps the branch: a culled dispatch's commits stay.
  */
 export function removeWorktree(id: string, dir: string): void {
-  if (readTrapAnchor(dir)?.createdBy === 'soak') {
-    removeGhostWorktree(dir);
+  const anchor = readTrapAnchor(dir);
+  if (anchor?.createdBy === 'soak') {
+    // The trap's revision goes under its protected ref first; the roster records it.
+    recordRosterRevision(anchor.trapId, removeGhostWorktree(dir).revision);
     return; // Never fall through to force removal of a trap checkout.
   }
   for (const lane of ['work', 'chore'] as Lane[]) {

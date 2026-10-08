@@ -140,6 +140,12 @@ export interface SoakConfig {
    * work raises no bait-orphaned notice.
    */
   signOffGraceSecs: number;
+  /**
+   * The terminal app a thrown trap opens in: `terminal` (Terminal.app) or
+   * `iterm` (iTerm2). A trap's roster profile overrides it. Unset, a throw
+   * uses the app the trap last signed on from, else Terminal.app.
+   */
+  terminal?: 'terminal' | 'iterm';
 }
 
 export interface HelmConfig {
@@ -236,6 +242,14 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
   return [...new Set(raw as AttentionKind[])];
 }
 
+function parseSoak(raw: unknown): SoakConfig {
+  const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
+  if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm') {
+    throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal" or "iterm"`);
+  }
+  return soak;
+}
+
 export const DEFAULT_SOAK: SoakConfig = {
   deferSecs: 90,
   claimIdleNoticeSecs: 180,
@@ -317,7 +331,7 @@ export function loadConfig(): Config {
     repos,
     harness: (raw.harness as HarnessDefaults) ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
-    soak: { ...DEFAULT_SOAK, ...((raw.soak as Partial<SoakConfig>) ?? {}) },
+    soak: parseSoak(raw.soak),
     helm: { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) },
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
     watch: { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) },
