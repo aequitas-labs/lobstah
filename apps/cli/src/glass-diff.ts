@@ -453,7 +453,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       decisions: decisionCards(d.attention || [], d.decisions || []).filter((c) =>
         c.kind === 'decision' ? hasQuery(c.kind, c.repo, c.title, c.dispatch, c.detail) : hasQuery(c.kind, c.repo, c.note, c.dispatch),
       ),
-      prAttention: (d.attention || []).filter((a) => a.kind && a.kind.startsWith('pr:')).map(noAge),
+      prAttention: (d.attention || []).filter((a) => a.kind && (a.kind.startsWith('pr:') || a.kind === 'stack-ready')).map(noAge),
       landed: (d.landed || [])
         .filter((a) => recent(a.at, LANDED_WINDOW_MS) && hasQuery(a.repo, a.note, a.id))
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))

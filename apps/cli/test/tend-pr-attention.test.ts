@@ -119,13 +119,14 @@ describe('attention kinds — stand and clear', () => {
     expect(kinds()).toEqual(['pr:ready']);
   });
 
-  it('keeps stacked pr:ready visible but quiet while its tracked base PR remains open', () => {
+  it('contains stacked pr:ready inside one item while its tracked base PR remains open', () => {
     const lower = pr({ number: 8, url: 'https://github.com/acme/web/pull/8', baseRefName: 'main', headRefName: 'lower' });
     const upper = pr({ baseRefName: 'lower', headRefName: 'upper', checks: { total: 1, passed: 1, failed: 0, pending: 0 } });
     prDispatch(upper);
     enqueue({ id: Q, repo: 'web', brief: 'lower PR' }, 'work');
     mergeEvidence(Q, 'work', { pr: lower });
-    expect(buildTendReport().attention.find((a) => a.kind === 'pr:ready')).toMatchObject({ quiet: true });
+    expect(buildTendReport().attention.some((a) => a.kind === 'pr:ready')).toBe(false);
+    expect(buildTendReport().attention.find((a) => a.stack)?.stack?.members.map((m) => m.number)).toEqual([8, 9]);
     expect(renderTend(buildTendReport())).toContain('stack #8 → #9: next #8');
     mergeEvidence(Q, 'work', { pr: { ...lower, state: 'MERGED' } });
     expect(kinds()).toContain('pr:ready');

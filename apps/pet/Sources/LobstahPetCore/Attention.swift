@@ -81,7 +81,7 @@ public struct AttentionItem: Decodable, Equatable {
     case "pr:checks": return "checks"
     case "pr:conflict": return "conflicts"
     case "pr:ready": return "ready"
-    case "stack-ready": return "stack ready"
+    case "stack-ready": return "stack"
     case "landed": return "landed"
     case "watch": return "watch"
     case "report": return "report"

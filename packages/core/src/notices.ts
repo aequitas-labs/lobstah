@@ -59,6 +59,8 @@ export interface Notice {
   text: string;
   /** The dispatch, trap, or message this is about, when one exists. */
   refId?: string;
+  /** Current top PR for a stack; its stable refId is not its click target. */
+  url?: string;
   /** Repo key, so a helm can scope notices to its grounds. */
   repo?: string;
   /** The session whose action caused it — consumed as usual, but never
@@ -94,6 +96,7 @@ export function postNotice(n: {
   kind: NoticeKind;
   text: string;
   refId?: string;
+  url?: string;
   repo?: string;
   /** The session whose action caused this — its own wakes skip the echo. */
   by?: string;
@@ -119,6 +122,7 @@ export function postNotice(n: {
     at: new Date().toISOString(),
     text: n.text,
     refId: n.refId,
+    ...(n.url ? { url: n.url } : {}),
     repo: n.repo,
     by: n.by,
     ...(n.quiet ? { quiet: true } : {}),

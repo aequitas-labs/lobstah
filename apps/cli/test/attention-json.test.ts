@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence } from '@lobstah/core';
+import { addWatch, appendWatchEvents, appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence, upsertPr, syncStackReadiness } from '@lobstah/core';
 import { petRow, petStateFile, type PetState } from '../src/pet.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -82,6 +82,20 @@ describe('attention --json', () => {
     const res = lobstah('attention', '--json');
     expect(res.status).toBe(0);
     expect(JSON.parse(res.stdout)).toEqual({ attention: [] });
+  });
+  it('feeds the pet exactly one stack entry for mixed watch owners, linked to the current top', () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), 'readySettleSecs = 0\n');
+    for (const n of [1, 2, 3]) {
+      upsertPr({ url: `https://github.com/acme/web/pull/${n}`, number: n, state: 'OPEN', draft: false,
+        headSha: `sha-${n}`, headRefName: `b${n}`, baseRefName: n === 1 ? 'main' : `b${n - 1}`,
+        reviewDecision: '', mergeStateStatus: 'CLEAN', checks: { total: 1, passed: 1, failed: 0, pending: 0 }, observedAt: new Date().toISOString() });
+      addWatch(`pr:acme/web#${n}`, 'fixture', { owner: n === 1 ? `dispatch:${P}` : 'man' });
+    }
+    appendWatchEvents('pr:acme/web#2', [{ seq: 1, at: new Date().toISOString(), summary: 'old check event' }]);
+    syncStackReadiness();
+    const parsed = JSON.parse(lobstah('attention', '--json').stdout) as { attention: Item[] };
+    expect(parsed.attention).toEqual([expect.objectContaining({ kind: 'stack-ready', key: 'stack:pr:acme/web#1', prUrl: 'https://github.com/acme/web/pull/3' })]);
+    expect(parsed.attention.filter((a) => !a.acked && !a.quiet)).toHaveLength(1);
   });
 });
 

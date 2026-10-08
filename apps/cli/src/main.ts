@@ -639,7 +639,7 @@ function emitNotices(notices: Notice[], sessionId?: string): void {
     // A decision answer is an event with its request's payload.
     const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
     if (answer) console.log(toonKV(decisionEventFields(answer)));
-    else console.log(toonKV(trapRequestFields(n) ?? { notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), text: n.text }));
+    else console.log(toonKV(trapRequestFields(n) ?? { notice: n.kind, ...(n.refId ? { ref: n.refId } : {}), ...(n.url ? { url: n.url } : {}), text: n.text }));
   }
   console.log(
     'next: each notice names its own decision or remedy — act on it (or note it and move on), ' +
@@ -663,7 +663,7 @@ function noticeLine(n: Notice, prefix = 'notice '): string {
   const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
   if (answer) return decisionLine(answer);
   const r = trapRequestFields(n);
-  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: start it with \`lobstah man throw --new --request ${r.id}\`` : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
+  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: start it with \`lobstah man throw --new --request ${r.id}\`` : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}${n.url ? ` ${n.url}` : ''}`;
 }
 
 /** A haul line for a send's answer. */

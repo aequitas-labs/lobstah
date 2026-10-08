@@ -36,8 +36,10 @@ export interface TendAttention {
    * without answering it.
    */
   held?: boolean;
-  /** A stacked PR's individual ready item is visible, but never walks. */
+  /** Progress with no current human action: visible, but never walks. */
   quiet?: boolean;
+  /** One item owns every member's attention, regardless of watch ownership. */
+  stack?: { ready: number; total: number; allReady: boolean; members: Array<{ key: string; url: string; number: number; note: string; kinds: TendAttentionKind[] }> };
   id: string;
   lane: Lane;
   /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
@@ -157,7 +159,7 @@ export interface GlassStack {
   nextNumber?: number;
   behind: number;
   /** Shared stack readiness, absent for a lone PR or an incomplete chain. */
-  readiness?: { ready: number; total: number; allReady: boolean; text: string };
+  readiness?: { id: string; url: string; ready: number; total: number; allReady: boolean; text: string };
 }
 
 /** The evidence fields a dispatch's row shows: where it went and its PRs. */

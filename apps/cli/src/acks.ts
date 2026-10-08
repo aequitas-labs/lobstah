@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { laneDirs, lobstahHome, parsePrRef, prStandingKinds, readEvidence, readPr, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
+import { laneDirs, lobstahHome, parsePrRef, prStandingKinds, readEvidence, readPr, readStackEpochs, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
 
 /**
@@ -133,7 +133,10 @@ export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string;
  * watch is still registered, or the report is still filed.
  */
 export function ackItemExists(key: string, culling: ReadonlySet<string> = new Set()): boolean {
-  if (key.startsWith('stack:')) return readPr(key.slice('stack:'.length))?.state === 'OPEN';
+  if (key.startsWith('stack:')) {
+    const stack = readStackEpochs()[key.slice('stack:'.length)];
+    return stack ? Object.keys(stack.heads).some((pr) => readPr(pr)?.state === 'OPEN') : readPr(key.slice('stack:'.length))?.state === 'OPEN';
+  }
   if (key.startsWith('watch:')) return readWatch(key.slice('watch:'.length)) !== undefined;
   // An answered decision is no longer attention: its ack is orphaned.
   if (key.startsWith('decision:')) return readDecision(key) !== undefined && readDecisionAnswer(key) === undefined;

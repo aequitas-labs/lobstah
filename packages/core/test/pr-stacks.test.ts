@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { derivePrStacks, ensureLayout, listNotices, loadConfig, readStackEpochs, syncStackReadiness, unseenNotices, upsertPr } from '../src/index.js';
+import { derivePrStacks, ensureLayout, listNotices, loadConfig, postNotice, readStackEpochs, syncStackReadiness, unseenNotices, upsertPr } from '../src/index.js';
 import type { PrEvidence } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -28,6 +28,37 @@ describe('stack detection and readiness', () => {
     expect(derivePrStacks([row(3), row(1), row(2)])[0]?.members.map((p) => p.number)).toEqual([1, 2, 3]);
     expect(derivePrStacks([row(1)])).toEqual([]);
   });
+  it('updates one stable item as a ready stack grows and partially merges', () => {
+    [1, 2].forEach((n) => upsertPr(row(n))); sync();
+    const id = readyNotices()[0]!.refId;
+    expect(unseenNotices(true)).toHaveLength(1);
+    upsertPr(row(3)); sync();
+    expect(readyNotices()).toHaveLength(1);
+    expect(readyNotices()[0]).toMatchObject({ refId: id, text: expect.stringContaining('#1 → #2 → #3') });
+    expect(unseenNotices(true)).toHaveLength(1);
+    upsertPr(row(1, { state: 'MERGED' })); upsertPr(row(2, { baseRefName: 'main' })); sync();
+    expect(readyNotices()).toHaveLength(1);
+    expect(readyNotices()[0]!.refId).toBe(id);
+    expect(unseenNotices(true)).toEqual([]);
+  });
+  it('supersedes the ready notice immediately on growth, waking only after the new member is ready', () => {
+    [1, 2].forEach((n) => upsertPr(row(n))); sync(); unseenNotices(true);
+    const id = readyNotices()[0]!.refId;
+    upsertPr(row(3, { draft: true })); sync();
+    expect(readyNotices()).toEqual([expect.objectContaining({ refId: id, quiet: true, text: expect.stringContaining('stack 2/3 ready') })]);
+    expect(unseenNotices(true)).toEqual([]);
+    upsertPr(row(3)); sync(); sync();
+    expect(readyNotices()).toHaveLength(1);
+    expect(unseenNotices(true)).toHaveLength(1);
+    sync(); expect(unseenNotices(true)).toEqual([]);
+  });
+  it('keeps its identity across branch renames/restacks with unchanged heads', () => {
+    [1, 2, 3].forEach((n) => upsertPr(row(n))); sync(); unseenNotices(true);
+    const id = readyNotices()[0]!.refId;
+    [1, 2, 3].forEach((n) => upsertPr(row(n, { headRefName: `new-${n}`, baseRefName: n === 1 ? 'main' : `new-${n - 1}` }))); sync();
+    expect(readyNotices()[0]!.refId).toBe(id);
+    expect(unseenNotices(true)).toEqual([]);
+  });
   it('never joins across repos, forks, ambiguous siblings, or non-trunk floors', () => {
     expect(derivePrStacks([row(1), row(2, { url: 'https://github.com/elsewhere/web/pull/2' })])).toEqual([]);
     expect(derivePrStacks([row(1), row(2, { isCrossRepository: true })])).toEqual([]);
@@ -51,25 +82,29 @@ describe('stack detection and readiness', () => {
     sync(); sync();
     expect(unseenNotices(true)).toEqual([]);
     expect(readyNotices()[0]?.text).toContain('#1 → #2 → #3 (3 PRs, all green)');
-    expect(readStackEpochs()['pr:acme/web#3']?.notified).toBe(true);
+    expect(readStackEpochs()['pr:acme/web#1']?.notified).toBe(true);
   });
   it.each([
     { draft: true }, { mergeStateStatus: 'DIRTY' },
     { checks: { total: 1, passed: 0, failed: 1, pending: 0 } },
   ])('re-notifies after an observed not-ready state clears: %j', (over) => {
     [1, 2, 3].forEach((n) => upsertPr(row(n))); sync();
+    unseenNotices(true);
     upsertPr(row(2, over)); sync(); upsertPr(row(2)); sync(); sync();
-    expect(readyNotices()).toHaveLength(2);
+    expect(readyNotices()).toHaveLength(1);
+    expect(unseenNotices(true)).toHaveLength(1);
   });
   it('new heads settle, then re-notify once on a cadence scan without a forge event', () => {
     const cfg = { ...loadConfig(), readySettleSecs: 10 };
     [1, 2, 3].forEach((n) => upsertPr(row(n)));
-    syncStackReadiness(cfg, time + 9000); expect(readyNotices()).toHaveLength(0);
+    syncStackReadiness(cfg, time + 9000); expect(unseenNotices(true)).toHaveLength(0);
     syncStackReadiness(cfg, time + 10000); expect(readyNotices()).toHaveLength(1);
+    expect(unseenNotices(true)).toHaveLength(1);
     upsertPr(row(2, { headSha: 'new', observedAt: new Date(time + 11000).toISOString() }));
     syncStackReadiness(cfg, time + 11000); expect(readyNotices()).toHaveLength(1);
     syncStackReadiness(cfg, time + 21000); syncStackReadiness(cfg, time + 22000);
-    expect(readyNotices()).toHaveLength(2);
+    expect(readyNotices()).toHaveLength(1);
+    expect(unseenNotices(true)).toHaveLength(1);
   });
   it('bottom merges and retargets do not wake again for unchanged remaining heads', () => {
     [1, 2, 3].forEach((n) => upsertPr(row(n))); sync();
@@ -99,5 +134,20 @@ describe('stack detection and readiness', () => {
     [1, 2, 3].forEach((n) => upsertPr(row(n))); sync();
     upsertPr(row(3, { state: 'CLOSED' })); sync();
     expect(unseenNotices(false).every((n) => n.refId !== 'pr:acme/web#3')).toBe(true);
+  });
+  it('collapses legacy shape notices without waking, then wakes on the next real change', () => {
+    [1, 2, 3].forEach((n) => upsertPr(row(n)));
+    fs.writeFileSync(path.join(home, 'pr-stacks.json'), JSON.stringify({
+      'pr:acme/web#2': { heads: { 'pr:acme/web#1': 'sha-1', 'pr:acme/web#2': 'sha-2' }, ready: true, epoch: 0, at: new Date(time).toISOString(), notified: true },
+      'pr:acme/web#3': { heads: { 'pr:acme/web#1': 'sha-1', 'pr:acme/web#2': 'sha-2', 'pr:acme/web#3': 'sha-3' }, ready: true, epoch: 0, at: new Date(time).toISOString(), notified: true },
+    }));
+    for (const n of [2, 3]) postNotice({ kind: 'stack-ready', refId: `pr:acme/web#${n}`, text: `old shape ${n}` });
+    sync(); sync();
+    expect(readyNotices()).toHaveLength(1);
+    expect(readyNotices()[0]).toMatchObject({ refId: 'pr:acme/web#1', quiet: true, url: row(3).url });
+    expect(Object.keys(readStackEpochs())).toEqual(['pr:acme/web#1']);
+    expect(unseenNotices(true)).toEqual([]);
+    upsertPr(row(2, { headSha: 'new' })); sync();
+    expect(unseenNotices(true)).toHaveLength(1);
   });
 });

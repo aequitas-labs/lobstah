@@ -58,7 +58,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
     'pr:checks': 'checks',
     'pr:conflict': 'conflicts',
     'pr:ready': 'ready',
-    'stack-ready': 'stack ready',
+    'stack-ready': 'stack',
     landed: 'landed',
     watch: 'watch',
     report: 'report',
