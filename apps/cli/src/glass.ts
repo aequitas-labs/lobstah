@@ -57,6 +57,7 @@ import {
   ANSWER_EXTENSIONS,
   ANSWER_FILES_MAX,
   ANSWER_TEXT_MAX,
+  prStackTrunk,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { reportAck } from './report-file.js';
@@ -539,6 +540,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     dispatches.map((d) => ({ id: d.id, followUp: d.followUp, repoKey: d.repo, pr: d.evidence?.pr, prGate: d.prGate })),
     watches,
     readPrs(),
+    { readySettleSecs: cfg.readySettleSecs, now: Date.now(), trunk: (r) => prStackTrunk(cfg, r) },
   );
   // A dispatch with several PRs lists each, in stack order, with its state.
   for (const d of dispatches as GlassDispatch[]) {

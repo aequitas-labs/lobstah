@@ -34,6 +34,8 @@ export interface TendAttention {
    * without answering it.
    */
   held?: boolean;
+  /** A stacked PR's individual ready item is visible, but never walks. */
+  quiet?: boolean;
   id: string;
   lane: Lane;
   /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
@@ -123,6 +125,7 @@ export interface GlassPr {
   mergeStateStatus: string;
   baseRefName?: string;
   headRefName?: string;
+  isCrossRepository?: boolean;
   /** Last check against the forge. Shown, never sorted on. */
   observedAt: string;
   /** From the PR record; the order key (core prs.ts prNewestFirst). */
@@ -151,6 +154,8 @@ export interface GlassStack {
   open: boolean;
   nextNumber?: number;
   behind: number;
+  /** Shared stack readiness, absent for a lone PR or an incomplete chain. */
+  readiness?: { ready: number; total: number; allReady: boolean; text: string };
 }
 
 /** The evidence fields a dispatch's row shows: where it went and its PRs. */

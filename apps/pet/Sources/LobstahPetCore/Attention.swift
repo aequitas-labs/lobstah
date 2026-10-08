@@ -15,6 +15,7 @@ public struct AttentionItem: Decodable, Equatable {
   public var key: String? = nil
   /** Acknowledged for display: the pet skips it (the helm's wakes never do). */
   public var acked: AckInfo? = nil
+  public var quiet: Bool? = nil
   /** question | decision | landed | watch | pr:draft | pr:review | pr:checks | pr:conflict | pr:ready | report — absent from an older lobstah. */
   public var kind: String? = nil
   /** pr:* kinds: the PR this pet walks for. */
@@ -37,7 +38,7 @@ public struct AttentionItem: Decodable, Equatable {
   public var identity: String { "\(kind ?? "question"):\(key ?? id)" }
 
   /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
-  public var prLink: URL? { (kind?.hasPrefix("pr:") ?? false) ? prUrl.flatMap(URL.init(string:)) : nil }
+  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready") ? prUrl.flatMap(URL.init(string:)) : nil }
 
   /** A report pet clicks through to the report's own page on the spyglass (/report/<key>). */
   public func reportLink(glass: URL) -> URL? {
@@ -80,6 +81,7 @@ public struct AttentionItem: Decodable, Equatable {
     case "pr:checks": return "checks"
     case "pr:conflict": return "conflicts"
     case "pr:ready": return "ready"
+    case "stack-ready": return "stack ready"
     case "landed": return "landed"
     case "watch": return "watch"
     case "report": return "report"
@@ -231,7 +233,7 @@ public func readAttention(run: LobstahRunner = defaultRunner) -> AttentionRead {
     let label = args.joined(separator: " ")
     switch decodeAttention(run(args)) {
     case .success(let items):
-      return AttentionRead(items: items.filter { $0.acked == nil }, command: label, failure: nil)
+      return AttentionRead(items: items.filter { $0.acked == nil && $0.quiet != true }, command: label, failure: nil)
     case .failure(let why):
       reasons.append("`lobstah \(label)` \(why)")
     }

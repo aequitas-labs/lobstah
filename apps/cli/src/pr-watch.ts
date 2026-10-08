@@ -31,10 +31,12 @@ import {
   storedDescriptor,
   upsertPr,
   watchDue,
+  syncStackReadiness,
 } from '@lobstah/core';
 import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch } from '@lobstah/core';
 import { githubRepoFromOrigin } from '@lobstah/pick';
 import { repoOf } from './digest.js';
+import { discoverPrStack } from './pr-stack-watch.js';
 
 /**
  * The CLI half of the `pr:` watch preset (the pure half is core's pr.ts):
@@ -230,6 +232,7 @@ export function syncPrWatches(): { refreshed: number } {
     if (!watch.lastError && after && after !== before) refreshed++;
     if (watch.done) removeWatch(w.key);
   }
+  syncStackReadiness();
   return { refreshed };
 }
 
@@ -253,9 +256,10 @@ export const FIRST_SIGHT_NOTICE_MS = 24 * 60 * 60 * 1000;
  * A PR seen for the first time already MERGED or CLOSED gets at most one
  * notice, and none when it ended more than 24 hours ago.
  */
-export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: string; now?: Date } = {}): PrRecord {
+export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: string; now?: Date; discovered?: boolean } = {}): PrRecord {
   const now = opts.now ?? new Date();
   const pr = prEvidence(ref, view, now.toISOString());
+  pr.discoveryPending = opts.discovered ? true : undefined;
   const id = opts.dispatchId;
   const lane = id ? laneOf(id) : undefined;
   const ev = id && lane ? readEvidence(id, lane) : undefined;
@@ -374,6 +378,8 @@ export function runPrCheck(refArg: string, cursor: string | undefined, forId: st
   const view = ghPrView(ref);
   const out = derivePrEvents(ref, view, cursor);
   observePr(ref, view, { dispatchId: forId });
+  discoverPrStack(ref, { everySecs: readWatch(ref.key)?.everySecs });
+  syncStackReadiness();
   const events = forId ? workEvents(ref, out.events) : manEvents(out.events);
   // Degraded view (no permission to read checks): the state is recorded and
   // the cursor advances, and the watch still records the permission error.
@@ -411,11 +417,13 @@ export function observeDispatchPrWatches(defaultEverySecs = pollSecs(), now = Da
     if (w.failures && !watchDue(w, defaultEverySecs, now)) continue;
     try {
       const record = observePr(ref, view(ref), { dispatchId: id, now: new Date(now) });
+      if (record.state === 'OPEN') discoverPrStack(ref, { now, everySecs: w.everySecs ?? defaultEverySecs });
       if (record.state === 'MERGED' || record.state === 'CLOSED') removeWatch(w.key);
     } catch {
       // gh missing, unauthenticated, or forbidden: pick's real check records the streak
     }
   }
+  syncStackReadiness(loadConfig(), now);
 }
 
 /** A PR title for `lobstah prs`: at most `max` characters, the last an ellipsis when cut; '' when absent. */

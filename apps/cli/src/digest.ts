@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { laneDirs, readEvidence, readHelm, wakeFloorMs, readStatusLog, toonKV, toonTable, TERMINAL_VERBS } from '@lobstah/core';
+import { laneDirs, loadConfig, repoKey, readEvidence, readHelm, wakeFloorMs, readStatusLog, toonKV, toonTable, TERMINAL_VERBS } from '@lobstah/core';
 import type { Descriptor, Lane } from '@lobstah/core';
 import { buildTendReport, repoOf } from './tend.js';
 import type { TendReport } from './tend.js';
@@ -38,6 +38,8 @@ export interface Digest {
   landed: DigestLanding[];
   arisen: DigestAttention[];
   standing: DigestAttention[];
+  /** Current stack progress, using the same observation-only derivation as tend. */
+  stacks: string[];
   verdict: TendReport['verdict'];
   counts: TendReport['counts'];
 }
@@ -117,6 +119,7 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
     landed,
     arisen,
     standing,
+    stacks: tend.stacks.filter((s) => inGrounds(repoKey(loadConfig(), s.repo)) && s.readiness).map((s) => s.readiness!.text),
     verdict: tend.verdict,
     counts: tend.counts,
   };
@@ -141,6 +144,7 @@ export function dueHelmDigest(
 
 export function renderDigest(d: Digest): string {
   const lines: string[] = [toonKV({ digest: `${d.since} -> ${d.now}` })];
+  lines.push(...(d.stacks ?? []));
   if (d.landed.length > 0) {
     lines.push(
       toonTable(

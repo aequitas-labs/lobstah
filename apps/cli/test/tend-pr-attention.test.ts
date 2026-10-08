@@ -18,7 +18,7 @@ import {
   writePr,
 } from '@lobstah/core';
 import type { PrEvidence } from '@lobstah/core';
-import { buildTendReport, humanPrAttention, landedCatches, onTheHook, prKinds, readyBlockedByStack, renderTend } from '../src/tend.js';
+import { buildTendReport, humanPrAttention, landedCatches, onTheHook, prKinds, renderTend } from '../src/tend.js';
 import { advanceCursor } from '../src/reported.js';
 import { deriveGlassPrs } from '../src/glass-prs.js';
 import { stampRepairerBeat } from '../src/pr-repair.js';
@@ -119,19 +119,17 @@ describe('attention kinds — stand and clear', () => {
     expect(kinds()).toEqual(['pr:ready']);
   });
 
-  it('suppresses pr:ready while its tracked base PR remains open', () => {
+  it('keeps stacked pr:ready visible but quiet while its tracked base PR remains open', () => {
     const lower = pr({ number: 8, url: 'https://github.com/acme/web/pull/8', baseRefName: 'main', headRefName: 'lower' });
     const upper = pr({ baseRefName: 'lower', headRefName: 'upper', checks: { total: 1, passed: 1, failed: 0, pending: 0 } });
-    expect(readyBlockedByStack(upper, [lower, upper])).toBe(true);
-    expect(readyBlockedByStack(upper, [{ ...lower, state: 'MERGED' }, upper])).toBe(false);
-    expect(readyBlockedByStack(upper, [{ ...lower, url: 'https://github.com/elsewhere/other/pull/8' }, upper])).toBe(false);
     prDispatch(upper);
     enqueue({ id: Q, repo: 'web', brief: 'lower PR' }, 'work');
     mergeEvidence(Q, 'work', { pr: lower });
-    expect(kinds()).not.toContain('pr:ready');
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:ready')).toMatchObject({ quiet: true });
     expect(renderTend(buildTendReport())).toContain('stack #8 → #9: next #8');
     mergeEvidence(Q, 'work', { pr: { ...lower, state: 'MERGED' } });
     expect(kinds()).toContain('pr:ready');
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:ready')?.quiet).toBeUndefined();
   });
 
   it('merge state gates pr:ready: green and approved but DIRTY is pr:conflict, never ready', () => {

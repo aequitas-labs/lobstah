@@ -74,6 +74,7 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
   redeems the ticket. Unredeemed past `--deadline` (default 180 seconds), a
   `trap-start-failed` notice arrives and the work stays queued;
   `lobstah stow --wt <name>` withdraws the reservation.
+- A PR stack wakes once with `stack-ready`, in bottom-first merge order. Its individual ready PRs stay visible but quiet; tend and the glass show partial readiness. Follow an external stack from any member with `lobstah watch add pr:<owner>/<repo>#<n>`.
 - A `trap-request` event is a trap the human asked for from the glass. Run
   `lobstah trap reserve --request <id>`, then start the session with the
   printed command, trying these in order and stopping at the first that works
