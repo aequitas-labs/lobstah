@@ -89,6 +89,7 @@ function parked(
 function prRecord(state: 'OPEN' | 'MERGED' | 'CLOSED', dispatches: string[] = [], url = PR): void {
   const n = Number(url.split('/').at(-1));
   const key = `pr:o/r#${n}`;
+  const wt = dispatches.map((id) => path.join(home, 'worktrees', id)).find((dir) => fs.existsSync(dir));
   fs.mkdirSync(path.dirname(prRecordFile(key)), { recursive: true });
   fs.writeFileSync(
     prRecordFile(key),
@@ -101,7 +102,7 @@ function prRecord(state: 'OPEN' | 'MERGED' | 'CLOSED', dispatches: string[] = []
       draft: false,
       reviewDecision: '',
       mergeStateStatus: 'UNKNOWN',
-      headSha: 'x',
+      headSha: wt ? git(wt, 'rev-parse', 'HEAD') : 'x',
       checks: { total: 0, passed: 0, failed: 0, pending: 0 },
       dispatches,
       standingSince: {},
