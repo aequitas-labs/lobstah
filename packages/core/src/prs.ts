@@ -19,6 +19,8 @@ import type { PrEvidence, PrStandingKind } from './pr.js';
  */
 
 export interface PrRecord extends PrEvidence {
+  /** Every head observed on the forge, retained after squash merge/branch deletion. */
+  observedHeadShas?: string[];
   /** `pr:<owner>/<repo>#<n>`. */
   key: string;
   /** The forge repo, `<owner>/<repo>`. */
@@ -201,6 +203,7 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
       key: ref.key,
       repo: `${ref.owner}/${ref.repo}`,
       dispatches,
+      observedHeadShas: [...new Set([...(before?.observedHeadShas ?? []), before?.headSha, pr.headSha].filter((s): s is string => !!s))],
       standingSince,
       observations: (before?.observations ?? 0) + 1,
       firstSeenAt,

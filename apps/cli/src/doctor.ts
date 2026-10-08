@@ -213,7 +213,7 @@ export function diskRow(cfg: Config, freeBytes: FreeBytesReader = statfsFreeByte
   const kept = readKeptWorktrees();
   if (kept.length > 0) {
     parts.push(
-      `kept: unpushed work (${kept.length} worktree(s) of merged PRs: ${kept.map((k) => `${k.id.slice(0, 8)} ${k.reason.replace(/^unpushed work: /, '')}`).join(', ')})`,
+      `kept: ${kept.length} worktree(s) of merged PRs: ${kept.map((k) => `${k.id.slice(0, 8)} ${k.reason}`).join(', ')}`,
     );
   }
   const hold = readHold();
