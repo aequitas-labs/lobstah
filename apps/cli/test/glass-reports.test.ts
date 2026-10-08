@@ -144,6 +144,41 @@ describe('glass: a report page', () => {
     expect(g.$('#deck')).toBeNull();
   });
 
+  it('showing it acks it once through the guarded request path; the page does not change', async () => {
+    const fleet = everyAttentionFleet();
+    const row = (fleet.reports ?? []).find((r) => r.key === TRAP_KEY)!;
+    const g = await page(fleet, {
+      path: pagePath(TRAP_KEY),
+      files: { [md(TRAP_KEY)]: TRAP_MD, [meta(TRAP_KEY)]: JSON.stringify(row) },
+      reportToken: 'page-token',
+      post: () => ({ status: 200, body: { ok: true, key: TRAP_KEY, viewedAt: ago(0), by: 'glass', first: true } }),
+    });
+    expect(g.posts()).toHaveLength(1);
+    const [p] = g.posts();
+    expect(p!.url).toBe('/requests');
+    expect(p!.headers['x-lobstah-token']).toBe('page-token');
+    expect(JSON.parse(p!.body)).toEqual({ kind: 'report-viewed', payload: { key: TRAP_KEY } });
+    expect(text(g.$('.reportview .sub'))).toBe('kind-crab · 20m ago');
+    // Still the one page: no poll.
+    expect(g.fetches()).toBe(0);
+  });
+
+  it('posts nothing for an acked report, a report whose page failed, or without the page token', async () => {
+    const fleet = everyAttentionFleet();
+    const acked = (fleet.reports ?? []).find((r) => r.acked)!;
+    const trap = (fleet.reports ?? []).find((r) => r.key === TRAP_KEY)!;
+    const ok = () => ({ status: 200, body: { ok: true } });
+    const already = await page(fleet, { path: pagePath(acked.key), files: { [meta(acked.key)]: JSON.stringify(acked), [md(acked.key)]: '# old' }, reportToken: 't', post: ok });
+    expect(already.posts()).toEqual([]);
+    const noText = await page(fleet, { path: pagePath(TRAP_KEY), files: { [meta(TRAP_KEY)]: JSON.stringify(trap) }, reportToken: 't', post: ok });
+    expect(text(noText.$('.reportview .bad'))).toBe('report not found (404)');
+    expect(noText.posts()).toEqual([]);
+    const gone = await page(fleet, { path: pagePath('report:helm:fleet:ffffffff'), reportToken: 't', post: ok });
+    expect(gone.posts()).toEqual([]);
+    const noToken = await reportPage(TRAP_KEY);
+    expect(noToken.posts()).toEqual([]);
+  });
+
   it('shows raw HTML in a helm report as text and loads no remote or path image', async () => {
     const g = await reportPage(HELM_KEY);
     const page_ = g.$('.reportview .mdpage')!;

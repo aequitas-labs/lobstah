@@ -8,11 +8,13 @@ import { ReportSection } from './report.js';
 /**
  * A report on its own page (`/report/<key>`): fetched once and rendered
  * once. It never polls, so nothing re-renders while a person reads it.
- * Opening it does not ack the report.
+ * Showing it acks the report (`report-viewed`); the page stays as rendered.
  */
 
 export type ReportViewState =
-  { state: 'loading' } | { state: 'error'; error: string } | { state: 'ready'; report: GlassReport; text?: string; error?: string };
+  | { state: 'loading' }
+  | { state: 'error'; error: string }
+  | { state: 'ready'; report: GlassReport; text?: string; error?: string; token?: string };
 
 export function ReportView({ view }: { view: ReportViewState }) {
   if (view.state === 'loading') return html`<main class="reportview"><div class="dim">loading…</div></main>`;
@@ -33,19 +35,39 @@ export function ReportShell({ view, box }: { view: ReportViewState; box: Lightbo
 export async function loadReportView(key: string): Promise<ReportViewState> {
   const enc = encodeURIComponent(key);
   let report: GlassReport;
+  let token: string | undefined;
   try {
     const res = await fetch(`/report/${enc}/meta`);
     if (!res.ok) return { state: 'error', error: `report not found (${res.status})` };
+    token = res.headers?.get('x-lobstah-token') ?? undefined;
     report = JSON.parse(await res.text()) as GlassReport;
   } catch {
     return { state: 'error', error: 'report could not be read' };
   }
   try {
     const res = await fetch(reportMarkdownUrl(key));
-    return res.ok
-      ? { state: 'ready', report, text: await res.text() }
-      : { state: 'ready', report, error: `report not found (${res.status})` };
+    const page = res.ok ? { text: await res.text() } : { error: `report not found (${res.status})` };
+    return { state: 'ready', report, ...page, ...(token ? { token } : {}) };
   } catch {
     return { state: 'ready', report, error: 'report could not be read' };
+  }
+}
+
+/**
+ * The page showed a report's text: ack this filing on the server
+ * (`report-viewed`, the guarded path a decision's view takes). State only:
+ * it wakes no one and changes nothing on the page. Nothing to do when the
+ * report is already acked, its text did not load, or the page has no token.
+ */
+export async function markReportViewed(view: ReportViewState): Promise<void> {
+  if (view.state !== 'ready' || view.text === undefined || view.report.acked || !view.token) return;
+  try {
+    await fetch('/requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-lobstah-token': view.token },
+      body: JSON.stringify({ kind: 'report-viewed', payload: { key: view.report.key } }),
+    });
+  } catch {
+    // The next open tries again.
   }
 }

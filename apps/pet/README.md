@@ -23,7 +23,7 @@ PR in your browser instead of the helm; right-click adds **Open PR**.
 Clicking a decision pet opens the glass at the decision's card; the card
 stays until the decision is answered or withdrawn.
 Clicking a report pet opens the glass at the report. Opening a report in
-the glass does not acknowledge it.
+the glass acknowledges it.
 
 A report or decision click (and **Open spyglass**) first uses a glass that
 is already open. The pet runs `lobstah glass show '<#hash>' --json`; when a

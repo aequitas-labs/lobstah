@@ -66,6 +66,8 @@ export interface GlassDomOptions {
   initialScroll?: number;
   /** Other URLs the page fetches (a report's markdown), by path; any other /report/ path is a 404. */
   files?: Record<string, string>;
+  /** The page token a report's /meta row carries in its x-lobstah-token header; none by default. */
+  reportToken?: string;
   /** Serve /data whole, without an ETag, as the server did before it slimmed the poll: the legacy page reads whole dispatches. */
   whole?: boolean;
   /** Answers a POST the page makes (an answer to a decision); the default is a 404. */
@@ -120,6 +122,7 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
       return {
         ok: file !== undefined,
         status: file !== undefined ? 200 : 404,
+        headers: { get: (name: string) => (name.toLowerCase() === 'x-lobstah-token' && url.endsWith('/meta') && file !== undefined ? (opts.reportToken ?? null) : null) },
         text: async () => file ?? 'not found',
         json: async () => JSON.parse(file ?? 'null'),
       };

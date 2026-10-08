@@ -97,6 +97,23 @@ export function reportAck(r: ReportMeta): { at: string; by: string } | undefined
   return ack ? { at: ack.at, by: ack.by } : undefined;
 }
 
+/**
+ * The human opened a report on its glass page: ack this filing, by `glass`.
+ * State only: it wakes no one. An existing ack of this filing (a first view,
+ * the terminal, a newer report) stands with its time; a refiled report has
+ * a new stateHash, so it stands again until opened again. Undefined when no
+ * report has the key.
+ */
+export function viewReport(key: string, now = new Date()): { key: string; viewedAt: string; by: string; first: boolean } | undefined {
+  const r = readReport(key);
+  if (!r) return undefined;
+  const held = currentAck(r.key, r.stateHash);
+  if (held) return { key: r.key, viewedAt: held.at, by: held.by, first: false };
+  const ack = { key: r.key, kind: 'report', stateHash: r.stateHash, at: now.toISOString(), by: 'glass' };
+  writeAck(ack);
+  return { key: r.key, viewedAt: ack.at, by: ack.by, first: true };
+}
+
 /** The rows `lobstah reports` prints, newest first. */
 export function reportRows(): Array<Record<string, string>> {
   return listReports().map((r) => ({

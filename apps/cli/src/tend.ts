@@ -1023,8 +1023,14 @@ export function renderTend(r: TendReport): string {
           verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : a.kind,
           waitingMins: Math.round(a.ageSecs / 60),
           held: a.held ? 'yes' : '',
-          // Whether the human has opened it in the glass's decision modal.
-          viewed: a.kind === 'decision' || a.kind === 'question' ? (a.viewedAt ? `yes ${a.viewedAt}` : 'no') : '',
+          // Whether the human has opened it in the glass's decision modal,
+          // or acked a report (opening its page acks it).
+          viewed:
+            a.kind === 'decision' || a.kind === 'question'
+              ? a.viewedAt ? `yes ${a.viewedAt}` : 'no'
+              : a.kind === 'report'
+                ? a.acked ? `yes ${a.acked.at}` : 'no'
+                : '',
           note: named(a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? '')),
         })),
         ['id', 'verb', 'waitingMins', 'held', 'viewed', 'note'],
