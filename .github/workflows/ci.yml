@@ -24,3 +24,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      # Exercise the Worker's SQL tests on both OSes (Node 20 has no node:sqlite).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm exec vitest run services/telemetry/test/worker.test.ts

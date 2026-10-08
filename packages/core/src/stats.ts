@@ -2,6 +2,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { laneDirs, lobstahHome, readDirIfPresent } from './paths.js';
 import type { Lane } from './types.js';
+import type { Evidence } from './types.js';
+import { sanitizeWorker, workerProfile } from './worker-profile.js';
+import type { WorkerProfile } from './worker-profile.js';
+import { readTrap } from './soak.js';
+
+export type WorkerCatches = WorkerProfile & { today: number };
 
 /**
  * Catches: dispatches that finished done. The counts live in a small durable
@@ -26,6 +32,8 @@ export interface StatsStore {
   /** The local day (YYYY-MM-DD) `catchesToday` counts. */
   day: string;
   catchesToday: number;
+  /** UTC-day counters for sharing; local-day glass/CLI stats stay unchanged. */
+  utc?: { date: string; catches: number; perTrap: Record<string, number>; trapWorkers?: Record<string, WorkerProfile>; byWorker?: WorkerCatches[] };
   /**
    * Counted dispatches whose state is still on disk, so a repeated done or a
    * later fold never counts one twice. Cull drops an id as it folds it: the
@@ -81,6 +89,7 @@ interface CatchFacts {
   done: boolean;
   at?: string;
   trap?: string;
+  worker?: WorkerProfile;
 }
 
 function readCatchFacts(stateDir: string, id: string): CatchFacts {
@@ -99,17 +108,24 @@ function readCatchFacts(stateDir: string, id: string): CatchFacts {
   }
   if (last?.verb !== 'done') return { done: false };
   let trap: string | undefined;
+  let worker = workerProfile();
   try {
-    const to = (JSON.parse(fs.readFileSync(path.join(stateDir, `${id}.evidence`), 'utf8')) as { deliveredTo?: unknown }).deliveredTo;
+    const evidence = JSON.parse(fs.readFileSync(path.join(stateDir, `${id}.evidence`), 'utf8')) as Evidence;
+    const to = evidence.deliveredTo;
     if (typeof to === 'string' && to.startsWith('wt:')) trap = to;
+    const reg = trap ? readTrap(trap.slice('wt:'.length)) : undefined;
+    worker = sanitizeWorker(reg ?? evidence.worker ?? workerProfile({ harness: evidence.harness }));
   } catch {
     /* no receipt: a headless catch */
   }
-  return { done: true, ...(typeof last.at === 'string' ? { at: last.at } : {}), ...(trap ? { trap } : {}) };
+  return { done: true, worker, ...(typeof last.at === 'string' ? { at: last.at } : {}), ...(trap ? { trap } : {}) };
 }
 
 function emptyStore(now: number): StatsStore {
-  return { version: 1, totalCatches: 0, perTrap: {}, day: localDay(now), catchesToday: 0, counted: [], daily: {} };
+  return {
+    version: 1, totalCatches: 0, perTrap: {}, day: localDay(now), catchesToday: 0, counted: [], daily: {},
+    utc: { date: new Date(now).toISOString().slice(0, 10), catches: 0, perTrap: {}, trapWorkers: {}, byWorker: [] },
+  };
 }
 
 /** The local day a catch counts on: its done report's, else now's. */
@@ -142,6 +158,23 @@ function add(store: StatsStore, facts: CatchFacts, now: number): void {
   if (day === today) store.catchesToday++;
   addDaily(store, day, now);
   pruneDaily(store, now);
+  const at = facts.at && Number.isFinite(Date.parse(facts.at)) ? facts.at : undefined;
+  const utcDay = new Date(now).toISOString().slice(0, 10);
+  if (store.utc?.date !== utcDay) store.utc = { date: utcDay, catches: 0, perTrap: {}, trapWorkers: {}, byWorker: [] };
+  if ((at ? new Date(at).toISOString().slice(0, 10) : utcDay) === utcDay) {
+    store.utc.catches++;
+    const worker = sanitizeWorker(facts.worker);
+    if (facts.trap) {
+      store.utc.perTrap[facts.trap] = (store.utc.perTrap[facts.trap] ?? 0) + 1;
+      (store.utc.trapWorkers ??= {})[facts.trap] = worker;
+    } else {
+      const rows = store.utc.byWorker ??= [];
+      const key = JSON.stringify(worker);
+      const row = rows.find((r) => JSON.stringify(sanitizeWorker(r)) === key);
+      if (row) row.today++;
+      else rows.push({ ...worker, today: 1 });
+    }
+  }
 }
 
 /** Retained state dirs, live lanes first so they win over any backup copy. */
@@ -156,7 +189,7 @@ function backfillSources(): Array<{ dir: string; live: boolean }> {
 }
 
 /** Build the store from history: every retained or backed-up dispatch that finished done, once. */
-export function backfillStats(now = Date.now()): StatsStore {
+export function backfillStats(now = Date.now(), alreadyCounted?: ReadonlySet<string>): StatsStore {
   const store = emptyStore(now);
   const seen = new Set<string>();
   for (const { dir, live } of backfillSources()) {
@@ -165,6 +198,9 @@ export function backfillStats(now = Date.now()): StatsStore {
       const id = file.slice(0, -'.status'.length);
       if (seen.has(id)) continue;
       seen.add(id);
+      // During an upgrade, a newly written done report may not yet be in
+      // the saved store. Its record/fold will add it, including UTC counts.
+      if (live && alreadyCounted && !alreadyCounted.has(id)) continue;
       const facts = readCatchFacts(dir, id);
       if (!facts.done) continue;
       add(store, facts, now);
@@ -219,6 +255,7 @@ function parseStore(text: string): (Omit<StatsStore, 'daily'> & { daily?: Record
       catchesToday: s.catchesToday,
       counted: s.counted ?? [],
       ...(isDaily(s.daily) ? { daily: s.daily } : {}),
+      ...(s.utc ? { utc: s.utc } : {}),
     };
   } catch {
     return undefined;
@@ -271,10 +308,26 @@ function loadOrBackfill(now: number): StatsStore {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   const saved = text === undefined ? undefined : parseStore(text);
-  if (complete(saved)) return saved;
+  if (complete(saved) && saved.utc?.trapWorkers !== undefined && saved.utc.byWorker !== undefined) return saved;
   if (saved) {
-    // Saved before per-day history: add it once, from the records on disk.
-    const store = backfillDaily({ ...saved, daily: {} }, now);
+    // Upgrade local history and UTC counters independently; never reset a
+    // present history or all-time totals that include culled dispatches.
+    const store = complete(saved) ? saved : backfillDaily({ ...saved, daily: {} }, now);
+    if (!store.utc) {
+      // Upgrade only the new UTC counters from retained history; never reset
+      // all-time totals that already include culled dispatches.
+      store.utc = backfillStats(now, new Set(store.counted)).utc!;
+    }
+    if (store.utc.trapWorkers === undefined || store.utc.byWorker === undefined) {
+      const history = backfillStats(now, new Set(store.counted)).utc;
+      if (history?.date === store.utc.date) {
+        store.utc.trapWorkers ??= history.trapWorkers ?? {};
+        store.utc.byWorker ??= history.byWorker ?? [];
+      } else {
+        store.utc.trapWorkers ??= {};
+        store.utc.byWorker ??= [];
+      }
+    }
     writeStore(store);
     return store;
   }
@@ -289,7 +342,7 @@ function loadOrBackfill(now: number): StatsStore {
 export function readStatsStore(now = Date.now()): StatsStore {
   try {
     const saved = parseStore(fs.readFileSync(statsPath(), 'utf8'));
-    if (complete(saved)) return saved;
+    if (complete(saved) && saved.utc?.trapWorkers !== undefined && saved.utc.byWorker !== undefined) return saved;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }

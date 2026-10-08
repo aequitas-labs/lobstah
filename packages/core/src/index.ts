@@ -45,3 +45,6 @@ export * from './activity.js';
 export * from './slots.js';
 export * from './worker-metadata.js';
 export * from './session-workers.js';
+export * from './telemetry.js';
+export * from './worker-profile.js';
+export * from './session-workers.js';

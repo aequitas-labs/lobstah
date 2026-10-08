@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, ensureLayout, mergeEvidence } from '../src/index.js';
+import { appendStatus, ensureLayout, mergeEvidence, signOnTrap, stowTrap } from '../src/index.js';
 import { DAILY_RETENTION_DAYS, HEATMAP_WEEKS, foldCatches, heatLevel, localDay, readStatsStore, recordCatch, shiftDay, statsPage, statsPath, statsView } from '../src/stats.js';
 import type { StatsStore } from '../src/stats.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { workerProfile } from '../src/worker-profile.js';
+import { observeSessionWorker } from '../src/session-workers.js';
 
 let home: string;
 beforeEach(() => {
@@ -28,6 +30,118 @@ function legacy(dir: string, id: string, verbs: string[], at: string, trap?: str
 }
 
 describe('catch store', () => {
+  it('upgrades UTC metadata without replacing saved local daily history', () => {
+    const now = Date.parse('2026-10-06T12:00:00Z');
+    const daily = { [localDay(now)]: 4 };
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 4, perTrap: {}, day: localDay(now), catchesToday: 4, counted: [], daily }));
+    const store = readStatsStore(now);
+    expect(store.daily).toEqual(daily);
+    expect(store.totalCatches).toBe(4);
+    expect(store.utc).toMatchObject({ catches: 0, trapWorkers: {}, byWorker: [] });
+    expect(readStatsStore(now).daily).toEqual(daily);
+  });
+
+  it('backfills missing local daily history without replacing saved UTC attribution', () => {
+    const now = Date.parse('2026-10-06T12:00:00Z');
+    const utc = { date: '2026-10-06', catches: 4, perTrap: {}, trapWorkers: {}, byWorker: [{ ...workerProfile({ harness: 'claude', model: 'sonnet' }), today: 4 }] };
+    legacy(path.join(home, 'state'), 'kept', ['done'], new Date(now).toISOString());
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 4, perTrap: {}, day: localDay(now), catchesToday: 4, counted: ['kept'], utc }));
+    const store = readStatsStore(now);
+    expect(store.daily).toEqual({ [localDay(now)]: 1 });
+    expect(store.utc).toEqual(utc);
+    expect(store.totalCatches).toBe(4);
+    expect(readStatsStore(now).utc).toEqual(utc);
+  });
+
+  it('preserves an existing attribution table when upgrading a missing sibling', () => {
+    const now = Date.parse('2026-10-06T12:00:00Z');
+    const byWorker = [{ ...workerProfile({ harness: 'claude', model: 'sonnet', effort: 'high' }), today: 4 }];
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 4, perTrap: {}, day: '2026-10-06', catchesToday: 4, counted: [], utc: { date: '2026-10-06', catches: 4, perTrap: {}, byWorker } }));
+    expect(readStatsStore(now).utc).toMatchObject({ byWorker, trapWorkers: {} });
+  });
+
+  it('preserves completed worker settings through stow/cull, counts headless combinations once and resets at UTC midnight', () => {
+    const now = Date.parse('2026-10-06T12:00:00Z');
+    const at = new Date(now).toISOString();
+    const dir = path.join(home, 'state');
+    observeSessionWorker({ session_id: 'trap-session', model: 'gpt-5.2-codex', permission_mode: 'default' }, 'codex');
+    const worktree = path.join(home, 'wt'); fs.mkdirSync(worktree);
+    signOnTrap({ trapId: 'a', sessionId: 'trap-session', harness: 'codex', worktree, cwd: worktree, ttlMs: 60_000, now });
+    legacy(dir, 'trap', ['done'], at, 'wt:a');
+    fs.writeFileSync(path.join(dir, 'trap.evidence'), JSON.stringify({ deliveredTo: 'wt:a', sessionId: 'trap-session', harness: 'codex' }));
+    const w = workerProfile({ harness: 'claude', model: 'sonnet', effort: 'high' });
+    for (const id of ['headless-a', 'headless-b']) {
+      legacy(dir, id, ['done'], at);
+      fs.writeFileSync(path.join(dir, `${id}.evidence`), JSON.stringify({ worker: w }));
+    }
+    legacy(dir, 'failed', ['failed'], at);
+    const store = readStatsStore(now);
+    expect(store.utc?.trapWorkers?.['wt:a']).toEqual(workerProfile({ harness: 'codex', model: 'gpt-5.2-codex', permissionMode: 'default' }));
+    expect(store.utc?.byWorker).toEqual([{ ...w, today: 2 }]);
+    recordCatch('headless-a', 'work', now);
+    foldCatches([{ id: 'trap', lane: 'work' }, { id: 'headless-a', lane: 'work' }], now);
+    stowTrap('a');
+    fs.unlinkSync(path.join(dir, 'trap.status'));
+    fs.unlinkSync(path.join(dir, 'headless-a.status'));
+    expect(readStatsStore(now).utc).toEqual(store.utc);
+    const next = now + 86400000;
+    legacy(dir, 'next', ['done'], new Date(next).toISOString());
+    recordCatch('next', 'work', next);
+    expect(readStatsStore(next).utc?.byWorker).toEqual([{ ...workerProfile(), today: 1 }]);
+  });
+
+  it('keeps a UTC-day per-trap table through cull, and resets at UTC midnight', () => {
+    const now = Date.parse('2026-10-06T23:59:00Z');
+    legacy(path.join(home, 'state'), 'trap', ['done'], new Date(now).toISOString(), 'wt:a');
+    legacy(path.join(home, 'state'), 'headless', ['done'], new Date(now).toISOString());
+    legacy(path.join(home, 'state'), 'yesterday', ['done'], '2026-10-05T23:59:00Z', 'wt:b');
+    expect(readStatsStore(now).utc).toMatchObject({ date: '2026-10-06', catches: 2, perTrap: { 'wt:a': 1 } });
+    foldCatches([{ id: 'trap', lane: 'work' }], now);
+    fs.unlinkSync(path.join(home, 'state', 'trap.status'));
+    expect(readStatsStore(now).utc).toMatchObject({ date: '2026-10-06', catches: 2, perTrap: { 'wt:a': 1 } });
+    const tomorrow = now + 120_000;
+    legacy(path.join(home, 'state'), 'new', ['done'], new Date(tomorrow).toISOString(), 'wt:b');
+    recordCatch('new', 'work', tomorrow);
+    expect(readStatsStore(tomorrow)).toMatchObject({ totalCatches: 4, utc: { date: '2026-10-07', catches: 1, perTrap: { 'wt:b': 1 } } });
+  });
+
+  it('upgrades UTC counters from retained history without resetting totals or deduplication', () => {
+    const now = Date.parse('2026-10-06T01:00:00Z');
+    legacy(path.join(home, 'state'), 'kept', ['done'], new Date(now).toISOString(), 'wt:a');
+    fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 90, perTrap: { 'wt:a': 40 }, day: '2026-10-05', catchesToday: 1, counted: ['kept'] }));
+    recordCatch('kept', 'work', now);
+    expect(readStatsStore(now)).toMatchObject({ totalCatches: 90, perTrap: { 'wt:a': 40 }, counted: ['kept'], utc: { date: '2026-10-06', catches: 1, perTrap: { 'wt:a': 1 } } });
+    // The saved new counters are authoritative, not rescanned on each poll.
+    legacy(path.join(home, 'state'), 'late', ['done'], new Date(now).toISOString());
+    expect(readStatsStore(now).utc?.catches).toBe(1);
+  });
+
+  it('does not double-count the first new done or missed fold while upgrading', () => {
+    const now = Date.parse('2026-10-06T01:00:00Z');
+    const oldStore = { version: 1, totalCatches: 90, perTrap: { 'wt:a': 40 }, day: localDay(now), catchesToday: 0, counted: [] };
+    fs.writeFileSync(statsPath(), JSON.stringify(oldStore));
+    legacy(path.join(home, 'state'), 'new', ['done'], new Date(now).toISOString(), 'wt:a');
+    recordCatch('new', 'work', now);
+    expect(readStatsStore(now)).toMatchObject({ totalCatches: 91, utc: { catches: 1, perTrap: { 'wt:a': 1 } } });
+    fs.writeFileSync(statsPath(), JSON.stringify(oldStore));
+    foldCatches([{ id: 'new', lane: 'work' }], now);
+    expect(readStatsStore(now)).toMatchObject({ totalCatches: 91, utc: { catches: 1, perTrap: { 'wt:a': 1 } } });
+  });
+
+  it('counts UTC separately when two catches share a local date across UTC midnight', () => {
+    const oldTz = process.env.TZ;
+    process.env.TZ = 'Pacific/Honolulu';
+    try {
+      const now = Date.parse('2026-10-06T01:00:00Z');
+      legacy(path.join(home, 'state'), 'before', ['done'], '2026-10-05T23:30:00Z', 'wt:a');
+      legacy(path.join(home, 'state'), 'after', ['done'], '2026-10-06T00:30:00Z', 'wt:a');
+      expect(readStatsStore(now)).toMatchObject({ catchesToday: 2, utc: { date: '2026-10-06', catches: 1, perTrap: { 'wt:a': 1 } } });
+    } finally {
+      if (oldTz === undefined) delete process.env.TZ;
+      else process.env.TZ = oldTz;
+    }
+  });
+
   it('backfills once from both lanes: done only, trap catches per trap, today by local day', () => {
     legacy(path.join(home, 'state'), 'plan', ['working', 'done'], EARLIER, 'wt:a');
     legacy(path.join(home, 'chores', 'state'), 'report', ['done'], new Date().toISOString(), 'wt:a');

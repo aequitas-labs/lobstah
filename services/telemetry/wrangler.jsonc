@@ -1,0 +1,35 @@
+// lobstah telemetry Worker. Not deployed: see README.md for the steps a
+// maintainer with Cloudflare access runs. No secret lives in this file.
+{
+  "name": "lobstah-telemetry",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-06",
+
+  // No request logs: Workers Logs, invocation logs and Logpush stay off.
+  "observability": {
+    "enabled": false,
+    "logs": { "enabled": false, "invocation_logs": false }
+  },
+  "logpush": false,
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lobstah-telemetry",
+      // Replace with the id `wrangler d1 create lobstah-telemetry` prints.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Rate limits key on the install id and on one global key, never on an IP.
+  "ratelimits": [
+    { "name": "SUBMIT_LIMITER", "namespace_id": "1531", "simple": { "limit": 10, "period": 60 } },
+    { "name": "GLOBAL_LIMITER", "namespace_id": "1532", "simple": { "limit": 1000, "period": 60 } }
+  ],
+
+  // Daily retention pass: per-install rows older than 90 days are deleted.
+  "triggers": { "crons": ["17 3 * * *"] }
+
+  // READ_TOKEN (GET /v1/stats) is a secret: `wrangler secret put READ_TOKEN`.
+}

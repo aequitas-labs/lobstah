@@ -59,8 +59,27 @@ export function trapNameForId(trapId: string): string | undefined {
   return knownTrapNames().find((name) => trapIdForName(name) === trapId);
 }
 
-/** Reserve a stable name; an exclusive create makes concurrent sign-ons collision-safe. */
-export function reserveTrapName(trapId: string, requested?: string, start = randomInt(TRAP_FIRST_WORDS.length * TRAP_LAST_WORDS.length)): string {
+/** One scan of the reservations; only recorded automatic names are safe to share. */
+export function generatedTrapNames(): ReadonlyMap<string, string> {
+  const names = new Map<string, string>();
+  for (const name of knownTrapNames()) {
+    try {
+      const record = JSON.parse(fs.readFileSync(nameFile(name), 'utf8')) as { trapId?: unknown; generated?: unknown };
+      const [first, last] = name.split('-');
+      if (typeof record.trapId === 'string' && record.generated === true && (TRAP_FIRST_WORDS as readonly string[]).includes(first!) && (TRAP_LAST_WORDS as readonly string[]).includes(last!)) names.set(record.trapId, name);
+    } catch {
+      /* Missing or older provenance: keep the name local. */
+    }
+  }
+  return names;
+}
+
+export function generatedTrapNameForId(trapId: string): string | undefined {
+  return generatedTrapNames().get(trapId);
+}
+
+/** Reserve a stable name. `requestedByUser=false` restores a prior/anchor name, not --name. */
+export function reserveTrapName(trapId: string, requested?: string, start = randomInt(TRAP_FIRST_WORDS.length * TRAP_LAST_WORDS.length), requestedByUser = true): string {
   fs.mkdirSync(namesDir(), { recursive: true });
   const old = knownTrapNames().find((name) => trapIdForName(name) === trapId);
   if (requested !== undefined && !TRAP_NAME_RE.test(requested)) {
@@ -75,14 +94,21 @@ export function reserveTrapName(trapId: string, requested?: string, start = rand
       })
     : [requested];
   for (const name of candidates) {
-    if (name === old) return name;
+    if (name === old) {
+      // Even choosing the same generated-looking name with --name makes it custom.
+      if (requestedByUser && requested !== undefined) fs.writeFileSync(nameFile(name), JSON.stringify({ trapId, generated: false }));
+      return name;
+    }
     try {
-      fs.writeFileSync(nameFile(name), JSON.stringify({ trapId }), { flag: 'wx' });
+      fs.writeFileSync(nameFile(name), JSON.stringify({ trapId, generated: requested === undefined }), { flag: 'wx' });
       if (old) fs.rmSync(nameFile(old), { force: true });
       return name;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      if (trapIdForName(name) === trapId) return name;
+      if (trapIdForName(name) === trapId) {
+        if (requestedByUser && requested !== undefined) fs.writeFileSync(nameFile(name), JSON.stringify({ trapId, generated: false }));
+        return name;
+      }
       if (requested !== undefined) throw new Error(`trap name "${name}" is already taken`);
     }
   }

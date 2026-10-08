@@ -70,3 +70,30 @@ session there parks as the lobstah man), or `LOBSTAH_MAN=1` for one launch.
 
 Everything else — the manual, the pattern, the trade-offs — lives in
 [docs/man.md](https://github.com/aequitas-labs/lobstah/blob/main/docs/man.md).
+
+## Telemetry
+
+This plugin sends nothing itself: its hooks run `lobstah` commands that only
+read and write files under `~/.lobstah`. The `lobstah` CLI it drives shares an
+anonymous daily count, on by default. Once per UTC day the lobstah daemon (not
+a hook) sends `catches: {today, total}` for the UTC day and all-time, plus up
+to 100 `traps: [{name, today, harness, model, config}]` entries with automatically generated names
+and recorded provenance. Custom names (`--name`) and older names with unknown
+provenance stay local; their catches remain in the totals. Names are not
+hashed. A `helm` snapshot and up to 100 headless `byWorker` count buckets
+include harness, catalog-only model id, and nullable reasoning effort and
+permission-mode enums. Missing observations stay null; custom or unrecognised
+models become `other`. No arbitrary config is sent. The payload also includes the lobstah version, OS family,
+CPU architecture, the UTC date, and a random install id. It never sends
+repository names or paths, code, briefs, session ids, PR URLs,
+hostnames, or usernames. Nothing is sent until a one-time notice has been shown
+in a terminal, and no release sends anything yet because the endpoint is not
+set.
+
+`lobstah telemetry show` prints the exact JSON. Turn it off with any one of:
+`lobstah telemetry disable`, `[telemetry] share = false` in
+`~/.lobstah/config.toml`, `LOBSTAH_TELEMETRY=0`, `DO_NOT_TRACK=1`, or `CI` set.
+Full details, including retention (90 days for per-install, per-trap and
+worker/config rows; retained daily totals contain counts including harness/model
+aggregates, no names or config), are in
+[PRIVACY.md](https://github.com/aequitas-labs/lobstah/blob/main/PRIVACY.md).
