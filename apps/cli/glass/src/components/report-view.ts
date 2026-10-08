@@ -8,8 +8,7 @@ import { ReportSection } from './report.js';
 /**
  * A report on its own page (`/report/<key>`): fetched once and rendered
  * once. It never polls, so nothing re-renders while a person reads it.
- * Showing it acks the report (`report-viewed`): the one repaint after that
- * marks it acked.
+ * Showing it acks the report (`report-viewed`); the page stays as rendered.
  */
 
 export type ReportViewState =
@@ -57,23 +56,18 @@ export async function loadReportView(key: string): Promise<ReportViewState> {
 /**
  * The page showed a report's text: ack this filing on the server
  * (`report-viewed`, the guarded path a decision's view takes). State only:
- * it wakes no one. Returns the view with the ack, or as it was when the
- * report was already acked, has no text, or the write failed.
+ * it wakes no one and changes nothing on the page. Nothing to do when the
+ * report is already acked, its text did not load, or the page has no token.
  */
-export async function markReportViewed(view: ReportViewState): Promise<ReportViewState> {
-  if (view.state !== 'ready' || view.text === undefined || view.report.acked || !view.token) return view;
+export async function markReportViewed(view: ReportViewState): Promise<void> {
+  if (view.state !== 'ready' || view.text === undefined || view.report.acked || !view.token) return;
   try {
-    const res = await fetch('/requests', {
+    await fetch('/requests', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-lobstah-token': view.token },
       body: JSON.stringify({ kind: 'report-viewed', payload: { key: view.report.key } }),
     });
-    if (!res.ok) return view;
-    const body = (await res.json()) as { viewedAt?: string; by?: string };
-    if (!body.viewedAt) return view;
-    return { ...view, report: { ...view.report, acked: { at: body.viewedAt, by: body.by ?? 'glass' } } };
   } catch {
     // The next open tries again.
-    return view;
   }
 }

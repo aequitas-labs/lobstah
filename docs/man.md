@@ -554,8 +554,7 @@ the helm files to keep.
   or row, a lob, the desktop pet, or its dispatch's modal. The page renders
   once and does not refresh. Showing it acks the report (`by: glass`):
   state only, with no wake. Fetching it through the CLI or the API does not
-  ack it. An unacked report has the unread decision's tint; an acked one
-  looks normal.
+  ack it.
   `#report/<key>` goes to that page. The page shows headings, lists,
   tables, fenced code, links (in a new tab), bold, italics, and images.
   Raw HTML in the markdown shows as text. The glass serves the markdown and

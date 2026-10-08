@@ -75,7 +75,7 @@ const click = async (g: GlassDom, el: Element | null) => {
 const reportsSection = (g: GlassDom) => g.$$('#deck .deckgrid > section').find((s) => text(s.querySelector('h2')) === 'reports →')!;
 
 describe('glass: the deck reports block', () => {
-  it('lists reports after Landed, unacked first then newest: title, then who filed it, the age, and acked; unread tint until acked; no badge', async () => {
+  it('lists reports after Landed, unacked first then newest: title, then who filed it, the age, and acked; no badge', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
       const headings = g.$$('#deck .deckgrid > section').map((s) => text(s.querySelector('h2')));
@@ -90,9 +90,7 @@ describe('glass: the deck reports block', () => {
         (view === 'cards' ? '' : '· ') + 'aaaaaaaa · 40m ago',
         (view === 'cards' ? '' : '· ') + '60s ago · acked',
       ]);
-      // Unacked reports carry the unread decision's tint; an acked one looks normal.
-      expect(rows.map((r) => r.classList.contains('unread'))).toEqual([true, true, true, false]);
-      expect(rows.some((r) => r.classList.contains('acked'))).toBe(false);
+      expect(rows[3]!.className).toContain('acked');
     }
   });
 
@@ -146,7 +144,7 @@ describe('glass: a report page', () => {
     expect(g.$('#deck')).toBeNull();
   });
 
-  it('showing it acks it once through the guarded request path, then marks it acked', async () => {
+  it('showing it acks it once through the guarded request path; the page does not change', async () => {
     const fleet = everyAttentionFleet();
     const row = (fleet.reports ?? []).find((r) => r.key === TRAP_KEY)!;
     const g = await page(fleet, {
@@ -160,8 +158,7 @@ describe('glass: a report page', () => {
     expect(p!.url).toBe('/requests');
     expect(p!.headers['x-lobstah-token']).toBe('page-token');
     expect(JSON.parse(p!.body)).toEqual({ kind: 'report-viewed', payload: { key: TRAP_KEY } });
-    expect(text(g.$('.reportview .sub'))).toBe('kind-crab · 20m ago · acked');
-    expect(text(g.$('.reportview'))).not.toContain('lobstah attention ack');
+    expect(text(g.$('.reportview .sub'))).toBe('kind-crab · 20m ago');
     // Still the one page: no poll.
     expect(g.fetches()).toBe(0);
   });
@@ -238,11 +235,9 @@ describe('glass: the Reports tab', () => {
       ['Build timings', 'aaaaaaaa', '40m', ''],
       ['Old fleet notes', '', '60s', 'acked'],
     ]);
-    expect(rows.map((r) => r.classList.contains('unread'))).toEqual([true, true, true, false]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Fleet notes', 'Tray findings', 'Build timings', 'Old fleet notes']);
     expect(cards.$$('#reports .card .meta').map(text)).toEqual(['5m ago', 'kind-crab · 20m ago', 'aaaaaaaa · 40m ago', '60s ago · acked']);
-    expect(cards.$$('#reports .card').map((c) => c.classList.contains('unread'))).toEqual([true, true, true, false]);
     expect(cards.$$('#reports .badge')).toHaveLength(0);
   });
 
