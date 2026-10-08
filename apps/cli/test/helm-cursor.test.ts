@@ -81,9 +81,9 @@ describe('helm sign-on starts its cursor at the sign-on', () => {
 
   it('a notice posted after the sign-on still wakes', () => {
     signOn(HELM);
-    postNotice({ kind: 'trap-stowed', text: 'trap wt:new stowed' });
+    postNotice({ kind: 'trap-start-failed', text: 'trap wt:new did not start' });
     const res = wait(HELM);
-    expect(res.stdout).toContain('trap wt:new stowed');
+    expect(res.stdout).toContain('trap wt:new did not start');
     expect(res.stdout).not.toContain('timeout: true');
   });
 
@@ -110,14 +110,14 @@ describe('helm sign-on starts its cursor at the sign-on', () => {
     signOn(HELM);
     const floor = readHelm('fleet')!.wakesFrom!;
     // Posted after the first helm signed on, before the take: in flight.
-    postNotice({ kind: 'trap-stowed', text: 'trap wt:inflight stowed' });
+    postNotice({ kind: 'trap-start-failed', text: 'trap wt:inflight did not start' });
     const later = Date.now() + 5;
     while (Date.now() < later) {
       // step past the millisecond so a reset would drop the notice
     }
     signOn(TAKER, '--take');
     expect(readHelm('fleet')).toMatchObject({ sessionId: TAKER, wakesFrom: floor });
-    expect(wait(TAKER).stdout).toContain('trap wt:inflight stowed');
+    expect(wait(TAKER).stdout).toContain('trap wt:inflight did not start');
   });
 
   it('a sign-on over a stale helm starts a new cursor; a re-sign by the same session keeps it', () => {

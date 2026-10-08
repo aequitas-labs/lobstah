@@ -18,9 +18,9 @@ lobstah soak --link <url>     # record this task's link for the glass's ↗ open
 lobstah soak --one            # sign off after the first finished catch
 lobstah soak --wait           # hookless: listen now; exit 3 = quiet, run again
 lobstah soak stop-listener    # end this session's own --wait listener, by its pid
-lobstah soak --ticket <t>     # sign on as a trap reserved with `lobstah trap reserve`
-lobstah stow                  # sign off; removes the worktree soak created
-lobstah stow --keep           # sign off; keep the worktree
+lobstah soak --ticket <t>     # sign on as a trap `lobstah man throw` reserved
+lobstah stow                  # sign off; keeps the worktree
+lobstah stow --remove         # sign off; remove the worktree soak created
 ```
 
 - In a linked worktree, `soak` signs on there. In the repo's primary
@@ -132,11 +132,12 @@ whose last report is done or failed finalizes in done/ instead. Unread
 messages wait `[soak].signOffGraceSecs` (default 10 minutes) for this
 worktree to re-soak, then bounce back to the helm.
 
-- When soak created the worktree, stow removes it and prints `returnTo:`.
-  Run `cd` to that path and work from there.
-- Stow keeps the worktree, and prints the reason, when it holds uncommitted
-  changes, untracked files that are not ignored, commits absent from its
-  upstream, or no upstream. `stow --keep` always keeps it. `stow --force`
+- Stow keeps the worktree, so the helm can throw the trap back into it.
+  `stow --remove` removes a worktree soak created and prints `returnTo:`;
+  run `cd` to that path and work from there.
+- `stow --remove` still keeps the worktree, and prints the reason, when it
+  holds uncommitted changes, untracked files that are not ignored, commits
+  absent from its upstream, or no upstream. `stow --remove --force`
   explicitly discards unsaved checkout files; use it only when instructed.
 - Ghost sweeping applies the same safety check without a force override.
   Its notice names kept checkouts and their file/commit counts. The daemon

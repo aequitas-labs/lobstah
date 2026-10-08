@@ -67,6 +67,8 @@ export interface TrapRegistration {
   link?: string;
   /** The active dispatch this trap currently works, if any. */
   claimed?: string;
+  /** The batch throw that started this trap: its availability is the batch's summary, not its own wake. */
+  batch?: string;
   /**
    * True when `lobstah soak` created the worktree for this trap. `stow`
    * removes only such a worktree. Read from the anchor file on every
@@ -286,6 +288,8 @@ export function signOnTrap(opts: {
   link?: string;
   /** A reserved trap id (a redeemed ticket): the worktree must anchor it, or anchor nothing yet. */
   trapId?: string;
+  /** The batch throw whose reservation this sign-on redeems. */
+  batch?: string;
   ttlMs: number;
   now?: number;
 }): SignOnResult {
@@ -333,6 +337,7 @@ export function signOnTrap(opts: {
     link: link !== undefined && linkMismatch(link, window) === undefined ? link : undefined,
     claimed: prior?.claimed,
     ...(createdWorktree ? { createdWorktree } : {}),
+    ...(opts.batch ? { batch: opts.batch } : sameSession && prior.batch ? { batch: prior.batch } : {}),
     // The same session keeps the title it confirmed or was asked to apply.
     ...(sameSession && prior.titleSet ? { titleSet: prior.titleSet, titleSetAt: prior.titleSetAt } : {}),
     ...(sameSession && prior.titlePending ? { titlePending: prior.titlePending } : {}),
@@ -477,7 +482,7 @@ export function confirmTrapTitle(trapId: string, now = Date.now()): TrapRegistra
 
 /**
  * Refresh liveness. `parked: true` marks the trap as actually listening —
- * the first time also raises the trap-listening notice, so the helm learns
+ * the first time also raises the trap-available notice, so the helm learns
  * the address is ready for near-instant delivery.
  */
 export function heartbeatTrap(
@@ -496,12 +501,14 @@ export function heartbeatTrap(
   };
   atomicWrite(regPath(trapId), JSON.stringify(next, null, 2));
   if (firstPark) {
+    // The one wake a trap's start gives the helm: it is free to take work.
+    // A trap a batch started is announced by the batch's summary instead.
     postNotice({
-      kind: 'trap-listening',
-      text: `trap ${trapLabel(next)} is listening — addressed work now delivers within seconds`,
+      kind: 'trap-available',
+      text: `trap ${trapLabel(next)} is available — listening (${next.harness}, ${next.repo ?? 'no repo'}); address work with \`--for ${next.name ?? `wt:${trapId}`}\``,
       refId: trapId,
       repo: reg.repo,
-      by: reg.sessionId,
+      ...(reg.batch ? { quiet: true } : {}),
     });
   }
   return next;
@@ -737,6 +744,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
         pauseExpired = true;
       }
     }
+    const holding = hasOpenCatch(reg);
     const released = releaseCatch(reg);
     const removal = reg.createdWorktree && fs.existsSync(reg.worktree) ? removeGhostWorktree(reg.worktree) : undefined;
     const revision = removal?.revision ?? (fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, reg.trapId, now) : undefined);
@@ -756,6 +764,8 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
         : `trap ${trapLabel(reg)} ghosted (went quiet mid-watch)`) + ` — registration removed${catchNote}${worktreeNote}`,
       refId: reg.trapId,
       repo: reg.repo,
+      // An idle trap that went quiet is digest news; one holding a catch wakes the helm.
+      ...(holding ? {} : { quiet: true }),
     });
   }
   return actions;

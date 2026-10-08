@@ -4,7 +4,7 @@ import { lobstahHome } from './paths.js';
 import type { TrapRegistration } from './soak.js';
 import type { WindowRef } from './window.js';
 import type { TrapRevision } from './worktree-safety.js';
-import { trapIdForName } from './trap-names.js';
+import { releaseTrapName, trapIdForName } from './trap-names.js';
 
 /**
  * The trap roster: one durable record per trap that ever signed on, kept in
@@ -78,8 +78,6 @@ export interface RosterEntry {
   lastCatch?: string;
   /** The saved configuration a throw applies. */
   profile?: TrapProfile;
-  /** Set by a deliberate forget: a throw skips the trap. */
-  forgottenAt?: string;
   updatedAt: string;
 }
 
@@ -168,6 +166,18 @@ function withRevision(entry: RosterEntry, revision: TrapRevision | undefined): R
 }
 
 /**
+ * Forget a trap: remove its roster record and free its name. The caller
+ * removes the checkout and the protected ref first (`man roster forget`).
+ */
+export function forgetRoster(trapId: string): RosterEntry | undefined {
+  const entry = readRoster(trapId);
+  if (!entry) return undefined;
+  fs.rmSync(rosterPath(trapId), { force: true });
+  if (trapIdForName(entry.name) === trapId) releaseTrapName(entry.name);
+  return entry;
+}
+
+/**
  * Record a sign-on: the registration's identity, harness, session, and
  * window, and the checkout's revision. A forget is lifted (the trap came
  * back); the saved profile and first sign-on time stay.
@@ -179,7 +189,7 @@ export function recordRosterSignOn(
   const at = new Date(opts.now ?? Date.now()).toISOString();
   const prior = readRoster(reg.trapId);
   const seen = observed(reg);
-  const { forgottenAt: _forgotten, leftAt: _left, leftReason: _reason, ...kept } = prior ?? ({} as Partial<RosterEntry>);
+  const { leftAt: _left, leftReason: _reason, ...kept } = prior ?? ({} as Partial<RosterEntry>);
   const entry: RosterEntry = {
     ...kept,
     version: ROSTER_VERSION,

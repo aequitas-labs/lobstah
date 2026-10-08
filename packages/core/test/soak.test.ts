@@ -38,6 +38,7 @@ import {
   sweepGhostTraps,
   trapBySession,
   trapIdAt,
+  unseenNotices,
 } from '../src/index.js';
 import type { TrapRegistration } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -145,7 +146,7 @@ describe('trap registry (worktree-anchored)', () => {
     heartbeatTrap(first.trapId, { parked: true });
     const kinds = listNotices(50).map((n) => n.kind);
     expect(kinds.filter((k) => k === 'trap-signed-on')).toHaveLength(2);
-    expect(kinds.filter((k) => k === 'trap-listening')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'trap-available')).toHaveLength(2);
     expect(kinds.filter((k) => k === 'trap-stowed')).toHaveLength(1);
   });
 
@@ -173,12 +174,37 @@ describe('trap registry (worktree-anchored)', () => {
     expect(again.claimed).toBe('abc');
   });
 
-  it('first park is recorded and raises a trap-listening notice', () => {
+  it('first park is recorded and raises one waking trap-available notice; a batch trap\'s is quiet', () => {
     const reg = trap('s1', 'web');
     expect(reg.firstParkedAt).toBeUndefined();
     heartbeatTrap(reg.trapId, { parked: true });
+    heartbeatTrap(reg.trapId, { parked: true });
     expect(readTrap(reg.trapId)?.firstParkedAt).toBeDefined();
-    expect(listNotices().map((n) => n.kind)).toContain('trap-listening');
+    const available = listNotices().filter((n) => n.kind === 'trap-available');
+    expect(available).toHaveLength(1);
+    expect(available[0]!.quiet).toBeUndefined();
+    expect(unseenNotices(true).map((n) => n.kind)).toEqual(['trap-available']);
+    const worktree = path.join(home, 'wt', 'batch');
+    fs.mkdirSync(worktree, { recursive: true });
+    const res = signOnTrap({ sessionId: 's9', harness: 'claude', repo: 'web', worktree, cwd: worktree, batch: 'b1', ttlMs: TTL_MS });
+    heartbeatTrap(('ok' in res ? res.ok : res.held).trapId, { parked: true });
+    expect(listNotices().filter((n) => n.kind === 'trap-available').at(-1)?.quiet).toBe(true);
+    expect(unseenNotices(true)).toEqual([]);
+  });
+
+  it('a ghost sweep of an idle trap is quiet; one holding a catch wakes', () => {
+    const idle = trap('s1', 'web');
+    const busy = trap('s2', 'web');
+    heartbeatTrap(idle.trapId, { parked: true });
+    heartbeatTrap(busy.trapId, { parked: true });
+    enqueue({ id: 'held', repo: 'web', brief: 'b', for: `wt:${busy.trapId}` });
+    claimBait(readTrap(busy.trapId)!);
+    unseenNotices(true);
+    sweepGhostTraps(1_000, Date.now() + 3_600_000);
+    const ghosts = listNotices(50).filter((n) => n.kind === 'trap-ghosted');
+    expect(ghosts.find((n) => n.refId === idle.trapId)?.quiet).toBe(true);
+    expect(ghosts.find((n) => n.refId === busy.trapId)?.quiet).toBeUndefined();
+    expect(unseenNotices(true).filter((n) => n.kind === 'trap-ghosted').map((n) => n.refId)).toEqual([busy.trapId]);
   });
 });
 

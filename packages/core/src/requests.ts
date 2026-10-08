@@ -84,7 +84,7 @@ function wakeText(r: LobstahRequest): string {
     const p = r.payload as unknown as TrapRequestPayload;
     return (
       `trap requested from the ${r.from}: repo ${p.repo}, harness ${p.harness} (request ${r.id}). ` +
-      `Reserve it with \`lobstah trap reserve --request ${r.id}\`, then start its session.`
+      `Start it with \`lobstah man throw --new --request ${r.id}\`.`
     );
   }
   if (r.kind === 'decision-answer') {

@@ -213,8 +213,9 @@ import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReporte
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
-import { backText, launchedText, throwTrap } from './throw.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, throwBatch, throwTrap } from './throw.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
+import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows } from './report-file.js';
@@ -425,15 +426,6 @@ soaking (interactive sessions volunteering as workers):
                                   --ticket (or LOBSTAH_TRAP_TICKET) signs on
                                   as a reserved trap. Sign-on names a
                                   Terminal.app or iTerm2 tab after the trap.
-  trap reserve --repo <key> [--harness claude|codex] [--name <word-word>] [--deadline <secs>]
-                                  reserve a trap before its session starts:
-                                  prints its name, id, a one-time ticket, and
-                                  the start command. dispatch --for works on
-                                  it at once; unredeemed past the deadline
-                                  (default 180s) it fails with a notice.
-  trap reserve --request <id>     reserve what a glass trap request asks for
-                                  (repo, harness), and close the request.
-  trap requests                   open trap requests from the glass.
   soak stop-listener [--session <id>]
                                   end this session's own soak --wait listener
                                   (SIGTERM to the pid it recorded). Never
@@ -442,12 +434,13 @@ soaking (interactive sessions volunteering as workers):
                                   sign-on printed. Sign-on is complete
                                   after it; until then SessionStart and
                                   Stop remind the session once per turn.
-  stow [--wt <trap>|--session <id>] [--keep|--force] [--quiet]
+  stow [--wt <trap>|--session <id>] [--remove [--force]] [--quiet]
                                   sign the trap off; an unfinished
                                   assignment requeues, unread messages
-                                  bounce to the helm. Removes a worktree
-                                  soak created unless --keep or it holds
-                                  unpushed work (then kept, with the reason).
+                                  wait the grace. Keeps the worktree;
+                                  --remove removes one soak created unless
+                                  it holds unpushed work (then kept, with
+                                  the reason).
 
 setup:
   init [--scan <dir>... [--pickup]]
@@ -663,7 +656,7 @@ function noticeLine(n: Notice, prefix = 'notice '): string {
   const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
   if (answer) return decisionLine(answer);
   const r = trapRequestFields(n);
-  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: reserve with \`lobstah trap reserve --request ${r.id}\`` : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
+  return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: start it with \`lobstah man throw --new --request ${r.id}\`` : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}`;
 }
 
 /** A haul line for a send's answer. */
@@ -972,83 +965,7 @@ async function mainCli(): Promise<void> {
         confirmTitle(opt('--session'));
         break;
       }
-      if (pos[0] === 'requests') {
-        const open = listRequests({ kind: 'trap-request', open: true });
-        console.log(
-          open.length
-            ? toonTable(
-                'trap-requests',
-                open.map((r) => ({ id: r.id, repo: String(r.payload.repo ?? ''), harness: String(r.payload.harness ?? ''), from: r.from, at: r.at })),
-                ['id', 'repo', 'harness', 'from', 'at'],
-              )
-            : toonKV({ requests: 'none open' }),
-        );
-        if (open.length) console.log(toonHelp(['lobstah trap reserve --request <id>   (reserve the trap a request asks for, and close the request)']));
-        break;
-      }
-      if (pos[0] !== 'reserve') throw new UsageError(usageFor('trap')!);
-      const cfg = loadConfig();
-      // A request from the glass names the repo and harness; flags may repeat them, never contradict them.
-      const requestId = opt('--request');
-      const request = requestId !== undefined ? readRequest(requestId) : undefined;
-      if (requestId !== undefined) {
-        if (!request || request.kind !== 'trap-request') throw new Error(`no trap request ${requestId} — \`lobstah trap requests\` lists open ones`);
-        if (request.closedAt) throw new Error(`trap request ${requestId} is already closed: ${request.outcome ?? 'no outcome recorded'}`);
-      }
-      const asked = request?.payload as { repo?: string; harness?: string } | undefined;
-      for (const [flag, value] of [['--repo', asked?.repo], ['--harness', asked?.harness]] as const) {
-        if (value !== undefined && opt(flag) !== undefined && opt(flag) !== value) {
-          throw new UsageError(`${flag} ${opt(flag)} contradicts trap request ${requestId} (${flag} ${value}): drop ${flag}`);
-        }
-      }
-      const repoKey = opt('--repo') ?? asked?.repo;
-      if (!repoKey) throw new UsageError(`trap reserve needs --repo <key> or --request <id>\n\n${usageFor('trap')!}`);
-      const repo = cfg.repos[repoKey];
-      if (!repo) {
-        throw new Error(`no repo "${repoKey}" is configured (configured: ${Object.keys(cfg.repos).join(', ') || 'none'}) — \`lobstah repos\` lists them`);
-      }
-      const harness = opt('--harness') ?? asked?.harness;
-      if (harness !== undefined && harness !== 'claude' && harness !== 'codex') {
-        throw new UsageError(`--harness must be claude or codex, got "${harness}"`);
-      }
-      const deadlineFlag = opt('--deadline');
-      const startSecs = deadlineFlag === undefined ? DEFAULT_TRAP_START_SECS : Number(deadlineFlag);
-      if (!Number.isInteger(startSecs) || startSecs < 1) throw new UsageError('--deadline must be a whole number of seconds, 1 or more');
-      const { reservation, ticket } = reserveTrap({
-        repo: repoKey,
-        harness,
-        name: opt('--name'),
-        startSecs,
-        by: callerSession(opt('--session'))?.id,
-        ...(request ? { request: request.id } : {}),
-      });
-      if (request) closeRequest(request.id, `reserved ${trapLabel(reservation)}`);
-      const starts = trapStartCommands(repo.path, ticket, reservation.harness);
-      console.log(
-        toonKV({
-          name: reservation.name,
-          trap: `wt:${reservation.trapId}`,
-          label: trapLabel(reservation),
-          state: 'starting',
-          repo: reservation.repo,
-          ...(reservation.harness ? { harness: reservation.harness } : {}),
-          ...(request ? { request: `${request.id} (closed)` } : {}),
-          ticket,
-          deadline: reservation.deadline,
-          note:
-            `start one session in the repo's primary checkout with this ticket; its soak signs on as ${reservation.name}. ` +
-            `\`dispatch --for ${reservation.name}\` works now. The ticket redeems once.`,
-        }),
-      );
-      console.log(
-        toonHelp([
-          ...starts.map((s) =>
-            s.harness === 'claude' ? `${s.command}   (Claude Code; the variable keeps the tab named ${reservation.name})` : `${s.command}   (Codex)`,
-          ),
-          `lobstah stow --wt ${reservation.name}   (withdraw the reservation)`,
-        ]),
-      );
-      break;
+      throw new UsageError(usageFor('trap')!);
     }
     case 'focus': {
       const address = pos[0];
@@ -1821,25 +1738,87 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'man:throw': {
-      if (!has('--plan')) {
-        // One trap back, then wait until it listens. Batches come later.
-        if (has('--all') || opt('--repo') !== undefined) {
-          throw new UsageError(`man throw launches one named trap; --all and --repo work only with --plan\n\n${usageFor('man:throw')!}`);
+      const dry = has('--dry-run') || has('--plan');
+      const cfgThrow = loadConfig();
+      const callerThrow = callerSession(opt('--session'));
+      const timeout = opt('--timeout');
+      const timeoutSecs = timeout === undefined ? undefined : Number(timeout);
+      if (timeoutSecs !== undefined && !(timeoutSecs > 0)) throw new UsageError('--timeout takes a number of seconds');
+      const throwGrounds = (() => {
+        const name = opt('--grounds') ?? (callerThrow?.id !== undefined ? helmOf(callerThrow.id)?.grounds : undefined);
+        return name !== undefined ? resolveGrounds(cfgThrow, name) : undefined;
+      })();
+      const json = has('--json');
+      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs };
+      if (has('--new')) {
+        // Fresh traps: --count of them, for --repo (or a glass request's repo, or the grounds' only repo).
+        if (pos.length > 0 || has('--all')) throw new UsageError(`--new starts fresh traps: no names, no --all\n\n${usageFor('man:throw')!}`);
+        const requestId = opt('--request');
+        const request = requestId !== undefined ? readRequest(requestId) : undefined;
+        if (requestId !== undefined && (!request || request.kind !== 'trap-request')) throw new Error(`no trap request ${requestId}`);
+        if (request?.closedAt) throw new Error(`trap request ${requestId} is already closed: ${request.outcome ?? 'no outcome recorded'}`);
+        const asked = request?.payload as { repo?: string; harness?: string } | undefined;
+        for (const [flag, value] of [['--repo', asked?.repo], ['--harness', asked?.harness]] as const) {
+          if (value !== undefined && opt(flag) !== undefined && opt(flag) !== value) {
+            throw new UsageError(`${flag} ${opt(flag)} contradicts trap request ${requestId} (${flag} ${value}): drop ${flag}`);
+          }
         }
-        if (pos.length !== 1) throw new UsageError(`man throw launches exactly one trap: name it\n\n${usageFor('man:throw')!}`);
-        const caller = callerSession(opt('--session'));
-        gateHelm(caller);
-        const timeout = opt('--timeout');
-        const timeoutSecs = timeout === undefined ? undefined : Number(timeout);
-        if (timeoutSecs !== undefined && !(timeoutSecs > 0)) throw new UsageError('--timeout takes a number of seconds');
-        const json = has('--json');
+        const scope = throwGrounds?.repos ?? Object.keys(cfgThrow.repos);
+        const repoKey = opt('--repo') ?? asked?.repo ?? (scope.length === 1 ? scope[0] : undefined);
+        if (!repoKey) throw new UsageError(`--new needs --repo <key> (${scope.join(', ') || 'no repos configured'})\n\n${usageFor('man:throw')!}`);
+        if (!cfgThrow.repos[repoKey]) throw new Error(`no repo "${repoKey}" is configured (configured: ${Object.keys(cfgThrow.repos).join(', ') || 'none'})`);
+        const harness = opt('--harness') ?? asked?.harness;
+        if (harness !== undefined && harness !== 'claude' && harness !== 'codex') throw new UsageError('--harness takes claude or codex');
+        const count = Number(opt('--count') ?? '1');
+        if (!Number.isInteger(count) || count < 1) throw new UsageError('--count takes a whole number, 1 or more');
+        if (dry) {
+          const profile = freshProfile(cfgThrow, repoKey, harness);
+          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>' });
+          console.log(toonKV({ plan: 'dry run — launches nothing', new: `${count} fresh ${repoKey} trap(s)` }));
+          console.log(
+            toonTable(
+              'throw',
+              Array.from({ length: count }, () => ({
+                trap: '(new name)',
+                repo: repoKey,
+                action: 'new',
+                harness: profile.harness,
+                model: profile.model ?? '',
+                config: Object.entries(profile.config ?? {}).map(([k, v]) => `${k}=${v}`).join(' '),
+                terminal: terminalAppName(cfgThrow.soak.terminal ?? 'terminal'),
+                command: launchShellText(command),
+              })),
+              ['trap', 'repo', 'action', 'harness', 'model', 'config', 'terminal', 'command'],
+            ),
+          );
+          break;
+        }
+        gateHelm(callerThrow);
+        const results = await throwBatch({ ...base, repo: repoKey, count, ...(harness ? { harness } : {}) });
+        if (request) closeRequest(request.id, `thrown: ${results.map((r) => `${r.trap} ${r.result}`).join(', ')}`);
+        console.log(json ? JSON.stringify({ results }, null, 2) : batchText(results));
+        if (results.some((r) => r.result === 'failed')) process.exitCode = 1;
+        break;
+      }
+      if (!dry && (has('--all') || opt('--repo') !== undefined)) {
+        if (pos.length > 0) throw new UsageError(`name traps, or select with --all / --repo, not both\n\n${usageFor('man:throw')!}`);
+        const repoSel = opt('--repo');
+        if (repoSel !== undefined && !cfgThrow.repos[repoSel]) throw new Error(`no repo "${repoSel}" is configured (configured: ${Object.keys(cfgThrow.repos).join(', ') || 'none'})`);
+        gateHelm(callerThrow);
+        const rows = planThrow(cfgThrow, { all: has('--all'), ...(repoSel !== undefined ? { repo: repoSel } : {}) }, { repos: throwGrounds?.repos });
+        const results = await throwBatch({ ...base, rows });
+        console.log(json ? JSON.stringify({ results }, null, 2) : batchText(results));
+        if (results.some((r) => r.result === 'failed')) process.exitCode = 1;
+        break;
+      }
+      if (!dry) {
+        if (pos.length !== 1) throw new UsageError(`man throw launches one named trap, or --all / --repo / --new for a batch\n\n${usageFor('man:throw')!}`);
+        gateHelm(callerThrow);
         let result: Awaited<ReturnType<typeof throwTrap>>;
         try {
           result = await throwTrap({
+            ...base,
             address: pos[0]!,
-            cfg: loadConfig(),
-            by: caller?.id,
-            timeoutSecs,
             onLaunch: (launched) => {
               if (!json) console.log(launchedText(launched, timeoutSecs));
             },
@@ -1858,7 +1837,7 @@ async function mainCli(): Promise<void> {
       const all = has('--all');
       const repo = opt('--repo');
       if (pos.length === 0 && !all && repo === undefined) {
-        throw new UsageError(`man throw --plan needs trap names, --all, or --repo <key>\n\n${usageFor('man:throw')!}`);
+        throw new UsageError(`man throw --dry-run needs trap names, --all, --repo <key>, or --new\n\n${usageFor('man:throw')!}`);
       }
       if (pos.length > 0 && (all || repo !== undefined)) {
         throw new UsageError(`name traps, or select with --all / --repo, not both\n\n${usageFor('man:throw')!}`);
@@ -1873,13 +1852,13 @@ async function mainCli(): Promise<void> {
       const grounds = groundsName !== undefined ? resolveGrounds(cfg, groundsName) : undefined;
       const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos });
       if (has('--json')) {
-        console.log(JSON.stringify({ plan: 'read-only', grounds: grounds?.name ?? 'all', traps: rows }, null, 2));
+        console.log(JSON.stringify({ plan: 'dry-run', grounds: grounds?.name ?? 'all', traps: rows }, null, 2));
         break;
       }
       const count = (action: string) => rows.filter((r) => r.action === action).length;
       console.log(
         toonKV({
-          plan: 'read-only — launches nothing',
+          plan: 'dry run — launches nothing',
           grounds: grounds ? `${grounds.name} (${grounds.repos.join(', ') || 'no repos'})` : 'all repos',
           resume: count('resume'),
           cold: count('cold'),
@@ -1915,6 +1894,37 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'man:roster': {
+      if (pos[0] === 'forget') {
+        const address = pos[1];
+        if (!address || pos.length !== 2) throw new UsageError(`man roster forget needs one trap name\n\n${usageFor('man:roster')!}`);
+        // Forgetting a trap is steering: the claimed helm's alone.
+        gateHelm(callerSession(opt('--session')));
+        let gone: Awaited<ReturnType<typeof forgetTrap>>;
+        try {
+          gone = await forgetTrap(address, loadConfig(), { force: has('--force') });
+        } catch (err) {
+          if (err instanceof ForgetRefusedError) {
+            console.log(err.message);
+            process.exitCode = 1;
+            break;
+          }
+          throw err;
+        }
+        console.log(
+          toonKV({
+            forgotten: gone.trap,
+            worktree: gone.worktree,
+            ...(gone.worktreeNote ? { worktreeNote: gone.worktreeNote } : {}),
+            ref: gone.ref,
+            ...(gone.branchDeleted ? { branchDeleted: gone.branchDeleted.join(', ') } : {}),
+            ...(gone.branchKept ? { branchKept: gone.branchKept.join('; ') } : {}),
+            ...(gone.dropped.length ? { dropped: `${gone.dropped.length} commit(s) on no remote (--force)` } : {}),
+            ...(gone.bounced ? { bounced: `${gone.bounced} unread message(s) returned to the helm` } : {}),
+            note: 'the roster record and the name are gone; a throw can no longer bring it back',
+          }),
+        );
+        break;
+      }
       if (pos[0] === 'set') {
         const address = pos[1];
         if (!address) throw new UsageError(`man roster set needs a trap name\n\n${usageFor('man:roster')!}`);
@@ -1950,7 +1960,7 @@ async function mainCli(): Promise<void> {
           entries.map((e) => ({
             trap: trapLabel(e),
             repo: e.repo ?? '',
-            state: e.forgottenAt ? 'forgotten' : e.state,
+            state: e.state,
             harness: e.harness,
             model: e.model ?? '',
             session: e.sessionId.slice(0, 8),
@@ -2547,7 +2557,7 @@ async function mainCli(): Promise<void> {
         const redeemedBy = TRAP_TICKET_RE.exec(ticketFlag)?.[1];
         const own = redeemedBy !== undefined ? readTrap(redeemedBy) : undefined;
         if (!own || own.sessionId !== callerSession(opt('--session'), true)?.id) {
-          throw new Error('this ticket redeems no reserved trap: it is malformed, already redeemed, or withdrawn — `lobstah trap reserve` issues a new one');
+          throw new Error('this ticket redeems no reserved trap: it is malformed, already redeemed, or withdrawn — `lobstah man throw` issues a new one');
         }
       }
       if (reservation) {
@@ -2715,6 +2725,7 @@ async function mainCli(): Promise<void> {
           window,
           link: linkIgnored ? undefined : linkFlag,
           ...(reservation ? { trapId: reservation.trapId } : {}),
+          ...(reservation?.batch ? { batch: reservation.batch } : {}),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
       } catch (err) {
@@ -2772,7 +2783,7 @@ async function mainCli(): Promise<void> {
         toonHelp([
           ...(inside ? [] : [`cd ${reg.worktree}   (do this first: every task runs in the trap's worktree)`]),
           `lobstah soak --wait --timeout 600${sessionFlag}   (no Stop hook: listen now; work prints here, exit 3 = run it again)`,
-          `lobstah stow${sessionFlag}   (sign off${reg.createdWorktree ? '; removes this worktree when it holds no unpushed work, --keep keeps it' : ''})`,
+          `lobstah stow${sessionFlag}   (sign off; keeps this worktree${reg.createdWorktree ? ', --remove removes it when it holds no unpushed work' : ''})`,
         ]),
       );
       // The hookless park: same soakPark as the Stop hook drives, as a plain
@@ -2790,6 +2801,8 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'stow': {
+      if (has('--remove') && has('--keep')) throw new UsageError(`--remove and --keep contradict each other\n\n${usageFor('stow')!}`);
+      if (has('--force') && !has('--remove')) throw new UsageError(`--force only goes with --remove (it lets removal discard unsaved files)\n\n${usageFor('stow')!}`);
       const quiet = has('--quiet');
       // Resolve the trap from where we stand, from the session (flag or
       // hook stdin), or from an explicit wt: id. Hook stdin is read at most
@@ -2868,8 +2881,9 @@ async function mainCli(): Promise<void> {
       const created = reg?.createdWorktree === true || anchor?.createdBy === 'soak';
       let worktreeOut: Record<string, unknown> = {};
       if (wtDir !== undefined && fs.existsSync(wtDir)) {
-        const keepReason = has('--keep')
-          ? '--keep'
+        // Stow keeps the worktree unless asked to remove it (--remove).
+        const keepReason = !has('--remove')
+          ? 'stow keeps the worktree; --remove removes it'
           : sessionEnd
             ? 'the session ended; the SessionEnd hook keeps the worktree'
             : !created

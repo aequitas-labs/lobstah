@@ -250,14 +250,14 @@ describe('soak creates a worktree when the session has none', () => {
   });
 });
 
-describe('stow removes the worktree soak created', () => {
+describe('stow keeps the worktree; --remove removes one soak created', () => {
   processTest('a clean one is removed, with its branch; stow by session id from the primary checkout', () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
     git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
     fs.mkdirSync(path.join(reg.worktree, 'build'));
     fs.writeFileSync(path.join(reg.worktree, 'build', 'out.js'), 'ignored output');
-    const res = lobstah(primary, 'stow', '--session', SESSION);
+    const res = lobstah(primary, 'stow', '--session', SESSION, '--remove');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toContain(`stowed: wt:${reg.trapId}`);
     expect(res.stdout).toMatch(/^worktree: removed$/m);
@@ -268,22 +268,29 @@ describe('stow removes the worktree soak created', () => {
     expect(worktreeCount()).toBe(1);
   });
 
-  processTest('--keep signs off and leaves it', () => {
+  processTest('by default it signs off and keeps a clean worktree; --keep is the same; --force needs --remove', () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
-    const res = lobstah(primary, 'stow', '--session', SESSION, '--keep');
+    git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
+    const res = lobstah(primary, 'stow', '--session', SESSION);
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toMatch(/^worktree: kept$/m);
-    expect(res.stdout).toContain('reason: --keep');
+    expect(res.stdout).toContain('reason: stow keeps the worktree; --remove removes it');
     expect(fs.existsSync(reg.worktree)).toBe(true);
+    expect(hasBranch(`lobstah/soak-${reg.trapId}`)).toBe(true);
     expect(listTraps()).toEqual([]);
+    expect(soak(primary).status).toBe(0);
+    expect(lobstah(primary, 'stow', '--session', SESSION, '--keep').stdout).toMatch(/^worktree: kept$/m);
+    expect(soak(primary).status).toBe(0);
+    expect(lobstah(primary, 'stow', '--session', SESSION, '--force').status).toBe(2);
+    expect(lobstah(primary, 'stow', '--session', SESSION, '--remove', '--keep').status).toBe(2);
   });
 
   processTest('run from inside the worktree it removes', () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
     git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
-    const res = lobstah(reg.worktree, 'stow');
+    const res = lobstah(reg.worktree, 'stow', '--remove');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toMatch(/^worktree: removed$/m);
     expect(same(kv(res.stdout, 'returnTo')!, primary)).toBe(true);
@@ -295,7 +302,7 @@ describe('stow removes the worktree soak created', () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
     setup(reg.worktree);
-    const res = lobstah(primary, 'stow', '--session', SESSION);
+    const res = lobstah(primary, 'stow', '--session', SESSION, '--remove');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toContain(`stowed: wt:${reg.trapId}`);
     expect(res.stdout).toMatch(/^worktree: kept$/m);
@@ -326,7 +333,7 @@ describe('stow removes the worktree soak created', () => {
     git(wt, 'commit', '-q', '-m', 'pushed elsewhere');
     git(wt, 'push', '-q', 'origin', 'HEAD:other');
     git(wt, 'branch', '-q', '--set-upstream-to=origin/main');
-    const res = lobstah(primary, 'stow', '--session', SESSION);
+    const res = lobstah(primary, 'stow', '--session', SESSION, '--remove');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toMatch(/^worktree: kept$/m);
     expect(kv(res.stdout, 'reason')).toMatch(/1 unpushed commit/);
@@ -342,7 +349,7 @@ describe('stow removes the worktree soak created', () => {
     fs.writeFileSync(path.join(reg.worktree, 'f.txt'), 'committed');
     git(reg.worktree, 'commit', '-qam', 'local work');
     fs.writeFileSync(path.join(reg.worktree, 'notes.md'), 'unsaved');
-    const res = lobstah(primary, 'stow', '--session', SESSION, '--force');
+    const res = lobstah(primary, 'stow', '--session', SESSION, '--remove', '--force');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toMatch(/^worktree: removed$/m);
     expect(fs.existsSync(reg.worktree)).toBe(false);
@@ -354,7 +361,7 @@ describe('stow removes the worktree soak created', () => {
     const linked = path.join(tmp, 'linked');
     git(primary, 'worktree', 'add', '-q', linked, '-b', 'mine');
     expect(soak(linked).status).toBe(0);
-    const res = lobstah(linked, 'stow');
+    const res = lobstah(linked, 'stow', '--remove');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toMatch(/^worktree: kept$/m);
     expect(kv(res.stdout, 'reason')).toContain('soak did not create this worktree');
@@ -378,7 +385,7 @@ describe('stow removes the worktree soak created', () => {
     expect(fs.existsSync(reg.worktree)).toBe(true);
   });
 
-  processTest("the helm's stow --wt follows the same rules, and --keep works there", () => {
+  processTest("the helm's stow --wt follows the same rules", () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
     git(reg.worktree, 'branch', '--set-upstream-to=origin/main');
@@ -388,10 +395,10 @@ describe('stow removes the worktree soak created', () => {
     expect(fs.existsSync(reg.worktree)).toBe(true);
     expect(soak(primary).status).toBe(0);
     fs.writeFileSync(path.join(reg.worktree, 'notes.md'), 'x');
-    const dirty = lobstah(outside, 'stow', '--wt', reg.trapId, '--session', OTHER);
+    const dirty = lobstah(outside, 'stow', '--wt', reg.trapId, '--remove', '--session', OTHER);
     expect(dirty.stdout).toMatch(/^worktree: kept$/m);
     fs.rmSync(path.join(reg.worktree, 'notes.md'));
-    const clean = lobstah(outside, 'stow', '--wt', reg.trapId, '--session', OTHER);
+    const clean = lobstah(outside, 'stow', '--wt', reg.trapId, '--remove', '--session', OTHER);
     expect(clean.status, clean.stderr).toBe(0);
     expect(clean.stdout).toMatch(/^worktree: removed$/m);
     expect(fs.existsSync(reg.worktree)).toBe(false);

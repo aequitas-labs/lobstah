@@ -79,15 +79,15 @@ describe('man wait: a trap request', () => {
   });
 });
 
-describe('man wait: trap-listening', () => {
-  it('does not wake on its own; trap-signed-on does', () => {
-    postNotice({ kind: 'trap-listening', text: 'trap amber-gull is listening', refId: 'abcd1234' });
+describe('man wait: a trap start wakes once', () => {
+  it('sign-on does not wake; trap-available does', () => {
+    postNotice({ kind: 'trap-signed-on', text: 'trap amber-gull signed on', refId: 'abcd1234' });
     const quiet = lobstah('man', 'wait', '--peek');
     expect(quiet.status).toBe(0);
     expect(quiet.stdout).toContain('standing: none');
-    postNotice({ kind: 'trap-signed-on', text: 'trap amber-gull signed on', refId: 'abcd1234' });
+    postNotice({ kind: 'trap-available', text: 'trap amber-gull is available', refId: 'abcd1234' });
     const woke = lobstah('man', 'wait', '--peek');
-    expect(woke.stdout).toContain('notice: trap-signed-on');
-    expect(woke.stdout).not.toContain('trap-listening');
+    expect(woke.stdout).toContain('notice: trap-available');
+    expect(woke.stdout).not.toContain('trap-signed-on');
   });
 });

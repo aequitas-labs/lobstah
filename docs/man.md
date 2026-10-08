@@ -921,8 +921,8 @@ lobstah focus <trap>           # focus a live trap from the CLI
 lobstah stow                    # sign off; an open catch requeues, unread
                                 # messages wait [soak].signOffGraceSecs for a
                                 # re-soak, then bounce back to the helm;
-                                # removes the worktree when soak created it
-lobstah stow --keep             # sign off and keep the worktree
+                                # keeps the worktree
+lobstah stow --remove           # sign off and remove the worktree soak created
 lobstah soak --name amber-gull  # choose or change this trap's two-word name
 ```
 
@@ -969,15 +969,20 @@ trap by session id (`--session <id>`, or `$CLAUDE_CODE_SESSION_ID`), and
 `send session:<id>` addresses it. With `--session`, or from inside the worktree, `report done` records the
 worktree's HEAD commit and branch in evidence.
 
-`stow` removes a worktree only when soak created it and nothing in it exists
-elsewhere. It keeps the worktree and prints `worktree: kept` and a `reason:`
-when soak did not create the worktree, or when the worktree has uncommitted
-changes, untracked files that are not ignored, commits its upstream lacks,
-or no upstream. Ignored files do not block removal. `stow --force` explicitly
-allows removal of unsaved checkout files; `--keep` still keeps the checkout.
+`stow` keeps the worktree by default: it prints `worktree: kept` and
+`reason: stow keeps the worktree; --remove removes it`, and a later
+`man throw` brings the trap back in it. `stow --remove` removes a worktree
+only when soak created it and nothing in it exists elsewhere. It keeps the
+worktree and prints `worktree: kept` and a `reason:` when soak did not create
+the worktree, or when the worktree has uncommitted changes, untracked files
+that are not ignored, commits its upstream lacks, or no upstream. Ignored
+files do not block removal. `stow --remove --force` explicitly allows removal
+of unsaved checkout files; `--force` alone refuses. `--keep` is accepted and
+changes nothing.
 Stow runs the removal from the primary checkout, so it works from inside
 the worktree. On removal it prints `worktree: removed`, `path:`, and
-`returnTo: <primary checkout>`, with a help line `cd <primary>`. It
+`returnTo: <primary checkout>`, with a help line `cd <primary>`. Before
+removal, the checkout's HEAD goes to the trap's protected ref. It
 deletes the branch only when every commit on it is on its upstream (with no
 upstream: on some remote branch);
 otherwise it prints `branchKept: <branch> (<reason>)`. A deleted branch
@@ -1082,43 +1087,46 @@ enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 Nobody is conscripted: only a worktree whose session ran `soak` ever
 receives work.
 
-### Reserving a trap before its session starts
+### Starting a new trap
 
 ```bash
-lobstah trap reserve --repo <key>       # reserve a trap; prints its name, id, and a one-time ticket
-        [--harness claude|codex]        # print only that harness's start command
-        [--name amber-gull]             # choose the name
-        [--deadline 180]                # seconds the session has to sign on (default 180)
-lobstah soak --ticket <ticket>          # in the new session: sign on as the reserved trap
+lobstah man throw --new --repo <key> [--count N] [--harness claude|codex]
+                                        # start N fresh traps; wait until each listens
+lobstah man throw --new --repo <key> --count 3 --dry-run
+                                        # what would start; launches nothing
+lobstah soak --ticket <ticket>          # what the new session runs: sign on as the reserved trap
 lobstah stow --wt amber-gull            # withdraw a reservation no session has redeemed
 ```
 
-`trap reserve` picks the two-word name and the `wt:` id before any session
-exists and writes a **starting** reservation (`soaking/<id>.starting`) with a
-deadline. `dispatch --for <name>` works on it at once: the work waits, as it
-does for any addressed trap. `man tend` and the glass show the trap as
-`starting`.
+`man throw --new` (the helm's) picks a two-word name and a `wt:` id for each
+fresh trap before any session exists and writes a **starting** reservation
+(`soaking/<id>.starting`) with a deadline (`--timeout`, default 180 seconds).
+`dispatch --for <name>` works on it at once: the work waits, as it does for
+any addressed trap. `man tend` and the glass show the trap as `starting`.
 
-The output holds a one-time ticket and the command that starts the session in
-the repo's primary checkout:
+The harness comes from `--harness`, else `[repos.<key>.harness].default`,
+else `[harness].default`; the model and effort from the same tables. The
+terminal is `[soak].terminal`, else Terminal.app. Throw opens the start
+command in a new tab in the repo's primary checkout:
 
 ```bash
-cd <repo> && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket <ticket>"
+cd <repo> && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude '/lobstah:trap soak --ticket <ticket>'
 cd <repo> && codex '$lobstah:trap soak --ticket <ticket>'
 ```
 
-Nothing starts the session for you: a person runs the command. The session's
-soak redeems the ticket, from `--ticket` or from the `LOBSTAH_TRAP_TICKET`
-environment variable. It creates a worktree named after the reserved id,
-signs on under the reserved name and id, and deletes the reservation. The
-ticket then redeems nothing. A spent ticket left in `LOBSTAH_TRAP_TICKET` is
-ignored; a spent `--ticket` is refused, except in the session that redeemed
-it. A session that already mans a trap cannot redeem a ticket.
+The session's soak redeems the ticket, from `--ticket` or from the
+`LOBSTAH_TRAP_TICKET` environment variable. It creates a worktree named after
+the reserved id, signs on under the reserved name and id, and deletes the
+reservation. The ticket then redeems nothing. A spent ticket left in
+`LOBSTAH_TRAP_TICKET` is ignored; a spent `--ticket` is refused, except in
+the session that redeemed it. A session that already mans a trap cannot
+redeem a ticket.
 
-A reservation still unredeemed at its deadline **fails**: the daemon posts one
-`trap-start-failed` notice, and the glass shows the trap as `start failed`
-with the reason. Work addressed to it stays queued. The ticket still redeems
-after the deadline. `lobstah stow --wt <name>` withdraws the reservation; its
+A throw that sees no sign-on by its deadline withdraws the reservation and
+posts `trap-start-failed`. A reservation found unredeemed at its deadline by
+the daemon (one throw did not wait for) **fails** the same way: the glass
+shows the trap as `start failed` with the reason, and work addressed to it
+stays queued. `lobstah stow --wt <name>` withdraws a reservation; its
 addressed work is then orphaned bait and the helm gets a `bait-orphaned`
 notice.
 
@@ -1142,20 +1150,20 @@ greyed card: `requested · <repo> · <harness> · waiting for the helm`, or
 `waiting for a helm` when no helm is signed on.
 
 ```bash
-lobstah trap requests                  # open trap requests
-lobstah trap reserve --request <id>    # reserve what the request asks for, and close it
+lobstah man throw --new --request <id>   # start what the request asks for, and close it
 ```
 
-`trap reserve --request <id>` takes the repo and harness from the request,
-records the request on the reservation, and closes the request. The card
-becomes the starting card, then the live trap when the session signs on.
+`man throw --new --request <id>` takes the repo and harness from the request
+(flags may repeat them, never contradict them), records the request on the
+reservation, and closes the request with the result. The card becomes the
+starting card, then the live trap when the session signs on.
 
-Every starting card shows the start command `trap reserve` prints, with a copy
-button: paste it into a terminal to start the session by hand. The ticket in
-it is kept in `soaking/<id>.ticket` (mode 0600) until the reservation is
-redeemed or withdrawn. The glass sends it only to a page on this machine's
-own glass address, only on the starting card, and no notice or log carries
-it.
+Every starting card shows a start command with a copy button: paste it into a
+terminal to start the session by hand if the throw's terminal could not open.
+The ticket in it is kept in `soaking/<id>.ticket` (mode 0600) until the
+reservation is redeemed or withdrawn. The glass sends it only to a page on
+this machine's own glass address, only on the starting card, and no notice or
+log carries it.
 
 ### The roster, and what a throw would do
 
@@ -1179,13 +1187,16 @@ lobstah man roster                                  # every trap the roster keep
 lobstah man roster set <trap> --harness codex --model <m> --terminal iterm --config effort=high
                                                     # save how a throw starts it; `default` or `key=` clears
 lobstah man throw <trap> [--timeout <secs>]         # bring one trap back; wait until it listens
-lobstah man throw --plan <trap>...                  # what a throw would do for these traps
-lobstah man throw --plan --all                      # ... for every eligible trap in your grounds
-lobstah man throw --plan --repo <key>               # ... for one repo's traps
+lobstah man throw --all                             # every eligible trap in your grounds, at once
+lobstah man throw --repo <key>                      # every eligible trap of one repo
+lobstah man throw --new --repo <key> --count N      # N fresh traps (see "Starting a new trap")
+lobstah man throw --dry-run <trap>... | --all | --repo <key> | --new ...
+                                                    # what a throw would do; launches nothing (--plan too)
+lobstah man roster forget <trap> [--force]          # remove a stowed trap's record, worktree, and ref
 ```
 
-`man throw --plan` launches nothing and writes nothing. Each row says what a
-throw would do and why:
+`man throw --dry-run` (or `--plan`) launches nothing and writes nothing. Each
+row says what a throw would do and why:
 
 - `resume`: the harness reopens the saved session (`claude --resume`, `codex
   resume`) in the trap's checkout.
@@ -1193,7 +1204,7 @@ throw would do and why:
   one of: no saved history for the session, a session that ran in an app (the
   Claude desktop app's Code tab, the VS Code extension, the Codex app), or a
   saved profile whose harness is not the one that wrote the session.
-- `skip`: the trap is live, starting (reserved), or forgotten.
+- `skip`: the trap is live or starting (reserved).
 - `unresolved`: a throw would refuse. The repo is no longer configured or now
   points at another repository, the record is incomplete, the checkout is
   gone and no protected ref keeps its revision, or the path now anchors
@@ -1231,6 +1242,34 @@ launched twice. Otherwise:
    it withdraws the reservation, so a late session cannot take the trap,
    posts `trap-start-failed`, and leaves the roster unchanged.
 
+**Batches.** `man throw --all` throws every eligible trap in the grounds
+(`--grounds`, else the caller's helm grounds, else every repo); `--repo`
+narrows to one repo; `--new --count N` starts N fresh ones. Every launch runs
+at once, with no limit, and the batch waits for all of them. It prints one
+row per trap: `resumed`, `cold`, or `new` (with why), `skipped` (live,
+starting, or unresolved, with why), or `failed` (with why). One trap failing
+does not stop the others, and the command exits 1 when any failed.
+
+**Notices.** A trap's start wakes the helm once: `trap-available`, when the
+trap is listening. Its reservation (`trap-starting`), sign-on
+(`trap-signed-on`), and sign-off (`trap-stowed`) are quiet: tend, the
+digest's `traps` table, and the glass show them. A ghost sweep of an idle
+trap is quiet the same way; a ghost sweep of a trap that held a catch wakes.
+A batch posts no `trap-available` per trap: when every throw has settled it
+posts one `trap-batch` notice with the counts and the names that failed. A
+trap that failed to start (`trap-start-failed`) and work addressed to a trap
+that is gone (`bait-orphaned`) still wake.
+
+**Forget.** `man roster forget <trap>` (the helm's) takes a stowed trap off
+the roster for good. It refuses a live or starting trap. It also refuses, and
+names the work, when the trap holds anything that exists nowhere else:
+modified or untracked files in its checkout, or commits (in the protected
+ref, the checkout, or its branch) that are on no remote branch and not merged
+to trunk. `--force` forgets anyway. Otherwise it removes the worktree soak
+created (one it did not create stays, minus its anchor), deletes
+`refs/lobstah/traps/<id>`, bounces held messages, and frees the name. A
+branch that still holds commits on no remote is kept even with `--force`.
+
 ### The sign-on title
 
 Sign-on asks the session to apply a title: `lobstah soak` prints
@@ -1264,7 +1303,7 @@ Other terminals are left alone. `lobstah stow` clears the name.
 Claude Code writes its own title to the tab, and in Terminal.app that title
 replaces the custom title. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` on the
 command that starts Claude Code stops that for that one process; the start
-command `trap reserve` prints sets it. Codex also sets the terminal title.
+command `man throw` opens sets it. Codex also sets the terminal title.
 
 ### Culling and disk space
 

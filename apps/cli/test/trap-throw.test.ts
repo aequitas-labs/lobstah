@@ -87,7 +87,7 @@ function stowedTrap(): TrapRegistration {
   return reg;
 }
 function stow(reg: TrapRegistration, keep: boolean): void {
-  const res = lobstah(reg.worktree, 'stow', '--session', reg.sessionId, ...(keep ? ['--keep'] : []));
+  const res = lobstah(reg.worktree, 'stow', '--session', reg.sessionId, ...(keep ? [] : ['--remove']));
   expect(res.status, res.stderr).toBe(0);
 }
 

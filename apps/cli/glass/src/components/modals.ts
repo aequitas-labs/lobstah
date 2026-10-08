@@ -167,7 +167,7 @@ function trapModal(t: GlassTrap) {
         t.harness ?? '',
         ' · requested ',
         Age(t.requested.at),
-        ' ago from the glass; the helm reserves it and starts its session.',
+        ' ago from the glass; the helm starts it with man throw --new.',
       ]
     : t.starting
       ? t.starting.failedAt
