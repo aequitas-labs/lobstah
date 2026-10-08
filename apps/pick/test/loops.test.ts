@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, enqueue, ensureLayout, pendingIds, readDescriptor } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, pendingIds, readDescriptor, slotUsage } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { PickupState } from '../src/state.js';
 import { dispatchLoop } from '../src/loops/dispatch.js';
@@ -659,18 +659,103 @@ describe('merge loop', () => {
     expect(rebaseBrief({ ...pr(), baseRef: 'feature/parent' }, 'x', 'main')).toContain('--force-with-lease');
   });
 
-  it("a reviewed PR's chore re-requests its reviewers and parks; an unreviewed one reports done", () => {
+  it('reviewed and unreviewed rebase briefs report done; the gate owns review requests', () => {
     const reviewed = rebaseBrief(pr({ reviews: [
       { id: 10, author: 'alice', state: 'APPROVED', sha: 'abc' },
       { id: 11, author: 'bob', state: 'CHANGES_REQUESTED', sha: 'abc' },
       { id: 12, author: 'alice', state: 'COMMENTED', sha: 'abc' },
     ] }), 'c1', 'main');
-    expect(reviewed).toContain('gh pr edit 1 --add-reviewer alice,bob');
-    expect(reviewed).toContain('lobstah report c1 paused "<note>" --waiting-on review --link https://x/pr/1');
-    expect(reviewed).not.toContain('report status done');
+    expect(reviewed).toContain('When pushed, report status done.');
+    expect(reviewed).not.toContain('paused');
+    expect(reviewed).not.toContain('re-request');
+    expect(reviewed).not.toContain('--add-reviewer');
     const fresh = rebaseBrief(pr({ reviews: [] }), 'c2', 'main');
     expect(fresh).toContain('When pushed, report status done.');
     expect(fresh).not.toContain('re-request review');
+  });
+
+  it.each(['done', 'paused'] as const)('%s rebase with a moved head re-enters the approval gate and merges without a failure', async (verb) => {
+    const ms = new FakeMergeSource();
+    const candidate = pr({ mergeableState: 'dirty', url: 'https://github.com/demo/demo/pull/1' });
+    ms.candidates = [candidate];
+    const st = new PickupState();
+    const notes: string[] = [];
+    await mergeLoop(ms, policy, st);
+    const id = pendingIds('chore')[0]!;
+    claimNext('chore');
+    appendStatus(id, 'chore', verb, 'pushed', undefined, verb === 'paused' ? { waitingOn: 'review', link: candidate.url } : undefined);
+    // Even while the runner's directory remains active, it holds no chore slot.
+    expect(slotUsage('chore')).toEqual({ headless: 0, traps: 0, parked: verb === 'paused' ? 1 : 0 });
+    candidate.headSha = 'pushed-head';
+    candidate.mergeableState = 'clean';
+    await mergeLoop(ms, policy, st, (note) => notes.push(note));
+    expect(st.rebase('fake-merge#1')).toBeUndefined();
+    expect(readMergeView()!.open[0]?.gate).toBe('stale-approval');
+    expect(ms.reviewRequests).toEqual([{ n: 1, reviewers: ['alice'] }]);
+    await mergeLoop(ms, policy, st, (note) => notes.push(note));
+    expect(ms.reviewRequests).toHaveLength(1);
+    if (verb === 'paused') {
+      expect(notes.filter((note) => note.includes('paused on review')).length).toBe(1);
+    }
+    candidate.reviews = [{ id: 11, author: 'alice', state: 'APPROVED', sha: candidate.headSha }];
+    await mergeLoop(ms, policy, st);
+    expect(ms.merged).toEqual([1]);
+    expect(ms.labels).toEqual([]);
+    expect(ms.comments).toEqual([]);
+  });
+
+  it.each(['done', 'paused'] as const)('%s rebase with an unchanged dirty head fails once, without another chore', async (verb) => {
+    const ms = new FakeMergeSource();
+    ms.candidates = [pr({ mergeableState: 'dirty' })];
+    const st = new PickupState();
+    await mergeLoop(ms, policy, st);
+    const id = pendingIds('chore')[0]!;
+    claimNext('chore');
+    appendStatus(id, 'chore', verb, 'claimed push', undefined, verb === 'paused' ? { waitingOn: 'review' } : undefined);
+    await mergeLoop(ms, policy, st);
+    await mergeLoop(ms, policy, st);
+    expect(ms.labels).toEqual([{ n: 1, label: 'needs-human' }]);
+    expect(ms.comments).toEqual([{ n: 1, text: `Automated rebase failed (dispatch ${id}) — needs a human.` }]);
+    expect(pendingIds('chore')).toHaveLength(0);
+    expect(readMergeView()!.open[0]?.gate).toBe('rebase-failed');
+    expect(ms.merged).toEqual([]);
+  });
+
+  it.each(['queue', 'done'] as const)('a pushed review pause wins over its %s bucket', async (bucket) => {
+    const ms = new FakeMergeSource();
+    const candidate = pr({ mergeableState: 'dirty' });
+    ms.candidates = [candidate];
+    const st = new PickupState();
+    await mergeLoop(ms, policy, st);
+    const id = pendingIds('chore')[0]!;
+    if (bucket === 'done') {
+      claimNext('chore');
+      fs.renameSync(path.join(home, 'chores', 'active', id), path.join(home, 'chores', 'done', id));
+    }
+    appendStatus(id, 'chore', 'paused', 'pushed', undefined, { waitingOn: 'review' });
+    candidate.headSha = 'new-head';
+    candidate.mergeableState = 'clean';
+    await mergeLoop(ms, policy, st);
+    expect(st.rebase('fake-merge#1')).toBeUndefined();
+    expect(readMergeView()!.open[0]?.gate).toBe('stale-approval');
+    expect(ms.labels).toEqual([]);
+    expect(ms.comments).toEqual([]);
+  });
+
+  it.each(['pr', 'deploy', 'person', 'external'] as const)('a chore paused on %s still holds its PR', async (waitingOn) => {
+    const ms = new FakeMergeSource();
+    ms.candidates = [pr({ mergeableState: 'dirty' })];
+    const st = new PickupState();
+    await mergeLoop(ms, policy, st);
+    const id = pendingIds('chore')[0]!;
+    claimNext('chore');
+    appendStatus(id, 'chore', 'paused', 'still waiting', undefined, { waitingOn });
+    await mergeLoop(ms, policy, st);
+    expect(readMergeView()!.open[0]?.gate).toBe(`conflict-chore:${id}`);
+    expect(st.rebase('fake-merge#1')?.uuid).toBe(id);
+    expect(ms.labels).toEqual([]);
+    expect(ms.comments).toEqual([]);
+    expect(ms.merged).toEqual([]);
   });
 
   it("a rebase chore ends with the repo's rebase hook, then its all hook", async () => {

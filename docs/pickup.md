@@ -282,7 +282,7 @@ A PR behind its base splits deterministically:
 | Condition | Action |
 |---|---|
 | Behind, no conflict | Update the branch through the forge API, re-enter the gate next tick |
-| Behind, real conflict | Write a rebase chore — brief: rebase onto base, resolve, push to the PR's branch — and re-enter the gate when it completes |
+| Behind, real conflict | Write a rebase chore — resolve, push to the PR's branch, report `done` — then re-enter the gate, which re-requests stale review once per head |
 
 Rebase chores go through the **chore lane** (`~/.lobstah/chores/`, defined in
 the [design's queue contract](design.md#queue-contract)), never the primary queue. Same descriptor schema,
@@ -293,6 +293,12 @@ queue, and `lobstah ls` stays a list of things a human asked for.
 Chores report to no tracker. The merge loop consumes the chore's status file
 directly, holds its own PR-to-chore mapping, and bounds the attempt at one: a
 failed rebase comments on the PR, applies the `needs-human` label, and stops.
+A rebase chore reports `done` after its push, even on a reviewed PR; the gate
+re-requests stale review once per head. Older chores parked on review are
+treated as finished by the gate and finish their own wait when the PR merges
+or closes. They hold no chore slot while parked. A reported push that leaves
+the original head unchanged and still conflicting fails the one attempt,
+whether the report was `done` or a legacy review pause.
 A rebase chore's descriptor names its PR (`pr`): the runner pushes no branch
 and opens no PR for it. The brief tells the worker to push to the PR's head
 branch only and, on a non-fast-forward rejection, to fetch, rebase onto the
