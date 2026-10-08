@@ -61,9 +61,14 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * so it is served the whole snapshot (the harness's `whole` option). The
  * built page's modal renders the same DOM once its detail lands.
  */
-/** Take the tabs the old page never had (Reports, Stats) out of a live page, so the page compares with the old one. */
+/**
+ * Take what the old page never had out of a live page, so the page compares
+ * with the old one: the Reports and Stats tabs, and the decision modal, the
+ * new-decision alert, and the unread badge on the deck tab
+ * (glass-decisions.test.ts covers those).
+ */
 function withoutNewTabs(g: GlassDom): void {
-  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="stats"], #page-stats')) el.remove();
+  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
 }
 const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
 /** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */

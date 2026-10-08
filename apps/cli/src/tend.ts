@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   workerLabel,
+  questionViewedAt,
   activeIds,
   questionHeld,
   waitingText,
@@ -881,7 +882,10 @@ export function buildTendReport(now = Date.now()): TendReport {
   attention.push(
     ...shown.map((a) => {
       const ack = currentAck(a.key, a.stateHash);
-      return ack ? { ...a, acked: { at: ack.at, by: ack.by } } : a;
+      // A raw question's first view in the glass, scoped to when it was asked.
+      const viewedAt = a.kind === 'question' && a.at ? questionViewedAt(a.key, a.at) : undefined;
+      const seen = viewedAt ? { ...a, viewedAt } : a;
+      return ack ? { ...seen, acked: { at: ack.at, by: ack.by } } : seen;
     }),
   );
   // Attention is a queue of standing conditions. Observation recency only
@@ -1019,9 +1023,11 @@ export function renderTend(r: TendReport): string {
           verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : a.kind,
           waitingMins: Math.round(a.ageSecs / 60),
           held: a.held ? 'yes' : '',
+          // Whether the human has opened it in the glass's decision modal.
+          viewed: a.kind === 'decision' || a.kind === 'question' ? (a.viewedAt ? `yes ${a.viewedAt}` : 'no') : '',
           note: named(a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? '')),
         })),
-        ['id', 'verb', 'waitingMins', 'held', 'note'],
+        ['id', 'verb', 'waitingMins', 'held', 'viewed', 'note'],
       ),
     );
   }

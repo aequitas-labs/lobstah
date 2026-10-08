@@ -100,17 +100,23 @@ export function Header({
   tab,
   st,
   stale,
+  unread = 0,
 }: {
   d: GlassSnapshot | undefined;
   inp: SectionInputs | undefined;
   tab: GlassTab;
   st: GlassPrefs;
   stale: boolean;
+  /** Unread decisions: a red badge on the deck tab, where they are listed. */
+  unread?: number;
 }) {
   return [
     html`<div class="headerline"><h1>🦞✨ spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
-    html`<nav class="tabs" id="tabs" aria-label="Spyglass views">${GLASS_TABS.map((t) => html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined}>${TAB_LABEL[t]}</a>`)}</nav>`,
+    html`<nav class="tabs" id="tabs" aria-label="Spyglass views">${GLASS_TABS.map(
+      (t) =>
+        html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined}>${TAB_LABEL[t]}${t === 'deck' && unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new decision${unread === 1 ? '' : 's'}`}>${unread}</span>`}</a>`,
+    )}</nav>`,
     controls(d, tab, st),
   ];
 }

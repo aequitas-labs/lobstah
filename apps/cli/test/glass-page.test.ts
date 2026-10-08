@@ -537,11 +537,14 @@ describe('glass page: On deck', () => {
   it('shows decisions (no pr:* kinds), in flight, landed, reports, traps, and PR stacks as six full-width sections', async () => {
     const g = await page(everyAttentionFleet());
     const sections = g.$$('#deck .deckgrid > section');
-    expect(sections.map((s) => text(s.querySelector('h2')))).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →', 'PRs →']);
-    // Only raw questions (and framed decisions) are cards; PR kinds stay with the PRs.
-    const cards = [...sections[0]!.querySelectorAll('.dcard')];
-    expect(cards.length).toBeGreaterThan(0);
-    expect(cards.every((c) => c.classList.contains('plain'))).toBe(true);
+    // The decisions heading carries the unread count as a badge.
+    const heading = (s: Element) => text(s.querySelector('h2')).replace(/\d+$/, '');
+    expect(sections.map(heading)).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →', 'PRs →']);
+    // Only raw questions (and framed decisions) are rows; PR kinds stay with the PRs.
+    const rows = [...sections[0]!.querySelectorAll('.drow')];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.querySelector('.badge'))).toBe(true);
+    expect(text(sections[0]!.querySelector('h2 .dbadge'))).toBe(String(rows.length));
     // PR standing rides the stack line.
     expect(text(sections[5]!)).toContain('#41 → #42 → #43 · next #41');
     expect(text(sections[5]!.querySelector('.deckmore'))).toBe('+1 more →');

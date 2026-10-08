@@ -163,8 +163,10 @@ export type DecisionCard =
       lane?: string;
       repo?: string;
       at: string;
+      /** When the human first viewed it in the decision modal; absent = unread. */
+      viewedAt?: string;
     }
-  | { kind: 'question'; key: string; verb: string; note: string; dispatch: string; lane: string; repo?: string; at: string };
+  | { kind: 'question'; key: string; verb: string; note: string; dispatch: string; lane: string; repo?: string; at: string; viewedAt?: string };
 
 /**
  * The deck's cards, newest first: each `decision` attention item joined to
@@ -188,6 +190,7 @@ export function decisionCards(attention: readonly TendAttention[], decisions: re
         ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),
         ...(d.repo ? { repo: d.repo } : {}),
         at: d.askedAt,
+        ...((d.viewedAt ?? a.viewedAt) ? { viewedAt: d.viewedAt ?? a.viewedAt } : {}),
       });
     } else if (a.kind === 'question') {
       cards.push({
@@ -199,6 +202,7 @@ export function decisionCards(attention: readonly TendAttention[], decisions: re
         lane: a.lane,
         ...(a.repo ? { repo: a.repo } : {}),
         at: a.at ?? '',
+        ...(a.viewedAt ? { viewedAt: a.viewedAt } : {}),
       });
     }
   }
@@ -552,4 +556,14 @@ export function prModalView(d: Pick<GlassSnapshot, 'prs' | 'stacks' | 'dispatche
 export function watchState(w: { lastCheckedAt?: string; lastError?: string } | undefined | null): { text: string; at: string | null } {
   if (!w) return { text: 'no watch', at: null };
   return { text: w.lastError ? 'failing' : 'watching', at: w.lastCheckedAt || null };
+}
+
+/** The decisions the modal steps through: open ones (not answered from this page), oldest first. */
+export function openDecisionOrder(cards: readonly DecisionCard[], sent: (key: string) => boolean): DecisionCard[] {
+  return cards.filter((c) => !sent(c.key)).sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
+}
+
+/** The open decisions not yet viewed, oldest first: what the new-decision alert counts. */
+export function unreadDecisions(cards: readonly DecisionCard[], sent: (key: string) => boolean, viewedHere: (key: string) => boolean): DecisionCard[] {
+  return openDecisionOrder(cards, sent).filter((c) => !c.viewedAt && !viewedHere(c.key));
 }

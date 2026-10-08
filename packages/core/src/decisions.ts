@@ -21,6 +21,12 @@ import type { Attachment, Lane } from './types.js';
  * it posts a `decision-answer` notice, which wakes the helm's `man wait`.
  * `answer.json` in the decision's directory marks it answered and names
  * the request.
+ *
+ * `viewed.json` records when the human first saw the decision in the
+ * glass's decision modal (`viewedAt`): state only, never a wake. A raw
+ * question (no directory of its own) keeps its first view in
+ * `decisions/viewed/<hash>.json`, keyed by the question and the time it was
+ * asked, so a new question on the same dispatch starts unread.
  */
 
 export interface DecisionMeta {
@@ -135,6 +141,7 @@ const SIGNATURES: Record<string, (b: Buffer) => boolean> = {
 const DECISION_JSON = 'decision.json';
 const DETAIL_MD = 'detail.md';
 const ANSWER_JSON = 'answer.json';
+const VIEWED_JSON = 'viewed.json';
 const RID_RE = /^[a-f0-9]{8}$/;
 
 export function decisionsRoot(): string {
@@ -191,6 +198,56 @@ export function readDecisionAnswer(key: string): DecisionAnswer | undefined {
     answeredAt: marker.answeredAt,
     by: marker.by,
   };
+}
+
+/** When the human first viewed a decision in the glass, if they have. */
+export function decisionViewedAt(key: string): string | undefined {
+  const dir = decisionDir(key);
+  const v = dir ? readJsonFile<{ key?: string; viewedAt?: string }>(path.join(dir, VIEWED_JSON)) : undefined;
+  return v?.key === key && typeof v.viewedAt === 'string' ? v.viewedAt : undefined;
+}
+
+/**
+ * Record the first view of a standing decision. Only the first counts: a
+ * later view leaves `viewedAt` as it was. Returns the stored time and
+ * whether this call set it. Viewing never answers anything.
+ */
+export function markDecisionViewed(key: string, now = new Date()): { viewedAt: string; first: boolean } {
+  const dir = decisionDir(key);
+  if (!dir || !readDecision(key)) throw new DecisionError(`no decision ${key}`, 404);
+  const viewedAt = now.toISOString();
+  try {
+    fs.writeFileSync(path.join(dir, VIEWED_JSON), `${JSON.stringify({ key, viewedAt }, null, 2)}\n`, { flag: 'wx' });
+    return { viewedAt, first: true };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    return { viewedAt: decisionViewedAt(key) ?? viewedAt, first: false };
+  }
+}
+
+/** Where a raw question's first view is kept: one file per question and asking time. */
+function questionViewFile(key: string, at: string): string {
+  return path.join(decisionsRoot(), 'viewed', `${createHash('sha1').update(`${key}\n${at}`).digest('hex').slice(0, 20)}.json`);
+}
+
+/** When the human first viewed a raw question (`<lane>:<id>`, asked at `at`), if they have. */
+export function questionViewedAt(key: string, at: string): string | undefined {
+  const v = readJsonFile<{ key?: string; at?: string; viewedAt?: string }>(questionViewFile(key, at));
+  return v?.key === key && v.at === at && typeof v.viewedAt === 'string' ? v.viewedAt : undefined;
+}
+
+/** Record the first view of a raw question; as markDecisionViewed. */
+export function markQuestionViewed(key: string, at: string, now = new Date()): { viewedAt: string; first: boolean } {
+  const file = questionViewFile(key, at);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const viewedAt = now.toISOString();
+  try {
+    fs.writeFileSync(file, `${JSON.stringify({ key, at, viewedAt }, null, 2)}\n`, { flag: 'wx' });
+    return { viewedAt, first: true };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    return { viewedAt: questionViewedAt(key, at) ?? viewedAt, first: false };
+  }
 }
 
 /** Every decision on disk, answered or not, newest first. */

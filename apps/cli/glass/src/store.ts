@@ -34,6 +34,16 @@ export interface GlassState {
   drafts: Record<string, DecisionDraft>;
   /** The card a `#decision/<key>` link points at. */
   focusDecision: string | null;
+  /**
+   * The decision modal: the decision it shows, or `key: null` for the
+   * "all decisions answered" state. Separate from `modal`, so it opens over
+   * another modal without closing it.
+   */
+  decisionModal: { key: string | null } | null;
+  /** Decisions this page showed in the modal (its view POST may still be on its way). */
+  viewedHere: Record<string, true>;
+  /** The unread decisions the new-decision alert was dismissed for; a new one shows it again. */
+  alertDismissed: string[];
   /** The image open in the in-page overlay, if any. */
   lightbox: Lightbox | null;
   /** The Stats tab's data (/data/stats), fetched while that tab is open. */

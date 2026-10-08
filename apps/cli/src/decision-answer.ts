@@ -1,4 +1,4 @@
-import { DecisionError, answerDecision, askDecision, decisionDir, loadConfig, readDecision } from '@lobstah/core';
+import { DecisionError, answerDecision, askDecision, decisionDir, loadConfig, markDecisionViewed, markQuestionViewed, readDecision } from '@lobstah/core';
 import type { DecisionAnswer, DecisionMeta, DecisionUpload, Lane } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { buildTendReport } from './tend.js';
@@ -51,4 +51,16 @@ export function answerKey(key: string, req: AnswerRequest): { decision: Decision
     fs.rmSync(decisionDir(meta.key)!, { recursive: true, force: true });
     throw err;
   }
+}
+
+/**
+ * The human opened a decision (or a raw question) in the glass's decision
+ * modal: record its first view. State only: it answers nothing and wakes
+ * no one. A raw question's view is scoped to when it was asked.
+ */
+export function viewKey(key: string, now = new Date()): { key: string; viewedAt: string; first: boolean } {
+  if (key.startsWith('decision:')) return { key, ...markDecisionViewed(key, now) };
+  const q = /^(work|chore):[A-Za-z0-9-]+$/.test(key) ? standingQuestion(key) : undefined;
+  if (!q?.at) throw new DecisionError(`no standing decision or question ${key}`, 404);
+  return { key, ...markQuestionViewed(key, q.at, now) };
 }

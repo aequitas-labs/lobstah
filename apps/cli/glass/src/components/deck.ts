@@ -132,12 +132,14 @@ export function Deck({
   inp,
   drafts,
   focus,
-  extensions,
+  viewedHere,
+  unread,
 }: {
   inp: DeckInputs;
   drafts: Record<string, DecisionDraft>;
   focus: string | null;
-  extensions: string[];
+  viewedHere: Record<string, true>;
+  unread: number;
 }) {
   const view = inp.view;
   const flight = inp.inflight.map((x): DeckItem => ({
@@ -182,5 +184,5 @@ export function Deck({
     extra: startCommands(t),
     open: opener('trap', t.trapId),
   }));
-  return html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} extensions=${extensions} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`;
+  return html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`;
 }

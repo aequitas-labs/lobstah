@@ -1,6 +1,15 @@
 import { h, render } from 'preact';
 import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath, reportPageUrl } from '../../src/glass-diff.js';
-import { closeLightbox, closeModal, loadStats } from './actions.js';
+import {
+  closeDecision,
+  closeLightbox,
+  closeModal,
+  decisionNumberKey,
+  loadStats,
+  openDecision,
+  sendAnswer,
+  stepDecision,
+} from './actions.js';
 import { App } from './components/app.js';
 import { ReportShell, loadReportView } from './components/report-view.js';
 import type { ReportViewState } from './components/report-view.js';
@@ -42,6 +51,9 @@ const initialState = (): GlassState => ({
   preview: new URLSearchParams(location.search).has('lob'),
   drafts: {},
   focusDecision: decisionFromHash(location.hash),
+  decisionModal: decisionFromHash(location.hash) ? { key: decisionFromHash(location.hash) } : null,
+  viewedHere: {},
+  alertDismissed: [],
   lightbox: null,
   stats: null,
   statsError: null,
@@ -109,13 +121,53 @@ function startGlass(): void {
     const focusDecision = decisionFromHash(location.hash);
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({ route, focusDecision });
+    // A `#decision/<key>` link (a lob, the pet) opens that decision too.
+    if (focusDecision) openDecision(focusDecision);
     if (route === 'stats') void loadStats();
   });
+  /** Whether a key lands in something the person is typing into. */
+  const typing = (t: HTMLElement | null): boolean =>
+    !!t && (!!t.closest?.('input, textarea, select, [contenteditable]') || t.isContentEditable === true);
+  /**
+   * The keys. Escape closes the topmost layer, and in the decision modal it
+   * leaves the text field first. The hotkeys (d, 1–9, Enter on a chosen
+   * option, ←/→) never fire while typing in a field, with cmd/ctrl/alt held,
+   * during IME composition, or while another layer is on top. No single key
+   * answers a decision: a number selects, Enter on the selected option sends.
+   */
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    // The image overlay sits above a modal: Escape closes it first.
-    if (getState().lightbox) closeLightbox();
-    else closeModal();
+    const state = getState();
+    const t = e.target as HTMLElement | null;
+    if (e.key === 'Escape') {
+      // Topmost first: the image overlay, then the decision modal, then the modal.
+      if (state.lightbox) closeLightbox();
+      else if (state.decisionModal) {
+        if (typing(t) && t!.closest?.('.dmodal')) {
+          t!.blur();
+          document.querySelector<HTMLElement>('.dmodal')?.focus();
+        } else closeDecision();
+      } else closeModal();
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.keyCode === 229 || typing(t) || state.lightbox) return;
+    if (state.decisionModal) {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        stepDecision(e.key === 'ArrowLeft' ? -1 : 1);
+      } else if (/^[1-9]$/.test(e.key)) {
+        if (decisionNumberKey(Number(e.key))) e.preventDefault();
+      } else if (e.key === 'Enter' && t?.matches?.('.dmodal .dopt.on') && state.decisionModal.key) {
+        // The deliberate second action: Enter on the option a number (or a click) chose.
+        e.preventDefault();
+        void sendAnswer(state.decisionModal.key);
+      }
+      return;
+    }
+    // d opens the decision modal from anywhere, unless another modal is open.
+    if (e.key === 'd' && !e.shiftKey && !state.modal) {
+      e.preventDefault();
+      openDecision();
+    }
   });
   startPresence();
   startPolling();
