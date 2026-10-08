@@ -1,4 +1,4 @@
-import * as fs from 'node:fs';
+import fs from 'node:fs';
 import * as path from 'node:path';
 import { lobstahHome } from './paths.js';
 import { readStackEpochs, stackReadyEnabled, stackStateHash } from './pr-stacks.js';
@@ -115,7 +115,7 @@ export function postNotice(n: {
       return undefined; // already posted
     }
   }
-  const seq = `${String(Date.now()).padStart(15, '0')}-${process.pid}-${counter++}`;
+  const seq = `${String(Date.now()).padStart(15, '0')}-${process.pid}-${String(counter++).padStart(8, '0')}`;
   const notice: Notice = {
     seq,
     kind: n.kind,
@@ -146,7 +146,15 @@ export function listNotices(limit = 20): Notice[] {
   return files
     .sort()
     .slice(-limit)
-    .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Notice);
+    .flatMap((f) => {
+      try { return [JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Notice]; }
+      catch (error) {
+        // A stack shape may have been superseded since readdir. Readers
+        // must not fail while the watch atomically updates its current item.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw error;
+      }
+    });
 }
 
 /**
