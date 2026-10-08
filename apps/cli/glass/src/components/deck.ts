@@ -48,7 +48,8 @@ interface DeckItem {
   /** A block under the card or line: a starting trap's start commands. */
   extra?: Children;
   open?: () => void;
-  acked?: boolean;
+  /** Not yet opened (an unacked report): the unread decision's tint. */
+  unread?: boolean;
 }
 
 type View = GlassPrefs['view'] | undefined;
@@ -62,14 +63,14 @@ function deckItem(it: DeckItem, view: View) {
   const worker = it.worker && html`<${Harness} worker=${it.worker} />`;
   if (it.href) {
     // A page of its own, in a new tab (a report).
-    const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
+    const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.unread ? ' unread' : '');
     return view === 'cards'
       ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener"><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
       : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
   }
   if (view === 'cards')
-    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
-  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${worker && [' ', worker]}${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
+    return html`<div key=${it.key} class=${'card' + (it.unread ? ' unread' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
+  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.unread ? ' unread' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${worker && [' ', worker]}${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
 }
 
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
@@ -168,7 +169,7 @@ export function Deck({
   }));
   const reports = inp.reports.map((r): DeckItem => {
     const meta = reportMeta(r);
-    return { key: r.key, title: r.title, meta: meta.nodes, metaText: meta.text, href: reportPageUrl(r.key), acked: !!r.acked };
+    return { key: r.key, title: r.title, meta: meta.nodes, metaText: meta.text, href: reportPageUrl(r.key), unread: !r.acked };
   });
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,

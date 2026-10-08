@@ -11,7 +11,7 @@ import {
   stepDecision,
 } from './actions.js';
 import { App } from './components/app.js';
-import { ReportShell, loadReportView } from './components/report-view.js';
+import { ReportShell, loadReportView, markReportViewed } from './components/report-view.js';
 import type { ReportViewState } from './components/report-view.js';
 import { startPolling } from './poll.js';
 import { startPresence } from './presence.js';
@@ -76,9 +76,14 @@ function startReportPage(key: string): void {
   subscribe(paint);
   paint();
   startPresence(2000);
-  void loadReportView(key).then((loaded) => {
+  void loadReportView(key).then(async (loaded) => {
     view = loaded;
     if (loaded.state === 'ready') document.title = `${loaded.report.title} · lobstah glass`;
+    paint();
+    // Shown: the human has opened it. Ack it, and mark it so once.
+    const viewed = await markReportViewed(loaded);
+    if (viewed === loaded) return;
+    view = viewed;
     paint();
   });
   document.addEventListener('keydown', (e) => {

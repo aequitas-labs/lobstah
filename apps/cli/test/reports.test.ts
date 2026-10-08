@@ -4,11 +4,28 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { claimBait, dispatchReportKey, enqueue, ensureLayout, executorPath, laneDirs, listReports, readReport, readStatusLog, signOnTrap } from '@lobstah/core';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import {
+  claimBait,
+  dispatchReportKey,
+  enqueue,
+  ensureLayout,
+  executorPath,
+  laneDirs,
+  listReports,
+  listRequests,
+  readReport,
+  readStatusLog,
+  signOnTrap,
+  unseenNotices,
+} from '@lobstah/core';
 import type { TendAttention } from '@lobstah/core';
 import { readAck } from '../src/acks.js';
 import { applyCull, planCull } from '../src/cull.js';
-import { buildTendReport } from '../src/tend.js';
+import { buildTendReport, renderTend } from '../src/tend.js';
+import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
+import { lobItems } from '../src/glass-lobs.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).
@@ -134,6 +151,108 @@ describe('the report attention kind', () => {
     const items = reportItems(buildTendReport().attention);
     expect(items.find((a) => a.id === A)!.acked?.by).toBe(`newer report report:work:${B}`);
     expect(items.find((a) => a.id === B)!.acked).toBeUndefined();
+  });
+});
+
+describe('opening a report on the glass acks it', () => {
+  let server: Server | undefined;
+  let base: string;
+  let token: string;
+  beforeEach(async () => {
+    server = serveGlass(0);
+    await new Promise<void>((resolve) => server!.once('listening', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    token = ((await (await fetch(`${base}/data`)).json()) as { focusToken: string }).focusToken;
+  });
+  afterEach(async () => {
+    if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+    server = undefined;
+  });
+  const key = `report:work:${A}`;
+  const enc = encodeURIComponent(key);
+  const send = (payload: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${base}/requests`, {
+      method: 'POST',
+      headers: { Origin: base, 'content-type': 'application/json', 'x-lobstah-token': token, ...headers },
+      body: JSON.stringify({ kind: 'report-viewed', payload }),
+    });
+  const view = (k: string, headers: Record<string, string> = {}) => send({ key: k }, headers);
+  const file = (body: string) => {
+    const res = lobstah('report', A, 'done', '--report', write('r.md', body));
+    expect(res.status, res.stderr).toBe(0);
+  };
+  const tendRow = () => renderTend(buildTendReport()).split('\n').find((l) => l.includes(',report,'));
+  const petItem = () => reportItems((JSON.parse(lobstah('attention', '--json').stdout) as { attention: TendAttention[] }).attention)[0];
+  const lobs = () => lobItems(buildGlassSnapshot().attention ?? [], { lobs: true, preview: false }).filter((l) => l.label === 'report');
+
+  it('acks the filing once, first time kept, by glass: the pet and lobs drop it, tend and the lists show it read, nothing wakes', async () => {
+    withKinds(['question', 'report']);
+    enqueue({ id: A, repo: 'web', brief: 'b' });
+    file('# Tray findings');
+    expect(tendRow()).toMatch(/,report,\d+,,no,Tray findings$/);
+    expect(lobs()).toHaveLength(1);
+    const wakesBefore = unseenNotices(false).length;
+
+    // Reading it through the CLI or the API acks nothing.
+    lobstah('reports');
+    lobstah('status', A);
+    lobstah('catch', A);
+    for (const url of [`/report/${enc}`, `/report/${enc}/meta`, `/report/${enc}/md`]) expect((await fetch(`${base}${url}`)).status).toBe(200);
+    expect(readAck(key)).toBeUndefined();
+    // The report page reads the page token from its row's header.
+    expect((await fetch(`${base}/report/${enc}/meta`)).headers.get('x-lobstah-token')).toBe(token);
+
+    // Only this page's token from this glass's origin writes.
+    expect((await view(key, { 'x-lobstah-token': 'wrong' })).status).toBe(403);
+    expect((await view(key, { Origin: 'http://evil.example' })).status).toBe(403);
+    expect(readAck(key)).toBeUndefined();
+
+    const first = await view(key);
+    expect(first.status).toBe(200);
+    const body = (await first.json()) as { ok: boolean; key: string; viewedAt: string; by: string; first: boolean };
+    expect(body).toMatchObject({ ok: true, key, by: 'glass', first: true });
+    expect(readAck(key)).toMatchObject({ key, kind: 'report', stateHash: readReport(key)!.stateHash, at: body.viewedAt, by: 'glass' });
+    // A second view keeps the first time.
+    const again = (await (await view(key)).json()) as { viewedAt: string; first: boolean };
+    expect(again).toMatchObject({ first: false, viewedAt: body.viewedAt });
+    expect(readAck(key)!.at).toBe(body.viewedAt);
+
+    // It leaves the pet and the lobs; tend lists it as viewed.
+    expect(petItem()!.acked).toMatchObject({ at: body.viewedAt, by: 'glass' });
+    expect(lobs()).toEqual([]);
+    expect(tendRow()).toMatch(new RegExp(`,report,\\d+,,yes ${body.viewedAt},Tray findings$`));
+    // Still listed and reachable, marked acked.
+    expect(lobstah('reports').stdout).toContain(`${key},Tray findings,headless,${A},`);
+    expect(lobstah('reports').stdout).toMatch(/,yes\n/);
+    expect(JSON.parse(await (await fetch(`${base}/report/${enc}/meta`)).text())).toMatchObject({ key, acked: { at: body.viewedAt, by: 'glass' } });
+    expect((await fetch(`${base}/report/${enc}/md`)).status).toBe(200);
+    // State, not an event: no request, no wake.
+    expect(listRequests()).toEqual([]);
+    expect(unseenNotices(false)).toHaveLength(wakesBefore);
+  });
+
+  it('a refiled report stands again until it is opened again', async () => {
+    withKinds(['report']);
+    enqueue({ id: A, repo: 'web', brief: 'b' });
+    file('# Tray findings');
+    const opened = (await (await view(key)).json()) as { viewedAt: string };
+    expect(readAck(key)?.at).toBe(opened.viewedAt);
+    await new Promise((r) => setTimeout(r, 5));
+    file('# Tray findings revised');
+    expect(petItem()!.acked).toBeUndefined();
+    expect(lobs()).toHaveLength(1);
+    expect(tendRow()).toMatch(/,report,\d+,,no,Tray findings revised$/);
+    const reopened = (await (await view(key)).json()) as { viewedAt: string; first: boolean };
+    expect(reopened.first).toBe(true);
+    expect(readAck(key)).toMatchObject({ stateHash: readReport(key)!.stateHash, at: reopened.viewedAt });
+  });
+
+  it('refuses a missing, malformed, or unknown key', async () => {
+    expect((await view('report:helm:fleet:ffffffff')).status).toBe(404);
+    expect((await view('decision:00000000')).status).toBe(400);
+    expect((await send({})).status).toBe(400);
+    expect((await send({ key: 'report:' + 'x'.repeat(300) })).status).toBe(400);
+    expect(listRequests()).toEqual([]);
   });
 });
 

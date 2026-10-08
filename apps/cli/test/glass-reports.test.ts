@@ -75,7 +75,7 @@ const click = async (g: GlassDom, el: Element | null) => {
 const reportsSection = (g: GlassDom) => g.$$('#deck .deckgrid > section').find((s) => text(s.querySelector('h2')) === 'reports →')!;
 
 describe('glass: the deck reports block', () => {
-  it('lists reports after Landed, unacked first then newest: title, then who filed it, the age, and acked; no badge', async () => {
+  it('lists reports after Landed, unacked first then newest: title, then who filed it, the age, and acked; unread tint until acked; no badge', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
       const headings = g.$$('#deck .deckgrid > section').map((s) => text(s.querySelector('h2')));
@@ -90,7 +90,9 @@ describe('glass: the deck reports block', () => {
         (view === 'cards' ? '' : '· ') + 'aaaaaaaa · 40m ago',
         (view === 'cards' ? '' : '· ') + '60s ago · acked',
       ]);
-      expect(rows[3]!.className).toContain('acked');
+      // Unacked reports carry the unread decision's tint; an acked one looks normal.
+      expect(rows.map((r) => r.classList.contains('unread'))).toEqual([true, true, true, false]);
+      expect(rows.some((r) => r.classList.contains('acked'))).toBe(false);
     }
   });
 
@@ -142,6 +144,42 @@ describe('glass: a report page', () => {
     expect(g.intervals()).toEqual([2000]);
     expect(g.presence()[0]).toMatch(/^\/api\/presence\?page=[A-Za-z0-9_-]{8,64}&vis=visible$/);
     expect(g.$('#deck')).toBeNull();
+  });
+
+  it('showing it acks it once through the guarded request path, then marks it acked', async () => {
+    const fleet = everyAttentionFleet();
+    const row = (fleet.reports ?? []).find((r) => r.key === TRAP_KEY)!;
+    const g = await page(fleet, {
+      path: pagePath(TRAP_KEY),
+      files: { [md(TRAP_KEY)]: TRAP_MD, [meta(TRAP_KEY)]: JSON.stringify(row) },
+      reportToken: 'page-token',
+      post: () => ({ status: 200, body: { ok: true, key: TRAP_KEY, viewedAt: ago(0), by: 'glass', first: true } }),
+    });
+    expect(g.posts()).toHaveLength(1);
+    const [p] = g.posts();
+    expect(p!.url).toBe('/requests');
+    expect(p!.headers['x-lobstah-token']).toBe('page-token');
+    expect(JSON.parse(p!.body)).toEqual({ kind: 'report-viewed', payload: { key: TRAP_KEY } });
+    expect(text(g.$('.reportview .sub'))).toBe('kind-crab · 20m ago · acked');
+    expect(text(g.$('.reportview'))).not.toContain('lobstah attention ack');
+    // Still the one page: no poll.
+    expect(g.fetches()).toBe(0);
+  });
+
+  it('posts nothing for an acked report, a report whose page failed, or without the page token', async () => {
+    const fleet = everyAttentionFleet();
+    const acked = (fleet.reports ?? []).find((r) => r.acked)!;
+    const trap = (fleet.reports ?? []).find((r) => r.key === TRAP_KEY)!;
+    const ok = () => ({ status: 200, body: { ok: true } });
+    const already = await page(fleet, { path: pagePath(acked.key), files: { [meta(acked.key)]: JSON.stringify(acked), [md(acked.key)]: '# old' }, reportToken: 't', post: ok });
+    expect(already.posts()).toEqual([]);
+    const noText = await page(fleet, { path: pagePath(TRAP_KEY), files: { [meta(TRAP_KEY)]: JSON.stringify(trap) }, reportToken: 't', post: ok });
+    expect(text(noText.$('.reportview .bad'))).toBe('report not found (404)');
+    expect(noText.posts()).toEqual([]);
+    const gone = await page(fleet, { path: pagePath('report:helm:fleet:ffffffff'), reportToken: 't', post: ok });
+    expect(gone.posts()).toEqual([]);
+    const noToken = await reportPage(TRAP_KEY);
+    expect(noToken.posts()).toEqual([]);
   });
 
   it('shows raw HTML in a helm report as text and loads no remote or path image', async () => {
@@ -200,9 +238,11 @@ describe('glass: the Reports tab', () => {
       ['Build timings', 'aaaaaaaa', '40m', ''],
       ['Old fleet notes', '', '60s', 'acked'],
     ]);
+    expect(rows.map((r) => r.classList.contains('unread'))).toEqual([true, true, true, false]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Fleet notes', 'Tray findings', 'Build timings', 'Old fleet notes']);
     expect(cards.$$('#reports .card .meta').map(text)).toEqual(['5m ago', 'kind-crab · 20m ago', 'aaaaaaaa · 40m ago', '60s ago · acked']);
+    expect(cards.$$('#reports .card').map((c) => c.classList.contains('unread'))).toEqual([true, true, true, false]);
     expect(cards.$$('#reports .badge')).toHaveLength(0);
   });
 

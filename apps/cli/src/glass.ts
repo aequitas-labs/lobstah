@@ -60,7 +60,7 @@ import {
   prStackTrunk,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
-import { reportAck } from './report-file.js';
+import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
@@ -116,6 +116,7 @@ export function requestBodyCap(): number {
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
   ['decision-viewed', 1024],
+  ['report-viewed', 1024],
 ]);
 
 const readJson = <T>(f: string): T | undefined => {
@@ -827,6 +828,17 @@ export function serveGlass(
               return reply(500, { ok: false, reason: 'The view could not be stored.' });
             }
           }
+          case 'report-viewed': {
+            // The report page showed it: ack this filing. No request, no wake.
+            const key = (body.payload as { key?: unknown } | undefined)?.key;
+            if (typeof key !== 'string' || !key.startsWith('report:') || key.length > 200) return reply(400, { ok: false, reason: 'A report key is required.' });
+            try {
+              const viewed = viewReport(key);
+              return viewed ? reply(200, { ok: true, ...viewed }) : reply(404, { ok: false, reason: `No report ${key}.` });
+            } catch {
+              return reply(500, { ok: false, reason: 'The view could not be stored.' });
+            }
+          }
           case 'trap-request': {
             const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
             if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
@@ -957,8 +969,9 @@ export function serveGlass(
       }
     } else if (req.method === 'GET' && REPORT_PAGE_RE.test(req.url?.split('?')[0] ?? '')) {
       // A report's own page, and its row as JSON. Only this machine's glass
-      // address gets them: a rebound name is refused. Opening a report never
-      // acks it.
+      // address gets them: a rebound name is refused. Fetching them acks
+      // nothing: the page acks through /requests (report-viewed) once it has
+      // shown the report, with the page token the row carries in a header.
       if (req.headers.host !== ownHost()) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
         res.end('Not this glass.');
@@ -973,7 +986,12 @@ export function serveGlass(
       }
       const row = key ? reportRow(key) : undefined;
       if (m[2] === '/meta') {
-        res.writeHead(row ? 200 : 404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.writeHead(row ? 200 : 404, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+          // The page token, so the report page can record its view.
+          ...(row ? { 'x-lobstah-token': focusToken } : {}),
+        });
         res.end(JSON.stringify(row ?? { error: 'report not found' }));
         return;
       }

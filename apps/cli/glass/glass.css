@@ -210,6 +210,15 @@ h2 {
 .badge.acked {
   opacity: 0.55;
 }
+/* A report not yet opened: the unread decision's tint. Opened ones look normal. */
+.deckline.unread,
+.card.unread,
+.rowhead.unread {
+  background: var(--unread-bg);
+}
+.card.unread {
+  border-color: var(--bad);
+}
 .deckmore {
   color: var(--dim);
   font-size: 11px;

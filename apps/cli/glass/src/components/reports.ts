@@ -7,11 +7,12 @@ import { Age, Table, ageText } from './common.js';
 /**
  * The Reports tab: every report, unacked first, then newest first. A card or
  * row says who filed it (a trap's name, a headless dispatch's id, nothing for
- * the helm), then its age, then `acked`. Each opens the report's own page in
- * a new tab.
+ * the helm), then its age, then `acked`. An unacked one has the unread
+ * decision's tint; an acked one looks normal. Each opens the report's own
+ * page in a new tab.
  */
 
-/** Open a report's own page in a new tab. Opening it does not ack it. */
+/** Open a report's own page in a new tab; the page acks it once shown. */
 export const openReport = (r: GlassReport) => () => {
   window.open(reportPageUrl(r.key), '_blank', 'noopener');
 };
@@ -27,11 +28,11 @@ export function reportMeta(r: GlassReport): { nodes: unknown[]; text: string } {
 
 function card(r: GlassReport) {
   const meta = reportMeta(r);
-  return html`<a key=${r.key} class=${'card' + (r.acked ? ' acked' : '')} href=${reportPageUrl(r.key)} target="_blank" rel="noopener"><div class="top"><b title=${r.title}>${r.title}</b></div><div class="meta" title=${meta.text}>${meta.nodes}</div></a>`;
+  return html`<a key=${r.key} class=${'card' + (r.acked ? '' : ' unread')} href=${reportPageUrl(r.key)} target="_blank" rel="noopener"><div class="top"><b title=${r.title}>${r.title}</b></div><div class="meta" title=${meta.text}>${meta.nodes}</div></a>`;
 }
 
 function row(r: GlassReport) {
-  return html`<tr key=${r.key} class=${'rowhead' + (r.acked ? ' acked' : '')} onClick=${openReport(r)}><td class="grow"><a href=${reportPageUrl(r.key)} target="_blank" rel="noopener" onClick=${(e: Event) => e.stopPropagation()}>${r.title}</a></td><td>${reportFrom(r)}</td><td>${Age(r.filedAt)}</td><td>${r.acked ? 'acked' : ''}</td></tr>`;
+  return html`<tr key=${r.key} class=${'rowhead' + (r.acked ? '' : ' unread')} onClick=${openReport(r)}><td class="grow"><a href=${reportPageUrl(r.key)} target="_blank" rel="noopener" onClick=${(e: Event) => e.stopPropagation()}>${r.title}</a></td><td>${reportFrom(r)}</td><td>${Age(r.filedAt)}</td><td>${r.acked ? 'acked' : ''}</td></tr>`;
 }
 
 export function Reports({ inp }: { inp: SectionInputs['reports'] }) {

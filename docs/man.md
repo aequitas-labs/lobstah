@@ -552,7 +552,10 @@ the helm files to keep.
   headless dispatch's id, nothing for the helm), its age, and `acked`. A
   report opens on its own page, `/report/<key>`, in a new tab: from its card
   or row, a lob, the desktop pet, or its dispatch's modal. The page renders
-  once and does not refresh; opening it does not ack the report.
+  once and does not refresh. Showing it acks the report (`by: glass`):
+  state only, with no wake. Fetching it through the CLI or the API does not
+  ack it. An unacked report has the unread decision's tint; an acked one
+  looks normal.
   `#report/<key>` goes to that page. The page shows headings, lists,
   tables, fenced code, links (in a new tab), bold, italics, and images.
   Raw HTML in the markdown shows as text. The glass serves the markdown and
@@ -571,7 +574,8 @@ the helm files to keep.
   `lobstah attention ack <key> --by pet`. The pet's Acknowledge menu entry
   acks without opening, and `lobstah attention ack <key>` acks a report
   whether or not `report` is in `attentionKinds`. Opening a report in the
-  glass does not ack it. A report filed by a follow-up dispatch acks the report
+  glass acks it, and `man tend`'s `viewed` column shows when; refiling it
+  stands it again until it is opened again. A report filed by a follow-up dispatch acks the report
   of each dispatch before it in the chain.
 - **Cull.** `lobstah cull` removes a dispatch's report with the rest of its
   state. A helm report is culled when it is older than the retention window,
