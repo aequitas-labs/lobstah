@@ -1,5 +1,4 @@
 import * as fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import {
   dispatchPrUrls,
   dispatchWorktree,
@@ -18,7 +17,7 @@ import {
   writeKeptWorktrees,
 } from '@lobstah/core';
 import type { Evidence, KeptWorktree, Lane } from '@lobstah/core';
-import { withRepoLockSync } from '@lobstah/worktree';
+import { mergedWorktreeUnsafe } from './merged-worktree-safety.js';
 import { applyCull, trapWorktreeIds, worktreeUsage } from './cull.js';
 import type { CullItem } from './cull.js';
 
@@ -31,7 +30,7 @@ import type { CullItem } from './cull.js';
  *
  * Nothing is released unless every check holds: every dispatch in the chain
  * and every user of the worktree is finished (done or failed); the worktree
- * is clean; and, after a fetch, its HEAD is on the remote. A worktree that
+ * is clean; and no commits are newer than its recorded merged PR heads or trunk. A worktree that
  * fails a check is kept, with the reason recorded for `lobstah doctor`.
  * A PR closed without merge releases nothing. A trap's worktree is never
  * touched.
@@ -108,19 +107,21 @@ interface MergedPr {
   key: string;
   headRef?: string;
   owners: Set<string>;
+  heads: string[];
 }
 
 function mergedPrs(all: Map<string, Known>): Map<string, MergedPr> {
   const merged = new Map<string, MergedPr>();
-  const add = (url: string, key: string, headRef: string | undefined, id: string) => {
-    const m = merged.get(key) ?? { url, key, headRef, owners: new Set<string>() };
+  const add = (url: string, key: string, headRef: string | undefined, id: string, heads: string[]) => {
+    const m = merged.get(key) ?? { url, key, headRef, owners: new Set<string>(), heads: [] };
+    m.heads = [...new Set([...m.heads, ...heads])];
     m.headRef ??= headRef;
     m.owners.add(id);
     merged.set(key, m);
   };
   for (const r of readPrs()) {
     if (r.state !== 'MERGED') continue;
-    for (const id of r.dispatches ?? []) if (all.has(id)) add(r.url, r.key, r.headRefName, id);
+    for (const id of r.dispatches ?? []) if (all.has(id)) add(r.url, r.key, r.headRefName, id, [...(r.observedHeadShas ?? []), r.headSha]);
   }
   for (const k of all.values()) {
     if (k.bucket !== 'done') continue;
@@ -131,7 +132,7 @@ function mergedPrs(all: Map<string, Known>): Map<string, MergedPr> {
     const record = readPr(ref.key);
     // The record wins when both exist: it is the newer observation.
     const state = record?.state ?? ev.pr?.state;
-    if (state === 'MERGED') add(ref.url, ref.key, record?.headRefName ?? ev.pr?.headRefName, k.id);
+    if (state === 'MERGED') add(ref.url, ref.key, record?.headRefName ?? ev.pr?.headRefName, k.id, record ? [...(record.observedHeadShas ?? []), record.headSha] : ev.pr?.headSha ? [ev.pr.headSha] : []);
   }
   return merged;
 }
@@ -143,29 +144,6 @@ export interface ReleasePlan {
   users: Map<string, Known[]>;
   /** Merged-PR worktrees kept, with why. */
   kept: KeptWorktree[];
-}
-
-/** git in a worktree; undefined when git fails. */
-function git(cwd: string, ...args: string[]): string | undefined {
-  try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  } catch {
-    return undefined;
-  }
-}
-
-/** Why a worktree must be kept, or undefined when it is safe to remove. */
-function unsafe(dir: string, fetched: Map<string, boolean>): string | undefined {
-  const status = git(dir, 'status', '--porcelain');
-  if (status === undefined) return 'unpushed work: not a readable git checkout';
-  if (status !== '') return 'unpushed work: uncommitted changes';
-  const common = git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir') ?? dir;
-  // The fetch takes turns with runner allocations in the same repo (#127).
-  if (!fetched.has(common)) fetched.set(common, withRepoLockSync(dir, () => git(dir, 'fetch', '--quiet', 'origin')) !== undefined);
-  if (!fetched.get(common)) return 'unpushed work: fetch failed, remote state unknown';
-  const remote = git(dir, 'branch', '-r', '--contains', 'HEAD');
-  if (remote === undefined || remote === '') return 'unpushed work: HEAD is not on the remote';
-  return undefined;
 }
 
 /**
@@ -231,7 +209,8 @@ export function planMergeRelease(now = Date.now(), batch = Infinity): ReleasePla
     if (![...c.chain].every((id) => finished(all.get(id))) || !users.every((k) => finished(k))) continue;
     checked++;
     const dir = worktreePath(o);
-    const why = unsafe(dir, fetched);
+    const repoKey = users.map((k) => storedDescriptor(k.id, k.lane)?.repo).find(Boolean);
+    const why = mergedWorktreeUnsafe(dir, c.pr.heads, loadConfig().repos[repoKey ?? '']?.trunk ?? 'main', fetched);
     if (why) {
       plan.kept.push({ id: o, reason: why, pr: c.pr.key, at: new Date(now).toISOString() });
       continue;

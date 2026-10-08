@@ -37,6 +37,7 @@ import {
 } from '@lobstah/core';
 import type { CatchRef, FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
+import { mergedCullProofs, mergedWorktreeUnsafe } from './merged-worktree-safety.js';
 
 export interface CullItem {
   kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report' | 'decision' | 'release';
@@ -141,16 +142,30 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
   const wtRoot = path.join(lobstahHome(), 'worktrees');
   const trapped = trapWorktreeIds(wtRoot);
   const usage = worktreeUsage(opts.keepOpenPrs ? openPr : undefined);
+  const proofs = mergedCullProofs();
+  const fetched = new Map<string, boolean>();
+  const keptUsers = new Set<string>();
+  const keptPrs = new Set<string>();
+  // A batch may defer a worktree after planning. Keep its forge proof until
+  // the checkout is actually gone, not merely scheduled for removal.
+  for (const [owner, proof] of proofs) if (fs.existsSync(path.join(wtRoot, owner))) for (const key of proof.keys) keptPrs.add(key);
   for (const id of idsIn(wtRoot)) {
     if (live.has(id) || trapped.has(id) || usage.live.has(id)) continue;
     // A shared worktree ages from the newest dispatch that used it.
     const doneAt = usage.newest.get(id) ?? doneMtimes.get(id);
     if (doneAt !== undefined && doneAt >= cutoff) continue; // recent catch — keep for attach/swap
     const p = path.join(wtRoot, id);
+    const proof = proofs.get(id);
+    if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) {
+      for (const user of proof.users) { live.add(user); keptUsers.add(user); retainReferences(user, 'work'); retainReferences(user, 'chore'); }
+      for (const key of proof.keys) keptPrs.add(key);
+      continue;
+    }
     if (readTrapAnchor(p)?.createdBy === 'soak' && inspectTrapWorktree(p).reason) continue;
     const from = doneAt ?? fs.statSync(p).mtimeMs;
     items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: measure ? sizing.worktree(p) : 0, ageFrom: from });
   }
+  for (let i = items.length - 1; i >= 0; i--) if (items[i]!.kind === 'done' && keptUsers.has(items[i]!.id)) items.splice(i, 1);
 
   for (const lane of ['work', 'chore'] as Lane[]) {
     const d = laneDirs(lane);
@@ -178,7 +193,7 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
   // PR records for PRs merged or closed longer ago than the window (their
   // last observation is when the terminal state was seen). Open PRs never.
   for (const r of readPrs()) {
-    if (r.state === 'OPEN') continue;
+    if (r.state === 'OPEN' || keptPrs.has(r.key)) continue;
     const seen = Date.parse(r.observedAt) || now;
     if (seen < cutoff) items.push({ kind: 'pr', id: r.key, target: r.key, ageDays: Math.floor((now - seen) / DAY), bytes: size(prRecordFile(r.key)), ageFrom: seen });
   }
@@ -335,6 +350,8 @@ export function limitBatch(items: CullItem[], maxGroups: number): { batch: CullI
  * and no sizing: the guard reads free space after each removal instead.
  */
 export function planPressureCull(now = Date.now()): CullItem[] {
+  const proofs = mergedCullProofs();
+  const fetched = new Map<string, boolean>();
   const live = new Set<string>();
   const doneMtimes = new Map<string, number>();
   for (const lane of ['work', 'chore'] as Lane[]) {
@@ -353,6 +370,8 @@ export function planPressureCull(now = Date.now()): CullItem[] {
   for (const id of idsIn(wtRoot)) {
     if (live.has(id)) continue;
     const p = path.join(wtRoot, id);
+    const proof = proofs.get(id);
+    if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) continue;
     if (readTrapAnchor(p)?.createdBy === 'soak' && inspectTrapWorktree(p).reason) continue;
     const from = usage.newest.get(id) ?? doneMtimes.get(id) ?? fs.statSync(p).mtimeMs;
     items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: 0, ageFrom: from });
