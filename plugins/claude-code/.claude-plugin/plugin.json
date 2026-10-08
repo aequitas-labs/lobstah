@@ -1,5 +1,8 @@
 {
   "name": "lobstah",
+  "displayName": "lobstah",
+  "privacyPolicyUrl": "https://github.com/aequitas-labs/lobstah/blob/main/PRIVACY.md",
+  "supportUrl": "https://github.com/aequitas-labs/lobstah/issues",
   "description": "Run a fleet of supervised coding agents from one session: dispatch work, get woken when something needs you, never watch the water.",
   "version": "0.6.10",
   "author": {

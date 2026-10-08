@@ -106,6 +106,18 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(manifest.interface.developerName).toBe('aequitas labs');
   });
 
+  it('both directory listings use the lowercase brand and shared privacy/support links', () => {
+    const claude = JSON.parse(read('plugins/claude-code/.claude-plugin/plugin.json'));
+    const codex = JSON.parse(read('plugins/codex/.codex-plugin/plugin.json'));
+    expect(claude.displayName).toBe('lobstah');
+    expect(codex.interface.displayName).toBe(claude.displayName);
+    expect(claude.privacyPolicyUrl).toBe('https://github.com/aequitas-labs/lobstah/blob/main/PRIVACY.md');
+    expect(claude.supportUrl).toBe('https://github.com/aequitas-labs/lobstah/issues');
+    expect(codex.interface.privacyPolicyURL).toBe(claude.privacyPolicyUrl);
+    expect(codex.interface.supportURL).toBe(claude.supportUrl);
+    expect(fs.statSync(`${root}/PRIVACY.md`).isFile()).toBe(true);
+  });
+
   it('both plugins expose the same four skills and no commands; Claude mentions are namespaced', () => {
     for (const plugin of ['claude-code', 'codex']) {
       expect(fs.existsSync(`${root}/plugins/${plugin}/commands`), plugin).toBe(false);

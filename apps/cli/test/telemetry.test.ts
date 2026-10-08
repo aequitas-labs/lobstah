@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { TELEMETRY_FIELDS, TELEMETRY_NOTICE } from '@lobstah/core';
+import { TELEMETRY_FIELDS } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -46,11 +46,12 @@ describe('lobstah telemetry', () => {
     expect(r.stderr).not.toContain('lobstah telemetry');
   });
 
-  it('PRIVACY.md quotes the notice word for word and documents every field', () => {
+  it('the policy points to current telemetry output, controls and source', () => {
     const privacy = fs.readFileSync(fileURLToPath(new URL('../../../PRIVACY.md', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
-    const unindented = privacy.replace(/^ {2}/gm, '');
-    expect(unindented).toContain(TELEMETRY_NOTICE);
-    for (const field of TELEMETRY_FIELDS) expect(privacy).toContain(`| \`${field}\` |`);
-    expect(privacy).toContain('unknown provenance, stay local');
+    expect(privacy).toContain('lobstah telemetry show');
+    expect(privacy).toContain('lobstah telemetry disable');
+    expect(privacy).toContain('lobstah telemetry status');
+    expect(privacy).toContain('(packages/core/src/telemetry.ts)');
+    expect(privacy).toContain('(services/telemetry/src/index.ts)');
   });
 });
