@@ -4,6 +4,7 @@ import { decisionFileUrl } from '../../../src/glass-diff.js';
 import type { DecisionCard } from '../../../src/glass-diff.js';
 import {
   addFiles,
+  HOTKEY_MAX,
   closeDecision,
   dismissAlert,
   markViewed,
@@ -54,15 +55,20 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
   const text = draft?.text ?? '';
   const files = draft?.files ?? [];
   const sending = !!draft?.sending;
+  // 1..N choose an option, N+1 the text field; only 1–9 are keys.
+  const hotkey = (i: number) => (i + 1 <= HOTKEY_MAX ? String(i + 1) : undefined);
+  const textKey = hotkey(options.length);
   return [
     options.length > 0 &&
-      html`<div class="doptions">${options.map(
-        (o) =>
-          html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} disabled=${sending} onClick=${() => toggleOption(key, o)}>${o}</button>`,
-      )}</div>`,
-    html`<textarea
+      html`<div class="doptions">${options.map((o, i) => {
+        const k = hotkey(i);
+        return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => toggleOption(key, o)}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dlabel">${o}</span></button>`;
+      })}</div>`,
+    html`<div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
       class="danswer"
       rows="2"
+      aria-keyshortcuts=${textKey}
+      aria-label=${options.length ? 'Your answer, in your own words' : 'Your answer'}
       placeholder=${options.length ? 'Add to your answer, or answer in your own words' : 'Your answer'}
       value=${text}
       disabled=${sending}
@@ -72,7 +78,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         setDraft(key, { text: el.value, error: undefined });
       }}
       onPaste=${(e: ClipboardEvent) => void pasteImages(key, e)}
-    ></textarea>`,
+    ></textarea></div>`,
     html`<div class="dfoot">
       <label class="btn dattach" title="attach images or files">attach<input type="file" multiple accept=${accept} disabled=${sending} onChange=${(
         e: Event,
@@ -150,6 +156,21 @@ export function DeckDecisions({
   return html`<section class="decisions"><h2>decisions${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`}</h2>${body}</section>`;
 }
 
+/** The modal's key legend: what each key does here. */
+function legend(options: number) {
+  const pick = Math.min(options, HOTKEY_MAX);
+  const text = options + 1 <= HOTKEY_MAX ? String(options + 1) : undefined;
+  const parts = [
+    pick > 0 && [html`<kbd>1</kbd>`, pick > 1 && ['–', html`<kbd>${pick}</kbd>`], ' choose'],
+    text && [html`<kbd>${text}</kbd>`, ' write'],
+    pick > 0 && [html`<kbd>Enter</kbd>`, ' on a chosen option sends'],
+    [html`<kbd>←</kbd>`, ' ', html`<kbd>→</kbd>`, ' previous / next'],
+    [html`<kbd>Esc</kbd>`, ' leaves the text box, then closes'],
+    [html`<kbd>d</kbd>`, ' opens decisions anywhere'],
+  ].filter(Boolean);
+  return html`<div class="dlegend dim">${parts.flatMap((p, i) => (i ? [' · ', p] : [p]))}</div>`;
+}
+
 /** Elements a Tab press may land on inside the modal. */
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -207,7 +228,7 @@ export function DecisionModal({
   const shell = (label: string, body: unknown, shown = '') =>
     html`<div id="doverlay" class="open" onClick=${(e: Event) => e.target === e.currentTarget && closeDecision()}>
       <div class="modal dmodal" role="dialog" aria-modal="true" aria-labelledby="dmodal-title" tabindex="-1" ref=${box} onKeyDown=${trap} data-decision=${shown}>
-        <button type="button" class="x" aria-label="close" onClick=${closeDecision}>×</button>
+        <button type="button" class="x" aria-label="close" aria-keyshortcuts="Escape" onClick=${closeDecision}>×</button>
         <h3 id="dmodal-title" class="sr-only">${label}</h3>
         ${body}
       </div>
@@ -222,9 +243,9 @@ export function DecisionModal({
   return shell(
     c.kind === 'decision' ? c.title : c.note,
     html`<div class="dnav">
-        <button type="button" class="btn dprev" aria-label="previous decision" disabled=${i <= 0} onClick=${() => stepDecision(-1)}>‹ prev</button>
+        <button type="button" class="btn dprev" aria-label="previous decision" aria-keyshortcuts="ArrowLeft" disabled=${i <= 0} onClick=${() => stepDecision(-1)}>‹ prev</button>
         <span class="dpos" aria-live="polite">${i + 1} of ${order.length}</span>
-        <button type="button" class="btn dnext" aria-label="next decision" disabled=${i >= order.length - 1} onClick=${() => stepDecision(1)}>next ›</button>
+        <button type="button" class="btn dnext" aria-label="next decision" aria-keyshortcuts="ArrowRight" disabled=${i >= order.length - 1} onClick=${() => stepDecision(1)}>next ›</button>
       </div>
       <div class="dtop">
         ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
@@ -233,7 +254,8 @@ export function DecisionModal({
       </div>
       ${c.kind === 'decision' && c.detail.trim() && html`<${Markdown} text=${c.detail} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`}
       ${c.kind === 'decision' && attachments(c.key, c.attachments)}
-      ${draft?.sent ? html`<div class="danswered ok">answered · ${draft.sent}</div>` : answerForm(c, draft, extensions.join(','))}`,
+      ${draft?.sent ? html`<div class="danswered ok">answered · ${draft.sent}</div>` : answerForm(c, draft, extensions.join(','))}
+      ${legend(c.kind === 'decision' ? c.options.length : 0)}`,
     c.key,
   );
 }
@@ -254,7 +276,7 @@ export function DecisionAlert({ unread, dismissed }: { unread: DecisionCard[]; d
   return html`<div class="dalert-live" role="status" aria-live="polite">${
     show &&
     html`<div class="dalert">
-      <button type="button" class="dalert-open" onClick=${() => openDecision()}><span class="dcount" aria-hidden="true">${n}</span> <span>${words}</span></button>
+      <button type="button" class="dalert-open" aria-keyshortcuts="d" onClick=${() => openDecision()}><span class="dcount" aria-hidden="true">${n}</span> <span>${words}</span></button>
       <button type="button" class="dx" aria-label="dismiss" title="dismiss" onClick=${dismissAlert}>×</button>
     </div>`
   }</div>`;

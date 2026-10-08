@@ -162,7 +162,7 @@ describe('glass: the decision modal', () => {
     expect(text(md.querySelector('h1'))).toBe('Context');
     expect(md.querySelector('img')!.getAttribute('src')).toBe(`/decision/${encodeURIComponent(KEY)}/files/tray.png`);
     expect(text(c.querySelector('.dfiles .dfile'))).toContain('notes.txt');
-    expect([...c.querySelectorAll('.doptions .dopt')].map(text)).toEqual(['v1', 'v2']);
+    expect([...c.querySelectorAll('.doptions .dopt .dlabel')].map(text)).toEqual(['v1', 'v2']);
     expect((c.querySelector('textarea.danswer') as HTMLTextAreaElement).value).toBe('');
     expect(c.querySelector('.dattach input[type="file"]')!.getAttribute('accept')).toBe('.png,.txt');
     expect(text(c.querySelector('.dsend'))).toBe('Send');
@@ -215,7 +215,7 @@ describe('glass: the decision modal', () => {
     expect(card(g, KEY)).toBeTruthy();
     expect(text(card(g, KEY)!.querySelector('.dpos'))).toBe('1 of 1');
     expect(text(row(g, Q)!.querySelector('.dstate'))).toBe('answered · 8080');
-    await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b) === 'v2'));
+    await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === 'v2'));
     await click(g, card(g, KEY)!.querySelector('.dsend'));
     expect(JSON.parse(answers(g)[1]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option: 'v2', files: [] } });
     const done = g.$('.dmodal .ddone')!;
@@ -296,6 +296,134 @@ describe('glass: the decision modal', () => {
     expect(row(g, KEY)!.className).toContain('focus');
     expect(card(g, KEY)).toBeTruthy();
     expect(g.$('#overlay')!.className).not.toBe('open');
+  });
+});
+
+describe('glass: decision hotkeys', () => {
+  type KeyOpts = { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; isComposing?: boolean };
+  const press = async (g: GlassDom, opts: KeyOpts, target?: Element | null) => {
+    const W = g.window as unknown as { KeyboardEvent: typeof KeyboardEvent };
+    const ev = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...opts });
+    (target ?? g.document.activeElement ?? g.document.body).dispatchEvent(ev);
+    await g.settle();
+    return ev;
+  };
+  const shown = (g: GlassDom) => g.$('.dmodal')?.getAttribute('data-decision');
+
+  it('d opens the decision modal at the oldest unread decision, else the oldest open one; with none open it does nothing', async () => {
+    const d = fleet();
+    // The question (10m) is the oldest; once viewed, d goes to the oldest unread one instead.
+    d.attention = d.attention.map((a) => (a.key === Q ? { ...a, viewedAt: ago(60_000) } : a));
+    const g = await page(d, { hash: '#prs', post: ok });
+    await press(g, { key: 'd' });
+    expect(shown(g)).toBe(KEY);
+    await key(g, 'Escape');
+    // Every one viewed: the oldest open one.
+    d.decisions = d.decisions.map((x) => ({ ...x, viewedAt: ago(30_000) }));
+    g.serve(d);
+    await g.poll();
+    await press(g, { key: 'd' });
+    expect(shown(g)).toBe(Q);
+    // None open: nothing happens.
+    const empty = await page(emptyFleet(), { post: ok });
+    await press(empty, { key: 'd' });
+    expect(empty.$('.dmodal')).toBeNull();
+    expect(empty.$('#overlay')!.className).not.toBe('open');
+  });
+
+  it('d is ignored while typing in a field, with cmd/ctrl/alt held, during IME composition, and under another modal', async () => {
+    const g = await page(everyAttentionFleet(), { post: ok });
+    const search = g.$('input[type="search"], .controls input[type="text"], .controls input')!;
+    expect(search).toBeTruthy();
+    await press(g, { key: 'd' }, search);
+    expect(g.$('.dmodal')).toBeNull();
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }, { isComposing: true }]) {
+      const ev = await press(g, { key: 'd', ...mod });
+      expect(ev.defaultPrevented).toBe(false);
+      expect(g.$('.dmodal')).toBeNull();
+    }
+    await g.go('#traps');
+    await click(g, g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1')));
+    expect(g.$('#overlay')!.className).toBe('open');
+    await press(g, { key: 'd' });
+    expect(g.$('.dmodal')).toBeNull();
+    expect(g.$('#overlay')!.className).toBe('open');
+  });
+
+  it('a number selects that option and focuses it without sending; the next number focuses the text field; hints show 1..N and N+1', async () => {
+    const g = await page(fleet(), { post: ok });
+    await show(g, KEY);
+    const c = card(g, KEY)!;
+    expect([...c.querySelectorAll('.dopt .dkey')].map(text)).toEqual(['1', '2']);
+    expect([...c.querySelectorAll('.dopt')].map((b) => b.getAttribute('aria-keyshortcuts'))).toEqual(['1', '2']);
+    expect(text(c.querySelector('.danswer-wrap .dkey'))).toBe('3');
+    expect(c.querySelector('textarea')!.getAttribute('aria-keyshortcuts')).toBe('3');
+    expect(text(c.querySelector('.dlegend'))).toContain('Enter on a chosen option sends');
+    await press(g, { key: '2' });
+    expect(text(card(g, KEY)!.querySelector('.dopt.on .dlabel'))).toBe('v2');
+    expect(g.document.activeElement).toBe(card(g, KEY)!.querySelector('.dopt.on'));
+    // Pressing it again keeps it chosen: a number selects, it never toggles or sends.
+    await press(g, { key: '2' }, g.$('.dmodal'));
+    expect(text(card(g, KEY)!.querySelector('.dopt.on .dlabel'))).toBe('v2');
+    expect(answers(g)).toEqual([]);
+    await press(g, { key: '3' }, g.$('.dmodal'));
+    expect(g.document.activeElement).toBe(card(g, KEY)!.querySelector('textarea'));
+    // Numbers typed in the text field are text, not keys.
+    const box = card(g, KEY)!.querySelector('textarea')!;
+    const typed = await press(g, { key: '1' }, box);
+    expect(typed.defaultPrevented).toBe(false);
+    expect(text(card(g, KEY)!.querySelector('.dopt.on .dlabel'))).toBe('v2');
+    expect(answers(g)).toEqual([]);
+    // A raw question has no options: 1 is its text field.
+    await key(g, 'Escape');
+    await key(g, 'Escape');
+    await show(g, Q);
+    expect(text(card(g, Q)!.querySelector('.danswer-wrap .dkey'))).toBe('1');
+    await press(g, { key: '1' }, g.$('.dmodal'));
+    expect(g.document.activeElement).toBe(card(g, Q)!.querySelector('textarea'));
+  });
+
+  it('Enter on the selected option sends it and the next decision loads; arrows still step; Esc leaves the text field, then closes', async () => {
+    const g = await page(fleet(), { post: ok });
+    await show(g, KEY);
+    // Arrows step as before, and number keys do not change that.
+    await press(g, { key: 'ArrowLeft' }, g.$('.dmodal'));
+    expect(shown(g)).toBe(Q);
+    await press(g, { key: 'ArrowRight' }, g.$('.dmodal'));
+    expect(shown(g)).toBe(KEY);
+    // Enter with nothing chosen sends nothing.
+    await press(g, { key: 'Enter' }, g.$('.dmodal'));
+    expect(answers(g)).toEqual([]);
+    await press(g, { key: '1' }, g.$('.dmodal'));
+    const ev = await press(g, { key: 'Enter' });
+    expect(ev.defaultPrevented).toBe(true);
+    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option: 'v1', files: [] } });
+    // The next open one loaded.
+    expect(shown(g)).toBe(Q);
+    // Esc in the text field leaves it first; the modal stays.
+    await press(g, { key: '1' }, g.$('.dmodal'));
+    const box = card(g, Q)!.querySelector('textarea')!;
+    expect(g.document.activeElement).toBe(box);
+    await key(g, 'Escape', box);
+    expect(g.document.activeElement).not.toBe(box);
+    expect(shown(g)).toBe(Q);
+    await key(g, 'Escape');
+    expect(g.$('.dmodal')).toBeNull();
+  });
+
+  it('more than nine options: keys and hints cover the first nine only, and the text field has no key', async () => {
+    const d = fleet();
+    const options = Array.from({ length: 11 }, (_, i) => `o${i + 1}`);
+    d.decisions = d.decisions.map((x) => ({ ...x, options }));
+    const g = await page(d, { post: ok });
+    await show(g, KEY);
+    const c = card(g, KEY)!;
+    expect([...c.querySelectorAll('.dopt .dkey')].map(text)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+    expect(c.querySelector('.danswer-wrap .dkey')).toBeNull();
+    expect(c.querySelector('textarea')!.hasAttribute('aria-keyshortcuts')).toBe(false);
+    await press(g, { key: '9' }, g.$('.dmodal'));
+    expect(text(card(g, KEY)!.querySelector('.dopt.on .dlabel'))).toBe('o9');
+    expect(answers(g)).toEqual([]);
   });
 });
 

@@ -91,6 +91,39 @@ export function stepDecision(dir: -1 | 1): void {
 
 export const closeDecision = (): void => setState({ decisionModal: null });
 
+/** Hotkeys reach the first nine answers only: 1–9. */
+export const HOTKEY_MAX = 9;
+
+/** The decision the modal shows now, if any. */
+function shownDecision() {
+  const key = getState().decisionModal?.key;
+  return key ? modalOrder().find((c) => c.key === key) : undefined;
+}
+
+/**
+ * A number key in the decision modal: 1..N selects option N (and focuses
+ * it), and N+1 focuses the text field (the open answer counts as an
+ * option). Only 1–9 are keys. It never sends: Enter on the selected option,
+ * or Send, does. Returns whether the key did something.
+ */
+export function decisionNumberKey(n: number): boolean {
+  const c = shownDecision();
+  if (!c || n < 1 || n > HOTKEY_MAX) return false;
+  const draft = getState().drafts[c.key];
+  if (draft?.sending || draft?.sent) return false;
+  const options = c.kind === 'decision' ? c.options : [];
+  if (n <= options.length) {
+    setDraft(c.key, { option: options[n - 1], error: undefined });
+    document.querySelectorAll<HTMLElement>('.dmodal .dopt')[n - 1]?.focus();
+    return true;
+  }
+  if (n === options.length + 1) {
+    document.querySelector<HTMLElement>('.dmodal textarea.danswer')?.focus();
+    return true;
+  }
+  return false;
+}
+
 /**
  * The modal displayed a decision: record its first view on the server
  * (`decision-viewed`), once per page. State only: it answers nothing.

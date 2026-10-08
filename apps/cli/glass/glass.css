@@ -1108,6 +1108,44 @@ a.lob {
   border-radius: var(--radius);
   font: inherit;
 }
+/* A key hint: the number that chooses an option or focuses the text box. */
+.dkey,
+.dlegend kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  text-align: center;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 4px;
+  border: 1px solid var(--line-hover);
+  border-radius: 4px;
+  color: var(--dim);
+  background: var(--inset);
+}
+.btn.dopt .dkey {
+  margin-right: 6px;
+}
+.btn.dopt.on .dkey {
+  border-color: var(--link);
+  color: var(--fg);
+}
+.danswer-wrap {
+  position: relative;
+}
+.danswer-wrap .dkey-text {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  pointer-events: none;
+}
+.dlegend {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.9;
+}
 .danswer:focus {
   outline: none;
   border-color: var(--line-hover);
