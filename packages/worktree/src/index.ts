@@ -306,6 +306,50 @@ export async function allocate(repo: RepoConfig, id: string, fromRemoteBranch = 
   return dir;
 }
 
+/** How `restoreWorktree` brought a trap's checkout back. */
+export interface RestoredWorktree {
+  dir: string;
+  branch: string;
+  /** True when the branch was created at the protected ref; false when an existing branch was checked out. */
+  createdBranch: boolean;
+  /** The remote branch set as upstream, when one exists. */
+  upstream?: string;
+}
+
+/**
+ * Add a trap's checkout back at `dir` from its protected ref. An existing
+ * local branch is checked out only when it already contains the ref's
+ * commit (it holds the same work or newer); a branch that moved elsewhere
+ * refuses rather than being reset. A missing branch is created at the ref,
+ * with `origin/<branch>` as its upstream when that exists. The repo's
+ * `setup` commands run in the new checkout.
+ */
+export async function restoreWorktree(repo: RepoConfig, dir: string, opts: { branch: string; ref: string }): Promise<RestoredWorktree> {
+  if (fs.existsSync(dir)) throw new Error(`${dir} already exists — a restore never writes over a checkout`);
+  const commit = await git(repo.path, 'rev-parse', '--verify', '-q', `${opts.ref}^{commit}`);
+  const local = await tryGit(repo.path, 'rev-parse', '--verify', '-q', `refs/heads/${opts.branch}^{commit}`);
+  let createdBranch = false;
+  await oneAtATime(repo.path, async () => {
+    if (local.ok) {
+      const contains = await tryGit(repo.path, 'merge-base', '--is-ancestor', commit, `refs/heads/${opts.branch}`);
+      if (!contains.ok) {
+        throw new Error(`branch ${opts.branch} no longer contains the trap's revision ${commit.slice(0, 12)} — inspect it; a throw never resets a branch`);
+      }
+      await gitShared(repo.path, 'worktree', 'add', dir, opts.branch);
+    } else {
+      await gitShared(repo.path, 'worktree', 'add', '--no-track', '-b', opts.branch, dir, commit);
+      createdBranch = true;
+    }
+  });
+  let upstream: string | undefined;
+  if ((await tryGit(dir, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}')).ok === false) {
+    const remote = await tryGit(repo.path, 'rev-parse', '--verify', '-q', `refs/remotes/origin/${opts.branch}`);
+    if (remote.ok && (await tryGit(dir, 'branch', '--set-upstream-to', `origin/${opts.branch}`)).ok) upstream = `origin/${opts.branch}`;
+  }
+  await runSetup(repo, dir);
+  return { dir, branch: opts.branch, createdBranch, ...(upstream ? { upstream } : {}) };
+}
+
 /**
  * Recover an allocation whose dispatch record was lost or never written.
  * The exact dispatch branch in a linked checkout of the configured repo is

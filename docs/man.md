@@ -1178,6 +1178,7 @@ place.
 lobstah man roster                                  # every trap the roster keeps
 lobstah man roster set <trap> --harness codex --model <m> --terminal iterm --config effort=high
                                                     # save how a throw starts it; `default` or `key=` clears
+lobstah man throw <trap> [--timeout <secs>]         # bring one trap back; wait until it listens
 lobstah man throw --plan <trap>...                  # what a throw would do for these traps
 lobstah man throw --plan --all                      # ... for every eligible trap in your grounds
 lobstah man throw --plan --repo <key>               # ... for one repo's traps
@@ -1205,6 +1206,30 @@ terminal come from the saved profile, else from the trap's last sign-on. The
 terminal is the profile's, else `[soak].terminal`, else the app the trap last
 signed on from, else Terminal.app. `--all` and `--repo` stay inside the
 grounds: `--grounds`, else the caller's helm grounds, else every repo.
+
+`man throw <trap>` does what its plan row says, for one trap (the helm's
+verb). A `skip` refuses: a trap that is live, or already starting, is never
+launched twice. Otherwise:
+
+1. It reserves the trap under its **own** id and name, in its own worktree.
+   The reservation is created exclusively, so a second throw refuses until
+   the first returns or times out. `--for <name>` keeps working throughout.
+2. A `recreate` checkout is added back at `refs/lobstah/traps/<id>` on the
+   trap's recorded branch, with the repo's `setup`. An existing branch is
+   used only when it still contains that revision; a throw never resets a
+   branch. A kept checkout is used as it is, dirty or not.
+3. It opens the start command in the terminal (Terminal.app or iTerm2,
+   through AppleScript, macOS only). `resume` reopens the saved session from
+   the directory its history is keyed by (Claude keys transcripts by the
+   directory the session started in); `cold` starts a new session in the
+   worktree. The profile's model and config become harness flags (`--model`,
+   `--effort`, `--permission-mode` for Claude; `-m`, `model_reasoning_effort`
+   for Codex); a setting with no flag is named as not applied. The first
+   prompt redeems the ticket, so the session signs on as the same trap.
+4. It returns when the trap has signed on and parked, and prints whether it
+   resumed or started cold, and why. Past `--timeout` (default 180 seconds)
+   it withdraws the reservation, so a late session cannot take the trap,
+   posts `trap-start-failed`, and leaves the roster unchanged.
 
 ### The sign-on title
 

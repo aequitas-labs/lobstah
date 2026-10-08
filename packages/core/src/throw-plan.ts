@@ -39,6 +39,8 @@ export interface ThrowPlanRow {
   branch?: string;
   revision?: string;
   sessionId?: string;
+  /** resume: the directory the harness must start in to find the session (Claude keys transcripts by it). */
+  resumeFrom?: string;
   /** Unread messages held for the trap. */
   held?: number;
 }
@@ -107,7 +109,7 @@ function startMode(
   harness: string,
   cwds: string[],
   opts: ThrowPlanOptions,
-): { action: 'resume' | 'cold'; why: string } {
+): { action: 'resume' | 'cold'; why: string; from?: string } {
   const sid = short(entry.sessionId);
   if (harness !== entry.harness) {
     return { action: 'cold', why: `profile harness ${harness} differs from the ${entry.harness} session ${sid}; a session resumes only under the harness that wrote it` };
@@ -117,7 +119,7 @@ function startMode(
   if (harness === 'claude') {
     const home = opts.claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
     const found = claudeTranscript(home, entry.sessionId, cwds);
-    if (found?.found === 'here') return { action: 'resume', why: `claude --resume ${sid} from ${found.from}` };
+    if (found?.found === 'here') return { action: 'resume', why: `claude --resume ${sid} from ${found.from}`, from: found.from };
     if (found) return { action: 'cold', why: `the transcript of session ${sid} is under a directory this trap does not know` };
     return { action: 'cold', why: `no saved Claude history for session ${sid}` };
   }
@@ -126,7 +128,7 @@ function startMode(
     if (!codexRolloutFile(entry.sessionId, home)) return { action: 'cold', why: `no saved Codex rollout for thread ${sid}` };
     const desktop = codexDesktopThread(entry.sessionId, home);
     if (desktop) return { action: 'cold', why: `thread ${sid} was written by ${desktop}; the CLI does not resume desktop threads` };
-    return { action: 'resume', why: `codex resume ${sid}` };
+    return { action: 'resume', why: `codex resume ${sid}`, from: entry.worktree };
   }
   return { action: 'cold', why: `no resume support for harness ${harness}` };
 }
@@ -192,7 +194,7 @@ function planEntry(entry: RosterEntry, cfg: Config, opts: ThrowPlanOptions): Thr
 
   const mode = startMode(entry, harness, [entry.worktree, repo.path], opts);
   const where = checkout === 'kept' ? 'kept checkout' : `checkout recreated from ${trapRef(entry.trapId)}`;
-  return { ...done(mode.action, `${mode.why}; ${where}`), checkout };
+  return { ...done(mode.action, `${mode.why}; ${where}`), checkout, ...(mode.from ? { resumeFrom: mode.from } : {}) };
 }
 
 /** A registration with no roster record yet (signed on before the roster existed). */

@@ -149,7 +149,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:tend': { flags: { '--json': {} } },
   'man:throw': {
     flags: {
-      '--plan': { required: true },
+      '--plan': {},
+      '--timeout': { value: '<secs>' },
       '--all': {},
       '--repo': { value: '<key>' },
       '--grounds': { value: '<name>' },
@@ -322,10 +323,10 @@ under the given directories.`,
   'man:manual': `The lobstah man's manual.`,
   'man:tend': `The whole-fleet pass: verdict, unanswered questions, each work item's chain,
 PR, and merge gate. Pure disk read.`,
-  'man:throw': `What a throw would do per trap, from the roster: resume its session, start
-cold (same name, id, checkout; says why), skip (live, starting, forgotten), or
-unresolved (repo, checkout, or record missing). --all: every eligible trap in the
-grounds (--grounds, else your helm's, else all); --repo narrows. --plan only: launches nothing.`,
+  'man:throw': `Bring one rostered trap back under its own id and name, and wait until it
+listens: resume its session or start cold (says why), in its checkout (recreated
+from refs/lobstah/traps/<id> if gone), from its profile, in Terminal.app or iTerm2.
+A trap live or starting refuses. --plan only shows the plan (names, --all, --repo).`,
   'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull: repo,
 harness, session, revision (refs/lobstah/traps/<id>), saved profile. set (the
 helm's) saves how a throw starts it; default or key= clears a field.`,
