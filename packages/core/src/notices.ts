@@ -1,4 +1,4 @@
-import * as fs from 'node:fs';
+import fs from 'node:fs';
 import * as path from 'node:path';
 import { lobstahHome } from './paths.js';
 import { readStackEpochs, stackReadyEnabled, stackStateHash } from './pr-stacks.js';
@@ -59,6 +59,8 @@ export interface Notice {
   text: string;
   /** The dispatch, trap, or message this is about, when one exists. */
   refId?: string;
+  /** Current top PR for a stack; its stable refId is not its click target. */
+  url?: string;
   /** Repo key, so a helm can scope notices to its grounds. */
   repo?: string;
   /** The session whose action caused it — consumed as usual, but never
@@ -94,6 +96,7 @@ export function postNotice(n: {
   kind: NoticeKind;
   text: string;
   refId?: string;
+  url?: string;
   repo?: string;
   /** The session whose action caused this — its own wakes skip the echo. */
   by?: string;
@@ -112,13 +115,14 @@ export function postNotice(n: {
       return undefined; // already posted
     }
   }
-  const seq = `${String(Date.now()).padStart(15, '0')}-${process.pid}-${counter++}`;
+  const seq = `${String(Date.now()).padStart(15, '0')}-${process.pid}-${String(counter++).padStart(8, '0')}`;
   const notice: Notice = {
     seq,
     kind: n.kind,
     at: new Date().toISOString(),
     text: n.text,
     refId: n.refId,
+    ...(n.url ? { url: n.url } : {}),
     repo: n.repo,
     by: n.by,
     ...(n.quiet ? { quiet: true } : {}),
@@ -142,7 +146,15 @@ export function listNotices(limit = 20): Notice[] {
   return files
     .sort()
     .slice(-limit)
-    .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Notice);
+    .flatMap((f) => {
+      try { return [JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Notice]; }
+      catch (error) {
+        // A stack shape may have been superseded since readdir. Readers
+        // must not fail while the watch atomically updates its current item.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw error;
+      }
+    });
 }
 
 /**

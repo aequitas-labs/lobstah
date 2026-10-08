@@ -137,7 +137,7 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
     landed,
     arisen,
     standing,
-    stacks: tend.stacks.filter((s) => inGrounds(repoKey(loadConfig(), s.repo)) && s.readiness).map((s) => s.readiness!.text),
+    stacks: tend.stacks.filter((s) => inGrounds(repoKey(loadConfig(), s.repo)) && s.readiness).map((s) => `${s.readiness!.text} ${s.readiness!.url}`),
     traps,
     verdict: tend.verdict,
     counts: tend.counts,

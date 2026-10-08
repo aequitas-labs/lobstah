@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import * as fs from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, listNotices, postNotice, unseenNotices } from '../src/index.js';
@@ -12,11 +12,30 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 
 describe('helm notices', () => {
+  it('tolerates a superseded stack shape removed between listing and reading', () => {
+    const stale = postNotice({ kind: 'stack-ready', text: 'old shape' })!;
+    postNotice({ kind: 'stack-ready', text: 'current shape' });
+    const read = fs.readdirSync;
+    const dir = path.join(home, 'notices');
+    vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: Parameters<typeof read>) => {
+      const files = read(...args);
+      if (String(args[0]) === dir) fs.rmSync(path.join(dir, `${stale.seq}.json`), { force: true });
+      return files;
+    }) as typeof read);
+    expect(listNotices().map((n) => n.text)).toEqual(['current shape']);
+  });
+  it('keeps delivery sequence order when several stack transitions share a millisecond', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-08T12:00:00Z'));
+    for (let n = 0; n < 20; n++) postNotice({ kind: 'bait-orphaned', text: String(n) });
+    expect(unseenNotices(true).map((n) => n.text)).toEqual(Array.from({ length: 20 }, (_, n) => String(n)));
+    expect(unseenNotices(true)).toEqual([]);
+  });
   it('posts in order and lists the recent tail', () => {
     postNotice({ kind: 'trap-signed-on', text: 'one' });
     postNotice({ kind: 'trap-listening', text: 'two' });
@@ -53,7 +72,7 @@ describe('helm notices', () => {
     expect(unseenNotices(false)).toEqual([]);
     expect(unseenNotices(true)).toEqual([]);
     expect(listNotices().map((n) => n.kind)).toEqual(['trap-starting', 'trap-signed-on', 'trap-listening', 'trap-stowed']);
-    // Notice ids order by millisecond, then an unpadded counter: step past this millisecond so the cursor's order holds.
+    // Simulate a later event after consuming the initial quiet batch.
     const ms = Date.now();
     while (Date.now() === ms) {
       // wait for the next millisecond

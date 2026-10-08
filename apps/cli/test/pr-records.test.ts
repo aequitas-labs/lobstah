@@ -147,15 +147,15 @@ describe('stacks and kinds from records alone (no dispatch evidence)', () => {
     expect(prs.find((p) => p.number === 27)).toMatchObject({ blockedBy: 26, dispatchIds: [], repo: 'acme/lobstah' });
   });
 
-  it('tend: the stack line, pr:draft for #36, quiet ready children and one stack item', () => {
+  it('tend: the stack line, pr:draft for #36, member details inside one stack item', () => {
     fs.writeFileSync(path.join(home, 'config.toml'), 'readySettleSecs = 0\nattentionKinds = ["pr:ready", "pr:draft"]\n');
     realStack();
     const r = buildTendReport();
     expect(renderTend(r)).toContain('stack #26 → #27 → #29 → #32 → #33: next #26');
     const kinds = r.attention.map((a) => `${a.kind} ${a.number}`);
     expect(kinds).toContain('pr:draft 36');
-    expect(kinds).toContain('pr:ready 26');
-    for (const n of [26, 27, 29, 32, 33]) expect(r.attention.find((a) => a.number === n)).toMatchObject({ kind: 'pr:ready', quiet: true });
+    expect(r.attention.some((a) => a.kind === 'pr:ready')).toBe(false);
+    expect(r.attention.find((a) => a.stack)?.stack?.members.map((m) => m.number)).toEqual([26, 27, 29, 32, 33]);
     expect(r.attention.filter((a) => a.kind === 'stack-ready')).toHaveLength(1);
     expect(r.attention.find((a) => a.number === 36)).toMatchObject({ key: 'pr:acme/lobstah#36', id: 'pr:acme/lobstah#36', repo: 'acme/lobstah' });
     expect(r.verdict).not.toBe('needs-attention');

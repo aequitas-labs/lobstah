@@ -1,4 +1,4 @@
-import { derivePrStacks, parsePrRef, prBadge, prNewestFirst } from '@lobstah/core';
+import { derivePrStacks, identifyPrStacks, parsePrRef, prBadge, prNewestFirst } from '@lobstah/core';
 import type { GlassPr, GlassPrWatch, GlassStack, PrEvidence, PrRecord } from '@lobstah/core';
 
 /**
@@ -124,7 +124,7 @@ export function deriveGlassPrs(
     (!evidenceByUrl.has(d.pr.url) || evidenceByUrl.get(d.pr.url)!.observedAt < d.pr.observedAt)) {
     evidenceByUrl.set(d.pr.url, d.pr);
   }
-  const readiness = derivePrStacks([...evidenceByUrl.values()], stackOptions);
+  const readiness = identifyPrStacks(derivePrStacks([...evidenceByUrl.values()], stackOptions));
   for (const [id, members] of groupedStacks) {
     const root = members.find((p) => p.key === id)!;
     const ordered: GlassPr[] = [];
@@ -153,6 +153,7 @@ export function deriveGlassPrs(
       nextNumber: eligible?.number, behind: eligible ? open.filter((p) => p.position > eligible.position).length : 0 });
     const status = readiness.find((s) => s.members.some((p) => members.some((m) => p.url === m.url)));
     if (status) stacks.at(-1)!.readiness = {
+      id: status.id, url: status.members.at(-1)!.url,
       ready: status.ready, total: status.members.length, allReady: status.allReady, text: status.text,
     };
   }

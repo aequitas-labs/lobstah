@@ -55,10 +55,13 @@ import {
   readStackEpochs,
   stackReadyEnabled,
   stackStateHash,
-  quietStackTailUrls,
+  identifyPrStacks,
+  humanGatesFor,
+  matchesGate,
   repoKey as forgeRepoKey,
 } from '@lobstah/core';
 import type {
+  AttentionKind,
   ActivityView,
   WaitingView,
   DiskHold,
@@ -190,6 +193,7 @@ export interface TendNotice {
   kind: string;
   ageMins: number;
   text: string;
+  url?: string;
 }
 
 /**
@@ -363,22 +367,10 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
       .map((e) => e.uuid),
   );
   const out: TendAttention[] = [];
-  const stacks = derivePrStacks(observed.map((x) => x.pr), {
+  const stacks = identifyPrStacks(derivePrStacks(observed.map((x) => x.pr), {
     trunk: (repo) => prStackTrunk(cfg, repo), readySettleSecs: cfg.readySettleSecs, now,
-  });
+  }));
   const epochs = readStackEpochs();
-  const quietReady = new Set([...stacks.flatMap((s) => s.members.map((p) => p.url)),
-    ...quietStackTailUrls(observed.map((x) => x.pr), epochs)]);
-  for (const s of stacks.filter((s) => s.allReady)) {
-    const top = s.members.at(-1)!, ref = parsePrRef(top.url)!;
-    const epoch = epochs[s.id];
-    const at = epoch?.ready ? epoch.at : new Date(now).toISOString();
-    const source = observed.find((x) => x.pr.url === top.url)!;
-    out.push({ kind: 'stack-ready', key: `stack:${s.id}`, stateHash: stackStateHash(s, epoch?.epoch),
-      id: source.id, lane: source.lane, verb: 'stack-ready', at, standingSince: at,
-      ageSecs: Math.max(0, Math.round((now - Date.parse(at)) / 1000)), note: s.text,
-      repo: source.dispatch ? repoOf(source.id, source.lane) : forgeRepoKey(cfg, s.repo), prUrl: ref.url });
-  }
   for (const { id, lane, pr, dispatch } of observed) {
     const kinds = prKinds(pr, { readySettleSecs: cfg.readySettleSecs, now });
     if (kinds.length === 0) continue;
@@ -387,6 +379,10 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
     const watchFollowUp = prWatch?.lastFollowUpId;
     const chain = dispatch ? chainOf(id) : [];
     for (const kind of kinds) {
+      if (kind === 'pr:checks' && stacks.some((s) => s.members.some((p) => p.url === pr.url))) {
+        const gates = ['Approval Gate', ...humanGatesFor(readPr(pr.url), ref ? forgeRepoKey(cfg, `${ref.owner}/${ref.repo}`) : undefined)];
+        if (pr.failingChecks?.length === pr.checks.failed && pr.failingChecks.every((c) => matchesGate(c.name, gates))) continue;
+      }
       const human = humanPrAttention(pr, kind, cfg, !!prWatch && !prWatch.done, now);
       if (!human.show) continue;
       const repairCannotAct =
@@ -400,7 +396,6 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
         : conditionSince;
       out.push({
         kind,
-        ...(kind === 'pr:ready' && quietReady.has(pr.url) ? { quiet: true } : {}),
         key: ref?.key ?? pr.url,
         stateHash: prStateHash(pr),
         id,
@@ -422,6 +417,26 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
         ...(pr.review ? { review: pr.review } : {}),
       });
     }
+  }
+  for (const s of stacks) {
+    const members = s.members.map((pr) => {
+      const items = out.filter((a) => a.prUrl === pr.url);
+      return { key: parsePrRef(pr.url)!.key, url: pr.url, number: pr.number,
+        note: items.map((a) => a.note).join('; ') || `#${pr.number} ${prBadge(pr).text}`,
+        kinds: items.map((a) => a.kind) };
+    });
+    const human = out.filter((a) => s.members.some((p) => p.url === a.prUrl) &&
+      a.kind !== 'pr:ready' && a.kind !== 'pr:draft' && cfg.attentionKinds.includes(a.kind as AttentionKind));
+    for (let i = out.length - 1; i >= 0; i--) if (s.members.some((p) => p.url === out[i]!.prUrl)) out.splice(i, 1);
+    const top = s.members.at(-1)!, source = observed.find((x) => x.pr.url === top.url)!;
+    const at = epochs[s.id]?.at ?? s.members[0]!.observedAt;
+    out.push({ kind: 'stack-ready', key: `stack:${s.id}`,
+      stateHash: human.length ? statusStateHash(stackStateHash(s, epochs[s.id]?.epoch), JSON.stringify(human.map((a) => [a.key, a.kind, a.stateHash]))) : stackStateHash(s, epochs[s.id]?.epoch),
+      id: source.id, lane: source.lane, verb: 'stack-ready', at, standingSince: at,
+      ageSecs: Math.max(0, Math.round((now - Date.parse(at)) / 1000)), note: s.text,
+      quiet: (!s.allReady && human.length === 0) || !!epochs[s.id]?.silent || !!s.legacy,
+      stack: { ready: s.ready, total: members.length, allReady: s.allReady, members },
+      repo: forgeRepoKey(cfg, s.repo), prUrl: top.url });
   }
   return out;
 }
@@ -869,11 +884,15 @@ export function buildTendReport(now = Date.now()): TendReport {
     { readySettleSecs: cfg.readySettleSecs, now, trunk: (r) => prStackTrunk(cfg, r) },
   ).stacks.filter((s) => s.open);
   attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now));
+  // Man-owned member events are represented by the same current stack item,
+  // not an independent watch lobster (including obsolete Approval Gate events).
+  const stackKeys = new Set(attention.flatMap((a) => a.stack?.members.map((m) => `watch:${m.key}`) ?? []));
+  for (let i = attention.length - 1; i >= 0; i--) if (attention[i]!.kind === 'watch' && stackKeys.has(attention[i]!.key)) attention.splice(i, 1);
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
   const walking = attention.filter((a) => a.kind === 'watch' ||
-    (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) : enabled.has(a.kind)));
+    (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) || a.stack?.members.some((m) => m.kinds.some((kind) => enabled.has(kind))) : enabled.has(a.kind)));
   // A question the helm framed as a decision shows as that decision.
   const shown = enabled.has('decision') ? hideFramedQuestions(walking) : walking;
   attention.length = 0;
@@ -935,6 +954,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     kind: n.kind,
     ageMins: Math.max(0, Math.round((now - (Date.parse(n.at) || 0)) / 60_000)),
     text: n.text,
+    ...(n.url ? { url: n.url } : {}),
   }));
 
   const helms = listHelms().map((h) => ({
@@ -1011,7 +1031,9 @@ export function renderTend(r: TendReport): string {
   if (r.queueWait) lines.push(r.queueWait);
   for (const stack of r.stacks) {
     lines.push(`stack ${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
-    if (stack.readiness) lines.push(stack.readiness.text);
+    if (stack.readiness) lines.push(`${stack.readiness.text} ${stack.readiness.url}`);
+    const item = r.attention.find((a) => a.key === `stack:${stack.readiness?.id}`);
+    if (item?.stack) for (const member of item.stack.members) lines.push(`  ${member.note} ${member.url}`);
   }
   if (r.attention.length > 0) {
     lines.push('');
@@ -1155,7 +1177,7 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'notices (recent)',
-        r.notices.map((n) => ({ kind: n.kind, ageMins: n.ageMins, text: n.text })),
+        r.notices.map((n) => ({ kind: n.kind, ageMins: n.ageMins, text: `${n.text}${n.url ? ` ${n.url}` : ''}` })),
         ['kind', 'ageMins', 'text'],
       ),
     );
