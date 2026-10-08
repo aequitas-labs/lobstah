@@ -49,6 +49,8 @@ export interface PrRecord extends PrEvidence {
    * head changes; a push by anyone else or `lobstah watch release` resets it.
    */
   repairStreak?: RepairStreak;
+  /** Last daemon repair, independent of the current PR head and no-progress counter. */
+  repairCooldown?: { dispatchId: string; endedAt?: string; released?: true };
 }
 
 export interface RepairStreak {
@@ -257,19 +259,22 @@ export function removePr(key: string): boolean {
 
 /**
  * A person's release (`lobstah watch release`): the PR's run of repairs
- * without progress starts over, and a stop at the cap is lifted. Returns
+ * without progress starts over, a stop at the cap is lifted, and the
+ * remaining cooldown is skipped once. Returns
  * the PR keys it reset; `key` absent means every PR.
  */
 export function resetRepairStreaks(key?: string): string[] {
   const reset: string[] = [];
+  const lastRepair = (pr: PrRecord) => pr.repairCooldown?.dispatchId ?? pr.repairStreak?.lastRepairId ?? pr.repair?.dispatchId;
   for (const pr of key === undefined ? readPrs() : [readPr(key)].filter((p): p is PrRecord => p !== undefined)) {
-    if (!pr.repairStreak) continue;
+    if (!pr.repairStreak && (!lastRepair(pr) || pr.repairCooldown?.released)) continue;
     withPrLock(pr.key, () => {
       const current = readPr(pr.key);
-      if (!current?.repairStreak) return;
-      const stopped = current.repair?.status === 'gave-up' && current.repairStreak.stoppedHead !== undefined;
+      if (!current || (!current.repairStreak && (!lastRepair(current) || current.repairCooldown?.released))) return;
+      const stopped = current.repair?.status === 'gave-up' && current.repairStreak?.stoppedHead !== undefined;
+      const cooldown = current.repairCooldown ?? (lastRepair(current) ? { dispatchId: lastRepair(current)! } : undefined);
       const { repairStreak: _streak, ...rest } = current;
-      writePr({ ...rest, ...(stopped ? { repair: undefined } : {}) } as PrRecord);
+      writePr({ ...rest, ...(cooldown ? { repairCooldown: { ...cooldown, released: true } } : {}), ...(stopped ? { repair: undefined } : {}) } as PrRecord);
       reset.push(pr.key);
     });
   }
