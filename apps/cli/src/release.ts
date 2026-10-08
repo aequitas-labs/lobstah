@@ -179,7 +179,11 @@ export function planMergeRelease(now = Date.now(), batch = Infinity): ReleasePla
       const chain = chains.get(id) ?? new Set([id]);
       const home = owner(id);
       const add = (o: string) => {
-        if (!candidates.has(o)) candidates.set(o, { pr, chain });
+        const previous = candidates.get(o);
+        if (previous) {
+          previous.pr.heads = [...new Set([...previous.pr.heads, ...pr.heads])];
+          previous.chain = new Set([...previous.chain, ...chain]);
+        } else candidates.set(o, { pr: { ...pr, heads: [...pr.heads] }, chain });
       };
       add(home);
       for (const m of chain) {

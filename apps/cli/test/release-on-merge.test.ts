@@ -199,11 +199,26 @@ describe('releaseOnMerge', () => {
     expect(fs.existsSync(wtOf('d1'))).toBe(false);
   });
 
+  it('uses heads of every merged PR owned by a shared worktree', () => {
+    finished('d1', { pr: 1 });
+    pr(1, 'MERGED', ['d1'], 'lobstah/d1');
+    git(wtOf('d1'), 'commit', '--allow-empty', '-m', 'second PR');
+    git(wtOf('d1'), 'push', '-q', 'origin', 'lobstah/d1');
+    pr(2, 'MERGED', ['d1'], 'lobstah/d1');
+    mergeEvidence('d1', 'work', { prUrls: ['https://github.com/o/r/pull/1', 'https://github.com/o/r/pull/2'] });
+    pass();
+    expect(fs.existsSync(wtOf('d1'))).toBe(false);
+  });
+
   it.each(['merge', 'rebase'])('releases work published to trunk by a %s merge', (kind) => {
     finished('d1', { pr: 1 });
-    pr(1, 'MERGED', ['d1']); // legacy record: no usable PR head
+    pr(1, 'MERGED', ['d1'], kind === 'rebase' ? 'lobstah/d1' : undefined);
     if (kind === 'merge') git(repo, 'merge', '--no-ff', '-m', 'merge', 'lobstah/d1');
-    else git(repo, 'cherry-pick', 'lobstah/d1');
+    else {
+      git(repo, 'commit', '--allow-empty', '-m', 'trunk moved');
+      git(repo, 'cherry-pick', 'lobstah/d1');
+      expect(git(repo, 'rev-parse', 'HEAD')).not.toBe(git(wtOf('d1'), 'rev-parse', 'HEAD'));
+    }
     git(repo, 'push', '-q', 'origin', 'main');
     pass();
     expect(fs.existsSync(wtOf('d1'))).toBe(false);
