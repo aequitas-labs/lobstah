@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { conflictUpdate, enqueue, laneDirs, loadConfig, pushRule, readStatusLog, rerequestReview, standalonePr, withBriefHooks } from '@lobstah/core';
+import { conflictUpdate, enqueue, laneDirs, loadConfig, pushRule, readStatusLog, standalonePr, storedDescriptor, withBriefHooks } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { MergePolicy, MergeSource, PrCandidate } from '../types.js';
@@ -57,18 +57,26 @@ export function rebaseBrief(pr: PrCandidate, id: string, trunk?: string): string
     conflictUpdate(pr.baseRef, pr.headRef, standalone),
     pushRule(pr.headRef, id, standalone ? 'merge' : 'rebase'),
     `Do not merge the PR. Do not change anything beyond conflict resolution.`,
-    // A reviewed PR's review goes stale at the new head: ask its reviewers again and park.
-    pr.reviews.length > 0
-      ? rerequestReview({ url: pr.url, number: pr.number }, id, [...new Set(pr.reviews.map((r) => r.author))])
-      : `When pushed, report status done.`,
+    `When pushed, report status done.`,
   ].join(' ');
 }
 
-function choreVerdict(uuid: string): 'active' | 'done' | 'failed' {
+function choreVerdict(uuid: string, pr: PrCandidate): { state: 'active' | 'done' | 'failed'; pausedOnReview?: boolean } {
+  const last = readStatusLog(uuid, 'chore').at(-1);
+  const pausedOnReview = last?.verb === 'paused' && last.waitingOn === 'review';
+  // Reports win over the directory: parked chores and exiting runners still
+  // live in active/. The merge gate, not a rebase worker, owns the review wait.
+  if (last?.verb === 'done' || pausedOnReview) {
+    const startedHead = storedDescriptor(uuid, 'chore')?.pr?.headSha;
+    // A claimed push that did not move a still-conflicting head is not a
+    // successful rebase. Keep the one-attempt bound for both old and new workers.
+    const unchangedConflict = pr.mergeableState === 'dirty' && startedHead === pr.headSha;
+    return { state: unchangedConflict ? 'failed' : 'done', pausedOnReview };
+  }
+  if (last?.verb === 'paused') return { state: 'active' };
   const d = laneDirs('chore');
-  if (fs.existsSync(path.join(d.active, uuid)) || fs.existsSync(path.join(d.queue, `${uuid}.json`))) return 'active';
-  const last = readStatusLog(uuid, 'chore').at(-1)?.verb;
-  return last === 'done' ? 'done' : 'failed';
+  if (fs.existsSync(path.join(d.active, uuid)) || fs.existsSync(path.join(d.queue, `${uuid}.json`))) return { state: 'active' };
+  return { state: 'failed' };
 }
 
 /**
@@ -129,12 +137,12 @@ export async function mergeLoop(
         observe(candidate, 'rebase-failed');
         continue;
       }
-      const verdict = choreVerdict(rebase.uuid);
-      if (verdict === 'active') {
+      const verdict = choreVerdict(rebase.uuid, candidate);
+      if (verdict.state === 'active') {
         observe(candidate, `conflict-chore:${rebase.uuid}`);
         continue;
       }
-      if (verdict === 'failed') {
+      if (verdict.state === 'failed') {
         await ms.comment(candidate.number, `Automated rebase failed (dispatch ${rebase.uuid}) — needs a human.`);
         await ms.addLabel(candidate.number, 'needs-human');
         state.failRebase(prKey);
@@ -142,6 +150,7 @@ export async function mergeLoop(
         observe(candidate, 'rebase-failed');
         continue;
       }
+      if (verdict.pausedOnReview) log(`${prKey}: rebase chore ${rebase.uuid} paused on review — treating as finished; the merge gate owns the review wait`);
       state.clearRebase(prKey); // done → the push invalidated approvals; gate re-enters below
     }
 

@@ -399,6 +399,22 @@ describe('a dispatch with several PRs', () => {
 });
 
 describe('a parked dispatch holds no slot', () => {
+  it('a legacy review-paused rebase frees the single chore slot and finishes after merge', () => {
+    config('choreConcurrent = 1\n');
+    parked('rebase', { lane: 'chore', waitingOn: 'review', link: PR });
+    prRecord('OPEN', ['rebase']);
+    enqueue({ id: 'next-chore', repo: 'r', brief: 'next' }, 'chore');
+    expect(slotUsage('chore')).toEqual({ headless: 0, traps: 0, parked: 1 });
+    expect(daemonTick().spawned.map((s) => s.id)).toEqual(['next-chore']);
+    expect(slotUsage('chore')).toEqual({ headless: 1, traps: 0, parked: 1 });
+    expect(verbOf('rebase', 'chore')?.verb).toBe('paused');
+    prRecord('MERGED', ['rebase']);
+    daemonTick();
+    expect(verbOf('rebase', 'chore')).toMatchObject({ verb: 'done', note: `the PR merged: ${PR}` });
+    expect(fs.existsSync(path.join(laneDirs('chore').done, 'rebase'))).toBe(true);
+    expect(slotUsage('chore')).toEqual({ headless: 1, traps: 0, parked: 0 });
+  });
+
   it('does not count against maxConcurrent: queued work is claimed beside it', () => {
     parked('p1', { waitingOn: 'review' });
     enqueue({ id: 'q1', repo: 'r', brief: 'next' });
