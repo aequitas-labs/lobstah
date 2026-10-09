@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
-import * as fs from 'node:fs';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -12,8 +12,45 @@ beforeEach(() => {
   process.env.LOBSTAH_HOME = home;
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   delete process.env.LOBSTAH_HOME;
   removeTempDir(home);
+});
+
+it.each(['EPERM', 'EBUSY', 'EACCES'])('retries transient %s on watch lock creation and removal', (code) => {
+  const lock = path.join(home, 'watches', 'retry.json.lock');
+  const mkdir = fs.mkdirSync;
+  const rmdir = fs.rmdirSync;
+  let creates = 0,
+    removes = 0;
+  vi.spyOn(fs, 'mkdirSync').mockImplementation(((...args: Parameters<typeof mkdir>) => {
+    if (args[0] === lock && ++creates <= 2) throw Object.assign(new Error(`transient ${code}`), { code });
+    return mkdir(...args);
+  }) as typeof mkdir);
+  vi.spyOn(fs, 'rmdirSync').mockImplementation(((...args: Parameters<typeof rmdir>) => {
+    if (args[0] === lock && ++removes <= 2) throw Object.assign(new Error(`transient ${code}`), { code });
+    return rmdir(...args);
+  }) as typeof rmdir);
+  expect(addWatch('retry', 'echo ok').check).toBe('echo ok');
+  expect(creates).toBe(3);
+  expect(removes).toBe(3);
+  expect(readWatch('retry')?.check).toBe('echo ok');
+  expect(fs.existsSync(lock)).toBe(false);
+});
+
+it.each(['mkdirSync', 'rmdirSync'] as const)('a persistent permission error on %s fails at the bounded deadline', (operation) => {
+  const lock = path.join(home, 'watches', 'denied.json.lock');
+  const original = fs[operation];
+  const denied = Object.assign(new Error(`permission denied: ${lock}`), { code: 'EACCES' });
+  let now = 0;
+  vi.spyOn(Date, 'now').mockImplementation(() => (now += 1000));
+  vi.spyOn(fs, operation).mockImplementation(((...args: Parameters<typeof original>) => {
+    if (args[0] === lock) throw denied;
+    return original(...args);
+  }) as typeof original);
+  expect(() => addWatch('denied', 'echo ok')).toThrow(denied);
+  expect(now).toBeGreaterThanOrEqual(11_000);
+  expect(now).toBeLessThanOrEqual(12_000);
 });
 
 it('concurrent writers of the same watch all complete with a valid record', async () => {

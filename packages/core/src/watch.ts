@@ -1,4 +1,4 @@
-import * as fs from 'node:fs';
+import fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { uniqueTempPath, lobstahHome, readDirIfPresent } from './paths.js';
@@ -115,25 +115,40 @@ function withWatchLock<T>(key: string, action: () => T): T {
   fs.mkdirSync(watchesDir(), { recursive: true });
   const lock = `${watchPath(key)}.lock`;
   const deadline = Date.now() + 10_000;
+  // Windows can report these while another writer's removed directory still
+  // has open handles. Retry briefly, but retain the error if it persists.
+  const transient = (err: unknown) => ['EPERM', 'EBUSY', 'EACCES'].includes((err as NodeJS.ErrnoException).code ?? '');
+  const pause = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   for (;;) {
     try {
       fs.mkdirSync(lock);
       break;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock);
-      } catch {
-        /* another writer cleared the lock */
+      const exists = (err as NodeJS.ErrnoException).code === 'EEXIST';
+      if (!exists && !transient(err)) throw err;
+      if (exists) {
+        try {
+          if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock);
+        } catch {
+          /* another writer cleared the lock */
+        }
       }
-      if (Date.now() >= deadline) throw new Error(`Watch locked: ${key}`);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      if (Date.now() >= deadline) throw exists ? new Error(`Watch locked: ${key}`) : err;
+      pause();
     }
   }
   try {
     return action();
   } finally {
-    fs.rmdirSync(lock);
+    for (;;) {
+      try {
+        fs.rmdirSync(lock);
+        break;
+      } catch (err) {
+        if (!transient(err) || Date.now() >= deadline) throw err;
+        pause();
+      }
+    }
   }
 }
 
