@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it as vitestIt } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -28,7 +28,6 @@ import { AsyncQueue } from '@lobstah/adapters';
 import type { Adapter, AdapterRun, AdapterStartOpts } from '@lobstah/adapters';
 import { claimPoolSlot, poolKeep, warmPool } from '@lobstah/worktree';
 import { main } from '../src/run.js';
-import { processTest as it } from '../../../test/process-test.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
@@ -36,6 +35,9 @@ import { removeTempDir } from '../../../test/temp-dir.js';
  * configured repo a clone of it, the pool slots real linked worktrees). Only
  * the harness is a mock.
  */
+
+/** Each test runs real git and several dispatches: give a loaded machine room. */
+const it = (name: string, run: () => void | Promise<void>) => vitestIt(name, run, 30_000);
 
 let root: string;
 let home: string;
