@@ -5,6 +5,8 @@ import { lobstahHome, readDirIfPresent } from './paths.js';
 import { classifyGhError, firstMeaningfulLine, isBackoffKind } from './gh-errors.js';
 import type { GhErrorKind } from './gh-errors.js';
 import { postNotice } from './notices.js';
+import { isPrPresetWatch, prBatchInFlight } from './pr-poll.js';
+import { recordGitHubRateLimit } from './github-budget.js';
 
 /**
  * A watch is a standing outbound poll on something external — a ume review
@@ -23,8 +25,8 @@ import { postNotice } from './notices.js';
  * Failures form a streak: the reason, exit code, and the time of the first
  * failure are kept on the watch; the third consecutive failure posts one
  * `watch-failing` notice, and the first success after it posts one
- * `watch-recovered`. A permission, auth, not-found, or rate-limit failure
- * backs the watch off (see watchIntervalSecs).
+ * `watch-recovered`. Permission, auth and not-found failures back off.
+ * Rate limits are a shared GitHub incident, never per-watch failure streaks.
  * Checks must be read-only and idempotent: both pick and an inline `man wait`
  * may run them, coordinated only by the lastCheckedAt stamp.
  */
@@ -182,11 +184,7 @@ export function addWatch(
  * a dispatch given here replaces the old one. Returns the watch, or
  * undefined when no watch has this key.
  */
-export function holdWatch(
-  key: string,
-  now = new Date(),
-  opts: { reason?: string; forId?: string; by?: string } = {},
-): Watch | undefined {
+export function holdWatch(key: string, now = new Date(), opts: { reason?: string; forId?: string; by?: string } = {}): Watch | undefined {
   const w = readWatch(key);
   if (!w) return undefined;
   if (w.heldAt && opts.reason === undefined && opts.forId === undefined && opts.by === undefined) return w;
@@ -261,7 +259,7 @@ export const WATCH_FAILING_NOTICE_AT = 3;
 
 /**
  * The watch's current poll interval. A watch failing for a cause that will
- * not fix itself (permission, auth, not found, rate limit) doubles its
+ * not fix itself (permission, auth, not found) doubles its
  * interval with each consecutive failure, capped at one hour (or at its own
  * interval, when that is longer already). Other failures retry at cadence.
  */
@@ -287,10 +285,18 @@ const CHECK_TIMEOUT_MS = 90_000;
  * double-poll the same watch inside one cadence window.
  */
 export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh: WatchEvent[] } {
+  // Another feeder is fetching this repository; it owns this window.
+  if (isPrPresetWatch(w) && prBatchInFlight(w.key)) return { watch: w, fresh: [] };
   w.lastCheckedAt = now.toISOString();
   writeWatch(w);
   const cmd = w.check.replaceAll('{cursor}', w.cursor);
-  const res = spawnSync(cmd, { shell: true, encoding: 'utf8', timeout: CHECK_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+  const res = spawnSync(cmd, {
+    shell: true,
+    encoding: 'utf8',
+    timeout: CHECK_TIMEOUT_MS,
+    maxBuffer: 8 * 1024 * 1024,
+    env: { ...process.env, ...(isPrPresetWatch(w) ? { LOBSTAH_PR_BATCH: '1' } : {}) },
+  });
   if (res.status !== 0 || res.error) {
     // lobstah's own commands print `error: ...` on stdout (axi.md P6); gh prints to stderr.
     const toonError = /^error:.*$/m.exec(res.stdout ?? '')?.[0];
@@ -332,6 +338,16 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
  */
 export function recordWatchFailure(w: Watch, reason: string, exit: number | undefined, now = new Date()): void {
   const cls = classifyGhError(reason);
+  if (cls.kind === 'rate-limit') {
+    recordGitHubRateLimit(now.getTime());
+    // Shared outage, not a failed watch. Drop legacy rate-limit streaks silently.
+    if (w.errorKind === 'rate-limit') {
+      w.failures = undefined;
+      w.failingSince = undefined;
+      w.failingNoticed = undefined;
+    }
+    return;
+  }
   w.lastError = reason.slice(0, 500);
   w.lastExit = exit;
   w.errorKind = cls.kind;
@@ -351,7 +367,7 @@ export function recordWatchFailure(w: Watch, reason: string, exit: number | unde
 
 /** One good check: end the streak, and post `watch-recovered` if the streak was announced. */
 export function recordWatchSuccess(w: Watch): void {
-  if (w.failingNoticed) {
+  if (w.failingNoticed && w.errorKind !== 'rate-limit') {
     postNotice({
       kind: 'watch-recovered',
       text: `${w.key} recovered after ${w.failures ?? 0} failed check(s) since ${w.failingSince ?? '?'}`,
@@ -366,6 +382,15 @@ export function recordWatchSuccess(w: Watch): void {
   w.failures = undefined;
   w.failingSince = undefined;
   w.failingNoticed = undefined;
+}
+
+/** Upgrade old per-watch rate-limit streaks silently before the next repository poll. */
+export function clearWatchRateLimitFailures(): void {
+  for (const w of listWatches()) {
+    if (w.errorKind !== 'rate-limit') continue;
+    recordWatchSuccess(w);
+    writeWatch(w);
+  }
 }
 
 /** The reason, exit code, and remedy of a failing watch, on one line. */

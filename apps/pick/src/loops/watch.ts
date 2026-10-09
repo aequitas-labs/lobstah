@@ -30,6 +30,7 @@ import {
   setWatchCursor,
   watchDue,
   watchFailureLogLine,
+  preparePrWatchBatch,
 } from '@lobstah/core';
 import { readSessionClaim, readTrap } from '@lobstah/core';
 import type { Descriptor, Lane, Watch, WatchEvent } from '@lobstah/core';
@@ -239,6 +240,7 @@ export async function watchLoop(
   notify: (n: ReportNotification) => void = () => {},
 ): Promise<void> {
   const autoRepair = loadConfig().watch.autoRepair;
+  preparePrWatchBatch(defaultEverySecs);
   for (const w of listWatches()) {
     // The daemon observes and repairs dispatch-owned PRs when auto-repair is on.
     if (autoRepair && w.key.startsWith('pr:') && w.owner.startsWith('dispatch:')) continue;

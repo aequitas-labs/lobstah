@@ -20,7 +20,7 @@ export const GH_REMEDY: Record<Exclude<GhErrorKind, 'unknown'>, string> = {
   'not-found':
     'check the repo name and that the gh identity can see it (App installed on the repo, or a token with access)',
   auth: 'credentials are missing, bad, or expired — run `gh auth status`, then `gh auth login` or refresh the token',
-  'rate-limit': 'GitHub rate limit reached — the watch backs off; wait for the reset (`gh api rate_limit`)',
+  'rate-limit': 'GitHub rate limit reached — shared PR polling waits for the reset',
   'gh-missing': 'install the GitHub CLI (`gh`) and put it on PATH for the daemon',
 };
 
