@@ -425,20 +425,30 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
         note: items.map((a) => a.note).join('; ') || `#${pr.number} ${prBadge(pr).text}`,
         kinds: items.map((a) => a.kind) };
     });
-    const human = out.filter((a) => s.members.some((p) => p.url === a.prUrl) &&
-      a.kind !== 'pr:ready' && a.kind !== 'pr:draft' && cfg.attentionKinds.includes(a.kind as AttentionKind));
-    for (let i = out.length - 1; i >= 0; i--) if (s.members.some((p) => p.url === out[i]!.prUrl)) out.splice(i, 1);
+    // Member readiness lives only in the stack item. A member's own problem
+    // (conflicts, checks, review, draft) keeps standing as its own pr:* item.
+    for (let i = out.length - 1; i >= 0; i--) if (out[i]!.kind === 'pr:ready' && s.members.some((p) => p.url === out[i]!.prUrl)) out.splice(i, 1);
     const top = s.members.at(-1)!, source = observed.find((x) => x.pr.url === top.url)!;
     const at = epochs[s.id]?.at ?? s.members[0]!.observedAt;
     out.push({ kind: 'stack-ready', key: `stack:${s.id}`,
-      stateHash: human.length ? statusStateHash(stackStateHash(s, epochs[s.id]?.epoch), JSON.stringify(human.map((a) => [a.key, a.kind, a.stateHash]))) : stackStateHash(s, epochs[s.id]?.epoch),
+      stateHash: stackStateHash(s, epochs[s.id]?.epoch),
       id: source.id, lane: source.lane, verb: 'stack-ready', at, standingSince: at,
       ageSecs: Math.max(0, Math.round((now - Date.parse(at)) / 1000)), note: s.text,
-      quiet: (!s.allReady && human.length === 0) || !!epochs[s.id]?.silent || !!s.legacy,
+      // Only an all-ready stack (every member past its settle window) walks;
+      // a partly ready one is a quiet standing row in tend and the glass.
+      quiet: !s.allReady || !!epochs[s.id]?.silent || !!s.legacy,
       stack: { ready: s.ready, total: members.length, allReady: s.allReady, members },
       repo: forgeRepoKey(cfg, s.repo), prUrl: top.url });
   }
   return out;
+}
+
+/**
+ * The kind as a person reads it. The stack item keeps its `stack-ready` kind
+ * (config and acks use it), but it is only "ready" when every member is.
+ */
+export function attentionKindLabel(a: Pick<TendAttention, 'kind' | 'stack'>): string {
+  return a.kind === 'stack-ready' && a.stack && !a.stack.allReady ? 'stack-waiting' : a.kind;
 }
 
 /** Terminal catches the helm hasn't been reported yet: past its grounds' cursor. */
@@ -892,7 +902,7 @@ export function buildTendReport(now = Date.now()): TendReport {
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
   const walking = attention.filter((a) => a.kind === 'watch' ||
-    (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) || a.stack?.members.some((m) => m.kinds.some((kind) => enabled.has(kind))) : enabled.has(a.kind)));
+    (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) : enabled.has(a.kind)));
   // A question the helm framed as a decision shows as that decision.
   const shown = enabled.has('decision') ? hideFramedQuestions(walking) : walking;
   attention.length = 0;
@@ -1042,7 +1052,7 @@ export function renderTend(r: TendReport): string {
         'attention',
         r.attention.map((a) => ({
           id: a.id,
-          verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : a.kind,
+          verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : attentionKindLabel(a),
           waitingMins: Math.round(a.ageSecs / 60),
           held: a.held ? 'yes' : '',
           // Whether the human has opened it in the glass's decision modal,

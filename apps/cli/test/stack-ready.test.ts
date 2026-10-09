@@ -83,9 +83,50 @@ describe('stack watch discovery and shared presentation', () => {
     const report = buildTendReport(now);
     expect(report.attention).toEqual([expect.objectContaining({ kind: 'stack-ready', quiet: true })]);
     for (const text of [renderTend(report), renderDigest(buildDigest({ now }))]) {
-      expect(text).toContain('stack 2/3 ready'); expect(text).toContain('waiting: #3 (draft)');
+      expect(text).toContain('stack waiting: 2 of 3 ready'); expect(text).toContain('— #3 draft');
+      expect(text).not.toContain('stack ready');
     }
+    expect(renderTend(report)).toContain('stack-waiting');
     expect(report.stacks[0]?.readiness?.allReady).toBe(false);
+  });
+  describe('a stack bubbles only when every member is ready, settled', () => {
+    const putAt = (n: number, at: number, over: Partial<GhPrView> = {}) =>
+      upsertPr(prEvidence(parsePrRef(view(n).url)!, view(n, over), new Date(at).toISOString()));
+    // What the pet and the glass lobs walk: unacked, not quiet.
+    const walking = (t: number) => buildTendReport(t).attention.filter((a) => !a.quiet && !a.acked);
+    beforeEach(() => fs.writeFileSync(path.join(home, 'config.toml'), 'readySettleSecs = 600\n'));
+    it('keeps a settling-only stack quiet, in plain words, then walks once it settles', () => {
+      putAt(1, now); putAt(2, now - 700_000);
+      syncStackReadiness(undefined, now);
+      const report = buildTendReport(now);
+      const item = report.attention.find((a) => a.kind === 'stack-ready')!;
+      expect(item).toMatchObject({ quiet: true, stack: { ready: 1, total: 2, allReady: false } });
+      expect(item.note).toBe('stack waiting: 1 of 2 ready: acme/web #1 → #2 — #1 ready, confirming for 10 more min');
+      expect(walking(now)).toEqual([]);
+      expect(lobItems(report.attention, { lobs: true, preview: false })).toEqual([]);
+      expect(renderTend(report)).not.toMatch(/stack ready|settling/);
+      expect(buildTendReport(now + 300_000).attention.find((a) => a.kind === 'stack-ready')?.note).toContain('#1 ready, confirming for 5 more min');
+      expect(walking(now + 600_000)).toEqual([expect.objectContaining({ kind: 'stack-ready', note: expect.stringContaining('stack ready to merge') })]);
+    });
+    it('keeps a 0-of-n stack quiet while its conflicting member walks as pr:conflict', () => {
+      putAt(1, now); putAt(2, now, { mergeStateStatus: 'DIRTY' });
+      syncStackReadiness(undefined, now);
+      const report = buildTendReport(now);
+      expect(report.attention.find((a) => a.kind === 'stack-ready')).toMatchObject({
+        quiet: true, note: 'stack waiting: 0 of 2 ready: acme/web #1 → #2 — #1 ready, confirming for 10 more min; #2 conflicts',
+      });
+      expect(walking(now)).toEqual([expect.objectContaining({ kind: 'pr:conflict', prUrl: view(2).url })]);
+      expect(lobItems(report.attention, { lobs: true, preview: false })).toEqual([expect.objectContaining({ label: 'conflicts', href: view(2).url })]);
+      // Settled, the stack still waits on the conflict: still no stack bubble.
+      expect(walking(now + 600_000).map((a) => a.kind)).toEqual(['pr:conflict']);
+    });
+    it('shows a partial stack under stack-waiting, never stack-ready, in the attention list', () => {
+      putAt(1, now); putAt(2, now - 700_000);
+      const report = buildTendReport(now);
+      const tend = renderTend(report);
+      expect(tend).toContain('stack-waiting');
+      expect(tend).not.toMatch(/\bstack-ready\b/);
+    });
   });
   it('does not change lone PR attention or its walking item', () => {
     put(1);
@@ -108,18 +149,20 @@ describe('stack watch discovery and shared presentation', () => {
     put(3, { baseRefName: 'main', headRefOid: 'new-head' }); syncStackReadiness(undefined, now);
     expect(lobItems(buildTendReport(now).attention, { lobs: true, preview: false })).toHaveLength(1);
   });
-  it('folds mixed-owner member ready/watch/check items into one current stack and pet entry', () => {
+  it('folds member ready/watch items into the stack; a member problem walks as its own kind', () => {
     [1, 2, 3].forEach((n) => { put(n); addWatch(`pr:acme/web#${n}`, 'fixture', { owner: n === 1 ? 'dispatch:fixture' : 'man' }); });
     appendWatchEvents('pr:acme/web#2', [{ seq: 1, at: new Date(now).toISOString(), summary: 'ci failed' }]);
     syncStackReadiness(undefined, now);
     expect(buildTendReport(now).attention).toHaveLength(1);
     put(2, { statusCheckRollup: [{ name: 'ci', status: 'COMPLETED', conclusion: 'FAILURE' }] });
     const report = buildTendReport(now);
-    expect(report.attention).toHaveLength(1);
-    expect(report.attention[0]!.stack?.members[1]).toMatchObject({ kinds: ['pr:checks'], note: expect.stringContaining('failed') });
-    expect(lobItems(report.attention, { lobs: true, preview: false })).toHaveLength(1);
+    const stack = report.attention.find((a) => a.kind === 'stack-ready')!;
+    expect(stack).toMatchObject({ quiet: true, note: expect.stringContaining('stack waiting: 2 of 3 ready') });
+    expect(stack.stack?.members[1]).toMatchObject({ kinds: ['pr:checks'], note: expect.stringContaining('failed') });
+    expect(report.attention.filter((a) => a.kind === 'pr:checks')).toEqual([expect.objectContaining({ prUrl: view(2).url })]);
+    expect(lobItems(report.attention, { lobs: true, preview: false })).toEqual([expect.objectContaining({ href: view(2).url })]);
     put(2, { statusCheckRollup: [{ name: 'Approval Gate', status: 'COMPLETED', conclusion: 'FAILURE' }] });
-    expect(buildTendReport(now).attention).toEqual([expect.objectContaining({ quiet: true })]);
+    expect(buildTendReport(now).attention).toEqual([expect.objectContaining({ kind: 'stack-ready', quiet: true })]);
   });
   it('links the current top everywhere, including after that top merges', () => {
     [1, 2, 3].forEach((n) => put(n)); syncStackReadiness(undefined, now);
@@ -163,9 +206,9 @@ describe('stack watch discovery and shared presentation', () => {
     const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), now: new Date(now).toISOString() };
     const g = await loadGlass(GLASS_PAGE, d, { now, hash: '#prs' });
     try {
-      expect(g.$('#prs')?.textContent).toContain('stack 2/3 ready');
-      expect(g.$('#prs')?.textContent).toContain('waiting: #3 (draft)');
-      expect(g.$$('#prs tr:not(.rowhead) th').filter((th) => th.textContent?.includes('stack 2/3 ready'))).toHaveLength(1);
+      expect(g.$('#prs')?.textContent).toContain('stack waiting: 2 of 3 ready');
+      expect(g.$('#prs')?.textContent).toContain('— #3 draft');
+      expect(g.$$('#prs tr:not(.rowhead) th').filter((th) => th.textContent?.includes('stack waiting: 2 of 3 ready'))).toHaveLength(1);
     } finally { await g.close(); }
   });
   it('does not group fork PRs with their apparent base branch in the glass', () => {

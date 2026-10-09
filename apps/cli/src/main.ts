@@ -173,7 +173,7 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { charter, HELM_REMINDER } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
-import { buildTendReport, renderTend } from './tend.js';
+import { attentionKindLabel, buildTendReport, renderTend } from './tend.js';
 import { runCull } from './cull.js';
 import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
@@ -1738,7 +1738,7 @@ async function mainCli(): Promise<void> {
           'attention',
           report.attention.map((a) => ({
             key: a.key,
-            kind: a.kind,
+            kind: attentionKindLabel(a),
             acked: a.acked ? `${a.acked.by} ${Math.round((Date.now() - Date.parse(a.acked.at)) / 60_000)}m ago` : '',
             held: a.held ? 'yes' : '',
             note: a.note ?? '',
