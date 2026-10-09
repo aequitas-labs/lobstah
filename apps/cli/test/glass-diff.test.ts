@@ -37,6 +37,20 @@ const snapshot = () => ({
 });
 const ui = (over: Partial<Ui> = {}): Ui => ({ st: { view: 'table', lane: '', repo: '', verb: '', q: '' }, open: new Set(), modal: null, ...over });
 
+describe('resume command', () => {
+  it.each([
+    ['claude', 'claude --resume session-id'],
+    ['codex', 'codex resume session-id'],
+    [undefined, undefined],
+    ['unknown', undefined],
+  ])('uses the %s harness without guessing', (harness, command) => {
+    expect(detector.resumeCommand(harness, 'session-id')).toBe(command);
+  });
+  it('requires a session id', () => {
+    expect(detector.resumeCommand('codex', undefined)).toBeUndefined();
+  });
+});
+
 describe('glass section selectors', () => {
   it('finds a trap by its two-word name in the deck and Traps tab', () => {
     const s = { ...snapshot(), traps: [{ ...snapshot().traps[0]!, name: 'amber-gull', label: 'amber-gull (wt:aa)' }] };

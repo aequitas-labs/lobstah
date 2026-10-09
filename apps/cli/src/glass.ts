@@ -22,6 +22,7 @@ import {
   listRequests,
   liveHelms,
   readReservationTicket,
+  readRoster,
   trapRequestError,
   trapStartCommands,
   writeRequest,
@@ -582,6 +583,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
+    const roster = readRoster(t.trapId);
     const name = t.name ?? names(t.trapId);
     return {
       ...t,
@@ -591,8 +593,8 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
       link: validSessionLink(t.link) && linkMismatch(t.link, t.window) === undefined ? t.link : undefined,
-      sessionId: t.sessionId ?? signed?.by,
-      harness: t.harness ?? (/\((claude|codex),/.exec(signed?.text ?? '')?.[1]),
+      sessionId: t.sessionId ?? roster?.sessionId ?? signed?.by,
+      harness: t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]),
       live: registered,
       listening,
       messages: trapMessages(t.trapId),
