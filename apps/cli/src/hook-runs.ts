@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from '@lobstah/core';
+import { uniqueTempPath, lobstahHome } from '@lobstah/core';
 
 /** The hooks lobstah's plugins declare, by the harness event name. */
 export const LOBSTAH_HOOKS = ['Stop', 'SessionStart', 'PostToolUse', 'SessionEnd'] as const;
@@ -33,7 +33,7 @@ export function recordHookRun(event: string | undefined, harness: string | undef
     if (now - (Date.parse(runs[key] ?? '') || 0) < RECORD_EVERY_MS) return;
     runs[key] = new Date(now).toISOString();
     const file = hookRunsPath();
-    const tmp = `${file}.tmp-${process.pid}`;
+    const tmp = uniqueTempPath(file);
     fs.writeFileSync(tmp, JSON.stringify(runs, null, 2));
     fs.renameSync(tmp, file);
   } catch {

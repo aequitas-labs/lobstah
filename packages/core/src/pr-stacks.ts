@@ -5,7 +5,7 @@ import { loadConfig } from './config.js';
 import type { Config } from './config.js';
 import { parsePrRef, prBadge, prStandingKinds } from './pr.js';
 import type { PrEvidence } from './pr.js';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { listNotices, noticesDir, postNotice } from './notices.js';
 import { readPrs, withPrLock } from './prs.js';
 
@@ -156,7 +156,7 @@ export function syncStackReadiness(cfg = loadConfig(), now = Date.now()): void {
       // ready transition gets a new seq; supersede, never append history items.
       const notice = wake || !current ? postNotice(fields)! : { ...current, ...fields };
       if (current && !wake) {
-        const file = path.join(noticesDir(), `${notice.seq}.json`), tmp = `${file}.tmp-${process.pid}`;
+        const file = path.join(noticesDir(), `${notice.seq}.json`), tmp = uniqueTempPath(file);
         fs.writeFileSync(tmp, JSON.stringify(notice)); fs.renameSync(tmp, file);
       }
       kept.add(notice.seq);
@@ -177,7 +177,7 @@ export function syncStackReadiness(cfg = loadConfig(), now = Date.now()): void {
         old.ready = false; old.notified = false; old.epoch++; old.at = new Date(now).toISOString();
       }
     }
-    const file = stateFile(), tmp = `${file}.tmp-${process.pid}`;
+    const file = stateFile(), tmp = uniqueTempPath(file);
     fs.writeFileSync(tmp, JSON.stringify(state)); fs.renameSync(tmp, file);
   });
 }

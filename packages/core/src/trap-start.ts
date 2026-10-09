@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { soakingDir } from './paths.js';
+import { uniqueTempPath, soakingDir } from './paths.js';
 import { postNotice } from './notices.js';
 import { pendingIds, queuedDescriptor } from './queue.js';
 import { newTrapId, readTrap, trapLabel } from './soak.js';
@@ -89,7 +89,7 @@ export function trapStartCommands(repoPath: string, ticket: string, harness?: st
 function writeReservation(r: TrapReservation): void {
   fs.mkdirSync(soakingDir(), { recursive: true });
   const file = startPath(r.trapId);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(r, null, 2));
   fs.renameSync(tmp, file);
 }

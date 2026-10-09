@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { parsePrRef, prStandingKinds } from './pr.js';
 import type { PrEvidence, PrStandingKind } from './pr.js';
 
@@ -245,7 +245,7 @@ export function setPrTitle(key: string, title: string): boolean {
 export function writePr(pr: PrRecord): void {
   fs.mkdirSync(prsDir(), { recursive: true });
   const file = prRecordFile(pr.key);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(pr, null, 2)}\n`);
   fs.renameSync(tmp, file);
 }

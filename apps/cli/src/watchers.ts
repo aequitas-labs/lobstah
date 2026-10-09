@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from '@lobstah/core';
+import { uniqueTempPath, lobstahHome } from '@lobstah/core';
 
 /** A foreground wait whose completion notification wakes its harness session. */
 export interface SessionWatcher {
@@ -132,7 +132,7 @@ export function armWatcher(sessionId: string, kind: SessionWatcher['kind'], trap
   };
   const beat = () => {
     if (!ownsFile()) return;
-    const tmp = `${file}.tmp-${process.pid}`;
+    const tmp = uniqueTempPath(file);
     try { fs.writeFileSync(tmp, `${JSON.stringify(own())}\n`); fs.renameSync(tmp, file); }
     catch { try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ } }
   };

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { laneDirs, lobstahHome, readDirIfPresent } from './paths.js';
+import { uniqueTempPath, laneDirs, lobstahHome, readDirIfPresent } from './paths.js';
 import type { Lane } from './types.js';
 import type { Evidence } from './types.js';
 import { sanitizeWorker, workerProfile } from './worker-profile.js';
@@ -267,7 +267,7 @@ const complete = (s: ReturnType<typeof parseStore>): s is StatsStore => !!s && s
 function writeStore(store: StatsStore): void {
   const file = statsPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(store));
   fs.renameSync(tmp, file);
 }

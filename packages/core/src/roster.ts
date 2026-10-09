@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import type { TrapRegistration } from './soak.js';
 import type { WindowRef } from './window.js';
 import type { TrapRevision } from './worktree-safety.js';
@@ -107,7 +107,7 @@ function rosterPath(trapId: string): string {
 function writeEntry(entry: RosterEntry): RosterEntry {
   fs.mkdirSync(rosterDir(), { recursive: true });
   const file = rosterPath(entry.trapId);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(entry, null, 2)}\n`);
   fs.renameSync(tmp, file);
   return entry;

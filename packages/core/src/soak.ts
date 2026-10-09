@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { Descriptor, Lane, StatusEntry } from './types.js';
-import { laneDirs, soakingDir } from './paths.js';
+import { uniqueTempPath, laneDirs, soakingDir } from './paths.js';
 import { linkMismatch, validSessionLink } from './session-link.js';
 import { cancelRequested, claimNext, complete, queuedDescriptor, pendingIds, requeue } from './queue.js';
 import { appendStatus, readStatusLog } from './status.js';
@@ -93,7 +93,7 @@ function regPath(trapId: string): string {
 }
 
 function atomicWrite(file: string, content: string): void {
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }

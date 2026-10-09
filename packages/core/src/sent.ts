@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { readStatusLog } from './status.js';
 import type { Lane, StatusEntry } from './types.js';
 
@@ -46,7 +46,7 @@ function sentPath(id: string): string {
 function write(e: SentExpectation): void {
   fs.mkdirSync(sentDir(), { recursive: true });
   const file = sentPath(e.dispatchId);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(e, null, 2)}\n`);
   fs.renameSync(tmp, file);
 }

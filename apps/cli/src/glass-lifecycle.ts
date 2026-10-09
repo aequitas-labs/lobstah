@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { COMPILED_BINARY, loadConfig, lobstahHome, lobstahVersion } from '@lobstah/core';
+import { uniqueTempPath, COMPILED_BINARY, loadConfig, lobstahHome, lobstahVersion } from '@lobstah/core';
 
 export interface GlassInfo {
   service: 'lobstah-glass';
@@ -76,7 +76,7 @@ async function pruneGlassState(): Promise<GlassState | undefined> {
 function writeGlassState(state: GlassState): void {
   const file = stateFile();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   try {
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n');
     fs.renameSync(tmp, file);

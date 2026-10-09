@@ -5,7 +5,7 @@ import { loadConfig } from './config.js';
 import { liveHelms } from './helm.js';
 import type { HelmRegistration } from './helm.js';
 import { answeredAt } from './inbox.js';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { activeIds, pendingIds, storedDescriptor } from './queue.js';
 import { readStatusLog } from './status.js';
 import type { Lane, StatusEntry } from './types.js';
@@ -76,7 +76,7 @@ export function currentRelease(key: string, stateHash: string): QuestionRelease 
 function writeRelease(r: QuestionRelease): void {
   fs.mkdirSync(releasesDir(), { recursive: true });
   const file = releaseFile(r.key);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(r, null, 2)}\n`);
   fs.renameSync(tmp, file);
 }

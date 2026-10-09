@@ -4,7 +4,19 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimNext, closeRequest, enqueue, ensureLayout, noticeStands, listNotices, postNotice, writeRequest } from '@lobstah/core';
+import {
+  addWatch,
+  readWatch,
+  appendStatus,
+  claimNext,
+  closeRequest,
+  enqueue,
+  ensureLayout,
+  noticeStands,
+  listNotices,
+  postNotice,
+  writeRequest,
+} from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`):
@@ -61,6 +73,25 @@ describe('man wait --peek — a check, never a park', () => {
     expect(res.status).toBe(2);
     expect(res.stdout).toContain('--peek never blocks');
   });
+});
+
+it('man wait keeps waiting when a watch is retired during its check', () => {
+  const script = path.join(home, 'retire-watch.cjs');
+  fs.writeFileSync(
+    script,
+    `
+    require('node:fs').unlinkSync(${JSON.stringify(path.join(home, 'watches', 'retired.json'))});
+    console.log(JSON.stringify({ cursor: '1', events: [{ seq: 1, summary: 'stale' }] }));
+  `,
+  );
+  addWatch('retired', `"${process.execPath}" "${script}"`, { owner: 'man' });
+  const res = lobstah('man', 'wait', '--timeout', '1');
+  expect(res.error).toBeUndefined();
+  expect(res.status).toBe(3); // quiet timeout, not the recoverable race's exit 1
+  expect(res.stdout).toContain('timeout: true');
+  expect(res.stdout).not.toContain('stale');
+  expect(res.stdout).not.toContain('error:');
+  expect(readWatch('retired')).toBeUndefined();
 });
 
 describe('man wait: a trap request', () => {

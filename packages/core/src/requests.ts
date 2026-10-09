@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { postNotice } from './notices.js';
 
 /**
@@ -64,7 +64,7 @@ export function requestFilesDir(id: string): string {
 function write(r: LobstahRequest): void {
   fs.mkdirSync(requestsDir(), { recursive: true });
   const file = requestPath(r.id);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(r, null, 2));
   fs.renameSync(tmp, file);
 }

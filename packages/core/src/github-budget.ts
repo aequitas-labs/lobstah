@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { postNotice } from './notices.js';
 
 interface Budget {
@@ -24,7 +24,7 @@ function read(): BudgetState {
 }
 function write(s: BudgetState): void {
   fs.mkdirSync(lobstahHome(), { recursive: true });
-  const tmp = `${file()}.${process.pid}.tmp`;
+  const tmp = uniqueTempPath(file());
   fs.writeFileSync(tmp, JSON.stringify(s));
   fs.renameSync(tmp, file());
 }
