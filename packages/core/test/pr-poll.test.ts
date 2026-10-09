@@ -180,6 +180,51 @@ describe('repository PR batch', () => {
     expect(detail).toHaveBeenCalledTimes(2);
   });
 
+  it('an incomplete changed snapshot does not masquerade as an old success or bypass detail backoff', () => {
+    const w = register(1);
+    register(2);
+    const raw = snapshot(1);
+    raw.reviews.pageInfo = { ...raw.reviews.pageInfo, hasPreviousPage: true };
+    const run = () => response({ pr1: raw, pr2: snapshot(2) });
+    const detail = vi.fn(() => ({ ...view(1), headRefOid: raw.headRefOid }));
+    preparePrWatchBatch(45, T, { run, detail });
+    Object.assign(w, { lastCheckedAt: new Date(T).toISOString(), failures: 3, errorKind: 'auth' });
+    saveWatch(w);
+    raw.headRefOid = 'changed-head';
+    preparePrWatchBatch(45, T + 45_000, { run, detail });
+    expect(() => cachedPrView(ref(1))).toThrow('details deferred');
+    preparePrWatchBatch(45, T + 90_000, { run, detail });
+    expect(() => cachedPrView(ref(1))).toThrow('details deferred');
+    expect(detail).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(T + 360_000);
+    preparePrWatchBatch(45, Date.now(), { run, detail });
+    expect(cachedPrView(ref(1))).toMatchObject({ headRefOid: 'changed-head', fetchedAt: new Date(T + 360_000).toISOString() });
+    expect(detail).toHaveBeenCalledTimes(2);
+  });
+
+  it('cache reads preserve fetch time; an unchanged new GitHub read advances it', () => {
+    register(1);
+    const run = vi.fn(() => response({ pr1: snapshot(1) }));
+    preparePrWatchBatch(45, T, { run });
+    vi.setSystemTime(T + 30_000);
+    preparePrWatchBatch(45, Date.now(), { run });
+    expect(cachedPrView(ref(1))?.fetchedAt).toBe(new Date(T).toISOString());
+    expect(run).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(T + 45_000);
+    preparePrWatchBatch(45, Date.now(), { run });
+    expect(cachedPrView(ref(1))?.fetchedAt).toBe(new Date(T + 45_000).toISOString());
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('dates the snapshot when the repository response arrives, not at the start of a long polling pass', () => {
+    register(1);
+    preparePrWatchBatch(45, T, { run: () => {
+      vi.setSystemTime(T + 2_000);
+      return response({ pr1: snapshot(1) });
+    } });
+    expect(cachedPrView(ref(1))?.fetchedAt).toBe(new Date(T + 2_000).toISOString());
+  });
+
   it('retires existing merged/closed watches at startup, without any API or duplicate notice', () => {
     for (const [n, state] of [
       [1, 'MERGED'],
