@@ -32,8 +32,9 @@ import {
   upsertPr,
   watchDue,
   syncStackReadiness,
+  preparePrWatchBatch,
 } from '@lobstah/core';
-import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch } from '@lobstah/core';
+import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch, PrBatchRun } from '@lobstah/core';
 import { githubRepoFromOrigin } from '@lobstah/pick';
 import { repoOf } from './digest.js';
 import { discoverPrStack } from './pr-stack-watch.js';
@@ -43,13 +44,13 @@ import { discoverPrStack } from './pr-stack-watch.js';
  * the check subcommand, auto-registration from `report --pr` and the trap beat, evidence
  * stamping, and observe-only polling for the inline poller.
  *
- * The daemon observes dispatch-owned PRs even without pickup or a helm.
- * With auto-repair on, its observer is the sole PR state writer; pickup
- * leaves those PR watches alone. It stamps the owner's evidence without
- * advancing the watch cursor, and retires a terminal PR watch.
+ * The daemon batches all PR watches even without pickup or a helm. Pickup
+ * and inline helm polling reuse the same repository cycle. Each check
+ * still advances its own cursor, stamps its owner's evidence, and retires
+ * a terminal PR watch; auto-repair remains the daemon's responsibility.
  */
 
-const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+const shq = (s: string) => (process.platform === 'win32' ? `"${s.replaceAll('"', '""')}"` : `'${s.replace(/'/g, `'\\''`)}'`);
 
 /** How this process re-invokes itself from a shell — node layout or compiled binary. */
 function selfCommand(): string {
@@ -220,10 +221,11 @@ export function backfillPrWatches(opts: { apply?: boolean; fetchTitle?: (ref: Pr
 }
 
 /** Refresh each due PR watch at most once. Registers nothing. */
-export function syncPrWatches(): { refreshed: number } {
+export function syncPrWatches(at = Date.now(), opts: { run?: PrBatchRun } = {}): { refreshed: number } {
   let refreshed = 0;
   const every = pollSecs();
-  const now = new Date();
+  const now = new Date(at);
+  preparePrWatchBatch(every, at, opts);
   for (const w of listWatches()) {
     if (!w.key.startsWith('pr:') || !watchDue(w, every, now.getTime())) continue;
     const before = readPr(w.key)?.observedAt;
@@ -232,7 +234,7 @@ export function syncPrWatches(): { refreshed: number } {
     if (!watch.lastError && after && after !== before) refreshed++;
     if (watch.done) removeWatch(w.key);
   }
-  syncStackReadiness();
+  syncStackReadiness(loadConfig(), at);
   return { refreshed };
 }
 

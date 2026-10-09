@@ -34,6 +34,8 @@ export type NoticeKind =
   | 'watch-held'
   | 'watch-failing'
   | 'watch-recovered'
+  | 'rate-limited'
+  | 'rate-limit-recovered'
   | 'disk-held'
   | 'disk-cleared'
   | 'worktree-released'

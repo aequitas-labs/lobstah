@@ -4,6 +4,8 @@ import {
   chainPr,
   dispatchPrUrls,
   ghPrView,
+  githubBlockedUntil,
+  isPrPresetWatch,
   laneOf,
   listWatches,
   mergeEvidence,
@@ -37,7 +39,11 @@ function ownPrs(id: string, lane: Lane): PrRef[] {
   let urls = dispatchPrUrls(evidence);
   if (urls.length === 0) {
     const chain = chainPr(id, lane)?.url;
-    urls = chain ? [chain] : listWatches().filter((w) => w.key.startsWith('pr:') && w.owner === `dispatch:${id}`).map((w) => w.key);
+    urls = chain
+      ? [chain]
+      : listWatches()
+          .filter((w) => w.key.startsWith('pr:') && w.owner === `dispatch:${id}`)
+          .map((w) => w.key);
   }
   return urls.map((u) => parsePrRef(u)).filter((r): r is PrRef => !!r);
 }
@@ -75,14 +81,12 @@ export function registerWaitWatches(id: string, lane: Lane, entry: StatusEntry):
 
 /**
  * Observe each PR a parked dispatch waits on that no daemon pass observes:
- * a PR with no watch, a helm-owned watch, or a watch whose owning dispatch
- * is gone. The daemon's own pass observes a live dispatch-owned watch. A PR
+ * a PR with no shipped watch or a custom watch. The daemon's repository
+ * pass observes shipped PR watches regardless of their owner. A PR
  * observed less than `everySecs` ago, or already merged or closed, is not
  * read again. Returns the PR keys it read. Never throws.
  */
-export function observeWaitedPrs(
-  opts: { everySecs?: number; now?: number; view?: (ref: PrRef) => GhPrView } = {},
-): string[] {
+export function observeWaitedPrs(opts: { everySecs?: number; now?: number; view?: (ref: PrRef) => GhPrView } = {}): string[] {
   const now = opts.now ?? Date.now();
   const everyMs = (opts.everySecs ?? 45) * 1000;
   const view = opts.view ?? ghPrView;
@@ -91,7 +95,12 @@ export function observeWaitedPrs(
   try {
     daemonWatched = new Set(
       listWatches()
-        .filter((w) => w.key.startsWith('pr:') && w.owner.startsWith('dispatch:') && !w.done && laneOf(w.owner.slice('dispatch:'.length)))
+        .filter(
+          (w) =>
+            !w.done &&
+            (isPrPresetWatch(w) ||
+              (w.key.startsWith('pr:') && w.owner.startsWith('dispatch:') && laneOf(w.owner.slice('dispatch:'.length)))),
+        )
         .map((w) => w.key),
     );
   } catch {
@@ -116,6 +125,7 @@ export function observeWaitedPrs(
           const record = readPr(ref.key);
           if (record && (record.state === 'MERGED' || record.state === 'CLOSED')) continue;
           if (record && now - Date.parse(record.observedAt) < everyMs) continue;
+          if (!opts.view && githubBlockedUntil(now)) continue;
           try {
             // Stamp the dispatch only when the PR is its own, not another PR it links.
             observePr(ref, view(ref), { ...(own.has(ref.key) ? { dispatchId: id } : {}), now: new Date(now) });

@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { AttentionKind } from './config.js';
 import { firstMeaningfulLine } from './gh-errors.js';
+import { cachedPrView } from './pr-poll.js';
 
 /**
  * The shipped GitHub PR watch: `pr:<owner>/<repo>#<n>`. The check reads one
@@ -491,6 +492,11 @@ export function derivePrEvents(
  * If the view fails even without check results, the error says so.
  */
 export function ghPrView(ref: PrRef): GhPrView {
+  return cachedPrView(ref) ?? ghPrViewDirect(ref);
+}
+
+/** Uncached details, only needed when a changed batch snapshot is incomplete. */
+export function ghPrViewDirect(ref: PrRef): GhPrView {
   const view1 = (fields: string) =>
     spawnSync('gh', ['pr', 'view', String(ref.number), '--repo', `${ref.owner}/${ref.repo}`, '--json', fields], {
       encoding: 'utf8',

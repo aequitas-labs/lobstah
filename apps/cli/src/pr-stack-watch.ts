@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome, loadConfig, parsePrRef, PR_VIEW_FIELDS, prStackTrunk, readPrs, readWatch } from '@lobstah/core';
+import { lobstahHome, loadConfig, parsePrRef, PR_VIEW_FIELDS, prStackTrunk, readPrs, readWatch, cachedPrStackLink, githubBlockedUntil } from '@lobstah/core';
 import type { GhPrView, PrRef } from '@lobstah/core';
 import { addPrWatch, observePr, pollSecs } from './pr-watch.js';
 
@@ -10,6 +10,9 @@ export type FetchStackLink = (ref: PrRef, branch: string, direction: 'head' | 'b
 
 /** One extra read per unknown branch link, including the full observation. */
 export const ghStackLink: FetchStackLink = (ref, branch, direction) => {
+  const cached = cachedPrStackLink(ref, branch, direction);
+  if (cached) return cached;
+  if (githubBlockedUntil()) throw new Error('GitHub rate limit reached; stack discovery waits for reset');
   const res = spawnSync('gh', ['pr', 'list', '--repo', `${ref.owner}/${ref.repo}`, '--state', 'open',
     `--${direction}`, branch, '--limit', '3', '--json', `${PR_VIEW_FIELDS},number,url`],
   { encoding: 'utf8', timeout: 60_000, windowsHide: true });

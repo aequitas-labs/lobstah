@@ -207,7 +207,7 @@ import {
   autoRegisterPrWatch,
   backfillPrWatches,
   cutTitle,
-  observeDispatchPrWatches,
+  syncPrWatches,
   pollSecs,
   runPrCheck,
 } from './pr-watch.js';
@@ -620,8 +620,9 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
 
 function runDueManWatches(): void {
   const every = pollSecs();
+  syncPrWatches();
   for (const w of listWatches()) {
-    if (w.owner === 'man' && watchDue(w, every)) runWatchCheck(w);
+    if (w.owner === 'man' && !w.key.startsWith('pr:') && watchDue(w, every)) runWatchCheck(w);
   }
   // The daemon observes dispatch-owned PR watches even with no helm signed on.
 }
@@ -3004,7 +3005,7 @@ async function mainCli(): Promise<void> {
         await daemon(Number(opt('--interval') ?? '5000'), console.log, {
           culler: cliCuller,
           prWatches: (now, log) => {
-            observeDispatchPrWatches(pollSecs(), now);
+            syncPrWatches(now);
             observeWaitedPrs({ everySecs: pollSecs(), now });
             // Before the cull pass: a merged PR's release needs the chain finished.
             finishResolvedWaits(log);

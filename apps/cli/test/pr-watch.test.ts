@@ -4,7 +4,20 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, derivePrEvents, enqueue, ensureLayout, listNotices, listWatches, parsePrRef, readEvidence, readPr, readStatusLog, readWatch, runWatchCheck } from '@lobstah/core';
+import {
+  appendStatus,
+  derivePrEvents,
+  enqueue,
+  ensureLayout,
+  listNotices,
+  listWatches,
+  parsePrRef,
+  readEvidence,
+  readPr,
+  readStatusLog,
+  readWatch,
+  runWatchCheck,
+} from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
 import { pickupOwnsReviewFeedback, stampPrEvidence, workEvents } from '../src/pr-watch.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -38,7 +51,8 @@ describe('report done --pr registers the PR watch', () => {
     expect(res.stdout).toContain('watch: pr:acme/web#7');
     const w = readWatch('pr:acme/web#7')!;
     expect(w.owner).toBe(`dispatch:${ID}`);
-    expect(w.check).toContain(`watch check-pr 'pr:acme/web#7' --for '${ID}' --cursor {cursor}`);
+    const quote = process.platform === 'win32' ? '"' : "'";
+    expect(w.check).toContain(`watch check-pr ${quote}pr:acme/web#7${quote} --for ${quote}${ID}${quote} --cursor {cursor}`);
     expect(w.brief).toContain(URL_);
     expect(w.brief).toContain('{summaries}');
   });
@@ -62,10 +76,16 @@ describe('report done --pr registers the PR watch', () => {
   });
 
   it('a daemon repair report does not replace or create the PR watch', () => {
-    enqueue({
-      id: ID, repo: 'web', brief: 'repair the existing PR',
-      pr: { url: URL_, headRefName: 'feature' }, systemRepair: {},
-    }, 'chore');
+    enqueue(
+      {
+        id: ID,
+        repo: 'web',
+        brief: 'repair the existing PR',
+        pr: { url: URL_, headRefName: 'feature' },
+        systemRepair: {},
+      },
+      'chore',
+    );
     const res = lobstah('report', ID, 'done', 'repaired', '--pr', URL_);
     expect(res.status).toBe(0);
     expect(res.stdout).not.toContain('watch:');
