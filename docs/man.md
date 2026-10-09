@@ -1308,6 +1308,47 @@ replaces the custom title. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` on the
 command that starts Claude Code stops that for that one process; the start
 command `man throw` opens sets it. Codex also sets the terminal title.
 
+### Warm worktree pools
+
+Bursty work (a tracker's issues, CodeClaw's delegations) wants a fresh
+conversation per issue but not a cold start. A pool
+([`[pools.<name>]`](configuration.md#poolsname--warm-worktrees-for-headless-dispatches))
+is a set of worktrees for one repo that the daemon keeps checked out and
+installed, with no session attached:
+
+```
+lobstah dispatch --pool codeclaw --brief-text "<full brief>"
+```
+
+The runner takes a free pool worktree, resets it to `lobstah/<id>` from trunk
+(untracked files go, except dependency installs, build caches and local env
+files; production env files always go), runs the repo's `setup`, and starts a
+new headless session there. The first status note names it: `pool worktree
+codeclaw/2`. When the pool is full, `overflow = "headless"` runs the dispatch
+in a cold worktree (`pool codeclaw full: cold worktree`) and `overflow =
+"queue"` leaves it queued until a pool worktree frees up. Pool work counts
+against `maxConcurrent`, and no trap ever takes it.
+
+A reset never discards work. A pool worktree with uncommitted changes or
+commits on no remote is taken out of rotation, and a `pool-out` notice names
+it (`pool worktree codeclaw/2 (~/.lobstah/pools/codeclaw/2) is out of
+rotation: 1 commit(s) on no remote branch`). Push or discard the work there;
+the daemon's next warm-up returns it.
+
+Follow-ups keep the usual rule: `lobstah send <id>` to finished pool work
+continues the same conversation in the same pool worktree while no pool
+dispatch has reset it since. Once one has, the follow-up starts as it does
+when its origin's worktree is gone: a fresh worktree, a cold session with a
+progress note, and a first note that says `fresh worktree (origin pool
+worktree codeclaw/2 was reused by <id>)`.
+
+`man tend` and `lobstah status` list each pool:
+
+```
+pools[1]{pool,repo,size,free,overflow,claimed,out,warming}:
+  codeclaw,homebase,3,1,headless,1: 6a1f0c2e,2: 1 commit(s) on no remote branch (after 9b3d0a11),
+```
+
 ### Culling and disk space
 
 Worktrees are 1 to 8 GB each. `lobstah cull` sweeps what is finished: `done/`
@@ -1321,7 +1362,9 @@ when the same clean-and-pushed safety check passes; unsaved soak checkouts
 remain protected even without a registration. A worktree that follow-ups
 reused is one worktree shared by the chain: it stays while any dispatch in
 the chain is queued or active, and it ages from the newest dispatch that
-used it.
+used it. Pool worktrees (`~/.lobstah/pools/`) are never culled, by `lobstah
+cull` or by the daemon: a pool keeps its worktrees, and the dispatch records
+that used them age out as usual.
 
 Without `--apply` it is a dry run: it measures each target and prints the
 sizes. A worktree is measured with one `du -sk`; where `du` is missing

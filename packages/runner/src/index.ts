@@ -4,6 +4,7 @@ import { appendStatus, isFinished, laneDirs } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 import { main } from './run.js';
 import { reapStarted } from './reap.js';
+import { warmPool } from '@lobstah/worktree';
 
 export { main } from './run.js';
 export type { RunnerDeps } from './run.js';
@@ -42,7 +43,29 @@ export function runRunner(activeDirArg: string, laneArg?: string): void {
     });
 }
 
+/**
+ * Entry for one pool warm-up pass (`--pool-warm <name>` under node, or
+ * `lobstah __pool-warm <name>` in the compiled binary). The daemon spawns
+ * it detached, so a long install never holds up its tick.
+ */
+export function runPoolWarm(name: string): void {
+  const log = (m: string) => console.log(`[pool-warm] ${new Date().toISOString()} ${m}`);
+  warmPool(name, { log })
+    .then((ran) => {
+      if (!ran) log(`pool ${name}: another warm-up is running`);
+    })
+    .catch((err) => {
+      log(`pool ${name}: warm-up failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    })
+    .finally(() => {
+      setTimeout(() => process.exit(), EXIT_LINGER_MS).unref();
+    });
+}
+
 const [activeDirArg, laneArg] = process.argv.slice(2);
 // Self-run as a script; when the compiled CLI imports this module its own
 // argv starts with __runner, and the CLI case calls runRunner explicitly.
-if (activeDirArg && activeDirArg !== '__runner') runRunner(activeDirArg, laneArg);
+if (activeDirArg === '--pool-warm') {
+  if (laneArg) runPoolWarm(laneArg);
+} else if (activeDirArg && activeDirArg !== '__runner' && activeDirArg !== '__pool-warm') runRunner(activeDirArg, laneArg);

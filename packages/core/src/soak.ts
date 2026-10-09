@@ -630,7 +630,8 @@ export function claimBait(reg: TrapRegistration): { id: string; lane: Lane; desc
   for (const [lane, pass] of [
     ['chore', addressed],
     ['work', addressed],
-    ['work', (d: Descriptor) => d.for === undefined && reg.repo !== undefined && d.repo === reg.repo],
+    // Pool work wants a fresh headless session in a pool worktree: never a trap's.
+    ['work', (d: Descriptor) => d.for === undefined && d.pool === undefined && reg.repo !== undefined && d.repo === reg.repo],
   ] as Array<[Lane, (d: Descriptor) => boolean]>) {
     const id = claimNext(lane, (d) => !pass(d));
     if (!id) continue;
@@ -674,6 +675,7 @@ export function trapReady(reg: TrapRegistration, deferMs: number, now = Date.now
 export function daemonSkip(traps: TrapRegistration[], deferMs: number, now = Date.now()): (d: Descriptor) => boolean {
   return (d) => {
     if (d.for !== undefined) return true; // sticky — never the daemon's
+    if (d.pool !== undefined) return false; // pool work is never a trap's
     return traps.some((r) => r.repo === d.repo && trapReady(r, deferMs, now));
   };
 }

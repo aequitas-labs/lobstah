@@ -3,6 +3,7 @@ import { enqueue, lastEventAt, loadConfig, readStatusLog, reconcile } from '@lob
 import type { Source, WorkItem } from '../types.js';
 import type { MapEntry, PickupState } from '../state.js';
 import { dispatchLane } from './report.js';
+import { pickupPool } from '../config.js';
 
 function terminal(uuid: string): boolean {
   const lane = dispatchLane(uuid);
@@ -45,6 +46,8 @@ export async function dispatchLoop(
   source: Source,
   state: PickupState,
   log: (m: string) => void = () => {},
+  /** `[pickup].pools`: an issue dispatch runs in the first one serving its repo. */
+  pools: string[] = [],
 ): Promise<void> {
   const items: WorkItem[] = await source.poll();
   const maxAttempts = 1 + loadConfig().limits.maxRestartAttempts;
@@ -67,6 +70,7 @@ export async function dispatchLoop(
       continue;
     }
     const id = randomUUID();
+    const pool = pickupPool(pools, item.repoKey);
     enqueue(
       {
         id,
@@ -74,6 +78,8 @@ export async function dispatchLoop(
         brief: item.brief,
         // A review dispatch forks the latest session in its chain; issues start cold.
         ...(plan.followUp ? { followUp: plan.followUp } : {}),
+        // An issue starts fresh in a warm pool worktree when a pool serves its repo.
+        ...(item.kind === 'issue' && pool ? { pool } : {}),
       },
       'work',
     );

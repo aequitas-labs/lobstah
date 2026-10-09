@@ -10,7 +10,12 @@ import {
   dispatchWorktree,
   laneOf,
   listTraps,
+  poolSlotLabel,
+  poolSlotOf,
+  readSlotClaim,
+  writeSlotClaim,
   inspectTrapWorktree,
+  releaseWorktreeLock,
   storedDescriptor,
   worktreeGitDir,
   worktreeHolder,
@@ -80,7 +85,8 @@ const ATTEMPTS = 6;
  * want the same result, so the losers wait and retry.
  * Anything else still fails at once.
  */
-async function gitShared(cwd: string, ...args: string[]): Promise<string> {
+/** @internal Shared with pool.ts. */
+export async function gitShared(cwd: string, ...args: string[]): Promise<string> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await git(cwd, ...args);
@@ -242,7 +248,7 @@ export function withRepoLockSync<T>(cwd: string, fn: () => T): T {
  * unpack; a parallel `git worktree add` can read another's half-written
  * `.git/worktrees/<id>`. `fn` gets the git common dir.
  */
-async function oneAtATime(cwd: string, fn: (common: string) => Promise<void>): Promise<void> {
+export async function oneAtATime(cwd: string, fn: (common: string) => Promise<void>): Promise<void> {
   const common = await git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir');
   const key = realpath(common);
   const run = (repoQueues.get(key) ?? Promise.resolve()).then(() => withRepoLock(common, () => fn(common)));
@@ -269,7 +275,7 @@ function fetchStamps(common: string): Record<string, number> {
  * before a fetch of the same ref started reuses that fetch instead of
  * fetching again: it would get the same answer.
  */
-async function fetchShared(cwd: string, remote: string, ref: string): Promise<void> {
+export async function fetchShared(cwd: string, remote: string, ref: string): Promise<void> {
   const asked = Date.now();
   const key = `${remote} ${ref}`;
   await oneAtATime(cwd, async (common) => {
@@ -372,7 +378,8 @@ export async function recoverWorktree(repo: RepoConfig, id: string): Promise<str
   );
 }
 
-async function runSetup(repo: RepoConfig, dir: string): Promise<void> {
+/** Run the repo's `setup` commands in `dir` and record that they ran. */
+export async function runSetup(repo: RepoConfig, dir: string): Promise<void> {
   for (const cmd of repo.setup ?? []) {
     await shell(cmd, { cwd: dir, env: { ...process.env, ...(repo.env ?? {}) } });
   }
@@ -458,6 +465,11 @@ export interface ChooseInput {
 
 const short = (s: string) => s.slice(0, 8);
 
+function poolReused(slot: { pool: string; slot: number }, by: string | undefined): string {
+  const label = poolSlotLabel(slot.pool, slot.slot);
+  return by ? `origin pool worktree ${label} was reused by ${short(by)}` : `origin pool worktree ${label} cannot be traced to it`;
+}
+
 /** Canonical path: native realpath (expands Windows 8.3 names), lowercased on Windows. */
 function realpath(p: string): string {
   let r: string;
@@ -515,6 +527,16 @@ export async function chooseWorktree(input: ChooseInput): Promise<WorktreeChoice
   } catch {
     return { reuse: false, reason: 'origin worktree is not a readable git checkout' };
   }
+  // A pool worktree is the chain's only while the newest claim on it is the
+  // dispatch that last ran there. Once a pool dispatch has reset it, it
+  // holds someone else's branch: the follow-up falls back as for a worktree
+  // that is gone.
+  const slot = poolSlotOf(found.path);
+  if (slot) {
+    const claim = readSlotClaim(slot.pool, slot.slot);
+    // The follow-up's own claim stands too: its restarted runner comes back here.
+    if (claim?.id !== found.from && claim?.id !== id) return { reuse: false, reason: poolReused(slot, claim?.id) };
+  }
   const here = realpath(found.path);
   // A trap works in its own checkout; lobstah never reuses one, even one a
   // trap anchored inside a dispatch's worktree.
@@ -544,6 +566,15 @@ export async function chooseWorktree(input: ChooseInput): Promise<WorktreeChoice
   }
   const held = acquireWorktreeLock(found.path, id, lane);
   if (held) return { reuse: false, reason: `origin worktree is in use by ${short(held.id)}` };
+  if (slot) {
+    // Checked again under the lock: a pool dispatch may have claimed it since.
+    const claim = readSlotClaim(slot.pool, slot.slot);
+    if (claim?.id !== found.from && claim?.id !== id) {
+      releaseWorktreeLock(found.path, id);
+      return { reuse: false, reason: poolReused(slot, claim?.id) };
+    }
+    writeSlotClaim(slot.pool, slot.slot, { id, lane, at: new Date().toISOString() });
+  }
   return { reuse: true, path: found.path, owner: found.owner, from: found.from };
 }
 
@@ -575,7 +606,7 @@ export async function remove(repo: RepoConfig, id: string): Promise<void> {
 }
 
 /** git that never throws: exit status and trimmed output. */
-async function tryGit(cwd: string, ...args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
+export async function tryGit(cwd: string, ...args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
   try {
     const { stdout, stderr } = await run('git', args, { cwd, env: process.env });
     return { ok: true, out: stdout.trimEnd(), err: stderr.trim() };
@@ -713,3 +744,5 @@ export async function removeIfSafe(dir: string, opts: { ignore?: string[]; branc
   }
   return { removed: true, primary, deletedBranches, keptBranches };
 }
+
+export * from './pool.js';

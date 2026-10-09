@@ -8,6 +8,7 @@ import type { WindowRef } from './window.js';
 import { listWatches } from './watch.js';
 import { readRequest } from './requests.js';
 import { cancelRequested } from './queue.js';
+import { poolSlotIsOut } from './pools.js';
 import { listTraps, unreportedTrapBait } from './soak.js';
 import { sessionWorker } from './session-workers.js';
 import { workerMetadata } from './worker-metadata.js';
@@ -256,6 +257,8 @@ export function noticeStands(n: Notice): boolean {
       );
     case 'trap-request':
       return n.refId !== undefined && isOpenRequest(n.refId);
+    case 'pool-out':
+      return n.refId !== undefined && poolSlotIsOut(n.refId);
     case 'trap-claim-idle':
       return listTraps().some((reg) => {
         if (reg.claimed !== n.refId) return false;

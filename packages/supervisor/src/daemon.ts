@@ -48,6 +48,9 @@ import {
   expireReservations,
   pausedWaiting,
   sendTelemetry,
+  poolDir,
+  poolWaits,
+  poolWarmDue,
 } from '@lobstah/core';
 import type { Config, Descriptor, FreeBytesReader, Lane, RunnerInfo } from '@lobstah/core';
 import { classify, killGroup, pidAlive, processStartTime } from './liveness.js';
@@ -373,6 +376,49 @@ export interface DaemonCuller {
   pressure(enough: () => boolean, now: number, batch: number, log: (m: string) => void): number;
 }
 
+/** Start one detached warm-up pass for a pool (see warmPool). */
+export function spawnPoolWarm(name: string): void {
+  const dir = poolDir(name);
+  fs.mkdirSync(dir, { recursive: true });
+  const log = fs.openSync(path.join(dir, 'warm.log'), 'a');
+  const argv = COMPILED_BINARY ? ['__pool-warm', name] : [runnerEntry(), '--pool-warm', name];
+  const child = spawn(process.execPath, argv, { detached: true, stdio: ['ignore', log, log], env: process.env });
+  fs.closeSync(log);
+  child.unref();
+}
+
+/** At most one warm-up start per pool per this interval, whatever is due. */
+export const POOL_WARM_SPAWN_MS = 30_000;
+const warmSpawnedAt = new Map<string, number>();
+
+/**
+ * Start a warm-up for each pool that has something due (poolWarmDue): a
+ * missing slot, a released one to check, an out-of-rotation one to
+ * re-check, or a stale fetch. The warm-up runs in its own process, never in
+ * the tick. Returns the pools it started.
+ */
+export function poolPass(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): string[] {
+  const now = hooks.now?.() ?? Date.now();
+  const started: string[] = [];
+  for (const [name, pool] of Object.entries(cfg.pools ?? {})) {
+    const key = `${lobstahHome()}\0${name}`;
+    if (now - (warmSpawnedAt.get(key) ?? -Infinity) < POOL_WARM_SPAWN_MS) continue;
+    let why: string | undefined;
+    try {
+      why = poolWarmDue(name, pool, now);
+    } catch (err) {
+      log(`pool ${name}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+    if (!why) continue;
+    warmSpawnedAt.set(key, now);
+    (hooks.spawnPoolWarm ?? spawnPoolWarm)(name);
+    started.push(name);
+    log(`pool ${name}: warm-up started (${why})`);
+  }
+  return started;
+}
+
 export interface DaemonHooks {
   culler?: DaemonCuller;
   /** Free-space reader; tests inject a fake so they never read the real disk. */
@@ -380,6 +426,8 @@ export interface DaemonHooks {
   now?: () => number;
   /** Test seam for process spawning; production uses spawnRunner. */
   spawnRunner?: typeof spawnRunner;
+  /** Test seam for the pool warm-up process; production uses spawnPoolWarm. */
+  spawnPoolWarm?: (name: string) => void;
   /** Dispatch-owned PR observer and repairer, provided by the CLI daemon entry. */
   prWatches?: (now: number, log: (message: string) => void) => void;
 }
@@ -538,9 +586,11 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   for (const t of bounceExpiredSignOffs(signOffGraceMs)) log(`trap wt:${t} did not re-soak within the sign-off grace — its messages bounced to the helm`);
   noticeOrphanedBait(Date.now(), signOffGraceMs);
   noticeIdleTrapClaims(now, cfg.soak.claimIdleNoticeSecs * 1000);
-  const workSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
-  const choreSkip = (d: Descriptor) => d.for !== undefined &&
-    (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));
+  const trapSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
+  // A queue-mode pool dispatch stays queued while its pool has no free worktree.
+  const workSkip = (d: Descriptor) => trapSkip(d) || poolWaits(d, cfg);
+  const choreSkip = (d: Descriptor) => (d.for !== undefined &&
+    (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil))) || poolWaits(d, cfg);
   const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : choreSkip);
   for (const lane of ['chore', 'work'] as Lane[]) {
     for (const st of listActive(lane)) reconcileOne(st, cfg, log, hooks.spawnRunner, wedgeGrace);
@@ -548,6 +598,8 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   // After reconcile: a dispatch the PR pass finished is in done/ before a
   // merged PR's worktree release looks at its chain.
   retentionPass(cfg, hooks, log);
+  // Pools: create missing worktrees, check released ones, keep idle ones fetched.
+  poolPass(cfg, hooks, log);
   // Only a headless claim creates a worktree. Trap catches do not spend slots
   // or require space, so avoid a disk hold when no headless slot is open.
   const hasHeadlessSlot = (lane: Lane) =>

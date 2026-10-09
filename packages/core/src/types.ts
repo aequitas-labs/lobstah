@@ -45,6 +45,12 @@ export interface Descriptor {
   env?: Record<string, string>;
   followUp?: string;
   /**
+   * Run in a worktree from this pool (`[pools.<name>]`): a free pool
+   * worktree is reset to a fresh branch from trunk and a new session starts
+   * there. A trap catch ignores it.
+   */
+  pool?: string;
+  /**
    * The existing PR this dispatch works on (a repair or a rebase). The
    * runner pushes no branch and opens no PR for it; the worker pushes to
    * the PR's head branch.
@@ -110,6 +116,8 @@ export interface Evidence {
   worktree?: string;
   /** Set when the dispatch reused an earlier dispatch's worktree: that dispatch's id. */
   worktreeOf?: string;
+  /** The pool worktree the dispatch ran in (`<pool>/<slot>`), when it ran in one. */
+  pool?: string;
   /** When `[limits].releaseOnMerge` removed the worktree after the PR merged (ISO). */
   worktreeReleased?: string;
   /** Branches this dispatch pushed, as lobstah saw it (pushes.ts). */

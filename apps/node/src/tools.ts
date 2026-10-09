@@ -6,6 +6,7 @@ import {
   ensureLayout,
   laneDirs,
   lastEventAt,
+  loadConfig,
   readStatusLog,
   reconcile,
   requestCancel,
@@ -59,15 +60,25 @@ export function dispatchTool(): AnyAgentTool {
         model: { type: 'string' },
         effort: { type: 'string' },
         followUp: { type: 'string', description: 'Earlier dispatch UUID whose session to fork' },
+        pool: {
+          type: 'string',
+          description: 'Worktree pool from the host config ([pools.<name>]): run in a warm pool worktree with a fresh session. repo defaults to the pool\'s repo.',
+        },
       },
-      required: ['repo', 'brief'],
+      required: ['brief'],
       additionalProperties: false,
     },
     async execute(_id, params) {
       ensureLayout();
-      const repo = param(params, 'repo');
+      const poolName = param(params, 'pool');
+      const pool = poolName !== undefined ? loadConfig().pools[poolName] : undefined;
+      if (poolName !== undefined && !pool) throw new Error(`lobstah_dispatch: unknown pool "${poolName}"`);
+      if (pool && param(params, 'repo') !== undefined && param(params, 'repo') !== pool.repo) {
+        throw new Error(`lobstah_dispatch: pool ${poolName} serves repo ${pool.repo}, not ${param(params, 'repo')}`);
+      }
+      const repo = param(params, 'repo') ?? pool?.repo;
       const brief = param(params, 'brief');
-      if (!repo || !brief) throw new Error('lobstah_dispatch requires repo and brief');
+      if (!repo || !brief) throw new Error('lobstah_dispatch requires brief, and repo or pool');
       const d: Descriptor = {
         id: randomUUID(),
         repo,
@@ -76,11 +87,12 @@ export function dispatchTool(): AnyAgentTool {
         model: param(params, 'model'),
         effort: param(params, 'effort'),
         followUp: param(params, 'followUp'),
+        ...(poolName !== undefined ? { pool: poolName } : {}),
       };
       if (d.harness) d.harnessExplicit = true;
       if (d.model) d.modelExplicit = true;
       enqueue(d, 'work');
-      return text(toonKV({ id: d.id, repo, queued: new Date().toISOString() }), { id: d.id });
+      return text(toonKV({ id: d.id, repo, ...(d.pool ? { pool: d.pool } : {}), queued: new Date().toISOString() }), { id: d.id });
     },
   };
 }

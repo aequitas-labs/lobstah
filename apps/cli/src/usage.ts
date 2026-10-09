@@ -32,7 +32,8 @@ const HARNESS = 'claude|codex';
 export const COMMANDS: Record<string, CommandSpec> = {
   dispatch: {
     flags: {
-      '--repo': { value: '<key>', required: true },
+      '--repo': { value: '<key>' },
+      '--pool': { value: '<name>' },
       '--brief': { value: '<file>' },
       '--bait': { value: '<file>' },
       '--brief-text': { value: '<text>' },
@@ -212,6 +213,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '<key>',
   },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
+  '__pool-warm': { flags: {}, positionals: '<pool>' },
 };
 
 /** Hand-written prose under each generated synopsis. */
@@ -219,7 +221,7 @@ export const PROSE: Record<string, string> = {
   dispatch: `Queue supervised work; prints id. --for <name>, wt:<name>, or wt:<id> targets a signed-on trap
 (sticky; session:<id> resolves to it). A claimed helm requires --session
 <helm-id> to address work. Repeat --attach to copy files into owned state.
-Alias: set --bait.`,
+--pool <name>: fresh session in a warm [pools.<name>] worktree. Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows its live registration. Alias: buoy.`,
@@ -367,6 +369,8 @@ post-tool-use runs soak beat, session-end runs stow --quiet. The older commands
 stay as aliases.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
 itself with this verb). Not for direct use.`,
+  '__pool-warm': `Internal: one warm-up pass over a worktree pool (the daemon re-execs itself
+with this verb). Not for direct use.`,
 };
 
 /** Generated synopsis: command, subverbs, positionals, then flags. */

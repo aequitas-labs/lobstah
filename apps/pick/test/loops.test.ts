@@ -68,6 +68,22 @@ describe('dispatch loop', () => {
     expect(st.get('fake:1')?.uuid).toBeDefined();
   });
 
+  it('issues go to the first [pickup].pools pool that serves their repo; reviews keep their chain rule', async () => {
+    fs.writeFileSync(
+      path.join(home, 'config.toml'),
+      ['[repos.demo]', 'path = "/tmp/demo"', '[repos.other]', 'path = "/tmp/other"', '[pools.o]', 'repo = "other"', '[pools.d]', 'repo = "demo"'].join('\n'),
+    );
+    const src = new FakeSource();
+    src.items = [item('fake:pool'), item('fake:review', 'review')];
+    const st = new PickupState();
+    await dispatchLoop(src, st, () => {}, ['o', 'd']);
+    const issue = claimNext('work')!;
+    const review = claimNext('work')!;
+    const byId = new Map([issue, review].map((id) => [id, readDescriptor(id, 'work')]));
+    expect(byId.get(st.get('fake:pool')!.uuid)?.pool).toBe('d');
+    expect(byId.get(st.get('fake:review')!.uuid)?.pool).toBeUndefined();
+  });
+
   it('a lost claim means no dispatch', async () => {
     const src = new FakeSource();
     src.items = [item('fake:2')];

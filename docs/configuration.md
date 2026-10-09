@@ -32,6 +32,7 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 | `env` | no | Environment merged into every dispatch for this repo. |
 | `pickup` | no (`false`) | Opt this repo into `[pickup.github]` multi-repo mode. Explicit per repo — nothing becomes pickable by being configured. |
 | `pushEarly`, `draftPr`, `checkpointOnStop` | no (inherit `[limits]`) | Override remote preservation for this repo's headless dispatches. |
+| `poolKeep` | no | Extra gitignore-style patterns a pool reset keeps (e.g. `["apps/ios/DerivedData/"]`), on top of the built-in keep list. See [`[pools.<name>]`](#poolsname--warm-worktrees-for-headless-dispatches). |
 | `humanGateChecks` | no | Check names that fail until a person approves the change (e.g. `["owner approval"]`). `*` matches any run of characters. On a PR of a dispatch in this repo, a failed human gate never starts a PR repair or a CI-fix continuation. A PR whose only failing checks are human gates shows `repair.status: waiting` with `heldBy: human-gate`. A worker adds gates for one PR with `lobstah report --human-gate <check>`. |
 
 `[repos.<key>.harness]` — per-repo harness defaults: `default` (`claude` \|
@@ -156,6 +157,87 @@ repos = ["homebase", "matcha"]
 repos = ["lobstah", "lavish"]
 ```
 
+## `[pools.<name>]` — warm worktrees for headless dispatches
+
+A pool is a set of worktrees for one repo that the daemon keeps warm (checked
+out, dependencies installed), with no session attached. A dispatch that names
+the pool takes a free one, and lobstah resets it and starts a fresh headless
+session there: a new conversation without the cold start (new worktree, full
+install, first build). Pools are separate from traps; a trap never takes pool
+work, and pool work is never addressed to one.
+
+```toml
+[pools.codeclaw]
+repo = "homebase"
+size = 3
+overflow = "headless"   # or "queue"
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `repo` | — (required) | The `[repos.<key>]` the pool's worktrees check out. |
+| `size` | `1` | How many worktrees the daemon keeps. Slots live at `~/.lobstah/pools/<name>/1` … `/<size>`. Lowering it leaves the extra slots on disk, unused. |
+| `overflow` | `"headless"` | When every pool worktree is taken: `"headless"` runs the dispatch in a normal cold worktree (`worktrees/<id>`); `"queue"` leaves it queued until a pool worktree is free (`man tend` shows `queued work waits: no free worktree in pool <name>`). |
+
+**Dispatching.** `lobstah dispatch --pool <name> --brief …` (`--repo` defaults
+to the pool's repo and must match it if given). The OpenClaw
+`lobstah_dispatch` tool takes `pool`, and `[pickup].pools` routes tracker
+issues to a pool. The descriptor field is `pool`. A pool dispatch counts
+against `[limits].maxConcurrent` like any headless dispatch.
+
+**Claim and reset.** The runner takes the first free slot (its worktree lock,
+the same lock every headless dispatch holds) and resets it: fetch trunk,
+check out `lobstah/<id>` from `origin/<trunk>` (a daemon repair starts from
+its PR's head instead), remove untracked and ignored files except the keep
+list, remove production env files, then run the repo's `setup` commands. The
+first status note says `pool worktree <name>/<slot>`, or `pool <name> full:
+cold worktree`. Evidence records `pool: <name>/<slot>`.
+
+The keep list (gitignore-style, matched at any depth unless anchored) is
+dependency installs, build caches and local env files:
+`node_modules/`, `.pnpm-store/`, `.venv/`, `vendor/bundle/`, `Pods/`,
+`.turbo/`, `.next/cache/`, `.nx/cache/`, `.cache/`, `*.tsbuildinfo`,
+`target/`, `.gradle/`, `.build/`, `.env*`, `.dev.vars`, plus the repo's
+`poolKeep`. Any `.env*` file whose name contains `prod` is removed even so: a
+production env file is never left in a pool worktree.
+
+**Safety.** A reset never discards work. A slot with uncommitted changes
+(tracked edits, or untracked files git does not ignore, outside `scratch`
+paths) or commits on no remote branch is taken out of rotation instead, a
+`pool-out` helm notice names it and its path, and the dispatch is served per
+`overflow`. Commit and push (or discard) the work there; the next warm-up
+pass finds it clean and pushed and returns it (a quiet `pool-returned`
+notice).
+
+**Release.** A slot returns to the pool when its dispatch finishes (done,
+failed or cancelled): the lock is released, and the runner has pushed the
+branch (`pushEarly`/`checkpointOnStop`). The warm-up then checks it; one left
+with unpushed or uncommitted work goes out of rotation as above.
+
+**Follow-ups** keep `[limits].reuseWorktree`: a follow-up of a pool dispatch
+continues in the same pool worktree, same branch and HEAD, while it is free
+and no pool dispatch has claimed it since. Once a pool dispatch has reset it,
+the follow-up falls back exactly as when the origin's worktree is gone (a
+fresh worktree from trunk, cold session with a progress note) and its first
+status note says `fresh worktree (origin pool worktree <name>/<slot> was
+reused by <id>)`. A follow-up dispatched with `--pool` takes that fresh
+worktree from the pool; one without stays out of it.
+
+**Warm-up.** Each tick the daemon starts a warm-up process for a pool with
+something due (at most one per pool, at most once per 30s): it creates
+missing slots (a detached checkout of trunk, then `setup`) while the
+worktrees volume has `[limits].minFreeGB` free, fetches trunk every 10
+minutes, checks slots whose dispatch has finished, and re-checks
+out-of-rotation slots every 5 minutes. It takes a slot's lock before it
+looks at it, so a claimed slot is never touched. Its log is
+`~/.lobstah/pools/<name>/warm.log`.
+
+**Visibility and cleanup.** `lobstah man tend` and `lobstah status` list each
+pool: size, free, which dispatch holds each claimed slot, which slots are out
+of rotation and why, and which are still being made. Pool worktrees live
+outside `~/.lobstah/worktrees`: `lobstah cull`, the retention cull,
+`releaseOnMerge` and the free-space guard never remove them.
+
 ## `[pickup]` — tracker loops (`lobstah pick`)
 
 | Key | Default | Meaning |
@@ -163,6 +245,7 @@ repos = ["lobstah", "lavish"]
 | `pollSecs` | `45` | Poll cadence. Outbound only — no webhooks, ever. |
 | `liveComment` | `true` | Keep one editable, marked status comment per dispatch. Routine edits are capped at once per minute; human-needed and terminal transitions still post a fresh notification comment. Falls back to transition comments if editing is unavailable. |
 | `notifyCommand` | — | Pickup's own hook, fired on tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`. |
+| `pools` | `[]` | Pool names (`["codeclaw"]`). An issue dispatch for repo R runs in the first listed `[pools.<name>]` whose `repo` is R. Review rounds are follow-ups and keep their chain's worktree rule. |
 
 ### Token sources (both trackers)
 

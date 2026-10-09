@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, ensureLayout, pendingIds } from '@lobstah/core';
+import { appendStatus, claimNext, ensureLayout, pendingIds, queuedDescriptor } from '@lobstah/core';
 import { cancelTool, dispatchTool, sendTool, statusTool } from '../src/tools.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -23,6 +23,13 @@ describe('openclaw plugin tools', () => {
     const { id } = res.details as { id: string };
     expect(pendingIds('work')).toEqual([id]);
     expect(res.content[0]!.text).toContain(id);
+  });
+
+  it('dispatch with a pool queues pool work for the pool\'s repo', async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.demo]\npath = "/tmp/demo"\n[pools.warm]\nrepo = "demo"\nsize = 2\n`);
+    const { id } = (await dispatchTool().execute('t', { pool: 'warm', brief: 'b' })).details as { id: string };
+    expect(queuedDescriptor(id, 'work')).toMatchObject({ repo: 'demo', pool: 'warm' });
+    await expect(dispatchTool().execute('t', { pool: 'cold', brief: 'b' })).rejects.toThrow(/unknown pool "cold"/);
   });
 
   it('status reconciles a single dispatch and lists active ones', async () => {

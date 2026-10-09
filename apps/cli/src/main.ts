@@ -120,6 +120,7 @@ import {
   mergeEvidence,
   unhandled,
   configPath,
+  poolViews,
   copyAttachments,
   dispatchAttachmentsDir,
   enqueue,
@@ -173,7 +174,7 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { charter, HELM_REMINDER } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
-import { attentionKindLabel, buildTendReport, renderTend } from './tend.js';
+import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS } from './tend.js';
 import { runCull } from './cull.js';
 import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
@@ -230,14 +231,16 @@ import { alreadyArmed, armWatcher, awaitWatcher, sessionWatcher, stopWatcher } f
 const HELP = `lobstah — supervision framework for coding agents
 
 work (humans and agents):
-  dispatch --repo <key> (--brief <file> | --brief-text <text>)   (alias: set --bait)
+  dispatch (--repo <key> | --pool <name>) (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
            [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap>] [--chore] [--id <uuid>]
                                   queue a supervised dispatch; prints the id.
                                   --for addresses the work to a signed-on
                                   worktree (sticky: waits for that trap,
                                   never falls back headless; session:<id>
-                                  resolves to its trap)
+                                  resolves to its trap). --pool runs it in a
+                                  warm worktree of [pools.<name>]: reset to a
+                                  fresh branch, new session
   ls [--all]                      queue, active, recent done      (alias: buoys)
   stats [--per-trap] [--json]     catches (dispatches finished done): today
                                   and in total; --per-trap adds each trap's
@@ -994,11 +997,19 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'dispatch': {
-      const repo = opt('--repo');
+      const poolName = opt('--pool');
+      const pool = poolName !== undefined ? loadConfig().pools[poolName] : undefined;
+      if (poolName !== undefined) {
+        const known = Object.keys(loadConfig().pools);
+        if (!pool) throw new Error(`unknown pool "${poolName}" — configured pools: ${known.join(', ') || 'none'} ([pools.<name>] in ${configPath()})`);
+        if (opt('--repo') !== undefined && opt('--repo') !== pool.repo) throw new Error(`pool ${poolName} serves repo ${pool.repo}, not ${opt('--repo')}: drop --repo or pick another pool`);
+        if (opt('--for') !== undefined) throw new Error('--pool runs a fresh headless session; it cannot be addressed to a trap with --for');
+      }
+      const repo = opt('--repo') ?? pool?.repo;
       const briefFile = opt('--brief') ?? opt('--bait');
       const briefText = opt('--brief-text');
       if (!repo || (!briefFile && !briefText)) {
-        throw new Error('dispatch requires --repo and --brief <file> (or --brief-text)');
+        throw new Error('dispatch requires --repo (or --pool) and --brief <file> (or --brief-text)');
       }
       const d: Descriptor = {
         id: opt('--id') ?? randomUUID(),
@@ -1009,10 +1020,11 @@ async function mainCli(): Promise<void> {
         effort: opt('--effort'),
         followUp: opt('--follow-up'),
         for: opt('--for'),
+        ...(poolName !== undefined ? { pool: poolName } : {}),
       };
       const lane: Lane = has('--chore') ? 'chore' : 'work';
       const warnings = startDispatch(d, lane, values('--attach'), callerSession(opt('--session')));
-      console.log(toonKV({ id: d.id, repo, lane, ...(d.for ? { for: d.for } : {}), queued: d.queuedAt }));
+      console.log(toonKV({ id: d.id, repo, lane, ...(d.for ? { for: d.for } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
@@ -1035,6 +1047,8 @@ async function mainCli(): Promise<void> {
       if (!id) {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
         console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'waiting', 'activity']));
+        const pools = poolViews(loadConfig());
+        if (pools.length > 0) console.log(`\n${toonTable('pools', poolRows(pools), POOL_COLUMNS)}`);
         break;
       }
       const namedTrap = trapByAddress(id);
@@ -1069,6 +1083,7 @@ async function mainCli(): Promise<void> {
           } : {}),
           ...(state === 'queued' ? { queued: since } : {}),
           ...dispatchTrap(id, lane, names),
+          ...(descriptor?.pool || readEvidence(id, lane).pool ? { pool: readEvidence(id, lane).pool ?? `${descriptor!.pool} (no worktree yet)` } : {}),
           lastNote: log.at(-1)?.note === undefined ? undefined : nameTrapsIn(log.at(-1)!.note!, 'label', names),
           ...(waitingNow ? { [log.at(-1)!.verb]: waitingText(waitingNow) } : {}),
           ...(waitingNow?.until ? { until: waitingNow.until } : {}),
@@ -3358,6 +3373,14 @@ wallClockSecs      = 3600
           initialized: true,
         }),
       );
+      break;
+    }
+    case '__pool-warm': {
+      // Hidden: the compiled binary re-execs itself with this verb to run one
+      // pool warm-up pass, as the daemon's spawnPoolWarm does.
+      if (!pos[0]) throw new Error('__pool-warm requires the pool name');
+      const { runPoolWarm } = await import('@lobstah/runner');
+      runPoolWarm(pos[0]);
       break;
     }
     case '__runner': {
