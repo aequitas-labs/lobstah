@@ -233,14 +233,15 @@ function trapModal(t: GlassTrap) {
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
     html`<div class="sec">window</div>`,
-    windowAction(t),
+    windowAction(t) ?? html`<span class="dim">Signed off — no window</span>`,
     startCommands(t),
-    t.live &&
-      !(t.link && desktopSession(t)) &&
-      t.sessionId && [
+    !t.requested &&
+      !t.starting &&
+      (t.sessionId || (t.link && desktopSession(t))) && [
         html`<div class="sec">open this session</div>`,
         resumeRow(t),
-        html`<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>`,
+        t.sessionId &&
+          html`<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>`,
       ],
     html`<div class="sec">lifecycle (${t.notices.length})</div>`,
     lifecycle,
