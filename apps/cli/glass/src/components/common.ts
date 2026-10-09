@@ -1,7 +1,7 @@
 import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, TendAttention } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { useState } from 'preact/hooks';
-import { dispatchFileUrl, isImageName, prBadgeClass, watchState } from '../../../src/glass-diff.js';
+import { dispatchFileUrl, isImageName, prBadgeClass, resumeCommand, watchState } from '../../../src/glass-diff.js';
 import type { DispatchDetail, ModalType } from '../../../src/glass-diff.js';
 import { copyText, loadOlder, openLightbox, openTrapWindow, requestTrap, showModal } from '../actions.js';
 import { getState } from '../store.js';
@@ -99,18 +99,13 @@ export const badgeLong = (text: string | undefined): string => (longBadge(text) 
 export const opener = (type: ModalType, key: string) => () => showModal(type, key);
 export const stop = (e: Event) => e.stopPropagation();
 
-const resumeCmd = (t: GlassTrap): string | undefined =>
-  t.sessionId ? (t.harness === 'codex' ? 'codex resume ' : 'claude --resume ') + t.sessionId : undefined;
-
 /** The same live-trap action and honest result wherever a trap is shown. */
 export function windowAction(t: GlassTrap): Children {
   if (t.requested) return html`<span class="dim">Requested — no window yet</span>`;
   if (t.starting) return html`<span class="dim">${t.starting.failedAt ? 'Did not start' : 'Starting — no window yet'}</span>`;
   if (!t.live) {
-    const command = resumeCmd(t);
-    return command
-      ? html`<span class="dim">Resume: <code onClick=${stop}>${command}</code></span>`
-      : html`<span class="dim">Resume command unavailable</span>`;
+    const command = resumeCommand(t.harness, t.sessionId);
+    return command ? cmdRow(command, undefined, 'Resume:') : html`<span class="dim">Resume command unavailable</span>`;
   }
   const state = getState();
   if (!state.snapshot?.focusSupported && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;
@@ -147,16 +142,27 @@ export function ShowOlder({ kind, more }: { kind: GlassOlderKind; more: OlderCon
 }
 
 /** A command the reader copies (the glass never runs anything): click the text or ⧉. */
-function CmdRow({ text }: { text: string }) {
+function CmdRow({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState<'code' | 'button' | null>(null);
-  const copy = (which: 'code' | 'button') => async () => {
+  const copy = (which: 'code' | 'button') => async (e: Event) => {
+    stop(e);
     if (!(await copyText(text))) return;
     setCopied(which);
     setTimeout(() => setCopied(null), 1000);
   };
-  return html`<div class="cmd"><code class=${copied === 'code' ? 'copied' : undefined} title="click to copy" onClick=${copy('code')}>${text}</code><button title="copy" onClick=${copy('button')}>${copied === 'button' ? '✓' : '⧉'}</button></div>`;
+  const content = [
+    label && html`<span class="dim">${label}</span>`,
+    html`<code class=${copied === 'code' ? 'copied' : undefined} title="click to copy" onClick=${copy('code')}>${text}</code>`,
+    html`<button title="copy" onClick=${copy('button')}>${copied === 'button' ? '✓' : '⧉'}</button>`,
+  ];
+  return label ? html`<span class="cmd inline">${content}</span>` : html`<div class="cmd">${content}</div>`;
 }
-export const cmdRow = (text: string, key?: string) => html`<${CmdRow} key=${key} text=${text} />`;
+export const cmdRow = (text: string, key?: string, label?: string) => html`<${CmdRow} key=${key} text=${text} label=${label} />`;
+
+export const resumeRow = (harness: string | undefined, sessionId: string) => {
+  const command = resumeCommand(harness, sessionId);
+  return command ? cmdRow(command) : html`<span class="dim">Resume command unavailable</span>`;
+};
 
 /** A clickable image that opens in the in-page overlay. */
 export const ImageThumb = (src: string, name: string, cls = 'thumb') =>

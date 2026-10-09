@@ -73,6 +73,26 @@ describe('glass snapshot', () => {
     expect(t?.notices.map((n) => n.kind)).toContain('trap-stowed');
   });
 
+  it('uses the roster session and harness after sign-off, not an old notice', () => {
+    fs.mkdirSync(path.join(home, 'roster'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'roster', 'deadbeef.json'), JSON.stringify({
+      trapId: 'deadbeef', name: 'fresh-cove', harness: 'codex', sessionId: 'current-session',
+    }));
+    postNotice({ kind: 'trap-signed-on', text: 'trap signed on (claude, web, wt)', refId: 'deadbeef', by: 'old-session' });
+    postNotice({ kind: 'trap-stowed', text: 'gone', refId: 'deadbeef' });
+    expect(buildGlassSnapshot().traps.find((t) => t.trapId === 'deadbeef')).toMatchObject({
+      live: false, harness: 'codex', sessionId: 'current-session',
+    });
+  });
+
+  it.each(['codex, web', 'codex · gpt-5 · high, web', 'claude, web', 'claude · sonnet, web'])('reads legacy harness metadata from %s without a roster', (metadata) => {
+    postNotice({ kind: 'trap-signed-on', text: `trap signed on (${metadata}, wt)`, refId: 'deadbeef', by: 'past-session' });
+    postNotice({ kind: 'trap-stowed', text: 'gone', refId: 'deadbeef' });
+    expect(buildGlassSnapshot().traps.find((t) => t.trapId === 'deadbeef')).toMatchObject({
+      live: false, harness: metadata.startsWith('codex') ? 'codex' : 'claude', sessionId: 'past-session',
+    });
+  });
+
   it('a reserved trap shows as starting, once, with its addressed work; past its deadline as failed', () => {
     const { reservation } = reserveTrap({ repo: 'web', name: 'amber-gull', harness: 'codex', startSecs: 60 });
     enqueue({ id: UUID, repo: 'web', brief: 'addressed work', for: `wt:${reservation.trapId}` }, 'work');

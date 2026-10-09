@@ -694,6 +694,10 @@ a {
   word-break: break-all;
   cursor: pointer;
 }
+.cmd.inline {
+  display: inline-flex;
+  margin: 0;
+}
 .cmd code:hover {
   border-color: var(--line-hover);
 }

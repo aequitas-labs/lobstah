@@ -129,6 +129,61 @@ describe('glass page: tabs and hash routing', () => {
     }
   });
 
+  it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('copies only the $harness resume command in $view, without opening the card', async ({ harness, view }) => {
+    const d = acceptanceFleet();
+    const trap = d.traps.find((t) => t.trapId === 't2')!;
+    trap.harness = harness;
+    trap.sessionId = 'past-session';
+    const command = (harness === 'codex' ? 'codex resume ' : 'claude --resume ') + trap.sessionId;
+    {
+      const g = await page(d, { hash: '#traps', prefs: { view } });
+      const writes: string[] = [];
+      g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
+      // Read confirmation before the page harness waits for its one-second reset.
+      const copy = async (row: Element) => {
+        const button = row.querySelector('button')! as HTMLElement;
+        button.click();
+        for (let i = 0; i < 10 && button.textContent !== '✓'; i++) await new Promise((r) => setTimeout(r, 10));
+        expect(button.textContent).toBe('✓');
+        expect(writes.at(-1)).toBe(command);
+        await g.settle();
+        expect(button.textContent).toBe('⧉');
+      };
+      const row = g.$$('#traps .cmd').find((el) => text(el).includes(command))!;
+      expect(text(row)).toContain('Resume:');
+      await copy(row);
+      expect(g.$('#overlay')!.className).toBe('');
+      await g.go('#deck');
+      // Only recently signed-off traps are listed on deck.
+      const deckRow = g.$$('#deck .cmd').find((el) => text(el).includes(command))!;
+      expect(deckRow).toBeTruthy();
+      await copy(deckRow);
+      expect(g.$('#overlay')!.className).toBe('');
+      await g.go('#traps');
+      await click(g, g.$$('#traps b').find((el) => text(el).endsWith('wt:t2'))!);
+      await copy(g.$('#modalbox .cmd')!);
+      expect(g.$('#overlay')!.className).toBe('open');
+    }
+  }, 15_000);
+
+  it.each(['claude', 'codex'])('copies the %s live trap and helm resume commands', async (harness) => {
+    const d = acceptanceFleet();
+    d.traps[0]!.harness = harness;
+    d.helms[0]!.harness = harness;
+    const g = await page(d, { hash: '#traps' });
+    const writes: string[] = [];
+    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
+    const prefix = harness === 'codex' ? 'codex resume ' : 'claude --resume ';
+    await openRow(g, '#traps', 'wt:t1');
+    const row = g.$$('#modalbox .cmd').find((el) => text(el).includes(prefix))!;
+    await click(g, row.querySelector('button'));
+    expect(writes.at(-1)).toBe(prefix + d.traps[0]!.sessionId);
+    await escape(g);
+    await click(g, g.$('#chips .chip.click'));
+    await click(g, g.$('#modalbox .cmd button'));
+    expect(writes.at(-1)).toBe(prefix + d.helms[0]!.sessionId);
+  });
+
   it('gives a signed-off trap a grey state dot', async () => {
     const g = await page(acceptanceFleet(), { hash: '#traps', prefs: { view: 'table' } });
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;

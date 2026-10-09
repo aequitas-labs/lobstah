@@ -83,6 +83,14 @@ export type ModalItem = GlassHelm | GlassDispatchSummary | GlassDispatch | Glass
 /** A trap as the page renders it: its catch ids resolved against the snapshot's dispatches. */
 export type GlassTrapView = Omit<GlassTrap, 'catches'> & { catches: GlassDispatchSummary[] };
 
+/** Resume only a known harness; missing metadata must not imply Claude. */
+export function resumeCommand(harness: string | undefined, sessionId: string | undefined): string | undefined {
+  if (!sessionId) return undefined;
+  if (harness === 'codex') return 'codex resume ' + sessionId;
+  if (harness === 'claude') return 'claude --resume ' + sessionId;
+  return undefined;
+}
+
 /**
  * A catch id with no dispatch in the snapshot: an old catch /data left out.
  * It renders as its id with an unknown state; its modal fetches the rest.
