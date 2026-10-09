@@ -1,6 +1,14 @@
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
-import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../../src/glass-diff.js';
+import {
+  desktopSession,
+  dispatchReport,
+  modalItem,
+  prBadgeClass,
+  prModalView,
+  reportPageUrl,
+  trapFileUrl,
+} from '../../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal } from '../actions.js';
 import { html } from '../html.js';
@@ -116,7 +124,7 @@ function helmModal(h: GlassHelm) {
     close,
     html`<h3>⛵ ${h.man}</h3><div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
     html`<${WorkerDetails} worker=${h} />`,
-    h.sessionId && [html`<div class="sec">open this session</div>`, resumeRow(h.harness, h.sessionId)],
+    h.sessionId && [html`<div class="sec">open this session</div>`, resumeRow(h)],
     h.transcript && [html`<div class="sec">transcript</div>`, cmdRow(h.transcript)],
   ];
 }
@@ -228,9 +236,10 @@ function trapModal(t: GlassTrap) {
     windowAction(t),
     startCommands(t),
     t.live &&
+      !(t.link && desktopSession(t)) &&
       t.sessionId && [
         html`<div class="sec">open this session</div>`,
-        resumeRow(t.harness, t.sessionId),
+        resumeRow(t),
         html`<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>`,
       ],
     html`<div class="sec">lifecycle (${t.notices.length})</div>`,

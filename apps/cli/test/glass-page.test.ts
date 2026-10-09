@@ -184,6 +184,57 @@ describe('glass page: tabs and hash routing', () => {
     expect(writes.at(-1)).toBe(prefix + d.helms[0]!.sessionId);
   });
 
+  it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('opens and copies a $harness desktop link across $view, deck and modal', async ({ harness, view }) => {
+    const d = acceptanceFleet();
+    const trap = d.traps.find((t) => t.trapId === 't2')!;
+    Object.assign(trap, { harness, sessionId: 'past-session', link: harness === 'codex' ? 'codex://threads/past-session' : 'claude://claude.ai/past-session', window: { entrypoint: 'claude-desktop' } });
+    const g = await page(d, { hash: '#traps', prefs: { view } });
+    const writes: string[] = [];
+    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
+    const check = async (selector: string) => {
+      const row = g.$$(selector + ' .cmd').find((el) => text(el).includes(trap.link!))!;
+      expect(text(row)).toContain('desktop thread:');
+      expect(row.querySelector('a')?.getAttribute('href')).toBe(trap.link);
+      expect(text(g.$(selector))).not.toContain(harness === 'codex' ? 'codex resume ' : 'claude --resume ');
+      await click(g, row.querySelector('button'));
+      expect(writes.at(-1)).toBe(trap.link);
+    };
+    await check('#traps');
+    expect(g.$('#overlay')!.className).toBe('');
+    await g.go('#deck');
+    await check('#deck');
+    await g.go('#traps');
+    await click(g, g.$$('#traps b').find((el) => text(el).endsWith('wt:t2'))!);
+    await check('#modalbox');
+  }, 15_000);
+
+  it('does not offer a CLI command for live desktop traps or the helm without a link', async () => {
+    const d = acceptanceFleet();
+    d.traps[0]!.desktopThread = true;
+    d.traps[0]!.harness = 'codex';
+    d.helms[0]!.desktopThread = true;
+    d.helms[0]!.harness = 'codex';
+    const g = await page(d, { hash: '#traps' });
+    await openRow(g, '#traps', 'wt:t1');
+    expect(text(g.$('#modalbox'))).toContain('desktop thread — open in the app');
+    expect(text(g.$('#modalbox'))).not.toContain('codex resume');
+    await escape(g);
+    await click(g, g.$('#chips .chip.click'));
+    expect(text(g.$('#modalbox'))).toContain('desktop thread — open in the app');
+    expect(text(g.$('#modalbox'))).not.toContain('codex resume');
+  });
+
+  it('shows one copyable desktop link in a live trap modal', async () => {
+    const d = acceptanceFleet();
+    Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
+    const g = await page(d, { hash: '#traps' });
+    await openRow(g, '#traps', 'wt:t1');
+    const links = g.$$('#modalbox a').filter((a) => a.getAttribute('href') === d.traps[0]!.link);
+    expect(links).toHaveLength(1);
+    expect(text(g.$('#modalbox'))).toContain('desktop thread:');
+    expect(text(g.$('#modalbox'))).not.toContain('codex resume');
+  });
+
   it('gives a signed-off trap a grey state dot', async () => {
     const g = await page(acceptanceFleet(), { hash: '#traps', prefs: { view: 'table' } });
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
