@@ -100,13 +100,19 @@ export const badgeLong = (text: string | undefined): string => (longBadge(text) 
 export const opener = (type: ModalType, key: string) => () => showModal(type, key);
 export const stop = (e: Event) => e.stopPropagation();
 
-/** The same live-trap action and honest result wherever a trap is shown. */
+/**
+ * The same live-trap action and honest result wherever a trap is shown: an
+ * open button, a state note, or nothing. Resume commands and raw session
+ * links with their copy controls live in the trap modal only.
+ */
 export function windowAction(t: GlassTrap): Children {
   if (t.requested) return html`<span class="dim">Requested — no window yet</span>`;
   if (t.starting) return html`<span class="dim">${t.starting.failedAt ? 'Did not start' : 'Starting — no window yet'}</span>`;
-  if (desktopSession(t) && t.link) return resumeRow(t);
+  const desktop = desktopSession(t) && !!t.link;
   if (!t.live) {
-    return resumeRow(t, 'Resume:');
+    if (!desktop) return null;
+    // The server focuses live traps only; a signed-off app session opens its stored link.
+    return html`<span class="winaction"><a class="btn open" href=${t.link} title="open this session in its app" onClick=${stop}>↗ open</a></span>`;
   }
   const state = getState();
   if (!state.snapshot?.focusSupported && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;
@@ -114,7 +120,7 @@ export function windowAction(t: GlassTrap): Children {
     stop(e);
     void openTrapWindow(t.trapId);
   };
-  return html`<span class="winaction"><button class="btn open" title="open this trap's window" onClick=${clicked}>↗ open</button>${t.link && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
+  return html`<span class="winaction"><button class="btn open" title="open this trap's window" onClick=${clicked}>↗ open</button>${t.link && !desktop && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
     state.focusResults[t.trapId] && [' ', html`<span class="dim">${state.focusResults[t.trapId]}</span>`]
   }</span>`;
 }
@@ -163,13 +169,13 @@ function CmdRow({ text, label, href }: { text: string; label?: string; href?: st
 export const cmdRow = (text: string, key?: string, label?: string, href?: string) =>
   html`<${CmdRow} key=${key} text=${text} label=${label} href=${href} />`;
 
-export const resumeRow = (session: ResumeSession, label?: string) => {
+export const resumeRow = (session: ResumeSession) => {
   if (desktopSession(session))
     return session.link
       ? cmdRow(session.link, undefined, 'desktop thread:', session.link)
       : html`<span class="dim">desktop thread — open in the app</span>`;
   const command = resumeCommand(session);
-  return command ? cmdRow(command, undefined, label) : html`<span class="dim">Resume command unavailable</span>`;
+  return command ? cmdRow(command) : html`<span class="dim">Resume command unavailable</span>`;
 };
 
 /** A clickable image that opens in the in-page overlay. */
