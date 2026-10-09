@@ -1,6 +1,6 @@
 {
   "name": "lobstah",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Run a fleet of supervised coding agents from one session: dispatch work, get woken when something needs you, never watch the water.",
   "author": {
     "name": "Chris Hsu"
