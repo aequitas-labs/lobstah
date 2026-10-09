@@ -28,6 +28,8 @@ export interface WorktreeRecord {
   path: string;
   /** The dispatch whose worktree this is, when this dispatch reused it. */
   of?: string;
+  /** The pool worktree this is (`<pool>/<slot>`), when the dispatch claimed one. */
+  pool?: string;
 }
 
 export interface DispatchWorktree {
@@ -131,6 +133,24 @@ export interface WorktreeLock {
   lane: Lane;
   pid: number;
   at: string;
+  /**
+   * `warm`: the pool warm-up holds the worktree for a moment (a check or a
+   * fetch), not a dispatch. It is live while its process is, for at most
+   * WARM_LOCK_MAX_MS.
+   */
+  kind?: 'warm';
+}
+
+/** The longest a pool warm-up holds a worktree's lock before it counts as stale. */
+export const WARM_LOCK_MAX_MS = 15 * 60_000;
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 /**
@@ -173,6 +193,7 @@ export function readWorktreeLock(wt: string): WorktreeLock | undefined {
  * same lock again.
  */
 export function lockIsLive(lock: WorktreeLock): boolean {
+  if (lock.kind === 'warm') return processAlive(lock.pid) && Date.now() - (Date.parse(lock.at) || 0) < WARM_LOCK_MAX_MS;
   return fs.existsSync(path.join(laneDirs(lock.lane).active, lock.id));
 }
 
@@ -187,9 +208,9 @@ export function worktreeHolder(wt: string): WorktreeLock | undefined {
  * (or when `id` already holds it), else the live holder. A stale lock is
  * replaced. A worktree with no git dir cannot be locked and is refused.
  */
-export function acquireWorktreeLock(wt: string, id: string, lane: Lane): WorktreeLock | undefined {
+export function acquireWorktreeLock(wt: string, id: string, lane: Lane, kind?: 'warm'): WorktreeLock | undefined {
   const file = worktreeLockFile(wt);
-  const mine: WorktreeLock = { id, lane, pid: process.pid, at: new Date().toISOString() };
+  const mine: WorktreeLock = { id, lane, pid: process.pid, at: new Date().toISOString(), ...(kind ? { kind } : {}) };
   if (!file) return { id: '(no git dir)', lane, pid: 0, at: mine.at };
   for (let attempt = 0; attempt < 3; attempt++) {
     try {

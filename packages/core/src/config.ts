@@ -40,6 +40,54 @@ export interface RepoConfig {
    * not read it.
    */
   briefHooks?: BriefHooks;
+  /**
+   * Extra gitignore-style patterns a pool reset keeps (`[repos.<key>].poolKeep`),
+   * on top of DEFAULT_POOL_KEEP. Untracked files that match no pattern are
+   * removed when a pool worktree is reset for a new dispatch.
+   */
+  poolKeep?: string[];
+}
+
+/** What a pool dispatch does when every pool worktree is taken. */
+export type PoolOverflow = 'headless' | 'queue';
+
+/**
+ * A pool (`[pools.<name>]`): pre-warmed worktrees for one repo, with no
+ * session attached. A dispatch with `pool` takes a free one, resets it to a
+ * fresh branch from trunk, and starts a new headless session there.
+ */
+export interface PoolConfig {
+  /** The repo key the pool's worktrees check out. */
+  repo: string;
+  /** How many worktrees the daemon keeps warm. */
+  size: number;
+  /**
+   * `headless` (default): a dispatch that finds the pool full runs in a
+   * normal cold worktree. `queue`: it stays queued until a pool worktree is
+   * free.
+   */
+  overflow: PoolOverflow;
+}
+
+/** Pool names name directories: letters, digits, `-` and `_`. */
+const POOL_NAME = /^[A-Za-z0-9_-]+$/;
+
+function parsePools(raw: unknown, repos: Record<string, RepoConfig>): Record<string, PoolConfig> {
+  const out: Record<string, PoolConfig> = {};
+  if (raw === undefined) return out;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`[pools] must be a table of pools in ${configPath()}`);
+  for (const [name, p] of Object.entries(raw as Record<string, Record<string, unknown>>)) {
+    const where = `[pools.${name}] in ${configPath()}`;
+    if (!POOL_NAME.test(name)) throw new Error(`${where}: a pool name may use letters, digits, "-" and "_" only`);
+    const repo = String(p?.repo ?? '');
+    if (!repos[repo]) throw new Error(`${where}: repo "${repo}" is not a configured [repos.<key>]`);
+    const size = p.size ?? 1;
+    if (typeof size !== 'number' || !Number.isInteger(size) || size < 1) throw new Error(`${where}: size must be a positive integer`);
+    const overflow = p.overflow ?? 'headless';
+    if (overflow !== 'headless' && overflow !== 'queue') throw new Error(`${where}: overflow must be "headless" or "queue"`);
+    out[name] = { repo, size, overflow };
+  }
+  return out;
 }
 
 /** The kinds of brief lobstah writes itself, and `all` for every one of them. */
@@ -209,6 +257,8 @@ export interface Config {
   glass: GlassConfig;
   watch: WatchConfig;
   grounds: Record<string, GroundsConfig>;
+  /** Worktree pools for headless dispatches (`[pools.<name>]`). */
+  pools: Record<string, PoolConfig>;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
   notifyCommand?: string;
   /** Verbs that fire notifyCommand. Default: needs-decision, blocked, done, failed. */
@@ -326,6 +376,7 @@ export function loadConfig(): Config {
       checkpointOnStop: r.checkpointOnStop === undefined ? undefined : Boolean(r.checkpointOnStop),
       humanGateChecks: Array.isArray(r.humanGateChecks) ? r.humanGateChecks.map(String).filter(Boolean) : undefined,
       briefHooks: parseBriefHooks(r.briefHooks),
+      poolKeep: Array.isArray(r.poolKeep) ? r.poolKeep.map(String).filter(Boolean) : undefined,
     };
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;
@@ -342,6 +393,7 @@ export function loadConfig(): Config {
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
     watch,
     grounds,
+    pools: parsePools(raw.pools, repos),
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,

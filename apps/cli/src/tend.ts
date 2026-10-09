@@ -59,6 +59,8 @@ import {
   humanGatesFor,
   matchesGate,
   repoKey as forgeRepoKey,
+  poolViews,
+  poolWaits,
 } from '@lobstah/core';
 import type {
   AttentionKind,
@@ -73,6 +75,7 @@ import type {
   PrEvidence,
   TendAttention,
   TendAttentionKind,
+  PoolView,
 } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
@@ -534,6 +537,24 @@ export function repoOf(id: string, lane: Lane): string | undefined {
   return undefined;
 }
 
+/** One row per pool: size, free, who holds each claimed worktree, and why any is out. */
+export function poolRows(pools: PoolView[]): Array<Record<string, string | number>> {
+  const list = (p: PoolView, state: PoolView['slots'][number]['state'], text: (s: PoolView['slots'][number]) => string) =>
+    p.slots.filter((s) => s.state === state).map((s) => `${s.slot}: ${text(s)}`).join('; ');
+  return pools.map((p) => ({
+    pool: p.name,
+    repo: p.repo,
+    size: p.size,
+    free: p.free,
+    overflow: p.overflow,
+    claimed: list(p, 'claimed', (s) => (s.dispatch ?? '').slice(0, 8)),
+    out: list(p, 'out', (s) => `${s.reason ?? 'out of rotation'}${s.dispatch ? ` (after ${s.dispatch.slice(0, 8)})` : ''}`),
+    warming: [list(p, 'warming', (s) => s.reason ?? 'setting up'), list(p, 'missing', (s) => s.reason ?? 'not created yet')].filter(Boolean).join('; '),
+  }));
+}
+
+export const POOL_COLUMNS = ['pool', 'repo', 'size', 'free', 'overflow', 'claimed', 'out', 'warming'];
+
 export interface TendReport {
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
   daemon: { up: boolean; lastHeartbeat?: string };
@@ -568,6 +589,8 @@ export interface TendReport {
   repairChores?: RepairChore[];
   /** A free-space hold: the daemon leaves unaddressed queued work in the queue. */
   hold?: DiskHold & { reason: string };
+  /** Worktree pools (`[pools.<name>]`): each slot free, claimed, out of rotation, or warming. */
+  pools?: PoolView[];
 }
 
 function readJson<T>(file: string): T | undefined {
@@ -794,11 +817,14 @@ export function buildTendReport(now = Date.now()): TendReport {
   // and shows in its own `awaiting` table instead of crying wolf here.
   const awaiting: TendAwaiting[] = [];
   const unaddressedQueued: string[] = [];
+  const poolQueued = new Set<string>();
   for (const id of queued) {
     const d = queuedDescriptor(id, 'work');
     const st = fs.statSync(path.join(laneDirs('work').queue, `${id}.json`), { throwIfNoEntry: false });
     const ageMins = st ? Math.max(0, Math.round((now - st.mtimeMs) / 60_000)) : 0;
     if (d?.for) awaiting.push({ id, for: d.for, ageMins });
+    // Waiting for a queue-mode pool worktree is by design, not a stall.
+    else if (d && poolWaits(d, cfg)) poolQueued.add(d.pool!);
     else unaddressedQueued.push(id);
   }
   const oldestQueuedAge = unaddressedQueued.reduce((max, id) => {
@@ -824,6 +850,7 @@ export function buildTendReport(now = Date.now()): TendReport {
       return reg ? trapLabel(reg) : address;
     }).join(', ')} not listening`;
   }
+  if (!queueWait && poolQueued.size > 0) queueWait = `queued work waits: no free worktree in pool ${[...poolQueued].join(', ')} (overflow = "queue")`;
 
   const merge = readMergeView();
   const gateFor = (uuid: string, prUrl?: string): string | undefined => {
@@ -967,6 +994,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     ...(n.url ? { url: n.url } : {}),
   }));
 
+  const pools = poolViews(cfg);
   const helms = listHelms().map((h) => ({
     grounds: h.grounds,
     man: helmLabel(h),
@@ -1018,6 +1046,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     })),
     repairChores: repairChores(records),
     ...(hold ? { hold: { ...hold, reason: holdReason(hold) } } : {}),
+    ...(pools.length > 0 ? { pools } : {}),
   };
 }
 
@@ -1135,6 +1164,10 @@ export function renderTend(r: TendReport): string {
       id: c.id.slice(0, 8), pr: c.pr, lane: c.lane, state: c.state,
       worker: named(c.worker), waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
     })), ['id', 'pr', 'lane', 'state', 'worker', 'waitingForTrap']));
+  }
+  if (r.pools?.length) {
+    lines.push('');
+    lines.push(toonTable('pools', poolRows(r.pools), POOL_COLUMNS));
   }
   if (r.watches.length > 0) {
     lines.push('');

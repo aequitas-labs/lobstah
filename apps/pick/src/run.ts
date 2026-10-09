@@ -112,12 +112,13 @@ export async function cycle(
   log: (m: string) => void,
   notify: (n: ReportNotification) => void,
   liveComment = true,
+  pools: string[] = [],
 ): Promise<void> {
   for (const source of sources) {
     // A guard per loop: reconcile is the safety net for a report that never
     // lands, so a throw in one loop must not skip the loops after it.
     for (const loop of [
-      () => dispatchLoop(source, state, log),
+      () => dispatchLoop(source, state, log, pools),
       () => reportLoop(source, state, log, notify, liveComment),
       () => reconcileLoop(source, state, log),
     ]) {
@@ -166,7 +167,7 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
 
   const notify = makeNotifier(cfg.notifyCommand, log);
   if (mode === 'once') {
-    await cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment);
+    await cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools);
     return;
   }
   log(`polling every ${cfg.pollSecs}s — no webhooks, no inbound surface`);
@@ -175,7 +176,7 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
   const flight = new SingleFlight();
   const streamChildren = new Map<string, ChildProcess>();
   while (true) {
-    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment));
+    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools));
     syncStreams(streamChildren, flight, log, notify);
     await new Promise((r) => setTimeout(r, cfg.pollSecs * 1000));
   }

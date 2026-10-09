@@ -6,6 +6,8 @@ does the supervision — you never watch a trap work.
 
 your working set:
   lobstah set --repo <key> --bait <brief.md>    set a trap (alias of dispatch)
+  lobstah set --pool <name> --bait <brief.md>   set it in a warm pool worktree
+                                                ([pools.<name>]): fresh session
   lobstah buoys                                 scan the water (alias of ls)
   lobstah buoy <id>                             check one buoy (alias of status)
   lobstah logs <id> --follow                    listen on one line

@@ -28,6 +28,11 @@ import {
   releaseWorktreeLock,
   acquireWorktreeLock,
   resolveDispatch,
+  configPath,
+  cancelRequested,
+  poolSlotLabel,
+  poolSlotOf,
+  requeue,
   unhandled,
   worktreeProgress,
   workerMetadata,
@@ -35,8 +40,8 @@ import {
 import type { ChainPr, Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
 import { loadAdapter } from '@lobstah/adapters';
 import type { Adapter, AdapterRun } from '@lobstah/adapters';
-import { allocate, chooseWorktree, collectEvidence, prepareReuse, recoverWorktree, worktreePath } from '@lobstah/worktree';
-import type { ChooseInput, WorktreeChoice } from '@lobstah/worktree';
+import { allocate, chooseWorktree, claimPoolSlot, collectEvidence, prepareReuse, recoverWorktree, resetPoolWorktree, worktreePath } from '@lobstah/worktree';
+import type { ChooseInput, ClaimPoolInput, PoolClaim, WorktreeChoice } from '@lobstah/worktree';
 import { buildPrompt } from './contract.js';
 import { drive, settle } from './drive.js';
 import { planStart } from './plan.js';
@@ -53,6 +58,10 @@ export interface RunnerDeps {
   /** Fetch trunk in a reused worktree; re-run setup if a lockfile changed. */
   prepareReuse: (repo: RepoConfig, dir: string) => Promise<{ setupRan: boolean }>;
   collectEvidence: (repo: RepoConfig, dir: string) => Promise<{ branch: string; commits: string[] }>;
+  /** Claim a free worktree of a pool (takes its lock), or say none is free. */
+  claimPool: (input: ClaimPoolInput) => Promise<PoolClaim>;
+  /** Reset a claimed pool worktree to a fresh branch for the dispatch, then run setup. */
+  resetPool: (repo: RepoConfig, dir: string, id: string, fromRemoteBranch?: string) => Promise<void>;
   /**
    * Stop every process this runner started (the harness, and what the
    * harness left running) and return how many. The default stops nothing:
@@ -80,6 +89,8 @@ const defaultDeps: RunnerDeps = {
   chooseWorktree,
   prepareReuse,
   collectEvidence,
+  claimPool: claimPoolSlot,
+  resetPool: resetPoolWorktree,
   reap: async () => 0,
   prState: livePrState,
 };
@@ -182,11 +193,41 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   } else if (descriptor.followUp && cfg.limits.reuseWorktree !== false) {
     choice = await deps.chooseWorktree({ id, lane, repoKey: descriptor.repo, repo, followUp: descriptor.followUp });
   }
-  const worktreeNote = choice
-    ? choice.reuse
-      ? `reusing worktree of ${short(choice.from)}`
-      : `fresh worktree (${choice.reason})`
-    : recovered ? 'recovered own unrecorded worktree' : undefined;
+  // A pool dispatch that is not continuing in its chain's worktree claims a
+  // free worktree of its pool. With none free, a `queue` pool puts it back
+  // in the queue untouched (the daemon claims it again once one is free); a
+  // `headless` pool runs it in a cold worktree as usual.
+  let poolClaim: Extract<PoolClaim, { claimed: true }> | undefined;
+  let poolNote: string | undefined;
+  if (!recorded && !choice?.reuse && descriptor.pool) {
+    const pool = cfg.pools[descriptor.pool];
+    if (!pool) throw new Error(`unknown pool "${descriptor.pool}" — add [pools.${descriptor.pool}] to ${configPath()}`);
+    if (pool.repo !== descriptor.repo) throw new Error(`pool ${descriptor.pool} serves repo ${pool.repo}, not ${descriptor.repo}`);
+    const got = await deps.claimPool({ name: descriptor.pool, pool, repo, id, lane });
+    if (got.claimed) {
+      poolClaim = got;
+      poolNote = `pool worktree ${got.label}`;
+    } else if (pool.overflow === 'queue') {
+      if (cancelRequested(id, lane)) {
+        status('failed', `cancelled by request while waiting for a pool ${descriptor.pool} worktree`);
+        complete(id, lane);
+        return;
+      }
+      requeue(id, lane);
+      console.log(`[runner] pool ${descriptor.pool} has no free worktree: back in the queue`);
+      return;
+    } else {
+      poolNote = `pool ${descriptor.pool} full${got.refused.length ? ` (${got.refused.join('; ')})` : ''}: cold worktree`;
+    }
+  }
+  const worktreeNote = [
+    choice
+      ? choice.reuse
+        ? `reusing worktree of ${short(choice.from)}`
+        : `fresh worktree (${choice.reason})`
+      : recovered ? 'recovered own unrecorded worktree' : undefined,
+    poolNote,
+  ].filter(Boolean).join('; ') || undefined;
 
   // A model never crosses harnesses: one that belongs to another harness is
   // dropped for the adapter's default rather than failing the dispatch.
@@ -235,6 +276,12 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
       data: { worktree: cwd, worktreeOf: choice.owner, setupRan },
     });
     fs.writeFileSync(wtFile, JSON.stringify({ path: cwd, of: choice.owner }, null, 2));
+  } else if (poolClaim) {
+    // A warm pool worktree, reset to a fresh branch: the same start as a
+    // fresh allocation, without the cold install. The claim holds its lock.
+    cwd = poolClaim.dir;
+    await deps.resetPool(repo, cwd, id, descriptor.systemRepair ? descriptor.pr?.headRefName : undefined);
+    fs.writeFileSync(wtFile, JSON.stringify({ path: cwd, pool: poolClaim.label }, null, 2));
   } else {
     // A repair that cannot reuse its origin (notably a trap-owned checkout)
     // starts in its own worktree at the PR head, never in the trap's worktree.
@@ -245,7 +292,8 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   // Evidence names the checkout, so catch, tend, the glass, and the cull
   // resolve a reused follow-up to the directory it really ran in.
   const worktreeOf = (JSON.parse(fs.readFileSync(wtFile, 'utf8')) as { of?: string }).of;
-  mergeEvidence(id, lane, { worktree: cwd, worktreeOf });
+  const inPool = poolSlotOf(cwd);
+  mergeEvidence(id, lane, { worktree: cwd, worktreeOf, ...(inPool ? { pool: poolSlotLabel(inPool.pool, inPool.slot) } : {}) });
 
   // A follow-up belongs to the origin chain's PR even when its checkout has
   // a different local branch name. Seed evidence before remote polling starts.

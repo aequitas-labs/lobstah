@@ -15,6 +15,12 @@ export interface PickupConfig {
   notifyCommand?: string;
   github: Array<GithubConfig & { merge: MergePolicy }>;
   linear?: LinearConfig;
+  /**
+   * Worktree pools issue dispatches run in (`[pickup].pools`): an issue for
+   * repo R goes to the first listed pool whose repo is R. Review rounds are
+   * follow-ups and keep their chain's worktree rule.
+   */
+  pools: string[];
 }
 
 /** "owner/name" from a GitHub origin URL in any of its usual shapes, else undefined. */
@@ -65,6 +71,22 @@ export function resolveTokenSource(section: Record<string, unknown>, label: stri
   throw new Error(`${label}: configure one of tokenCommand, tokenFile, tokenEnv`);
 }
 
+function parsePickupPools(raw: unknown): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new Error('pickup.pools must be an array of pool names');
+  const pools = loadConfig().pools;
+  for (const name of raw) {
+    if (!pools[String(name)]) throw new Error(`pickup.pools: unknown pool "${String(name)}" — add [pools.${String(name)}]`);
+  }
+  return raw.map(String);
+}
+
+/** The pool an issue dispatch for `repoKey` runs in: the first of `pools` that serves it. */
+export function pickupPool(pools: string[], repoKey: string): string | undefined {
+  const cfg = loadConfig().pools;
+  return pools.find((name) => cfg[name]?.repo === repoKey);
+}
+
 /** Pickup reads its own [pickup.*] sections from the shared config file. */
 export function loadPickupConfig(): PickupConfig {
   const file = configPath();
@@ -75,6 +97,7 @@ export function loadPickupConfig(): PickupConfig {
     liveComment: p.liveComment === undefined ? true : Boolean(p.liveComment),
     notifyCommand: p.notifyCommand ? String(p.notifyCommand) : undefined,
     github: [],
+    pools: parsePickupPools(p.pools),
   };
 
   const gh = p.github as Record<string, unknown> | undefined;
