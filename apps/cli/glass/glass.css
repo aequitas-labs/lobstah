@@ -204,6 +204,18 @@ h2 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+a.deckline {
+  display: flex;
+  gap: 0.35em;
+}
+a.deckline > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.deckline > .dim {
+  flex-shrink: 0;
+}
 .deckline.acked,
 .card.acked,
 .rowhead.acked,
