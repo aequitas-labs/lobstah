@@ -55,18 +55,32 @@ export function derivePrStacks(
       members.push(children[0]!);
     }
     if (members.length < 2) continue;
-    const isReady = (p: PrEvidence) => prStandingKinds(p, { readySettleSecs: opts.readySettleSecs ?? 0, now }).includes('pr:ready');
+    const settleSecs = opts.readySettleSecs ?? 0;
+    // A member inside its settle window is not ready for the stack either.
+    const isReady = (p: PrEvidence) => prStandingKinds(p, { readySettleSecs: settleSecs, now }).includes('pr:ready');
     const ready = members.filter(isReady).length;
     const allReady = ready === members.length;
     const order = members.map((p) => `#${p.number}`).join(' → ');
-    const waiting = members.filter((p) => !isReady(p)).map((p) =>
-      `#${p.number} (${p.discoveryPending ? 'awaiting watch check' : prStandingKinds(p).includes('pr:ready') ? 'settling' : prBadge(p).text})`).join(', ');
+    const waiting = members.filter((p) => !isReady(p)).map((p) => `#${p.number} ${waitingReason(p, settleSecs, now)}`).join('; ');
     out.push({ id: parsePrRef(bottom.url)!.key, repo: repo(bottom), members, ready, allReady,
       text: allReady
         ? `stack ready to merge: ${repo(bottom)} ${order} (${members.length} PRs, all green) — merge in this order, bottom first`
-        : `stack ${ready}/${members.length} ready: ${repo(bottom)} ${order}, waiting: ${waiting}` });
+        : `stack waiting: ${ready} of ${members.length} ready: ${repo(bottom)} ${order} — ${waiting}` });
   }
   return out;
+}
+
+/**
+ * Why a member keeps its stack waiting, in plain words. A green member inside
+ * the pr:ready settle window ("settling" internally) is confirming: it has to
+ * stay green for the window before it counts.
+ */
+function waitingReason(p: PrEvidence, settleSecs: number, now: number): string {
+  if (p.discoveryPending) return 'awaiting watch check';
+  if (!prStandingKinds(p).includes('pr:ready')) return prBadge(p).text;
+  const since = Date.parse(p.standingSince?.['pr:ready'] ?? p.observedAt);
+  const left = Math.max(1, Math.ceil((since + settleSecs * 1000 - now) / 60_000));
+  return `ready, confirming for ${left} more min`;
 }
 
 export function prStackTrunk(cfg: Config, forgeRepo: string): string {

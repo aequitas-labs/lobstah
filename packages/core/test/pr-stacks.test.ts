@@ -45,7 +45,7 @@ describe('stack detection and readiness', () => {
     [1, 2].forEach((n) => upsertPr(row(n))); sync(); unseenNotices(true);
     const id = readyNotices()[0]!.refId;
     upsertPr(row(3, { draft: true })); sync();
-    expect(readyNotices()).toEqual([expect.objectContaining({ refId: id, quiet: true, text: expect.stringContaining('stack 2/3 ready') })]);
+    expect(readyNotices()).toEqual([expect.objectContaining({ refId: id, quiet: true, text: expect.stringContaining('stack waiting: 2 of 3 ready') })]);
     expect(unseenNotices(true)).toEqual([]);
     upsertPr(row(3)); sync(); sync();
     expect(readyNotices()).toHaveLength(1);
@@ -68,7 +68,7 @@ describe('stack detection and readiness', () => {
   });
   it('uses the same ready rule, unknown checks and human gates never guessed green', () => {
     const bad = row(3, { draft: true });
-    expect(derivePrStacks([row(1), row(2), bad])[0]).toMatchObject({ ready: 2, allReady: false, text: expect.stringContaining('#3 (draft)') });
+    expect(derivePrStacks([row(1), row(2), bad])[0]).toMatchObject({ ready: 2, allReady: false, text: expect.stringContaining('— #3 draft') });
     for (const over of [
       { mergeStateStatus: 'DIRTY' }, { checks: { total: 1, passed: 0, failed: 1, pending: 0 } },
       { checks: { total: 0, passed: 0, failed: 0, pending: 0, unknown: 'no permission' as const } },
@@ -105,6 +105,29 @@ describe('stack detection and readiness', () => {
     syncStackReadiness(cfg, time + 21000); syncStackReadiness(cfg, time + 22000);
     expect(readyNotices()).toHaveLength(1);
     expect(unseenNotices(true)).toHaveLength(1);
+  });
+  it('a member inside its settle window keeps the stack quiet: no notice wake, plain words', () => {
+    const cfg = { ...loadConfig(), readySettleSecs: 600 };
+    upsertPr(row(1)); upsertPr(row(2, { observedAt: new Date(time - 700_000).toISOString() }));
+    syncStackReadiness(cfg, time);
+    expect(readyNotices()).toEqual([expect.objectContaining({ quiet: true, text: 'stack waiting: 1 of 2 ready: acme/web #1 → #2 — #1 ready, confirming for 10 more min' })]);
+    expect(unseenNotices(true)).toEqual([]);
+    syncStackReadiness(cfg, time + 599_000); expect(unseenNotices(true)).toEqual([]);
+    syncStackReadiness(cfg, time + 600_000);
+    expect(unseenNotices(true)).toEqual([expect.objectContaining({ kind: 'stack-ready', text: expect.stringContaining('stack ready to merge') })]);
+  });
+  it('a 0-of-n stack never wakes, and names each member in plain words', () => {
+    const cfg = { ...loadConfig(), readySettleSecs: 600 };
+    upsertPr(row(1)); upsertPr(row(2, { mergeStateStatus: 'DIRTY' }));
+    syncStackReadiness(cfg, time);
+    expect(readyNotices()).toEqual([expect.objectContaining({
+      quiet: true, text: 'stack waiting: 0 of 2 ready: acme/web #1 → #2 — #1 ready, confirming for 10 more min; #2 conflicts',
+    })]);
+    expect(unseenNotices(true)).toEqual([]);
+    // #1 settles; the conflict still holds the stack: quiet, no wake.
+    syncStackReadiness(cfg, time + 600_000);
+    expect(readyNotices()).toEqual([expect.objectContaining({ quiet: true, text: 'stack waiting: 1 of 2 ready: acme/web #1 → #2 — #2 conflicts' })]);
+    expect(unseenNotices(true)).toEqual([]);
   });
   it('bottom merges and retargets do not wake again for unchanged remaining heads', () => {
     [1, 2, 3].forEach((n) => upsertPr(row(n))); sync();
