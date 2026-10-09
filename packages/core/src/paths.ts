@@ -1,7 +1,13 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import type { Lane } from './types.js';
+
+/** A sibling temporary file owned by one write, even within the same process. */
+export function uniqueTempPath(file: string): string {
+  return `${file}.tmp-${process.pid}-${randomUUID()}`;
+}
 
 /** Entries of a lobstah folder. A folder that does not exist yet is empty. */
 export function readDirIfPresent(dir: string): string[] {

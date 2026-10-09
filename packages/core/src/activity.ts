@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Lane, NormalizedEvent } from './types.js';
-import { activityPath } from './paths.js';
+import { uniqueTempPath, activityPath } from './paths.js';
 
 /**
  * Activity: what a worker is doing right now, derived from its event stream
@@ -163,7 +163,7 @@ export function activityFromEvent(ev: NormalizedEvent, root?: string): Omit<Acti
 }
 
 function atomicWrite(file: string, content: string): void {
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }

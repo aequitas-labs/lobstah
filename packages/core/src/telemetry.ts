@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import { configPath, loadConfig } from './config.js';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { readStatsStore } from './stats.js';
 import { generatedTrapNames, TRAP_NAME_RE } from './trap-names.js';
 import { lobstahVersion } from './version.js';
@@ -100,7 +100,7 @@ export function readTelemetryState(): TelemetryState | undefined {
 function writeTelemetryState(state: TelemetryState): void {
   const file = telemetryStatePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
   fs.renameSync(tmp, file);
 }
@@ -397,7 +397,7 @@ export function setTelemetryShare(share: boolean): void {
   }
   if (readBack !== share) throw new Error(`could not set [telemetry] share in ${file} — set \`share = ${share}\` under [telemetry] by hand`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, next);
   fs.renameSync(tmp, file);
 }

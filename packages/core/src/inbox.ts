@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Attachment, Lane } from './types.js';
-import { laneDirs, readDirIfPresent } from './paths.js';
+import { uniqueTempPath, laneDirs, readDirIfPresent } from './paths.js';
 import { postNotice } from './notices.js';
 import { listSignedOff, readTrap, releaseSignedOff, trapLabel } from './soak.js';
 import { trapNameForId } from './trap-names.js';
@@ -31,7 +31,7 @@ export function sendMessage(id: string, lane: Lane, text: string, from?: string,
   const existing = fs.readdirSync(dir).filter((f) => f.endsWith('.msg')).length;
   const handled = fs.readdirSync(path.join(dir, 'handled')).filter((f) => f.endsWith('.msg')).length;
   const name = `${String(existing + handled + 1).padStart(3, '0')}.msg`;
-  const tmp = path.join(dir, `.tmp-${process.pid}-${Date.now()}`);
+  const tmp = uniqueTempPath(path.join(dir, name));
   if (from !== undefined || attachments.length > 0) {
     const meta: MessageMeta = { from: from ?? 'unknown', at: new Date().toISOString(), ...(attachments.length ? { attachments } : {}) };
     const metaTmp = `${tmp}.meta`;

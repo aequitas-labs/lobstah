@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from '@lobstah/core';
+import { uniqueTempPath, lobstahHome } from '@lobstah/core';
 import type { Verb } from '@lobstah/core';
 
 export interface MapEntry {
@@ -54,7 +54,7 @@ export class PickupState {
   }
 
   private save(): void {
-    const tmp = `${this.file}.tmp-${process.pid}`;
+    const tmp = uniqueTempPath(this.file);
     fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
     fs.renameSync(tmp, this.file);
   }

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  uniqueTempPath,
   ghPrView,
   parsePrRef,
   readPr,
@@ -356,7 +357,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   const maxWallMs = Math.max(resolved.limits.wallClockSecs ?? 0,
     cfg.limits.maxWallClockSecs ?? (resolved.limits.wallClockSecs ?? 0) * 4) * 1000;
   const persistWall = (elapsedMs: number, windowMs: number) => {
-    const tmp = `${wallFile}.tmp-${process.pid}`;
+    const tmp = uniqueTempPath(wallFile);
     fs.writeFileSync(tmp, JSON.stringify({ ...wallState, elapsedMs, windowMs }));
     fs.renameSync(tmp, wallFile);
   };

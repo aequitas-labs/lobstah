@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 
 /**
  * Disk guard state. Worktrees are large (1 to 8 GB each), so the daemon
@@ -59,7 +59,7 @@ export function readHold(): DiskHold | undefined {
 }
 
 export function writeHold(hold: DiskHold): void {
-  const tmp = `${holdPath()}.tmp`;
+  const tmp = uniqueTempPath(holdPath());
   fs.writeFileSync(tmp, JSON.stringify(hold, null, 2));
   fs.renameSync(tmp, holdPath());
 }

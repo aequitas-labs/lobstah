@@ -1,11 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Descriptor, Lane } from './types.js';
-import { laneDirs, readDirIfPresent } from './paths.js';
+import { uniqueTempPath, laneDirs, readDirIfPresent } from './paths.js';
 import { appendStatus } from './status.js';
 
 function atomicWrite(file: string, content: string): void {
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }

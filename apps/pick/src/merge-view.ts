@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from '@lobstah/core';
+import { uniqueTempPath, lobstahHome } from '@lobstah/core';
 import type { MergeView, MergeViewPr } from '@lobstah/core';
 
 export type { MergeView, MergeViewPr } from '@lobstah/core';
@@ -20,7 +20,7 @@ export function readMergeView(): MergeView | undefined {
 export function writeMergeView(view: MergeView): void {
   const file = viewPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(view, null, 2));
   fs.renameSync(tmp, file);
 }

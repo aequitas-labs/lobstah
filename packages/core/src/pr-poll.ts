@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { parsePrRef, ghPrViewDirect } from './pr.js';
 import type { GhPrView, PrRef } from './pr.js';
 import { readPr } from './prs.js';
@@ -273,7 +273,7 @@ export function preparePrWatchBatch(
         }
         for (const link of links) cycle.links[link.key] = (repository[link.alias] as Connection<Snapshot>)?.nodes ?? [];
       }
-      const tmp = `${file}.${process.pid}.tmp`;
+      const tmp = uniqueTempPath(file);
       fs.writeFileSync(tmp, JSON.stringify(cycle));
       fs.renameSync(tmp, file);
       if (limited) break; // one shared failure, never hammer the next repository

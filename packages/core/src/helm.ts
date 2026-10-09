@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import type { Config } from './config.js';
 import { readHold } from './disk.js';
 import type { Notice } from './notices.js';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import type { WindowRef } from './window.js';
 import { listWatches } from './watch.js';
 import { readRequest } from './requests.js';
@@ -85,7 +85,7 @@ function helmPath(grounds: string): string {
 
 function atomicWrite(file: string, content: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }

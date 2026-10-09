@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from './paths.js';
+import { uniqueTempPath, lobstahHome } from './paths.js';
 import { readStackEpochs, stackReadyEnabled, stackStateHash } from './pr-stacks.js';
 import { loadConfig } from './config.js';
 
@@ -133,7 +133,7 @@ export function postNotice(n: {
     ...(n.stateHash ? { stateHash: n.stateHash } : {}),
   };
   const file = path.join(dir, `${seq}.json`);
-  const tmp = `${file}.tmp`;
+  const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(notice, null, 2));
   fs.renameSync(tmp, file);
   return notice;

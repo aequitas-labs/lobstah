@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
+  uniqueTempPath,
   appendStatus,
   bounceExpiredSignOffs,
   cancelRequested,
@@ -337,7 +338,7 @@ function writeHeartbeat(cfg: Config): void {
     pid: process.pid,
     heartbeat: new Date().toISOString(),
   };
-  const tmp = `${executorPath()}.tmp`;
+  const tmp = uniqueTempPath(executorPath());
   fs.writeFileSync(tmp, JSON.stringify(payload, null, 2));
   fs.renameSync(tmp, executorPath());
 }
