@@ -259,6 +259,7 @@ export interface GlassBeats {
 }
 
 export interface GlassHelm extends HelmRegistration {
+  desktopThread?: boolean;
   /** The session id's first eight characters. */
   session: string;
   /** helmLabel(): who mans the helm. */
@@ -304,6 +305,7 @@ export interface GlassMessage {
 
 /** A trap: live (a registration) or historical (only receipts, mail, and notices survive). */
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
+  desktopThread?: boolean;
   trapId: string;
   label?: string;
   /** Signed on now (the registration exists), including when its beat is stale. */

@@ -10,14 +10,19 @@ import { trapView } from '../src/glass-diff.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
+let codexHome: string | undefined;
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-glass-'));
   process.env.LOBSTAH_HOME = home;
+  codexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = path.join(home, 'codex');
   ensureLayout();
 });
 afterEach(() => {
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
+  if (codexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = codexHome;
 });
 
 const UUID = '33333333-3333-3333-3333-333333333333';
@@ -77,12 +82,25 @@ describe('glass snapshot', () => {
     fs.mkdirSync(path.join(home, 'roster'), { recursive: true });
     fs.writeFileSync(path.join(home, 'roster', 'deadbeef.json'), JSON.stringify({
       trapId: 'deadbeef', name: 'fresh-cove', harness: 'codex', sessionId: 'current-session',
+      link: 'codex://threads/current-session', window: { bundleId: 'com.openai.codex' },
     }));
     postNotice({ kind: 'trap-signed-on', text: 'trap signed on (claude, web, wt)', refId: 'deadbeef', by: 'old-session' });
     postNotice({ kind: 'trap-stowed', text: 'gone', refId: 'deadbeef' });
     expect(buildGlassSnapshot().traps.find((t) => t.trapId === 'deadbeef')).toMatchObject({
       live: false, harness: 'codex', sessionId: 'current-session',
+      link: 'codex://threads/current-session', window: { bundleId: 'com.openai.codex' },
     });
+  });
+
+  it('marks a desktop rollout for a trap and helm even without an app link', () => {
+    const dir = path.join(process.env.CODEX_HOME!, 'sessions', '2026', '10', '09');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `rollout-${UUID}.jsonl`), JSON.stringify({ type: 'session_meta', payload: { id: UUID, originator: 'codex_work_desktop' } }) + '\n');
+    takeHelm({ sessionId: UUID, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'codex', cwd: home } });
+    postNotice({ kind: 'trap-signed-on', text: 'trap signed on (codex, web, wt)', refId: 'deadbeef', by: UUID });
+    const snap = buildGlassSnapshot();
+    expect(snap.helms[0]?.desktopThread).toBe(true);
+    expect(snap.traps.find((t) => t.trapId === 'deadbeef')?.desktopThread).toBe(true);
   });
 
   it.each(['codex, web', 'codex · gpt-5 · high, web', 'claude, web', 'claude · sonnet, web'])('reads legacy harness metadata from %s without a roster', (metadata) => {

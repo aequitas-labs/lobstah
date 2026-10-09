@@ -83,8 +83,27 @@ export type ModalItem = GlassHelm | GlassDispatchSummary | GlassDispatch | Glass
 /** A trap as the page renders it: its catch ids resolved against the snapshot's dispatches. */
 export type GlassTrapView = Omit<GlassTrap, 'catches'> & { catches: GlassDispatchSummary[] };
 
-/** Resume only a known harness; missing metadata must not imply Claude. */
-export function resumeCommand(harness: string | undefined, sessionId: string | undefined): string | undefined {
+export interface ResumeSession {
+  harness?: string;
+  sessionId?: string;
+  link?: string;
+  window?: { bundleId?: string; entrypoint?: string };
+  desktopThread?: boolean;
+}
+
+/** The terminal panel inside Claude Desktop is still a CLI session. */
+export function desktopSession(session: ResumeSession): boolean {
+  if (session.harness === 'codex')
+    return !!session.desktopThread || session.link?.startsWith('codex://threads/') === true || session.window?.bundleId === 'com.openai.codex';
+  if (session.harness === 'claude')
+    return session.window?.entrypoint === 'claude-desktop' || (!session.window?.entrypoint && session.link?.startsWith('claude://claude.ai/') === true);
+  return false;
+}
+
+/** Resume only a known terminal harness; app sessions use their open link. */
+export function resumeCommand(session: ResumeSession): string | undefined {
+  const { harness, sessionId } = session;
+  if (desktopSession(session)) return undefined;
   if (!sessionId) return undefined;
   if (harness === 'codex') return 'codex resume ' + sessionId;
   if (harness === 'claude') return 'claude --resume ' + sessionId;

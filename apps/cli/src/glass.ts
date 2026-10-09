@@ -7,6 +7,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   awaitingReply,
+  codexDesktopThread,
   activeIds,
   activityView,
   waitingView,
@@ -523,6 +524,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     session: h.sessionId.slice(0, 8),
     man: helmLabel(h),
     transcript: transcriptPath(h.harness, h.cwd, h.sessionId),
+    desktopThread: (h.harness === 'codex' && !!codexDesktopThread(h.sessionId)) || undefined,
   }));
   const mergeView = readMergeView();
   // PR state per dispatch: the evidence badge (the shared derivation tend and
@@ -585,6 +587,10 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
     const roster = readRoster(t.trapId);
     const name = t.name ?? names(t.trapId);
+    const window = t.window ?? (!registered ? roster?.window : undefined);
+    const link = t.link ?? (!registered ? roster?.link : undefined);
+    const sessionId = t.sessionId ?? roster?.sessionId ?? signed?.by;
+    const harness = t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]);
     return {
       ...t,
       name,
@@ -592,9 +598,11 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       label: trapLabel({ trapId: t.trapId, name }),
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
-      link: validSessionLink(t.link) && linkMismatch(t.link, t.window) === undefined ? t.link : undefined,
-      sessionId: t.sessionId ?? roster?.sessionId ?? signed?.by,
-      harness: t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]),
+      window,
+      link: validSessionLink(link) && linkMismatch(link, window) === undefined ? link : undefined,
+      sessionId,
+      harness,
+      desktopThread: (harness === 'codex' && !!sessionId && !!codexDesktopThread(sessionId)) || undefined,
       live: registered,
       listening,
       messages: trapMessages(t.trapId),

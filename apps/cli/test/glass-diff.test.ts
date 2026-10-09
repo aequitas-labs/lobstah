@@ -44,10 +44,23 @@ describe('resume command', () => {
     [undefined, undefined],
     ['unknown', undefined],
   ])('uses the %s harness without guessing', (harness, command) => {
-    expect(detector.resumeCommand(harness, 'session-id')).toBe(command);
+    expect(detector.resumeCommand({ harness, sessionId: 'session-id' })).toBe(command);
   });
   it('requires a session id', () => {
-    expect(detector.resumeCommand('codex', undefined)).toBeUndefined();
+    expect(detector.resumeCommand({ harness: 'codex' })).toBeUndefined();
+  });
+  it.each([
+    { harness: 'codex', link: 'codex://threads/session-id' },
+    { harness: 'codex', desktopThread: true },
+    { harness: 'codex', window: { bundleId: 'com.openai.codex' } },
+    { harness: 'claude', window: { entrypoint: 'claude-desktop' } },
+    { harness: 'claude', link: 'claude://claude.ai/session-id' },
+  ])('never offers a CLI command for desktop metadata %j', (session) => {
+    expect(detector.desktopSession(session)).toBe(true);
+    expect(detector.resumeCommand({ ...session, sessionId: 'session-id' })).toBeUndefined();
+  });
+  it('keeps terminal sessions inside Claude Desktop resumable', () => {
+    expect(detector.resumeCommand({ harness: 'claude', sessionId: 'session-id', window: { bundleId: 'com.anthropic.claudefordesktop', entrypoint: 'cli' } })).toBe('claude --resume session-id');
   });
 });
 
