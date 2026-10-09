@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { derivePrEvents, enqueue, ensureLayout, executorPath, listNotices, parsePrRef, pendingIds, prRecordFile, readPr, readPrs, readStatusLog, upsertPr } from '@lobstah/core';
+import { appendStatus, derivePrEvents, enqueue, ensureLayout, executorPath, listNotices, parsePrRef, pendingIds, prRecordFile, readPr, readPrs, readStatusLog, upsertPr } from '@lobstah/core';
 import type { GhPrView, PrEvidence } from '@lobstah/core';
 import { deriveGlassPrs } from '../src/glass-prs.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
@@ -105,6 +105,32 @@ describe('PR records (core prs.ts)', () => {
 });
 
 describe('PR titles in records', () => {
+  it('cache replay is not a fresh observation and cannot overwrite a newer immediate check', () => {
+    const ref = parsePrRef(url(10))!;
+    const fetchedAt = '2026-10-09T19:00:00Z';
+    const cached: GhPrView = { state: 'OPEN', isDraft: false, headRefOid: 'old', mergeStateStatus: 'DIRTY', fetchedAt };
+    const first = observePr(ref, cached, { now: new Date('2026-10-09T19:01:00Z') });
+    expect(first.observedAt).toBe(fetchedAt);
+    const replay = observePr(ref, cached, { now: new Date('2026-10-09T19:02:00Z') });
+    expect(replay.observations).toBe(first.observations);
+    expect(replay.observedAt).toBe(fetchedAt);
+    const immediate = observePr(ref, { ...cached, headRefOid: 'new', mergeStateStatus: 'CLEAN', fetchedAt: '2026-10-09T19:03:00Z' });
+    observePr(ref, cached, { now: new Date('2026-10-09T19:04:00Z') });
+    expect(readPr(ref.key)).toEqual(immediate);
+  });
+
+  it('a replay still links a newly registered dispatch owner without changing the fetched state', () => {
+    const ref = parsePrRef(url(10))!;
+    const cached: GhPrView = { state: 'OPEN', isDraft: false, headRefOid: 'sha10', fetchedAt: '2026-10-09T19:00:00Z' };
+    observePr(ref, cached);
+    const id = '12345678-1234-4123-8123-123456789012';
+    enqueue({ id, repo: 'r', brief: 'work' });
+    appendStatus(id, 'work', 'done', 'opened a PR');
+    const after = observePr(ref, cached, { dispatchId: id });
+    expect(after.dispatches).toEqual([id]);
+    expect(after.observedAt).toBe(cached.fetchedAt);
+  });
+
   it('keeps a title; a later upsert with a new title replaces it; one without a title keeps it', () => {
     upsertPr(obs(8, { title: 'First title' }));
     expect(readPr('pr:acme/lobstah#8')?.title).toBe('First title');

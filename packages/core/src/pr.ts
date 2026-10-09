@@ -88,6 +88,8 @@ export interface GhReview {
 }
 
 export interface GhPrView {
+  /** When GitHub was read, preserved when a batch snapshot is replayed. */
+  fetchedAt?: string;
   isCrossRepository?: boolean;
   title?: string;
   state: string;
@@ -344,7 +346,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
         }
       : {}),
     review: prReview(view),
-    observedAt,
+    observedAt: view.fetchedAt ?? observedAt,
     ...(view.updatedAt ? { updatedAt: view.updatedAt } : {}),
     ...(view.mergedAt ? { mergedAt: view.mergedAt } : {}),
     ...(view.closedAt ? { closedAt: view.closedAt } : {}),
@@ -527,6 +529,7 @@ export function ghPrViewDirect(ref: PrRef): GhPrView {
     const threads = ghUnresolvedThreads(ref);
     if (threads !== undefined) view.unresolvedThreads = threads;
   }
+  view.fetchedAt = new Date().toISOString();
   return view;
 }
 

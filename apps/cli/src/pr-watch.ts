@@ -265,10 +265,21 @@ export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: strin
   const id = opts.dispatchId;
   const lane = id ? laneOf(id) : undefined;
   const ev = id && lane ? readEvidence(id, lane) : undefined;
-  const legacyBefore = ev?.pr && parsePrRef(ev.pr.url)?.key === ref.key ? ev.pr : undefined;
-  const { before, after } = upsertPr(pr, lane ? id : undefined);
   // A dispatch with several PRs keeps its first PR's state in `pr`; the others live in their records.
   const other = ev?.prUrls?.some((u) => parsePrRef(u)?.key === ref.key) && parsePrRef(ev.prUrl ?? '')?.key !== ref.key;
+  const current = view.fetchedAt ? readPr(ref.key) : undefined;
+  if (current && Date.parse(current.observedAt) >= Date.parse(pr.observedAt)) {
+    // Cache delivery is not another GitHub observation, and an older batch
+    // must not undo a newer immediate check. Still associate a new owner.
+    if (id && lane && !current.dispatches.includes(id)) {
+      const { after } = upsertPr(current, id);
+      if (!other) mergeEvidence(id, lane, { pr: after });
+      return after;
+    }
+    return current;
+  }
+  const legacyBefore = ev?.pr && parsePrRef(ev.pr.url)?.key === ref.key ? ev.pr : undefined;
+  const { before, after } = upsertPr(pr, lane ? id : undefined);
   if (id && lane && !other) mergeEvidence(id, lane, { pr });
   const was = before?.state ?? legacyBefore?.state;
   const terminal = pr.state === 'MERGED' || pr.state === 'CLOSED';

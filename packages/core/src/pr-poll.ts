@@ -67,7 +67,7 @@ export function cachedPrView(ref: PrRef): GhPrView | undefined {
   if (cycle.error) throw new Error(cycle.error);
   const cached = cycle.snapshots[ref.key];
   if (cached?.error) throw new Error(cached.error);
-  return cached?.view;
+  return cached ? { ...cached.view, fetchedAt: new Date(cached.at).toISOString() } : undefined;
 }
 
 const fields = `number url title state isDraft isCrossRepository headRefOid baseRefName baseRefOid headRefName mergeStateStatus reviewDecision mergedAt closedAt updatedAt
@@ -193,6 +193,7 @@ export function preparePrWatchBatch(
       if (blocked) continue;
       const { query, links } = prBatchQuery(refs);
       const res = (opts.run ?? runBatch)(query, refs[0]!);
+      const fetchedAt = Date.now();
       const { headers, body } = splitGitHubResponse(res.stdout);
       let answer: {
         data?: { repository?: Record<string, Snapshot | Connection<Snapshot> | null>; rateLimit?: { cost?: number } };
@@ -219,7 +220,7 @@ export function preparePrWatchBatch(
         recordGitHubRateLimit(now, Number.isFinite(retry) && retry > 0 ? now + retry * 1000 : undefined);
       }
       const cycle: Cycle = {
-        at: now,
+        at: fetchedAt,
         nextAt: now + githubPollIntervalSecs(defaultEverySecs, now, groups.size) * 1000,
         snapshots: {},
         links: {},
@@ -235,7 +236,7 @@ export function preparePrWatchBatch(
             cycle.snapshots[ref.key] = {
               fingerprint: '',
               view: before?.snapshots[ref.key]?.view ?? ({} as GhPrView),
-              at: now,
+              at: fetchedAt,
               error:
                 answer.errors?.find((e) => e.path?.includes(`pr${ref.number}`))?.message ??
                 `could not resolve to a PullRequest (${ref.key})`,
@@ -244,17 +245,24 @@ export function preparePrWatchBatch(
           }
           const fingerprint = createHash('sha256').update(JSON.stringify(raw)).digest('hex');
           const previous = before?.snapshots[ref.key];
-          // A repo batch may include a watch that is backing off. Do not turn
-          // another watch's cadence into repeated detail calls for that one.
-          if (previous && !dueRefs.has(ref.key)) {
-            cycle.snapshots[ref.key] = previous;
-            continue;
-          }
           const incomplete =
             raw.reviews?.pageInfo?.hasPreviousPage ||
             raw.reviewThreads?.pageInfo?.hasNextPage ||
             raw.commits?.nodes?.[0]?.commit.statusCheckRollup?.contexts?.pageInfo?.hasNextPage ||
             answer.errors?.some((e) => e.path?.includes(`pr${ref.number}`));
+          // Every complete snapshot was just read, regardless of this watch's
+          // own cadence. Otherwise another feeder can stamp lastCheckedAt just
+          // before every batch and keep its previous view alive forever.
+          // Backoff only defers EXTRA detail reads, never the free batch data.
+          if (incomplete && previous && !dueRefs.has(ref.key) && (fingerprint !== previous.fingerprint || previous.error)) {
+            cycle.snapshots[ref.key] = {
+              fingerprint,
+              view: toView(raw),
+              at: fetchedAt,
+              error: previous.error ?? `Incomplete PR batch for ${ref.key}; details deferred until the watch is due`,
+            };
+            continue;
+          }
           try {
             const view =
               fingerprint === previous?.fingerprint && !previous.error
@@ -262,9 +270,9 @@ export function preparePrWatchBatch(
                 : incomplete
                   ? (opts.detail ?? ghPrViewDirect)(ref)
                   : toView(raw);
-            cycle.snapshots[ref.key] = { fingerprint, view, at: now };
+            cycle.snapshots[ref.key] = { fingerprint, view, at: fetchedAt };
           } catch (e) {
-            cycle.snapshots[ref.key] = { fingerprint, view: previous?.view ?? toView(raw), at: now, error: (e as Error).message };
+            cycle.snapshots[ref.key] = { fingerprint, view: previous?.view ?? toView(raw), at: fetchedAt, error: (e as Error).message };
             if (classifyGhError((e as Error).message).kind === 'rate-limit') {
               recordGitHubRateLimit(now);
               break;
@@ -293,5 +301,5 @@ export function cachedPrStackLink(
   const c = readCycle(repoOf(ref));
   if (!c || c.error) return undefined;
   const rows = c.links[`${repoOf(ref)}:${direction}:${branch}`];
-  return rows?.map((r) => ({ ...toView(r), number: r.number, url: r.url }));
+  return rows?.map((r) => ({ ...toView(r), fetchedAt: new Date(c.at).toISOString(), number: r.number, url: r.url }));
 }
