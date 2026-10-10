@@ -1,6 +1,6 @@
 # Privacy
 
-Published by aequitas labs LLC. Last updated: 2026-10-07.
+Published by aequitas labs LLC. Last updated: 2026-10-10.
 
 ## Local work and connections
 
@@ -13,6 +13,28 @@ lobstah contacts your configured code host and optional issue tracker to
 coordinate work. Git operations, coding agents, commands and tools you
 configure or ask workers to use can contact other services and send task
 material. Those services have their own data-handling policies.
+
+## Optional wharf
+
+Local files are the default. If you choose a wharf, your selected server
+stores coordination material: task briefs, messages, decisions, reports and
+files you upload, along with repo identities, boat and worker metadata and
+authentication records. GitHub sign-in contacts GitHub; the wharf uses
+Cloudflare storage. Coding agents and Git worktrees still run on your boats.
+
+Each account is one person's grounds. The signed-in person and credentials
+granted read or steering access can read account state through the API;
+worker tokens access only their assigned catch. The server operator and
+hosting provider also handle this stored data. Upload only material you
+intend to store there. Access controls do not make it anonymous telemetry.
+
+Operational data is kept until account deletion, subject to storage limits;
+there is no automatic retention deadline. Account deletion removes task
+records, uploaded files and the account's sign-in identity and sessions. A
+minimal hashed receipt remains
+to make retries safe and prevent old credentials reopening the account.
+Revoking a boat stops its credential; logging out removes the local login,
+not the server's work. See the [wharf source and setup](services/wharf).
 
 ## Usage statistics
 
@@ -44,8 +66,8 @@ effect, and `lobstah telemetry --help` explains them.
 To reset the installation identifier, disable sharing, then delete the local
 `telemetry.json` file in your lobstah data directory. A new identifier is
 created when needed. This does not erase statistics already received.
-There is no personal-data deletion API because these statistics are not
-linked to a person.
+There is no telemetry deletion API because these statistics are not linked
+to a person. This is separate from wharf account deletion above.
 
 ## Questions
 

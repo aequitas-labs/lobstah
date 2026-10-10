@@ -321,10 +321,12 @@ including who receives it and how long it is kept, is in
 
 ## Non-goals
 
-No webhooks or inbound listeners, no merge decisions in core, no tracker
-vocabulary in core, no hosted service (the one exception is the small
-anonymous telemetry endpoint in [`services/telemetry`](services/telemetry),
-which you can turn off).
+No webhooks, generic remote-shell service, merge decisions in core or tracker
+vocabulary in core. Local files remain the default coordination backend.
+The optional [wharf](services/wharf) lets one person's helm and workers
+coordinate across boats; it does not host coding agents or Git worktrees.
+Anonymous [telemetry](services/telemetry) is separate and can be turned off.
+See [PRIVACY.md](PRIVACY.md) before choosing a wharf for task material.
 
 ## License
 
