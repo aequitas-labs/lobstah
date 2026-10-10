@@ -18,16 +18,31 @@ export default {
       const helm = Array.isArray(hashes) && hashes.some((h: unknown) => typeof h === 'string' && sameHash(h, givenHash));
       if (!helm && !token.startsWith(`b.${account}.`) && !token.startsWith(`d.${account}.`)) throw new ApiError(403, 'wrong account or credential');
       let body: unknown = {};
-      if (request.method !== 'GET') {
+      const route = segments.slice(3).join('/');
+      const upload = /^dispatches\/[A-Za-z0-9_-]+\/files$/.test(route) && request.method === 'POST';
+      if (request.method !== 'GET' && !upload) {
         const bytes = await boundedBody(request);
         try { body = bytes.length ? JSON.parse(new TextDecoder().decode(bytes)) : {}; } catch { throw new ApiError(400, 'invalid JSON'); }
       }
-      const c: Command = { account, helm, token, method: request.method, path: segments.slice(3).join('/'), body,
+      const c: Command = { account, helm, token, method: request.method, path: route, body,
         key: request.headers.get('Idempotency-Key') ?? undefined, session: request.headers.get('X-Lobstah-Helm') ?? undefined,
         after: url.searchParams.get('after') ?? undefined };
       const stub = env.ACCOUNTS.getByName(account);
-      const result = object(JSON.parse(await stub.handle(JSON.stringify(c))));
+      let serialized: string;
+      if (upload) {
+        c.body = { name: request.headers.get('X-File-Name') ?? 'attachment' };
+        serialized = await stub.upload(JSON.stringify(c), await boundedBody(request, Number(env.MAX_FILE_BYTES)));
+      } else if (!route && request.method === 'DELETE') serialized = await stub.deleteAccount(JSON.stringify(c));
+      else serialized = await stub.handle(JSON.stringify(c));
+      const result = object(JSON.parse(serialized));
       if (typeof result.status !== 'number') throw new ApiError(503, 'invalid state response');
+      if (/^dispatches\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route) && request.method === 'GET' && result.status === 200) {
+        const file = object(result.value); const stored = await env.FILES.get(`${account}/${identifier(file.id)}`);
+        if (!stored) throw new ApiError(404, 'file not found');
+        return new Response(stored.body, { headers: { 'Content-Type': 'application/octet-stream',
+          'Content-Disposition': 'attachment', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+          'Content-Security-Policy': "default-src 'none'; sandbox" } });
+      }
       return Response.json(result.value, { status: result.status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
     } catch (e) {
       if (e instanceof ApiError) return Response.json({ error: e.message }, { status: e.status });
