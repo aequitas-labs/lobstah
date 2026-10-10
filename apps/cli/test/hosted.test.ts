@@ -9,6 +9,7 @@ import { buildGlassSnapshot, glassDispatchJson } from '../src/glass.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { lobItems } from '../src/glass-lobs.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { parseArgs } from '../src/usage.js';
 let home: string;
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-hosted-')); process.env.LOBSTAH_HOME = home; ensureLayout();
@@ -127,6 +128,8 @@ it('refuses boat addressing on local grounds rather than silently dropping the t
   expect(fs.readdirSync(path.join(home, 'queue'))).toEqual([]);
 });
 it('requires explicit CLI confirmation and warns before granting boat admin', async () => {
+  expect(() => parseArgs('wharf', ['issue-boat', 'laptop', '--permission', 'work', '--permission', 'admin', '--grant-admin', '--grounds', 'away'])).not.toThrow();
+  expect(() => parseArgs('wharf', ['boat-permissions', 'laptop', '--clear', '--grounds', 'away'])).not.toThrow();
   const fetcher = vi.fn(async (_url: string, _init: RequestInit) => Response.json({ issued: true })); vi.stubGlobal('fetch', fetcher);
   vi.spyOn(console, 'log').mockImplementation(() => {}); const warning = vi.spyOn(console, 'error').mockImplementation(() => {});
   const flags: Record<string, string> = { '--grounds': 'away' };
