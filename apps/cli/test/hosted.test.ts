@@ -78,6 +78,19 @@ it('remote CLI mutations use the selected server and never the local queue; unsu
   expect(fs.readdirSync(path.join(home, 'queue'))).toEqual([]);
   await expect(serverCommand('cull', [], opts, loadConfig())).rejects.toThrow('not supported');
 });
+it('server recover prints only its submitted recovery, without listing recoveries or falling through the outer switch', async () => {
+  const recovery = { verb: 'done', note: 'preserved result' };
+  const file = path.join(home, 'recovery.json'); fs.writeFileSync(file, JSON.stringify(recovery));
+  const result = { preserved: true };
+  const fetcher = vi.fn(async () => Response.json(result)); vi.stubGlobal('fetch', fetcher);
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away', '--request-key': 'recover-once' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  expect(await serverCommand('server', ['recover', 'remote-job', file], opts, loadConfig())).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledWith('https://state.invalid/v1/accounts/person/dispatches/remote-job/recovery', expect.objectContaining({ method: 'POST', body: JSON.stringify(recovery) }));
+  expect(output.mock.calls).toEqual([[JSON.stringify(result, null, 2)]]);
+});
 it('rejects executable evidence URLs from a configured server', async () => {
   const backend = new ServerBackend({ kind: 'server', url: 'https://state.invalid', account: 'a', tokenEnv: 'TOKEN' }, 'token', { fetch: async () => Response.json([{ id: 'x', repo: 'r', brief: 'b', state: 'done', status: { verb: 'done', at: 'now', evidence: { prUrls: ['javascript:alert(1)'] } } }]) });
   await expect(backend.list()).rejects.toThrow('evidence URL');
