@@ -42,19 +42,20 @@ must retain results and must not infer success or claim locally during an outage
 
 ## Permission layers
 
-Person credentials carry `read`, `helm` and `admin`, never `work`: boats fish,
+Person credentials carry the `admin` steering layer, never `work`: boats fish,
 people steer and administer. Worker sign-on, claim and renew refuse a person
 credential with an enrolment instruction. The sign-in slice will replace the
 temporary operator-provisioned PATs, not expand their work authority.
 
-Boat credentials carry independent permissions, chosen on issue or rotation:
+Boat credentials carry a steering layer (`read < helm < admin`) and independent
+`work` permission, chosen on issue or rotation:
 
 | Permission | Allows |
 | --- | --- |
 | read | Account job state, messages, events, boats and evidence downloads |
 | work | This boat's worker sign-on, claims and renewals |
-| helm | Dispatch, message, cancel and exclusive helm lease operations |
-| admin | Issue/revoke/rename/remove boats, change permissions, delete account |
+| helm | Read plus dispatch, message, cancel and exclusive helm lease operations |
+| admin | Helm plus issue/revoke/rename/remove boats, change permissions, delete account |
 
 Omission defaults to `work`. `POST boats` accepts `permissions`; `POST
 boats/:id/permissions` replaces them (an empty array removes all grants).
@@ -62,7 +63,9 @@ An `admin` grant additionally requires `confirmAdmin: true`. The CLI uses
 repeated `--permission read|work|helm|admin` on `wharf issue-boat <name>` or
 `wharf boat-permissions <name>`; `--clear` removes all grants. Admin requires
 `--grant-admin` and prints a warning about credential management and deletion.
-Permissions do not imply one another: a helm boat also needs `read` for views.
+Only the highest steering layer is stored, not its implied permissions. Replacing
+`helm` with no steering layer removes read access too; explicitly selecting `read`
+is a downgrade. `work` never implies read or steering authority.
 
 Checks precede idempotency replay, so removing a permission immediately fences
 new requests and retries. A helm seat is bound to both the credential principal
