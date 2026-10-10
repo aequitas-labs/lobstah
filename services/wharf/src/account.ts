@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { ReportInput, BackendEvent, DispatchInput } from '../../../packages/core/src/backend-model.js';
 import { ApiError, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
-import { boatPermissions, personPermissions, requiredPermission } from './permissions.js';
+import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
 
 type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
@@ -144,7 +144,7 @@ export class Account extends DurableObject<Env> {
     requireThat(h && h.session === c.session && h.actor === `${actor.kind}:${actor.id}` && h.until > now, 409, 'take or renew the helm lease first');
   }
   private requirePermission(actor: Actor, permission: Permission) {
-    requireThat(actor.kind !== 'dispatch' && actor.permissions.includes(permission), 403, `${permission} permission required`);
+    requireThat(actor.kind !== 'dispatch' && permits(actor.permissions, permission), 403, `${permission} permission required`);
     if (permission === 'work') requireThat(actor.kind === 'boat', 403, 'enrol this machine as a boat with lobstah wharf login before signing on or claiming work');
   }
   private authorize(c: Command, actor: Actor) {

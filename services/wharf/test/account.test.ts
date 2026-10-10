@@ -255,7 +255,7 @@ it('person sessions cannot sign on, claim or renew a worker and explain boat enr
     expect(await res.json()).toEqual({ error: expect.stringContaining('enrol this machine as a boat') });
   }
 });
-it('read, work, helm and admin boat permissions have separate positive and negative boundaries', async () => {
+it('steering layers imply lower layers while work remains independent', async () => {
   const issue = async (name: string, permissions: string[]) => {
     const res = await call('boats', { name, permissions, confirmAdmin: permissions.includes('admin') });
     expect(res.status).toBe(201); return res.json<{ id: string; token: string }>();
@@ -264,8 +264,8 @@ it('read, work, helm and admin boat permissions have separate positive and negat
   const helm = await issue('steer', ['helm']); const admin = await issue('admin', ['admin']);
   await enqueue();
   for (const path of ['boats', 'dispatches', 'dispatches/dispatch', 'events', 'dispatches/dispatch/messages', 'dispatches/dispatch/recoveries']) {
-    expect((await call(path, undefined, read.token)).status).toBe(200);
-    for (const token of [work.token, helm.token, admin.token]) expect((await call(path, undefined, token)).status).toBe(403);
+    for (const token of [read.token, helm.token, admin.token]) expect((await call(path, undefined, token)).status).toBe(200);
+    expect((await call(path, undefined, work.token)).status).toBe(403);
   }
   for (const token of [read.token, helm.token, admin.token]) {
     expect((await call('workers/sign-on', { worker: 'w', repo: 'repo', repoRemote: 'github.com/test/repo' }, token)).status).toBe(403);
@@ -275,7 +275,7 @@ it('read, work, helm and admin boat permissions have separate positive and negat
   expect((await call('workers/sign-on', { worker: 'w', repo: 'repo', repoRemote: 'github.com/test/repo' }, work.token)).status).toBe(200);
   expect((await call('workers/renew', { worker: 'w' }, work.token)).status).toBe(200);
   for (const path of ['workers/sign-on', 'workers/renew', 'claims']) expect((await call(path, { worker: 'w', repo: 'repo', repoRemote: 'github.com/test/repo', boat: read.id }, work.token)).status).toBe(400);
-  for (const token of [read.token, work.token, admin.token]) {
+  for (const token of [read.token, work.token]) {
     for (const [path, body] of [['helm/take', { session: 'helm', take: true }], ['helm/renew', {}], ['helm/release', {}], ['dispatches', { id: 'blocked' }], ['dispatches/dispatch/messages', { text: 'blocked' }], ['dispatches/dispatch/cancel', {}]] as const) expect((await call(path, body, token)).status).toBe(403);
   }
   // Knowing the current session ID does not inherit another principal's seat.
@@ -284,6 +284,13 @@ it('read, work, helm and admin boat permissions have separate positive and negat
   expect((await call('helm/renew', {}, helm.token)).status).toBe(200);
   expect((await call('dispatches/dispatch/messages', { text: 'steer' }, helm.token)).status).toBe(200);
   expect((await call('dispatches/dispatch/cancel', {}, helm.token)).status).toBe(200);
+  expect((await call('helm/release', {}, helm.token)).status).toBe(200);
+  expect((await call('helm/take', { session: 'helm' }, admin.token)).status).toBe(200);
+  expect((await call('helm/renew', {}, admin.token)).status).toBe(200);
+  expect((await call('dispatches', { id: 'admin-job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work' }, admin.token)).status).toBe(200);
+  expect((await call('dispatches/admin-job/messages', { text: 'admin steer' }, admin.token)).status).toBe(200);
+  expect((await call('dispatches/admin-job/cancel', {}, admin.token)).status).toBe(200);
+  expect((await call('helm/release', {}, admin.token)).status).toBe(200);
   for (const token of [read.token, work.token, helm.token]) {
     for (const [path, body] of [['boats', { name: 'blocked' }], [`boats/${read.id}/permissions`, { permissions: ['work'] }], [`boats/${read.id}/rename`, { name: 'new' }], [`boats/${read.id}/revoke`, {}]] as const) expect((await call(path, body, token)).status).toBe(403);
     expect((await SELF.fetch(`https://state.test/v1/accounts/a/boats/${read.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': `remove-${++key}` } })).status).toBe(403);
@@ -300,14 +307,22 @@ it('validates permissions, requires explicit admin confirmation, and rejects rep
   for (const permissions of [['root'], 'work', ['admin']]) expect((await call('boats', { name: 'bad', permissions })).status).toBe(400);
   const m = await boat();
   expect((await call(`boats/${m.id}/permissions`, { permissions: ['admin'] })).status).toBe(400);
-  expect((await call(`boats/${m.id}/permissions`, { permissions: ['work', 'helm', 'read'] })).status).toBe(200);
+  const granted = await call(`boats/${m.id}/permissions`, { permissions: ['work', 'helm', 'read'] });
+  expect(granted.status).toBe(200);
+  expect(await granted.json()).toEqual({ id: m.id, permissions: ['work', 'helm'] });
   expect((await call('helm/take', { session: 'helm', take: true }, m.token)).status).toBe(200);
   const input = { id: 'dispatch', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work' };
   expect((await call('dispatches', input, m.token, 'formerly-allowed')).status).toBe(200);
-  expect((await call(`boats/${m.id}/permissions`, { permissions: ['work', 'read'] })).status).toBe(200);
+  // Revoking the steering layer also removes its implied read authority.
+  expect((await call(`boats/${m.id}/permissions`, { permissions: ['work'] })).status).toBe(200);
   expect((await call('dispatches', input, m.token, 'formerly-allowed')).status).toBe(403);
   expect((await call('helm/renew', {}, m.token)).status).toBe(403);
+  expect((await call('events', undefined, m.token)).status).toBe(403);
+  expect((await call('dispatches', undefined, m.token)).status).toBe(403);
+  // An explicit lower layer restores only read, not helm.
+  expect((await call(`boats/${m.id}/permissions`, { permissions: ['work', 'read'] })).status).toBe(200);
   expect((await call('dispatches', undefined, m.token)).status).toBe(200);
+  expect((await call('helm/renew', {}, m.token)).status).toBe(403);
   // Job authority remains scoped to its epoch, but cannot extend a removed work grant.
   const receipt = await claim(m.token);
   expect((await call(`boats/${m.id}/permissions`, { permissions: [] })).status).toBe(200);
