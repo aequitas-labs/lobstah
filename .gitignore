@@ -9,4 +9,7 @@ dist/
 build/
 *.tgz
 .lobstah-trap
+.wrangler/
+.dev.vars
+.dev.vars.*
 apps/cli/src/glass-page.generated.ts
