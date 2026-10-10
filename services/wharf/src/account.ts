@@ -247,29 +247,6 @@ export class Account extends DurableObject<Env> {
       requireThat(target, 404, 'boat not found');
       this.ctx.storage.sql.exec('UPDATE boats SET revoked=1 WHERE id=?', id); this.event('boat-revoked', undefined, `boat: ${target.name}`); return ok();
     }
-    if (c.path.startsWith('boats/') && c.path.split('/').length === 2 && c.method === 'DELETE') {
-      this.requirePermission(actor, 'admin'); const id = identifier(c.path.split('/')[1]);
-      requireThat(this.ctx.storage.sql.exec('SELECT id FROM boats WHERE id=?', id).toArray().length, 404, 'boat not found');
-      requireThat(!this.ctx.storage.sql.exec("SELECT id FROM dispatches WHERE state IN ('queued','active') AND (json_extract(data,'$.boat')=? OR boat=?)", id, id).toArray().length, 409, 'boat has open addressed or claimed work; cancel or re-address it first');
-      this.ctx.storage.sql.exec('DELETE FROM worker_nicknames WHERE worker IN (SELECT id FROM workers WHERE boat=?)', id);
-      this.ctx.storage.sql.exec('DELETE FROM workers WHERE boat=?', id); this.ctx.storage.sql.exec('DELETE FROM boats WHERE id=?', id);
-      this.ctx.storage.sql.exec('DELETE FROM boat_permissions WHERE boat=?', id);
-      this.event('boat-removed'); return ok();
-    }
-    if (c.path.startsWith('boats/') && c.path.endsWith('/rename') && c.method === 'POST') {
-      this.requirePermission(actor, 'admin'); const id = identifier(c.path.split('/')[1]); const name = boatName(b.name);
-      requireThat(this.ctx.storage.sql.exec('SELECT id FROM boats WHERE id=?', id).toArray().length, 404, 'boat not found');
-      requireThat(!this.ctx.storage.sql.exec('SELECT id FROM boats WHERE name=? COLLATE NOCASE AND id!=?', name, id).toArray().length, 409, 'boat name already exists');
-      this.ctx.storage.sql.exec('UPDATE boats SET name=? WHERE id=?', name, id); this.event('boat-renamed', undefined, `boat: ${name}`); return ok({ id, name });
-    }
-    if (c.path.startsWith('boats/') && c.path.endsWith('/permissions') && c.method === 'POST') {
-      this.requirePermission(actor, 'admin'); const id = identifier(c.path.split('/')[1]);
-      requireThat(this.ctx.storage.sql.exec('SELECT id FROM boats WHERE id=?', id).toArray().length, 404, 'boat not found');
-      requireThat(b.permissions !== undefined, 400, 'permissions required');
-      const selected = boatPermissions(b.permissions, b.confirmAdmin);
-      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO boat_permissions VALUES (?,?)', id, JSON.stringify(selected));
-      this.event('boat-permissions-changed'); return ok({ id, permissions: selected });
-    }
     if (c.path === 'workers/sign-on' && c.method === 'POST') {
       requireThat(actor.kind === 'boat', 403, 'boat scope required');
       requireThat(b.boat === undefined, 400, 'boat credentials cannot select another boat');
