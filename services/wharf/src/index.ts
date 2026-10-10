@@ -16,7 +16,7 @@ export default {
       const hashes = configured[account]; const givenHash = await digest(token);
       if (!Array.isArray(hashes) || hashes.length === 0) throw new ApiError(403, 'account not provisioned');
       const helm = Array.isArray(hashes) && hashes.some((h: unknown) => typeof h === 'string' && sameHash(h, givenHash));
-      if (!helm && !token.startsWith(`m.${account}.`) && !token.startsWith(`d.${account}.`)) throw new ApiError(403, 'wrong account or credential');
+      if (!helm && !token.startsWith(`b.${account}.`) && !token.startsWith(`d.${account}.`)) throw new ApiError(403, 'wrong account or credential');
       let body: unknown = {};
       if (request.method !== 'GET') {
         const bytes = await boundedBody(request);
