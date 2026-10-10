@@ -28,7 +28,7 @@ beforeEach(async () => {
   // New pool shares storage across tests: explicitly delete only test DO data.
   const stub = env.ACCOUNTS.getByName('a');
   await runInDurableObject(stub, async (_instance: Account, state) => {
-    for (const table of ['boats', 'workers', 'worker_nicknames', 'unservable', 'event_details', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'messages', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
+    for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'event_details', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'messages', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key!='generation'");
     state.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
   });
@@ -247,4 +247,71 @@ it('account deletion racing an upload leaves no orphan object', async () => {
   ]);
   expect([200, 410]).toContain(responses[0].status); expect(responses[1].status).toBe(200);
   expect((await env.FILES.list({ prefix: 'a/' })).objects).toEqual([]);
+});
+it('person sessions cannot sign on, claim or renew a worker and explain boat enrolment', async () => {
+  for (const path of ['workers/sign-on', 'workers/renew', 'claims']) {
+    const res = await call(path, { worker: 'person-worker', repo: 'repo', repoRemote: 'github.com/test/repo' });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: expect.stringContaining('enrol this machine as a boat') });
+  }
+});
+it('read, work, helm and admin boat permissions have separate positive and negative boundaries', async () => {
+  const issue = async (name: string, permissions: string[]) => {
+    const res = await call('boats', { name, permissions, confirmAdmin: permissions.includes('admin') });
+    expect(res.status).toBe(201); return res.json<{ id: string; token: string }>();
+  };
+  const read = await issue('read', ['read']); const work = await issue('work', ['work']);
+  const helm = await issue('steer', ['helm']); const admin = await issue('admin', ['admin']);
+  await enqueue();
+  for (const path of ['boats', 'dispatches', 'dispatches/dispatch', 'events', 'dispatches/dispatch/messages', 'dispatches/dispatch/recoveries']) {
+    expect((await call(path, undefined, read.token)).status).toBe(200);
+    for (const token of [work.token, helm.token, admin.token]) expect((await call(path, undefined, token)).status).toBe(403);
+  }
+  for (const token of [read.token, helm.token, admin.token]) {
+    expect((await call('workers/sign-on', { worker: 'w', repo: 'repo', repoRemote: 'github.com/test/repo' }, token)).status).toBe(403);
+    expect((await call('claims', { worker: 'w' }, token)).status).toBe(403);
+    expect((await call('workers/renew', { worker: 'w' }, token)).status).toBe(403);
+  }
+  expect((await call('workers/sign-on', { worker: 'w', repo: 'repo', repoRemote: 'github.com/test/repo' }, work.token)).status).toBe(200);
+  expect((await call('workers/renew', { worker: 'w' }, work.token)).status).toBe(200);
+  for (const path of ['workers/sign-on', 'workers/renew', 'claims']) expect((await call(path, { worker: 'w', repo: 'repo', repoRemote: 'github.com/test/repo', boat: read.id }, work.token)).status).toBe(400);
+  for (const token of [read.token, work.token, admin.token]) {
+    for (const [path, body] of [['helm/take', { session: 'helm', take: true }], ['helm/renew', {}], ['helm/release', {}], ['dispatches', { id: 'blocked' }], ['dispatches/dispatch/messages', { text: 'blocked' }], ['dispatches/dispatch/cancel', {}]] as const) expect((await call(path, body, token)).status).toBe(403);
+  }
+  // Knowing the current session ID does not inherit another principal's seat.
+  expect((await call('helm/take', { session: 'helm' }, helm.token)).status).toBe(409);
+  expect((await call('helm/take', { session: 'helm', take: true }, helm.token)).status).toBe(200);
+  expect((await call('helm/renew', {}, helm.token)).status).toBe(200);
+  expect((await call('dispatches/dispatch/messages', { text: 'steer' }, helm.token)).status).toBe(200);
+  expect((await call('dispatches/dispatch/cancel', {}, helm.token)).status).toBe(200);
+  for (const token of [read.token, work.token, helm.token]) {
+    for (const [path, body] of [['boats', { name: 'blocked' }], [`boats/${read.id}/permissions`, { permissions: ['work'] }], [`boats/${read.id}/rename`, { name: 'new' }], [`boats/${read.id}/revoke`, {}]] as const) expect((await call(path, body, token)).status).toBe(403);
+    expect((await SELF.fetch(`https://state.test/v1/accounts/a/boats/${read.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': `remove-${++key}` } })).status).toBe(403);
+    expect((await SELF.fetch('https://state.test/v1/accounts/a/', { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': `delete-${++key}` } })).status).toBe(403);
+  }
+  expect((await call('boats', { name: 'child' }, admin.token)).status).toBe(201);
+  expect((await call(`boats/${read.id}/permissions`, { permissions: ['read', 'work'] }, admin.token)).status).toBe(200);
+  expect((await call(`boats/${read.id}/rename`, { name: 'new' }, admin.token)).status).toBe(200);
+  expect((await call(`boats/${read.id}/revoke`, {}, admin.token)).status).toBe(200);
+  expect((await SELF.fetch(`https://state.test/v1/accounts/a/boats/${read.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${admin.token}`, 'Idempotency-Key': 'admin-remove' } })).status).toBe(200);
+  for (let i = 0; i < 2; i++) expect((await SELF.fetch('https://state.test/v1/accounts/a/', { method: 'DELETE', headers: { Authorization: `Bearer ${admin.token}`, 'Idempotency-Key': 'admin-delete' } })).status).toBe(200);
+});
+it('validates permissions, requires explicit admin confirmation, and rejects replay after a permission is removed', async () => {
+  for (const permissions of [['root'], 'work', ['admin']]) expect((await call('boats', { name: 'bad', permissions })).status).toBe(400);
+  const m = await boat();
+  expect((await call(`boats/${m.id}/permissions`, { permissions: ['admin'] })).status).toBe(400);
+  expect((await call(`boats/${m.id}/permissions`, { permissions: ['work', 'helm', 'read'] })).status).toBe(200);
+  expect((await call('helm/take', { session: 'helm', take: true }, m.token)).status).toBe(200);
+  const input = { id: 'dispatch', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work' };
+  expect((await call('dispatches', input, m.token, 'formerly-allowed')).status).toBe(200);
+  expect((await call(`boats/${m.id}/permissions`, { permissions: ['work', 'read'] })).status).toBe(200);
+  expect((await call('dispatches', input, m.token, 'formerly-allowed')).status).toBe(403);
+  expect((await call('helm/renew', {}, m.token)).status).toBe(403);
+  expect((await call('dispatches', undefined, m.token)).status).toBe(200);
+  // Job authority remains scoped to its epoch, but cannot extend a removed work grant.
+  const receipt = await claim(m.token);
+  expect((await call(`boats/${m.id}/permissions`, { permissions: [] })).status).toBe(200);
+  expect((await call('workers/renew', { worker: 'worker' }, m.token)).status).toBe(403);
+  expect((await call('dispatches/dispatch/heartbeat', {}, receipt.token)).status).toBe(403);
+  expect((await call('dispatches/dispatch/report', { verb: 'done' }, receipt.token)).status).toBe(200);
 });
