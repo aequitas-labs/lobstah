@@ -38,6 +38,38 @@ it.each(['EPERM', 'EBUSY', 'EACCES'])('retries transient %s on watch lock creati
   expect(fs.existsSync(lock)).toBe(false);
 });
 
+it.each(['EPERM', 'EBUSY', 'EACCES'])('retries transient %s while publishing a watch', (code) => {
+  const file = path.join(home, 'watches', 'rename.json');
+  addWatch('rename', 'echo old');
+  const rename = fs.renameSync;
+  let attempts = 0;
+  vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
+    if (target === file && ++attempts <= 2) throw Object.assign(new Error(`transient ${code}`), { code });
+    return rename(source, target);
+  });
+  expect(addWatch('rename', 'echo new').check).toBe('echo new');
+  expect(attempts).toBe(3);
+  expect(readWatch('rename')?.check).toBe('echo new');
+  expect(fs.readdirSync(path.dirname(file))).toEqual(['rename.json']);
+});
+
+it('persistent rename contention fails at the existing watch-lock deadline, preserving the last record', () => {
+  addWatch('rename', 'echo old');
+  const rename = fs.renameSync;
+  const denied = Object.assign(new Error('rename denied'), { code: 'EPERM' });
+  let now = 0;
+  vi.spyOn(Date, 'now').mockImplementation(() => (now += 1000));
+  vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
+    if (target === path.join(home, 'watches', 'rename.json')) throw denied;
+    return rename(source, target);
+  });
+  expect(() => addWatch('rename', 'echo new')).toThrow(denied);
+  expect(now).toBeGreaterThanOrEqual(11_000);
+  expect(now).toBeLessThanOrEqual(12_000);
+  expect(readWatch('rename')?.check).toBe('echo old');
+  expect(fs.readdirSync(path.join(home, 'watches'))).toEqual(['rename.json']);
+});
+
 it.each(['mkdirSync', 'rmdirSync'] as const)('a persistent permission error on %s fails at the bounded deadline', (operation) => {
   const lock = path.join(home, 'watches', 'denied.json.lock');
   const original = fs[operation];

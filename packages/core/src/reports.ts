@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { AttachmentError, copyAttachments } from './attachments.js';
-import { uniqueTempPath, laneDirs, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, laneDirs, lobstahHome } from './paths.js';
 import type { Attachment, Lane } from './types.js';
 
 /**
@@ -151,7 +151,7 @@ export function fileReport(opts: FileReportOptions): ReportMeta {
     const file = path.join(dir, name);
     const tmp = uniqueTempPath(file);
     fs.writeFileSync(tmp, content);
-    fs.renameSync(tmp, file);
+    atomicRenameSync(tmp, file);
   };
   write(REPORT_MD, markdown);
   write(REPORT_JSON, `${JSON.stringify(meta, null, 2)}\n`);

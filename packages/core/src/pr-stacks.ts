@@ -5,7 +5,7 @@ import { loadConfig } from './config.js';
 import type { Config } from './config.js';
 import { parsePrRef, prBadge, prStandingKinds } from './pr.js';
 import type { PrEvidence } from './pr.js';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { listNotices, noticesDir, postNotice } from './notices.js';
 import { readPrs, withPrLock } from './prs.js';
 
@@ -157,7 +157,7 @@ export function syncStackReadiness(cfg = loadConfig(), now = Date.now()): void {
       const notice = wake || !current ? postNotice(fields)! : { ...current, ...fields };
       if (current && !wake) {
         const file = path.join(noticesDir(), `${notice.seq}.json`), tmp = uniqueTempPath(file);
-        fs.writeFileSync(tmp, JSON.stringify(notice)); fs.renameSync(tmp, file);
+        fs.writeFileSync(tmp, JSON.stringify(notice)); atomicRenameSync(tmp, file);
       }
       kept.add(notice.seq);
       if (s.allReady) next.notified = true;
@@ -178,7 +178,7 @@ export function syncStackReadiness(cfg = loadConfig(), now = Date.now()): void {
       }
     }
     const file = stateFile(), tmp = uniqueTempPath(file);
-    fs.writeFileSync(tmp, JSON.stringify(state)); fs.renameSync(tmp, file);
+    fs.writeFileSync(tmp, JSON.stringify(state)); atomicRenameSync(tmp, file);
   });
 }
 

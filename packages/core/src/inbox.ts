@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Attachment, Lane } from './types.js';
-import { uniqueTempPath, laneDirs, readDirIfPresent } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './paths.js';
 import { postNotice } from './notices.js';
 import { listSignedOff, readTrap, releaseSignedOff, trapLabel } from './soak.js';
 import { trapNameForId } from './trap-names.js';
@@ -36,10 +36,10 @@ export function sendMessage(id: string, lane: Lane, text: string, from?: string,
     const meta: MessageMeta = { from: from ?? 'unknown', at: new Date().toISOString(), ...(attachments.length ? { attachments } : {}) };
     const metaTmp = `${tmp}.meta`;
     fs.writeFileSync(metaTmp, JSON.stringify(meta, null, 2));
-    fs.renameSync(metaTmp, path.join(dir, metaName(name)));
+    atomicRenameSync(metaTmp, path.join(dir, metaName(name)));
   }
   fs.writeFileSync(tmp, text);
-  fs.renameSync(tmp, path.join(dir, name));
+  atomicRenameSync(tmp, path.join(dir, name));
   return name;
 }
 

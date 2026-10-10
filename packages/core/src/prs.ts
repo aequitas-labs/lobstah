@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { parsePrRef, prStandingKinds } from './pr.js';
 import type { PrEvidence, PrStandingKind } from './pr.js';
 
@@ -247,7 +247,7 @@ export function writePr(pr: PrRecord): void {
   const file = prRecordFile(pr.key);
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(pr, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 export function removePr(key: string): boolean {

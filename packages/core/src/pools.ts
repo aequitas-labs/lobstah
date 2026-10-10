@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome, laneDirs } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome, laneDirs } from './paths.js';
 import { readWorktreeLock, lockIsLive } from './worktrees.js';
 import { isTrapCatch } from './slots.js';
 import type { WorktreeLock } from './worktrees.js';
@@ -106,7 +106,7 @@ function writeJson(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 const metaFile = (pool: string, slot: number) => path.join(slotsDir(pool), `${slot}.json`);

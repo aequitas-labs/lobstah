@@ -1,12 +1,25 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
-import * as fs from 'node:fs';
+import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { Lane } from './types.js';
 
 /** A sibling temporary file owned by one write, even within the same process. */
 export function uniqueTempPath(file: string): string {
   return `${file}.tmp-${process.pid}-${randomUUID()}`;
+}
+
+/** Publish one write's temp file; Windows readers can briefly deny replacement. */
+export function atomicRenameSync(source: fs.PathLike, target: fs.PathLike, deadline = Date.now() + 10_000): void {
+  for (;;) {
+    try {
+      fs.renameSync(source, target);
+      return;
+    } catch (err) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes((err as NodeJS.ErrnoException).code ?? '') || Date.now() >= deadline) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
 }
 
 /** Entries of a lobstah folder. A folder that does not exist yet is empty. */
