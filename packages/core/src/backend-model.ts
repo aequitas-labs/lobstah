@@ -19,7 +19,7 @@ export interface ClaimReceipt {
 export interface BackendMessage { id: string; text: string; received: boolean }
 export interface BackendEvent { cursor: string; kind: string; dispatchId?: string; at: string }
 export interface EventBatch { events: BackendEvent[]; cursor: string }
-export interface BackendLocation { kind: 'server'; url: string; account: string; tokenEnv: string }
+export interface BackendLocation { kind: 'wharf'; url: string; account: string; tokenEnv: string }
 export interface CoordinationBackend {
   enqueue(input: DispatchInput, key: string): Promise<DispatchInput>;
   list(): Promise<DispatchView[]>;

@@ -47,15 +47,15 @@ export function coordinationDescriptor(d: Descriptor): DispatchInput {
 
 export function parseBackendLocation(raw: unknown): BackendLocation | undefined {
   if (raw === undefined) return undefined; // local files remain the default
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('backend must be a server configuration');
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('backend must be a wharf configuration');
   const b = raw as Record<string, unknown>;
-  if (b.kind !== 'server' || typeof b.url !== 'string' || typeof b.account !== 'string' ||
+  if (b.kind !== 'wharf' || typeof b.url !== 'string' || typeof b.account !== 'string' ||
       typeof b.tokenEnv !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(b.account) ||
-      !/^[A-Z][A-Z0-9_]{0,127}$/.test(b.tokenEnv)) throw new Error('backend requires kind=server, url, account and tokenEnv');
+      !/^[A-Z][A-Z0-9_]{0,127}$/.test(b.tokenEnv)) throw new Error('backend requires kind=wharf, url, account and tokenEnv');
   const url = new URL(b.url);
   if (url.username || url.password || url.search || url.hash ||
       (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
     throw new Error('backend url must use HTTPS (HTTP is allowed only for loopback tests), without credentials');
   }
-  return { kind: 'server', url: b.url.replace(/\/$/, ''), account: b.account, tokenEnv: b.tokenEnv };
+  return { kind: 'wharf', url: b.url.replace(/\/$/, ''), account: b.account, tokenEnv: b.tokenEnv };
 }

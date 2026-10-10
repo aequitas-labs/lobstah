@@ -13,21 +13,21 @@ beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'backend-')); pr
 afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });
 it('defaults to local and validates explicit remote locations without embedding secrets', () => {
   expect(parseBackendLocation(undefined)).toBeUndefined();
-  expect(parseBackendLocation({ kind: 'server', url: 'http://127.0.0.1:8787/', account: 'test', tokenEnv: 'LOBSTAH_TOKEN' })?.url).toBe('http://127.0.0.1:8787');
-  expect(() => parseBackendLocation({ kind: 'server', url: 'http://remote.test', account: 'test', tokenEnv: 'TOKEN' })).toThrow('HTTPS');
+  expect(parseBackendLocation({ kind: 'wharf', url: 'http://127.0.0.1:8787/', account: 'test', tokenEnv: 'LOBSTAH_TOKEN' })?.url).toBe('http://127.0.0.1:8787');
+  expect(() => parseBackendLocation({ kind: 'wharf', url: 'http://remote.test', account: 'test', tokenEnv: 'TOKEN' })).toThrow('HTTPS');
 });
 it('only serializes coordination, not worker paths, env, setup, or attachments', () => {
   const d = coordinationDescriptor({ id: 'one', repo: 'repo', brief: 'work', env: { SECRET: 'never sent' }, flags: ['--unsafe'], attachments: [{ name: 'x', path: '/private/x', bytes: 1, type: 'text/plain' }] });
   expect(JSON.stringify(d)).not.toMatch(/SECRET|private|unsafe/);
 });
-it('local grounds and multiple named servers are active together with isolated failures', async () => {
-  const location = { kind: 'server' as const, url: 'https://test.invalid', account: 'person', tokenEnv: 'SERVER_ONE_TOKEN' };
-  const scopes = backendScopes({ repos: {}, grounds: { desk: { repos: ['local'] }, cloud: { repos: ['remote'], server: 'one' }, dev: { repos: ['dev'], server: 'two' } },
-    servers: { one: location, two: { ...location, url: 'http://127.0.0.1:8787', tokenEnv: 'SERVER_TWO_TOKEN' } } });
-  const results = await eachBackend(scopes, async (s) => { if (s.server === 'one') throw new Error('offline'); return s.kind; });
-  expect(results.map((r) => r.value)).toEqual(['local', undefined, 'server']);
+it('local grounds and multiple named wharves are active together with isolated failures', async () => {
+  const location = { kind: 'wharf' as const, url: 'https://test.invalid', account: 'person', tokenEnv: 'WHARF_ONE_TOKEN' };
+  const scopes = backendScopes({ repos: {}, grounds: { desk: { repos: ['local'] }, cloud: { repos: ['remote'], wharf: 'one' }, dev: { repos: ['dev'], wharf: 'two' } },
+    wharves: { one: location, two: { ...location, url: 'http://127.0.0.1:8787', tokenEnv: 'WHARF_TWO_TOKEN' } } });
+  const results = await eachBackend(scopes, async (s) => { if (s.wharf === 'one') throw new Error('offline'); return s.kind; });
+  expect(results.map((r) => r.value)).toEqual(['local', undefined, 'wharf']);
   expect(results[1].unavailable).toMatch(/unknown/);
-  expect(scopes[2].location?.tokenEnv).toBe('SERVER_TWO_TOKEN');
+  expect(scopes[2].location?.tokenEnv).toBe('WHARF_TWO_TOKEN');
 });
 it('the local adapter uses the existing queue, sticky addressing and report/inbox paths', async () => {
   const worktree = path.join(home, 'checkout'); fs.mkdirSync(worktree);
