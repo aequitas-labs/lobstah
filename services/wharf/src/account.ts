@@ -3,8 +3,9 @@ import type { ReportInput, BackendEvent, DispatchInput } from '../../../packages
 import { ApiError, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
+import { GlassState, glassSchema, glassTables } from './glass-state.js';
 
-type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
+export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
 type BoatRow = { id: string; name: string; hash: string; revoked: number };
 type WorkerRow = { id: string; boat: string; repo: string; seen: number };
@@ -17,6 +18,7 @@ const HELM_MS = 120_000;
 
 /** One account's only coordination authority. No alarms, timers or sockets. */
 export class Account extends DurableObject<Env> {
+  private glass: GlassState;
   /** Serialises only R2 mutations in this live instance; ownership stays in SQL. */
   private fileTail: Promise<unknown> = Promise.resolve();
   /** Private binding only: the signed-in approval page chooses a visible name. */
@@ -61,8 +63,11 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS claims (dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(dispatch,epoch));
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, dispatch TEXT NOT NULL, text TEXT NOT NULL, received INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, hash TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0);
+      ${glassSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
+    this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), event: (k, d, note) => this.event(k, d, note),
+      helmLive: (now) => Number(JSON.parse(this.get('helm') ?? '{}').until) > now });
   }
   private get(key: string): string | undefined {
     return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key=?', key).toArray()[0]?.value;
@@ -108,7 +113,7 @@ export class Account extends DurableObject<Env> {
   private view(d: DispatchRow) {
     const input = JSON.parse(d.data) as DispatchInput; const target = this.targetBoat(input);
     const unservable = this.ctx.storage.sql.exec<{ repo: string; note: string }>('SELECT repo,note FROM unservable WHERE dispatch=?', d.id).toArray()[0];
-    return { ...input, state: d.state, status: this.lastReport(d.id), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
+    return { ...input, state: d.state, status: this.lastReport(d.id), ...(d.worker ? { workerId: d.worker } : {}), ...(d.boat ? { claimedBoat: d.boat } : {}), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
   }
   private authenticate(c: Command, hash: string, now: number): Actor {
     if (c.helm) return { kind: 'person', id: c.personId ?? 'person', permissions: personPermissions };
@@ -133,6 +138,7 @@ export class Account extends DurableObject<Env> {
     return { kind: 'dispatch', id: d.id, epoch };
   }
   private expire(now: number) {
+    this.glass.expire(now);
     for (const d of this.ctx.storage.sql.exec<DispatchRow>("SELECT * FROM dispatches WHERE state='active' AND lease<=?", now).toArray()) {
       const last = this.lastReport(d.id);
       if (last?.verb === 'paused' && Date.parse(last.until ?? '') > now) continue;
@@ -172,7 +178,7 @@ export class Account extends DurableObject<Env> {
     b.count++; this.set('budget', JSON.stringify(b));
   }
   private capacity() {
-    const tables = ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files'];
+    const tables = ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files', ...glassTables];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
@@ -255,7 +261,7 @@ export class Account extends DurableObject<Env> {
     }
     if (c.path === 'boats' && c.method === 'GET') {
       this.requirePermission(actor, 'read');
-      return ok(this.ctx.storage.sql.exec<{ id: string; name: string; revoked: number; permissions: string }>("SELECT b.id,b.name,b.revoked,coalesce(p.permissions,'[\"work\"]') AS permissions FROM boats b LEFT JOIN boat_permissions p ON p.boat=b.id").toArray().map((b) => ({ ...b, permissions: JSON.parse(b.permissions) })));
+      return ok(this.glass.boats());
     }
     if (c.path.startsWith('boats/') && c.path.endsWith('/revoke') && c.method === 'POST') {
       this.requirePermission(actor, 'admin');
@@ -271,6 +277,7 @@ export class Account extends DurableObject<Env> {
       requireThat(!old || old.boat === actor.id, 409, 'worker belongs to another boat');
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO workers VALUES (?,?,?,?)', id, actor.id, repo, now);
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO worker_nicknames VALUES (?,?)', id, nickname);
+      this.glass.worker(id, b);
       this.event('worker-signed-on'); return ok({ id, repo: nickname, repoRemote: repo });
     }
     if (c.path === 'workers/renew' && c.method === 'POST') {
@@ -309,12 +316,25 @@ export class Account extends DurableObject<Env> {
       return ok({ events, cursor: events.at(-1)?.cursor ?? `${generation}.${n}` });
     }
     const parts = c.path.split('/');
+    if (parts[0] === 'documents' && parts[2] === 'files' && !parts[3] && c.method === 'POST') {
+      const scope = this.glass.uploadScope(c, actor, now); return this.reserveFile(c, b, scope);
+    }
+    const glass = this.glass.execute(c, actor, now); if (glass) return glass;
     if (parts[0] === 'dispatches' && parts[1]) {
       const d = this.dispatch(identifier(parts[1])); const action = parts[2];
       requireThat(actor.kind !== 'dispatch' || actor.id === d.id, 403, 'dispatch scope required');
       if (!action && c.method === 'GET') return ok(this.view(d));
       if (action === 'cancel' && c.method === 'POST') {
-        this.helm(c, actor, now); this.ctx.storage.sql.exec("UPDATE dispatches SET state='cancelled',hash=NULL WHERE id=?", d.id); this.event('cancelled', d.id); return ok();
+        // The owner can stop work even with no helm online; this never changes its seat.
+        if (actor.kind !== 'person') this.helm(c, actor, now);
+        this.ctx.storage.sql.exec("UPDATE dispatches SET state='cancelled',hash=NULL,epoch=epoch+1 WHERE id=?", d.id);
+        this.event('cancelled', d.id, `cancelled by ${actor.kind}:${actor.id}`); return ok();
+      }
+      if (action === 'detail' && c.method === 'GET') {
+        this.requirePermission(actor, 'read');
+        return ok({ ...this.view(d), reports: this.ctx.storage.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 100', d.id).toArray().reverse().map((r) => JSON.parse(r.data)),
+          messages: this.ctx.storage.sql.exec('SELECT id,text,received FROM messages WHERE dispatch=? ORDER BY id DESC LIMIT 100', d.id).toArray().reverse(),
+          files: this.ctx.storage.sql.exec('SELECT id,name,size FROM files WHERE dispatch=? AND ready=1 LIMIT 100', d.id).toArray() });
       }
       if (action === 'heartbeat' && c.method === 'POST') {
         requireThat(actor.kind === 'dispatch', 403, 'dispatch scope required');
@@ -363,15 +383,19 @@ export class Account extends DurableObject<Env> {
       if (action === 'files' && c.method === 'POST') {
         // Used only by upload(), which bounds and hashes the actual bytes.
         requireThat(actor.kind === 'dispatch' && d.state === 'active' && c.prepared?.id, 403, 'active dispatch token required');
-        const name = text(b.name, 128); requireThat(!/[\x00-\x1f/\\]/.test(name), 400, 'invalid file name');
-        requireThat(typeof b.size === 'number' && Number.isInteger(b.size) && b.size >= 0 && b.size <= Number(this.env.MAX_FILE_BYTES), 413, 'file too large');
-        const sum = this.ctx.storage.sql.exec<{ n: number }>('SELECT coalesce(sum(size),0) AS n FROM files').one().n;
-        requireThat(sum + b.size + this.ctx.storage.sql.databaseSize <= Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
-        this.ctx.storage.sql.exec('INSERT INTO files(id,dispatch,name,size,hash) VALUES (?,?,?,?,?)', c.prepared.id, d.id, name, b.size, c.prepared.hash);
-        return ok({ id: c.prepared.id });
+        return this.reserveFile(c, b, d.id);
       }
     }
     throw new ApiError(404, 'route not found');
+  }
+  private reserveFile(c: Command, b: Record<string, unknown>, scope: string): StoredResult {
+    requireThat(c.prepared?.id, 403, 'prepared upload required');
+    const name = text(b.name, 128); requireThat(!/[\x00-\x1f/\\]/.test(name), 400, 'invalid file name');
+    requireThat(typeof b.size === 'number' && Number.isInteger(b.size) && b.size >= 0 && b.size <= Number(this.env.MAX_FILE_BYTES), 413, 'file too large');
+    const sum = this.ctx.storage.sql.exec<{ n: number }>('SELECT coalesce(sum(size),0) AS n FROM files').one().n;
+    requireThat(sum + b.size + this.ctx.storage.sql.databaseSize <= Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
+    this.ctx.storage.sql.exec('INSERT INTO files(id,dispatch,name,size,hash) VALUES (?,?,?,?,?)', c.prepared.id, scope, name, b.size, c.prepared.hash);
+    return { status: 200, value: { id: c.prepared.id } };
   }
   private worker(value: unknown, boat: string): WorkerRow {
     const w = this.ctx.storage.sql.exec<WorkerRow>('SELECT * FROM workers WHERE id=?', identifier(value)).toArray()[0];
@@ -409,7 +433,8 @@ export class Account extends DurableObject<Env> {
         const hash = hex(await crypto.subtle.digest('SHA-256', bytes)); const id = crypto.randomUUID();
         c.body = { ...object(c.body), size: bytes.byteLength, hash };
         c.prepared = { id, hash };
-        const reserve = await this.command(c); const file = identifier(object(reserve.value).id);
+        const reserve = await this.command(c); if (reserve.status !== 200) return JSON.stringify(reserve);
+        const file = identifier(object(reserve.value).id);
         const row = this.ctx.storage.sql.exec<FileRow>('SELECT * FROM files WHERE id=?', file).one();
         if (!row.ready) {
           await this.env.FILES.put(`${c.account}/${file}`, bytes, { sha256: hash, httpMetadata: { contentType: 'application/octet-stream', contentDisposition: 'attachment' } });
@@ -442,7 +467,7 @@ export class Account extends DurableObject<Env> {
           await this.env.FILES.delete(files.objects.map((f) => f.key));
         }
         this.ctx.storage.transactionSync(() => {
-          for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files']) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+          for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files', ...glassTables]) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
           this.ctx.storage.sql.exec("DELETE FROM meta WHERE key NOT IN ('deleted','delete-authority')");
         });
         // Keep only a tombstone; the Worker also removes this person's D1 identity.
