@@ -32,9 +32,9 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
     : html`<span class="bad">down</span>`;
   return [
     html`<span class="chip">daemon ${daemon}</span>`,
-    (inp.backends?.some((b) => b.kind === 'server') ? inp.backends : []).map(
+    (inp.backends?.some((b) => b.kind === 'wharf') ? inp.backends : []).map(
       (b) =>
-        html`<span class=${b.unavailable ? 'chip warn' : 'chip dim'} title=${b.url ?? 'local files'}>${b.grounds} · ${b.server ?? 'local'}${b.unavailable ? ' · unknown' : ''}</span>`,
+        html`<span class=${b.unavailable ? 'chip warn' : 'chip dim'} title=${b.url ?? 'local files'}>${b.grounds} · ${b.wharf ?? 'local'}${b.unavailable ? ' · unknown' : ''}</span>`,
     ),
     inp.stats && html`<span class="chip" title="catches today">🦞 ${inp.stats.catchesToday} today</span>`,
     d.slots &&

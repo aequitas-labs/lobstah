@@ -59,8 +59,8 @@ function report(v: unknown): ReportInput & { at: string } {
   }
   return out;
 }
-/** One instance per named server/grounds. Never falls back to local on errors. */
-export class ServerBackend implements CoordinationBackend {
+/** One instance per named wharf/grounds. Never falls back to local on errors. */
+export class WharfBackend implements CoordinationBackend {
   constructor(public location: BackendLocation, private token: string,
     private options: { session?: string; worker?: string; fetch?: typeof fetch } = {}) {
     if (!token) throw new BackendError(401, `set the credential in ${location.tokenEnv}`);

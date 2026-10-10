@@ -2,7 +2,7 @@ import { env, SELF, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, expect, it } from 'vitest';
 import { digest } from '../src/protocol.js';
 import type { Account } from '../src/account.js';
-import { ServerBackend } from '../../../packages/core/src/server-backend.js';
+import { WharfBackend } from '../../../packages/core/src/wharf-backend.js';
 let key = 0;
 const pat = 'test-helm-a';
 async function call(path: string, body?: unknown, token = pat, idempotency = `key-${++key}`, account = 'a') {
@@ -35,14 +35,14 @@ beforeEach(async () => {
   expect((await call('helm/take', { session: 'helm' })).status).toBe(200);
 });
 it('local Workers end-to-end: helm enqueues, machine claims, agent renews/uploads/reports, helm wait wakes', async () => {
-  const location = { kind: 'server' as const, url: 'https://state.test', account: 'a', tokenEnv: 'TEST_TOKEN' };
+  const location = { kind: 'wharf' as const, url: 'https://state.test', account: 'a', tokenEnv: 'TEST_TOKEN' };
   const transport: typeof fetch = (input, init) => SELF.fetch(input, init);
-  const helm = new ServerBackend(location, pat, { session: 'helm', fetch: transport });
+  const helm = new WharfBackend(location, pat, { session: 'helm', fetch: transport });
   const m = await machine('e2e');
-  const launcher = new ServerBackend(location, m.token, { worker: 'e2e', fetch: transport });
+  const launcher = new WharfBackend(location, m.token, { worker: 'e2e', fetch: transport });
   await helm.enqueue({ id: 'e2e', repo: 'repo', brief: 'write a report', for: 'e2e', model: 'gpt-6.1-sol' }, 'e2e-enqueue');
   const claim = await launcher.claim('e2e-claim'); expect(claim?.dispatch.id).toBe('e2e');
-  const agent = new ServerBackend(location, claim!.token!, { fetch: transport });
+  const agent = new WharfBackend(location, claim!.token!, { fetch: transport });
   await agent.heartbeat('e2e', 'beat');
   await helm.send('e2e', 'include evidence', 'send');
   const [message] = await agent.messages('e2e'); expect(message.text).toBe('include evidence');
