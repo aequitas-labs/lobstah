@@ -5,6 +5,10 @@ import { ApiError, boundedBody, identifier, object } from './protocol.js';
 /** Both HTTP hosts share scoped file/download and account-deletion behavior. */
 export async function accountResponse(request: Request, env: Env, c: Command): Promise<Response> {
   const stub = env.ACCOUNTS.getByName(c.account);
+  if (c.path === 'wake' && c.method === 'GET') {
+    // Never forward a caller-supplied internal header or a bearer in the URL.
+    return stub.fetch('https://internal/wake', { headers: { Upgrade: request.headers.get('Upgrade') ?? '', 'X-Wharf-Command': JSON.stringify(c) } });
+  }
   const upload = /^(dispatches|documents)\/[A-Za-z0-9_-]+\/files$/.test(c.path) && c.method === 'POST';
   const deleting = !c.path && c.method === 'DELETE';
   let serialized: string;
