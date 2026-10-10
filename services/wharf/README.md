@@ -64,7 +64,12 @@ this narrow configuration is not a claim that every 1.7.6 plugin is safe.
 prints a browser approval URL/code and stores only that wharf's boat credential
 under `~/.lobstah/credentials/`, with owner-only file permissions where supported.
 Normal login requests work plus read; the browser approves as requested, lowers
-access, or refuses. Re-login proves the current boat credential before changing
+access, or refuses. The default boat name is the cleaned short system name (or
+hostname), never a random name. `--name` overrides it; re-login keeps the existing
+name unless overridden. Account-local collisions gain a numeric suffix shown
+before approval. A collision arising after approval refuses redemption rather
+than silently changing the approved name. Boat names stay within the wharf account
+and are not telemetry. Re-login proves the current boat credential before changing
 its name/access and preserves its stable ID; a fresh request cannot steal an
 existing name. No separate enrol command, person token store or admin request.
 `login --credential-file <file>` (or `-` for stdin) imports an existing boat token

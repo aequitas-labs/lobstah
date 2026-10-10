@@ -146,8 +146,10 @@ it('re-login rotates only a proven current boat; a fresh enrolment cannot take i
   const firstResponse = await redeem(first); expect(firstResponse.status, await firstResponse.clone().text()).toBe(200);
   const old = await firstResponse.json<{ id: string; token: string }>();
   const impostor = await device('existing-boat', 'helm'); expect((await inspect(impostor)).status).toBe(200);
-  expect((await approve(impostor, 'existing-boat', ['work', 'helm'], ['work', 'helm'])).status).toBe(200);
-  expect((await redeem(impostor)).status).toBe(409);
+  expect(await (await inspect(impostor)).json()).toMatchObject({ boatName: 'existing-boat-2' });
+  expect((await approve(impostor, 'existing-boat', ['work', 'helm'], ['work', 'helm'])).status).toBe(403);
+  expect((await approve(impostor, 'existing-boat-2', ['work', 'helm'], ['work', 'helm'])).status).toBe(200);
+  expect((await redeem(impostor)).status).toBe(200);
   const again = await device('renamed-boat', 'helm', old.token);
   const shown = await inspect(again); expect(shown.status).toBe(200);
   expect(await shown.json()).toMatchObject({ boatName: 'renamed-boat', previousBoatName: 'existing-boat' });
@@ -169,9 +171,28 @@ it('a boat name collision cannot rename another boat during approval', async () 
   };
   const a = await enroll('collision-a'); const b = await enroll('collision-b');
   const code = await device('collision-b', 'read', a.token); expect((await inspect(code)).status).toBe(200);
-  expect((await approve(code, 'collision-b', ['work', 'read'], ['work', 'read'])).status).toBe(200);
-  expect((await redeem(code)).status).toBe(409);
-  for (const boat of [a, b]) expect((await SELF.fetch('https://state.test/v1/accounts/a/_boat', { headers: { Authorization: `Bearer ${boat.token}` } })).status).toBe(200);
+  expect(await (await inspect(code)).json()).toMatchObject({ boatName: 'collision-b-2' });
+  expect((await approve(code, 'collision-b-2', ['work', 'read'], ['work', 'read'])).status).toBe(200);
+  const updated = await redeem(code); expect(updated.status).toBe(200);
+  expect(await updated.json()).toMatchObject({ id: a.id, name: 'collision-b-2' });
+  expect(await (await SELF.fetch('https://state.test/v1/accounts/a/_boat', { headers: { Authorization: `Bearer ${b.token}` } })).json()).toMatchObject({ id: b.id, name: 'collision-b' });
+});
+
+it('numbers collisions before approval but refuses a later race instead of silently changing the approved name', async () => {
+  await authFixtures();
+  const one = await device('concurrent-name'), two = await device('concurrent-name');
+  for (const code of [one, two]) {
+    expect(await (await inspect(code)).json()).toMatchObject({ boatName: 'concurrent-name' });
+    expect((await approve(code, 'concurrent-name', ['work', 'read'], ['work', 'read'])).status).toBe(200);
+  }
+  expect((await redeem(one)).status).toBe(200);
+  expect((await redeem(two)).status).toBe(409);
+  const next = await device('concurrent-name');
+  expect(await (await inspect(next)).json()).toMatchObject({ boatName: 'concurrent-name-2' });
+  expect((await approve(next, 'concurrent-name-2', ['work', 'read'], ['work', 'read'])).status).toBe(200);
+  expect((await redeem(next)).status).toBe(200);
+  const third = await device('concurrent-name');
+  expect(await (await inspect(third)).json()).toMatchObject({ boatName: 'concurrent-name-3' });
 });
 
 it('a previously approved re-login cannot overwrite a newer boat credential', async () => {

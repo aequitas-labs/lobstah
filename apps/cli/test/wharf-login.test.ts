@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
+import os from 'node:os';
 import * as path from 'node:path';
 import { saveWharfCredential, wharfCredential, wharfFor, agentEnvironment, loadConfig } from '@lobstah/core';
 import type { BackendScope } from '@lobstah/core';
-import { wharfLogin } from '../src/wharf-login.js';
+import { wharfLogin, cleanBoatName, systemBoatName } from '../src/wharf-login.js';
+import childProcess from 'node:child_process';
 import { wharfCommand } from '../src/wharf-commands.js';
 import { parseArgs } from '../src/usage.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -21,6 +22,26 @@ beforeEach(() => {
   vi.stubEnv('LOBSTAH_HOME', home); vi.stubEnv('LOBSTAH_TEST_LOGIN_TOKEN', ''); vi.stubEnv('LOBSTAH_WHARF_AGENT', '');
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); removeTempDir(home); });
+
+it('uses a deterministic cleaned short system name, removing possessives and punctuation with bounded ASCII output', () => {
+  expect(cleanBoatName("Chris’s MacBook Pro! (Work)")).toBe('chris-macbook-pro-work');
+  expect(cleanBoatName("Chris's boat_name.test")).toBe('chris-boatnametest');
+  expect(cleanBoatName('!✨')).toBe('boat');
+  expect(cleanBoatName('a'.repeat(100))).toHaveLength(64);
+  vi.spyOn(os, 'hostname').mockReturnValue('ChriS-Desktop.local');
+  const system = vi.spyOn(childProcess, 'execFileSync').mockReturnValue('Short-Mac\n');
+  expect(systemBoatName()).toBe(process.platform === 'darwin' ? 'short-mac' : 'chris-desktop');
+  system.mockImplementation(() => { throw new Error('not available'); });
+  expect(systemBoatName()).toBe('chris-desktop');
+});
+
+it('re-login keeps the existing name without --name even if the system name changed', async () => {
+  saveWharfCredential(scope, token);
+  const transport = vi.fn().mockResolvedValueOnce(Response.json({ name: 'already-named' })).mockResolvedValueOnce(Response.json(code)).mockResolvedValueOnce(Response.json(issued()));
+  vi.stubGlobal('fetch', transport); vi.spyOn(console, 'log').mockImplementation(() => {});
+  await wharfLogin(scope, 'login', opts());
+  expect(JSON.parse(transport.mock.calls[1][1].body)).toMatchObject({ name: 'already-named', boatToken: token });
+});
 
 it.each([['read', {}], ['helm', { '--helm': '' }], ['none', { '--work-only': '' }]] as const)('login requests %s, stores only a boat and does not print secrets', async (steering, flags) => {
   const transport = vi.fn().mockResolvedValueOnce(Response.json(code)).mockResolvedValueOnce(Response.json(issued()));
