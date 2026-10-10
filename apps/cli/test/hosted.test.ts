@@ -83,12 +83,12 @@ it('remote CLI mutations use the selected wharf and never the local queue; unsup
   expect(fs.readdirSync(path.join(home, 'queue'))).toEqual([]);
   await expect(wharfCommand('cull', [], opts, loadConfig())).rejects.toThrow('not supported');
 });
-it('refuses wharf worker sign-on and dispatch before HTTP when the checkout lacks a usable remote', async () => {
+it('refuses hosted soak without a daemon, and dispatch without a usable remote, before HTTP', async () => {
   execFileSync('git', ['-C', home, 'remote', 'remove', 'origin']);
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
-  const flags: Record<string, string> = { '--grounds': 'away', '--repo': 'remote', '--worker': 'worker', '--brief-text': 'work' };
+  const flags: Record<string, string> = { '--grounds': 'away', '--repo': 'remote', '--session': 'session', '--harness': 'codex', '--brief-text': 'work' };
   const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
-  await expect(wharfCommand('soak', [], opts, loadConfig())).rejects.toThrow('no usable origin remote');
+  await expect(wharfCommand('soak', [], opts, loadConfig())).rejects.toThrow("the boat's daemon is not running");
   await expect(wharfCommand('dispatch', [], opts, loadConfig())).rejects.toThrow('no usable origin remote');
   expect(fetcher).not.toHaveBeenCalled();
 });

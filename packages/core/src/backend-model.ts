@@ -33,7 +33,8 @@ export interface WharfDocument extends WharfDocumentInput {
 }
 export interface WharfHumanRequest {
   id: string; kind: 'message' | 'trap-request'; dispatch?: string; text?: string; boat?: string; repo?: string;
-  at: string; expiresAt: string; state: 'queued' | 'received' | 'fulfilled' | 'expired'; by: string;
+  at: string; expiresAt: string; state: 'queued' | 'received' | 'authorized' | 'fulfilled' | 'expired'; by: string;
+  outcome?: string;
   waitingForHelm?: boolean;
 }
 export interface BackendLocation { kind: 'wharf'; url: string; account: string; tokenEnv: string }

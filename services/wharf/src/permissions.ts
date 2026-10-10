@@ -19,6 +19,7 @@ export function boatPermissions(value: unknown, confirmAdmin: unknown): Permissi
 }
 /** Agent capabilities are checked separately against the dispatch and epoch. */
 export function requiredPermission(path: string, method: string): Permission | undefined {
+  if (path === 'requests/starts' || /^requests\/[^/]+\/start$/.test(path)) return 'work';
   if (path === '_boat' && method === 'GET') return undefined;
   if (path === '_issue' || path === 'boats' && method === 'POST' || path.startsWith('boats/') && method !== 'GET' || !path && method === 'DELETE') return 'admin';
   if (path === '_claim' || path === 'claims' || path.startsWith('workers/')) return 'work';
