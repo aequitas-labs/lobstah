@@ -4,6 +4,7 @@ import { digest } from '../src/protocol.js';
 import { boatPermissions } from '../src/permissions.js';
 import type { Account } from '../src/account.js';
 import { WharfBackend } from '../../../packages/core/src/wharf-backend.js';
+import { authFixtures } from './auth-fixture.js';
 let key = 0;
 const pat = 'test-helm-a';
 async function call(path: string, body?: unknown, token = pat, idempotency = `key-${++key}`, account = 'a') {
@@ -13,8 +14,14 @@ async function call(path: string, body?: unknown, token = pat, idempotency = `ke
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
+async function issueBoat(body: unknown, idempotency = `issue-${++key}`) {
+  // Test fixture drives the private issuer used after device approval, not HTTP.
+  const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: pat,
+    method: 'POST', path: 'boats', key: idempotency, body })));
+  return Response.json(result.value, { status: result.status });
+}
 async function boat(worker = 'worker', repo = 'repo') {
-  const issued = await call('boats', { name: worker, permissions: ['work'] }); expect(issued.status).toBe(201);
+  const issued = await issueBoat({ name: worker, permissions: ['work'] }); expect(issued.status).toBe(201);
   const m = await issued.json<{ id: string; token: string }>();
   expect((await call('workers/sign-on', { worker, repo, repoRemote: `github.com/test/${repo}` }, m.token)).status).toBe(200); return m;
 }
@@ -34,6 +41,7 @@ async function setGrants(id: string, permissions: unknown) {
   return selected;
 }
 beforeEach(async () => {
+  await authFixtures();
   // New pool shares storage across tests: explicitly delete only test DO data.
   const stub = env.ACCOUNTS.getByName('a');
   await runInDurableObject(stub, async (_instance: Account, state) => {
@@ -132,8 +140,9 @@ it('boat credentials cannot perform any helm action or read dispatch content; ag
   for (const [path, body] of [
     ['dispatches', { id: 'evil', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'bad' }], ['dispatches/dispatch/cancel', {}],
     ['helm/take', { session: 'evil', take: true }], ['helm/renew', {}], ['helm/release', {}],
-    ['boats', { name: 'evil' }], [`boats/${m.id}/revoke`, {}],
+    [`boats/${m.id}/revoke`, {}],
   ] as const) expect((await call(path, body, m.token)).status).toBe(403);
+  expect((await call('boats', { name: 'evil' }, m.token)).status).toBe(404);
   for (const path of ['dispatches', 'dispatches/dispatch', 'events', 'boats']) expect((await call(path, undefined, m.token)).status).toBe(403);
   expect((await call('claims', { worker: 'worker' }, receipt.token)).status).toBe(403);
   await enqueue('second'); expect((await call('dispatches/second', undefined, receipt.token)).status).toBe(403);
@@ -165,9 +174,9 @@ it('addressed work is sticky and a fresh helm cannot be displaced implicitly', a
   expect((await call('dispatches', { id: 'late', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'old helm' })).status).toBe(409);
 });
 it('stores only boat credential hashes and returns a credential only once', async () => {
-  const response = await call('boats', { name: 'laptop' }, pat, 'issue');
+  const response = await issueBoat({ name: 'laptop' }, 'issue');
   const first = await response.json<{ id: string; token: string }>();
-  const retry = await (await call('boats', { name: 'laptop' }, pat, 'issue')).json<Record<string, unknown>>(); expect(retry.token).toBeUndefined();
+  const retry = await (await issueBoat({ name: 'laptop' }, 'issue')).json<Record<string, unknown>>(); expect(retry.token).toBeUndefined();
   const hash = await digest(first.token.split('.').at(-1)!);
   await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => {
     expect(state.storage.sql.exec<{ hash: string }>('SELECT hash FROM boats WHERE id=?', first.id).one().hash).toBe(hash);
@@ -176,12 +185,12 @@ it('stores only boat credential hashes and returns a credential only once', asyn
 it('rotates a unique named boat credential without losing its identity, repos or sticky work', async () => {
   const a = await boat('laptop'); const other = await boat('other');
   await call('dispatches', { id: 'sticky', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work', boat: a.id });
-  const rotated = await (await call('boats', { name: 'LAPTOP' }, pat, 'rotate')).json<{ id: string; name: string; token: string }>();
+  const rotated = await (await issueBoat({ name: 'LAPTOP' }, 'rotate')).json<{ id: string; name: string; token: string }>();
   expect(rotated).toMatchObject({ id: a.id, name: 'laptop' });
   expect(rotated.token).not.toBe(a.token);
   expect((await call('workers/renew', { worker: 'laptop' }, a.token)).status).toBe(401);
   expect((await call('workers/renew', { worker: 'laptop' }, rotated.token)).status).toBe(200);
-  const retry = await (await call('boats', { name: 'laptop' }, pat, 'rotate')).json<{ token?: string }>();
+  const retry = await (await issueBoat({ name: 'laptop' }, 'rotate')).json<{ token?: string }>();
   expect(retry.token).toBeUndefined();
   expect((await call('workers/renew', { worker: 'laptop' }, rotated.token)).status).toBe(200);
   expect(await (await call('claims', { worker: 'other' }, other.token)).json()).toBeNull();
@@ -193,7 +202,7 @@ it('revocation leaves boat-addressed work unservable and sticky', async () => {
   expect((await call(`boats/${a.id}/revoke`, {})).status).toBe(200);
   expect(await (await call('dispatches/sticky')).json()).toMatchObject({ boat: a.id, boatName: 'laptop', state: 'queued', unservable: { note: expect.stringContaining('credential revoked') } });
   expect(await (await call('claims', { worker: 'other' }, other.token)).json()).toBeNull();
-  expect((await call('boats', { name: 'unsafe name' })).status).toBe(400);
+  expect((await issueBoat({ name: 'unsafe name' })).status).toBe(400);
 });
 it('offers revocation only, with no rename, grant-editing or separate removal route', async () => {
   const a = await boat('laptop');
@@ -217,6 +226,7 @@ it('reading a message does not receipt it; done waits for explicit receipt', asy
 });
 it('files are scoped, retryable downloads, never executable pages; deletion removes rows and files', async () => {
   const m = await boat(); await enqueue(); const r = await claim(m.token);
+  expect((await SELF.fetch('https://state.test/v1/auth/device/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: 'lobstah-cli', account: 'a', name: 'pending-before-delete' }) })).status).toBe(200);
   const upload = () => SELF.fetch('https://state.test/v1/accounts/a/dispatches/dispatch/files', {
     method: 'POST', headers: { Authorization: `Bearer ${r.token}`, 'Idempotency-Key': 'file', 'X-File-Name': 'report.html' }, body: '<script>never run</script>',
   });
@@ -235,7 +245,13 @@ it('files are scoped, retryable downloads, never executable pages; deletion remo
     expect(res.status).toBe(200);
   }
   expect((await env.FILES.list({ prefix: 'a/' })).objects).toEqual([]);
-  expect((await call('events')).status).toBe(410);
+  expect((await call('events')).status).toBe(401);
+  expect(await env.AUTH_DB.prepare("SELECT count(*) AS n FROM deviceCode WHERE json_extract(requestData,'$.account')='a'").first('n')).toBe(0);
+  for (const table of ['user', 'session', 'account', 'deviceCode']) {
+    const column = table === 'user' ? 'id' : 'userId';
+    expect(await env.AUTH_DB.prepare(`SELECT count(*) AS n FROM "${table}" WHERE "${column}"=?`).bind('a').first('n')).toBe(0);
+  }
+  expect((await SELF.fetch('https://state.test/v1/accounts/a/', { method: 'DELETE', headers: { Authorization: `Bearer ${pat}`, 'Idempotency-Key': 'different-key' } })).status).toBe(401);
   await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => {
     expect(state.storage.sql.exec<{ n: number }>('SELECT count(*) AS n FROM dispatches').one().n).toBe(0);
     expect(state.storage.sql.exec<{ n: number }>('SELECT count(*) AS n FROM files').one().n).toBe(0);
@@ -258,7 +274,7 @@ it('person sessions cannot sign on, claim or renew a worker and explain boat enr
   }
 });
 it('regular boats default to work and read; work-only boats can inspect only themselves', async () => {
-  const regular = await (await call('boats', { name: 'regular' })).json<{ token: string }>();
+  const regular = await (await issueBoat({ name: 'regular' })).json<{ token: string }>();
   expect(await (await call('_boat', undefined, regular.token)).json()).toMatchObject({ name: 'regular', permissions: ['work', 'read'] });
   expect((await call('dispatches', undefined, regular.token)).status).toBe(200);
   const worker = await boat();
@@ -268,7 +284,7 @@ it('regular boats default to work and read; work-only boats can inspect only the
 });
 it('steering layers imply lower layers while work remains independent', async () => {
   const issue = async (name: string, permissions: string[]) => {
-    const res = await call('boats', { name, permissions, confirmAdmin: permissions.includes('admin') });
+    const res = await issueBoat({ name, permissions, confirmAdmin: permissions.includes('admin') });
     expect(res.status).toBe(201); return res.json<{ id: string; token: string }>();
   };
   const read = await issue('read', ['read']); const work = await issue('work', ['work']);
@@ -303,11 +319,12 @@ it('steering layers imply lower layers while work remains independent', async ()
   expect((await call('dispatches/admin-job/cancel', {}, admin.token)).status).toBe(200);
   expect((await call('helm/release', {}, admin.token)).status).toBe(200);
   for (const token of [read.token, work.token, helm.token]) {
-    for (const [path, body] of [['boats', { name: 'blocked' }], [`boats/${read.id}/permissions`, { permissions: ['work'] }], [`boats/${read.id}/rename`, { name: 'new' }], [`boats/${read.id}/revoke`, {}]] as const) expect((await call(path, body, token)).status).toBe(403);
+    expect((await call('boats', { name: 'blocked' }, token)).status).toBe(404);
+    for (const [path, body] of [[`boats/${read.id}/permissions`, { permissions: ['work'] }], [`boats/${read.id}/rename`, { name: 'new' }], [`boats/${read.id}/revoke`, {}]] as const) expect((await call(path, body, token)).status).toBe(403);
     expect((await SELF.fetch(`https://state.test/v1/accounts/a/boats/${read.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': `remove-${++key}` } })).status).toBe(403);
     expect((await SELF.fetch('https://state.test/v1/accounts/a/', { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': `delete-${++key}` } })).status).toBe(403);
   }
-  expect((await call('boats', { name: 'child' }, admin.token)).status).toBe(201);
+  expect((await call('boats', { name: 'child' }, admin.token)).status).toBe(404);
   expect((await call(`boats/${read.id}/permissions`, { permissions: ['read', 'work'] }, admin.token)).status).toBe(404);
   expect((await call(`boats/${read.id}/rename`, { name: 'new' }, admin.token)).status).toBe(404);
   expect((await call(`boats/${read.id}/revoke`, {}, admin.token)).status).toBe(200);
@@ -315,7 +332,7 @@ it('steering layers imply lower layers while work remains independent', async ()
   for (let i = 0; i < 2; i++) expect((await SELF.fetch('https://state.test/v1/accounts/a/', { method: 'DELETE', headers: { Authorization: `Bearer ${admin.token}`, 'Idempotency-Key': 'admin-delete' } })).status).toBe(200);
 });
 it('validates permissions, requires explicit admin confirmation, and rejects replay after a permission is removed', async () => {
-  for (const permissions of [['root'], 'work', ['admin']]) expect((await call('boats', { name: 'bad', permissions })).status).toBe(400);
+  for (const permissions of [['root'], 'work', ['admin']]) expect((await issueBoat({ name: 'bad', permissions })).status).toBe(400);
   const m = await boat();
   expect(await setGrants(m.id, ['work', 'helm', 'read'])).toEqual(['work', 'helm']);
   expect((await call('helm/take', { session: 'helm', take: true }, m.token)).status).toBe(200);
