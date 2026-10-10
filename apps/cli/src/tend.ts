@@ -18,6 +18,7 @@ import {
   awaitingReply,
   ageLabel,
   displayState,
+  displayGrounds,
   executorPath,
   laneDirs,
   lastEventAt,
@@ -991,7 +992,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (item.prUrl) item.reviewUrl = prReviewUrl(item.prUrl, tools);
   }
   const helms = listHelms().map((h) => ({
-    grounds: h.grounds,
+    grounds: displayGrounds(h.grounds, cfg),
     man: helmLabel(h),
     session: h.sessionId.slice(0, 8),
     worker: workerLabel(h),
