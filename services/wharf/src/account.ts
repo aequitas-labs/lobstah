@@ -10,7 +10,7 @@ type BoatRow = { id: string; name: string; hash: string; revoked: number };
 type WorkerRow = { id: string; boat: string; repo: string; seen: number };
 type StoredResult = { status: number; value: unknown };
 type FileRow = { id: string; dispatch: string; name: string; size: number; hash: string; ready: number };
-export type Command = { account: string; helm: boolean; token: string; method: string; path: string; key?: string; session?: string; body: unknown; after?: string;
+export type Command = { account: string; helm: boolean; personId?: string; token: string; method: string; path: string; key?: string; session?: string; body: unknown; after?: string;
   prepared?: { id?: string; hash: string } };
 const LEASE_MS = 90_000;
 const HELM_MS = 120_000;
@@ -100,7 +100,7 @@ export class Account extends DurableObject<Env> {
     return { ...input, state: d.state, status: this.lastReport(d.id), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
   }
   private authenticate(c: Command, hash: string, now: number): Actor {
-    if (c.helm) return { kind: 'person', id: 'person', permissions: personPermissions };
+    if (c.helm) return { kind: 'person', id: c.personId ?? 'person', permissions: personPermissions };
     const pieces = c.token.split('.'); requireThat(pieces[1] === c.account, 403, 'wrong account');
     if (pieces[0] === 'b') {
       const m = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', pieces[2]).toArray()[0];
@@ -200,7 +200,12 @@ export class Account extends DurableObject<Env> {
       this.requirePermission(actor, 'admin'); requireThat(c.prepared?.id, 403, 'prepared credential required');
       const name = boatName(b.name);
       const selected = boatPermissions(b.permissions, b.confirmAdmin);
-      const previous = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE name=? COLLATE NOCASE', name).toArray()[0];
+      const named = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE name=? COLLATE NOCASE', name).toArray()[0];
+      const previous = b.enrol && b.expectedBoat ? this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', identifier(b.expectedBoat)).toArray()[0] : named;
+      if (b.enrol) {
+        requireThat(!named || named.id === b.expectedBoat, 409, 'boat name already enrolled; choose another name');
+        requireThat(b.expectedBoat ? previous && !previous.revoked && typeof b.proof === 'string' && sameHash(previous.hash, b.proof) : !previous, 409, 'prove the current boat credential or choose another name');
+      }
       const id = previous?.id ?? c.prepared.id;
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO boats(id,name,hash,revoked) VALUES (?,?,?,0)', id, name, c.prepared.hash);
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO boat_permissions VALUES (?,?)', id, JSON.stringify(selected));
@@ -429,8 +434,7 @@ export class Account extends DurableObject<Env> {
           for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files']) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
           this.ctx.storage.sql.exec("DELETE FROM meta WHERE key NOT IN ('deleted','delete-authority')");
         });
-        // Keep only a tombstone: static operator-provisioned PATs cannot recreate
-        // the deleted account. Remove its PAT hashes to complete deprovisioning.
+        // Keep only a tombstone; the Worker also removes this person's D1 identity.
         return JSON.stringify({ status: 200, value: { deleted: true } });
       } catch (e) {
         if (e instanceof ApiError) return JSON.stringify({ status: e.status, value: { error: e.message } });
