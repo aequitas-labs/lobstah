@@ -35,6 +35,13 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('defaults hosted starts off and accepts only an explicit boolean opt-in', () => {
+    expect(loadConfig().soak.acceptWharfStarts).toBe(false);
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nacceptWharfStarts = true\n');
+    expect(loadConfig().soak.acceptWharfStarts).toBe(true);
+    fs.writeFileSync(path.join(home, 'config.toml'), '[soak]\nacceptWharfStarts = "yes"\n');
+    expect(() => loadConfig()).toThrow('acceptWharfStarts must be true or false');
+  });
   it('defaults repair cooldown off and validates the watch override', () => {
     expect(loadConfig().watch.repairCooldownSecs).toBe(0);
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[watch]\nrepairCooldownSecs = 3600\n');

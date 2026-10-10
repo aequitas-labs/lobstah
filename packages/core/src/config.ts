@@ -167,6 +167,8 @@ export interface LimitsConfig {
 }
 
 export interface SoakConfig {
+  /** This boat may fulfill helm-approved wharf trap-start requests. Default off. */
+  acceptWharfStarts?: boolean;
   /** How long a fresh park heartbeat holds unaddressed matching bait for a soaking session. */
   deferSecs: number;
   /** Grace after a claim before an absent worker report raises a helm notice. */
@@ -300,6 +302,7 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
 
 function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
+  if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
   if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm') {
     throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal" or "iterm"`);
   }
@@ -307,6 +310,7 @@ function parseSoak(raw: unknown): SoakConfig {
 }
 
 export const DEFAULT_SOAK: SoakConfig = {
+  acceptWharfStarts: false,
   deferSecs: 90,
   claimIdleNoticeSecs: 180,
   ttlSecs: 1800,

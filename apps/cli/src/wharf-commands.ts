@@ -1,11 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, isVerb, waitingFields, toonKV } from '@lobstah/core';
+import { backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, isVerb, waitingFields, toonKV,
+  readBrokerAgent, brokerRequest, WharfBackend, type BrokerPoll } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
 import { wharfRepoIdentity } from './wharf-repo.js';
 import { wharfLogin } from './wharf-login.js';
+import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-soak.js';
+import { readHookStdin } from './soak-site.js';
 
 export function commandScope(config: Config, grounds?: string, repo?: string): BackendScope | undefined {
   if (grounds) return backendScope(config, grounds);
@@ -29,8 +32,12 @@ const OVERVIEW = new Set(['ls', 'status', 'man:tend', 'man:report', 'prs', 'repo
 export async function wharfCommand(cmd: string | undefined, pos: string[], opts: Options, config: Config): Promise<boolean> {
   if (!cmd || GLOBAL.has(cmd)) return false;
   const grounds = opts.opt('--grounds') ?? process.env.LOBSTAH_GROUNDS;
+  const agentScope = backendScopes(config).find((s) => s.kind === 'wharf' && readBrokerAgent(s.grounds));
+  if (agentScope && OVERVIEW.has(cmd)) throw new Error('a hosted trap sees only its own catch; use inbox or wharf receipt');
   if (!grounds && OVERVIEW.has(cmd) && !pos.length) { await refreshHostedViews(config); return false; }
-  const scope = commandScope(config, grounds, opts.opt('--repo'));
+  const boundScope = grounds ? undefined : agentScope;
+  const scope = boundScope ?? commandScope(config, grounds, opts.opt('--repo'));
+  if (agentScope && scope?.grounds !== agentScope.grounds) throw new Error('a hosted trap cannot select another grounds or boat credential');
   if (!scope) {
     if (backendScopes(config).some((s) => s.kind === 'wharf')) throw new Error('choose --grounds for this command; no implicit local or wharf backend');
     return false;
@@ -40,13 +47,24 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     if (cmd === 'dispatch' && opts.opt('--boat')) throw new Error('--boat addressing requires wharf grounds; nothing was queued locally');
     return false;
   }
+  const agent = readBrokerAgent(scope.grounds);
   if (cmd === 'wharf' && ['login', 'logout'].includes(pos[0] ?? '')) {
+    if (agent) throw new Error('a trap session cannot enroll or read a boat credential');
     if (pos.length !== 1) throw new Error('login/logout acts only as this boat; no positional boat argument');
     await wharfLogin(scope, pos[0]!, opts); return true;
   }
-  const session = resolveSessionId({ flag: opts.opt('--session') })?.id;
+  if (cmd === 'soak') { await wharfSoak(scope, opts); return true; }
+  const session = resolveSessionId({ flag: opts.opt('--session') })?.id ?? agent?.session;
+  if (agent && session !== agent.session) throw new Error('another hosted session owns this worktree');
+  if (cmd === 'stow' && agent) { await endBrokerAgent(agent); console.log(JSON.stringify({ stowed: agent.trap, worktree: agent.worktree })); return true; }
   const worker = opts.opt('--worker');
-  const backend = wharfFor(scope, { session, worker });
+  let backend: WharfBackend;
+  if (agent) {
+    if (cmd.startsWith('man:')) throw new Error('a trap cannot hold or use the helm seat');
+    const current = await brokerRequest<BrokerPoll>('heartbeat', brokerBody(agent));
+    if (!current.claim?.token) throw new Error('this trap has no catch; run lobstah soak --wait through the boat daemon');
+    backend = new WharfBackend(scope.location, current.claim.token);
+  } else backend = wharfFor(scope, { session, worker });
   const key = () => {
     const value = opts.opt('--request-key') ?? randomUUID();
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new Error('request key must use 1–128 identifier characters'); return value;
@@ -113,7 +131,9 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       for (const [i, file] of opts.values('--attach').entries()) files.push(await backend.upload(pos[0] ?? '', path.basename(file), readFile(file), partKey(base, `file-${i}`)));
       const r: ReportInput = { verb, ...(pos.length > 2 ? { note: pos.slice(2).join(' ') } : {}), ...waiting,
         evidence: { prUrls: opts.values('--pr'), files } };
-      await backend.report(pos[0] ?? '', r, base); print({ reported: verb }); break;
+      await backend.report(pos[0] ?? '', r, base);
+      if (agent) await brokerRequest(verb === 'done' || verb === 'failed' ? 'finish' : 'progress', { ...brokerBody(agent), dispatch: pos[0] });
+      print({ reported: verb }); break;
     }
     case 'man:ask': {
       const withdraw = opts.opt('--withdraw');
@@ -127,6 +147,12 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     case 'man:tend': print({ dispatches: await backend.list(), ...await backend.request('glass') as Record<string, unknown> }); break;
     case 'man:helm': print(await backend.request('helm/take', { session, take: opts.has('--take') }, key())); break;
     case 'man:relieve': print(await backend.request('helm/release', {}, key())); break;
+    case 'man:throw': {
+      if (!opts.has('--new') || pos.length || opts.has('--all') || opts.has('--dry-run') || opts.opt('--harness') || opts.opt('--count'))
+        throw new Error('wharf throw supports --new --repo only; the boat chooses configured harness options');
+      await backend.request('helm/renew', {}, key());
+      print(await brokerRequest('launch', { grounds: scope.grounds, repo: opts.opt('--repo') })); break;
+    }
     case 'man:wait': {
       let cursor = opts.opt('--after'); const seconds = Number(opts.opt('--timeout') ?? 600);
       if (!Number.isFinite(seconds) || seconds < 0) throw new Error('timeout must be nonnegative seconds');
@@ -145,21 +171,6 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
         await new Promise((resolve) => setTimeout(resolve, Math.min(1000, Math.max(0, deadline - Date.now()))));
       }
       print({ cursor, timeout: true }); break;
-    }
-    case 'soak': {
-      if (!worker || !opts.opt('--repo')) throw new Error('wharf soak requires --worker and --repo (trusted boat credential, not an agent token)');
-      if (!scope.repos.includes(opts.opt('--repo')!)) throw new Error('worker repo must belong to this grounds');
-      await backend.request('workers/sign-on', { worker, repo: opts.opt('--repo'), repoRemote: wharfRepoIdentity(config, opts.opt('--repo')!), harness: opts.opt('--harness'), session }, key());
-      const seconds = Number(opts.opt('--timeout') ?? 600);
-      if (!Number.isFinite(seconds) || seconds < 0) throw new Error('timeout must be nonnegative seconds');
-      const deadline = opts.has('--wait') ? (seconds ? Date.now() + seconds * 1000 : Infinity) : Date.now();
-      do {
-        const claim = await backend.claim(randomUUID()); if (claim) { print(claim); return true; }
-        if (Date.now() >= deadline) break;
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        await backend.request('workers/renew', { worker }, randomUUID());
-      } while (Date.now() < deadline);
-      print({ timeout: true }); process.exitCode = 3; break;
     }
     case 'wharf': {
       switch (pos[0]) {
@@ -193,17 +204,35 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
 
 /** Remote agents must never sign on, beat or claim in this boat's local fleet. */
 export async function wharfHook(cmd: string | undefined, args: string[]): Promise<boolean> {
-  if (!process.env.LOBSTAH_GROUNDS || !(cmd === 'hook' || (cmd === 'soak' && args[0] === 'beat') || cmd === 'man:brief' || cmd === 'man:haul')) return false;
+  if (!(cmd === 'hook' || (cmd === 'soak' && args[0] === 'beat') || cmd === 'man:brief' || cmd === 'man:haul')) return false;
   const { loadConfig } = await import('@lobstah/core');
-  const scope = commandScope(loadConfig(), process.env.LOBSTAH_GROUNDS);
+  let config: Config;
+  try { config = loadConfig(); } catch { return false; } // Existing local hook owns broken-config handling.
+  const bound = backendScopes(config).find((s) => s.kind === 'wharf' && readBrokerAgent(s.grounds));
+  if (!process.env.LOBSTAH_GROUNDS && !bound) return false; // Do not consume local hooks' stdin.
+  const scope = bound ?? commandScope(config, process.env.LOBSTAH_GROUNDS);
   if (scope?.kind !== 'wharf') return false;
+  const input = readHookStdin(), agent = readBrokerAgent(scope.grounds, input?.cwd ?? process.cwd());
   try {
+    if (agent) {
+      if (input?.session_id && input.session_id !== agent.session) return true;
+      if (args[0] === 'session-end') await endBrokerAgent(agent);
+      else if (args[0] === 'post-tool-use' || (cmd === 'soak' && args[0] === 'beat')) await brokerRequest('heartbeat', brokerBody(agent));
+      else if (args[0] === 'stop' || cmd === 'man:haul') {
+        const p = await waitBrokerAgent(agent, 600);
+        console.log(JSON.stringify({ decision: 'block', reason: p.claim
+          ? `Hosted trap ${agent.trap} assigned dispatch ${p.claim.dispatch.id}. Branch first in ${agent.worktree}; report working, then work and report done/failed.\n${p.claim.dispatch.brief}`
+          : p.messages?.length ? `New inbox messages for ${p.dispatch}:\n${p.messages.map((m) => `${m.id}: ${m.text}`).join('\n')}\nReceipt explicitly with lobstah wharf receipt.`
+          : 'This hosted trap is still signed on; its park timed out. End this turn and park again.' }));
+      } else if (args[0] === 'session-start') console.log(`lobstah: hosted trap ${agent.trap}, session ${input?.session_id ?? agent.session}. Its boat daemon owns claim/renew; never use a boat credential.`);
+      return true;
+    }
     const token = wharfCredential(scope);
     if (args[0] === 'post-tool-use' || (cmd === 'soak' && args[0] === 'beat')) {
       const pieces = token.split('.');
       if (pieces[0] === 'd' && pieces[1] === scope.location.account && pieces[2]) await wharfFor(scope).heartbeat(pieces[2], randomUUID());
     } else if (args[0] === 'session-start' || cmd === 'man:brief') {
-      console.log(`lobstah: wharf grounds ${scope.grounds} on ${scope.wharf}. Report and read messages through this grounds; receipt messages explicitly with lobstah wharf receipt. Do not sign on to the local fleet. The trusted launcher owns claim and lease renewal.`);
+      console.log(`lobstah: wharf grounds ${scope.grounds} on ${scope.wharf}, session ${input?.session_id ?? 'unknown'}. Use --session on first soak. Report and read messages through this grounds; receipt messages explicitly with lobstah wharf receipt. Do not sign on to the local fleet. The boat daemon owns claim and lease renewal.`);
     }
   } catch { /* Missing remote signal means unknown; hooks never break a user's turn. */ }
   return true;

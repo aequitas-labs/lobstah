@@ -129,6 +129,42 @@ it('person trap requests wait for a helm and are bounded, without launching anyt
   expect(await sql('SELECT count(*) AS n FROM workers')).toEqual([{ n: 0 }]);
 });
 
+it('only the helm authorizes a start; only its addressed work boat can consume it, once', async () => {
+  const boat = await helmBoat();
+  const otherResult = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person,
+    method: 'POST', path: 'boats', body: { name: 'other-boat', permissions: ['work'] }, key: `other-${++sequence}` })));
+  const other = otherResult.value as { token: string };
+  await call('requests', { id: 'start', kind: 'trap-request', boat: boat.id, repo: 'github.com/test/repo' });
+  expect((await call('requests/start/execute', {})).status).toBe(409);
+  expect((await call('requests/start/start', {}, boat.token)).status).toBe(409);
+  await call('requests/start/receipt', {}, boat.token, 'boat-seat');
+  expect(await (await call('requests/start/execute', {}, boat.token, 'boat-seat')).json()).toMatchObject({ state: 'authorized' });
+  expect(await (await call('requests/starts', undefined, other.token)).json()).toEqual([]);
+  expect((await call('requests/start/start', {}, other.token)).status).toBe(403);
+  expect((await call('requests/start/start', {})).status).toBe(403);
+  await sql('UPDATE boat_permissions SET permissions=? WHERE boat=?', '["work"]', boat.id);
+  expect(await (await call('requests/starts', undefined, boat.token)).json()).toContainEqual(expect.objectContaining({ id: 'start', state: 'authorized' }));
+  expect((await call('requests/start/start', {}, boat.token, 'unused', 'consume')).status).toBe(200);
+  expect((await call('requests/start/start', {}, boat.token, 'unused', 'consume')).status).toBe(200);
+  expect((await call('requests/start/start', {}, boat.token)).status).toBe(409);
+  expect(await (await call('requests/starts', undefined, boat.token)).json()).toEqual([]);
+  expect(await sql('SELECT count(*) AS n FROM events WHERE kind=?', 'trap-start-accepted')).toEqual([{ n: 1 }]);
+});
+
+it('an authorized start expires while the boat is offline, and a refused repo remains visible', async () => {
+  const boat = await helmBoat();
+  for (const id of ['late', 'foreign']) {
+    await call('requests', { id, kind: 'trap-request', boat: boat.id, repo: 'github.com/test/repo' });
+    await call(`requests/${id}/receipt`, {}, boat.token, 'boat-seat'); await call(`requests/${id}/execute`, {}, boat.token, 'boat-seat');
+  }
+  await sql("UPDATE human_requests SET data=json_set(data,'$.expiresAt','2000-01-01T00:00:00.000Z') WHERE id='late'");
+  expect((await call('requests/late/start', {}, boat.token)).status).toBe(409);
+  expect(await (await call('requests/late')).json()).toMatchObject({ state: 'expired' });
+  expect((await call('requests/foreign/start', { refused: 'repo is not configured on this boat' }, boat.token)).status).toBe(200);
+  expect(await (await call('requests/foreign')).json()).toMatchObject({ state: 'fulfilled', outcome: 'repo is not configured on this boat' });
+  expect(await sql('SELECT count(*) AS n FROM workers')).toEqual([{ n: 0 }]);
+});
+
 it('read boats cannot author cards, answer for the human or enqueue human requests; dispatch tokens see only their own job', async () => {
   const boat = await helmBoat(); await dispatch(boat.token, 'boat-seat');
   await document('card', 'decision', boat.token, 'boat-seat'); await call('documents/card/publish', {}, boat.token, 'boat-seat');

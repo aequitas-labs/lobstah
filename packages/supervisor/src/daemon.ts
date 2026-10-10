@@ -432,6 +432,9 @@ export interface DaemonHooks {
   spawnPoolWarm?: (name: string) => void;
   /** Dispatch-owned PR observer and repairer, provided by the CLI daemon entry. */
   prWatches?: (now: number, log: (message: string) => void) => void;
+  /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
+  hostedStart?: () => Promise<void>;
+  hostedPoll?: () => Promise<void>;
 }
 
 /** The retention cull runs at most once per this interval. */
@@ -722,6 +725,7 @@ let telemetryCheckedAt = 0;
 export async function daemon(intervalMs = 5000, log: (m: string) => void = console.log, hooks: DaemonHooks = {}): Promise<never> {
   ensureLayout();
   acquireDaemonLock();
+  await hooks.hostedStart?.();
   log(`lobstah daemon: watching ${laneDirs('work').queue} every ${intervalMs}ms`);
   let wake: (() => void) | undefined;
   let remoteRead: Promise<void> | undefined;
@@ -734,7 +738,10 @@ export async function daemon(intervalMs = 5000, log: (m: string) => void = conso
     }
     // Each grounds has its own backend. A slow/unreachable server never holds
     // the local tick or turns cached observations into local authoritative work.
-    if (!remoteRead) remoteRead = Promise.resolve().then(() => refreshHostedViews(loadConfig())).catch(() => {}).finally(() => { remoteRead = undefined; });
+    if (!remoteRead) remoteRead = Promise.resolve().then(async () => {
+      await refreshHostedViews(loadConfig());
+      await hooks.hostedPoll?.();
+    }).catch((e) => log(`wharf poll: ${e instanceof Error ? e.message : String(e)}`)).finally(() => { remoteRead = undefined; });
     // Anonymous daily counts (PRIVACY.md): checked every few minutes, sent at
     // most once per UTC day, fire and forget. Never awaited, never logged.
     if (Date.now() - telemetryCheckedAt >= TELEMETRY_CHECK_MS) {
