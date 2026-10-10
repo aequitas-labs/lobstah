@@ -44,7 +44,7 @@ export default {
       let body: unknown = {};
       const route = segments.slice(3).join('/');
       if (route === 'boats' && request.method === 'POST') throw new ApiError(404, 'boats enroll through approved login only');
-      const upload = /^dispatches\/[A-Za-z0-9_-]+\/files$/.test(route) && request.method === 'POST';
+      const upload = /^(dispatches|documents)\/[A-Za-z0-9_-]+\/files$/.test(route) && request.method === 'POST';
       if (request.method !== 'GET' && !upload) {
         const bytes = await boundedBody(request);
         try { body = bytes.length ? JSON.parse(new TextDecoder().decode(bytes)) : {}; } catch { throw new ApiError(400, 'invalid JSON'); }
@@ -62,7 +62,7 @@ export default {
       const result = object(JSON.parse(serialized));
       if (typeof result.status !== 'number') throw new ApiError(503, 'invalid state response');
       if (deleting && result.status === 200) await deletePersonData(env, account, token, c.key!);
-      if (/^dispatches\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route) && request.method === 'GET' && result.status === 200) {
+      if (/^(dispatches|documents)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route) && request.method === 'GET' && result.status === 200) {
         const file = object(result.value); const stored = await env.FILES.get(`${account}/${identifier(file.id)}`);
         if (!stored) throw new ApiError(404, 'file not found');
         return respond(new Response(stored.body, { headers: { 'Content-Type': 'application/octet-stream',

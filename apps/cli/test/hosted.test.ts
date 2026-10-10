@@ -140,3 +140,55 @@ it('has no other-boat or admin CLI actions, and whoami inspects only the current
   await wharfCommand('wharf', ['whoami'], opts, loadConfig());
   expect(fetcher).toHaveBeenCalledWith('https://state.invalid/v1/accounts/person/_boat', expect.objectContaining({ method: 'GET' }));
 });
+
+it('wharf man ask/file upload scoped Markdown and attachments, publish, and retry with stable IDs/keys', async () => {
+  const detail = path.join(home, 'detail.md'), attached = path.join(home, 'image.png');
+  fs.writeFileSync(detail, '# Detail\n![image](image.png)'); fs.writeFileSync(attached, 'test image bytes');
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/files')) return Response.json({ id: (init.headers as Record<string, string>)['X-File-Name'] === 'image.png' ? 'image-id' : 'markdown-id' });
+    return Response.json(JSON.parse(String(init.body)));
+  }); vi.stubGlobal('fetch', fetcher); vi.spyOn(console, 'log').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away', '--session': 'helm', '--title': 'Which way?', '--detail': detail, '--request-key': 'a'.repeat(128) };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: (f: string) => f === '--option' ? ['One', 'Two'] : f === '--attach' ? [attached] : [] };
+  for (let i = 0; i < 2; i++) expect(await wharfCommand('man:ask', [], opts, loadConfig())).toBe(true);
+  expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toMatchObject({ kind: 'decision', title: 'Which way?', options: ['One', 'Two'], id: expect.stringMatching(/^[a-f0-9]{32}$/) });
+  expect(fetcher.mock.calls[0][0]).toEqual(fetcher.mock.calls[4][0]);
+  expect(fetcher.mock.calls[0][1].body).toEqual(fetcher.mock.calls[4][1].body);
+  expect(fetcher.mock.calls[0][1].headers).toEqual(fetcher.mock.calls[4][1].headers);
+  for (const [url, init] of fetcher.mock.calls) {
+    expect(url).toContain('/v1/accounts/person/documents');
+    expect((init.headers as Record<string, string>)['X-Lobstah-Helm']).toBe('helm');
+    expect((init.headers as Record<string, string>)['Idempotency-Key']).toMatch(/^[a-f0-9]{64}$/);
+  }
+  expect(JSON.parse(String(fetcher.mock.calls[3][1].body))).toEqual({ markdown: 'markdown-id', attachments: ['image-id'] });
+  fetcher.mockClear(); flags['--request-key'] = 'report-once';
+  expect(await wharfCommand('man:file', [detail], opts, loadConfig())).toBe(true);
+  expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toMatchObject({ kind: 'report', options: [] });
+  expect(fs.existsSync(path.join(home, 'decisions')) ? fs.readdirSync(path.join(home, 'decisions')) : []).toEqual([]);
+});
+
+it('worker reports upload only their dispatch files and human-request CLI verbs carry the helm lease', async () => {
+  const markdown = path.join(home, 'report.md'); fs.writeFileSync(markdown, '# Evidence');
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => url.endsWith('/files') ? Response.json({ id: 'markdown-id' }) : Response.json(init.body ? JSON.parse(String(init.body)) : []));
+  vi.stubGlobal('fetch', fetcher); vi.spyOn(console, 'log').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away', '--session': 'helm', '--report': markdown, '--request-key': 'report' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: (f: string) => f === '--pr' ? ['https://github.com/test/repo/pull/1'] : [] };
+  expect(await wharfCommand('report', ['job', 'done', 'Finished'], opts, loadConfig())).toBe(true);
+  expect(fetcher.mock.calls[0][0]).toContain('/dispatches/job/files');
+  expect(JSON.parse(String(fetcher.mock.calls[1][1].body))).toMatchObject({ verb: 'done', evidence: { files: ['markdown-id'], prUrls: ['https://github.com/test/repo/pull/1'] } });
+  for (const verb of ['requests', 'request-receipt', 'request-execute']) {
+    expect(parseArgs('wharf', [verb, '--grounds', 'away'])?.error).toBeUndefined();
+    await wharfCommand('wharf', [verb, 'human-request'], opts, loadConfig());
+  }
+  expect(fetcher.mock.calls.at(-1)?.[0]).toContain('/requests/human-request/execute');
+});
+
+it('a wharf card answer reaches man wait through the ordered event cursor', async () => {
+  const event = { cursor: 'generation.8', kind: 'decision-answer', note: 'card', at: new Date().toISOString() };
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.endsWith('/helm/renew') ? {} : { cursor: event.cursor, events: [event] })));
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away', '--session': 'helm', '--after': 'generation.7', '--timeout': '1' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  await wharfCommand('man:wait', [], opts, loadConfig());
+  expect(JSON.parse(output.mock.calls[0]![0])).toEqual({ cursor: event.cursor, events: [event] });
+});
