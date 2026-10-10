@@ -57,12 +57,15 @@ Boat credentials carry a steering layer (`read < helm < admin`) and independent
 | helm | Read plus dispatch, message, cancel and exclusive helm lease operations |
 | admin | Helm plus issue/revoke/rename/remove boats, change permissions, delete account |
 
-Omission defaults to `work`. `POST boats` accepts `permissions`; `POST
+Omission defaults to `work` plus `read`. `POST boats` accepts `permissions`; `POST
 boats/:id/permissions` replaces them (an empty array removes all grants).
-An `admin` grant additionally requires `confirmAdmin: true`. The CLI uses
-repeated `--permission read|work|helm|admin` on `wharf issue-boat <name>` or
-`wharf boat-permissions <name>`; `--clear` removes all grants. Admin requires
-`--grant-admin` and prints a warning about credential management and deletion.
+An `admin` grant additionally requires `confirmAdmin: true`. Person-admin glass
+actions manage other boats and deletion; there are no CLI admin commands. The CLI
+acts only as its current boat; `wharf whoami` shows its own name and grants, even
+for a work-only boat. A machine's login will store only its boat credential, never
+a person session. Normal device approval requests work plus read; `--helm` requests
+work plus helm, and `--work-only` requests only work. Admin is not requestable from
+the CLI. Import of a glass-issued credential is via stdin/file, not a process argument.
 Only the highest steering layer is stored, not its implied permissions. Replacing
 `helm` with no steering layer removes read access too; explicitly selecting `read`
 is a downgrade. `work` never implies read or steering authority.
