@@ -57,6 +57,11 @@ administration uses the account PAT. A different live helm needs explicit takeov
 | Helm | POST dispatches/:id/cancel | Cancel, fence the worker |
 | Agent | POST dispatches/:id/heartbeat, report | Renew live lease; six report verbs with evidence |
 | Agent | POST dispatches/:id/recovery | Preserve stale result; never finalise replacement |
+| Helm | POST dispatches/:id/messages | Send an instruction |
+| Agent | GET dispatches/:id/messages; POST dispatches/:id/messages/:message/receipt | Read without side effects, then explicitly receipt |
+| Agent | POST dispatches/:id/files | Bounded binary upload; X-File-Name header |
+| Helm/agent | GET dispatches/:id/files/:file | Authorized download, attachment and nosniff |
+| Helm PAT | DELETE account root | Delete rows/files; persistent tombstone prevents recreation |
 | Helm | GET events?after=:cursor | Up to 100 wharf-ordered events; returned opaque cursor |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
@@ -78,3 +83,14 @@ Event cursors are opaque, account-generation scoped and ordered by SQLite sequen
 not client clocks. Polling requests finish immediately; the DO can sleep idle.
 Report evidence is data, not hosted executable HTML. No GitHub polling or worker
 execution is moved into this service.
+
+Files are immutable by idempotency key and dispatch-scoped, including report
+Markdown and images. Downloads force octet-stream, attachment disposition,
+nosniff and a sandbox CSP; no cookies, public file URLs or executable report pages.
+Reading messages does not mark them received. `done` refuses unreceived messages.
+
+Account deletion serialises with uploads, rejects new requests, deletes every
+account-prefixed R2 object and clears coordination rows. A retry resumes cleanup
+after an R2 error. Only the hashed deletion-key tombstone remains to prevent a
+still-provisioned PAT from recreating deleted data. The operator should remove
+that account's PAT hashes. There is no cross-account cleanup or automatic timer.
