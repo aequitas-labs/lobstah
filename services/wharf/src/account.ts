@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { DispatchInput, ReportInput, BackendEvent } from '../../../packages/core/src/backend-model.js';
+import type { ReportInput, BackendEvent } from '../../../packages/core/src/backend-model.js';
 import { ApiError, capability, digest, dispatchInput, hex, identifier, object, reportInput, requireThat, sameHash, text } from './protocol.js';
 
 type Actor = { kind: 'helm'; id: string } | { kind: 'boat'; id: string } | { kind: 'dispatch'; id: string; epoch: number };
@@ -140,9 +140,9 @@ export class Account extends DurableObject<Env> {
       requireThat(w.seen + LEASE_MS > now, 409, 'worker sign-on expired; renew first');
       requireThat(!this.ctx.storage.sql.exec("SELECT id FROM dispatches WHERE worker=? AND state='active'", w.id).toArray().length, 409, 'worker already has an open catch');
       // Addressed work remains sticky, including absent/stale workers.
-      const candidates = this.ctx.storage.sql.exec<DispatchRow>("SELECT * FROM dispatches WHERE state='queued' ORDER BY rowid LIMIT 1000").toArray();
-      const eligible = candidates.filter((d) => { const input: DispatchInput = JSON.parse(d.data); return input.for === w.id || (!input.for && input.repo === w.repo); });
-      const d = eligible.find((d) => JSON.parse(d.data).for === w.id) ?? eligible[0];
+      const d = this.ctx.storage.sql.exec<DispatchRow>(`SELECT * FROM dispatches WHERE state='queued'
+        AND (json_extract(data,'$.for')=? OR (json_extract(data,'$.for') IS NULL AND json_extract(data,'$.repo')=?))
+        ORDER BY CASE WHEN json_extract(data,'$.for')=? THEN 0 ELSE 1 END, rowid LIMIT 1`, w.id, w.repo, w.id).toArray()[0];
       if (!d) return ok(null);
       const epoch = d.epoch + 1;
       this.ctx.storage.sql.exec("UPDATE dispatches SET state='active',worker=?,boat=?,epoch=?,lease=?,hash=? WHERE id=?", w.id, actor.id, epoch, now + LEASE_MS, c.prepared.hash, d.id);
