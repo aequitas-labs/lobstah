@@ -34,7 +34,10 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     if (backendScopes(config).some((s) => s.kind === 'wharf')) throw new Error('choose --grounds for this command; no implicit local or wharf backend');
     return false;
   }
-  if (scope.kind === 'local') return false;
+  if (scope.kind === 'local') {
+    if (cmd === 'dispatch' && opts.opt('--boat')) throw new Error('--boat addressing requires wharf grounds; nothing was queued locally');
+    return false;
+  }
   const session = resolveSessionId({ flag: opts.opt('--session') })?.id;
   const worker = opts.opt('--worker');
   const backend = wharfFor(scope, { session, worker });
@@ -42,6 +45,14 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   const id = () => { if (!pos[0]) throw new Error(`${cmd} requires a dispatch id`); return encodeURIComponent(pos[0]); };
   const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
   const noFiles = () => { if (opts.values('--attach').length || opts.opt('--report')) throw new Error('upload wharf evidence with wharf upload, then report --file-id; local attachment paths are never sent'); };
+  const boatId = async (name: string | undefined): Promise<string> => {
+    if (!name || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) throw new Error('choose a validated boat name');
+    const boats = await backend.request('boats');
+    if (!Array.isArray(boats)) throw new Error('invalid boat list');
+    const found = boats.find((b) => b && typeof b === 'object' && b.name === name.toLowerCase());
+    if (!found || typeof found.id !== 'string') throw new Error(`boat ${name} not found; issue its credential with wharf issue-boat`);
+    return found.id;
+  };
   switch (cmd) {
     case 'dispatch': {
       noFiles();
@@ -49,7 +60,9 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       const repo = opts.opt('--repo'); const file = opts.opt('--brief') ?? opts.opt('--bait');
       const brief = opts.opt('--brief-text') ?? (file ? fs.readFileSync(file, 'utf8') : undefined);
       if (!repo || !brief || !scope.repos.includes(repo)) throw new Error('dispatch needs --repo in this grounds and --brief or --brief-text');
+      const targetBoat = opts.opt('--boat') ? await boatId(opts.opt('--boat')) : undefined;
       print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), repo, repoRemote: wharfRepoIdentity(config, repo), brief, lane: opts.has('--chore') ? 'chore' : 'work',
+        ...(targetBoat ? { boat: targetBoat } : {}),
         for: opts.opt('--for')?.replace(/^wt:/, ''), followUp: opts.opt('--follow-up'), harness: opts.opt('--harness'), model: opts.opt('--model'), effort: opts.opt('--effort') }, key()));
       break;
     }
@@ -105,7 +118,11 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       switch (pos[0]) {
         case 'issue-boat': print(await backend.request('boats', { name: pos[1] }, key())); break;
         case 'boats': print(await backend.request('boats')); break;
-        case 'revoke-boat': print(await backend.request(`boats/${encodeURIComponent(pos[1] ?? '')}/revoke`, {}, key())); break;
+        case 'revoke-boat': print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}/revoke`, {}, key())); break;
+        case 'rename-boat': print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}/rename`, { name: pos[2] }, key())); break;
+        case 'remove-boat':
+          if (!opts.has('--confirm')) throw new Error('remove-boat requires --confirm; open addressed work must be cancelled first');
+          print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}`, {}, key(), 'DELETE')); break;
         case 'renew': print(await backend.request('workers/renew', { worker }, key())); break;
         case 'heartbeat': await backend.heartbeat(pos[1] ?? '', key()); print({ renewed: true }); break;
         case 'receipt': await backend.receipt(pos[1] ?? '', pos[2] ?? '', key()); print({ received: true }); break;
