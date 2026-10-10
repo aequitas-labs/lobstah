@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
+import { parseBackendLocation } from './backend.js';
 import type { Descriptor, DispatchLimits } from './types.js';
 import { lobstahHome } from './paths.js';
 
@@ -246,6 +247,7 @@ export interface GlassConfig {
 /** A named territory: the subset of configured repos one helm oversees. */
 export interface GroundsConfig {
   repos: string[];
+  backend?: import('./backend.js').BackendLocation;
 }
 
 export interface Config {
@@ -382,7 +384,7 @@ export function loadConfig(): Config {
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;
   const grounds: Record<string, GroundsConfig> = {};
   for (const [key, g] of Object.entries(groundsRaw)) {
-    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [] };
+    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [], backend: parseBackendLocation(g.backend) };
   }
   return {
     repos,

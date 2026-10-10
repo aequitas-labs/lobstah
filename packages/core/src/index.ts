@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './backend.js';
 export * from './stats.js';
 export * from './attachments.js';
 export * from './reports.js';
