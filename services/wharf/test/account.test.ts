@@ -71,6 +71,18 @@ it('two workers race a dispatch: one wins; ownership and a single open catch are
   const winner = claims[0] ? a : b; const worker = claims[0] ? 'a-worker' : 'b-worker';
   expect((await call('claims', { worker }, winner.token)).status).toBe(409);
 });
+it('eligible addressed work cannot starve behind a large queue of another worker\'s jobs', async () => {
+  const m = await machine();
+  await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => {
+    state.storage.transactionSync(() => {
+      for (let i = 0; i < 1001; i++) {
+        const id = `foreign-${i}`;
+        state.storage.sql.exec("INSERT INTO dispatches(id,data,state) VALUES (?,?,'queued')", id, JSON.stringify({ id, repo: 'repo', brief: 'foreign', for: 'absent' }));
+      }
+    });
+  });
+  await enqueue('mine', 'worker'); expect((await claim(m.token)).dispatch.id).toBe('mine');
+});
 it('idempotent enqueue, claim and report write once and conflicting keys fail', async () => {
   const m = await boat();
   const input = { id: 'dispatch', repo: 'repo', brief: 'build' };
