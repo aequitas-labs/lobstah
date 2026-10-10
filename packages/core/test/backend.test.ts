@@ -7,6 +7,7 @@ import { ensureLayout } from '../src/paths.js';
 import { readStatusLog } from '../src/status.js';
 import { signOnTrap } from '../src/soak.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { backendScopes, eachBackend } from '../src/backend-scope.js';
 let home: string;
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'backend-')); process.env.LOBSTAH_HOME = home; ensureLayout(); });
 afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });
@@ -18,6 +19,15 @@ it('defaults to local and validates explicit remote locations without embedding 
 it('only serializes coordination, not worker paths, env, setup, or attachments', () => {
   const d = coordinationDescriptor({ id: 'one', repo: 'repo', brief: 'work', env: { SECRET: 'never sent' }, flags: ['--unsafe'], attachments: [{ name: 'x', path: '/private/x', bytes: 1, type: 'text/plain' }] });
   expect(JSON.stringify(d)).not.toMatch(/SECRET|private|unsafe/);
+});
+it('local grounds and multiple named servers are active together with isolated failures', async () => {
+  const location = { kind: 'server' as const, url: 'https://test.invalid', account: 'person', tokenEnv: 'SERVER_ONE_TOKEN' };
+  const scopes = backendScopes({ repos: {}, grounds: { desk: { repos: ['local'] }, cloud: { repos: ['remote'], server: 'one' }, dev: { repos: ['dev'], server: 'two' } },
+    servers: { one: location, two: { ...location, url: 'http://127.0.0.1:8787', tokenEnv: 'SERVER_TWO_TOKEN' } } });
+  const results = await eachBackend(scopes, async (s) => { if (s.server === 'one') throw new Error('offline'); return s.kind; });
+  expect(results.map((r) => r.value)).toEqual(['local', undefined, 'server']);
+  expect(results[1].unavailable).toMatch(/unknown/);
+  expect(scopes[2].location?.tokenEnv).toBe('SERVER_TWO_TOKEN');
 });
 it('the local adapter uses the existing queue, sticky addressing and report/inbox paths', async () => {
   const worktree = path.join(home, 'checkout'); fs.mkdirSync(worktree);
