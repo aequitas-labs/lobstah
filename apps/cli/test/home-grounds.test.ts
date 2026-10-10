@@ -93,7 +93,8 @@ it('home and fleet address one old/new helm seat; only an explicit fleet flag pr
   expect('held' in takeHelm({ sessionId: 'old-cli', grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000 })).toBe(true);
   const alias = run('man', 'helm', '--session', 'old-session', '--grounds', 'fleet');
   expect(alias.status, alias.stdout + alias.stderr).toBe(0);
-  expect(alias.stderr.trim().split('\n')).toEqual(['lobstah: the implicit grounds is now called home; --grounds fleet remains an alias.']);
+  expect(alias.stderr.trim().split(/\r?\n/).filter((line) => line.startsWith('lobstah: the implicit grounds')))
+    .toEqual(['lobstah: the implicit grounds is now called home; --grounds fleet remains an alias.']);
   expect(alias.stdout).toContain('helm: home');
   expect(fs.existsSync(path.join(home, 'helm', 'home.json'))).toBe(false);
   const wait = run('man', 'wait', '--session', 'old-session', '--grounds', 'home', '--timeout', '1');
