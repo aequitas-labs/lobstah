@@ -24,7 +24,7 @@ export class GlassState {
   }
   private person(actor: Actor) { requireThat(actor.kind === 'person', 403, 'signed-in person required'); }
   expire(now: number) {
-    for (const row of this.sql.exec<{ id: string; data: string }>("SELECT * FROM human_requests WHERE json_extract(data,'$.state') IN ('queued','received') AND json_extract(data,'$.expiresAt')<=?", new Date(now).toISOString()).toArray()) {
+    for (const row of this.sql.exec<{ id: string; data: string }>("SELECT * FROM human_requests WHERE json_extract(data,'$.state') IN ('queued','received','authorized') AND json_extract(data,'$.expiresAt')<=?", new Date(now).toISOString()).toArray()) {
       const r = JSON.parse(row.data) as WharfHumanRequest; r.state = 'expired'; this.put('human_requests', row.id, r);
       this.hooks.event('human-request-expired', r.dispatch, r.id);
     }
@@ -115,6 +115,10 @@ export class GlassState {
       }
     }
     if (parts[0] === 'requests') {
+      if (parts[1] === 'starts' && parts.length === 2 && c.method === 'GET') {
+        requireThat(actor.kind === 'boat', 403, 'boat scope required');
+        return ok(this.list<WharfHumanRequest>('human_requests').filter((r) => r.kind === 'trap-request' && r.state === 'authorized' && r.boat === actor.id));
+      }
       if (parts.length === 1 && c.method === 'GET') return ok(this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })));
       if (parts.length === 1 && c.method === 'POST') {
         this.person(actor); const id = identifier(b.id); requireThat(!this.get('human_requests', id), 409, 'request already exists');
@@ -125,6 +129,12 @@ export class GlassState {
         this.put('human_requests', id, r); this.hooks.event('human-request', r.dispatch, id); return ok({ ...r, waitingForHelm: !this.hooks.helmLive(now) });
       }
       const r = this.get<WharfHumanRequest>('human_requests', identifier(parts[1])); requireThat(r, 404, 'request not found');
+      if (parts.length === 3 && parts[2] === 'start' && c.method === 'POST') {
+        requireThat(actor.kind === 'boat' && r.boat === actor.id, 403, 'addressed boat required');
+        requireThat(r.kind === 'trap-request' && r.state === 'authorized' && Date.parse(r.expiresAt) > now, 409, 'start request is not authorized or expired');
+        r.state = 'fulfilled'; r.outcome = b.refused === undefined ? 'accepted by boat for launch' : text(b.refused, 200);
+        this.put('human_requests', r.id, r); this.hooks.event('trap-start-accepted', undefined, r.id); return ok(r);
+      }
       if (parts.length === 2 && c.method === 'GET') return ok({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) });
       if (parts.length === 3 && parts[2] === 'receipt' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(r.state === 'queued' && Date.parse(r.expiresAt) > now, 409, 'request already received or expired');
@@ -132,7 +142,9 @@ export class GlassState {
       }
       if (parts.length === 3 && parts[2] === 'execute' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(r.state === 'received' && Date.parse(r.expiresAt) > now, 409, 'receipt a live request first');
-        requireThat(r.kind === 'message', 409, 'trap-start fulfillment belongs to the opted-in boat slice');
+        if (r.kind === 'trap-request') {
+          r.state = 'authorized'; this.put('human_requests', r.id, r); this.hooks.event('trap-start-authorized', undefined, r.id); return ok(r);
+        }
         const dispatch = this.sql.exec<{ state: string }>('SELECT state FROM dispatches WHERE id=?', r.dispatch!).toArray()[0];
         requireThat(dispatch && !['cancelled', 'done'].includes(dispatch.state), 409, 'dispatch is no longer open');
         this.sql.exec('INSERT INTO messages(dispatch,text) VALUES (?,?)', r.dispatch!, r.text!); r.state = 'fulfilled'; this.put('human_requests', r.id, r);

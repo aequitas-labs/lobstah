@@ -159,6 +159,7 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Signed-in person | POST documents/:id/answer | Record one card answer and ordered event; no helm-seat change |
 | Signed-in person | POST requests | Queue a bounded message or trap-start request for the helm |
 | Read / leased helm | GET requests; POST requests/:id/receipt, execute | Explicit receipt then execute a live message request |
+| Addressed work boat | GET requests/starts; POST requests/:id/start | Read only its helm-authorized trap starts; consume once or record repo refusal before expiry |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; approve another login to receive a new
@@ -188,11 +189,31 @@ Reading messages does not mark them received. `done` refuses unreceived messages
 The signed-in person never takes the helm seat merely by using the glass. Card
 answers are durable events. Send and trap-start actions queue account-local human
 requests for the live helm to read and explicitly receipt. Without a helm, they
-show `waitingForHelm`; queued/received requests expire visibly after ten minutes
+show `waitingForHelm`; queued/received/authorized requests expire visibly after ten minutes
 on the next poll and cannot execute late. Only owner cancellation directly acts
 on a job without a seat: it fences the claim epoch and records the person actor.
-Trap-start fulfillment follows in the opted-in boat slice; this slice never launches
-a process. No new server timers or polling loops.
+The helm explicitly authorizes a trap start after receipt; only the addressed
+boat consumes that authorization. With `[soak].acceptWharfStarts = true` (default
+off), its daemon prepares a configured repo worktree and launches only the repo's
+configured Claude/Codex profile, using the existing terminal adapter (macOS).
+An unknown repo is refused visibly. A consumed request means accepted for launch,
+not proof that the harness signed on; launch errors reach the daemon log and must
+be retried as a new human request. The wharf itself never launches a process.
+No new server timers or polling loops.
+
+All hosted traps, including manual `soak --grounds <grounds> --repo <repo>
+--session <id>` and `man throw --new --repo <repo>`, use one boat-local daemon
+broker. Missing daemon is an explicit error, never a boat-token fallback. A
+single-use ticket binds the trap, repo, grounds and start request, and expires.
+The loopback interface returns only the trap's session capability and current
+dispatch token; no credential lookup, generic proxy or arbitrary launch action.
+The launcher removes wharf credentials from the coding agent's environment.
+Manual sessions identify their exact harness ancestor; launched sessions use a
+fixed lifetime wrapper. Renewal requires both that process and a heartbeat under
+30 seconds old; a dead session receives no further renewals and its claim expires.
+Tickets and session capabilities are daemon-instance-local: after a daemon restart,
+stow/re-soak to bind again, retaining the worktree and allowing the old lease to
+expire normally. The broker does not delete branches or worktrees.
 
 `man ask --title ... --option ... [--detail file.md] [--attach file]`,
 `man file report.md [--attach file]`, worker `report ... --report file.md

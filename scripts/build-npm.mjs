@@ -17,6 +17,7 @@ const common = [
 ];
 execFileSync('npx', ['esbuild', 'apps/cli/src/main.ts', ...common, `--outfile=${out}/dist/main.js`], { cwd: root, stdio: 'inherit' });
 execFileSync('npx', ['esbuild', 'packages/runner/src/index.ts', ...common, `--outfile=${out}/dist/runner.js`], { cwd: root, stdio: 'inherit' });
+execFileSync('npx', ['esbuild', 'apps/cli/src/wharf-trap-runner.ts', ...common, `--outfile=${out}/dist/wharf-trap-runner.js`], { cwd: root, stdio: 'inherit' });
 
 // Default to the CLI's version: every published artifact carries one version.
 const version = process.argv[2] ?? JSON.parse(fs.readFileSync(path.join(root, 'apps/cli/package.json'), 'utf8')).version;

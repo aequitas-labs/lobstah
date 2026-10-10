@@ -3030,8 +3030,15 @@ async function mainCli(): Promise<void> {
         if (!hb) process.exitCode = 1;
         break;
       }
+      let hostedBroker: Awaited<ReturnType<typeof import('./wharf-trap-broker.js').startWharfBroker>> | undefined;
       if (kind === 'daemon')
         await daemon(Number(opt('--interval') ?? '5000'), console.log, {
+          hostedStart: async () => {
+            if (!loadConfig().wharves || !Object.keys(loadConfig().wharves!).length) return;
+            const { startWharfBroker, daemonBrokerOptions } = await import('./wharf-trap-broker.js');
+            hostedBroker = await startWharfBroker(daemonBrokerOptions(loadConfig));
+          },
+          hostedPoll: async () => { await hostedBroker?.broker.poll(); },
           culler: cliCuller,
           prWatches: (now, log) => {
             syncPrWatches(now);

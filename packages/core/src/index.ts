@@ -58,3 +58,4 @@ export * from './worker-profile.js';
 export * from './session-workers.js';
 export * from './pools.js';
 export * from './wharf-credentials.js';
+export * from './wharf-broker.js';
