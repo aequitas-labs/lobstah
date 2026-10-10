@@ -31,7 +31,7 @@ const HARNESS = 'claude|codex';
 
 export const COMMANDS: Record<string, CommandSpec> = {
   wharf: {
-    subverbs: ['issue-machine', 'machines', 'revoke-machine', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries', 'delete-account'],
+    subverbs: ['issue-boat', 'boats', 'revoke-boat', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries', 'delete-account'],
     flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--confirm': {} },
     positionals: '<action> [<id>] [<file>|<message-id>]',
   },
@@ -236,8 +236,7 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 export const PROSE: Record<string, string> = {
   dispatch: `Queue work; prints id. --for <name>, wt:<name>, wt:<id> is sticky; session:<id> resolves to its trap.
 --trap-any: free live → return stowed → new below the repo's traps cap; at capacity waits, never headless.
---pool <name>: fresh headless session in a warm worktree. --for, --trap-any and --pool are exclusive.
-A claimed helm requires --session <helm-id> for trap work. Repeat --attach to copy files. Alias: set --bait.`,
+--pool: warm headless worktree; exclusive with --for and --trap-any. Claimed helm: --session <helm-id>. --attach copies files. Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster record. Alias: buoy.`,

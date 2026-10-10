@@ -34,11 +34,11 @@ beforeEach(async () => {
   });
   expect((await call('helm/take', { session: 'helm' })).status).toBe(200);
 });
-it('local Workers end-to-end: helm enqueues, machine claims, agent renews/uploads/reports, helm wait wakes', async () => {
+it('local Workers end-to-end: helm enqueues, boat claims, agent renews/uploads/reports, helm wait wakes', async () => {
   const location = { kind: 'wharf' as const, url: 'https://state.test', account: 'a', tokenEnv: 'TEST_TOKEN' };
   const transport: typeof fetch = (input, init) => SELF.fetch(input, init);
   const helm = new WharfBackend(location, pat, { session: 'helm', fetch: transport });
-  const m = await machine('e2e');
+  const m = await boat('e2e');
   const launcher = new WharfBackend(location, m.token, { worker: 'e2e', fetch: transport });
   await helm.enqueue({ id: 'e2e', repo: 'repo', brief: 'write a report', for: 'e2e', model: 'gpt-6.1-sol' }, 'e2e-enqueue');
   const claim = await launcher.claim('e2e-claim'); expect(claim?.dispatch.id).toBe('e2e');
@@ -55,7 +55,7 @@ it('local Workers end-to-end: helm enqueues, machine claims, agent renews/upload
   const [view] = await helm.list(); expect(view.state).toBe('done'); expect(view.status?.evidence?.files).toEqual([file]);
 });
 it('a paused deadline holds the catch through missing signal; expiry is unknown, never completion', async () => {
-  const m = await machine(); const other = await machine('other'); await enqueue(); const r = await claim(m.token);
+  const m = await boat(); const other = await boat('other'); await enqueue(); const r = await claim(m.token);
   await call('dispatches/dispatch/report', { verb: 'paused', waitingOn: 'person', until: new Date(Date.now() + 3600000).toISOString() }, r.token);
   await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => { state.storage.sql.exec('UPDATE dispatches SET lease=0'); });
   expect(await (await call('claims', { worker: 'other' }, other.token)).json()).toBeNull();
@@ -72,7 +72,7 @@ it('two workers race a dispatch: one wins; ownership and a single open catch are
   expect((await call('claims', { worker }, winner.token)).status).toBe(409);
 });
 it('eligible addressed work cannot starve behind a large queue of another worker\'s jobs', async () => {
-  const m = await machine();
+  const m = await boat();
   await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => {
     state.storage.transactionSync(() => {
       for (let i = 0; i < 1001; i++) {
