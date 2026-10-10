@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { backendScopes, readHostedViews } from '@lobstah/core';
+import { backendScopes, displayGrounds, readHostedViews } from '@lobstah/core';
 import type { Config, DispatchView, HostedView, GlassDispatch, TendAttention } from '@lobstah/core';
 
 // Display identity only: never used as authority or sent to the wharf.
@@ -8,7 +8,7 @@ export function hostedId(view: HostedView, id: string): string {
 }
 export function backendViews(config: Config) {
   const views = readHostedViews(config);
-  return backendScopes(config).map((s) => ({ grounds: s.grounds, kind: s.kind, wharf: s.wharf,
+  return backendScopes(config).map((s) => ({ grounds: displayGrounds(s.grounds, config), kind: s.kind, wharf: s.wharf,
     ...(s.kind === 'wharf' ? { url: s.location.url, unavailable: views.find((v) => v.grounds === s.grounds)?.unavailable } : {}) }));
 }
 export function hostedDispatch(view: HostedView, d: DispatchView): GlassDispatch {
