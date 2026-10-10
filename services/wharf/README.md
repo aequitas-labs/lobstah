@@ -40,13 +40,45 @@ not paid tiers. JSON bodies are bounded at 64 KiB. Rate limits are durable accou
 windows, not IP identities. Store/R2 failure returns an unavailable error; clients
 must retain results and must not infer success or claim locally during an outage.
 
+## Permission layers
+
+Person credentials carry `read`, `helm` and `admin`, never `work`: boats fish,
+people steer and administer. Worker sign-on, claim and renew refuse a person
+credential with an enrolment instruction. The sign-in slice will replace the
+temporary operator-provisioned PATs, not expand their work authority.
+
+Boat credentials carry independent permissions, chosen on issue or rotation:
+
+| Permission | Allows |
+| --- | --- |
+| read | Account job state, messages, events, boats and evidence downloads |
+| work | This boat's worker sign-on, claims and renewals |
+| helm | Dispatch, message, cancel and exclusive helm lease operations |
+| admin | Issue/revoke/rename/remove boats, change permissions, delete account |
+
+Omission defaults to `work`. `POST boats` accepts `permissions`; `POST
+boats/:id/permissions` replaces them (an empty array removes all grants).
+An `admin` grant additionally requires `confirmAdmin: true`. The CLI uses
+repeated `--permission read|work|helm|admin` on `wharf issue-boat <name>` or
+`wharf boat-permissions <name>`; `--clear` removes all grants. Admin requires
+`--grant-admin` and prints a warning about credential management and deletion.
+Permissions do not imply one another: a helm boat also needs `read` for views.
+
+Checks precede idempotency replay, so removing a permission immediately fences
+new requests and retries. A helm seat is bound to both the credential principal
+and session; knowing its session id cannot inherit it. A boat with helm still
+needs explicit takeover of another live seat. Boats cannot select another boat
+on sign-on/claim/renew. Agent tokens retain their one dispatch/epoch authority;
+revocation or removal of work prevents lease extension but preserves reporting
+until the original deadline. No local-files authorization changes.
+
 ## Authority and protocol
 
 All routes are under `/v1/accounts/<account>/`, authenticated with a bearer token.
 All mutations require `Idempotency-Key` (1–128 identifier characters). Reusing a
 key with a different request fails. Keys are scoped to authenticated principals.
 Helm mutations require a live helm lease and `X-Lobstah-Helm: <session>`; credential
-administration uses the account PAT. A different live helm needs explicit takeover.
+administration requires `admin`. A different live helm needs explicit takeover.
 
 | Scope | Route | Operation |
 | --- | --- | --- |
@@ -67,8 +99,8 @@ administration uses the account PAT. A different live helm needs explicit takeov
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; revoke/reissue to receive a new
-secret. Boats cannot read dispatch content, enqueue, cancel, manage credentials,
-take helm or delete accounts. Coding agents receive only the token returned by a
+secret. Work-only boats cannot read dispatch content, enqueue, cancel, manage
+credentials, take helm or delete accounts. Coding agents receive only the token returned by a
 claim, not their boat credential or the PAT. Agent tokens cannot claim.
 
 Claims last 90 seconds and carry a monotonically increasing dispatch epoch.

@@ -1,8 +1,10 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { ReportInput, BackendEvent, DispatchInput } from '../../../packages/core/src/backend-model.js';
 import { ApiError, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
+import { boatPermissions, personPermissions, requiredPermission } from './permissions.js';
+import type { Permission } from './permissions.js';
 
-type Actor = { kind: 'helm'; id: string } | { kind: 'boat'; id: string } | { kind: 'dispatch'; id: string; epoch: number };
+type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
 type BoatRow = { id: string; name: string; hash: string; revoked: number };
 type WorkerRow = { id: string; boat: string; repo: string; seen: number };
@@ -33,6 +35,7 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS boats (id TEXT PRIMARY KEY, name TEXT NOT NULL, hash TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
       CREATE UNIQUE INDEX IF NOT EXISTS boat_name ON boats(name COLLATE NOCASE);
+      CREATE TABLE IF NOT EXISTS boat_permissions (boat TEXT PRIMARY KEY, permissions TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, boat TEXT NOT NULL, repo TEXT NOT NULL, seen INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS worker_repo ON workers(repo,seen);
       CREATE TABLE IF NOT EXISTS worker_nicknames (worker TEXT PRIMARY KEY, nickname TEXT NOT NULL);
@@ -68,7 +71,8 @@ export class Account extends DurableObject<Env> {
   /** Polling is the guarantee: observe expiry on the next request, without timers. */
   private availability(now: number) {
     const absent = this.ctx.storage.sql.exec<DispatchRow>(`SELECT d.* FROM dispatches d WHERE d.state='queued' AND NOT EXISTS (
-      SELECT 1 FROM workers w JOIN boats b ON b.id=w.boat WHERE b.revoked=0 AND w.seen>?
+      SELECT 1 FROM workers w JOIN boats b ON b.id=w.boat LEFT JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND w.seen>?
+      AND (p.boat IS NULL OR EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='work'))
       AND w.repo=json_extract(d.data,'$.repoRemote') AND (json_extract(d.data,'$.for') IS NULL OR json_extract(d.data,'$.for')=w.id)
       AND (json_extract(d.data,'$.boat') IS NULL OR json_extract(d.data,'$.boat')=w.boat)
     )`, now - LEASE_MS).toArray();
@@ -96,12 +100,13 @@ export class Account extends DurableObject<Env> {
     return { ...input, state: d.state, status: this.lastReport(d.id), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
   }
   private authenticate(c: Command, hash: string, now: number): Actor {
-    if (c.helm) return { kind: 'helm', id: 'helm' };
+    if (c.helm) return { kind: 'person', id: 'person', permissions: personPermissions };
     const pieces = c.token.split('.'); requireThat(pieces[1] === c.account, 403, 'wrong account');
     if (pieces[0] === 'b') {
       const m = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', pieces[2]).toArray()[0];
       requireThat(m && !m.revoked && sameHash(hash, m.hash), 401, 'invalid boat credential');
-      return { kind: 'boat', id: m.id };
+      const row = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', m.id).toArray()[0];
+      return { kind: 'boat', id: m.id, permissions: row ? JSON.parse(row.permissions) : ['work'] };
     }
     requireThat(pieces[0] === 'd', 401, 'invalid credential');
     const d = this.dispatch(pieces[2]); const epoch = Number(pieces[3]);
@@ -128,10 +133,26 @@ export class Account extends DurableObject<Env> {
     const row = this.ctx.storage.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 1', id).toArray()[0];
     return row ? JSON.parse(row.data) : undefined;
   }
+  private boatCanWork(id: string | null): boolean {
+    if (!id) return false;
+    const row = this.ctx.storage.sql.exec<{ revoked: number; permissions: string }>("SELECT b.revoked,coalesce(p.permissions,'[\"work\"]') AS permissions FROM boats b LEFT JOIN boat_permissions p ON p.boat=b.id WHERE b.id=?", id).toArray()[0];
+    return !!row && !row.revoked && JSON.parse(row.permissions).includes('work');
+  }
   private helm(c: Command, actor: Actor, now: number) {
-    requireThat(actor.kind === 'helm', 403, 'helm scope required');
+    this.requirePermission(actor, 'helm');
     const seat = this.get('helm'); const h = seat ? JSON.parse(seat) : undefined;
-    requireThat(h && h.session === c.session && h.until > now, 409, 'take or renew the helm lease first');
+    requireThat(h && h.session === c.session && h.actor === `${actor.kind}:${actor.id}` && h.until > now, 409, 'take or renew the helm lease first');
+  }
+  private requirePermission(actor: Actor, permission: Permission) {
+    requireThat(actor.kind !== 'dispatch' && actor.permissions.includes(permission), 403, `${permission} permission required`);
+    if (permission === 'work') requireThat(actor.kind === 'boat', 403, 'enrol this machine as a boat with lobstah wharf login before signing on or claiming work');
+  }
+  private authorize(c: Command, actor: Actor) {
+    // Person sessions never fish, even if a caller retries a prior request.
+    const permission = requiredPermission(c.path, c.method);
+    if (permission === 'work' && actor.kind === 'person') throw new ApiError(403, 'enrol this machine as a boat with lobstah wharf login before signing on or claiming work');
+    if (actor.kind !== 'dispatch' && permission) this.requirePermission(actor, permission);
+    if (actor.kind === 'dispatch') requireThat(c.path.startsWith(`dispatches/${actor.id}/`) || c.path === `dispatches/${actor.id}`, 403, 'dispatch scope required');
   }
   private budget(now: number) {
     const window = Math.floor(now / 60000); const b = JSON.parse(this.get('budget') ?? '{"window":0,"count":0}');
@@ -140,7 +161,7 @@ export class Account extends DurableObject<Env> {
     b.count++; this.set('budget', JSON.stringify(b));
   }
   private capacity() {
-    const tables = ['boats', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files'];
+    const tables = ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files'];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
@@ -153,6 +174,7 @@ export class Account extends DurableObject<Env> {
       const now = Date.now();
       requireThat(!this.get('deleted'), 410, 'account deleted');
       const actor = this.authenticate(c, hash, now); this.budget(now); this.expire(now);
+      this.authorize(c, actor);
       if (c.method !== 'GET') {
         requireThat(c.key && /^[A-Za-z0-9_-]{1,128}$/.test(c.key), 400, 'Idempotency-Key required');
         const previous = this.ctx.storage.sql.exec<{ fingerprint: string; result: string }>('SELECT * FROM idem WHERE actor=? AND key=?', `${actor.kind}:${actor.id}`, c.key).toArray()[0];
@@ -170,16 +192,19 @@ export class Account extends DurableObject<Env> {
     const ok = (value: unknown = {}): StoredResult => ({ status: 200, value });
     const b = c.method === 'GET' ? {} : object(c.body);
     if (c.path === '_issue' && c.method === 'POST') {
-      requireThat(actor.kind === 'helm' && c.prepared?.id, 403, 'helm scope required');
+      this.requirePermission(actor, 'admin'); requireThat(c.prepared?.id, 403, 'prepared credential required');
       const name = boatName(b.name);
+      const selected = boatPermissions(b.permissions, b.confirmAdmin);
       const previous = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE name=? COLLATE NOCASE', name).toArray()[0];
       const id = previous?.id ?? c.prepared.id;
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO boats(id,name,hash,revoked) VALUES (?,?,?,0)', id, name, c.prepared.hash);
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO boat_permissions VALUES (?,?)', id, JSON.stringify(selected));
       this.event(previous ? 'boat-credential-rotated' : 'boat-issued', undefined, `boat: ${name}`);
-      return { status: 201, value: { id, name, issuance: c.prepared.id } };
+      return { status: 201, value: { id, name, permissions: selected, issuance: c.prepared.id } };
     }
     if (c.path === '_claim' && c.method === 'POST') {
       requireThat(actor.kind === 'boat' && c.prepared, 403, 'boat scope required');
+      requireThat(b.boat === undefined, 400, 'boat credentials cannot select another boat');
       const w = this.worker(b.worker, actor.id);
       requireThat(w.seen + LEASE_MS > now, 409, 'worker sign-on expired; renew first');
       requireThat(!this.ctx.storage.sql.exec("SELECT id FROM dispatches WHERE worker=? AND state='active'", w.id).toArray().length, 409, 'worker already has an open catch');
@@ -196,42 +221,53 @@ export class Account extends DurableObject<Env> {
       return ok({ id: d.id, dispatch: JSON.parse(d.data), epoch, leaseUntil: new Date(now + LEASE_MS).toISOString() });
     }
     if (c.path === 'helm/take' && c.method === 'POST') {
-      requireThat(actor.kind === 'helm', 403, 'helm scope required'); const session = identifier(b.session);
+      this.requirePermission(actor, 'helm'); const session = identifier(b.session);
       const previous = JSON.parse(this.get('helm') ?? 'null');
-      requireThat(!previous || previous.session === session || previous.until <= now || b.take === true, 409, 'helm held; explicit takeover required');
-      const h = { session, until: now + HELM_MS }; this.set('helm', JSON.stringify(h)); this.event('helm-taken'); return ok(h);
+      const principal = `${actor.kind}:${actor.id}`;
+      requireThat(!previous || previous.session === session && previous.actor === principal || previous.until <= now || b.take === true, 409, 'helm held; explicit takeover required');
+      const h = { session, actor: principal, until: now + HELM_MS }; this.set('helm', JSON.stringify(h)); this.event('helm-taken'); return ok(h);
     }
     if (c.path === 'helm/renew' || c.path === 'helm/release') {
       requireThat(c.method === 'POST', 405, 'POST required'); this.helm(c, actor, now);
-      const h = { session: c.session, until: c.path.endsWith('release') ? 0 : now + HELM_MS };
+      const h = { session: c.session, actor: `${actor.kind}:${actor.id}`, until: c.path.endsWith('release') ? 0 : now + HELM_MS };
       this.set('helm', JSON.stringify(h)); return ok(h);
     }
     if (c.path === 'boats' && c.method === 'GET') {
-      requireThat(actor.kind === 'helm', 403, 'helm scope required');
-      return ok(this.ctx.storage.sql.exec('SELECT id,name,revoked FROM boats').toArray());
+      this.requirePermission(actor, 'read');
+      return ok(this.ctx.storage.sql.exec<{ id: string; name: string; revoked: number; permissions: string }>("SELECT b.id,b.name,b.revoked,coalesce(p.permissions,'[\"work\"]') AS permissions FROM boats b LEFT JOIN boat_permissions p ON p.boat=b.id").toArray().map((b) => ({ ...b, permissions: JSON.parse(b.permissions) })));
     }
     if (c.path.startsWith('boats/') && c.path.endsWith('/revoke') && c.method === 'POST') {
-      requireThat(actor.kind === 'helm', 403, 'helm scope required');
+      this.requirePermission(actor, 'admin');
       const id = identifier(c.path.split('/')[1]); const target = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', id).toArray()[0];
       requireThat(target, 404, 'boat not found');
       this.ctx.storage.sql.exec('UPDATE boats SET revoked=1 WHERE id=?', id); this.event('boat-revoked', undefined, `boat: ${target.name}`); return ok();
     }
     if (c.path.startsWith('boats/') && c.path.split('/').length === 2 && c.method === 'DELETE') {
-      requireThat(actor.kind === 'helm', 403, 'helm scope required'); const id = identifier(c.path.split('/')[1]);
+      this.requirePermission(actor, 'admin'); const id = identifier(c.path.split('/')[1]);
       requireThat(this.ctx.storage.sql.exec('SELECT id FROM boats WHERE id=?', id).toArray().length, 404, 'boat not found');
       requireThat(!this.ctx.storage.sql.exec("SELECT id FROM dispatches WHERE state IN ('queued','active') AND (json_extract(data,'$.boat')=? OR boat=?)", id, id).toArray().length, 409, 'boat has open addressed or claimed work; cancel or re-address it first');
       this.ctx.storage.sql.exec('DELETE FROM worker_nicknames WHERE worker IN (SELECT id FROM workers WHERE boat=?)', id);
       this.ctx.storage.sql.exec('DELETE FROM workers WHERE boat=?', id); this.ctx.storage.sql.exec('DELETE FROM boats WHERE id=?', id);
+      this.ctx.storage.sql.exec('DELETE FROM boat_permissions WHERE boat=?', id);
       this.event('boat-removed'); return ok();
     }
     if (c.path.startsWith('boats/') && c.path.endsWith('/rename') && c.method === 'POST') {
-      requireThat(actor.kind === 'helm', 403, 'helm scope required'); const id = identifier(c.path.split('/')[1]); const name = boatName(b.name);
+      this.requirePermission(actor, 'admin'); const id = identifier(c.path.split('/')[1]); const name = boatName(b.name);
       requireThat(this.ctx.storage.sql.exec('SELECT id FROM boats WHERE id=?', id).toArray().length, 404, 'boat not found');
       requireThat(!this.ctx.storage.sql.exec('SELECT id FROM boats WHERE name=? COLLATE NOCASE AND id!=?', name, id).toArray().length, 409, 'boat name already exists');
       this.ctx.storage.sql.exec('UPDATE boats SET name=? WHERE id=?', name, id); this.event('boat-renamed', undefined, `boat: ${name}`); return ok({ id, name });
     }
+    if (c.path.startsWith('boats/') && c.path.endsWith('/permissions') && c.method === 'POST') {
+      this.requirePermission(actor, 'admin'); const id = identifier(c.path.split('/')[1]);
+      requireThat(this.ctx.storage.sql.exec('SELECT id FROM boats WHERE id=?', id).toArray().length, 404, 'boat not found');
+      requireThat(b.permissions !== undefined, 400, 'permissions required');
+      const selected = boatPermissions(b.permissions, b.confirmAdmin);
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO boat_permissions VALUES (?,?)', id, JSON.stringify(selected));
+      this.event('boat-permissions-changed'); return ok({ id, permissions: selected });
+    }
     if (c.path === 'workers/sign-on' && c.method === 'POST') {
       requireThat(actor.kind === 'boat', 403, 'boat scope required');
+      requireThat(b.boat === undefined, 400, 'boat credentials cannot select another boat');
       const id = identifier(b.worker); const repo = repoIdentity(b.repoRemote); const nickname = identifier(b.repo);
       const old = this.ctx.storage.sql.exec<WorkerRow>('SELECT * FROM workers WHERE id=?', id).toArray()[0];
       requireThat(!old || old.boat === actor.id, 409, 'worker belongs to another boat');
@@ -241,6 +277,7 @@ export class Account extends DurableObject<Env> {
     }
     if (c.path === 'workers/renew' && c.method === 'POST') {
       requireThat(actor.kind === 'boat', 403, 'boat scope required'); const w = this.worker(b.worker, actor.id);
+      requireThat(b.boat === undefined, 400, 'boat credentials cannot select another boat');
       this.ctx.storage.sql.exec('UPDATE workers SET seen=? WHERE id=?', now, w.id);
       this.ctx.storage.sql.exec("UPDATE dispatches SET lease=? WHERE worker=? AND boat=? AND state='active'", now + LEASE_MS, w.id, actor.id);
       return ok();
@@ -253,11 +290,11 @@ export class Account extends DurableObject<Env> {
       this.ctx.storage.sql.exec("INSERT INTO dispatches(id,data,state) VALUES (?,?,'queued')", d.id, JSON.stringify(d)); this.event('queued', d.id); return ok(d);
     }
     if (c.path === 'dispatches' && c.method === 'GET') {
-      requireThat(actor.kind === 'helm', 403, 'helm scope required');
+      this.requirePermission(actor, 'read');
       return ok(this.ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches ORDER BY rowid DESC LIMIT 100').toArray().map((d) => this.view(d)));
     }
     if (c.path === 'events' && c.method === 'GET') {
-      requireThat(actor.kind === 'helm', 403, 'helm scope required');
+      this.requirePermission(actor, 'read');
       const generation = this.get('generation')!; const [g, n] = (c.after ?? `${generation}.0`).split('.');
       requireThat(g === generation && /^\d+$/.test(n) && Number.isSafeInteger(Number(n)), 400, 'invalid account event cursor');
       const rows = this.ctx.storage.sql.exec<{ seq: number; kind: string; dispatch: string | null; at: string; note: string | null }>('SELECT e.*,d.note FROM events e LEFT JOIN event_details d ON d.seq=e.seq WHERE e.seq>? ORDER BY e.seq LIMIT 100', Number(n)).toArray();
@@ -276,7 +313,7 @@ export class Account extends DurableObject<Env> {
     const parts = c.path.split('/');
     if (parts[0] === 'dispatches' && parts[1]) {
       const d = this.dispatch(identifier(parts[1])); const action = parts[2];
-      requireThat(actor.kind === 'helm' || (actor.kind === 'dispatch' && actor.id === d.id), 403, 'dispatch scope required');
+      requireThat(actor.kind !== 'dispatch' || actor.id === d.id, 403, 'dispatch scope required');
       if (!action && c.method === 'GET') return ok(this.view(d));
       if (action === 'cancel' && c.method === 'POST') {
         this.helm(c, actor, now); this.ctx.storage.sql.exec("UPDATE dispatches SET state='cancelled',hash=NULL WHERE id=?", d.id); this.event('cancelled', d.id); return ok();
@@ -284,7 +321,7 @@ export class Account extends DurableObject<Env> {
       if (action === 'heartbeat' && c.method === 'POST') {
         requireThat(actor.kind === 'dispatch', 403, 'dispatch scope required');
         requireThat(d.state === 'active', 409, 'dispatch no longer active');
-        requireThat(!this.ctx.storage.sql.exec<{ revoked: number }>('SELECT revoked FROM boats WHERE id=?', d.boat).toArray()[0]?.revoked, 403, 'boat revoked; lease cannot be extended');
+        requireThat(this.boatCanWork(d.boat), 403, 'boat revoked or work permission removed; lease cannot be extended');
         this.ctx.storage.sql.exec('UPDATE dispatches SET lease=? WHERE id=?', now + LEASE_MS, d.id); return ok({ leaseUntil: new Date(now + LEASE_MS).toISOString() });
       }
       if (action === 'report' && c.method === 'POST') {
@@ -294,8 +331,7 @@ export class Account extends DurableObject<Env> {
         for (const file of report.evidence?.files ?? []) requireThat(this.ctx.storage.sql.exec('SELECT id FROM files WHERE id=? AND dispatch=? AND ready=1', file, d.id).toArray().length, 400, 'evidence file not uploaded to this dispatch');
         if (report.verb === 'paused' && !report.until) report.until = new Date(now + 86400_000).toISOString();
         this.ctx.storage.sql.exec('INSERT INTO reports(dispatch,data) VALUES (?,?)', d.id, JSON.stringify({ ...report, at: new Date(now).toISOString() }));
-        const revoked = this.ctx.storage.sql.exec<{ revoked: number }>('SELECT revoked FROM boats WHERE id=?', d.boat).toArray()[0]?.revoked;
-        this.ctx.storage.sql.exec('UPDATE dispatches SET state=?,lease=? WHERE id=?', ['done', 'failed'].includes(report.verb) ? 'done' : 'active', revoked ? d.lease : now + LEASE_MS, d.id);
+        this.ctx.storage.sql.exec('UPDATE dispatches SET state=?,lease=? WHERE id=?', ['done', 'failed'].includes(report.verb) ? 'done' : 'active', this.boatCanWork(d.boat) ? now + LEASE_MS : d.lease, d.id);
         this.event(report.verb, d.id); return ok();
       }
       if (action === 'recovery' && c.method === 'POST') {
@@ -305,7 +341,7 @@ export class Account extends DurableObject<Env> {
         this.event('recovery-submitted', d.id); return ok({ id, finalised: false });
       }
       if (action === 'recoveries' && c.method === 'GET') {
-        requireThat(actor.kind === 'helm', 403, 'helm scope required');
+        this.requirePermission(actor, 'read');
         return ok(this.ctx.storage.sql.exec('SELECT id,epoch,data FROM recoveries WHERE dispatch=? LIMIT 100', d.id).toArray());
       }
       if (action === 'messages' && !parts[3] && c.method === 'POST') {
@@ -346,10 +382,9 @@ export class Account extends DurableObject<Env> {
 
   /** Hashes only at rest. Issuance is shown once; retries return metadata. */
   async issue(c: Command): Promise<StoredResult> {
-    requireThat(c.helm, 403, 'helm scope required');
     const b = object(c.body); const name = boatName(b.name); const id = crypto.randomUUID();
     const secret = `${crypto.randomUUID()}${crypto.randomUUID()}`; const hash = await digest(secret);
-    const base = await this.command({ ...c, path: '_issue', body: { name }, prepared: { id, hash } });
+    const base = await this.command({ ...c, path: '_issue', body: { ...b, name }, prepared: { id, hash } });
     if (base.status !== 201) return base;
     const { issuance, ...value } = object(base.value);
     const token = `b.${c.account}.${value.id}.${secret}`;
@@ -395,10 +430,13 @@ export class Account extends DurableObject<Env> {
     return this.serialFile(async () => {
       const c: Command = JSON.parse(command);
       try {
-        requireThat(c.helm, 403, 'helm scope required');
+        const hash = await digest(c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
         requireThat(c.key && /^[A-Za-z0-9_-]{1,128}$/.test(c.key), 400, 'Idempotency-Key required');
         const keyHash = await digest(c.key);
         const prior = this.get('deleted'); requireThat(!prior || prior === keyHash, 410, 'account deleted');
+        if (prior) requireThat(sameHash(this.get('delete-authority') ?? '', hash), 403, 'deletion retry belongs to another credential');
+        else this.requirePermission(this.authenticate(c, hash, Date.now()), 'admin');
+        this.set('delete-authority', hash); // permits the same admin retry after its boat row is deleted
         this.set('deleted', keyHash); // reject every other request before R2 I/O
         for (;;) {
           const files = await this.env.FILES.list({ prefix: `${c.account}/`, limit: 1000 });
@@ -406,8 +444,8 @@ export class Account extends DurableObject<Env> {
           await this.env.FILES.delete(files.objects.map((f) => f.key));
         }
         this.ctx.storage.transactionSync(() => {
-          for (const table of ['boats', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files']) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
-          this.ctx.storage.sql.exec("DELETE FROM meta WHERE key!='deleted'");
+          for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files']) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+          this.ctx.storage.sql.exec("DELETE FROM meta WHERE key NOT IN ('deleted','delete-authority')");
         });
         // Keep only a tombstone: static operator-provisioned PATs cannot recreate
         // the deleted account. Remove its PAT hashes to complete deprovisioning.
