@@ -53,6 +53,7 @@ import {
   poolDir,
   poolWaits,
   poolWarmDue,
+  refreshHostedViews,
 } from '@lobstah/core';
 import type { Config, Descriptor, FreeBytesReader, Lane, RunnerInfo } from '@lobstah/core';
 import { classify, killGroup, pidAlive, processStartTime } from './liveness.js';
@@ -726,6 +727,7 @@ export async function daemon(intervalMs = 5000, log: (m: string) => void = conso
   acquireDaemonLock();
   log(`lobstah daemon: watching ${laneDirs('work').queue} every ${intervalMs}ms`);
   let wake: (() => void) | undefined;
+  let remoteRead: Promise<void> | undefined;
   watchQueues(() => wake?.());
   while (true) {
     try {
@@ -733,6 +735,9 @@ export async function daemon(intervalMs = 5000, log: (m: string) => void = conso
     } catch (err) {
       log(`tick error: ${err instanceof Error ? err.message : String(err)}`);
     }
+    // Each grounds has its own backend. A slow/unreachable server never holds
+    // the local tick or turns cached observations into local authoritative work.
+    if (!remoteRead) remoteRead = Promise.resolve().then(() => refreshHostedViews(loadConfig())).catch(() => {}).finally(() => { remoteRead = undefined; });
     // Anonymous daily counts (PRIVACY.md): checked every few minutes, sent at
     // most once per UTC day, fire and forget. Never awaited, never logged.
     if (Date.now() - telemetryCheckedAt >= TELEMETRY_CHECK_MS) {
