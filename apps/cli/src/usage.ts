@@ -31,8 +31,8 @@ const HARNESS = 'claude|codex';
 
 export const COMMANDS: Record<string, CommandSpec> = {
   wharf: {
-    subverbs: ['whoami', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries'],
-    flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' } },
+    subverbs: ['login', 'logout', 'whoami', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries'],
+    flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--name': { value: '<boat>' }, '--helm': {}, '--work-only': {}, '--credential-file': { value: '<file|->' }, '--timeout': { value: '<seconds>' } },
     positionals: '<action> [<id>] [<file>|<message-id>]',
   },
   dispatch: {

@@ -4,8 +4,15 @@ export default defineConfig({
   plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.jsonc' },
     miniflare: { bindings: {
       // Test-only fixtures, not credentials for any running/deployed service.
-      HELM_PAT_HASHES: '{"a":["d3fb8ec042f408a3527efbca35f09c220491efb63b231697f4e6f2ed994748d1"],"b":["912225f4855a8456a835984df5cc3fa46520959d7ebea956e62335d8b3357b20"]}',
+      GLASS_ORIGIN: 'https://glass.test', API_ORIGIN: 'https://state.test', GITHUB_CLIENT_ID: 'stub-client',
+      GITHUB_ALLOWLIST: '["123","456"]', AUTH_SECRET: 'test-only-auth-secret-not-a-real-credential-32bytes', GITHUB_CLIENT_SECRET: 'stub-secret',
       TOKEN_SECRET: 'test-only-token-signing-secret-not-for-deployment',
     } } })],
-  test: { include: ['test/**/*.test.ts'] },
+  test: {
+    include: ['test/**/*.test.ts'],
+    // Native D1/DO fixtures are deliberately shared. Migration/deletion tests
+    // must finish before another file resets or reads those same test records.
+    fileParallelism: false,
+    ...(process.platform === 'win32' && { testTimeout: 30_000, hookTimeout: 30_000 }),
+  },
 });

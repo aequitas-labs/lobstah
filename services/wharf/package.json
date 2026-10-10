@@ -13,5 +13,9 @@
     "typescript": "^5.7.0",
     "vitest": "^4.1.0",
     "wrangler": "4.149.0"
+  },
+  "dependencies": {
+    "better-auth": "1.7.6",
+    "zod": "4.5.4"
   }
 }
