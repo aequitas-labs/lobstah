@@ -126,3 +126,15 @@ it('refuses boat addressing on local grounds rather than silently dropping the t
   await expect(wharfCommand('dispatch', [], opts, loadConfig())).rejects.toThrow('requires wharf grounds');
   expect(fs.readdirSync(path.join(home, 'queue'))).toEqual([]);
 });
+it('requires explicit CLI confirmation and warns before granting boat admin', async () => {
+  const fetcher = vi.fn(async (_url: string, _init: RequestInit) => Response.json({ issued: true })); vi.stubGlobal('fetch', fetcher);
+  vi.spyOn(console, 'log').mockImplementation(() => {}); const warning = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: (f: string) => f === '--permission' ? ['work', 'admin'] : [] };
+  await expect(wharfCommand('wharf', ['issue-boat', 'laptop'], opts, loadConfig())).rejects.toThrow('use --grant-admin');
+  expect(fetcher).not.toHaveBeenCalled();
+  flags['--grant-admin'] = '';
+  await wharfCommand('wharf', ['issue-boat', 'laptop'], opts, loadConfig());
+  expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toMatchObject({ name: 'laptop', permissions: ['work', 'admin'], confirmAdmin: true });
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('account deletion'));
+});
