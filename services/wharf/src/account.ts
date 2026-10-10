@@ -191,6 +191,11 @@ export class Account extends DurableObject<Env> {
   private execute(c: Command, actor: Actor, now: number): StoredResult {
     const ok = (value: unknown = {}): StoredResult => ({ status: 200, value });
     const b = c.method === 'GET' ? {} : object(c.body);
+    if (c.path === '_boat' && c.method === 'GET') {
+      requireThat(actor.kind === 'boat', 403, 'boat credential required');
+      const boat = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', actor.id).one();
+      return ok({ id: boat.id, name: boat.name, permissions: actor.permissions });
+    }
     if (c.path === '_issue' && c.method === 'POST') {
       this.requirePermission(actor, 'admin'); requireThat(c.prepared?.id, 403, 'prepared credential required');
       const name = boatName(b.name);

@@ -109,7 +109,7 @@ it('rejects executable evidence URLs from a configured wharf', async () => {
   const backend = new WharfBackend({ kind: 'wharf', url: 'https://state.invalid', account: 'a', tokenEnv: 'TOKEN' }, 'token', { fetch: async () => Response.json([{ id: 'x', repo: 'r', brief: 'b', state: 'done', status: { verb: 'done', at: 'now', evidence: { prUrls: ['javascript:alert(1)'] } } }]) });
   await expect(backend.list()).rejects.toThrow('evidence URL');
 });
-it('resolves --boat by its current name and sends a stable ID; revoke also takes the name', async () => {
+it('resolves addressed --boat by its current name and sends a stable ID', async () => {
   const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
     if (init.method === 'GET') return Response.json([{ id: 'stable-id', name: 'laptop', revoked: 0 }]);
     return Response.json(JSON.parse(String(init.body)));
@@ -118,8 +118,6 @@ it('resolves --boat by its current name and sends a stable ID; revoke also takes
   const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
   await wharfCommand('dispatch', [], opts, loadConfig());
   expect(JSON.parse(String(fetcher.mock.calls[1][1].body))).toMatchObject({ boat: 'stable-id', repoRemote: 'github.com/test/repo' });
-  await wharfCommand('wharf', ['revoke-boat', 'laptop'], opts, loadConfig());
-  expect(fetcher.mock.calls.at(-1)?.[0]).toContain('/boats/stable-id/revoke');
 });
 it('refuses boat addressing on local grounds rather than silently dropping the target', async () => {
   const flags: Record<string, string> = { '--grounds': 'desk', '--boat': 'laptop' };
@@ -127,17 +125,18 @@ it('refuses boat addressing on local grounds rather than silently dropping the t
   await expect(wharfCommand('dispatch', [], opts, loadConfig())).rejects.toThrow('requires wharf grounds');
   expect(fs.readdirSync(path.join(home, 'queue'))).toEqual([]);
 });
-it('requires explicit CLI confirmation and warns before granting boat admin', async () => {
-  expect(() => parseArgs('wharf', ['issue-boat', 'laptop', '--permission', 'work', '--permission', 'admin', '--grant-admin', '--grounds', 'away'])).not.toThrow();
-  expect(() => parseArgs('wharf', ['boat-permissions', 'laptop', '--clear', '--grounds', 'away'])).not.toThrow();
-  const fetcher = vi.fn(async (_url: string, _init: RequestInit) => Response.json({ issued: true })); vi.stubGlobal('fetch', fetcher);
-  vi.spyOn(console, 'log').mockImplementation(() => {}); const warning = vi.spyOn(console, 'error').mockImplementation(() => {});
+it('has no other-boat or admin CLI actions, and whoami inspects only the current boat', async () => {
+  const fetcher = vi.fn(async (_url: string, _init: RequestInit) => Response.json({ name: 'this-boat', permissions: ['work'] })); vi.stubGlobal('fetch', fetcher);
+  vi.spyOn(console, 'log').mockImplementation(() => {});
   const flags: Record<string, string> = { '--grounds': 'away' };
-  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: (f: string) => f === '--permission' ? ['work', 'admin'] : [] };
-  await expect(wharfCommand('wharf', ['issue-boat', 'laptop'], opts, loadConfig())).rejects.toThrow('use --grant-admin');
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  for (const command of ['issue-boat', 'boats', 'boat-permissions', 'revoke-boat', 'rename-boat', 'remove-boat', 'delete-account']) {
+    expect(parseArgs('wharf', [command, '--grounds', 'away'])?.error).toContain('unknown wharf subcommand');
+    await expect(wharfCommand('wharf', [command], opts, loadConfig())).rejects.toThrow('choose a wharf subcommand');
+  }
+  await expect(wharfCommand('wharf', ['whoami', 'another-boat'], opts, loadConfig())).rejects.toThrow('no boat argument');
   expect(fetcher).not.toHaveBeenCalled();
-  flags['--grant-admin'] = '';
-  await wharfCommand('wharf', ['issue-boat', 'laptop'], opts, loadConfig());
-  expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toMatchObject({ name: 'laptop', permissions: ['work', 'admin'], confirmAdmin: true });
-  expect(warning).toHaveBeenCalledWith(expect.stringContaining('account deletion'));
+  expect(parseArgs('wharf', ['whoami', '--grounds', 'away'])?.error).toBeUndefined();
+  await wharfCommand('wharf', ['whoami'], opts, loadConfig());
+  expect(fetcher).toHaveBeenCalledWith('https://state.invalid/v1/accounts/person/_boat', expect.objectContaining({ method: 'GET' }));
 });
