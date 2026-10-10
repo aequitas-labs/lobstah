@@ -1,13 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "lobstah-state",
+  "name": "lobstah-wharf",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-09",
   "compatibility_flags": ["nodejs_compat"],
   "secrets": { "required": ["HELM_PAT_HASHES", "TOKEN_SECRET"] },
   "durable_objects": { "bindings": [{ "name": "ACCOUNTS", "class_name": "Account" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Account"] }],
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "lobstah-state-files", "remote": false }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "lobstah-wharf-files", "remote": false }],
   "observability": { "enabled": false },
   "vars": { "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120" }
   // Secrets: HELM_PAT_HASHES (account -> SHA-256 PAT hashes), TOKEN_SECRET.
