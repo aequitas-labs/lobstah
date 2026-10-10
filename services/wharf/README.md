@@ -2,7 +2,7 @@
 
 An optional coordination authority, separate from telemetry. One person's account
 is one SQLite Durable Object; R2 holds evidence files. Briefs, messages, reports
-and explicitly uploaded evidence go to the chosen server. Checkouts, harness
+and explicitly uploaded evidence go to the chosen wharf. Checkouts, harness
 credentials and local env are not automatically uploaded. Local files remain the default.
 This service has not been deployed. There is no domain, sign-in UI, OAuth, billing,
 second runtime, socket, alarm or background timer.
@@ -98,11 +98,11 @@ that account's PAT hashes. There is no cross-account cleanup or automatic timer.
 
 ## Opt-in CLI routing
 
-Configure named servers and choose one per grounds; omission keeps local files.
-Credentials are looked up per server, never stored in this TOML:
+Configure named wharves and choose one per grounds; omission keeps local files.
+Credentials are looked up per wharf, never stored in this TOML:
 
 ```toml
-[servers.dev]
+[wharves.dev]
 url = "http://127.0.0.1:8787"
 account = "person"
 tokenEnv = "LOBSTAH_DEV_TOKEN"
@@ -112,38 +112,38 @@ repos = ["local-repo"]
 
 [grounds.away]
 repos = ["remote-repo"]
-server = "dev"
+wharf = "dev"
 ```
 
 Remote HTTPS is required except for loopback development. The chosen grounds'
-repos must also exist in the normal repo configuration. Multiple servers can be
+repos must also exist in the normal repo configuration. Multiple wharves can be
 used simultaneously; no command silently fails over to local state.
 
 With the PAT in the configured environment variable, take the helm using
 `lobstah man helm --grounds away --session <id>`, then dispatch/send/cancel with
-the same grounds/session. `lobstah server issue-machine <name> --grounds away`
+the same grounds/session. `lobstah wharf issue-machine <name> --grounds away`
 issues the trusted launcher's one-time credential. On that machine, set its
-credential (not the PAT) in the server's token environment variable and use
+credential (not the PAT) in the wharf's token environment variable and use
 `lobstah soak --grounds away --worker <id> --repo remote-repo --wait`.
 The claimed brief includes the epoch, expiry and dispatch capability.
 
 The trusted launcher must hand **only** that capability to the agent. The core's
-`agentEnvironment` removes every named server's credentials and installs the
+`agentEnvironment` removes every named wharf's credentials and installs the
 selected dispatch token plus `LOBSTAH_GROUNDS`. Phase 0 exposes claim/renew for a
 trusted launcher; it does not move local harness execution or Git worktrees to
-the service. Renew with `server renew --worker <id>` while execution is alive;
-the agent can use `server heartbeat <dispatch>` and its post-tool hook.
+the service. Renew with `wharf renew --worker <id>` while execution is alive;
+the agent can use `wharf heartbeat <dispatch>` and its post-tool hook.
 
 Agents report with the existing six-verb `report` command. `inbox` reads without
-acknowledging; `server receipt <dispatch> <message-id>` acknowledges explicitly.
-Upload evidence using `server upload <dispatch> <file>`, then `report ... --file-id
-<id> --pr <url>`. `man wait --after <opaque-cursor>` polls ordered server events
+acknowledging; `wharf receipt <dispatch> <message-id>` acknowledges explicitly.
+Upload evidence using `wharf upload <dispatch> <file>`, then `report ... --file-id
+<id> --pr <url>`. `man wait --after <opaque-cursor>` polls ordered wharf events
 and renews its helm lease; keep the returned cursor for the next wait. Use
 `--request-key <id>` to retry a mutation without writing twice. Expired results
-go through `server recover <dispatch> <report.json>`, not a new final report.
+go through `wharf recover <dispatch> <report.json>`, not a new final report.
 
-The daemon's existing cadence refreshes independent observational server caches.
-Glass and tend show local and remote work together, labelled by grounds/server;
-the pet reads the same attention feed. An unreachable server shows unknown state
-without blocking local work. Server grounds reject unsupported local operations
+The daemon's existing cadence refreshes independent observational wharf caches.
+Glass and tend show local and remote work together, labelled by grounds/wharf;
+the pet reads the same attention feed. An unreachable wharf shows unknown state
+without blocking local work. Wharf grounds reject unsupported local operations
 (pools, cull, harness attach, PR watches) rather than mutating local authority.
