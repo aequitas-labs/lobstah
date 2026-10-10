@@ -1,4 +1,4 @@
-import type { Grounds } from '@lobstah/core';
+import { displayGrounds, loadConfig, type Config, type Grounds } from '@lobstah/core';
 
 export const HELM_REMINDER = 'Helm reminder: any question or choice for the human goes on a card with lobstah man ask, not only in chat.';
 
@@ -9,9 +9,9 @@ export const HELM_REMINDER = 'Helm reminder: any question or choice for the huma
  * reader to answer the same way. Printed by `man helm` and re-injected by
  * `man brief` on every session start, so it survives restarts and compaction.
  */
-export function charter(g: Grounds): string {
+export function charter(g: Grounds, cfg: Pick<Config, 'grounds'> = loadConfig()): string {
   const repos = g.repos.length > 0 ? g.repos.join(', ') : '(no repos configured)';
-  return `the helm charter — grounds "${g.name}" (${repos})
+  return `the helm charter — grounds "${displayGrounds(g.name, cfg)}" (${repos})
 
 You hold the helm. You are the lobstah man for these grounds.
 

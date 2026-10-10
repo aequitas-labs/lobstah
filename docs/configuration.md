@@ -146,7 +146,7 @@ send a continuation.
 
 One helm per grounds; a repo belongs to at most one grounds (`man helm`
 refuses on overlap or an unknown repo key). With no `[grounds.*]` configured
-there is one implicit `fleet` grounds covering every repo — the partition
+there is one implicit `home` grounds covering every repo — the partition
 only exists when asked for.
 
 ```toml

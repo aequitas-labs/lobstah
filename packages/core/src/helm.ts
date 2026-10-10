@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from './config.js';
+import { displayGrounds, storageGrounds } from './grounds-name.js';
 import { readHold } from './disk.js';
 import type { Notice } from './notices.js';
 import { uniqueTempPath, lobstahHome } from './paths.js';
@@ -128,12 +129,12 @@ export function liveHelms(ttlMs: number, now = Date.now()): HelmRegistration[] {
  * live helm, only that helm's session may make it — one helm must never
  * consume another's cursor or wakes.
  */
-export function helmGate(live: HelmRegistration[], sessionId?: string, grounds?: string): string | undefined {
+export function helmGate(live: HelmRegistration[], sessionId?: string, grounds?: string, cfg: Pick<Config, 'grounds'> = { grounds: {} }): string | undefined {
   if (grounds !== undefined) {
-    const holder = live.find((h) => h.grounds === grounds);
+    const holder = live.find((h) => h.grounds === storageGrounds(grounds, cfg));
     if (holder && holder.sessionId !== sessionId) {
       return (
-        `grounds "${grounds}" is helmed by session ${holder.sessionId.slice(0, 8)} — its verbs are that ` +
+        `grounds "${displayGrounds(holder.grounds, cfg)}" is helmed by session ${holder.sessionId.slice(0, 8)} — its verbs are that ` +
         'session\'s alone. Run this from that session (--session), or take its helm (`lobstah man helm --take`).'
       );
     }
@@ -141,7 +142,7 @@ export function helmGate(live: HelmRegistration[], sessionId?: string, grounds?:
   }
   if (live.length === 0) return undefined; // no claimed lobstah man — open water
   if (sessionId !== undefined && live.some((h) => h.sessionId === sessionId)) return undefined;
-  const holders = live.map((h) => `${h.grounds}=${h.sessionId.slice(0, 8)}`).join(', ');
+  const holders = live.map((h) => `${displayGrounds(h.grounds, cfg)}=${h.sessionId.slice(0, 8)}`).join(', ');
   return (
     `the helm is claimed (${holders}) — this verb is reserved for the helm session. ` +
     'Run it there with --session <helm-session-id>, or take the helm (`lobstah man helm --take`).'
@@ -312,12 +313,12 @@ export function consumeRelievedNotice(sessionId: string): RelievedNotice | undef
 }
 
 /**
- * The configured grounds, or one implicit "fleet" grounds covering every
- * repo when none are configured — the partition only exists when asked for.
+ * Internal grounds identities: configured names, or fleet (displayed as home)
+ * covering every repo. The implicit grounds exists only when none are configured.
  */
 export function groundsList(cfg: Config): Grounds[] {
   const entries = Object.entries(cfg.grounds);
-  if (entries.length === 0) return [{ name: 'fleet', repos: Object.keys(cfg.repos) }];
+  if (entries.length === 0) return [{ name: storageGrounds('home', cfg), repos: Object.keys(cfg.repos) }];
   return entries.map(([name, g]) => ({ name, repos: g.repos }));
 }
 
@@ -343,9 +344,9 @@ export function resolveGrounds(cfg: Config, name?: string): Grounds {
   const all = groundsList(cfg);
   if (name === undefined) {
     if (all.length === 1) return all[0]!;
-    throw new Error(`multiple grounds configured — pass --grounds <${all.map((g) => g.name).join('|')}>`);
+    throw new Error(`multiple grounds configured — pass --grounds <${all.map((g) => displayGrounds(g.name, cfg)).join('|')}>`);
   }
-  const found = all.find((g) => g.name === name);
-  if (!found) throw new Error(`unknown grounds "${name}" (configured: ${all.map((g) => g.name).join(', ')})`);
+  const found = all.find((g) => g.name === storageGrounds(name, cfg));
+  if (!found) throw new Error(`unknown grounds "${name}" (configured: ${all.map((g) => displayGrounds(g.name, cfg)).join(', ')})`);
   return found;
 }

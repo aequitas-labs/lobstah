@@ -7,6 +7,8 @@ import {
   ensureLayout,
   groundsErrors,
   groundsList,
+  displayGrounds,
+  storageGrounds,
   heartbeatHelm,
   helmGate,
   helmLabel,
@@ -124,7 +126,7 @@ describe('the strict helm rule', () => {
     const live = liveHelms(TTL_MS);
     expect(helmGate(live, 's-one')).toBeUndefined();
     expect(helmGate(live, 's-two')).toMatch(/reserved for the helm session/);
-    expect(helmGate(live, undefined)).toMatch(/fleet=s-one/);
+    expect(helmGate(live, undefined)).toMatch(/home=s-one/);
   });
 
   it('a stale helm reserves nothing — dead orchestrators hold no verbs', () => {
@@ -154,6 +156,28 @@ describe('grounds resolution', () => {
   it('no configured grounds means one implicit fleet covering every repo', () => {
     expect(groundsList(BASE)).toEqual([{ name: 'fleet', repos: ['web', 'api'] }]);
     expect(resolveGrounds(BASE).name).toBe('fleet');
+    expect(resolveGrounds(BASE, 'home')).toEqual(resolveGrounds(BASE, 'fleet'));
+    expect(displayGrounds(resolveGrounds(BASE).name, BASE)).toBe('home');
+    expect(storageGrounds('home', BASE)).toBe('fleet');
+    expect(() => resolveGrounds(BASE, 'absent')).toThrow('(configured: home)');
+  });
+
+  it('explicit fleet/home names are never aliases and eliminate the implicit grounds even for unassigned repos', () => {
+    for (const name of ['fleet', 'home']) {
+      const cfg: Config = { ...BASE, grounds: { [name]: { repos: ['web'] } } };
+      expect(groundsList(cfg)).toEqual([{ name, repos: ['web'] }]);
+      expect(displayGrounds(name, cfg)).toBe(name);
+      expect(storageGrounds(name, cfg)).toBe(name);
+      expect(() => resolveGrounds(cfg, name === 'fleet' ? 'home' : 'fleet')).toThrow('unknown grounds');
+      expect(groundsList(cfg).some((g) => g.repos.includes('api'))).toBe(false);
+    }
+  });
+
+  it('the home alias gates against the existing fleet seat, including the general refusal text', () => {
+    takeHelm({ sessionId: 's-one', grounds: resolveGrounds(BASE), ttlMs: TTL_MS });
+    expect(helmGate(liveHelms(TTL_MS), 's-two', 'home', BASE)).toContain('grounds "home"');
+    expect(helmGate(liveHelms(TTL_MS), 's-one', 'home', BASE)).toBeUndefined();
+    expect(helmGate(liveHelms(TTL_MS), 's-two', undefined, BASE)).not.toContain('fleet');
   });
 
   it('a sole configured grounds resolves without a name; several demand one', () => {

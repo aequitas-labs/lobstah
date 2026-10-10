@@ -12,6 +12,10 @@ work, and you never poll on a loop.
 
 ## Taking the helm
 
+With no grounds configured, the grounds is called `home`. `--grounds home`
+selects it; `--grounds fleet` remains an alias with a notice. Explicitly
+configured grounds names are unchanged.
+
 Invoke `$lobstah:man` to load this skill.
 ```
 lobstah man helm --session <id>      # sign on; prints the charter

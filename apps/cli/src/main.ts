@@ -87,6 +87,8 @@ import {
   unseenNotices,
   consumeRelievedNotice,
   groundsErrors,
+  displayGrounds,
+  storageGrounds,
   captureWindow,
   heartbeatHelm,
   expectReply,
@@ -372,7 +374,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
                                   take the helm: one orchestrator per grounds
                                   (a named repo set from [grounds.*], or the
-                                  whole fleet). Prints the charter, arms the
+                                  implicit home grounds). Prints the charter, arms the
                                   Stop hook, and gates the periodic
                                   digest. A live holder refuses without
                                   --take; a stale one is claimable.
@@ -496,7 +498,8 @@ function profileText(profile: ReturnType<typeof listRoster>[number]['profile']):
 }
 
 function gateHelm(who: ResolvedSession | undefined, grounds?: string): void {
-  const refusal = helmGate(liveHelms(loadConfig().helm.ttlSecs * 1000), who?.id, grounds);
+  const cfg = loadConfig();
+  const refusal = helmGate(liveHelms(cfg.helm.ttlSecs * 1000), who?.id, grounds, cfg);
   if (refusal) throw new Error(explainRefusal(refusal, who));
 }
 
@@ -926,6 +929,13 @@ async function mainCli(): Promise<void> {
     const value = flags.get(flag);
     return Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
   };
+  const groundsConfig = loadConfig();
+  const groundsFlag = opt('--grounds');
+  if (groundsFlag !== undefined) {
+    if (groundsFlag === 'fleet' && displayGrounds(groundsFlag, groundsConfig) === 'home')
+      console.error('lobstah: the implicit grounds is now called home; --grounds fleet remains an alias.');
+    flags.set('--grounds', storageGrounds(groundsFlag, groundsConfig));
+  }
   const { wharfCommand } = await import('./wharf-commands.js');
   if (await wharfCommand(cmd, pos, { opt, has, values }, loadConfig())) return;
   const copyFiles = (files: string[], dir: string): Descriptor['attachments'] => {
@@ -1624,7 +1634,7 @@ async function mainCli(): Promise<void> {
       let groundsName = opt('--grounds');
       gateHelm(caller, groundsName);
       if (groundsName === undefined && caller?.id !== undefined) groundsName = helmOf(caller.id)?.grounds;
-      const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName).name : 'fleet';
+      const grounds = resolveGrounds(loadConfig(), groundsName).name;
       let filed: ReportMeta;
       try {
         filed = fileHelmReport(grounds, file, values('--attach'), opt('--title'));
@@ -1632,7 +1642,7 @@ async function mainCli(): Promise<void> {
         if (err instanceof ReportError) throw new UsageError(err.message);
         throw err;
       }
-      console.log(toonKV({ key: filed.key, title: filed.title, author: filed.author, grounds, report: reportMarkdownPath(filed.key), attachments: filed.attachments.length }));
+      console.log(toonKV({ key: filed.key, title: filed.title, author: filed.author, grounds: displayGrounds(grounds, loadConfig()), report: reportMarkdownPath(filed.key), attachments: filed.attachments.length }));
       console.log(toonHelp([`lobstah attention ack ${filed.key}   (when the human has read it)`]));
       break;
     }
@@ -1888,14 +1898,14 @@ async function mainCli(): Promise<void> {
       const grounds = groundsName !== undefined ? resolveGrounds(cfg, groundsName) : undefined;
       const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos });
       if (has('--json')) {
-        console.log(JSON.stringify({ plan: 'dry-run', grounds: grounds?.name ?? 'all', traps: rows }, null, 2));
+        console.log(JSON.stringify({ plan: 'dry-run', grounds: grounds ? displayGrounds(grounds.name, cfg) : 'all', traps: rows }, null, 2));
         break;
       }
       const count = (action: string) => rows.filter((r) => r.action === action).length;
       console.log(
         toonKV({
           plan: 'dry run — launches nothing',
-          grounds: grounds ? `${grounds.name} (${grounds.repos.join(', ') || 'no repos'})` : 'all repos',
+          grounds: grounds ? `${displayGrounds(grounds.name, cfg)} (${grounds.repos.join(', ') || 'no repos'})` : 'all repos',
           resume: count('resume'),
           cold: count('cold'),
           skip: count('skip'),
@@ -2024,7 +2034,7 @@ async function mainCli(): Promise<void> {
       // An identified helm defaults to its own grounds.
       if (groundsName === undefined && sid !== undefined) groundsName = helmOf(sid)?.grounds;
       const grounds = groundsName !== undefined ? resolveGrounds(cfgReport, groundsName) : undefined;
-      const cursor = opt('--cursor') ?? grounds?.name ?? 'fleet';
+      const cursor = storageGrounds(opt('--cursor') ?? grounds?.name ?? 'fleet', cfgReport);
       const digest = buildDigest({ cursor, repos: grounds ? new Set(grounds.repos) : undefined });
       if (has('--json')) console.log(JSON.stringify(digest, null, 2));
       else if (digest.changed) console.log(renderDigest(digest));
@@ -2057,7 +2067,7 @@ async function mainCli(): Promise<void> {
       if ('held' in res) {
         const ageSecs = Math.max(0, Math.round((Date.now() - (Date.parse(res.held.heartbeatAt) || 0)) / 1000));
         throw new Error(
-          `the helm for grounds "${grounds.name}" is held by ${helmLabel(res.held)} (session ${res.held.sessionId.slice(0, 8)}, ` +
+          `the helm for grounds "${displayGrounds(grounds.name, cfg)}" is held by ${helmLabel(res.held)} (session ${res.held.sessionId.slice(0, 8)}, ` +
             `heartbeat ${ageSecs}s ago). Relieve them deliberately with \`lobstah man helm --take\`, or leave it.`,
         );
       }
@@ -2065,7 +2075,7 @@ async function mainCli(): Promise<void> {
       console.log('');
       console.log(
         toonKV({
-          helm: grounds.name,
+          helm: displayGrounds(grounds.name, cfg),
           man: helmLabel(res.ok),
           worker: workerLabel(res.ok),
           session: sessionId,
@@ -2086,7 +2096,7 @@ async function mainCli(): Promise<void> {
       const sessionId = callerSession(opt('--session'), true)?.id;
       if (!sessionId) throw new Error('relieve requires --session <id> (or hook input on stdin, or $CLAUDE_CODE_SESSION_ID)');
       const relieved = relieveHelm(sessionId);
-      console.log(toonKV({ relieved: sessionId, grounds: relieved.length > 0 ? relieved.join(', ') : '(none held)' }));
+      console.log(toonKV({ relieved: sessionId, grounds: relieved.length > 0 ? relieved.map((g) => displayGrounds(g, loadConfig())).join(', ') : '(none held)' }));
       break;
     }
     case 'cancel': {
@@ -2259,7 +2269,7 @@ async function mainCli(): Promise<void> {
         // nothing changed — the loop should not train its reader to skim.
         const digest = peekDigest();
         console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
-        const flags = `${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${groundsName}` : ''}`;
+        const flags = `${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${displayGrounds(groundsName, loadConfig())}` : ''}`;
         console.log(
           toonHelp([
             `lobstah man wait --timeout ${timeoutSecs}${flags}   (re-arm and keep waiting)`,
@@ -2364,7 +2374,7 @@ async function mainCli(): Promise<void> {
         const relievedNotice = hook?.session_id ? consumeRelievedNotice(hook.session_id) : undefined;
         if (relievedNotice) {
           emit(
-            `You were relieved of the helm for grounds "${relievedNotice.grounds}" by session ` +
+            `You were relieved of the helm for grounds "${displayGrounds(relievedNotice.grounds, loadConfig())}" by session ` +
               `${relievedNotice.by.slice(0, 8)} at ${relievedNotice.at}. Stand down: stop dispatching, ` +
               'and do not re-take the helm without the human.',
           );
@@ -2388,7 +2398,7 @@ async function mainCli(): Promise<void> {
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
           advanceCursor(helm!.grounds, d.now);
           emit(
-            `Fleet report for grounds "${helm!.grounds}":\n${renderDigest(d)}\n` +
+            `Fleet report for grounds "${displayGrounds(helm!.grounds, loadConfig())}":\n${renderDigest(d)}\n` +
               'Handle anything actionable; the Stop hook checks again at turn end.',
           );
         };
