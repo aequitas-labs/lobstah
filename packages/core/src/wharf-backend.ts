@@ -48,6 +48,7 @@ function report(v: unknown): ReportInput & { at: string } {
   const out: ReportInput & { at: string } = { verb: r.verb as ReportInput['verb'], at: string(r.at) };
   if (r.note !== undefined) out.note = string(r.note);
   if (r.until !== undefined) out.until = string(r.until);
+  if (r.link !== undefined) out.link = url(r.link);
   if (r.waitingOn !== undefined) {
     if (!['review', 'pr', 'deploy', 'person', 'external'].includes(String(r.waitingOn))) throw new BackendError(502, 'invalid waiting kind');
     out.waitingOn = r.waitingOn as ReportInput['waitingOn'];
@@ -87,6 +88,7 @@ export class WharfBackend implements CoordinationBackend {
       const unservable = r.unservable ? record(r.unservable) : undefined;
       return { ...input(r), state: r.state as DispatchView['state'], ...(r.status ? { status: report(r.status) } : {}),
         ...(r.boatName ? { boatName: string(r.boatName) } : {}),
+        ...(r.workerId ? { workerId: string(r.workerId) } : {}), ...(r.claimedBoat ? { claimedBoat: string(r.claimedBoat) } : {}),
         ...(unservable ? { unservable: { repo: string(unservable.repo), note: string(unservable.note) } } : {}) };
     });
   }
@@ -127,8 +129,15 @@ export class WharfBackend implements CoordinationBackend {
     throw new BackendError(499, 'wait cancelled');
   }
   async upload(id: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
-    const response = await (this.options.fetch ?? fetch)(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/dispatches/${encodeURIComponent(id)}/files`, {
-      method: 'POST', headers: { Authorization: `Bearer ${this.token}`, 'Idempotency-Key': key, 'X-File-Name': name },
+    return this.uploadPath(`dispatches/${encodeURIComponent(id)}/files`, name, bytes, key);
+  }
+  async uploadDocument(id: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
+    return this.uploadPath(`documents/${encodeURIComponent(id)}/files`, name, bytes, key);
+  }
+  private async uploadPath(path: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
+    const response = await (this.options.fetch ?? fetch)(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/${path}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${this.token}`, 'Idempotency-Key': key, 'X-File-Name': name,
+        ...(this.options.session ? { 'X-Lobstah-Helm': this.options.session } : {}) },
       body: new Uint8Array(bytes).buffer, signal: AbortSignal.timeout(30000), redirect: 'manual',
     });
     const result = record(await responseValue(response));
