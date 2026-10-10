@@ -55,17 +55,20 @@ Boat credentials carry a steering layer (`read < helm < admin`) and independent
 | read | Account job state, messages, events, boats and evidence downloads |
 | work | This boat's worker sign-on, claims and renewals |
 | helm | Read plus dispatch, message, cancel and exclusive helm lease operations |
-| admin | Helm plus issue/revoke/rename/remove boats, change permissions, delete account |
+| admin | Helm plus approved boat enrollment, revoke boats, delete account |
 
-Omission defaults to `work` plus `read`. `POST boats` accepts `permissions`; `POST
-boats/:id/permissions` replaces them (an empty array removes all grants).
-An `admin` grant additionally requires `confirmAdmin: true`. Person-admin glass
-actions manage other boats and deletion; there are no CLI admin commands. The CLI
+Omission defaults to `work` plus `read`. This interim slice's `POST boats` accepts
+`permissions`; the sign-in slice replaces that operator route with approved login.
+An `admin` grant additionally requires `confirmAdmin: true`. The signed-in glass
+lists boats and permits revocation only, plus confirmed account deletion on that
+same page. Boat name and access change only through login on that boat, approved
+as requested, with less access, or refused. There are no grant/rename/edit controls
+or separate boat-removal route, and no CLI admin commands. The CLI
 acts only as its current boat; `wharf whoami` shows its own name and grants, even
 for a work-only boat. A machine's login will store only its boat credential, never
 a person session. Normal device approval requests work plus read; `--helm` requests
 work plus helm, and `--work-only` requests only work. Admin is not requestable from
-the CLI. Import of a glass-issued credential is via stdin/file, not a process argument.
+the CLI. Credential import is via stdin/file, not a process argument.
 Only the highest steering layer is stored, not its implied permissions. Replacing
 `helm` with no steering layer removes read access too; explicitly selecting `read`
 is a downgrade. `work` never implies read or steering authority.
@@ -207,8 +210,8 @@ background timer or connection.
 
 Boat IDs are account-scoped identities, not credential IDs. Names use letters,
 digits, `-` or `_`, at most 64 characters, normalized to lowercase and unique
-per account. `wharf issue-boat <name>` creates that boat or rotates its current
-credential: its ID, worker repos and addressed work remain intact, while the
+per account. The sign-in slice's `wharf login` creates a boat or rotates its current
+credential after approval: its ID, worker repos and addressed work remain intact, while the
 previous credential fails on its next request. Retries reveal no credential.
 
 `dispatch --boat <name>` resolves the name through `GET boats` and sends the
@@ -217,8 +220,7 @@ match; a trap address may additionally narrow the target. Neither address
 falls back. Revocation leaves queued work on that boat and labels it unservable.
 Status and events label the current name, including after a rename.
 
-`wharf revoke-boat <name>` revokes only the credential. `wharf rename-boat
-<old-name> <new-name>` preserves the ID. `wharf remove-boat <name> --confirm`
-explicitly removes the boat only if no queued/active work is addressed to it
-or claimed on it; cancel that work first. Corresponding PAT routes are
-`POST boats/:id/rename` and `DELETE boats/:id`, separate from account deletion.
+The signed-in boat list's revoke action invalidates the credential and is the
+only boat-removal action. Stable IDs and sticky addressed work remain recorded;
+revocation never silently reassigns that work. Renaming or changing access requires
+approved login from the boat; no public grant-editing or rename API exists.
