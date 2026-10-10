@@ -31,7 +31,7 @@ const HARNESS = 'claude|codex';
 
 export const COMMANDS: Record<string, CommandSpec> = {
   wharf: {
-    subverbs: ['issue-boat', 'boats', 'revoke-boat', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries', 'delete-account'],
+    subverbs: ['issue-boat', 'boats', 'revoke-boat', 'rename-boat', 'remove-boat', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries', 'delete-account'],
     flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--confirm': {} },
     positionals: '<action> [<id>] [<file>|<message-id>]',
   },
@@ -228,6 +228,7 @@ for (const [name, spec] of Object.entries(COMMANDS)) {
 for (const name of ['dispatch', 'send', 'cancel', 'report', 'soak', 'wharf', 'man:helm', 'man:relieve']) COMMANDS[name]!.flags['--request-key'] = { value: '<id>' };
 COMMANDS.report!.flags['--file-id'] = { value: '<id>', repeatable: true };
 COMMANDS.soak!.flags['--worker'] = { value: '<id>' };
+COMMANDS.dispatch!.flags['--boat'] = { value: '<name>' };
 COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 
 /** Hand-written prose under each generated synopsis. */

@@ -159,10 +159,50 @@ it('stores only boat credential hashes and returns a credential only once', asyn
   const response = await call('boats', { name: 'laptop' }, pat, 'issue');
   const first = await response.json<{ id: string; token: string }>();
   const retry = await (await call('boats', { name: 'laptop' }, pat, 'issue')).json<Record<string, unknown>>(); expect(retry.token).toBeUndefined();
-  const hash = await digest(first.token);
+  const hash = await digest(first.token.split('.').at(-1)!);
   await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => {
     expect(state.storage.sql.exec<{ hash: string }>('SELECT hash FROM boats WHERE id=?', first.id).one().hash).toBe(hash);
   });
+});
+it('rotates a unique named boat credential without losing its identity, repos or sticky work', async () => {
+  const a = await boat('laptop'); const other = await boat('other');
+  await call('dispatches', { id: 'sticky', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work', boat: a.id });
+  const rotated = await (await call('boats', { name: 'LAPTOP' }, pat, 'rotate')).json<{ id: string; name: string; token: string }>();
+  expect(rotated).toMatchObject({ id: a.id, name: 'laptop' });
+  expect(rotated.token).not.toBe(a.token);
+  expect((await call('workers/renew', { worker: 'laptop' }, a.token)).status).toBe(401);
+  expect((await call('workers/renew', { worker: 'laptop' }, rotated.token)).status).toBe(200);
+  const retry = await (await call('boats', { name: 'laptop' }, pat, 'rotate')).json<{ token?: string }>();
+  expect(retry.token).toBeUndefined();
+  expect((await call('workers/renew', { worker: 'laptop' }, rotated.token)).status).toBe(200);
+  expect(await (await call('claims', { worker: 'other' }, other.token)).json()).toBeNull();
+  expect((await claim(rotated.token, 'laptop')).dispatch.id).toBe('sticky');
+});
+it('revocation leaves boat-addressed work unservable and sticky; rename preserves identity and updates labels', async () => {
+  const a = await boat('laptop'); const other = await boat('other');
+  await call('dispatches', { id: 'sticky', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work', boat: a.id });
+  expect((await call(`boats/${a.id}/revoke`, {})).status).toBe(200);
+  expect(await (await call('dispatches/sticky')).json()).toMatchObject({ boat: a.id, boatName: 'laptop', state: 'queued', unservable: { note: expect.stringContaining('credential revoked') } });
+  expect(await (await call('claims', { worker: 'other' }, other.token)).json()).toBeNull();
+  expect((await call(`boats/${a.id}/rename`, { name: 'desk' })).status).toBe(200);
+  expect(await (await call('dispatches/sticky')).json()).toMatchObject({ boat: a.id, boatName: 'desk', unservable: { note: expect.stringContaining('boat desk') } });
+  const events = (await (await call('events')).json<{ events: { dispatchId?: string; boatName?: string; note?: string }[] }>()).events.filter((e) => e.dispatchId === 'sticky');
+  expect(events.every((e) => e.boatName === 'desk')).toBe(true);
+  expect(events.some((e) => e.note?.includes('boat laptop'))).toBe(false);
+  expect((await call(`boats/${a.id}/rename`, { name: 'other' })).status).toBe(409);
+  expect((await call('boats', { name: 'unsafe name' })).status).toBe(400);
+});
+it('explicit boat removal refuses open targets and claims, and works only after cancellation', async () => {
+  const a = await boat('laptop');
+  await call('dispatches', { id: 'sticky', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work', boat: a.id });
+  const remove = () => SELF.fetch(`https://state.test/v1/accounts/a/boats/${a.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${pat}`, 'Idempotency-Key': `remove-${++key}` } });
+  expect((await remove()).status).toBe(409);
+  await claim(a.token, 'laptop');
+  expect((await remove()).status).toBe(409);
+  await call('dispatches/sticky/cancel', {});
+  expect((await remove()).status).toBe(200);
+  expect((await (await call('boats')).json<unknown[]>())).toEqual([]);
+  expect((await call('workers/renew', { worker: 'laptop' }, a.token)).status).toBe(401);
 });
 it('reading a message does not receipt it; done waits for explicit receipt', async () => {
   const m = await boat(); await enqueue(); const r = await claim(m.token);

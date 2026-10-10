@@ -3,7 +3,7 @@ export type BackendVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 
 export type BackendWait = 'review' | 'pr' | 'deploy' | 'person' | 'external';
 export interface DispatchInput {
   id: string; repo: string; repoRemote?: string; brief: string; lane?: 'work' | 'chore';
-  for?: string; followUp?: string; harness?: string; model?: string; effort?: string;
+  for?: string; boat?: string; followUp?: string; harness?: string; model?: string; effort?: string;
 }
 export interface ReportInput {
   verb: BackendVerb; note?: string; waitingOn?: BackendWait; link?: string; until?: string;
@@ -12,13 +12,13 @@ export interface ReportInput {
 export interface BackendStatus extends ReportInput { at: string; reported?: true }
 export interface DispatchView extends DispatchInput {
   state: 'queued' | 'active' | 'done' | 'cancelled'; status?: BackendStatus;
-  unservable?: { repo: string; note: string };
+  boatName?: string; unservable?: { repo: string; note: string };
 }
 export interface ClaimReceipt {
   dispatch: DispatchInput; epoch?: number; token?: string; leaseUntil?: string;
 }
 export interface BackendMessage { id: string; text: string; received: boolean }
-export interface BackendEvent { cursor: string; kind: string; dispatchId?: string; at: string; note?: string }
+export interface BackendEvent { cursor: string; kind: string; dispatchId?: string; at: string; note?: string; boatName?: string }
 export interface EventBatch { events: BackendEvent[]; cursor: string }
 export interface BackendLocation { kind: 'wharf'; url: string; account: string; tokenEnv: string }
 export interface CoordinationBackend {
