@@ -1,0 +1,6 @@
+/* Native buttons keep the existing glass card typography, not UA defaults. */
+button.card {
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}

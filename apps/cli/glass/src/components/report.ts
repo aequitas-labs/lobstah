@@ -1,101 +1,19 @@
 import type { GlassReport } from '@lobstah/core';
-import { bareImageName, parseMarkdown, safeHref } from '../../../src/glass-markdown.js';
-import type { MdBlock, MdInline } from '../../../src/glass-markdown.js';
+import { MarkdownElements } from './markdown.js';
 import { reportFileUrl, reportFrom } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 import { Age, ImageThumb, attachmentRows, cmdRow } from './common.js';
 
-/**
- * A report page: its markdown as elements. Text stays text (raw HTML shows
- * as written), links open in a new tab, and an image loads only from the
- * report's own attachments by bare filename.
- */
-
-/** Where an image named by bare filename loads from: the report's or the decision's own attachments. */
 type FileUrl = (name: string) => string;
-
-function inline(fileUrl: FileUrl, nodes: MdInline[]): Children {
-  return nodes.map((n) => {
-    switch (n.t) {
-      case 'text':
-        return n.v;
-      case 'code':
-        return html`<code>${n.v}</code>`;
-      case 'b':
-        return html`<strong>${inline(fileUrl, n.c)}</strong>`;
-      case 'i':
-        return html`<em>${inline(fileUrl, n.c)}</em>`;
-      case 'br':
-        return html`<br />`;
-      case 'a': {
-        const href = safeHref(n.href);
-        return href ? html`<a href=${href} target="_blank" rel="noopener noreferrer">${inline(fileUrl, n.c)}</a>` : inline(fileUrl, n.c);
-      }
-      case 'img': {
-        const name = bareImageName(n.src);
-        return name
-          ? ImageThumb(fileUrl(name), n.alt || name, 'mdimg')
-          : html`<span class="dim">[image not shown: ${n.alt || n.src}]</span>`;
-      }
-    }
-  });
-}
-
-function blocks(fileUrl: FileUrl, list: MdBlock[]): Children {
-  return list.map((b) => {
-    switch (b.t) {
-      case 'h': {
-        const c = inline(fileUrl, b.c);
-        return b.level === 1
-          ? html`<h1>${c}</h1>`
-          : b.level === 2
-            ? html`<h2>${c}</h2>`
-            : b.level === 3
-              ? html`<h3>${c}</h3>`
-              : html`<h4>${c}</h4>`;
-      }
-      case 'p':
-        return html`<p>${inline(fileUrl, b.c)}</p>`;
-      case 'code':
-        return html`<pre class="mdcode"><code>${b.v}</code></pre>`;
-      case 'hr':
-        return html`<hr />`;
-      case 'quote':
-        return html`<blockquote>${blocks(fileUrl, b.c)}</blockquote>`;
-      case 'list': {
-        const items = b.items.map((it) => html`<li>${blocks(fileUrl, it)}</li>`);
-        return b.ordered ? html`<ol start=${b.start}>${items}</ol>` : html`<ul>${items}</ul>`;
-      }
-      case 'table':
-        return html`<div class="mdtable"><table><thead><tr>${b.head.map((c, i) => html`<th style=${b.align[i] ? 'text-align:' + b.align[i] : undefined}>${inline(fileUrl, c)}</th>`)}</tr></thead><tbody>${b.rows.map(
-          (row) =>
-            html`<tr>${row.map((c, i) => html`<td style=${b.align[i] ? 'text-align:' + b.align[i] : undefined}>${inline(fileUrl, c)}</td>`)}</tr>`,
-        )}</tbody></table></div>`;
-    }
-  });
-}
-
-/**
- * Parsed markdown by text. A modal re-renders on every 2 s poll; the same
- * text is parsed once, not per render. Holds the few texts shown recently.
- */
-const parsed = new Map<string, MdBlock[]>();
-function parseOnce(text: string): MdBlock[] {
-  let tree = parsed.get(text);
-  if (!tree) {
-    tree = parseMarkdown(text);
-    parsed.set(text, tree);
-    if (parsed.size > 8) parsed.delete(parsed.keys().next().value!);
-  }
-  return tree;
-}
+const markdown = (text: string, fileUrl: FileUrl) =>
+  html`<${MarkdownElements} text=${text} image=${(name: string, alt: string) => ImageThumb(fileUrl(name), alt, 'mdimg')} />`;
 
 /** The page body for one report's markdown, or the loading and error states. */
 export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string; error?: string } | undefined }) {
   const body =
     text?.text !== undefined
-      ? blocks((name) => reportFileUrl(r.key, name), parseOnce(text.text))
+      ? markdown(text.text, (name) => reportFileUrl(r.key, name))
       : text?.error
         ? html`<div class="bad">${text.error}</div>`
         : html`<div class="dim">loading…</div>`;
@@ -104,7 +22,7 @@ export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string;
 
 /** Markdown as elements, with images from `fileUrl` (a decision's detail page). */
 export function Markdown({ text, fileUrl }: { text: string; fileUrl: FileUrl }) {
-  return html`<div class="mdpage">${blocks(fileUrl, parseOnce(text))}</div>`;
+  return html`<div class="mdpage">${markdown(text, fileUrl)}</div>`;
 }
 
 /** The report's heading line: who it is from (a trap, a headless dispatch's id, nothing for the helm), its age, and `acked`. */
