@@ -25,9 +25,10 @@ export function dispatchInput(value: unknown): DispatchInput {
   keys(b, ['id', 'repo', 'brief', 'lane', 'for', 'followUp', 'harness', 'model', 'effort']);
   const d: DispatchInput = { id: identifier(b.id), repo: identifier(b.repo), brief: text(b.brief, 48000) };
   if (b.lane !== undefined) { requireThat(b.lane === 'work' || b.lane === 'chore', 400, 'invalid lane'); d.lane = b.lane; }
-  for (const k of ['for', 'followUp', 'harness', 'model', 'effort'] as const) {
+  for (const k of ['for', 'followUp', 'harness', 'effort'] as const) {
     if (b[k] !== undefined) d[k] = identifier(b[k]);
   }
+  if (b.model !== undefined) { const model = text(b.model, 128); requireThat(/^[A-Za-z0-9._-]+$/.test(model), 400, 'invalid model identifier'); d.model = model; }
   return d;
 }
 export function reportInput(value: unknown): ReportInput {
