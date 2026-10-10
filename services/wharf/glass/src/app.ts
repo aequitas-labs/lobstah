@@ -5,6 +5,7 @@ import { Document, Job } from './details.js';
 import { DeviceApproval } from './device.js';
 import { json } from './api.js';
 import { requestState } from './model.js';
+import { glassWake } from './wake.js';
 import type { DispatchView, Snapshot } from './model.js';
 
 export function App() {
@@ -17,6 +18,7 @@ export function App() {
   const [modal, setModal] = useState<{ kind: 'job' | 'document' | 'worker'; id: string }>();
   const generation = useRef(0);
   const loggedOut = useRef(false);
+  const wake = useRef<ReturnType<typeof glassWake>>();
   const busy = useRef(false),
     live = useRef(true);
   const refresh = async () => {
@@ -36,6 +38,7 @@ export function App() {
       setError(message);
       if (message.startsWith('Sign in')) {
         loggedOut.current = true;
+        wake.current?.close();
         setSignedOut(true);
         setSnapshot(undefined);
         setJobs([]);
@@ -46,10 +49,13 @@ export function App() {
   useEffect(() => {
     live.current = true;
     void refresh();
-    const timer = setInterval(refresh, 15000);
+    wake.current = glassWake(() => { if (!loggedOut.current && live.current) void refresh(); });
+    wake.current.connect();
+    const timer = setInterval(() => { void refresh(); if (!loggedOut.current) wake.current?.connect(); }, 15000);
     return () => {
       live.current = false;
       clearInterval(timer);
+      wake.current?.close();
     };
   }, []);
   const notify = (message: string, bad = false) => {
@@ -85,6 +91,7 @@ export function App() {
   };
   const signOut = async () => {
     loggedOut.current = true;
+    wake.current?.close();
     generation.current++;
     try {
       await json('/api/auth/sign-out', {});
@@ -101,6 +108,7 @@ export function App() {
     if (busy.current) return;
     busy.current = true;
     loggedOut.current = true;
+    wake.current?.close();
     generation.current++;
     try {
       await json('/api/glass/account', { confirm: true }, 'DELETE');
