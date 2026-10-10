@@ -1,12 +1,13 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { DispatchInput, ReportInput, BackendEvent } from '../../../packages/core/src/backend-model.js';
-import { ApiError, capability, digest, dispatchInput, identifier, object, reportInput, requireThat, sameHash, text } from './protocol.js';
+import { ApiError, capability, digest, dispatchInput, hex, identifier, object, reportInput, requireThat, sameHash, text } from './protocol.js';
 
 type Actor = { kind: 'helm'; id: string } | { kind: 'boat'; id: string } | { kind: 'dispatch'; id: string; epoch: number };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
 type BoatRow = { id: string; name: string; hash: string; revoked: number };
 type WorkerRow = { id: string; boat: string; repo: string; seen: number };
 type StoredResult = { status: number; value: unknown };
+type FileRow = { id: string; dispatch: string; name: string; size: number; hash: string; ready: number };
 export type Command = { account: string; helm: boolean; token: string; method: string; path: string; key?: string; session?: string; body: unknown; after?: string;
   prepared?: { id?: string; hash: string } };
 const LEASE_MS = 90_000;
@@ -14,6 +15,8 @@ const HELM_MS = 120_000;
 
 /** One account's only coordination authority. No alarms, timers or sockets. */
 export class Account extends DurableObject<Env> {
+  /** Serialises only R2 mutations in this live instance; ownership stays in SQL. */
+  private fileTail: Promise<unknown> = Promise.resolve();
   async handle(command: string): Promise<string> { return JSON.stringify(await this.request(JSON.parse(command))); }
   async request(c: Command): Promise<StoredResult> {
     try {
@@ -37,6 +40,8 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS idem (actor TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(actor,key));
       CREATE TABLE IF NOT EXISTS recoveries (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS claims (dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(dispatch,epoch));
+      CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, dispatch TEXT NOT NULL, text TEXT NOT NULL, received INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, hash TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0);
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
   }
@@ -96,7 +101,7 @@ export class Account extends DurableObject<Env> {
     b.count++; this.set('budget', JSON.stringify(b));
   }
   private capacity() {
-    const tables = ['boats', 'workers', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims'];
+    const tables = ['boats', 'workers', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'messages', 'files'];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
@@ -174,7 +179,7 @@ export class Account extends DurableObject<Env> {
     if (c.path === 'workers/renew' && c.method === 'POST') {
       requireThat(actor.kind === 'boat', 403, 'boat scope required'); const w = this.worker(b.worker, actor.id);
       this.ctx.storage.sql.exec('UPDATE workers SET seen=? WHERE id=?', now, w.id);
-      this.ctx.storage.sql.exec("UPDATE dispatches SET lease=? WHERE worker=? AND boat=? AND state='active' AND lease>?", now + LEASE_MS, w.id, actor.id, now);
+      this.ctx.storage.sql.exec("UPDATE dispatches SET lease=? WHERE worker=? AND boat=? AND state='active'", now + LEASE_MS, w.id, actor.id);
       return ok();
     }
     if (c.path === 'dispatches' && c.method === 'POST') {
@@ -212,6 +217,8 @@ export class Account extends DurableObject<Env> {
       if (action === 'report' && c.method === 'POST') {
         requireThat(actor.kind === 'dispatch', 403, 'dispatch scope required'); const report = reportInput(b);
         requireThat(d.state === 'active', 409, 'dispatch no longer active');
+        if (report.verb === 'done') requireThat(!this.ctx.storage.sql.exec('SELECT id FROM messages WHERE dispatch=? AND received=0', d.id).toArray().length, 409, 'unreceived messages; read and receipt before done');
+        for (const file of report.evidence?.files ?? []) requireThat(this.ctx.storage.sql.exec('SELECT id FROM files WHERE id=? AND dispatch=? AND ready=1', file, d.id).toArray().length, 400, 'evidence file not uploaded to this dispatch');
         if (report.verb === 'paused' && !report.until) report.until = new Date(now + 86400_000).toISOString();
         this.ctx.storage.sql.exec('INSERT INTO reports(dispatch,data) VALUES (?,?)', d.id, JSON.stringify({ ...report, at: new Date(now).toISOString() }));
         const revoked = this.ctx.storage.sql.exec<{ revoked: number }>('SELECT revoked FROM boats WHERE id=?', d.boat).toArray()[0]?.revoked;
@@ -223,6 +230,38 @@ export class Account extends DurableObject<Env> {
         const report = reportInput(b); const id = crypto.randomUUID();
         this.ctx.storage.sql.exec('INSERT INTO recoveries VALUES (?,?,?,?)', id, d.id, actor.epoch, JSON.stringify(report));
         this.event('recovery-submitted', d.id); return ok({ id, finalised: false });
+      }
+      if (action === 'recoveries' && c.method === 'GET') {
+        requireThat(actor.kind === 'helm', 403, 'helm scope required');
+        return ok(this.ctx.storage.sql.exec('SELECT id,epoch,data FROM recoveries WHERE dispatch=? LIMIT 100', d.id).toArray());
+      }
+      if (action === 'messages' && !parts[3] && c.method === 'POST') {
+        this.helm(c, actor, now);
+        const row = this.ctx.storage.sql.exec<{ id: number }>('INSERT INTO messages(dispatch,text) VALUES (?,?) RETURNING id', d.id, text(b.text, 16000)).one();
+        this.event('message', d.id); return ok({ id: String(row.id) });
+      }
+      if (action === 'messages' && c.method === 'GET') {
+        return ok(this.ctx.storage.sql.exec<{ id: number; text: string; received: number }>('SELECT id,text,received FROM messages WHERE dispatch=? AND received=0 ORDER BY id LIMIT 100', d.id).toArray().map((m) => ({ ...m, id: String(m.id), received: !!m.received })));
+      }
+      if (action === 'messages' && parts[3] && parts[4] === 'receipt' && c.method === 'POST') {
+        requireThat(actor.kind === 'dispatch', 403, 'dispatch scope required');
+        requireThat(/^\d+$/.test(parts[3]), 400, 'invalid message id');
+        requireThat(this.ctx.storage.sql.exec('SELECT id FROM messages WHERE id=? AND dispatch=?', parts[3], d.id).toArray().length, 404, 'message not found');
+        this.ctx.storage.sql.exec('UPDATE messages SET received=1 WHERE id=? AND dispatch=?', parts[3], d.id); this.event('message-received', d.id); return ok();
+      }
+      if (action === 'files' && c.method === 'GET' && parts[3]) {
+        const f = this.ctx.storage.sql.exec<FileRow>('SELECT * FROM files WHERE id=? AND dispatch=? AND ready=1', identifier(parts[3]), d.id).toArray()[0];
+        requireThat(f, 404, 'file not found'); return ok(f);
+      }
+      if (action === 'files' && c.method === 'POST') {
+        // Used only by upload(), which bounds and hashes the actual bytes.
+        requireThat(actor.kind === 'dispatch' && d.state === 'active' && c.prepared?.id, 403, 'active dispatch token required');
+        const name = text(b.name, 128); requireThat(!/[\x00-\x1f/\\]/.test(name), 400, 'invalid file name');
+        requireThat(typeof b.size === 'number' && Number.isInteger(b.size) && b.size >= 0 && b.size <= Number(this.env.MAX_FILE_BYTES), 413, 'file too large');
+        const sum = this.ctx.storage.sql.exec<{ n: number }>('SELECT coalesce(sum(size),0) AS n FROM files').one().n;
+        requireThat(sum + b.size + this.ctx.storage.sql.databaseSize <= Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
+        this.ctx.storage.sql.exec('INSERT INTO files(id,dispatch,name,size,hash) VALUES (?,?,?,?,?)', c.prepared.id, d.id, name, b.size, c.prepared.hash);
+        return ok({ id: c.prepared.id });
       }
     }
     throw new ApiError(404, 'route not found');
@@ -250,5 +289,57 @@ export class Account extends DurableObject<Env> {
     // The persisted hash verifies the unguessable secret; account/id/epoch
     // are checked against this account's dispatch and claim history.
     return { ...result, value: { dispatch: r.dispatch, epoch: r.epoch, token, leaseUntil: r.leaseUntil } };
+  }
+  private serialFile<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.fileTail.catch(() => {}).then(fn); this.fileTail = result.catch(() => {}); return result;
+  }
+  async upload(command: string, bytes: Uint8Array): Promise<string> {
+    return this.serialFile(async () => {
+      try {
+        const c: Command = JSON.parse(command);
+        const hash = hex(await crypto.subtle.digest('SHA-256', bytes)); const id = crypto.randomUUID();
+        c.body = { ...object(c.body), size: bytes.byteLength, hash };
+        c.prepared = { id, hash };
+        const reserve = await this.command(c); const file = identifier(object(reserve.value).id);
+        const row = this.ctx.storage.sql.exec<FileRow>('SELECT * FROM files WHERE id=?', file).one();
+        if (!row.ready) {
+          await this.env.FILES.put(`${c.account}/${file}`, bytes, { sha256: hash, httpMetadata: { contentType: 'application/octet-stream', contentDisposition: 'attachment' } });
+          // SQL tombstones cannot race deletion: deleteAccount uses this same
+          // R2 serial queue, and all metadata remains durable across eviction.
+          this.ctx.storage.sql.exec('UPDATE files SET ready=1 WHERE id=?', file); this.event('file-uploaded', row.dispatch);
+        }
+        return JSON.stringify({ status: 200, value: { id: file, bytes: row.size } });
+      } catch (e) {
+        if (e instanceof ApiError) return JSON.stringify({ status: e.status, value: { error: e.message } });
+        throw e;
+      }
+    });
+  }
+  async deleteAccount(command: string): Promise<string> {
+    return this.serialFile(async () => {
+      const c: Command = JSON.parse(command);
+      try {
+        requireThat(c.helm, 403, 'helm scope required');
+        requireThat(c.key && /^[A-Za-z0-9_-]{1,128}$/.test(c.key), 400, 'Idempotency-Key required');
+        const keyHash = await digest(c.key);
+        const prior = this.get('deleted'); requireThat(!prior || prior === keyHash, 410, 'account deleted');
+        this.set('deleted', keyHash); // reject every other request before R2 I/O
+        for (;;) {
+          const files = await this.env.FILES.list({ prefix: `${c.account}/`, limit: 1000 });
+          if (!files.objects.length) break;
+          await this.env.FILES.delete(files.objects.map((f) => f.key));
+        }
+        this.ctx.storage.transactionSync(() => {
+          for (const table of ['boats', 'workers', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'messages', 'files']) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+          this.ctx.storage.sql.exec("DELETE FROM meta WHERE key!='deleted'");
+        });
+        // Keep only a tombstone: static operator-provisioned PATs cannot recreate
+        // the deleted account. Remove its PAT hashes to complete deprovisioning.
+        return JSON.stringify({ status: 200, value: { deleted: true } });
+      } catch (e) {
+        if (e instanceof ApiError) return JSON.stringify({ status: e.status, value: { error: e.message } });
+        throw e;
+      }
+    });
   }
 }
