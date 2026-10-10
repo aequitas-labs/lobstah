@@ -1,10 +1,24 @@
 import * as fs from 'node:fs';
-import * as os from 'node:os';
+import os from 'node:os';
+import childProcess from 'node:child_process';
 import { forgetWharfCredential, isBoatCredential, saveWharfCredential, wharfCredential, WharfBackend } from '@lobstah/core';
 import type { BackendScope } from '@lobstah/core';
 
 type Options = { opt: (flag: string) => string | undefined; has: (flag: string) => boolean };
 type WharfScope = Extract<BackendScope, { kind: 'wharf' }>;
+export function cleanBoatName(value: string): string {
+  return value.toLowerCase().replace(/['’]s\b/g, '').replace(/['’]/g, '').replace(/[^a-z0-9\s-]/g, '')
+    .trim().replace(/[\s-]+/g, '-').slice(0, 64).replace(/-+$/, '') || 'boat';
+}
+export function systemBoatName(): string {
+  if (process.platform === 'darwin') {
+    try {
+      const short = childProcess.execFileSync('/usr/sbin/scutil', ['--get', 'LocalHostName'], { encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (short) return cleanBoatName(short);
+    } catch { /* A missing short system name falls back to the hostname. */ }
+  }
+  return cleanBoatName(os.hostname().split('.')[0]);
+}
 function importedCredential(file: string): string {
   const descriptor = file === '-' ? 0 : fs.openSync(file, 'r');
   try {
@@ -56,7 +70,7 @@ export async function wharfLogin(scope: WharfScope, action: string, opts: Option
   const old = wharfCredential(scope);
   if (old && !isBoatCredential(old, scope.location.account)) throw new Error('login acts as a boat, not a person or dispatch credential');
   const current = old ? await new WharfBackend(scope.location, old).request('_boat') as { name: string } : undefined;
-  const name = opts.opt('--name') ?? current?.name ?? os.hostname().toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 64);
+  const name = opts.opt('--name') ?? current?.name ?? systemBoatName();
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) throw new Error('choose --name with 1–64 letters, digits, hyphens or underscores');
   const steering = opts.has('--work-only') ? 'none' : opts.has('--helm') ? 'helm' : 'read';
   const issued = await authPost(scope, 'device/code', { client_id: 'lobstah-cli', account: scope.location.account, name, steering, ...(old ? { boatToken: old } : {}) });
