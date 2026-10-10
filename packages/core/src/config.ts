@@ -247,7 +247,8 @@ export interface GlassConfig {
 /** A named territory: the subset of configured repos one helm oversees. */
 export interface GroundsConfig {
   repos: string[];
-  backend?: import('./backend.js').BackendLocation;
+  /** Omitted: local files. Otherwise an entry in servers, never a global mode. */
+  server?: string;
 }
 
 export interface Config {
@@ -259,6 +260,7 @@ export interface Config {
   glass: GlassConfig;
   watch: WatchConfig;
   grounds: Record<string, GroundsConfig>;
+  servers?: Record<string, import('./backend-model.js').BackendLocation>;
   /** Worktree pools for headless dispatches (`[pools.<name>]`). */
   pools: Record<string, PoolConfig>;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
@@ -382,9 +384,15 @@ export function loadConfig(): Config {
     };
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;
+  const servers: Record<string, import('./backend-model.js').BackendLocation> = {};
+  for (const [name, value] of Object.entries((raw.servers ?? {}) as Record<string, Record<string, unknown>>)) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new Error('invalid server name');
+    servers[name] = parseBackendLocation({ ...value, kind: 'server' })!;
+  }
   const grounds: Record<string, GroundsConfig> = {};
   for (const [key, g] of Object.entries(groundsRaw)) {
-    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [], backend: parseBackendLocation(g.backend) };
+    if (g.server !== undefined && (typeof g.server !== 'string' || !servers[g.server])) throw new Error(`grounds ${key}: unknown server`);
+    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [], ...(g.server ? { server: String(g.server) } : {}) };
   }
   return {
     repos,
@@ -395,6 +403,7 @@ export function loadConfig(): Config {
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
     watch,
     grounds,
+    servers,
     pools: parsePools(raw.pools, repos),
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
