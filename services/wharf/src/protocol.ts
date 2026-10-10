@@ -1,4 +1,5 @@
 import type { DispatchInput, ReportInput } from '../../../packages/core/src/backend-model.js';
+import { validateRepoIdentity } from '../../../packages/core/src/repo-identity.js';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -17,13 +18,16 @@ export function text(value: unknown, max = 1024): string {
 export function identifier(value: unknown): string {
   const s = text(value, 128); requireThat(/^[A-Za-z0-9_-]+$/.test(s), 400, 'invalid identifier'); return s;
 }
+export function repoIdentity(value: unknown): string {
+  try { return validateRepoIdentity(value); } catch { throw new ApiError(400, 'canonical repoRemote required'); }
+}
 function keys(b: Record<string, unknown>, allowed: string[]) {
   requireThat(Object.keys(b).every((k) => allowed.includes(k)), 400, 'unexpected field');
 }
 export function dispatchInput(value: unknown): DispatchInput {
   const b = object(value);
-  keys(b, ['id', 'repo', 'brief', 'lane', 'for', 'followUp', 'harness', 'model', 'effort']);
-  const d: DispatchInput = { id: identifier(b.id), repo: identifier(b.repo), brief: text(b.brief, 48000) };
+  keys(b, ['id', 'repo', 'repoRemote', 'brief', 'lane', 'for', 'followUp', 'harness', 'model', 'effort']);
+  const d: DispatchInput = { id: identifier(b.id), repo: identifier(b.repo), repoRemote: repoIdentity(b.repoRemote), brief: text(b.brief, 48000) };
   if (b.lane !== undefined) { requireThat(b.lane === 'work' || b.lane === 'chore', 400, 'invalid lane'); d.lane = b.lane; }
   for (const k of ['for', 'followUp', 'harness', 'effort'] as const) {
     if (b[k] !== undefined) d[k] = identifier(b[k]);

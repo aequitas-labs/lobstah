@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { backendScope, backendScopes, BackendError, wharfFor, refreshHostedViews, isVerb, waitingFields, toonKV } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
+import { wharfRepoIdentity } from './wharf-repo.js';
 
 export function commandScope(config: Config, grounds?: string, repo?: string): BackendScope | undefined {
   if (grounds) return backendScope(config, grounds);
@@ -48,7 +49,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       const repo = opts.opt('--repo'); const file = opts.opt('--brief') ?? opts.opt('--bait');
       const brief = opts.opt('--brief-text') ?? (file ? fs.readFileSync(file, 'utf8') : undefined);
       if (!repo || !brief || !scope.repos.includes(repo)) throw new Error('dispatch needs --repo in this grounds and --brief or --brief-text');
-      print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), repo, brief, lane: opts.has('--chore') ? 'chore' : 'work',
+      print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), repo, repoRemote: wharfRepoIdentity(config, repo), brief, lane: opts.has('--chore') ? 'chore' : 'work',
         for: opts.opt('--for')?.replace(/^wt:/, ''), followUp: opts.opt('--follow-up'), harness: opts.opt('--harness'), model: opts.opt('--model'), effort: opts.opt('--effort') }, key()));
       break;
     }
@@ -88,7 +89,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     case 'soak': {
       if (!worker || !opts.opt('--repo')) throw new Error('wharf soak requires --worker and --repo (trusted boat credential, not an agent token)');
       if (!scope.repos.includes(opts.opt('--repo')!)) throw new Error('worker repo must belong to this grounds');
-      await backend.request('workers/sign-on', { worker, repo: opts.opt('--repo') }, key());
+      await backend.request('workers/sign-on', { worker, repo: opts.opt('--repo'), repoRemote: wharfRepoIdentity(config, opts.opt('--repo')!) }, key());
       const seconds = Number(opts.opt('--timeout') ?? 600);
       if (!Number.isFinite(seconds) || seconds < 0) throw new Error('timeout must be nonnegative seconds');
       const deadline = opts.has('--wait') ? (seconds ? Date.now() + seconds * 1000 : Infinity) : Date.now();
