@@ -10,7 +10,7 @@ const out = path.join(root, 'build', 'npm');
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(out, 'dist'), { recursive: true });
 
-const external = ['@anthropic-ai/claude-agent-sdk', '@openai/codex-sdk'];
+const external = ['@anthropic-ai/claude-agent-sdk', '@openai/codex-sdk', 'ws'];
 const common = [
   '--bundle', '--platform=node', '--format=esm', '--target=node20',
   ...external.map((e) => `--external:${e}`),
@@ -40,6 +40,7 @@ fs.writeFileSync(
         '@anthropic-ai/claude-agent-sdk': '^0.3.0',
         '@openai/codex-sdk': '^0.152.0',
       },
+      dependencies: { ws: JSON.parse(fs.readFileSync(path.join(root, 'apps/cli/package.json'), 'utf8')).dependencies.ws },
     },
     null,
     2,

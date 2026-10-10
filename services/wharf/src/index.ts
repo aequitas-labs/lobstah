@@ -13,7 +13,7 @@ export default {
       if (!cors) return response;
       const headers = new Headers(response.headers);
       headers.set('Access-Control-Allow-Origin', cors); headers.set('Vary', 'Origin');
-      return new Response(response.body, { status: response.status, headers });
+      return new Response(response.body, { status: response.status, headers, ...(response.webSocket ? { webSocket: response.webSocket } : {}) });
     };
     try {
       const url = new URL(request.url); const segments = url.pathname.split('/').filter(Boolean);
@@ -51,7 +51,7 @@ export default {
         const bytes = await boundedBody(request);
         try { body = bytes.length ? JSON.parse(new TextDecoder().decode(bytes)) : {}; } catch { throw new ApiError(400, 'invalid JSON'); }
       }
-      const c: Command = { account, helm, personId: person?.id, token, method: request.method, path: route, body,
+      const c: Command = { account, helm, personId: person?.id, personSessionId: person && 'sessionId' in person ? person.sessionId : undefined, token, method: request.method, path: route, body,
         key: request.headers.get('Idempotency-Key') ?? undefined, session: request.headers.get('X-Lobstah-Helm') ?? undefined,
         after: url.searchParams.get('after') ?? undefined };
       return respond(await accountResponse(request, env, c));

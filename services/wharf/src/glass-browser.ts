@@ -19,7 +19,7 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
   const headers = new Headers({ Cookie: request.headers.get('Cookie') ?? '' });
   const person = await personSession(env, headers);
   const route = url.pathname === '/api/glass' ? 'glass' : url.pathname.slice('/api/glass/'.length);
-  const read = request.method === 'GET' && (['glass', 'dispatches', 'events'].includes(route)
+  const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake'].includes(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
     || /^(documents|dispatches)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));
   const input = request.method === 'POST' && (route === 'requests'
@@ -35,7 +35,7 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
     catch (e) { if (e instanceof ApiError) throw e; throw new ApiError(400, 'invalid JSON'); }
     if (deleting) requireThat(object(body).confirm === true, 400, 'confirm account deletion on the boat list');
   }
-  const c: Command = { account: person.id, helm: true, personId: person.id, token: `browser:${person.sessionId}`,
+  const c: Command = { account: person.id, helm: true, personId: person.id, personSessionId: person.sessionId, token: `browser:${person.sessionId}`,
     path: deleting ? '' : route, method: request.method, body, key: request.headers.get('Idempotency-Key') ?? undefined,
     after: url.searchParams.get('after') ?? undefined };
   return accountResponse(request, env, c);

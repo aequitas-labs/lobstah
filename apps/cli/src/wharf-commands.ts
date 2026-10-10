@@ -9,6 +9,7 @@ import { wharfRepoIdentity } from './wharf-repo.js';
 import { wharfLogin } from './wharf-login.js';
 import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-soak.js';
 import { readHookStdin } from './soak-site.js';
+import { WharfWake } from './wharf-wake.js';
 
 export function commandScope(config: Config, grounds?: string, repo?: string): BackendScope | undefined {
   if (grounds) return backendScope(config, grounds);
@@ -157,6 +158,8 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       let cursor = opts.opt('--after'); const seconds = Number(opts.opt('--timeout') ?? 600);
       if (!Number.isFinite(seconds) || seconds < 0) throw new Error('timeout must be nonnegative seconds');
       const deadline = seconds ? Date.now() + seconds * 1000 : Infinity; let unknown = false; let renewed = 0;
+      const hints = new WharfWake(scope.location, wharfCredential(scope));
+      try {
       while (Date.now() < deadline) {
         try {
           if (Date.now() - renewed > 60_000) { await backend.request('helm/renew', {}, randomUUID()); renewed = Date.now(); }
@@ -168,9 +171,11 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
           if (!unknown) console.error(toonKV({ grounds: scope.grounds, state: 'unknown', note: 'wharf unavailable; keeping cursor and waiting' }));
           unknown = true;
         }
-        await new Promise((resolve) => setTimeout(resolve, Math.min(1000, Math.max(0, deadline - Date.now()))));
+        await hints.wait(Math.min(1000, Math.max(0, deadline - Date.now())));
       }
-      print({ cursor, timeout: true }); break;
+      print({ cursor, timeout: true });
+      } finally { hints.close(); }
+      break;
     }
     case 'wharf': {
       switch (pos[0]) {

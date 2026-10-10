@@ -9,6 +9,12 @@ async function page(path = '/') {
   windows.push(window); const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] = [], reads: string[] = [], copied: string[] = [], intervals: (() => void)[] = [];
   let unauthenticated = false;
+  const sockets: { url: string; onopen?: () => void; onmessage?: (e: { data: string }) => void; onclose?: () => void; closed: boolean; close(): void }[] = [];
+  w.WebSocket = class {
+    onopen?: () => void; onmessage?: (e: { data: string }) => void; onclose?: () => void; closed = false;
+    constructor(public url: string) { sockets.push(this); }
+    close() { this.closed = true; }
+  };
   w.setInterval = (fn: () => void) => { intervals.push(fn); return intervals.length; }; w.clearInterval = () => {};
   w.fetch = async (path: string, init: RequestInit = {}) => {
     reads.push(path);
@@ -30,8 +36,15 @@ async function page(path = '/') {
   const click = async (text: string) => { expect(button(text), text).toBeTruthy(); button(text).click(); await settle(); };
   const tab = async (text: string) => { (window.document.querySelector(`nav a[href='#${text}']`)! as unknown as HTMLElement).click(); await settle(); };
   const input = (label: string, text: string) => { const node = window.document.querySelector(`[aria-label='${label}']`)! as unknown as HTMLInputElement; node.value = text; node.dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event); };
-  return { window, doc: window.document, writes, reads, copied, settle, click, tab, input, poll: async () => { intervals.forEach((f) => f()); await settle(); }, unauthenticated: () => { unauthenticated = true; } };
+  return { window, doc: window.document, writes, reads, copied, sockets, settle, click, tab, input, poll: async () => { intervals.forEach((f) => f()); await settle(); }, unauthenticated: () => { unauthenticated = true; } };
 }
+it('uses a cookie-only wake hint, retains polling on a drop and closes hints on sign-out', async () => {
+  const g = await page(); expect(g.sockets).toHaveLength(1); expect(String(g.sockets[0].url)).toBe('wss://glass.test/api/glass/wake');
+  const reads = g.reads.length; g.sockets[0].onmessage?.({ data: '{"type":"wake"}' }); await g.settle();
+  expect(g.reads.length).toBeGreaterThan(reads);
+  g.sockets[0].onclose?.(); await g.poll(); expect(g.sockets).toHaveLength(2);
+  await g.click('sign out'); expect(g.sockets[1].closed).toBe(true); await g.poll(); expect(g.sockets).toHaveLength(2);
+});
 it('shows jobs, notes, catches, PR links and the remote boat’s copy command without claiming window focus', async () => {
   const g = await page(); expect(g.doc.body.textContent).toContain('waiting for helm'); await g.tab('jobs'); await g.click('Build the hosted spyglass');
   expect(g.doc.body.textContent).toContain('Browser controls'); expect(g.doc.body.textContent).toContain('Waiting for review'); expect(g.doc.body.textContent).toContain('Please preserve local behavior.');
