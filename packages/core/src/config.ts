@@ -263,8 +263,8 @@ export interface PetConfig {
 /** A named territory: the subset of configured repos one helm oversees. */
 export interface GroundsConfig {
   repos: string[];
-  /** Omitted: local files. Otherwise an entry in servers, never a global mode. */
-  server?: string;
+  /** Omitted: local files. Otherwise an entry in wharves, never a global mode. */
+  wharf?: string;
 }
 
 export interface Config {
@@ -277,7 +277,7 @@ export interface Config {
   pet: PetConfig;
   watch: WatchConfig;
   grounds: Record<string, GroundsConfig>;
-  servers?: Record<string, import('./backend-model.js').BackendLocation>;
+  wharves?: Record<string, import('./backend-model.js').BackendLocation>;
   /** Worktree pools for headless dispatches (`[pools.<name>]`). */
   pools: Record<string, PoolConfig>;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
@@ -418,15 +418,15 @@ export function loadConfig(): Config {
     };
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;
-  const servers: Record<string, import('./backend-model.js').BackendLocation> = {};
-  for (const [name, value] of Object.entries((raw.servers ?? {}) as Record<string, Record<string, unknown>>)) {
-    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new Error('invalid server name');
-    servers[name] = parseBackendLocation({ ...value, kind: 'server' })!;
+  const wharves: Record<string, import('./backend-model.js').BackendLocation> = {};
+  for (const [name, value] of Object.entries((raw.wharves ?? {}) as Record<string, Record<string, unknown>>)) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new Error('invalid wharf name');
+    wharves[name] = parseBackendLocation({ ...value, kind: 'wharf' })!;
   }
   const grounds: Record<string, GroundsConfig> = {};
   for (const [key, g] of Object.entries(groundsRaw)) {
-    if (g.server !== undefined && (typeof g.server !== 'string' || !servers[g.server])) throw new Error(`grounds ${key}: unknown server`);
-    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [], ...(g.server ? { server: String(g.server) } : {}) };
+    if (g.wharf !== undefined && (typeof g.wharf !== 'string' || !wharves[g.wharf])) throw new Error(`grounds ${key}: unknown wharf`);
+    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [], ...(g.wharf ? { wharf: String(g.wharf) } : {}) };
   }
   return {
     repos,
@@ -438,7 +438,7 @@ export function loadConfig(): Config {
     pet: { open: petOpen },
     watch,
     grounds,
-    servers,
+    wharves,
     pools: parsePools(raw.pools, repos),
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
