@@ -121,8 +121,8 @@ used simultaneously; no command silently fails over to local state.
 
 With the PAT in the configured environment variable, take the helm using
 `lobstah man helm --grounds away --session <id>`, then dispatch/send/cancel with
-the same grounds/session. `lobstah wharf issue-machine <name> --grounds away`
-issues the trusted launcher's one-time credential. On that machine, set its
+the same grounds/session. `lobstah wharf issue-boat <name> --grounds away`
+issues the trusted launcher's one-time credential. On that boat, set its
 credential (not the PAT) in the wharf's token environment variable and use
 `lobstah soak --grounds away --worker <id> --repo remote-repo --wait`.
 The claimed brief includes the epoch, expiry and dispatch capability.

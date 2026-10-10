@@ -33,7 +33,7 @@ wharf = 'cloud'
 repos = ['remote']
 wharf = 'dev'
 `);
-  process.env.LOBSTAH_TEST_CLOUD_TOKEN = 'helm-cloud'; process.env.LOBSTAH_TEST_DEV_TOKEN = 'machine-dev';
+  process.env.LOBSTAH_TEST_CLOUD_TOKEN = 'helm-cloud'; process.env.LOBSTAH_TEST_DEV_TOKEN = 'boat-dev';
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.env.LOBSTAH_HOME; delete process.env.LOBSTAH_TEST_CLOUD_TOKEN; delete process.env.LOBSTAH_TEST_DEV_TOKEN; removeTempDir(home); });
 it('selects each grounds independently, defaulting to local without an implicit remote write', () => {
@@ -43,10 +43,10 @@ it('selects each grounds independently, defaulting to local without an implicit 
   expect(() => commandScope(cfg, undefined, 'remote')).toThrow('several grounds');
 });
 it('only hands a dispatch capability to an agent, removing credentials for every named wharf', () => {
-  const cfg = loadConfig(); const env = agentEnvironment(cfg, backendScope(cfg, 'away'), 'd.person.dispatch.1.secret', { LOBSTAH_TEST_CLOUD_TOKEN: 'PAT', LOBSTAH_TEST_DEV_TOKEN: 'MACHINE', PATH: 'path' });
+  const cfg = loadConfig(); const env = agentEnvironment(cfg, backendScope(cfg, 'away'), 'd.person.dispatch.1.secret', { LOBSTAH_TEST_CLOUD_TOKEN: 'PAT', LOBSTAH_TEST_DEV_TOKEN: 'BOAT', PATH: 'path' });
   expect(env.LOBSTAH_TEST_CLOUD_TOKEN).toBe('d.person.dispatch.1.secret'); expect(env.LOBSTAH_TEST_DEV_TOKEN).toBeUndefined();
-  expect(env.LOBSTAH_GROUNDS).toBe('away'); expect(Object.values(env)).not.toContain('PAT'); expect(Object.values(env)).not.toContain('MACHINE');
-  expect(() => agentEnvironment(cfg, backendScope(cfg, 'away'), 'm.person.secret')).toThrow('dispatch token');
+  expect(env.LOBSTAH_GROUNDS).toBe('away'); expect(Object.values(env)).not.toContain('PAT'); expect(Object.values(env)).not.toContain('BOAT');
+  expect(() => agentEnvironment(cfg, backendScope(cfg, 'away'), 'b.person.secret')).toThrow('dispatch token');
 });
 it('local + two wharves coexist in glass, tend and the pet; unreachable grounds do not erase local work', async () => {
   const at = new Date().toISOString();

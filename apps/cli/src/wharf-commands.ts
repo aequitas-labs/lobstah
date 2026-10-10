@@ -86,7 +86,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       print({ cursor, timeout: true }); break;
     }
     case 'soak': {
-      if (!worker || !opts.opt('--repo')) throw new Error('wharf soak requires --worker and --repo (trusted machine credential, not an agent token)');
+      if (!worker || !opts.opt('--repo')) throw new Error('wharf soak requires --worker and --repo (trusted boat credential, not an agent token)');
       if (!scope.repos.includes(opts.opt('--repo')!)) throw new Error('worker repo must belong to this grounds');
       await backend.request('workers/sign-on', { worker, repo: opts.opt('--repo') }, key());
       const seconds = Number(opts.opt('--timeout') ?? 600);
@@ -102,9 +102,9 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     }
     case 'wharf': {
       switch (pos[0]) {
-        case 'issue-machine': print(await backend.request('machines', { name: pos[1] }, key())); break;
-        case 'machines': print(await backend.request('machines')); break;
-        case 'revoke-machine': print(await backend.request(`machines/${encodeURIComponent(pos[1] ?? '')}/revoke`, {}, key())); break;
+        case 'issue-boat': print(await backend.request('boats', { name: pos[1] }, key())); break;
+        case 'boats': print(await backend.request('boats')); break;
+        case 'revoke-boat': print(await backend.request(`boats/${encodeURIComponent(pos[1] ?? '')}/revoke`, {}, key())); break;
         case 'renew': print(await backend.request('workers/renew', { worker }, key())); break;
         case 'heartbeat': await backend.heartbeat(pos[1] ?? '', key()); print({ renewed: true }); break;
         case 'receipt': await backend.receipt(pos[1] ?? '', pos[2] ?? '', key()); print({ received: true }); break;
@@ -130,7 +130,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   return true;
 }
 
-/** Remote agents must never sign on, beat or claim in this machine's local fleet. */
+/** Remote agents must never sign on, beat or claim in this boat's local fleet. */
 export async function wharfHook(cmd: string | undefined, args: string[]): Promise<boolean> {
   if (!process.env.LOBSTAH_GROUNDS || !(cmd === 'hook' || (cmd === 'soak' && args[0] === 'beat') || cmd === 'man:brief' || cmd === 'man:haul')) return false;
   const { loadConfig } = await import('@lobstah/core');
