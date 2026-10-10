@@ -164,3 +164,23 @@ unrevoked boat. The event cursor records one `unservable` event per transition,
 with the remote and reason, rather than repeating it on every poll. Fresh
 sign-on clears it; expiry is observed on the next polling request, with no
 background timer or connection.
+
+## Stable boats and sticky targets
+
+Boat IDs are account-scoped identities, not credential IDs. Names use letters,
+digits, `-` or `_`, at most 64 characters, normalized to lowercase and unique
+per account. `wharf issue-boat <name>` creates that boat or rotates its current
+credential: its ID, worker repos and addressed work remain intact, while the
+previous credential fails on its next request. Retries reveal no credential.
+
+`dispatch --boat <name>` resolves the name through `GET boats` and sends the
+optional `boat` ID. Claims require both the remote repo and target boat to
+match; a trap address may additionally narrow the target. Neither address
+falls back. Revocation leaves queued work on that boat and labels it unservable.
+Status and events label the current name, including after a rename.
+
+`wharf revoke-boat <name>` revokes only the credential. `wharf rename-boat
+<old-name> <new-name>` preserves the ID. `wharf remove-boat <name> --confirm`
+explicitly removes the boat only if no queued/active work is addressed to it
+or claimed on it; cancel that work first. Corresponding PAT routes are
+`POST boats/:id/rename` and `DELETE boats/:id`, separate from account deletion.

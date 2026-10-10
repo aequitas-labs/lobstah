@@ -108,3 +108,21 @@ it('rejects executable evidence URLs from a configured wharf', async () => {
   const backend = new WharfBackend({ kind: 'wharf', url: 'https://state.invalid', account: 'a', tokenEnv: 'TOKEN' }, 'token', { fetch: async () => Response.json([{ id: 'x', repo: 'r', brief: 'b', state: 'done', status: { verb: 'done', at: 'now', evidence: { prUrls: ['javascript:alert(1)'] } } }]) });
   await expect(backend.list()).rejects.toThrow('evidence URL');
 });
+it('resolves --boat by its current name and sends a stable ID; revoke also takes the name', async () => {
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
+    if (init.method === 'GET') return Response.json([{ id: 'stable-id', name: 'laptop', revoked: 0 }]);
+    return Response.json(JSON.parse(String(init.body)));
+  }); vi.stubGlobal('fetch', fetcher); vi.spyOn(console, 'log').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away', '--repo': 'remote', '--brief-text': 'work', '--boat': 'LAPTOP' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  await wharfCommand('dispatch', [], opts, loadConfig());
+  expect(JSON.parse(String(fetcher.mock.calls[1][1].body))).toMatchObject({ boat: 'stable-id', repoRemote: 'github.com/test/repo' });
+  await wharfCommand('wharf', ['revoke-boat', 'laptop'], opts, loadConfig());
+  expect(fetcher.mock.calls.at(-1)?.[0]).toContain('/boats/stable-id/revoke');
+});
+it('refuses boat addressing on local grounds rather than silently dropping the target', async () => {
+  const flags: Record<string, string> = { '--grounds': 'desk', '--boat': 'laptop' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  await expect(wharfCommand('dispatch', [], opts, loadConfig())).rejects.toThrow('requires wharf grounds');
+  expect(fs.readdirSync(path.join(home, 'queue'))).toEqual([]);
+});

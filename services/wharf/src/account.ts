@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { ReportInput, BackendEvent, DispatchInput } from '../../../packages/core/src/backend-model.js';
-import { ApiError, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
+import { ApiError, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 
 type Actor = { kind: 'helm'; id: string } | { kind: 'boat'; id: string } | { kind: 'dispatch'; id: string; epoch: number };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
@@ -32,6 +32,7 @@ export class Account extends DurableObject<Env> {
     ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS boats (id TEXT PRIMARY KEY, name TEXT NOT NULL, hash TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
+      CREATE UNIQUE INDEX IF NOT EXISTS boat_name ON boats(name COLLATE NOCASE);
       CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, boat TEXT NOT NULL, repo TEXT NOT NULL, seen INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS worker_repo ON workers(repo,seen);
       CREATE TABLE IF NOT EXISTS worker_nicknames (worker TEXT PRIMARY KEY, nickname TEXT NOT NULL);
@@ -61,11 +62,15 @@ export class Account extends DurableObject<Env> {
     this.ctx.storage.sql.exec('INSERT INTO events(kind,dispatch,at) VALUES (?,?,?)', kind, dispatch ?? null, new Date().toISOString());
     if (note) this.ctx.storage.sql.exec('INSERT INTO event_details VALUES (last_insert_rowid(),?)', note);
   }
+  private targetBoat(d: DispatchInput): BoatRow | undefined {
+    return d.boat ? this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', d.boat).toArray()[0] : undefined;
+  }
   /** Polling is the guarantee: observe expiry on the next request, without timers. */
   private availability(now: number) {
     const absent = this.ctx.storage.sql.exec<DispatchRow>(`SELECT d.* FROM dispatches d WHERE d.state='queued' AND NOT EXISTS (
       SELECT 1 FROM workers w JOIN boats b ON b.id=w.boat WHERE b.revoked=0 AND w.seen>?
       AND w.repo=json_extract(d.data,'$.repoRemote') AND (json_extract(d.data,'$.for') IS NULL OR json_extract(d.data,'$.for')=w.id)
+      AND (json_extract(d.data,'$.boat') IS NULL OR json_extract(d.data,'$.boat')=w.boat)
     )`, now - LEASE_MS).toArray();
     const ids = new Set(absent.map((d) => d.id));
     for (const row of this.ctx.storage.sql.exec<{ dispatch: string }>('SELECT dispatch FROM unservable').toArray()) {
@@ -75,17 +80,20 @@ export class Account extends DurableObject<Env> {
       }
     }
     for (const d of absent) {
-      const repo = (JSON.parse(d.data) as DispatchInput).repoRemote!;
-      const note = `${repo}: no boat online has an eligible signed-on worker`;
-      if (!this.ctx.storage.sql.exec('SELECT dispatch FROM unservable WHERE dispatch=?', d.id).toArray().length) {
-        this.ctx.storage.sql.exec('INSERT INTO unservable VALUES (?,?,?)', d.id, repo, note);
+      const input = JSON.parse(d.data) as DispatchInput; const repo = input.repoRemote!;
+      const target = this.targetBoat(input);
+      const note = target ? `${repo}: boat ${target.name} has no eligible online worker${target.revoked ? ' (credential revoked)' : ''}` : `${repo}: no boat online has an eligible signed-on worker`;
+      const previous = this.ctx.storage.sql.exec<{ note: string }>('SELECT note FROM unservable WHERE dispatch=?', d.id).toArray()[0];
+      if (previous?.note !== note) {
+        this.ctx.storage.sql.exec('INSERT OR REPLACE INTO unservable VALUES (?,?,?)', d.id, repo, note);
         this.event('unservable', d.id, note);
       }
     }
   }
   private view(d: DispatchRow) {
+    const input = JSON.parse(d.data) as DispatchInput; const target = this.targetBoat(input);
     const unservable = this.ctx.storage.sql.exec<{ repo: string; note: string }>('SELECT repo,note FROM unservable WHERE dispatch=?', d.id).toArray()[0];
-    return { ...JSON.parse(d.data), state: d.state, status: this.lastReport(d.id), ...(unservable ? { unservable } : {}) };
+    return { ...input, state: d.state, status: this.lastReport(d.id), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
   }
   private authenticate(c: Command, hash: string, now: number): Actor {
     if (c.helm) return { kind: 'helm', id: 'helm' };
@@ -137,7 +145,7 @@ export class Account extends DurableObject<Env> {
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
   async command(c: Command): Promise<StoredResult> {
-    const hash = await digest(c.token.startsWith('d.') ? c.token.split('.').at(-1)! : c.token);
+    const hash = await digest(c.token.startsWith('d.') || c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
     const fingerprint = await digest(JSON.stringify([c.method, c.path, c.body, c.session]));
     // Crypto awaits are before the transaction. Auth and ownership are checked
     // inside it, including revocations that arrived while hashing.
@@ -163,9 +171,12 @@ export class Account extends DurableObject<Env> {
     const b = c.method === 'GET' ? {} : object(c.body);
     if (c.path === '_issue' && c.method === 'POST') {
       requireThat(actor.kind === 'helm' && c.prepared?.id, 403, 'helm scope required');
-      const name = text(b.name, 80);
-      this.ctx.storage.sql.exec('INSERT INTO boats(id,name,hash) VALUES (?,?,?)', c.prepared.id, name, c.prepared.hash);
-      this.event('boat-issued'); return { status: 201, value: { id: c.prepared.id, name } };
+      const name = boatName(b.name);
+      const previous = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE name=? COLLATE NOCASE', name).toArray()[0];
+      const id = previous?.id ?? c.prepared.id;
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO boats(id,name,hash,revoked) VALUES (?,?,?,0)', id, name, c.prepared.hash);
+      this.event(previous ? 'boat-credential-rotated' : 'boat-issued', undefined, `boat: ${name}`);
+      return { status: 201, value: { id, name, issuance: c.prepared.id } };
     }
     if (c.path === '_claim' && c.method === 'POST') {
       requireThat(actor.kind === 'boat' && c.prepared, 403, 'boat scope required');
@@ -175,7 +186,8 @@ export class Account extends DurableObject<Env> {
       // Addressed work remains sticky, including absent/stale workers.
       const d = this.ctx.storage.sql.exec<DispatchRow>(`SELECT * FROM dispatches WHERE state='queued'
         AND json_extract(data,'$.repoRemote')=? AND (json_extract(data,'$.for')=? OR json_extract(data,'$.for') IS NULL)
-        ORDER BY CASE WHEN json_extract(data,'$.for')=? THEN 0 ELSE 1 END, rowid LIMIT 1`, w.repo, w.id, w.id).toArray()[0];
+        AND (json_extract(data,'$.boat') IS NULL OR json_extract(data,'$.boat')=?)
+        ORDER BY CASE WHEN json_extract(data,'$.for')=? THEN 0 ELSE 1 END, rowid LIMIT 1`, w.repo, w.id, actor.id, w.id).toArray()[0];
       if (!d) return ok(null);
       const epoch = d.epoch + 1;
       this.ctx.storage.sql.exec("UPDATE dispatches SET state='active',worker=?,boat=?,epoch=?,lease=?,hash=? WHERE id=?", w.id, actor.id, epoch, now + LEASE_MS, c.prepared.hash, d.id);
@@ -200,7 +212,23 @@ export class Account extends DurableObject<Env> {
     }
     if (c.path.startsWith('boats/') && c.path.endsWith('/revoke') && c.method === 'POST') {
       requireThat(actor.kind === 'helm', 403, 'helm scope required');
-      this.ctx.storage.sql.exec('UPDATE boats SET revoked=1 WHERE id=?', identifier(c.path.split('/')[1])); this.event('boat-revoked'); return ok();
+      const id = identifier(c.path.split('/')[1]); const target = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', id).toArray()[0];
+      requireThat(target, 404, 'boat not found');
+      this.ctx.storage.sql.exec('UPDATE boats SET revoked=1 WHERE id=?', id); this.event('boat-revoked', undefined, `boat: ${target.name}`); return ok();
+    }
+    if (c.path.startsWith('boats/') && c.path.split('/').length === 2 && c.method === 'DELETE') {
+      requireThat(actor.kind === 'helm', 403, 'helm scope required'); const id = identifier(c.path.split('/')[1]);
+      requireThat(this.ctx.storage.sql.exec('SELECT id FROM boats WHERE id=?', id).toArray().length, 404, 'boat not found');
+      requireThat(!this.ctx.storage.sql.exec("SELECT id FROM dispatches WHERE state IN ('queued','active') AND (json_extract(data,'$.boat')=? OR boat=?)", id, id).toArray().length, 409, 'boat has open addressed or claimed work; cancel or re-address it first');
+      this.ctx.storage.sql.exec('DELETE FROM worker_nicknames WHERE worker IN (SELECT id FROM workers WHERE boat=?)', id);
+      this.ctx.storage.sql.exec('DELETE FROM workers WHERE boat=?', id); this.ctx.storage.sql.exec('DELETE FROM boats WHERE id=?', id);
+      this.event('boat-removed'); return ok();
+    }
+    if (c.path.startsWith('boats/') && c.path.endsWith('/rename') && c.method === 'POST') {
+      requireThat(actor.kind === 'helm', 403, 'helm scope required'); const id = identifier(c.path.split('/')[1]); const name = boatName(b.name);
+      requireThat(this.ctx.storage.sql.exec('SELECT id FROM boats WHERE id=?', id).toArray().length, 404, 'boat not found');
+      requireThat(!this.ctx.storage.sql.exec('SELECT id FROM boats WHERE name=? COLLATE NOCASE AND id!=?', name, id).toArray().length, 409, 'boat name already exists');
+      this.ctx.storage.sql.exec('UPDATE boats SET name=? WHERE id=?', name, id); this.event('boat-renamed', undefined, `boat: ${name}`); return ok({ id, name });
     }
     if (c.path === 'workers/sign-on' && c.method === 'POST') {
       requireThat(actor.kind === 'boat', 403, 'boat scope required');
@@ -219,6 +247,7 @@ export class Account extends DurableObject<Env> {
     }
     if (c.path === 'dispatches' && c.method === 'POST') {
       this.helm(c, actor, now); const d = dispatchInput(b);
+      if (d.boat) requireThat(this.targetBoat(d), 404, 'target boat not found');
       requireThat(!this.ctx.storage.sql.exec('SELECT id FROM dispatches WHERE id=?', d.id).toArray().length, 409, 'dispatch already exists');
       if (d.followUp) this.dispatch(d.followUp);
       this.ctx.storage.sql.exec("INSERT INTO dispatches(id,data,state) VALUES (?,?,'queued')", d.id, JSON.stringify(d)); this.event('queued', d.id); return ok(d);
@@ -233,6 +262,15 @@ export class Account extends DurableObject<Env> {
       requireThat(g === generation && /^\d+$/.test(n) && Number.isSafeInteger(Number(n)), 400, 'invalid account event cursor');
       const rows = this.ctx.storage.sql.exec<{ seq: number; kind: string; dispatch: string | null; at: string; note: string | null }>('SELECT e.*,d.note FROM events e LEFT JOIN event_details d ON d.seq=e.seq WHERE e.seq>? ORDER BY e.seq LIMIT 100', Number(n)).toArray();
       const events: BackendEvent[] = rows.map((r) => ({ cursor: `${generation}.${r.seq}`, kind: r.kind, ...(r.dispatch ? { dispatchId: r.dispatch } : {}), at: r.at, ...(r.note ? { note: r.note } : {}) }));
+      // Historical events still label an addressed boat with its current name.
+      for (const e of events) if (e.dispatchId) {
+        const d = this.ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches WHERE id=?', e.dispatchId).toArray()[0];
+        const target = d ? this.targetBoat(JSON.parse(d.data)) : undefined;
+        if (target) {
+          e.boatName = target.name;
+          if (e.note) e.note = e.note.replace(/boat [a-z0-9_-]+/g, `boat ${target.name}`);
+        }
+      }
       return ok({ events, cursor: events.at(-1)?.cursor ?? `${generation}.${n}` });
     }
     const parts = c.path.split('/');
@@ -309,10 +347,13 @@ export class Account extends DurableObject<Env> {
   /** Hashes only at rest. Issuance is shown once; retries return metadata. */
   async issue(c: Command): Promise<StoredResult> {
     requireThat(c.helm, 403, 'helm scope required');
-    const b = object(c.body); const name = text(b.name, 80); const id = crypto.randomUUID();
-    const token = `b.${c.account}.${id}.${crypto.randomUUID()}${crypto.randomUUID()}`; const hash = await digest(token);
+    const b = object(c.body); const name = boatName(b.name); const id = crypto.randomUUID();
+    const secret = `${crypto.randomUUID()}${crypto.randomUUID()}`; const hash = await digest(secret);
     const base = await this.command({ ...c, path: '_issue', body: { name }, prepared: { id, hash } });
-    return object(base.value).id === id ? { ...base, value: { ...object(base.value), token } } : base;
+    if (base.status !== 201) return base;
+    const { issuance, ...value } = object(base.value);
+    const token = `b.${c.account}.${value.id}.${secret}`;
+    return { ...base, value: { ...value, ...(issuance === id ? { token } : {}) } };
   }
   async claim(c: Command): Promise<StoredResult> {
     const key = c.key ?? '';
