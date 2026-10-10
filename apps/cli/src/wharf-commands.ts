@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, isVerb, waitingFields, toonKV } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
@@ -47,10 +47,36 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   const session = resolveSessionId({ flag: opts.opt('--session') })?.id;
   const worker = opts.opt('--worker');
   const backend = wharfFor(scope, { session, worker });
-  const key = () => opts.opt('--request-key') ?? randomUUID();
+  const key = () => {
+    const value = opts.opt('--request-key') ?? randomUUID();
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new Error('request key must use 1–128 identifier characters'); return value;
+  };
+  const partKey = (base: string, part: string) => createHash('sha256').update(`${base}:${part}`).digest('hex');
   const id = () => { if (!pos[0]) throw new Error(`${cmd} requires a dispatch id`); return encodeURIComponent(pos[0]); };
   const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
   const noFiles = () => { if (opts.values('--attach').length || opts.opt('--report')) throw new Error('upload wharf evidence with wharf upload, then report --file-id; local attachment paths are never sent'); };
+  const readFile = (file: string, max = 25 * 1024 * 1024) => {
+    const stat = fs.statSync(file); if (!stat.isFile() || stat.size > max) throw new Error('file is not regular or exceeds the upload limit');
+    const bytes = fs.readFileSync(file); if (bytes.length > max) throw new Error('file exceeds the upload limit'); return bytes;
+  };
+  const documentId = (value: string) => value.replace(/^(decision|report):/, '');
+  const fileDocument = async (kind: 'decision' | 'report') => {
+    if (pos.length > 1) throw new Error('man ask/file takes at most one positional argument');
+    const title = opts.opt('--title') ?? (kind === 'report' && pos[0] ? path.basename(pos[0], path.extname(pos[0])) : undefined);
+    if (!title) throw new Error('man ask requires --title; man file requires a markdown file');
+    const markdown = kind === 'report' ? pos[0] : opts.opt('--detail');
+    const contents = markdown ? readFile(markdown, 65536) : undefined;
+    if (kind === 'report' && !contents) throw new Error('man file requires a markdown file');
+    const attached = opts.values('--attach').map((file) => ({ name: path.basename(file), bytes: readFile(file) }));
+    if (attached.length > 32 || new Set(attached.map((f) => f.name)).size !== attached.length) throw new Error('at most 32 attachments, with different basenames');
+    const base = key(), id = opts.opt('--id') ?? partKey(base, 'document').slice(0, 32);
+    await backend.request('documents', { id, kind, title, options: kind === 'decision' ? opts.values('--option') : [], ...(kind === 'decision' && pos[0] ? { dispatch: pos[0] } : {}) }, partKey(base, 'create'));
+    const detail = contents ? await backend.uploadDocument(id, kind === 'decision' ? 'detail.md' : 'report.md', contents, partKey(base, 'markdown')) : undefined;
+    const files: string[] = [];
+    for (const [i, file] of attached.entries()) files.push(await backend.uploadDocument(id, file.name, file.bytes, partKey(base, `file-${i}`)));
+    print(await backend.request(`documents/${encodeURIComponent(id)}/publish`, { markdown: detail, attachments: files,
+      ...(opts.opt('--replace') ? { replace: documentId(opts.opt('--replace')!) } : {}) }, partKey(base, 'publish')));
+  };
   const boatId = async (name: string | undefined): Promise<string> => {
     if (!name || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) throw new Error('choose a validated boat name');
     const boats = await backend.request('boats');
@@ -78,12 +104,27 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     case 'send': noFiles(); await backend.send(pos[0] ?? '', pos.slice(1).join(' '), key()); print({ sent: true }); break;
     case 'inbox': print(await backend.messages(pos[0] ?? '')); break; // Explicit receipt, never implicit acknowledgement.
     case 'report': {
-      noFiles(); const verb = pos[1]; if (!verb || !isVerb(verb)) throw new Error('report requires one of the six verbs');
+      const verb = pos[1]; if (!verb || !isVerb(verb)) throw new Error('report requires one of the six verbs');
       const waiting = waitingFields(verb, { waitingOn: opts.opt('--waiting-on'), link: opts.opt('--link'), until: opts.opt('--until') });
+      const files = [...opts.values('--file-id')], base = key();
+      const reportFile = opts.opt('--report');
+      if (files.length + opts.values('--attach').length + Number(!!reportFile) > 32) throw new Error('at most 32 evidence files');
+      if (reportFile) files.unshift(await backend.upload(pos[0] ?? '', 'report.md', readFile(reportFile, 65536), partKey(base, 'markdown')));
+      for (const [i, file] of opts.values('--attach').entries()) files.push(await backend.upload(pos[0] ?? '', path.basename(file), readFile(file), partKey(base, `file-${i}`)));
       const r: ReportInput = { verb, ...(pos.length > 2 ? { note: pos.slice(2).join(' ') } : {}), ...waiting,
-        evidence: { prUrls: opts.values('--pr'), files: opts.values('--file-id') } };
-      await backend.report(pos[0] ?? '', r, key()); print({ reported: verb }); break;
+        evidence: { prUrls: opts.values('--pr'), files } };
+      await backend.report(pos[0] ?? '', r, base); print({ reported: verb }); break;
     }
+    case 'man:ask': {
+      const withdraw = opts.opt('--withdraw');
+      if (withdraw) {
+        if (pos.length || opts.opt('--title')) throw new Error('--withdraw takes only a decision key');
+        print(await backend.request(`documents/${encodeURIComponent(documentId(withdraw))}/withdraw`, {}, key()));
+      }
+      else await fileDocument('decision'); break;
+    }
+    case 'man:file': await fileDocument('report'); break;
+    case 'man:tend': print({ dispatches: await backend.list(), ...await backend.request('glass') as Record<string, unknown> }); break;
     case 'man:helm': print(await backend.request('helm/take', { session, take: opts.has('--take') }, key())); break;
     case 'man:relieve': print(await backend.request('helm/release', {}, key())); break;
     case 'man:wait': {
@@ -108,7 +149,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     case 'soak': {
       if (!worker || !opts.opt('--repo')) throw new Error('wharf soak requires --worker and --repo (trusted boat credential, not an agent token)');
       if (!scope.repos.includes(opts.opt('--repo')!)) throw new Error('worker repo must belong to this grounds');
-      await backend.request('workers/sign-on', { worker, repo: opts.opt('--repo'), repoRemote: wharfRepoIdentity(config, opts.opt('--repo')!) }, key());
+      await backend.request('workers/sign-on', { worker, repo: opts.opt('--repo'), repoRemote: wharfRepoIdentity(config, opts.opt('--repo')!), harness: opts.opt('--harness'), session }, key());
       const seconds = Number(opts.opt('--timeout') ?? 600);
       if (!Number.isFinite(seconds) || seconds < 0) throw new Error('timeout must be nonnegative seconds');
       const deadline = opts.has('--wait') ? (seconds ? Date.now() + seconds * 1000 : Infinity) : Date.now();
@@ -125,6 +166,9 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
         case 'whoami':
           if (pos.length !== 1) throw new Error('whoami acts only as the current boat; no boat argument');
           print(await backend.request('_boat')); break;
+        case 'requests': print(await backend.request('requests')); break;
+        case 'request-receipt': print(await backend.request(`requests/${encodeURIComponent(pos[1] ?? '')}/receipt`, {}, key())); break;
+        case 'request-execute': print(await backend.request(`requests/${encodeURIComponent(pos[1] ?? '')}/execute`, {}, key())); break;
         case 'renew': print(await backend.request('workers/renew', { worker }, key())); break;
         case 'heartbeat': await backend.heartbeat(pos[1] ?? '', key()); print({ renewed: true }); break;
         case 'receipt': await backend.receipt(pos[1] ?? '', pos[2] ?? '', key()); print({ received: true }); break;
