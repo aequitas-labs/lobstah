@@ -860,6 +860,8 @@ const HOOK_COMMANDS: Record<string, string[]> = {
 
 async function mainCli(): Promise<void> {
   let [cmd, ...args] = process.argv.slice(2);
+  const { serverHook } = await import('./server-commands.js');
+  if (await serverHook(cmd, args)) return;
   if (cmd === 'hook' && args[0] === 'user-prompt-submit') {
     // Add context, never block a prompt or change fleet state.
     try {
@@ -924,6 +926,8 @@ async function mainCli(): Promise<void> {
     const value = flags.get(flag);
     return Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
   };
+  const { serverCommand } = await import('./server-commands.js');
+  if (await serverCommand(cmd, pos, { opt, has, values }, loadConfig())) return;
   const copyFiles = (files: string[], dir: string): Descriptor['attachments'] => {
     if (files.length === 0) return [];
     try {

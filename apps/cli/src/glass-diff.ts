@@ -437,7 +437,7 @@ export interface PrsInputs {
 }
 
 export interface SectionInputs {
-  chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[]; stats: GlassSnapshot['stats'] };
+  chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[]; stats: GlassSnapshot['stats']; backends?: GlassSnapshot['backends'] };
   deck: DeckInputs;
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatchSummary[] };
   traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[] };
@@ -474,7 +474,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     );
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
   return {
-    chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat), stats: d.stats },
+    chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat), stats: d.stats, backends: d.backends },
     deck: {
       view: st.view,
       decisions: decisionCards(d.attention || [], d.decisions || []).filter((c) =>

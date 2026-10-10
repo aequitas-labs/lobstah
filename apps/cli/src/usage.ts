@@ -30,6 +30,11 @@ export interface CommandSpec {
 const HARNESS = 'claude|codex';
 
 export const COMMANDS: Record<string, CommandSpec> = {
+  server: {
+    subverbs: ['issue-machine', 'machines', 'revoke-machine', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries', 'delete-account'],
+    flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--confirm': {} },
+    positionals: '<action> [<id>] [<file>|<message-id>]',
+  },
   dispatch: {
     flags: {
       '--repo': { value: '<key>' },
@@ -216,12 +221,20 @@ export const COMMANDS: Record<string, CommandSpec> = {
   '__pool-warm': { flags: {}, positionals: '<pool>' },
 };
 
+// Backend selection applies to every public command, never one global backend.
+for (const [name, spec] of Object.entries(COMMANDS)) {
+  if (!name.startsWith('__')) spec.flags['--grounds'] ??= { value: '<name>' };
+}
+for (const name of ['dispatch', 'send', 'cancel', 'report', 'soak', 'server', 'man:helm', 'man:relieve']) COMMANDS[name]!.flags['--request-key'] = { value: '<id>' };
+COMMANDS.report!.flags['--file-id'] = { value: '<id>', repeatable: true };
+COMMANDS.soak!.flags['--worker'] = { value: '<id>' };
+COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
+
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
   dispatch: `Queue supervised work; prints id. --for <name>, wt:<name>, or wt:<id> targets a signed-on trap
-(sticky; session:<id> resolves to it). A claimed helm requires --session
-<helm-id> to address work. Repeat --attach to copy files into owned state.
---pool <name>: fresh session in a warm [pools.<name>] worktree. Alias: set --bait.`,
+(sticky; session:<id> resolves to it). A claimed helm requires --session <helm-id>. Repeat --attach to copy files into owned state. --pool <name>:
+fresh session in a warm [pools.<name>] worktree. Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows its live registration. Alias: buoy.`,
@@ -246,8 +259,7 @@ git progress note.`,
 Use watch check-pr <key> to force a refresh of one PR watch.`,
   attention: `Standing attention items with their ack state; \`ack <item-key>\` marks the
 current state seen (--by names who), \`unack\` clears it. Display-only: an ack
-hides the item from the desktop pet and the glass lobs until its state
-changes — never from man tend --json, man wait, the park, or reminders.
+hides the item from the desktop pet and glass lobs until its state changes — never from man tend --json, man wait, the park, or reminders.
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
 watch:<key>, report:<lane>:<uuid> or report:helm:<grounds>:<rid> (report). An unknown key exits 2. --json prints { "attention": [...] },
 the same items and fields as man tend --json (the desktop pet reads it), less questions held on the helm's turn (the held column).`,
@@ -261,8 +273,7 @@ unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note.
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
---waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes.
-A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page as the report; --attach adds the images it names.`,
+--waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images.`,
   stats: `Catches: dispatches that finished done. catchesToday counts the local day;
 totalCatches counts all time. Both live in stats.json, which cull folds into
 before deleting, so they survive it; so does a per-local-day count (400 days),
@@ -280,8 +291,7 @@ installs the shipped PR check; with --for, a check that fails after the first
   soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
 Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
---wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours.
---ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
+--wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.`,
   stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
 finalizes; unread messages wait the grace. Keeps the worktree; --remove removes one

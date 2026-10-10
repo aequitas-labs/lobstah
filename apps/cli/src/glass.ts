@@ -80,6 +80,7 @@ import type { PollBody } from './glass-poll.js';
 import { focusRegistration, liveTrap } from './focus.js';
 import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
+import { backendViews, hostedDispatches } from './hosted-view.js';
 
 /**
  * The spyglass: a localhost dashboard over ~/.lobstah — the same
@@ -529,7 +530,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const mergeView = readMergeView();
   // PR state per dispatch: the evidence badge (the shared derivation tend and
   // catch use) plus the merge view's gate verdict where pick has one.
-  const dispatches = dispatchRows().map((x) => {
+  const dispatches: GlassDispatch[] = [...dispatchRows().map((x) => {
     const pr = x.evidence?.pr;
     const url = x.evidence?.prUrl ?? pr?.url;
     const open = mergeView?.open.find((p) => p.uuid === x.id || (url !== undefined && p.url === url));
@@ -538,7 +539,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       prBadge: pr ? { ...prBadge(pr), observedAt: pr.observedAt } : undefined,
       prGate: open?.gate,
     };
-  });
+  }), ...hostedDispatches(cfg)];
   // The glass shows a failing watch's whole error cell (reason, exit code,
   // remedy, streak start) wherever it shows lastError — the same text as tend.
   const watches = listWatches().map((w) => (w.lastError ? { ...w, lastError: watchErrorCell(w) } : w));
@@ -644,6 +645,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   return {
     now: new Date().toISOString(),
     version: lobstahVersion(),
+    backends: backendViews(cfg),
     repoUrl: REPO_URL,
     daemon: executor ? { version: executor.version, heartbeat: executor.heartbeat } : undefined,
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
@@ -683,7 +685,7 @@ export function glassOlderJson(kind: GlassOlderKind, offset: number, limit: numb
 
 /** A `/data/dispatch/<id>` body as JSON, or null when there is no such dispatch. */
 export function glassDispatchJson(id: string, snapshot?: (o: { local?: boolean }) => GlassFullSnapshot): string | null {
-  const x = snapshot ? snapshot({ local: false }).dispatches.find((d) => d.id === id) : dispatchDetail(id);
+  const x = snapshot ? snapshot({ local: false }).dispatches.find((d) => d.id === id) : dispatchDetail(id) ?? hostedDispatches(loadConfig()).find((d) => d.id === id);
   return x ? JSON.stringify(x) : null;
 }
 

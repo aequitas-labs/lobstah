@@ -2,6 +2,7 @@ import { env, SELF, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, expect, it } from 'vitest';
 import { digest } from '../src/protocol.js';
 import type { Account } from '../src/account.js';
+import { ServerBackend } from '../../../packages/core/src/server-backend.js';
 let key = 0;
 const pat = 'test-helm-a';
 async function call(path: string, body?: unknown, token = pat, idempotency = `key-${++key}`, account = 'a') {
@@ -32,6 +33,35 @@ beforeEach(async () => {
     state.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
   });
   expect((await call('helm/take', { session: 'helm' })).status).toBe(200);
+});
+it('local Workers end-to-end: helm enqueues, machine claims, agent renews/uploads/reports, helm wait wakes', async () => {
+  const location = { kind: 'server' as const, url: 'https://state.test', account: 'a', tokenEnv: 'TEST_TOKEN' };
+  const transport: typeof fetch = (input, init) => SELF.fetch(input, init);
+  const helm = new ServerBackend(location, pat, { session: 'helm', fetch: transport });
+  const m = await machine('e2e');
+  const launcher = new ServerBackend(location, m.token, { worker: 'e2e', fetch: transport });
+  await helm.enqueue({ id: 'e2e', repo: 'repo', brief: 'write a report', for: 'e2e', model: 'gpt-6.1-sol' }, 'e2e-enqueue');
+  const claim = await launcher.claim('e2e-claim'); expect(claim?.dispatch.id).toBe('e2e');
+  const agent = new ServerBackend(location, claim!.token!, { fetch: transport });
+  await agent.heartbeat('e2e', 'beat');
+  await helm.send('e2e', 'include evidence', 'send');
+  const [message] = await agent.messages('e2e'); expect(message.text).toBe('include evidence');
+  await agent.receipt('e2e', message.id, 'receipt');
+  const file = await agent.upload('e2e', 'report.md', new TextEncoder().encode('# Result\n\nBuilt safely.'), 'upload');
+  const cursor = (await helm.events()).cursor;
+  const wait = helm.wait(cursor, 5000);
+  await agent.report('e2e', { verb: 'done', note: 'finished', evidence: { files: [file], prUrls: ['https://github.com/test/repo/pull/1'] } }, 'finish');
+  const wake = await wait; expect(wake.events.some((e) => e.kind === 'done' && e.dispatchId === 'e2e')).toBe(true);
+  const [view] = await helm.list(); expect(view.state).toBe('done'); expect(view.status?.evidence?.files).toEqual([file]);
+});
+it('a paused deadline holds the catch through missing signal; expiry is unknown, never completion', async () => {
+  const m = await machine(); const other = await machine('other'); await enqueue(); const r = await claim(m.token);
+  await call('dispatches/dispatch/report', { verb: 'paused', waitingOn: 'person', until: new Date(Date.now() + 3600000).toISOString() }, r.token);
+  await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => { state.storage.sql.exec('UPDATE dispatches SET lease=0'); });
+  expect(await (await call('claims', { worker: 'other' }, other.token)).json()).toBeNull();
+  expect((await call('dispatches/dispatch/report', { verb: 'done' }, r.token)).status).toBe(409);
+  expect((await call('workers/renew', { worker: 'worker' }, m.token)).status).toBe(200);
+  expect((await call('dispatches/dispatch/report', { verb: 'working' }, r.token)).status).toBe(200);
 });
 it('two workers race a dispatch: one wins; ownership and a single open catch are atomic', async () => {
   const a = await boat('a-worker'); const b = await boat('b-worker'); await enqueue();
