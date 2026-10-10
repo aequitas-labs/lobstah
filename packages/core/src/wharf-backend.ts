@@ -37,6 +37,7 @@ async function responseValue(response: Response): Promise<unknown> {
 }
 function input(v: unknown): DispatchInput {
   const r = record(v); const d: DispatchInput = { id: string(r.id), repo: string(r.repo), brief: string(r.brief) };
+  if (r.repoRemote !== undefined) d.repoRemote = string(r.repoRemote);
   for (const k of ['for', 'followUp', 'harness', 'model', 'effort'] as const) if (r[k] !== undefined) d[k] = string(r[k]);
   if (r.lane === 'work' || r.lane === 'chore') d.lane = r.lane;
   return d;
@@ -83,7 +84,9 @@ export class WharfBackend implements CoordinationBackend {
     const value = await this.request('dispatches'); if (!Array.isArray(value)) throw new BackendError(502, 'invalid dispatch list');
     return value.map((v) => {
       const r = record(v); if (!['queued', 'active', 'done', 'cancelled'].includes(String(r.state))) throw new BackendError(502, 'invalid dispatch state');
-      return { ...input(r), state: r.state as DispatchView['state'], ...(r.status ? { status: report(r.status) } : {}) };
+      const unservable = r.unservable ? record(r.unservable) : undefined;
+      return { ...input(r), state: r.state as DispatchView['state'], ...(r.status ? { status: report(r.status) } : {}),
+        ...(unservable ? { unservable: { repo: string(unservable.repo), note: string(unservable.note) } } : {}) };
     });
   }
   async claim(key: string): Promise<ClaimReceipt | null> {
@@ -105,7 +108,7 @@ export class WharfBackend implements CoordinationBackend {
     const r = record(await this.request(`events${after ? `?after=${encodeURIComponent(after)}` : ''}`));
     if (!Array.isArray(r.events)) throw new BackendError(502, 'invalid events');
     return { cursor: string(r.cursor), events: r.events.map((v) => {
-      const e = record(v); return { cursor: string(e.cursor), kind: string(e.kind), at: string(e.at), ...(e.dispatchId ? { dispatchId: string(e.dispatchId) } : {}) };
+      const e = record(v); return { cursor: string(e.cursor), kind: string(e.kind), at: string(e.at), ...(e.dispatchId ? { dispatchId: string(e.dispatchId) } : {}), ...(e.note ? { note: string(e.note) } : {}) };
     }) };
   }
   async wait(after: string | undefined, timeoutMs: number, signal?: AbortSignal): Promise<EventBatch> {

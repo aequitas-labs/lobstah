@@ -147,3 +147,20 @@ Glass and tend show local and remote work together, labelled by grounds/wharf;
 the pet reads the same attention feed. An unreachable wharf shows unknown state
 without blocking local work. Wharf grounds reject unsupported local operations
 (pools, cull, harness attach, PR watches) rather than mutating local authority.
+
+## Repository identity and availability
+
+Dispatch and worker sign-on require `repoRemote`, a canonical remote identity
+derived by the CLI from the configured checkout's `origin`. The local `repo`
+key remains a nickname, not a matching key. HTTPS, SSH and scp forms normalize
+to `host/owner/name` (nested namespaces are allowed); host case is folded,
+GitHub path case is folded, and other hosts retain path case. Credentials,
+query strings and local paths are not accepted. A checkout without a usable
+origin refuses before the CLI sends a dispatch or signs on its worker.
+
+Claims match that identity even for addressed work. List and status include
+an `unservable` reason when queued work has no eligible fresh worker on an
+unrevoked boat. The event cursor records one `unservable` event per transition,
+with the remote and reason, rather than repeating it on every poll. Fresh
+sign-on clears it; expiry is observed on the next polling request, with no
+background timer or connection.
