@@ -13,7 +13,7 @@ async function call(path: string, body?: unknown, token = pat, idempotency = `ke
   });
 }
 async function boat(worker = 'worker', repo = 'repo') {
-  const issued = await call('boats', { name: worker }); expect(issued.status).toBe(201);
+  const issued = await call('boats', { name: worker, permissions: ['work'] }); expect(issued.status).toBe(201);
   const m = await issued.json<{ id: string; token: string }>();
   expect((await call('workers/sign-on', { worker, repo, repoRemote: `github.com/test/${repo}` }, m.token)).status).toBe(200); return m;
 }
@@ -254,6 +254,15 @@ it('person sessions cannot sign on, claim or renew a worker and explain boat enr
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: expect.stringContaining('enrol this machine as a boat') });
   }
+});
+it('regular boats default to work and read; work-only boats can inspect only themselves', async () => {
+  const regular = await (await call('boats', { name: 'regular' })).json<{ token: string }>();
+  expect(await (await call('_boat', undefined, regular.token)).json()).toMatchObject({ name: 'regular', permissions: ['work', 'read'] });
+  expect((await call('dispatches', undefined, regular.token)).status).toBe(200);
+  const worker = await boat();
+  expect(await (await call('_boat', undefined, worker.token)).json()).toMatchObject({ name: 'worker', permissions: ['work'] });
+  expect((await call('events', undefined, worker.token)).status).toBe(403);
+  expect((await call('_boat')).status).toBe(403);
 });
 it('steering layers imply lower layers while work remains independent', async () => {
   const issue = async (name: string, permissions: string[]) => {
