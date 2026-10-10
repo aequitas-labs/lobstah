@@ -32,7 +32,7 @@ export default {
     } catch (e) {
       if (e instanceof ApiError) return Response.json({ error: e.message }, { status: e.status });
       // The DO serialises protocol errors, not exception prototypes.
-      return Response.json({ error: 'state service unavailable' }, { status: 503 });
+      return Response.json({ error: 'wharf unavailable' }, { status: 503 });
     }
   },
 } satisfies ExportedHandler<Env>;
