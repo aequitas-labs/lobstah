@@ -113,7 +113,10 @@ export async function serverCommand(cmd: string | undefined, pos: string[], opts
           if (fs.statSync(file).size > 25 * 1024 * 1024) throw new Error('file exceeds 25 MiB');
           print({ file: await backend.upload(pos[1] ?? '', path.basename(file), fs.readFileSync(file), key()) }); break;
         }
-        case 'recover': print(await backend.request(`dispatches/${encodeURIComponent(pos[1] ?? '')}/recovery`, JSON.parse(fs.readFileSync(pos[2] ?? '', 'utf8')), key())); break;
+        case 'recover': {
+          print(await backend.request(`dispatches/${encodeURIComponent(pos[1] ?? '')}/recovery`, JSON.parse(fs.readFileSync(pos[2] ?? '', 'utf8')), key()));
+          break;
+        }
         case 'recoveries': print(await backend.request(`dispatches/${encodeURIComponent(pos[1] ?? '')}/recoveries`)); break;
         case 'delete-account':
           if (!opts.has('--confirm')) throw new Error('delete-account requires --confirm; removes all account rows and files');
