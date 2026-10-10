@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { agentEnvironment, backendScope, enqueue, ensureLayout, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, ServerBackend } from '@lobstah/core';
-import { commandScope, serverCommand } from '../src/server-commands.js';
+import { agentEnvironment, backendScope, enqueue, ensureLayout, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, WharfBackend } from '@lobstah/core';
+import { commandScope, wharfCommand } from '../src/wharf-commands.js';
 import { buildGlassSnapshot, glassDispatchJson } from '../src/glass.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { lobItems } from '../src/glass-lobs.js';
@@ -16,11 +16,11 @@ beforeEach(() => {
 path = '${home.replaceAll('\\', '/')}'
 [repos.remote]
 path = '${home.replaceAll('\\', '/')}'
-[servers.cloud]
+[wharves.cloud]
 url = 'https://state.invalid'
 account = 'person'
 tokenEnv = 'LOBSTAH_TEST_CLOUD_TOKEN'
-[servers.dev]
+[wharves.dev]
 url = 'http://127.0.0.1:8787'
 account = 'person'
 tokenEnv = 'LOBSTAH_TEST_DEV_TOKEN'
@@ -28,10 +28,10 @@ tokenEnv = 'LOBSTAH_TEST_DEV_TOKEN'
 repos = ['local']
 [grounds.away]
 repos = ['remote']
-server = 'cloud'
+wharf = 'cloud'
 [grounds.dev]
 repos = ['remote']
-server = 'dev'
+wharf = 'dev'
 `);
   process.env.LOBSTAH_TEST_CLOUD_TOKEN = 'helm-cloud'; process.env.LOBSTAH_TEST_DEV_TOKEN = 'machine-dev';
 });
@@ -39,16 +39,16 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.en
 it('selects each grounds independently, defaulting to local without an implicit remote write', () => {
   const cfg = loadConfig(); expect(commandScope(cfg)?.kind).toBe('local');
   expect(groundsErrors(cfg)).toEqual([]);
-  expect(commandScope(cfg, 'away')?.server).toBe('cloud'); expect(commandScope(cfg, 'dev')?.server).toBe('dev');
+  expect(commandScope(cfg, 'away')?.wharf).toBe('cloud'); expect(commandScope(cfg, 'dev')?.wharf).toBe('dev');
   expect(() => commandScope(cfg, undefined, 'remote')).toThrow('several grounds');
 });
-it('only hands a dispatch capability to an agent, removing credentials for every named server', () => {
+it('only hands a dispatch capability to an agent, removing credentials for every named wharf', () => {
   const cfg = loadConfig(); const env = agentEnvironment(cfg, backendScope(cfg, 'away'), 'd.person.dispatch.1.secret', { LOBSTAH_TEST_CLOUD_TOKEN: 'PAT', LOBSTAH_TEST_DEV_TOKEN: 'MACHINE', PATH: 'path' });
   expect(env.LOBSTAH_TEST_CLOUD_TOKEN).toBe('d.person.dispatch.1.secret'); expect(env.LOBSTAH_TEST_DEV_TOKEN).toBeUndefined();
   expect(env.LOBSTAH_GROUNDS).toBe('away'); expect(Object.values(env)).not.toContain('PAT'); expect(Object.values(env)).not.toContain('MACHINE');
   expect(() => agentEnvironment(cfg, backendScope(cfg, 'away'), 'm.person.secret')).toThrow('dispatch token');
 });
-it('local + two servers coexist in glass, tend and the pet; unreachable grounds do not erase local work', async () => {
+it('local + two wharves coexist in glass, tend and the pet; unreachable grounds do not erase local work', async () => {
   const at = new Date().toISOString();
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     if (url.startsWith('http://127.0.0.1')) throw new Error('offline');
@@ -62,23 +62,23 @@ it('local + two servers coexist in glass, tend and the pet; unreachable grounds 
   const remote = glass.dispatches.find((d) => d.backend); expect(JSON.parse(glassDispatchJson(remote!.id)!)).toMatchObject({ brief: '# Remote task', backend: { grounds: 'away' } });
   const tend = buildTendReport(); expect(renderTend(tend)).toContain('cloud'); expect(renderTend(tend)).toContain('unknown');
   expect(lobItems(tend.attention, { lobs: true, preview: false })).toHaveLength(1);
-  const observed = readHostedViews(loadConfig()).find((v) => v.server === 'cloud')!.observedAt;
+  const observed = readHostedViews(loadConfig()).find((v) => v.wharf === 'cloud')!.observedAt;
   vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
-  await refreshHostedViews(loadConfig()); expect(readHostedViews(loadConfig()).find((v) => v.server === 'cloud')!.observedAt).toBe(observed);
+  await refreshHostedViews(loadConfig()); expect(readHostedViews(loadConfig()).find((v) => v.wharf === 'cloud')!.observedAt).toBe(observed);
   expect(buildGlassSnapshot().dispatches.find((d) => d.backend)?.verb).toBe('unknown');
   expect(lobItems(buildTendReport().attention, { lobs: true, preview: false })).toHaveLength(0);
 });
-it('remote CLI mutations use the selected server and never the local queue; unsupported operations refuse', async () => {
+it('remote CLI mutations use the selected wharf and never the local queue; unsupported operations refuse', async () => {
   const fetcher = vi.fn(async (_url: string, init: RequestInit) => Response.json(JSON.parse(String(init.body)))); vi.stubGlobal('fetch', fetcher);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   const flags: Record<string, string> = { '--grounds': 'away', '--repo': 'remote', '--brief-text': 'work', '--id': 'remote-job', '--session': 'helm', '--request-key': 'retry' };
   const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
-  expect(await serverCommand('dispatch', [], opts, loadConfig())).toBe(true);
+  expect(await wharfCommand('dispatch', [], opts, loadConfig())).toBe(true);
   expect(fetcher.mock.calls[0][0]).toContain('/v1/accounts/person/dispatches');
   expect(fs.readdirSync(path.join(home, 'queue'))).toEqual([]);
-  await expect(serverCommand('cull', [], opts, loadConfig())).rejects.toThrow('not supported');
+  await expect(wharfCommand('cull', [], opts, loadConfig())).rejects.toThrow('not supported');
 });
-it('server recover prints only its submitted recovery, without listing recoveries or falling through the outer switch', async () => {
+it('wharf recover prints only its submitted recovery, without listing recoveries or falling through the outer switch', async () => {
   const recovery = { verb: 'done', note: 'preserved result' };
   const file = path.join(home, 'recovery.json'); fs.writeFileSync(file, JSON.stringify(recovery));
   const result = { preserved: true };
@@ -86,12 +86,12 @@ it('server recover prints only its submitted recovery, without listing recoverie
   const output = vi.spyOn(console, 'log').mockImplementation(() => {});
   const flags: Record<string, string> = { '--grounds': 'away', '--request-key': 'recover-once' };
   const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
-  expect(await serverCommand('server', ['recover', 'remote-job', file], opts, loadConfig())).toBe(true);
+  expect(await wharfCommand('wharf', ['recover', 'remote-job', file], opts, loadConfig())).toBe(true);
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(fetcher).toHaveBeenCalledWith('https://state.invalid/v1/accounts/person/dispatches/remote-job/recovery', expect.objectContaining({ method: 'POST', body: JSON.stringify(recovery) }));
   expect(output.mock.calls).toEqual([[JSON.stringify(result, null, 2)]]);
 });
-it('rejects executable evidence URLs from a configured server', async () => {
-  const backend = new ServerBackend({ kind: 'server', url: 'https://state.invalid', account: 'a', tokenEnv: 'TOKEN' }, 'token', { fetch: async () => Response.json([{ id: 'x', repo: 'r', brief: 'b', state: 'done', status: { verb: 'done', at: 'now', evidence: { prUrls: ['javascript:alert(1)'] } } }]) });
+it('rejects executable evidence URLs from a configured wharf', async () => {
+  const backend = new WharfBackend({ kind: 'wharf', url: 'https://state.invalid', account: 'a', tokenEnv: 'TOKEN' }, 'token', { fetch: async () => Response.json([{ id: 'x', repo: 'r', brief: 'b', state: 'done', status: { verb: 'done', at: 'now', evidence: { prUrls: ['javascript:alert(1)'] } } }]) });
   await expect(backend.list()).rejects.toThrow('evidence URL');
 });

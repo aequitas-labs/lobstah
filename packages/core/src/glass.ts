@@ -176,8 +176,8 @@ export interface GlassEvidenceSummary {
  * (`/data/dispatch/<id>`), which the page fetches when its modal opens.
  */
 export interface GlassDispatchSummary {
-  /** Remote display identity is separate from the server's dispatch id. */
-  backend?: { grounds: string; server: string; dispatch: string; unavailable?: string };
+  /** Remote display identity is separate from the wharf's dispatch id. */
+  backend?: { grounds: string; wharf: string; dispatch: string; unavailable?: string };
   worker?: WorkerMetadata;
   id: string;
   lane: Lane;
@@ -364,7 +364,7 @@ export interface GlassAnswerLimits {
 
 /** The /data payload: one disk pass, everything the page renders. */
 export interface GlassSnapshot {
-  backends?: Array<{ grounds: string; kind: 'local' | 'server'; server?: string; url?: string; unavailable?: string }>;
+  backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;
   /** Per-server secret for the same-origin actions: focusing a trap and answering a decision. */
   focusToken?: string;
   /** Native window selection is available on this host. Session links may work elsewhere. */

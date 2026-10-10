@@ -328,7 +328,7 @@ export function groundsErrors(cfg: Config): string[] {
   for (const [name, g] of Object.entries(cfg.grounds)) {
     for (const repo of g.repos) {
       if (cfg.repos[repo] === undefined) errors.push(`grounds.${name} names unknown repo "${repo}"`);
-      const location = g.server ? cfg.servers?.[g.server] : undefined;
+      const location = g.wharf ? cfg.wharves?.[g.wharf] : undefined;
       const scope = location ? JSON.stringify([location.url, location.account, repo]) : `local:${repo}`;
       const other = seen.get(scope);
       if (other !== undefined) errors.push(`repo "${repo}" is in both grounds.${other} and grounds.${name} — a repo belongs to at most one grounds`);

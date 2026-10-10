@@ -30,7 +30,7 @@ export interface CommandSpec {
 const HARNESS = 'claude|codex';
 
 export const COMMANDS: Record<string, CommandSpec> = {
-  server: {
+  wharf: {
     subverbs: ['issue-machine', 'machines', 'revoke-machine', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries', 'delete-account'],
     flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--confirm': {} },
     positionals: '<action> [<id>] [<file>|<message-id>]',
@@ -225,7 +225,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
 for (const [name, spec] of Object.entries(COMMANDS)) {
   if (!name.startsWith('__')) spec.flags['--grounds'] ??= { value: '<name>' };
 }
-for (const name of ['dispatch', 'send', 'cancel', 'report', 'soak', 'server', 'man:helm', 'man:relieve']) COMMANDS[name]!.flags['--request-key'] = { value: '<id>' };
+for (const name of ['dispatch', 'send', 'cancel', 'report', 'soak', 'wharf', 'man:helm', 'man:relieve']) COMMANDS[name]!.flags['--request-key'] = { value: '<id>' };
 COMMANDS.report!.flags['--file-id'] = { value: '<id>', repeatable: true };
 COMMANDS.soak!.flags['--worker'] = { value: '<id>' };
 COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };

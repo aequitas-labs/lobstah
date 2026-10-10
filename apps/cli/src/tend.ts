@@ -1055,7 +1055,7 @@ export function buildTendReport(now = Date.now()): TendReport {
 
 export function renderTend(r: TendReport): string {
   const lines: string[] = [];
-  for (const b of r.backends ?? []) lines.push(toonKV({ grounds: b.grounds, backend: b.server ?? 'local', ...(b.unavailable ? { state: 'unknown', note: b.unavailable } : {}) }));
+  for (const b of r.backends ?? []) lines.push(toonKV({ grounds: b.grounds, backend: b.wharf ?? 'local', ...(b.unavailable ? { state: 'unknown', note: b.unavailable } : {}) }));
   // Tables show each trap by name alone; `wt:<id>` only where no name is known.
   const names = trapNamer();
   const named = (text: string) => nameTrapsIn(text, 'name', names);

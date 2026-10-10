@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { backendScope, backendScopes, BackendError, serverFor, refreshHostedViews, isVerb, waitingFields, toonKV } from '@lobstah/core';
+import { backendScope, backendScopes, BackendError, wharfFor, refreshHostedViews, isVerb, waitingFields, toonKV } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
 
@@ -12,7 +12,7 @@ export function commandScope(config: Config, grounds?: string, repo?: string): B
     const matches = scopes.filter((s) => s.repos.includes(repo));
     if (matches.length === 1) return matches[0];
     if (matches.length > 1) throw new Error(`repo ${repo} belongs to several grounds; use --grounds`);
-    if (scopes.some((s) => s.kind === 'server')) throw new Error(`repo ${repo} has no grounds; use a configured repo and --grounds`);
+    if (scopes.some((s) => s.kind === 'wharf')) throw new Error(`repo ${repo} has no grounds; use a configured repo and --grounds`);
   }
   if (scopes.length === 1) return scopes[0];
   const local = scopes.filter((s) => s.kind === 'local');
@@ -24,27 +24,27 @@ type Options = { opt: (flag: string) => string | undefined; has: (flag: string) 
 const GLOBAL = new Set(['version', 'daemon', 'glass', 'pet', 'doctor', 'telemetry', 'init', 'repos', 'pick', 'man:manual', '__runner', '__pool-warm']);
 const OVERVIEW = new Set(['ls', 'status', 'man:tend', 'man:report', 'prs', 'reports', 'stats', 'attention']);
 /** Resolve once per command; remote mutations can never enter local handlers. */
-export async function serverCommand(cmd: string | undefined, pos: string[], opts: Options, config: Config): Promise<boolean> {
+export async function wharfCommand(cmd: string | undefined, pos: string[], opts: Options, config: Config): Promise<boolean> {
   if (!cmd || GLOBAL.has(cmd)) return false;
   const grounds = opts.opt('--grounds') ?? process.env.LOBSTAH_GROUNDS;
   if (!grounds && OVERVIEW.has(cmd) && !pos.length) { await refreshHostedViews(config); return false; }
   const scope = commandScope(config, grounds, opts.opt('--repo'));
   if (!scope) {
-    if (backendScopes(config).some((s) => s.kind === 'server')) throw new Error('choose --grounds for this command; no implicit local or server backend');
+    if (backendScopes(config).some((s) => s.kind === 'wharf')) throw new Error('choose --grounds for this command; no implicit local or wharf backend');
     return false;
   }
   if (scope.kind === 'local') return false;
   const session = resolveSessionId({ flag: opts.opt('--session') })?.id;
   const worker = opts.opt('--worker');
-  const backend = serverFor(scope, { session, worker });
+  const backend = wharfFor(scope, { session, worker });
   const key = () => opts.opt('--request-key') ?? randomUUID();
   const id = () => { if (!pos[0]) throw new Error(`${cmd} requires a dispatch id`); return encodeURIComponent(pos[0]); };
   const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
-  const noFiles = () => { if (opts.values('--attach').length || opts.opt('--report')) throw new Error('upload server evidence with server upload, then report --file-id; local attachment paths are never sent'); };
+  const noFiles = () => { if (opts.values('--attach').length || opts.opt('--report')) throw new Error('upload wharf evidence with wharf upload, then report --file-id; local attachment paths are never sent'); };
   switch (cmd) {
     case 'dispatch': {
       noFiles();
-      if (opts.opt('--pool')) throw new Error('local worktree pools cannot run on server grounds');
+      if (opts.opt('--pool')) throw new Error('local worktree pools cannot run on wharf grounds');
       const repo = opts.opt('--repo'); const file = opts.opt('--brief') ?? opts.opt('--bait');
       const brief = opts.opt('--brief-text') ?? (file ? fs.readFileSync(file, 'utf8') : undefined);
       if (!repo || !brief || !scope.repos.includes(repo)) throw new Error('dispatch needs --repo in this grounds and --brief or --brief-text');
@@ -78,7 +78,7 @@ export async function serverCommand(cmd: string | undefined, pos: string[], opts
           unknown = false;
         } catch (e) {
           if (!(e instanceof BackendError) || e.status !== 503) throw e;
-          if (!unknown) console.error(toonKV({ grounds: scope.grounds, state: 'unknown', note: 'server unavailable; keeping cursor and waiting' }));
+          if (!unknown) console.error(toonKV({ grounds: scope.grounds, state: 'unknown', note: 'wharf unavailable; keeping cursor and waiting' }));
           unknown = true;
         }
         await new Promise((resolve) => setTimeout(resolve, Math.min(1000, Math.max(0, deadline - Date.now()))));
@@ -86,7 +86,7 @@ export async function serverCommand(cmd: string | undefined, pos: string[], opts
       print({ cursor, timeout: true }); break;
     }
     case 'soak': {
-      if (!worker || !opts.opt('--repo')) throw new Error('server soak requires --worker and --repo (trusted machine credential, not an agent token)');
+      if (!worker || !opts.opt('--repo')) throw new Error('wharf soak requires --worker and --repo (trusted machine credential, not an agent token)');
       if (!scope.repos.includes(opts.opt('--repo')!)) throw new Error('worker repo must belong to this grounds');
       await backend.request('workers/sign-on', { worker, repo: opts.opt('--repo') }, key());
       const seconds = Number(opts.opt('--timeout') ?? 600);
@@ -100,7 +100,7 @@ export async function serverCommand(cmd: string | undefined, pos: string[], opts
       } while (Date.now() < deadline);
       print({ timeout: true }); process.exitCode = 3; break;
     }
-    case 'server': {
+    case 'wharf': {
       switch (pos[0]) {
         case 'issue-machine': print(await backend.request('machines', { name: pos[1] }, key())); break;
         case 'machines': print(await backend.request('machines')); break;
@@ -109,7 +109,7 @@ export async function serverCommand(cmd: string | undefined, pos: string[], opts
         case 'heartbeat': await backend.heartbeat(pos[1] ?? '', key()); print({ renewed: true }); break;
         case 'receipt': await backend.receipt(pos[1] ?? '', pos[2] ?? '', key()); print({ received: true }); break;
         case 'upload': {
-          const file = pos[2]; if (!file) throw new Error('server upload <dispatch> <file>');
+          const file = pos[2]; if (!file) throw new Error('wharf upload <dispatch> <file>');
           if (fs.statSync(file).size > 25 * 1024 * 1024) throw new Error('file exceeds 25 MiB');
           print({ file: await backend.upload(pos[1] ?? '', path.basename(file), fs.readFileSync(file), key()) }); break;
         }
@@ -121,28 +121,28 @@ export async function serverCommand(cmd: string | undefined, pos: string[], opts
         case 'delete-account':
           if (!opts.has('--confirm')) throw new Error('delete-account requires --confirm; removes all account rows and files');
           print(await backend.request('', {}, key(), 'DELETE')); break;
-        default: throw new Error('choose a server subcommand');
+        default: throw new Error('choose a wharf subcommand');
       }
       break;
     }
-    default: throw new Error(`${cmd} is not supported on server grounds; nothing was written locally`);
+    default: throw new Error(`${cmd} is not supported on wharf grounds; nothing was written locally`);
   }
   return true;
 }
 
 /** Remote agents must never sign on, beat or claim in this machine's local fleet. */
-export async function serverHook(cmd: string | undefined, args: string[]): Promise<boolean> {
+export async function wharfHook(cmd: string | undefined, args: string[]): Promise<boolean> {
   if (!process.env.LOBSTAH_GROUNDS || !(cmd === 'hook' || (cmd === 'soak' && args[0] === 'beat') || cmd === 'man:brief' || cmd === 'man:haul')) return false;
   const { loadConfig } = await import('@lobstah/core');
   const scope = commandScope(loadConfig(), process.env.LOBSTAH_GROUNDS);
-  if (scope?.kind !== 'server') return false;
+  if (scope?.kind !== 'wharf') return false;
   try {
     const token = process.env[scope.location.tokenEnv] ?? '';
     if (args[0] === 'post-tool-use' || (cmd === 'soak' && args[0] === 'beat')) {
       const pieces = token.split('.');
-      if (pieces[0] === 'd' && pieces[1] === scope.location.account && pieces[2]) await serverFor(scope).heartbeat(pieces[2], randomUUID());
+      if (pieces[0] === 'd' && pieces[1] === scope.location.account && pieces[2]) await wharfFor(scope).heartbeat(pieces[2], randomUUID());
     } else if (args[0] === 'session-start' || cmd === 'man:brief') {
-      console.log(`lobstah: server grounds ${scope.grounds} on ${scope.server}. Report and read messages through this grounds; receipt messages explicitly with lobstah server receipt. Do not sign on to the local fleet. The trusted launcher owns claim and lease renewal.`);
+      console.log(`lobstah: wharf grounds ${scope.grounds} on ${scope.wharf}. Report and read messages through this grounds; receipt messages explicitly with lobstah wharf receipt. Do not sign on to the local fleet. The trusted launcher owns claim and lease renewal.`);
     }
   } catch { /* Missing remote signal means unknown; hooks never break a user's turn. */ }
   return true;
