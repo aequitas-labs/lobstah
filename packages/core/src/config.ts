@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
+import { parseBackendLocation } from './backend.js';
 import type { Descriptor, DispatchLimits } from './types.js';
 import { lobstahHome } from './paths.js';
 
@@ -246,6 +247,8 @@ export interface GlassConfig {
 /** A named territory: the subset of configured repos one helm oversees. */
 export interface GroundsConfig {
   repos: string[];
+  /** Omitted: local files. Otherwise an entry in wharves, never a global mode. */
+  wharf?: string;
 }
 
 export interface Config {
@@ -257,6 +260,7 @@ export interface Config {
   glass: GlassConfig;
   watch: WatchConfig;
   grounds: Record<string, GroundsConfig>;
+  wharves?: Record<string, import('./backend-model.js').BackendLocation>;
   /** Worktree pools for headless dispatches (`[pools.<name>]`). */
   pools: Record<string, PoolConfig>;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
@@ -380,9 +384,15 @@ export function loadConfig(): Config {
     };
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;
+  const wharves: Record<string, import('./backend-model.js').BackendLocation> = {};
+  for (const [name, value] of Object.entries((raw.wharves ?? {}) as Record<string, Record<string, unknown>>)) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new Error('invalid wharf name');
+    wharves[name] = parseBackendLocation({ ...value, kind: 'wharf' })!;
+  }
   const grounds: Record<string, GroundsConfig> = {};
   for (const [key, g] of Object.entries(groundsRaw)) {
-    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [] };
+    if (g.wharf !== undefined && (typeof g.wharf !== 'string' || !wharves[g.wharf])) throw new Error(`grounds ${key}: unknown wharf`);
+    grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [], ...(g.wharf ? { wharf: String(g.wharf) } : {}) };
   }
   return {
     repos,
@@ -393,6 +403,7 @@ export function loadConfig(): Config {
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
     watch,
     grounds,
+    wharves,
     pools: parsePools(raw.pools, repos),
     notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
     notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
