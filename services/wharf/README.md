@@ -178,6 +178,16 @@ Recoveries are stored separately for helm reconciliation.
 
 Event cursors are opaque, account-generation scoped and ordered by SQLite sequence,
 not client clocks. Polling requests finish immediately; the DO can sleep idle.
+`GET wake` upgrades a read-authorized bearer connection; the glass uses its
+cookie-only `/api/glass/wake` instead. These receive-only hibernating sockets send
+only `{ "type": "wake" }`. They carry no cursor, task data or mutation authority.
+There are at most 32 connections per account, no server pings, timers or alarms.
+Boat rotation/revocation and person-session expiry are rechecked before hints;
+account deletion closes all sockets. Helm wait still polls the durable cursor
+every second; the glass still polls every fifteen seconds and retries a dropped
+hint connection on that cadence. Workers never connect. Losing a hint loses no
+work. Native tests evict the DO with a connected socket, prove its transient state
+is gone and its socket survives, then fetch events missed after disconnecting.
 Report evidence is data, not hosted executable HTML. No GitHub polling or worker
 execution is moved into this service.
 

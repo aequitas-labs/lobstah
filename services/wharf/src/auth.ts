@@ -49,6 +49,14 @@ export async function personSession(env: Env, headers: Headers): Promise<{ id: s
   return { id: identifier(session.user.id), sessionId: session.session.id };
 }
 
+/** Wake hints never retain cookie/token secrets, and recheck the session by ID. */
+export async function personSessionLive(env: Env, id: string, sessionId: string): Promise<boolean> {
+  const context = await wharfAuth(env).$context;
+  const session = await context.adapter.findOne<{ expiresAt: Date }>({ model: 'session', where: [{ field: 'id', value: sessionId }, { field: 'userId', value: id }] });
+  const provider = await env.AUTH_DB.prepare('SELECT accountId FROM account WHERE userId=? AND providerId=?').bind(id, 'github').first<{ accountId: string }>();
+  return !!session && new Date(session.expiresAt).getTime() > Date.now() && invited(env, provider?.accountId);
+}
+
 /** A receipt authorizes only the same deletion retry, never any normal request. */
 export async function deletionReceipt(env: Env, account: string, token: string, key: string | null): Promise<boolean> {
   if (!key || !/^[A-Za-z0-9_-]{1,128}$/.test(key)) return false;
