@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { readStatusLog } from './status.js';
 import type { Lane, StatusEntry } from './types.js';
 
@@ -48,7 +48,7 @@ function write(e: SentExpectation): void {
   const file = sentPath(e.dispatchId);
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(e, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 /** The first non-empty line of a message. */

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { uniqueTempPath, laneDirs, lobstahHome, parsePrRef, prStandingKinds, readEvidence, readPr, readStackEpochs, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
+import { uniqueTempPath, atomicRenameSync, laneDirs, lobstahHome, parsePrRef, prStandingKinds, readEvidence, readPr, readStackEpochs, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
 
 /**
@@ -65,7 +65,7 @@ export function writeAck(a: Ack): void {
   const file = ackFile(a.key);
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(a, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 export function removeAck(key: string): boolean {

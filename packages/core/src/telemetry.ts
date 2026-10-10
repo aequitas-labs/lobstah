@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import { configPath, loadConfig } from './config.js';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { readStatsStore } from './stats.js';
 import { generatedTrapNames, TRAP_NAME_RE } from './trap-names.js';
 import { lobstahVersion } from './version.js';
@@ -102,7 +102,7 @@ function writeTelemetryState(state: TelemetryState): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 /** The state, creating the install id (a random v4 UUID) on first use. */
@@ -399,7 +399,7 @@ export function setTelemetryShare(share: boolean): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, next);
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 /** `lobstah telemetry enable`: share on, and the notice counts as shown. */

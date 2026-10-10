@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, laneDirs, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, laneDirs, lobstahHome } from './paths.js';
 import { readEvidence } from './evidence.js';
 import { storedDescriptor } from './queue.js';
 import type { Lane } from './types.js';
@@ -294,5 +294,5 @@ export function writeKeptWorktrees(list: KeptWorktree[]): void {
   }
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }

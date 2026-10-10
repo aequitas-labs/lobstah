@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
-  uniqueTempPath,
+  uniqueTempPath, atomicRenameSync,
   branchOwnership,
   chainPr,
   enqueue,
@@ -61,7 +61,7 @@ export function stampRepairerBeat(now = Date.now(), processName = 'daemon'): voi
   fs.mkdirSync(lobstahHome(), { recursive: true });
   const tmp = uniqueTempPath(beatFile());
   fs.writeFileSync(tmp, JSON.stringify({ process: processName, pid: process.pid, at: new Date(now).toISOString() } satisfies RepairerBeat));
-  fs.renameSync(tmp, beatFile());
+  atomicRenameSync(tmp, beatFile());
 }
 
 export function readRepairerBeat(): RepairerBeat | undefined {

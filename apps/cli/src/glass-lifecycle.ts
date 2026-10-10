@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { uniqueTempPath, COMPILED_BINARY, loadConfig, lobstahHome, lobstahVersion } from '@lobstah/core';
+import { uniqueTempPath, atomicRenameSync, COMPILED_BINARY, loadConfig, lobstahHome, lobstahVersion } from '@lobstah/core';
 
 export interface GlassInfo {
   service: 'lobstah-glass';
@@ -79,7 +79,7 @@ function writeGlassState(state: GlassState): void {
   const tmp = uniqueTempPath(file);
   try {
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n');
-    fs.renameSync(tmp, file);
+    atomicRenameSync(tmp, file);
   } finally {
     fs.rmSync(tmp, { force: true });
   }

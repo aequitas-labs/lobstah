@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { parsePrRef, ghPrViewDirect } from './pr.js';
 import type { GhPrView, PrRef } from './pr.js';
 import { readPr } from './prs.js';
@@ -283,7 +283,7 @@ export function preparePrWatchBatch(
       }
       const tmp = uniqueTempPath(file);
       fs.writeFileSync(tmp, JSON.stringify(cycle));
-      fs.renameSync(tmp, file);
+      atomicRenameSync(tmp, file);
       if (limited) break; // one shared failure, never hammer the next repository
     } finally {
       fs.rmdirSync(lock);

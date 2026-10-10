@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome } from '@lobstah/core';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from '@lobstah/core';
 
 /** A foreground wait whose completion notification wakes its harness session. */
 export interface SessionWatcher {
@@ -133,7 +133,7 @@ export function armWatcher(sessionId: string, kind: SessionWatcher['kind'], trap
   const beat = () => {
     if (!ownsFile()) return;
     const tmp = uniqueTempPath(file);
-    try { fs.writeFileSync(tmp, `${JSON.stringify(own())}\n`); fs.renameSync(tmp, file); }
+    try { fs.writeFileSync(tmp, `${JSON.stringify(own())}\n`); atomicRenameSync(tmp, file); }
     catch { try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ } }
   };
   const timer = setInterval(beat, HEARTBEAT_MS);
