@@ -8,5 +8,11 @@ export default defineConfig({
       GITHUB_ALLOWLIST: '["123","456"]', AUTH_SECRET: 'test-only-auth-secret-not-a-real-credential-32bytes', GITHUB_CLIENT_SECRET: 'stub-secret',
       TOKEN_SECRET: 'test-only-token-signing-secret-not-for-deployment',
     } } })],
-  test: { include: ['test/**/*.test.ts'] },
+  test: {
+    include: ['test/**/*.test.ts'],
+    // Native D1/DO fixtures are deliberately shared. Migration/deletion tests
+    // must finish before another file resets or reads those same test records.
+    fileParallelism: false,
+    ...(process.platform === 'win32' && { testTimeout: 30_000, hookTimeout: 30_000 }),
+  },
 });
