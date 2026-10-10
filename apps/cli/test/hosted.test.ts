@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { agentEnvironment, backendScope, enqueue, ensureLayout, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, WharfBackend } from '@lobstah/core';
 import { commandScope, wharfCommand } from '../src/wharf-commands.js';
 import { buildGlassSnapshot, glassDispatchJson } from '../src/glass.js';
@@ -11,6 +12,8 @@ import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-hosted-')); process.env.LOBSTAH_HOME = home; ensureLayout();
+  execFileSync('git', ['init', home]);
+  execFileSync('git', ['-C', home, 'remote', 'add', 'origin', 'git@github.com:Test/Repo.git']);
   fs.writeFileSync(path.join(home, 'config.toml'), `
 [repos.local]
 path = '${home.replaceAll('\\', '/')}'
@@ -75,8 +78,18 @@ it('remote CLI mutations use the selected wharf and never the local queue; unsup
   const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
   expect(await wharfCommand('dispatch', [], opts, loadConfig())).toBe(true);
   expect(fetcher.mock.calls[0][0]).toContain('/v1/accounts/person/dispatches');
+  expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toMatchObject({ repo: 'remote', repoRemote: 'github.com/test/repo' });
   expect(fs.readdirSync(path.join(home, 'queue'))).toEqual([]);
   await expect(wharfCommand('cull', [], opts, loadConfig())).rejects.toThrow('not supported');
+});
+it('refuses wharf worker sign-on and dispatch before HTTP when the checkout lacks a usable remote', async () => {
+  execFileSync('git', ['-C', home, 'remote', 'remove', 'origin']);
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const flags: Record<string, string> = { '--grounds': 'away', '--repo': 'remote', '--worker': 'worker', '--brief-text': 'work' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  await expect(wharfCommand('soak', [], opts, loadConfig())).rejects.toThrow('no usable origin remote');
+  await expect(wharfCommand('dispatch', [], opts, loadConfig())).rejects.toThrow('no usable origin remote');
+  expect(fetcher).not.toHaveBeenCalled();
 });
 it('wharf recover prints only its submitted recovery, without listing recoveries or falling through the outer switch', async () => {
   const recovery = { verb: 'done', note: 'preserved result' };

@@ -15,10 +15,10 @@ async function call(path: string, body?: unknown, token = pat, idempotency = `ke
 async function boat(worker = 'worker', repo = 'repo') {
   const issued = await call('boats', { name: worker }); expect(issued.status).toBe(201);
   const m = await issued.json<{ id: string; token: string }>();
-  expect((await call('workers/sign-on', { worker, repo }, m.token)).status).toBe(200); return m;
+  expect((await call('workers/sign-on', { worker, repo, repoRemote: `github.com/test/${repo}` }, m.token)).status).toBe(200); return m;
 }
 async function enqueue(id = 'dispatch', forWorker?: string) {
-  expect((await call('dispatches', { id, repo: 'repo', brief: 'build', ...(forWorker ? { for: forWorker } : {}) })).status).toBe(200);
+  expect((await call('dispatches', { id, repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'build', ...(forWorker ? { for: forWorker } : {}) })).status).toBe(200);
 }
 async function claim(token: string, worker = 'worker', retryKey?: string) {
   const res = await call('claims', { worker }, token, retryKey);
@@ -28,11 +28,35 @@ beforeEach(async () => {
   // New pool shares storage across tests: explicitly delete only test DO data.
   const stub = env.ACCOUNTS.getByName('a');
   await runInDurableObject(stub, async (_instance: Account, state) => {
-    for (const table of ['boats', 'workers', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'messages', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
+    for (const table of ['boats', 'workers', 'worker_nicknames', 'unservable', 'event_details', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'messages', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key!='generation'");
     state.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
   });
   expect((await call('helm/take', { session: 'helm' })).status).toBe(200);
+});
+it('matches canonical remotes across local nicknames, never matching different remotes with the same nickname', async () => {
+  const matching = await boat('matching', 'worker-key');
+  expect((await call('workers/sign-on', { worker: 'matching', repo: 'worker-key', repoRemote: 'github.com/test/repo' }, matching.token)).status).toBe(200);
+  const foreign = await boat('foreign');
+  expect((await call('workers/sign-on', { worker: 'foreign', repo: 'repo', repoRemote: 'github.com/other/repo' }, foreign.token)).status).toBe(200);
+  await enqueue();
+  expect(await (await call('claims', { worker: 'foreign' }, foreign.token)).json()).toBeNull();
+  expect((await claim(matching.token, 'matching')).dispatch.id).toBe('dispatch');
+});
+it('lists unservable repos and records one event per availability transition, including lease expiry', async () => {
+  await enqueue();
+  const listed = await (await call('dispatches')).json<{ unservable?: { repo: string; note: string } }[]>();
+  expect(listed[0].unservable).toMatchObject({ repo: 'github.com/test/repo', note: expect.stringContaining('no boat online') });
+  expect(await (await call('dispatches/dispatch')).json()).toMatchObject({ unservable: listed[0].unservable });
+  const before = await (await call('events')).json<{ cursor: string; events: { kind: string; note?: string }[] }>();
+  expect(before.events.filter((e) => e.kind === 'unservable')).toEqual([expect.objectContaining({ note: expect.stringContaining('github.com/test/repo') })]);
+  expect((await (await call(`events?after=${before.cursor}`)).json<{ events: unknown[] }>()).events).toEqual([]);
+  const b = await boat();
+  expect((await (await call('dispatches')).json<{ unservable?: unknown }[]>())[0].unservable).toBeUndefined();
+  await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => { state.storage.sql.exec('UPDATE workers SET seen=0 WHERE boat=?', b.id); });
+  expect((await (await call(`events?after=${before.cursor}`)).json<{ events: { kind: string }[] }>()).events.filter((e) => e.kind === 'unservable')).toHaveLength(1);
+  const cursor = (await (await call('events')).json<{ cursor: string }>()).cursor;
+  expect((await (await call(`events?after=${cursor}`)).json<{ events: unknown[] }>()).events).toEqual([]);
 });
 it('local Workers end-to-end: helm enqueues, boat claims, agent renews/uploads/reports, helm wait wakes', async () => {
   const location = { kind: 'wharf' as const, url: 'https://state.test', account: 'a', tokenEnv: 'TEST_TOKEN' };
@@ -40,7 +64,7 @@ it('local Workers end-to-end: helm enqueues, boat claims, agent renews/uploads/r
   const helm = new WharfBackend(location, pat, { session: 'helm', fetch: transport });
   const m = await boat('e2e');
   const launcher = new WharfBackend(location, m.token, { worker: 'e2e', fetch: transport });
-  await helm.enqueue({ id: 'e2e', repo: 'repo', brief: 'write a report', for: 'e2e', model: 'gpt-6.1-sol' }, 'e2e-enqueue');
+  await helm.enqueue({ id: 'e2e', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'write a report', for: 'e2e', model: 'gpt-6.1-sol' }, 'e2e-enqueue');
   const claim = await launcher.claim('e2e-claim'); expect(claim?.dispatch.id).toBe('e2e');
   const agent = new WharfBackend(location, claim!.token!, { fetch: transport });
   await agent.heartbeat('e2e', 'beat');
@@ -77,7 +101,7 @@ it('eligible addressed work cannot starve behind a large queue of another worker
     state.storage.transactionSync(() => {
       for (let i = 0; i < 1001; i++) {
         const id = `foreign-${i}`;
-        state.storage.sql.exec("INSERT INTO dispatches(id,data,state) VALUES (?,?,'queued')", id, JSON.stringify({ id, repo: 'repo', brief: 'foreign', for: 'absent' }));
+        state.storage.sql.exec("INSERT INTO dispatches(id,data,state) VALUES (?,?,'queued')", id, JSON.stringify({ id, repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'foreign', for: 'absent' }));
       }
     });
   });
@@ -85,7 +109,7 @@ it('eligible addressed work cannot starve behind a large queue of another worker
 });
 it('idempotent enqueue, claim and report write once and conflicting keys fail', async () => {
   const m = await boat();
-  const input = { id: 'dispatch', repo: 'repo', brief: 'build' };
+  const input = { id: 'dispatch', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'build' };
   expect((await call('dispatches', input, pat, 'enqueue')).status).toBe(200);
   expect((await call('dispatches', input, pat, 'enqueue')).status).toBe(200);
   expect((await call('dispatches', { ...input, brief: 'changed' }, pat, 'enqueue')).status).toBe(409);
@@ -97,7 +121,7 @@ it('idempotent enqueue, claim and report write once and conflicting keys fail', 
 it('boat credentials cannot perform any helm action or read dispatch content; agent tokens cannot claim', async () => {
   const m = await boat(); await enqueue(); const receipt = await claim(m.token);
   for (const [path, body] of [
-    ['dispatches', { id: 'evil', repo: 'repo', brief: 'bad' }], ['dispatches/dispatch/cancel', {}],
+    ['dispatches', { id: 'evil', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'bad' }], ['dispatches/dispatch/cancel', {}],
     ['helm/take', { session: 'evil', take: true }], ['helm/renew', {}], ['helm/release', {}],
     ['boats', { name: 'evil' }], [`boats/${m.id}/revoke`, {}],
   ] as const) expect((await call(path, body, m.token)).status).toBe(403);
@@ -129,7 +153,7 @@ it('addressed work is sticky and a fresh helm cannot be displaced implicitly', a
   expect(await (await call('claims', { worker: 'worker' }, m.token)).json()).toBeNull();
   expect((await call('helm/take', { session: 'other' })).status).toBe(409);
   expect((await call('helm/take', { session: 'other', take: true })).status).toBe(200);
-  expect((await call('dispatches', { id: 'late', repo: 'repo', brief: 'old helm' })).status).toBe(409);
+  expect((await call('dispatches', { id: 'late', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'old helm' })).status).toBe(409);
 });
 it('stores only boat credential hashes and returns a credential only once', async () => {
   const response = await call('boats', { name: 'laptop' }, pat, 'issue');
