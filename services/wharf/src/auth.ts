@@ -78,8 +78,18 @@ export async function authRequest(request: Request, env: Env, api: boolean): Pro
     if (route === 'device' || route === 'device/deny') {
       const userCode = request.method === 'GET' ? url.searchParams.get('user_code') : (await request.clone().json() as { userCode?: unknown }).userCode;
       requireThat(typeof userCode === 'string' && userCode.length <= 128, 400, 'invalid device code');
-      const code = await env.AUTH_DB.prepare('SELECT requestData FROM deviceCode WHERE userCode=?').bind(userCode).first<{ requestData: string }>();
+      const code = await env.AUTH_DB.prepare('SELECT id,status,requestData FROM deviceCode WHERE userCode=?').bind(userCode).first<{ id: string; status: string; requestData: string }>();
       requireThat(code && JSON.parse(code.requestData).account === person.id, 403, 'boat approval belongs to another account or is invalid');
+      if (route === 'device' && request.method === 'GET' && code.status === 'pending') {
+        const data = JSON.parse(code.requestData);
+        if (!data.nameResolved) {
+          data.name = await env.ACCOUNTS.getByName(person.id).availableBoatName(data.name, data.id);
+          data.nameResolved = true;
+          // Resolve before rendering, never silently rename an already approved boat.
+          await env.AUTH_DB.prepare("UPDATE deviceCode SET requestData=? WHERE id=? AND status='pending' AND requestData=?")
+            .bind(JSON.stringify(data), code.id, code.requestData).run();
+        }
+      }
     }
   }
   const headers = new Headers(request.headers);

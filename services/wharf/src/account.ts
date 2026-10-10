@@ -19,6 +19,17 @@ const HELM_MS = 120_000;
 export class Account extends DurableObject<Env> {
   /** Serialises only R2 mutations in this live instance; ownership stays in SQL. */
   private fileTail: Promise<unknown> = Promise.resolve();
+  /** Private binding only: the signed-in approval page chooses a visible name. */
+  availableBoatName(requested: string, own?: string): string {
+    const base = boatName(requested);
+    const taken = (name: string) => this.ctx.storage.sql.exec<{ id: string }>('SELECT id FROM boats WHERE name=? COLLATE NOCASE', name).toArray().some((b) => b.id !== own);
+    if (!taken(base)) return base;
+    for (let n = 2; n <= Number(this.env.MAX_ROWS) + 2; n++) {
+      const suffix = `-${n}`, candidate = `${base.slice(0, 64 - suffix.length).replace(/-+$/, '')}${suffix}`;
+      if (!taken(candidate)) return candidate;
+    }
+    throw new ApiError(409, 'no available boat name; choose another name');
+  }
   async handle(command: string): Promise<string> { return JSON.stringify(await this.request(JSON.parse(command))); }
   async request(c: Command): Promise<StoredResult> {
     try {
