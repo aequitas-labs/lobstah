@@ -295,3 +295,27 @@ The signed-in boat list's revoke action invalidates the credential and is the
 only boat-removal action. Stable IDs and sticky addressed work remain recorded;
 revocation never silently reassigns that work. Renaming or changing access requires
 approved login from the boat; no public grant-editing or rename API exists.
+
+## Browser glass
+
+`pnpm --filter @lobstah/wharf build` bundles the existing glass stylesheet and
+shared safe Markdown elements into the Worker. The configured glass host serves
+`/` and `/device`; no separately hosted assets or hardcoded domain are needed.
+Sign in with invited GitHub credentials, then use `/device` to inspect a CLI
+approval code and approve the displayed boat with the same or lower access, or
+refuse it. No boat or dispatch token is issued to the page.
+
+The browser uses same-origin, cookie-only `/api/glass` routes. Account identity
+comes from that cookie, never a URL selector. Writes require the exact configured
+Origin and an idempotency key. These routes cannot take/renew the helm seat,
+author documents, directly send a worker message or grant/edit a boat. Message
+and trap-start requests wait for the leased helm, with a visible ten-minute
+expiry; answers emit decision-answer events. Owner cancellation fences a job
+immediately without touching the helm seat. Revoke and account deletion require
+separate in-page confirmations on the boat list.
+
+Snapshots poll every fifteen seconds. Missing check-ins or a failed feed are
+unknown, not completion. Remote sessions show their boat and a validated command
+to copy, never a pretend focus-window action. Markdown is rendered as elements;
+raw HTML stays text. Inline raster images resolve only through the document's
+own uploaded attachments; SVG/HTML files remain downloads with `nosniff`.

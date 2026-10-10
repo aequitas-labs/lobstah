@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit",
-    "test": "vitest run",
+    "build": "node ../../scripts/build-wharf-glass.mjs && tsc --noEmit && tsc -p glass",
+    "test": "node ../../scripts/build-wharf-glass.mjs && vitest run",
     "types": "wrangler types --include-runtime false"
   },
   "devDependencies": {
@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "better-auth": "1.7.6",
-    "zod": "4.5.4"
+    "zod": "4.5.4",
+    "preact": "^10.29.8",
+    "htm": "^3.1.1"
   }
 }
