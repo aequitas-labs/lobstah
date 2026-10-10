@@ -67,7 +67,7 @@ describe('lobstah hook session-start (alias: man brief)', () => {
         expect(res.status, res.stderr).toBe(0);
         return (JSON.parse(res.stdout) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext;
       };
-      expect(brief(HELM)).toContain('you hold the helm for grounds "fleet"');
+      expect(brief(HELM)).toContain('you hold the helm for grounds "home"');
       expect(brief('trap-session')).toContain('this session mans trap');
       // A session with no role still learns its id: Codex has no other source.
       expect(brief(NOBODY)).toContain(`lobstah: session id ${NOBODY}.`);

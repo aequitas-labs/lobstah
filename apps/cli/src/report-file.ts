@@ -1,5 +1,7 @@
 import {
   briefTitle,
+  displayGrounds,
+  storageGrounds,
   dispatchReportKey,
   fileReport,
   followUpAncestors,
@@ -62,14 +64,16 @@ export function fileDispatchReport(id: string, lane: Lane, file: string, attach:
 
 /** `man file <file.md> [--attach <file>] [--title <text>]`: a helm's own report under its grounds. */
 export function fileHelmReport(grounds: string, file: string, attach: string[], title?: string): ReportMeta {
+  const cfg = loadConfig();
+  grounds = storageGrounds(grounds, cfg);
   return fileReport({
     key: newHelmReportKey(grounds),
     file,
     attach,
     ...(title ? { title } : {}),
-    fallbackTitle: `helm report · ${grounds}`,
+    fallbackTitle: `helm report · ${displayGrounds(grounds, cfg)}`,
     author: 'helm',
-    maxBytes: loadConfig().limits.attachmentMaxBytes,
+    maxBytes: cfg.limits.attachmentMaxBytes,
     grounds,
   });
 }
@@ -116,11 +120,12 @@ export function viewReport(key: string, now = new Date()): { key: string; viewed
 
 /** The rows `lobstah reports` prints, newest first. */
 export function reportRows(): Array<Record<string, string>> {
+  const cfg = loadConfig();
   return listReports().map((r) => ({
     key: r.key,
     title: r.title,
     author: r.author,
-    from: r.dispatch ?? `helm ${r.grounds ?? ''}`.trim(),
+    from: r.dispatch ?? `helm ${displayGrounds(r.grounds ?? '', cfg)}`.trim(),
     filedAt: r.filedAt,
     acked: reportAck(r) ? 'yes' : 'no',
   }));

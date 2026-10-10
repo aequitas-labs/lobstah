@@ -1,5 +1,6 @@
 import {
   groundsList,
+  displayGrounds,
   heartbeatHelm,
   helmLabel,
   helmOf,
@@ -26,10 +27,11 @@ const SOAK_WHERE = '(in a linked worktree; from a primary checkout it creates on
  */
 export function signOnHelp(sessionId: string, opts: { holder?: HelmRegistration; groundsFlag?: string } = {}): string {
   const soak = `to work as a trap:   lobstah soak --session ${sessionId}     ${SOAK_WHERE}`;
-  const g = opts.groundsFlag ? ` --grounds ${opts.groundsFlag}` : '';
+  const cfg = loadConfig();
+  const g = opts.groundsFlag ? ` --grounds ${displayGrounds(opts.groundsFlag, cfg)}` : '';
   if (opts.holder) {
     return [
-      `the helm for grounds "${opts.holder.grounds}" is held by ${helmLabel(opts.holder)} (session ${opts.holder.sessionId.slice(0, 8)}).`,
+      `the helm for grounds "${displayGrounds(opts.holder.grounds, cfg)}" is held by ${helmLabel(opts.holder)} (session ${opts.holder.sessionId.slice(0, 8)}).`,
       soak,
       `to displace it deliberately:   lobstah man helm --take --session ${sessionId}${g}`,
     ].join('\n');
@@ -93,7 +95,7 @@ export async function buildBriefContext(sessionId: string, cwd?: string): Promis
   if (helmReg) {
     heartbeatHelm(helmReg.sessionId);
     return (
-      `lobstah: session id ${sessionId} — you hold the helm for grounds "${helmReg.grounds}" ` +
+      `lobstah: session id ${sessionId} — you hold the helm for grounds "${displayGrounds(helmReg.grounds, loadConfig())}" ` +
       `(\`lobstah man relieve --session ${sessionId}\` steps down).${fleet}\n\n` +
       charter({ name: helmReg.grounds, repos: helmReg.repos })
     );

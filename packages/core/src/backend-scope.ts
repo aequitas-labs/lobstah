@@ -1,12 +1,14 @@
 import type { Config } from './config.js';
 import type { BackendLocation } from './backend-model.js';
+import { displayGrounds, storageGrounds } from './grounds-name.js';
+/** Routing/display names; local file writers use resolveGrounds' storage identity instead. */
 export type BackendScope = { grounds: string; repos: string[] } & (
   { kind: 'local'; wharf?: never; location?: never } |
   { kind: 'wharf'; wharf: string; location: BackendLocation }
 );
 export function backendScopes(config: Pick<Config, 'grounds' | 'wharves' | 'repos'>): BackendScope[] {
   const explicit = Object.entries(config.grounds);
-  if (!explicit.length) return [{ kind: 'local', grounds: 'all', repos: Object.keys(config.repos) }];
+  if (!explicit.length) return [{ kind: 'local', grounds: displayGrounds(storageGrounds('home', config), config), repos: Object.keys(config.repos) }];
   return explicit.map(([grounds, g]) => {
     if (!g.wharf) return { kind: 'local', grounds, repos: g.repos };
     const location = config.wharves?.[g.wharf];
@@ -14,9 +16,9 @@ export function backendScopes(config: Pick<Config, 'grounds' | 'wharves' | 'repo
     return { kind: 'wharf', grounds, repos: g.repos, wharf: g.wharf, location };
   });
 }
-export function backendScope(config: Pick<Config, 'grounds' | 'wharves' | 'repos'>, grounds = 'all'): BackendScope {
-  const scopes = backendScopes(config); const scope = scopes.find((s) => s.grounds === grounds);
-  if (!scope) throw new Error(`unknown grounds ${grounds}; choose ${scopes.map((s) => s.grounds).join(', ')}`);
+export function backendScope(config: Pick<Config, 'grounds' | 'wharves' | 'repos'>, grounds = 'home'): BackendScope {
+  const scopes = backendScopes(config); const scope = scopes.find((s) => s.grounds === displayGrounds(storageGrounds(grounds, config), config));
+  if (!scope) throw new Error(`unknown grounds ${grounds}; choose ${scopes.map((s) => displayGrounds(s.grounds, config)).join(', ')}`);
   return scope;
 }
 /** A failed wharf is a result for that grounds, never a global failure. */

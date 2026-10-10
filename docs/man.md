@@ -863,7 +863,7 @@ The lobstah man skill prints the glass URL. `[glass].port` sets the port;
 
 **One helm per grounds, enforced.** A **grounds** is a named territory: the
 subset of configured repos one orchestrator oversees (`[grounds.*]`; with
-none configured, one implicit `fleet` grounds covers every repo). A repo
+none configured, one implicit `home` grounds covers every repo). A repo
 belongs to at most one grounds, so two orchestrators can never dispatch into
 the same territory. The registration is one file per grounds — the data model
 cannot hold two:
