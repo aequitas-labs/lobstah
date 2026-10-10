@@ -3,6 +3,7 @@ import type { ReportInput, BackendEvent, DispatchInput } from '../../../packages
 import { ApiError, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
+import { personSessionLive } from './auth.js';
 import { GlassState, glassSchema, glassTables } from './glass-state.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
@@ -12,13 +13,56 @@ type WorkerRow = { id: string; boat: string; repo: string; seen: number };
 type StoredResult = { status: number; value: unknown };
 type FileRow = { id: string; dispatch: string; name: string; size: number; hash: string; ready: number };
 export type Command = { account: string; helm: boolean; personId?: string; token: string; method: string; path: string; key?: string; session?: string; body: unknown; after?: string;
+  personSessionId?: string;
   prepared?: { id?: string; hash: string } };
 const LEASE_MS = 90_000;
 const HELM_MS = 120_000;
 
-/** One account's only coordination authority. No alarms, timers or sockets. */
+/** One account's only coordination authority. No alarms, timers or socket pings. */
 export class Account extends DurableObject<Env> {
   private glass: GlassState;
+  private hintPending = false;
+  /** Fetch is only for the private upgrade binding: normal state uses RPC. */
+  async fetch(request: Request): Promise<Response> {
+    try {
+      requireThat(request.method === 'GET' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket', 400, 'websocket upgrade required');
+      const c: Command = JSON.parse(request.headers.get('X-Wharf-Command') ?? '{}');
+      requireThat(c.path === 'wake' && c.method === 'GET' && typeof c.token === 'string', 400, 'invalid wake request');
+      const hash = await digest(c.token.startsWith('b.') || c.token.startsWith('d.') ? c.token.split('.').at(-1)! : c.token);
+      requireThat(!this.get('deleted'), 410, 'account deleted');
+      const actor = this.authenticate(c, hash, Date.now());
+      this.requirePermission(actor, 'read'); this.budget(Date.now());
+      requireThat(actor.kind !== 'person' || c.personSessionId && await personSessionLive(this.env, c.account, c.personSessionId), 401, 'session expired');
+      requireThat(!this.get('deleted'), 410, 'account deleted');
+      requireThat(this.ctx.getWebSockets().length < 32, 429, 'wake connection limit');
+      const pair = new WebSocketPair();
+      this.ctx.acceptWebSocket(pair[1]);
+      pair[1].serializeAttachment({ actor, hash, account: c.account, sessionId: c.personSessionId });
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    } catch (e) {
+      if (e instanceof ApiError) return Response.json({ error: e.message }, { status: e.status });
+      return Response.json({ error: 'wake unavailable' }, { status: 503 });
+    }
+  }
+  webSocketMessage(socket: WebSocket) { socket.close(1008, 'wake hints are receive-only'); }
+  webSocketClose(socket: WebSocket, code: number, reason: string) { socket.close(code === 1005 || code === 1006 ? 1000 : code, reason); }
+  webSocketError(socket: WebSocket) { socket.close(1011, 'wake connection failed'); }
+  private async hint() {
+    // No content or authority travels here. Clients fetch from their durable cursor.
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        const a = socket.deserializeAttachment() as { actor: Actor; hash: string; account: string; sessionId?: string };
+        let allowed = !this.get('deleted');
+        if (a.actor.kind === 'boat') {
+          const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
+          const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
+          allowed &&= !!row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], 'read');
+        } else allowed &&= a.actor.kind === 'person' && !!a.sessionId && await personSessionLive(this.env, a.account, a.sessionId);
+        if (allowed && !this.get('deleted')) socket.send('{"type":"wake"}');
+        else socket.close(1008, 'credential expired or revoked');
+      } catch { try { socket.close(1011, 'wake unavailable'); } catch { /* disconnected */ } }
+    }
+  }
   /** Serialises only R2 mutations in this live instance; ownership stays in SQL. */
   private fileTail: Promise<unknown> = Promise.resolve();
   /** Private binding only: the signed-in approval page chooses a visible name. */
@@ -80,6 +124,10 @@ export class Account extends DurableObject<Env> {
   private event(kind: string, dispatch?: string, note?: string) {
     this.ctx.storage.sql.exec('INSERT INTO events(kind,dispatch,at) VALUES (?,?,?)', kind, dispatch ?? null, new Date().toISOString());
     if (note) this.ctx.storage.sql.exec('INSERT INTO event_details VALUES (last_insert_rowid(),?)', note);
+    if (!this.hintPending && this.ctx.getWebSockets().length) {
+      this.hintPending = true;
+      this.ctx.waitUntil(Promise.resolve().then(() => this.hint()).finally(() => { this.hintPending = false; }));
+    }
   }
   private targetBoat(d: DispatchInput): BoatRow | undefined {
     return d.boat ? this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', d.boat).toArray()[0] : undefined;
@@ -461,6 +509,7 @@ export class Account extends DurableObject<Env> {
         else this.requirePermission(this.authenticate(c, hash, Date.now()), 'admin');
         this.set('delete-authority', hash); // permits the same admin retry after its boat row is deleted
         this.set('deleted', keyHash); // reject every other request before R2 I/O
+        for (const socket of this.ctx.getWebSockets()) socket.close(1008, 'account deleted');
         for (;;) {
           const files = await this.env.FILES.list({ prefix: `${c.account}/`, limit: 1000 });
           if (!files.objects.length) break;

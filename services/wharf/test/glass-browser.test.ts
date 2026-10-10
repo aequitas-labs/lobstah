@@ -60,6 +60,17 @@ it('requires its cookie, not an API bearer, and derives the account rather than 
   expect((await browser('accounts/b/dispatches')).status).toBe(404);
   expect((await SELF.fetch(`https://state.test/v1/accounts/${account}/dispatches`, { headers: { Cookie: cookie } })).status).toBe(401);
 });
+it('accepts cookie-scoped wake hints without a helm lease and fences expired sessions', async () => {
+  const response = await browser('wake', undefined, 'GET', { Upgrade: 'websocket' }); expect(response.status).toBe(101);
+  const socket = response.webSocket!; socket.accept();
+  const closed = new Promise((resolve) => socket.addEventListener('close', resolve, { once: true }));
+  const previous = await env.AUTH_DB.prepare('SELECT expiresAt FROM session WHERE token=?').bind(token).first<{ expiresAt: number }>();
+  await env.AUTH_DB.prepare('UPDATE session SET expiresAt=0 WHERE token=?').bind(token).run();
+  // A private fixture emits an account event after expiry: no content is delivered.
+  await env.ACCOUNTS.getByName(account).handle(JSON.stringify({ account, helm: true, personId: account, token, path: 'helm/take', method: 'POST', body: { session: 'fixture' }, key: 'expired-wake' }));
+  await closed; expect(socket.readyState).not.toBe(WebSocket.OPEN);
+  await env.AUTH_DB.prepare('UPDATE session SET expiresAt=? WHERE token=?').bind(previous!.expiresAt, token).run();
+});
 it('rejects cross-origin or missing-origin writes, malformed and oversized bodies', async () => {
   await job();
   const body = { id: 'message', kind: 'message', dispatch: 'job', text: 'hello' };
