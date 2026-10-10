@@ -1,5 +1,6 @@
 export * from './types.js';
 export * from './backend.js';
+export * from './repo-identity.js';
 export * from './backend-scope.js';
 export * from './wharf-backend.js';
 export * from './hosted-cache.js';
