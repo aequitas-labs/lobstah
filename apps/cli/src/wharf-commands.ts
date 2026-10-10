@@ -45,15 +45,6 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   const id = () => { if (!pos[0]) throw new Error(`${cmd} requires a dispatch id`); return encodeURIComponent(pos[0]); };
   const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
   const noFiles = () => { if (opts.values('--attach').length || opts.opt('--report')) throw new Error('upload wharf evidence with wharf upload, then report --file-id; local attachment paths are never sent'); };
-  const permissions = () => {
-    const selected = opts.values('--permission');
-    if (!selected.every((p) => ['read', 'work', 'helm', 'admin'].includes(p))) throw new Error('--permission must be read, work, helm or admin');
-    if (selected.includes('admin')) {
-      if (!opts.has('--grant-admin')) throw new Error('admin can issue credentials and delete this account; use --grant-admin to confirm this grant');
-      console.error('Warning: this boat will have admin authority, including credential management and account deletion.');
-    }
-    return { ...(selected.length ? { permissions: selected } : {}), ...(opts.has('--grant-admin') ? { confirmAdmin: true } : {}) };
-  };
   const boatId = async (name: string | undefined): Promise<string> => {
     if (!name || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) throw new Error('choose a validated boat name');
     const boats = await backend.request('boats');
@@ -125,18 +116,9 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     }
     case 'wharf': {
       switch (pos[0]) {
-        case 'issue-boat': print(await backend.request('boats', { name: pos[1], ...permissions() }, key())); break;
-        case 'boat-permissions': {
-          const chosen = permissions();
-          if (!chosen.permissions && !opts.has('--clear')) throw new Error('boat-permissions requires --permission or --clear');
-          print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}/permissions`, { ...chosen, permissions: opts.has('--clear') ? [] : chosen.permissions }, key())); break;
-        }
-        case 'boats': print(await backend.request('boats')); break;
-        case 'revoke-boat': print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}/revoke`, {}, key())); break;
-        case 'rename-boat': print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}/rename`, { name: pos[2] }, key())); break;
-        case 'remove-boat':
-          if (!opts.has('--confirm')) throw new Error('remove-boat requires --confirm; open addressed work must be cancelled first');
-          print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}`, {}, key(), 'DELETE')); break;
+        case 'whoami':
+          if (pos.length !== 1) throw new Error('whoami acts only as the current boat; no boat argument');
+          print(await backend.request('_boat')); break;
         case 'renew': print(await backend.request('workers/renew', { worker }, key())); break;
         case 'heartbeat': await backend.heartbeat(pos[1] ?? '', key()); print({ renewed: true }); break;
         case 'receipt': await backend.receipt(pos[1] ?? '', pos[2] ?? '', key()); print({ received: true }); break;
@@ -150,9 +132,6 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
           break;
         }
         case 'recoveries': print(await backend.request(`dispatches/${encodeURIComponent(pos[1] ?? '')}/recoveries`)); break;
-        case 'delete-account':
-          if (!opts.has('--confirm')) throw new Error('delete-account requires --confirm; removes all account rows and files');
-          print(await backend.request('', {}, key(), 'DELETE')); break;
         default: throw new Error('choose a wharf subcommand');
       }
       break;
