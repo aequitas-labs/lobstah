@@ -1,4 +1,4 @@
-# Hosted state — phase 0
+# Wharf — phase 0
 
 An optional coordination authority, separate from telemetry. One person's account
 is one SQLite Durable Object; R2 holds evidence files. No code, harness credentials,
@@ -8,10 +8,10 @@ second runtime, socket, alarm or background timer.
 
 ## Local development and tests
 
-Use Node 24 and pnpm. `pnpm --filter @lobstah/state-service test` runs in the
+Use Node 24 and pnpm. `pnpm --filter @lobstah/wharf test` runs in the
 Workers runtime with local SQLite and R2. Test credentials are test-only fixtures.
-For local HTTP development, supply secrets in ignored `services/state/.dev.vars`
-and run `pnpm --filter @lobstah/state-service exec wrangler dev --local`.
+For local HTTP development, supply secrets in ignored `services/wharf/.dev.vars`
+and run `pnpm --filter @lobstah/wharf exec wrangler dev --local`.
 Never use real PATs in tests or pass secrets in process arguments.
 
 ## Settings for a maintainer's eventual deployment
@@ -57,7 +57,7 @@ administration uses the account PAT. A different live helm needs explicit takeov
 | Helm | POST dispatches/:id/cancel | Cancel, fence the worker |
 | Agent | POST dispatches/:id/heartbeat, report | Renew live lease; six report verbs with evidence |
 | Agent | POST dispatches/:id/recovery | Preserve stale result; never finalise replacement |
-| Helm | GET events?after=:cursor | Up to 100 server-ordered events; returned opaque cursor |
+| Helm | GET events?after=:cursor | Up to 100 wharf-ordered events; returned opaque cursor |
 
 Machine credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; revoke/reissue to receive a new

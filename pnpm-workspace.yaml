@@ -1,4 +1,4 @@
 packages:
   - packages/*
   - apps/*
-  - services/state
+  - services/wharf

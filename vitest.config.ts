@@ -9,7 +9,7 @@ export default defineConfig({
   test: {
     include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'services/*/test/**/*.test.ts'],
     environment: 'node',
-    exclude: ['services/state/**', '**/node_modules/**'],
+    exclude: ['services/wharf/**', '**/node_modules/**'],
     // No test names or clears the tab of the terminal running the suite.
     env: { LOBSTAH_TERMINAL_TITLE: '0' },
     ...(windows && {

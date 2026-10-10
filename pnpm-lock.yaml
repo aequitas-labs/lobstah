@@ -119,7 +119,7 @@ importers:
         specifier: workspace:*
         version: link:../core
 
-  services/state:
+  services/wharf:
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0

@@ -1,5 +1,5 @@
 {
-  "name": "@lobstah/state-service",
+  "name": "@lobstah/wharf",
   "private": true,
   "type": "module",
   "scripts": {
