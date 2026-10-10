@@ -50,23 +50,23 @@ administration uses the account PAT. A different live helm needs explicit takeov
 | Scope | Route | Operation |
 | --- | --- | --- |
 | Helm PAT | POST helm/take, helm/renew, helm/release | Exclusive, fenced helm session |
-| Helm PAT | POST/GET machines; POST machines/:id/revoke | Issue once, list metadata, revoke |
-| Machine | POST workers/sign-on, workers/renew | Bind a logical worker to this machine |
-| Machine | POST claims | Atomically claim eligible dispatch; receive agent token |
+| Helm PAT | POST/GET boats; POST boats/:id/revoke | Issue once, list metadata, revoke |
+| Boat | POST workers/sign-on, workers/renew | Bind a logical worker to this boat |
+| Boat | POST claims | Atomically claim eligible dispatch; receive agent token |
 | Helm | POST/GET dispatches; GET dispatches/:id | Enqueue/follow-up, bounded list/read |
 | Helm | POST dispatches/:id/cancel | Cancel, fence the worker |
 | Agent | POST dispatches/:id/heartbeat, report | Renew live lease; six report verbs with evidence |
 | Agent | POST dispatches/:id/recovery | Preserve stale result; never finalise replacement |
 | Helm | GET events?after=:cursor | Up to 100 wharf-ordered events; returned opaque cursor |
 
-Machine credentials are named, revocable, hashed at rest and shown once. A lost
+Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; revoke/reissue to receive a new
-secret. Machines cannot read dispatch content, enqueue, cancel, manage credentials,
+secret. Boats cannot read dispatch content, enqueue, cancel, manage credentials,
 take helm or delete accounts. Coding agents receive only the token returned by a
-claim, not their machine credential or the PAT. Agent tokens cannot claim.
+claim, not their boat credential or the PAT. Agent tokens cannot claim.
 
 Claims last 90 seconds and carry a monotonically increasing dispatch epoch.
-Renew before expiry. Revocation rejects the next machine request and prevents
+Renew before expiry. Revocation rejects the next boat request and prevents
 agent lease extension, but lets the current agent report until its original
 deadline. Addressed work never falls back to a different worker. Each worker can
 hold one open catch. Pauses protect ownership until their deadline (default one
