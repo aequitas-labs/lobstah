@@ -35,6 +35,13 @@ final class ClickRoutingTests: XCTestCase {
     XCTAssertFalse(isInstalledChromeGlass(info, glass: glass))
     XCTAssertEqual(glassShowArguments("#prs", port: 63169, installedOnly: true), ["glass", "show", "#prs", "--port", "63169", "--json", "--app"])
   }
+
+  func testReviewDestinationIsSeparateFromCanonicalPRIdentity() throws {
+    let data = Data(#"{"attention":[{"id":"a","verb":"pr:ready","kind":"pr:ready","prUrl":"https://github.com/acme/web/pull/42","reviewUrl":"https://linear.review/acme/web/pull/42","petOpen":"helm"}]}"#.utf8)
+    let item = try XCTUnwrap(JSONDecoder().decode(AttentionReport.self, from: data).attention.first)
+    XCTAssertEqual(item.prLink?.absoluteString, "https://linear.review/acme/web/pull/42")
+    XCTAssertEqual(item.prUrl, "https://github.com/acme/web/pull/42")
+  }
   func testConfiguredRoutesForReportsAndDecisions() {
     let glass = URL(string: "http://127.0.0.1:63169")!
     for kind in ["report", "decision"] {

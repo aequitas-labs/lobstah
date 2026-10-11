@@ -52,6 +52,8 @@ export interface TendAttention {
   repo?: string;
   /** pr:* kinds: the evidence fields the kind derives from. */
   prUrl?: string;
+  /** Click destination only: prUrl remains the canonical watch/ack identity. */
+  reviewUrl?: string;
   /** Report/decision click route from [pet].open; PR clicks are independent. */
   petOpen?: 'tab' | 'app' | 'helm';
   number?: number;
@@ -375,6 +377,8 @@ export interface GlassSnapshot {
   now: string;
   version: string;
   repoUrl: string;
+  /** Forge owner/repo (lowercase) → review preset/template; presentation only. */
+  reviewTools?: Record<string, string>;
   daemon?: { version?: string; heartbeat?: string };
   /** Work slots. `parked` dispatches (last report `paused`) hold none. */
   slots?: { headless: number; limit: number; traps: number; parked?: number };

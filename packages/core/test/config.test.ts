@@ -35,6 +35,15 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('validates repo review presets and templates', () => {
+    expect(loadConfig().repos.myapp?.review).toBeUndefined();
+    for (const review of ['github', 'graphite', 'linear', 'https://review.example/{owner}/{repo}/{number}']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[repos.myapp]\npath = "/tmp/app"\nreview = "${review}"\n`);
+      expect(loadConfig().repos.myapp?.review).toBe(review);
+    }
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.myapp]\nreview = "javascript:alert(1)"\n');
+    expect(() => loadConfig()).toThrow('[repos.myapp].review must be');
+  });
   it('defaults pet clicks to tabs and validates all explicit routes', () => {
     expect(loadConfig().pet.open).toBe('tab');
     for (const open of ['tab', 'app', 'helm']) {

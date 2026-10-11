@@ -20,6 +20,7 @@ public struct AttentionItem: Decodable, Equatable {
   public var kind: String? = nil
   /** pr:* kinds: the PR this pet walks for. */
   public var prUrl: String? = nil
+  public var reviewUrl: String? = nil
   public var petOpen: String? = nil
   /** The hash of the state the item stands on; a new one re-stands an acked item. */
   public var stateHash: String? = nil
@@ -39,7 +40,7 @@ public struct AttentionItem: Decodable, Equatable {
   public var identity: String { "\(kind ?? "question"):\(key ?? id)" }
 
   /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
-  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready") ? prUrl.flatMap(URL.init(string:)) : nil }
+  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready") ? (reviewUrl ?? prUrl).flatMap(URL.init(string:)) : nil }
 
   /** A report pet clicks through to the report's own page on the spyglass (/report/<key>). */
   public func reportLink(glass: URL) -> URL? {

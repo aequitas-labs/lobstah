@@ -548,6 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           let last = shown.removeLast()
           shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", key: last.key, kind: last.kind, prUrl: last.prUrl, stateHash: last.stateHash))
           shown[shown.count - 1].petOpen = last.petOpen
+          shown[shown.count - 1].reviewUrl = last.reviewUrl
         }
         let visibleKeys = Set(shown.map(\.identity))
         for key in self.petsByKey.keys.filter({ !visibleKeys.contains($0) }) {

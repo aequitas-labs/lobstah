@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { reviewTools } from './review-tools.js';
 import {
   workerLabel,
   questionViewedAt,
@@ -28,6 +29,7 @@ import {
   listWatches,
   watchErrorCell,
   loadConfig,
+  prReviewUrl,
   parsePrRef,
   pendingIds,
   prBadge,
@@ -995,8 +997,10 @@ export function buildTendReport(now = Date.now()): TendReport {
   }));
 
   const pools = poolViews(cfg);
+  const tools = reviewTools(cfg);
   for (const item of attention) {
     if (item.kind === 'report' || item.kind === 'decision') item.petOpen = cfg.pet.open;
+    if (item.prUrl) item.reviewUrl = prReviewUrl(item.prUrl, tools);
   }
   const helms = listHelms().map((h) => ({
     grounds: h.grounds,

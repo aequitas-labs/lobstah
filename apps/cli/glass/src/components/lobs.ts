@@ -5,6 +5,7 @@ import { hideLob, showModal } from '../actions.js';
 import { html } from '../html.js';
 import type { GlassState } from '../store.js';
 import { PetArt } from './pet-art.js';
+import { reviewLink } from './common.js';
 
 /**
  * The crawling lobs: attention walking along the bottom of the page.
@@ -30,7 +31,7 @@ function lob(it: LobItem, i: number) {
   if (it.hash)
     return html`<a key=${it.key} class="lob" style=${style} title="open the decision" href=${it.hash} onClick=${hide}>${body}</a>`;
   return it.href
-    ? html`<a key=${it.key} class="lob" style=${style} title=${it.label === 'report' ? 'open the report' : 'open the PR'} href=${it.href} target="_blank" rel="noopener" onClick=${hide}>${body}</a>`
+    ? html`<a key=${it.key} class="lob" style=${style} title=${it.label === 'report' ? 'open the report' : 'open the PR'} href=${reviewLink(it.href)} target="_blank" rel="noopener" onClick=${hide}>${body}</a>`
     : html`<div
         key=${it.key}
         class="lob"
@@ -56,5 +57,5 @@ export function Lobs({ state }: { state: GlassState }) {
   // The lobs re-render only when which lobs walk changes, so
   // a poll never restarts their crawl.
   const key = items.map((i) => i.key).join('|');
-  return useMemo(() => items.map((it, i) => lob(it, i)), [key]);
+  return useMemo(() => items.map((it, i) => lob(it, i)), [key, JSON.stringify(d?.reviewTools)]);
 }
