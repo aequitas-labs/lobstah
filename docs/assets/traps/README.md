@@ -1,74 +1,84 @@
 # Trap art
 
 Every trap name is `<first>-<last>` (`packages/core/src/trap-names.ts`).
-Every trap uses the same illustration. Its **first** word paints the buoy
-in a band pattern, the way lobstermen paint their buoys so others can tell
-whose trap is whose. Its **last** word adds an item beside the trap.
+A trap's avatar is a highflyer, the flagged buoy lobstermen use to mark
+their gear. The **first** word paints the buoy in a band pattern, the way
+lobstermen paint buoys so others can tell whose trap is whose. The **last**
+word is the item on the flag. The trap illustration is the general trap
+icon, and the starting point for animation.
 
 | File | What it is |
 |---|---|
+| `buoy-source.png` | The flag buoy, drawn by Gemini |
+| `buoy.png` | The flag buoy cut out of its background |
+| `bands.json` | The buoy paints, and the band pattern for each first word |
+| `props/<word>.png` | One item per last word (to be made) |
 | `source.webp` | The trap illustration |
 | `base.png` | The trap cut out of its background and ground shadow |
-| `bands.json` | The buoy colours, and the band pattern for each first word |
-| `props/<word>.png` | One item per last word (to be generated) |
 
 The scripts in `scripts/trap-art/` need Python 3 with `numpy` and `pillow`.
 
-## First words: buoy bands
-
-`scripts/trap-art/buoy.py` paints the buoy in `base.png` for each first
-word. Bands keep the original's shading and outline.
-
 ```bash
-python3 scripts/trap-art/buoy.py --sheet     # every word -> build/trap-art/, plus _sheet.png
-python3 scripts/trap-art/buoy.py blue rapid  # just these
+python3 scripts/trap-art/buoy.py --sheet                        # every band pattern -> build/trap-art/buoys/
+python3 scripts/trap-art/avatar.py coral-crab blue-gull --sheet  # buoy + item -> build/trap-art/avatars/
+python3 scripts/trap-art/buoy.py --trap blue                    # paint the buoy beside the trap instead
 ```
 
-In `bands.json`, `colours` names the paints and `bands` lists each word's
-bands from the rope end to the dowel end. A band is a colour name with an
-optional width: `["B", "W", "B"]` is three equal bands, and
-`["B2", "W.6", "B2"]` is blue with a thin white stripe. No two words share
-a pattern.
+`cutout.py` rebuilds a cut-out after a redraw: with no arguments it
+rebuilds the trap (`--net` also clears the paper seen through the
+netting), and `cutout.py docs/assets/traps/buoy-source.png
+docs/assets/traps/buoy.png` rebuilds the buoy.
 
-### A bigger buoy
+## First words: buoy bands
 
-The buoy is small in the original, so its bands are hard to read at card
-size. To enlarge it, attach `source.webp` and send:
+`buoy.py` finds the buoy by its red paint and paints it in the word's
+bands, keeping the drawing's shading and outline. In `bands.json`,
+`colours` names the paints and `bands` lists each word's bands from the top
+of the buoy down. A band is a colour name with an optional width:
+`["B", "W", "B"]` is three equal bands, and `["B2", "W.6", "B2"]` is blue
+with a thin white stripe. No two words share a pattern.
 
-> Edit the attached lobster trap illustration. Make the red buoy at the end
-> of the rope about twice as large, still tied to the end of the rope and
-> lying on the ground in the same direction, with its wooden dowel. Keep it
-> plain red with no stripes. Keep everything else exactly the same: the
-> trap, the rope, the colours, the style, the camera angle and the framing.
+To redraw the buoy, attach `source.webp` and send:
 
-Save the result as `source.webp`, then run
-`python3 scripts/trap-art/cutout.py` to rebuild `base.png`. `buoy.py` finds
-the buoy by its red paint, so nothing else needs to change.
+> Using the attached lobster trap illustration as the style reference, draw
+> a single wooden lobster buoy standing upright with a short flagpole, in
+> exactly the same style: the same hand-drawn flat illustration,
+> reddish-brown outline and soft shading. The body is flat across the top
+> and rounded at the bottom, with a wooden spindle running through it; the
+> spindle continues up out of the top as a short wooden pole ending in a
+> small round cap, and out of the bottom as a short stub. A plain, blank,
+> off-white cloth flag hangs from the pole, flying to the right. The body is
+> plain red with no stripes. Seen from the front, lit from the upper left.
+> Square 1024×1024 canvas, plain pure white background, the whole thing
+> centred. No rope, no ground, no shadow, no text.
 
-## Last words: 64 props
+Keep the body plain red and the flag blank and light: `buoy.py` finds the
+buoy by its red, and `avatar.py` finds the flag as the largest light
+region.
 
-Attach the trap image as a style reference and send the prompt below with
-`{subject}` replaced from the table. Then cut it out with
-`python3 scripts/trap-art/cutout.py <gemini.png> docs/assets/traps/props/<word>.png`
-(without `--net`, so white parts of the prop stay).
+## Last words: items on the flag
+
+`avatar.py` scales each item to fit the middle of the flag and lays it
+flat. Any PNG with a transparent background works; `--props DIR` reads
+items from another folder. To cut an item out of a white background, run
+`python3 scripts/trap-art/cutout.py <in.png> docs/assets/traps/props/<word>.png`
+(without `--net`, so white parts of the item stay).
+
+To have Gemini draw an item, attach `source.webp` and send the prompt below
+with `{subject}` replaced from the table.
 
 > Use the attached lobster trap illustration as the style reference. Draw a
-> single {subject} as a standalone prop in exactly the same style: the same
-> hand-drawn flat illustration, warm muted coastal palette, clean rounded
-> shapes, a consistent reddish-brown outline (#8A3A1E) about 1% of the image
-> width, and simple shading with one highlight tone and one shadow tone.
-> Three-quarter view from slightly above, lit from the upper left, matching
-> the trap. Draw it at small diorama scale, as if it sits on the ground
-> beside the trap. Animals are friendly and simple, with dot eyes. Square
-> 1024×1024 canvas with a plain pure white background, the object centred
-> and filling about 70% of the width. No ground, no cast shadow, no text, no
-> border and no other objects.
+> single {subject} as a simple, bold icon in exactly the same style: the
+> same hand-drawn flat illustration, warm muted coastal palette, clean
+> rounded shapes, a consistent reddish-brown outline (#8A3A1E) about 1% of
+> the image width, and simple shading with one highlight tone and one
+> shadow tone. Seen from the front or side, with a clear silhouette that
+> reads at small size. Animals are friendly and simple, with dot eyes.
+> Square 1024×1024 canvas with a plain pure white background, the object
+> centred and filling about 80% of the canvas. No ground, no shadow, no
+> text, no border and no other objects.
 
-The cut-out is cropped to the prop, so props don't need matching framing.
-The compose step (not written yet) will scale each prop to the same height
-and stand it beside the trap's front-left corner.
-
-### The 64 props
+### The 64 items
 
 | Word | Subject |
 |---|---|

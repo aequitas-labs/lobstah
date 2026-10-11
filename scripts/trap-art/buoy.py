@@ -1,15 +1,16 @@
-"""Paint a trap's buoy with the bands for each first word.
+"""Paint a buoy with the bands for each first word.
 
-    python3 scripts/trap-art/buoy.py [word ...] [--out DIR] [--sheet]
+    python3 scripts/trap-art/buoy.py [word ...] [--trap] [--out DIR] [--sheet]
 
-Reads docs/assets/traps/base.png and docs/assets/traps/bands.json and
-writes DIR/<word>.png (default build/trap-art/). With no words it paints
-every word; --sheet also writes DIR/_sheet.png with a close-up of each buoy.
+Reads docs/assets/traps/buoy.png (or, with --trap, the buoy beside the trap
+in base.png) and docs/assets/traps/bands.json, and writes DIR/<word>.png
+(default build/trap-art/buoys/). With no words it paints every word;
+--sheet also writes DIR/_sheet.png with a close-up of each buoy.
 
-The buoy is found by its red paint, so a redrawn base still works as long as
-its buoy stays red. Bands run across the buoy's long axis from the rope end
-to the dowel end; each band keeps the original's shading and outline.
-Needs numpy and pillow.
+The buoy is found by its red paint, so any redrawn buoy works as long as it
+stays plain red. Bands run across its long axis, from the top of an upright
+buoy or from the rope end of one lying down; each band keeps the drawing's
+shading and outline. Needs numpy and pillow.
 """
 import json
 import re
@@ -25,8 +26,6 @@ from lab import hex2lab, lab2rgb, rgb2lab
 ROOT = Path(__file__).resolve().parents[2]
 TRAPS = ROOT / 'docs/assets/traps'
 
-# The buoy's red paint in the original art (Lab).
-BUOY_RED = [[43.5, 35.0, 32.8], [49.9, 37.0, 32.9], [60.0, 32.0, 30.0]]
 SHADE = 0.9  # how much of the original's light and shade each band keeps
 SEAM = 0.8  # lightness kept on the thin seam between two bands
 WRAP = 0.0006  # bends the bands so they follow the round body
@@ -62,15 +61,22 @@ class Buoy:
         arr = np.asarray(base.convert('RGBA')).astype(float) / 255
         self.lab, self.alpha = rgb2lab(arr[..., :3]), arr[..., 3]
         lab = self.lab
+        # Red paint: redder than it is yellow, which sets it apart from wood and rope.
+        red = (self.alpha > 0.5) & (lab[..., 1] > 28) & (lab[..., 1] > 1.05 * lab[..., 2]) & (lab[..., 0] > 25)
+        if red.sum() < 200:
+            sys.exit('no red buoy found')
+        light = lab[..., 0][red]
+        anchors = [lab[red & (lab[..., 0] >= lo) & (lab[..., 0] <= hi)].mean(0)
+                   for lo, hi in zip(np.percentile(light, [0, 33, 66]), np.percentile(light, [33, 66, 100]))]
         dist = np.min([np.sqrt(((lab[..., 1:] - b[1:]) ** 2).sum(-1) + (0.3 * (lab[..., 0] - b[0])) ** 2)
-                       for b in np.array(BUOY_RED)], 0)
+                       for b in anchors], 0)
         weight = np.clip((18 - dist) / 8, 0, 1) * (self.alpha > 0.5)
         red = weight > 0.5
         # An opening drops thin red-brown lines (outlines, the dowel); the buoy is the reddest blob left.
         red &= morph(morph(red, ImageFilter.MinFilter(9)), ImageFilter.MaxFilter(11))
         candidates = [b for b in blobs(red) if b.sum() > 200]
         if not candidates:
-            sys.exit('no red buoy found in base.png')
+            sys.exit('no red buoy found')
         self.body = max(candidates, key=lambda b: lab[..., 1][b].mean())
         self.weight = weight * morph(self.body, ImageFilter.MaxFilter(3))
         self.ref_light = np.median(lab[..., 0][self.body])
@@ -80,9 +86,9 @@ class Buoy:
         pts = np.stack([xs, ys], 1).astype(float)
         centre = pts.mean(0)
         axis = np.linalg.svd(pts - centre, full_matrices=False)[2][0]
-        # The rope ties on at the end nearer the trap; bands are numbered from there.
-        rope_end = pts[np.argmin((pts - centre) @ axis)]
-        if rope_end[0] > centre[0]:
+        # Bands are numbered from the top of an upright buoy, or from the left
+        # (the rope end) of one lying beside the trap.
+        if (abs(axis[1]) > abs(axis[0]) and axis[1] < 0) or (abs(axis[1]) <= abs(axis[0]) and axis[0] < 0):
             axis = -axis
         grid = np.stack(np.meshgrid(np.arange(w), np.arange(h)), -1) - centre
         along, across = grid @ axis, grid @ np.array([-axis[1], axis[0]])
@@ -138,7 +144,8 @@ def sheet(images, box, path, cols=8, tw=230, th=250):
 
 
 def main(argv):
-    out_dir = ROOT / 'build/trap-art'
+    out_dir = ROOT / 'build/trap-art/buoys'
+    image = TRAPS / 'buoy.png'
     words, want_sheet = [], False
     it = iter(argv)
     for arg in it:
@@ -146,6 +153,8 @@ def main(argv):
             out_dir = Path(next(it))
         elif arg == '--sheet':
             want_sheet = True
+        elif arg == '--trap':
+            image = TRAPS / 'base.png'
         else:
             words.append(arg)
     spec = json.loads((TRAPS / 'bands.json').read_text())
@@ -158,7 +167,7 @@ def main(argv):
         missing = [name for name, _ in parse(bands) if name not in colours]
         if missing:
             sys.exit(f'{word}: unknown colour {", ".join(missing)}')
-    buoy = Buoy(Image.open(TRAPS / 'base.png'))
+    buoy = Buoy(Image.open(image))
     out_dir.mkdir(parents=True, exist_ok=True)
     images = []
     for word in words or list(table):
