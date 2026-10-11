@@ -37,7 +37,7 @@ afterEach(() => {
 describe('config precedence: descriptor > repo > global > default', () => {
   it('validates repo review presets and templates', () => {
     expect(loadConfig().repos.myapp?.review).toBeUndefined();
-    for (const review of ['github', 'graphite', 'linear', 'https://review.example/{owner}/{repo}/{number}']) {
+    for (const review of ['github', 'graphite', 'linear', 'linear-app', 'https://review.example/{owner}/{repo}/{number}']) {
       fs.writeFileSync(path.join(home, 'config.toml'), `[repos.myapp]\npath = "/tmp/app"\nreview = "${review}"\n`);
       expect(loadConfig().repos.myapp?.review).toBe(review);
     }

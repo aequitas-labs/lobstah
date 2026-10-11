@@ -16,15 +16,19 @@ import { removeTempDir } from '../../../test/temp-dir.js';
 
 let open: GlassDom[] = [];
 let home: string;
-it('routes PR links to the repo review tool without changing report or decision links', async () => {
+it.each([
+  ['linear', 'https://linear.review/acme/web/pull/'],
+  ['linear-app', 'linear://review/acme/web/pull/'],
+])('routes PR links to %s without changing report or decision links', async (tool, prefix) => {
   const fixture = acceptanceFleet();
-  fixture.reviewTools = { 'acme/web': 'linear' };
+  fixture.reviewTools = { 'acme/web': tool! };
   const g = await loadGlass(GLASS_PAGE, fixture, { now: NOW });
   open.push(g);
   await g.go('#prs');
   const links = g.$$('a').map((a) => a.getAttribute('href') ?? '');
-  expect(links.some((url) => url.startsWith('https://linear.review/acme/web/pull/'))).toBe(true);
+  expect(links.some((url) => url.startsWith(prefix!))).toBe(true);
   expect(links.filter((url) => /^https:\/\/github.com\/acme\/web\/pull\//.test(url))).toEqual([]);
+  expect(g.$$('#lobs a').some((a) => (a.getAttribute('href') ?? '').startsWith(prefix!))).toBe(true);
 });
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-glass-page-'));

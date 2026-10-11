@@ -373,7 +373,7 @@ export function loadConfig(): Config {
   const reposRaw = (raw.repos ?? {}) as Record<string, Record<string, unknown>>;
   const repos: Record<string, RepoConfig> = {};
   for (const [key, r] of Object.entries(reposRaw)) {
-    if (r.review !== undefined && !validReviewTool(r.review)) throw new Error(`[repos.${key}].review must be github, graphite, linear, or an HTTPS template with {owner}, {repo}, {number}`);
+    if (r.review !== undefined && !validReviewTool(r.review)) throw new Error(`[repos.${key}].review must be github, graphite, linear, linear-app, or an HTTPS template with {owner}, {repo}, {number}`);
     repos[key] = {
       path: expandHome(String(r.path ?? '')),
       ...(r.review !== undefined ? { review: r.review as string } : {}),

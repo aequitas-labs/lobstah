@@ -3,6 +3,7 @@ export const REVIEW_PRESETS = {
   github: 'https://github.com/{owner}/{repo}/pull/{number}',
   graphite: 'https://app.graphite.com/github/pr/{owner}/{repo}/{number}',
   linear: 'https://linear.review/{owner}/{repo}/pull/{number}',
+  'linear-app': 'linear://review/{owner}/{repo}/pull/{number}',
 } as const;
 
 export function validReviewTool(value: unknown): value is string {

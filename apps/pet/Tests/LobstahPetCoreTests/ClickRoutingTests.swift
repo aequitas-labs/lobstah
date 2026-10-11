@@ -42,6 +42,18 @@ final class ClickRoutingTests: XCTestCase {
     XCTAssertEqual(item.prLink?.absoluteString, "https://linear.review/acme/web/pull/42")
     XCTAssertEqual(item.prUrl, "https://github.com/acme/web/pull/42")
   }
+  func testLinearDesktopReviewOpensDirectlyForEveryReportDecisionRoute() throws {
+    for route in ["tab", "app", "helm"] {
+      let data = Data("{\"attention\":[{\"id\":\"a\",\"verb\":\"pr:ready\",\"kind\":\"pr:ready\",\"prUrl\":\"https://github.com/acme/web/pull/42\",\"reviewUrl\":\"linear://review/acme/web/pull/42\",\"petOpen\":\"\(route)\"}]}".utf8)
+      let item = try XCTUnwrap(JSONDecoder().decode(AttentionReport.self, from: data).attention.first)
+      var opened: URL?
+      clickAttentionItem(item, glass: URL(string: "http://127.0.0.1:63169")!,
+        open: { opened = $0 }, focusHelm: { _ in XCTFail("PRs never focus helm") },
+        showApp: { _, _ in XCTFail("PRs never open the glass app") }, acknowledge: { _ in })
+      XCTAssertEqual(opened?.absoluteString, "linear://review/acme/web/pull/42")
+      XCTAssertEqual(item.prUrl, "https://github.com/acme/web/pull/42")
+    }
+  }
   func testConfiguredRoutesForReportsAndDecisions() {
     let glass = URL(string: "http://127.0.0.1:63169")!
     for kind in ["report", "decision"] {
