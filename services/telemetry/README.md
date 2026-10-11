@@ -10,11 +10,11 @@ is still empty, so no lobstah build sends anything.
 
 | Route | What it does |
 | ----- | ------------ |
-| `POST /v1/daily` | Accepts one payload (`application/json`, ≤ 64 KiB). Schema stays `1`: exactly `schema`, `version`, `os`, `arch`, `installId`, `date`, `catches`, `helm`, `traps`, `byWorker`. Worker metadata is `{harness, model, config: {effort, permissionMode}}`: enums/catalog-only identifiers (64 characters max), or null. At most 100 distinct generated trap names and 100 headless settings buckets. Trap names are two lowercase words of 2–8 letters joined by a hyphen; all counts are positive and their sum cannot exceed `catches.today`. Unknown keys at any level are refused with 400. Upserts by install id + UTC date, so a retry never double-counts. 204 on success, 429 when rate-limited. |
+| `POST /v1/daily` | Accepts schema `2` (`application/json`, ≤ 64 KiB): `schema`, `version`, `os`, `arch`, `installId`, `date`, `catches`, `helms`, `helm`, `traps`, `byWorker`, `grounds`, `wharf`, `boats`, `boatAccess`. New usage fields are fixed choices or count ranges; absence of an observation stays unknown. Worker metadata is `{harness, model, config: {effort, permissionMode}}`: enums/catalog-only identifiers (64 characters max), or null. At most 100 distinct generated trap names and 100 headless settings buckets. Trap names are two lowercase words of 2–8 letters joined by a hyphen; worker counts are positive and their sum cannot exceed `catches.today`. Unknown keys at any level are refused with 400. Upserts by install id + UTC date, so a retry never double-counts. 204 on success, 429 when rate-limited. |
 | `GET /badge/catches.json` | shields.io endpoint JSON: `{"schemaVersion":1,"label":"🦞","message":"N",...}`, where N is the catches across every sharing install. Use `https://img.shields.io/endpoint?url=<host>/badge/catches.json`. |
 | `GET /badge/boats.json` | shields.io endpoint JSON, label `boats (30d)`: distinct installs that submitted in the last 30 UTC days. |
 | `GET /badge/traps.json` | shields.io endpoint JSON, label `traps (30d)`: distinct (install, generated trap name) pairs reported in the last 30 UTC days. |
-| `GET /v1/stats?days=30` | Public; no authentication. Returns `totalCatches`, `activeBoats`, `activeTraps`, `activeDays: 30`, `retentionDays: 90` and, per day, `activeInstalls`, `catchesToday`, and `newCatches`, plus daily `byWorker` harness/model counts. No installation-linked rows, identifiers, trap names or config are returned. `days` selects the daily history (1–3660), not the active-count window. |
+| `GET /v1/stats?days=30` | Public; no authentication. Returns `totalCatches`, `activeBoats`, `activeTraps`, `activeDays: 30`, `retentionDays: 90` and, per day, `activeInstalls`, `catchesToday`, and `newCatches`, plus daily `byWorker` harness/model counts and `usage` bucket histograms. No installation-linked rows, identifiers, trap names or config are returned. `days` selects the daily history (1–3660), not the active-count window. |
 
 Active counts include today and the previous 29 UTC dates. Tomorrow's
 clock-skew submissions are excluded until that date. A boat submitting zero
@@ -33,7 +33,7 @@ append-only (a retry would count twice), its queries are sampled, and it has
 a fixed retention we cannot shorten or extend per table, so it cannot keep
 daily totals after the per-install data is gone.
 
-Tables (`migrations/0001_init.sql`):
+Tables (`migrations/0001_init.sql`, `0002_daily_catches.sql` and `0003_wharf_usage.sql`):
 
 - `submissions`: one row per install per UTC date, holding the payload fields
   only. There is no IP address, user agent, or request metadata column.
@@ -50,6 +50,10 @@ Tables (`migrations/0001_init.sql`):
   used to replace a retry or corrected snapshot atomically without double-counting.
 - `daily_worker_totals`: indefinite counts by date/harness/model only, with no
   names, install ids or config. Omitted trap metadata contributes to null/null.
+- `usage_submissions`: one validated bucket snapshot per install/date, retained
+  for 90 days; no account, boat, wharf, grounds or repository identifiers.
+- `daily_usage_totals`: retained counts of installations per date/dimension/bucket,
+  with no install identifiers or names. Retries replace their prior contribution.
 
 `catches.total` is still accepted and stored for released-client compatibility.
 It is validated as an integer of at most 10,000,000 and at least
@@ -61,11 +65,15 @@ count. A fresh installation id cannot import its lifetime total.
 aggregate rows and adds date indexes for the active-count queries. It creates
 no identity registry and no lifetime boat/trap counters.
 
+The deployed receiver currently accepts schema 1. Before deploying this
+schema 2 receiver, apply the new `0003_wharf_usage.sql` migration using the
+remote migration command below. This PR does not deploy or enable sending.
+
 ## Retention
 
 A daily cron (`17 3 * * *`) deletes `submissions`, `trap_submissions`,
-`worker_submissions` and `attribution_submissions` rows whose date is more than
-**90 days** old (`RETENTION_DAYS`). `daily_totals` and `daily_worker_totals` carry no install id, name or config
+`worker_submissions`, `attribution_submissions` and `usage_submissions` rows whose date is more than
+**90 days** old (`RETENTION_DAYS`). `daily_totals`, `daily_worker_totals` and `daily_usage_totals` carry no install id, name or config
 and are kept. Because they are updated on every submission, deleting
 per-install rows never changes a total.
 
@@ -91,6 +99,8 @@ storage tests run the real SQL against `node:sqlite` as a stand-in for D1,
 and skip on Node versions without it (before 22.5). CI runs these again on
 Node 24 on Ubuntu and Windows so the SQL is tested on both. `pnpm lint` typechecks
 the Worker.
+The wharf's local Workers test runtime also exercises the receiver's migrations
+and schema-2 retry transaction against native D1 (`test/telemetry.test.ts`).
 
 ## Deployment (aequitas labs)
 

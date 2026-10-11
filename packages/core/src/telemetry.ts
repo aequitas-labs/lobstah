@@ -12,6 +12,10 @@ import { listTraps } from './soak.js';
 import { sanitizeWorker, workerProfile } from './worker-profile.js';
 import type { WorkerProfile } from './worker-profile.js';
 import type { WorkerCatches } from './stats.js';
+import { telemetryContext } from './telemetry-context.js';
+import { anonymousTelemetryPost } from './telemetry-transport.js';
+import { GROUNDS_BUCKETS, HELM_COUNTS, WHARF_KINDS, USAGE_BUCKETS, usageBucket, safeCatchUsage, safeAccess } from './telemetry-usage.js';
+import type { CatchUsage, BoatAccess, GroundsBucket, UsageBucket } from './telemetry-usage.js';
 
 /**
  * Anonymous telemetry: one small daily aggregate of catch counts, sent by the
@@ -31,10 +35,10 @@ import type { WorkerCatches } from './stats.js';
 /** Where the daily payload goes. Empty: this build sends nothing. */
 export const TELEMETRY_ENDPOINT = '';
 
-export const TELEMETRY_SCHEMA = 1;
+export const TELEMETRY_SCHEMA = 2;
 
 /** The only keys a payload may carry. The Worker rejects any other key. */
-export const TELEMETRY_FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'helm', 'traps', 'byWorker'] as const;
+export const TELEMETRY_FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'helms', 'helm', 'traps', 'byWorker', 'grounds', 'wharf', 'boats', 'boatAccess'] as const;
 export const TELEMETRY_MAX_TRAPS = 100;
 export const TELEMETRY_MAX_WORKERS = 100;
 
@@ -51,13 +55,19 @@ export interface TelemetryPayload {
   /** The UTC date of the send, YYYY-MM-DD. */
   date: string;
   /** UTC-day and all-time catches, including headless and omitted traps. */
-  catches: { today: number; total: number };
+  catches: { today: number; total: number } & CatchUsage;
+  /** Live seats visible to this install; null if a wharf's seat cannot be read. */
+  helms: 'none' | 'one' | 'several' | null;
   /** The single live helm's recorded metadata, or null when absent/ambiguous. */
   helm: WorkerProfile | null;
   /** At most 100 automatically generated names, with positive UTC-day counts. */
   traps: Array<WorkerCatches & { name: string }>;
   /** Headless UTC-day catches, grouped by safe worker settings (max 100). */
   byWorker: WorkerCatches[];
+  grounds: { total: GroundsBucket; local: GroundsBucket; wharf: GroundsBucket };
+  wharf: 'none' | 'hosted' | 'self-hosted' | 'both';
+  boats: Exclude<UsageBucket, '0'> | null;
+  boatAccess: BoatAccess;
 }
 
 /** Local telemetry state, `~/.lobstah/telemetry.json`. Never sent, apart from installId. */
@@ -160,6 +170,7 @@ export interface TelemetryStatus {
   /** The endpoint, or empty when this build sends nothing. */
   endpoint: string;
   noticeShown: boolean;
+  collects: string;
   installId?: string;
   lastSentDate?: string;
 }
@@ -176,6 +187,7 @@ export function telemetryStatus(env: NodeJS.ProcessEnv = process.env, endpoint =
     offBy,
     endpoint,
     noticeShown: !!state?.noticeShownAt,
+    collects: TELEMETRY_SUMMARY,
     ...(state ? { installId: state.installId } : {}),
     ...(state?.lastSentDate ? { lastSentDate: state.lastSentDate } : {}),
   };
@@ -220,9 +232,13 @@ export function buildTelemetryPayload(installId: string, now: number = Date.now(
   const headless = Math.max(0, (utc?.catches ?? 0) - Object.values(utc?.perTrap ?? {}).reduce((a, b) => a + b, 0));
   const missing = headless - byWorker.reduce((n, w) => n + w.today, 0);
   if (missing > 0) byWorker.push({ ...workerProfile(), today: missing });
-  const helms = liveHelms(loadConfig().helm.ttlSecs * 1000, now);
+  const cfg = loadConfig(), context = telemetryContext(cfg, now);
+  const helms = liveHelms(cfg.helm.ttlSecs * 1000, now);
+  const seatCount = helms.length + context.remoteHelms;
+  const helmCount = seatCount > 1 ? 'several' : context.remoteHelmsUnknown ? null : seatCount === 1 ? 'one' : 'none';
   // An install can oversee multiple grounds. Never invent one representative.
-  const helm = helms.length === 1 ? sanitizeWorker(helms[0]) : null;
+  const helm = helmCount === 'one' && helms.length === 1 ? sanitizeWorker(helms[0]) : null;
+  const today = utc?.catches ?? 0, u = utc?.usage;
   return {
     schema: TELEMETRY_SCHEMA,
     version: lobstahVersion(),
@@ -230,10 +246,15 @@ export function buildTelemetryPayload(installId: string, now: number = Date.now(
     arch: archFamily(),
     installId,
     date,
-    catches: { today: utc?.catches ?? 0, total: store.totalCatches },
+    catches: { today, total: store.totalCatches, withHelm: usageBucket(u?.withHelm ?? 0), withoutHelm: usageBucket(u?.withoutHelm ?? 0),
+      helmUnknown: usageBucket(Math.max(0, today - (u?.withHelm ?? 0) - (u?.withoutHelm ?? 0))),
+      onLocal: usageBucket(u?.onLocal ?? 0), onWharf: usageBucket(u?.onWharf ?? 0),
+      locationUnknown: usageBucket(Math.max(0, today - (u?.onLocal ?? 0) - (u?.onWharf ?? 0))) },
+    helms: helmCount,
     helm,
     traps: [...perName].map(([name, row]) => ({ name, ...row })).sort((a, b) => b.today - a.today || a.name.localeCompare(b.name)).slice(0, TELEMETRY_MAX_TRAPS),
     byWorker: boundedWorkers(byWorker),
+    grounds: context.grounds, wharf: context.wharf, boats: context.boats, boatAccess: context.boatAccess,
   };
 }
 
@@ -241,8 +262,14 @@ export function buildTelemetryPayload(installId: string, now: number = Date.now(
 export function serializeTelemetryPayload(p: TelemetryPayload): string {
   const out: Record<string, unknown> = {};
   for (const key of TELEMETRY_FIELDS) out[key] = p[key];
-  out.catches = { today: p.catches.today, total: p.catches.total };
-  out.helm = p.helm ? sanitizeWorker(p.helm) : null;
+  out.catches = { today: p.catches.today, total: p.catches.total, ...safeCatchUsage(p.catches) };
+  out.helms = p.helms && HELM_COUNTS.includes(p.helms) ? p.helms : null;
+  out.helm = out.helms === 'one' && p.helm ? sanitizeWorker(p.helm) : null;
+  const ground = (k: keyof TelemetryPayload['grounds']) => GROUNDS_BUCKETS.includes(p.grounds?.[k]) ? p.grounds[k] : '0';
+  out.grounds = { total: ground('total'), local: ground('local'), wharf: ground('wharf') };
+  out.wharf = WHARF_KINDS.includes(p.wharf) ? p.wharf : 'none';
+  out.boats = p.boats && USAGE_BUCKETS.slice(1).includes(p.boats) ? p.boats : null;
+  out.boatAccess = safeAccess(p.boatAccess);
   out.traps = p.traps
     .filter((t) => typeof t.name === 'string' && t.name.length >= 5 && t.name.length <= 17 && t.name.trim() === t.name && TRAP_NAME_RE.test(t.name) && Number.isSafeInteger(t.today) && t.today > 0)
     .slice(0, TELEMETRY_MAX_TRAPS).map((t) => ({ name: t.name, today: t.today, ...sanitizeWorker(t) }));
@@ -271,6 +298,7 @@ function boundedWorkers(rows: readonly WorkerCatches[]): WorkerCatches[] {
   return kept;
 }
 
+export const TELEMETRY_SUMMARY = 'Anonymous daily usage: catches, helm presence, bucketed boats/grounds/wharf use and access, generated traps, harness/model configurations, version and platform; never account-linked.';
 export const TELEMETRY_NOTICE = `lobstah telemetry: once a day the lobstah daemon sends an anonymous count of
 catches (dispatches finished done): the UTC-day count and the all-time total,
 with the lobstah version, OS family, CPU architecture, the UTC date, and a
@@ -279,9 +307,16 @@ generated trap names with recorded provenance and their UTC-day counts.
 It includes the signed-on helm's and traps' harness, known model and fixed-choice
 config (reasoning effort and permission mode), plus headless counts by those
 settings. Missing observations are null; custom/unrecognized models are other.
+It sends none/one/several live helm seats (null if unreadable), bucketed counts
+of grounds and boats, local/hosted/self-hosted wharf use, and work/read/helm access.
+UTC-day catch splits are bucketed: with/without a live helm at claim or finish,
+and local/wharf; past or missing observations stay unknown. Signing in never
+links the random install id to a wharf account. Telemetry uses a separate
+daily schedule and connection, without wharf credentials or cookies.
 Custom names (--name) and older names with unknown provenance stay local;
 their catches still count in the totals. Names are not hashed. It never sends
-repository names or paths, code, briefs, session ids, PR URLs, hostnames or user names.
+repository names or paths, code, briefs, session ids, PR URLs, hostnames or user names,
+account ids, boat names/ids, wharf names/addresses, grounds names, tokens or sub-day times.
 See it exactly: lobstah telemetry show. Details: PRIVACY.md.
 Turn it off with any one of: lobstah telemetry disable · [telemetry] share = false
 in ~/.lobstah/config.toml · LOBSTAH_TELEMETRY=0 · DO_NOT_TRACK=1 · CI set.`;
@@ -353,11 +388,12 @@ export async function sendTelemetry(opts: {
     const body = serializeTelemetryPayload(buildTelemetryPayload(state.installId, now));
     updateTelemetryState((s) => ({ ...s, lastSentDate: date }));
     sending = true;
-    const res = await (opts.fetch ?? fetch)(endpoint, {
+    const res = await (opts.fetch ?? anonymousTelemetryPost)(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body,
       signal: AbortSignal.timeout(opts.timeoutMs ?? 2000),
+      credentials: 'omit', redirect: 'error',
     });
     return res.ok ? 'sent' : 'error';
   } catch {

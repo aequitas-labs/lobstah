@@ -6,6 +6,7 @@ import type { Evidence } from './types.js';
 import { sanitizeWorker, workerProfile } from './worker-profile.js';
 import type { WorkerProfile } from './worker-profile.js';
 import { readTrap } from './soak.js';
+import { readCatchContext } from './catch-context.js';
 
 export type WorkerCatches = WorkerProfile & { today: number };
 
@@ -33,11 +34,13 @@ export interface StatsStore {
   day: string;
   catchesToday: number;
   /** UTC-day counters for sharing; local-day glass/CLI stats stay unchanged. */
-  utc?: { date: string; catches: number; perTrap: Record<string, number>; trapWorkers?: Record<string, WorkerProfile>; byWorker?: WorkerCatches[] };
+  utc?: { date: string; catches: number; perTrap: Record<string, number>; trapWorkers?: Record<string, WorkerProfile>; byWorker?: WorkerCatches[];
+    usage?: { withHelm: number; withoutHelm: number; onLocal: number; onWharf: number } };
   /**
    * Counted dispatches whose state is still on disk, so a repeated done or a
    * later fold never counts one twice. Cull drops an id as it folds it: the
-   * store stays as small as the retained state.
+   * store stays as small as the retained state. Hashed wharf completion
+   * receipts also remain here: retries can arrive after local state is gone.
    */
   counted: string[];
   /**
@@ -90,6 +93,8 @@ interface CatchFacts {
   at?: string;
   trap?: string;
   worker?: WorkerProfile;
+  helm?: boolean | null;
+  location?: 'local' | 'wharf';
 }
 
 function readCatchFacts(stateDir: string, id: string): CatchFacts {
@@ -118,7 +123,8 @@ function readCatchFacts(stateDir: string, id: string): CatchFacts {
   } catch {
     /* no receipt: a headless catch */
   }
-  return { done: true, worker, ...(typeof last.at === 'string' ? { at: last.at } : {}), ...(trap ? { trap } : {}) };
+  const context = readCatchContext(stateDir, id);
+  return { done: true, worker, helm: context.helm, location: context.location, ...(typeof last.at === 'string' ? { at: last.at } : {}), ...(trap ? { trap } : {}) };
 }
 
 function emptyStore(now: number): StatsStore {
@@ -163,6 +169,11 @@ function add(store: StatsStore, facts: CatchFacts, now: number): void {
   if (store.utc?.date !== utcDay) store.utc = { date: utcDay, catches: 0, perTrap: {}, trapWorkers: {}, byWorker: [] };
   if ((at ? new Date(at).toISOString().slice(0, 10) : utcDay) === utcDay) {
     store.utc.catches++;
+    const usage = store.utc.usage ??= { withHelm: 0, withoutHelm: 0, onLocal: 0, onWharf: 0 };
+    if (facts.helm === true) usage.withHelm++;
+    if (facts.helm === false) usage.withoutHelm++;
+    if (facts.location === 'local') usage.onLocal++;
+    if (facts.location === 'wharf') usage.onWharf++;
     const worker = sanitizeWorker(facts.worker);
     if (facts.trap) {
       store.utc.perTrap[facts.trap] = (store.utc.perTrap[facts.trap] ?? 0) + 1;
@@ -358,6 +369,18 @@ export function recordCatch(id: string, lane: Lane, now = Date.now()): void {
     if (!facts.done) return;
     add(store, facts, now);
     store.counted.push(id);
+    writeStore(store);
+  });
+}
+
+/** Only this install's accepted wharf completions count, never an account's entire roster of jobs.
+ * The opaque local receipt key is not an installation ID and is never sent. */
+export function recordWharfCatch(receipt: string, helm: boolean | null, at: string, now = Date.now()): void {
+  withStatsLock(() => {
+    const store = loadOrBackfill(now), key = `wharf:${receipt}`;
+    if (store.counted.includes(key)) return;
+    add(store, { done: true, at, location: 'wharf', helm }, now);
+    store.counted.push(key);
     writeStore(store);
   });
 }

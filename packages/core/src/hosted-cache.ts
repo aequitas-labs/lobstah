@@ -7,6 +7,9 @@ import type { Config } from './config.js';
 import type { DispatchView, WharfAck, WharfDocumentSummary } from './backend-model.js';
 import { BackendError, WharfBackend } from './wharf-backend.js';
 import { wharfCredential } from './wharf-credentials.js';
+import { accessFlags, UNKNOWN_ACCESS } from './telemetry-usage.js';
+import type { BoatAccess } from './telemetry-usage.js';
+export interface WharfUsageSnapshot { boats: number | null; boatAccess: BoatAccess; helmLive: boolean | null; observedAt: string }
 export interface HostedView {
   grounds: string; wharf: string; url: string; account: string; observedAt: string; checkedAt?: string; dispatches: DispatchView[]; unavailable?: string;
   /** The wharf's glass origin, as its last answer named it. Absent until one did (an older wharf never does). */
@@ -19,6 +22,8 @@ export interface HostedView {
    */
   documents?: WharfDocumentSummary[];
   documentsAt?: string;
+  /** Coarse facts from existing boat/glass reads. No telemetry install ID is available to those requests. */
+  usage?: WharfUsageSnapshot;
 }
 export const DOCUMENTS_EVERY_MS = 30_000;
 function cachePath() { return path.join(lobstahHome(), 'hosted-snapshots.json'); }
@@ -31,6 +36,7 @@ export function readHostedViews(config: Config, now = Date.now()): HostedView[] 
       grounds: s.grounds, wharf: s.wharf!, url: s.location!.url, account: s.location!.account, observedAt: cached?.observedAt ?? '', dispatches: cached?.dispatches ?? [], unavailable: 'wharf unavailable; state unknown',
       ...(cached?.glass ? { glass: cached.glass } : {}),
       ...(cached?.documents ? { documents: cached.documents, documentsAt: cached.documentsAt } : {}),
+      ...(cached?.usage ? { usage: cached.usage } : {}),
     };
   });
 }
@@ -41,6 +47,14 @@ export function wharfFor(scope: BackendScope, options: { session?: string; worke
 /** The local daemon's existing cadence drives independent remote snapshots. */
 export async function refreshHostedViews(config: Config): Promise<void> {
   const known = readHostedViews(config);
+  const usageReads = new Map<string, Promise<WharfUsageSnapshot | undefined>>();
+  const usage = (scope: BackendScope): Promise<WharfUsageSnapshot | undefined> => {
+    const key = JSON.stringify(scope.location), prior = known.find((v) => v.url === scope.location?.url && v.account === scope.location?.account)?.usage;
+    if (prior && Date.now() - Date.parse(prior.observedAt) < DOCUMENTS_EVERY_MS) return Promise.resolve(prior);
+    if (!usageReads.has(key)) usageReads.set(key, readWharfUsage(wharfFor(scope)));
+    return usageReads.get(key)!;
+  };
+  const usageRows = await Promise.all(backendScopes(config).filter((s) => s.kind === 'wharf').map(async (s) => ({ grounds: s.grounds, value: await usage(s) })));
   const rows = await eachBackend(backendScopes(config).filter((s) => s.kind === 'wharf'), async (s) => {
     const wharf = wharfFor(s); const listed = await wharf.list(); const dispatches = listed.filter((d) => s.repos.includes(d.repo));
     const readAt = Date.parse(known.find((v) => v.grounds === s.grounds)?.documentsAt ?? '');
@@ -65,11 +79,30 @@ export async function refreshHostedViews(config: Config): Promise<void> {
     return { grounds: scope.grounds, wharf: scope.wharf!, url: scope.location!.url, account: scope.location!.account,
       checkedAt: new Date().toISOString(), observedAt: value ? new Date().toISOString() : before?.observedAt ?? '',
       dispatches: dispatches ?? before?.dispatches ?? [], ...(unavailable ? { unavailable } : {}), ...(glass ? { glass } : {}),
+      usage: usageRows.find((r) => r.grounds === scope.grounds)?.value,
       ...(documents ? { documents, documentsAt: new Date().toISOString() }
         : before?.documents ? { documents: before.documents, documentsAt: before.documentsAt } : {}) };
   });
   if (!rows.length) return;
   writeCache(views);
+}
+/** Existing routes only. Work-only boats can read their grants, not the roster or helm seat. */
+async function readWharfUsage(wharf: WharfBackend): Promise<WharfUsageSnapshot> {
+  const unknown = (): WharfUsageSnapshot => ({ boats: null, boatAccess: { ...UNKNOWN_ACCESS }, helmLive: null, observedAt: new Date().toISOString() });
+  try {
+    const own = await wharf.request('_boat') as { permissions?: unknown };
+    if (!Array.isArray(own.permissions) || own.permissions.some((p) => !['work', 'read', 'helm', 'admin'].includes(p))) return unknown();
+    const boatAccess = accessFlags(own.permissions);
+    let boats: number | null = null, helmLive: boolean | null = null;
+    if (boatAccess.read) {
+      try {
+        const glass = await wharf.request('glass') as { boats?: unknown; helmLive?: unknown };
+        if (Array.isArray(glass.boats) && glass.boats.length <= 100) boats = Math.max(1, glass.boats.filter((b) => b && typeof b === 'object' && b.revoked === 0).length);
+        if (typeof glass.helmLive === 'boolean') helmLive = glass.helmLive;
+      } catch { /* No read, old wharf, or unavailable: unknown. */ }
+    }
+    return { boats, boatAccess, helmLive, observedAt: new Date().toISOString() };
+  } catch { return unknown(); } // Cache a failed attempt too; retry only on the normal cadence.
 }
 function writeCache(views: HostedView[]) {
   const file = cachePath(); const tmp = uniqueTempPath(file); fs.writeFileSync(tmp, JSON.stringify(views)); fs.renameSync(tmp, file);

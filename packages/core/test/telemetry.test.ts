@@ -129,8 +129,8 @@ describe('telemetry payload', () => {
     expect(unexpected, `payload carries keys outside the allowed list: ${unexpected.join(', ')}`).toEqual([]);
     expect(Object.keys(parsed)).toEqual([...TELEMETRY_FIELDS]);
     for (const s of secrets) expect(json, `payload leaks ${s}`).not.toContain(s);
-    expect(parsed).toMatchObject({ schema: 1, catches: { today: 2, total: 2 }, traps: [] });
-    expect(Object.keys(parsed.catches as object)).toEqual(['today', 'total']);
+    expect(parsed).toMatchObject({ schema: 2, catches: { today: 2, total: 2 }, traps: [] });
+    expect(Object.keys(parsed.catches as object)).toEqual(['today', 'total', 'withHelm', 'withoutHelm', 'helmUnknown', 'onLocal', 'onWharf', 'locationUnknown']);
     expect(parsed.installId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(['macos', 'linux', 'windows', 'other']).toContain(parsed.os);
     expect(['x64', 'arm64', 'other']).toContain(parsed.arch);
@@ -145,7 +145,7 @@ describe('telemetry payload', () => {
     fs.writeFileSync(statsPath(), JSON.stringify({ ...store, daily: { '2026-09-01': 99999 } }));
     const payload = buildTelemetryPayload(state.installId, NOON);
     expect(serializeTelemetryPayload(payload)).toBe(before);
-    expect(payload.catches).toEqual({ today: 3, total: 40 });
+    expect(payload.catches).toMatchObject({ today: 3, total: 40 });
     expect(serializeTelemetryPayload({ ...payload, daily: store.daily } as never)).toBe(before);
     expect(before).not.toContain('daily');
     expect(before).not.toContain('2026-09-01');
@@ -157,7 +157,7 @@ describe('telemetry payload', () => {
     fs.writeFileSync(path.join(home, 'trap-names', 'amber-gull.json'), JSON.stringify({ trapId: 'legacy' }));
     fs.writeFileSync(statsPath(), JSON.stringify({ version: 1, totalCatches: 99, perTrap: {}, day: '2026-10-05', catchesToday: 77, counted: [], utc: { date: '2026-10-06', catches: 10, perTrap: { 'wt:auto': 2, 'wt:custom': 3, 'wt:legacy': 1 } } }));
     const p = buildTelemetryPayload(ensureTelemetryState().installId, NOON);
-    expect(p.catches).toEqual({ today: 10, total: 99 });
+    expect(p.catches).toMatchObject({ today: 10, total: 99 });
     expect(p.traps).toEqual([{ name: generated, today: 2, ...workerProfile() }]);
     expect(buildTelemetryPayload(p.installId, NOON + DAY)).toMatchObject({ catches: { today: 0, total: 99 }, traps: [] });
   });

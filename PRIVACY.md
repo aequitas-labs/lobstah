@@ -19,11 +19,17 @@ material. Those services have their own data-handling policies.
 lobstah can send anonymous, aggregate usage statistics to its maintainers:
 counts of completed work, automatically generated worker labels, the kinds
 of harness and model configurations used, and version and platform
-information. These statistics are tied to a random installation identifier,
-not your identity.
+information. They also describe, in small count ranges and fixed choices,
+boats and local or wharf grounds, boat access, and whether completed work
+had a live helm. Unobserved history stays unknown. These statistics are tied
+to a random installation identifier, not your identity or wharf account.
+Signing in does not link the two. A self-hosted wharf receives no telemetry.
 
 Telemetry never sends code, prompts, file contents, file paths, repository
 names, user-chosen names, credentials or account identifiers.
+It never sends boat identifiers, wharf addresses, grounds names or times
+finer than the UTC date. Telemetry uses its own daily schedule and connection,
+without wharf credentials or cookies.
 
 Sharing is on by default. We use telemetry to understand lobstah's usage;
 we do not sell it or share it for advertising. Installation-linked data is
@@ -38,6 +44,15 @@ Run `lobstah telemetry show` to see the exact current contents. The
 [service source](services/telemetry/src/index.ts) describe the current
 collection, controls and retention.
 
+## What a wharf holds
+
+Local files remain the default. If you use a wharf, that separate service
+holds your account, boats, dispatches, messages and files so your machines
+can coordinate work. Task material can be sensitive. Account deletion
+removes that work and its files; a minimal hashed deletion receipt remains
+to make retries safe. Signing out or revoking a boat does not delete the
+account's work. The wharf is operational storage, not anonymous telemetry.
+
 ## Your choices
 
 Stop sending with `lobstah telemetry disable`. Configuration and environment
@@ -47,8 +62,8 @@ effect, and `lobstah telemetry --help` explains them.
 To reset the installation identifier, disable sharing, then delete the local
 `telemetry.json` file in your lobstah data directory. A new identifier is
 created when needed. This does not erase statistics already received.
-There is no personal-data deletion API because these statistics are not
-linked to a person.
+There is no telemetry deletion API because these statistics are not linked
+to a person. This is separate from wharf account deletion above.
 
 ## Questions
 

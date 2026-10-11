@@ -18,6 +18,7 @@ function statusFields(s: TelemetryStatus): Record<string, string> {
     noticeShown: s.noticeShown ? 'yes' : 'no (nothing is sent until it is shown on an interactive run)',
     installId: s.installId ?? '(not created yet)',
     lastSent: s.lastSentDate ?? '(never)',
+    collects: s.collects,
   };
 }
 

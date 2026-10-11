@@ -174,7 +174,7 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
       const target = path.join(d.state, f);
       const directory = fs.statSync(target).isDirectory();
       if (directory && !fs.existsSync(path.join(target, 'attachments')) && !fs.existsSync(path.join(target, 'report.json'))) continue;
-      const id = directory ? f : f.replace(/\.(status|events|evidence|attn|notified|runner\.log)$/, '');
+      const id = directory ? f : f.replace(/\.(status|events|evidence|catch-context|attn|notified|runner\.log)$/, '');
       if (id === f && !directory) continue;
       if (live.has(id) || (doneMtimes.get(id) ?? 0) >= cutoff || referencedAttachmentState.has(path.join(d.state, id))) continue;
       const previous = groups.get(id);

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { startTelemetrySchedule } from './telemetry-schedule.js';
 import {
   uniqueTempPath,
   appendStatus,
@@ -49,7 +50,6 @@ import {
   sweepGhostTraps,
   expireReservations,
   pausedWaiting,
-  sendTelemetry,
   poolDir,
   poolWaits,
   poolWarmDue,
@@ -722,12 +722,10 @@ export function watchQueues(onChange: () => void): () => void {
   };
 }
 
-const TELEMETRY_CHECK_MS = 10 * 60_000;
-let telemetryCheckedAt = 0;
-
 export async function daemon(intervalMs = 5000, log: (m: string) => void = console.log, hooks: DaemonHooks = {}): Promise<never> {
   ensureLayout();
   acquireDaemonLock();
+  startTelemetrySchedule();
   await hooks.hostedStart?.();
   log(`lobstah daemon: watching ${laneDirs('work').queue} every ${intervalMs}ms`);
   let wake: (() => void) | undefined;
@@ -745,12 +743,6 @@ export async function daemon(intervalMs = 5000, log: (m: string) => void = conso
       await refreshHostedViews(loadConfig());
       await hooks.hostedPoll?.();
     }).catch((e) => log(`wharf poll: ${e instanceof Error ? e.message : String(e)}`)).finally(() => { remoteRead = undefined; });
-    // Anonymous daily counts (PRIVACY.md): checked every few minutes, sent at
-    // most once per UTC day, fire and forget. Never awaited, never logged.
-    if (Date.now() - telemetryCheckedAt >= TELEMETRY_CHECK_MS) {
-      telemetryCheckedAt = Date.now();
-      void sendTelemetry().catch(() => {});
-    }
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
         wake = undefined;

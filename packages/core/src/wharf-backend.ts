@@ -145,7 +145,17 @@ export class WharfBackend implements CoordinationBackend {
     return { dispatch: input(r.dispatch), epoch: Number(r.epoch), token: string(r.token), leaseUntil: string(r.leaseUntil) };
   }
   async heartbeat(id: string, key: string) { await this.request(`dispatches/${encodeURIComponent(id)}/heartbeat`, {}, key); }
-  async report(id: string, r: ReportInput, key: string) { await this.request(`dispatches/${encodeURIComponent(id)}/report`, r, key); }
+  /** Forward-only facts returned by an accepted completion; never telemetry identity. */
+  completion?: { withHelm: boolean | null; at: string };
+  async report(id: string, r: ReportInput, key: string) {
+    this.completion = undefined;
+    const value = record(await this.request(`dispatches/${encodeURIComponent(id)}/report`, r, key));
+    if (r.verb === 'done' && value.catch && typeof value.catch === 'object') {
+      const c = record(value.catch);
+      if ((c.withHelm === null || typeof c.withHelm === 'boolean') && typeof c.at === 'string' && Number.isFinite(Date.parse(c.at)))
+        this.completion = { withHelm: c.withHelm as boolean | null, at: c.at };
+    }
+  }
   async send(id: string, message: string, key: string) { await this.request(`dispatches/${encodeURIComponent(id)}/messages`, { text: message }, key); }
   async messages(id: string): Promise<BackendMessage[]> {
     const r = await this.request(`dispatches/${encodeURIComponent(id)}/messages`);

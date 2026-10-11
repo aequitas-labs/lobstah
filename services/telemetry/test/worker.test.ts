@@ -9,6 +9,7 @@ import { FIELDS, MAX_BODY_BYTES, MAX_TRAPS, RETENTION_DAYS, handle, utcDate, val
 import { TELEMETRY_FIELDS, TELEMETRY_MAX_TRAPS, TELEMETRY_MAX_WORKERS } from '../../../packages/core/src/telemetry.js';
 import { workerProfile } from '../../../packages/core/src/worker-profile.js';
 import { TRAP_FIRST_WORDS, TRAP_LAST_WORDS } from '../../../packages/core/src/trap-names.js';
+import { usageBucket } from '../../../packages/core/src/telemetry-usage.js';
 
 const DAY = 86_400_000;
 const NOW = Date.parse('2026-10-06T12:00:00Z');
@@ -17,10 +18,26 @@ const ID = '3b0c8f9e-6a1d-4c2e-9f3a-1b2c3d4e5f60';
 const OTHER = '7e1d2c3b-4a5f-4e6d-8c7b-0a9f8e7d6c5b';
 
 function payload(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return { schema: 1, version: '0.6.9', os: 'macos', arch: 'arm64', installId: ID, date: TODAY, catches: { today: 3, total: 40 }, helm: null, traps: [{ name: 'kind-crab', today: 2, ...workerProfile() }], byWorker: [], ...over };
+  const counts = over.catches as { today?: number; total?: number } | undefined;
+  const unknown = usageBucket(typeof counts?.today === 'number' ? counts.today : 3);
+  return { schema: 2, version: '0.6.9', os: 'macos', arch: 'arm64', installId: ID, date: TODAY, helms: over.helm ? 'one' : 'none',
+    helm: null, traps: [{ name: 'kind-crab', today: 2, ...workerProfile() }], byWorker: [],
+    grounds: { total: '1', local: '1', wharf: '0' }, wharf: 'none', boats: '1', boatAccess: { work: false, read: false, helm: false }, ...over,
+    catches: { withHelm: '0', withoutHelm: '0', helmUnknown: unknown, onLocal: '0', onWharf: '0', locationUnknown: unknown, ...(counts ?? { today: 3, total: 40 }) } };
 }
 
 describe('telemetry Worker validation', () => {
+  it('refuses identities, addresses, timestamps and arbitrary nested values in every new field', () => {
+    for (const key of ['accountId', 'boatName', 'boatId', 'wharfName', 'wharfAddress', 'groundsNames', 'repoNames', 'hostname', 'token', 'observedAt']) {
+      expect(validate(payload({ [key]: 'secret' }), NOW).ok).toBe(false);
+      for (const nested of ['grounds', 'boatAccess', 'catches']) {
+        const p = payload(); p[nested] = { ...(p[nested] as object), [key]: 'secret' };
+        expect(validate(p, NOW).ok).toBe(false);
+      }
+    }
+    for (const over of [{ helms: 'two' }, { wharf: 'https://private.test' }, { boats: 4 }, { boatAccess: { work: 'secret', read: true, helm: false } }, { grounds: { total: '2', local: '1', wharf: '0' } }, { catches: { today: 3, total: 40, withHelm: '6-10' } }, { date: '2026-10-06T12:00:00Z' }]) expect(validate(payload(over), NOW).ok).toBe(false);
+    expect(validate(payload({ helms: null, grounds: { total: '2', local: '1', wharf: '1' }, wharf: 'self-hosted', boats: null, boatAccess: { work: true, read: false, helm: null } }), NOW).ok).toBe(true);
+  });
   it('accepts known profiles or explicit nulls, rejects all free text and extra nested keys', () => {
     const safe = workerProfile({ harness: 'codex', model: 'gpt-6.1-sol', effort: 'high', permissionMode: 'default' });
     expect(validate(payload({ helm: safe, traps: [{ name: 'kind-crab', today: 2, ...safe }], byWorker: [{ ...workerProfile(), today: 1 }] }), NOW).ok).toBe(true);
@@ -51,7 +68,7 @@ describe('telemetry Worker validation', () => {
   it.each([
     ['an unknown field', { repo: 'acme/app' }],
     ['a hostname', { hostname: 'box' }],
-    ['schema 2', { schema: 2 }],
+    ['schema 1', { schema: 1 }],
     ['a free-form version', { version: 'my laptop' }],
     ['an unknown os', { os: 'darwin 24.6' }],
     ['an unknown arch', { arch: 'ia32' }],
@@ -126,6 +143,7 @@ function fakeD1(beforeMigration?: (db: Sqlite) => void): D1Database {
   db.exec(fs.readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
   beforeMigration?.(db);
   db.exec(fs.readFileSync(new URL('../migrations/0002_daily_catches.sql', import.meta.url), 'utf8'));
+  db.exec(fs.readFileSync(new URL('../migrations/0003_wharf_usage.sql', import.meta.url), 'utf8'));
   const statement = (sql: string, params: unknown[] = []): D1PreparedStatement => ({
     bind: (...values: unknown[]) => statement(sql, values),
     first: async <T>() => ((db.prepare(sql).all(...params)[0] as T | undefined) ?? null),
@@ -196,7 +214,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     await post(e, payload({ catches: { today: 4, total: 10_000_000 } }));
     expect((await badge(e)).message).toBe('4');
     expect((await e.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all<{ name: string }>()).results.map((r) => r.name))
-      .toEqual(['attribution_submissions', 'daily_totals', 'daily_worker_totals', 'submissions', 'trap_submissions', 'worker_submissions']);
+      .toEqual(['attribution_submissions', 'daily_totals', 'daily_usage_totals', 'daily_worker_totals', 'submissions', 'trap_submissions', 'usage_submissions', 'worker_submissions']);
   });
 
   it('counts only daily catches even when a fresh install reports a huge lifetime total', async () => {
@@ -245,7 +263,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     const response = await get(e, '/v1/stats');
     expect(response.status).toBe(200);
     const s = await response.json() as Record<string, unknown>;
-    expect(Object.keys(s).sort()).toEqual(['activeBoats', 'activeDays', 'activeTraps', 'byWorker', 'days', 'retentionDays', 'totalCatches']);
+    expect(Object.keys(s).sort()).toEqual(['activeBoats', 'activeDays', 'activeTraps', 'byWorker', 'days', 'retentionDays', 'totalCatches', 'usage']);
     const text = JSON.stringify(s);
     for (const privateValue of [ID, OTHER, 'kind-crab', 'install_id', 'installId', 'submissions', 'permissionMode', 'effort']) expect(text).not.toContain(privateValue);
     expect(s.days).toEqual([{ date: TODAY, activeInstalls: 2, catchesToday: 6, newCatches: 6 }]);
@@ -261,6 +279,19 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     expect(await stats(e)).toMatchObject({ activeBoats: 1, activeTraps: 0, totalCatches: 0 });
   });
 
+  it('upserts bucket histograms once, corrects changed snapshots and retains only anonymous daily aggregates', async () => {
+    const e = env(); const p = payload();
+    await post(e, p); await post(e, p);
+    expect(await e.DB.prepare("SELECT installs FROM daily_usage_totals WHERE dimension='helms' AND bucket='none'").first()).toEqual({ installs: 1 });
+    await post(e, payload({ helms: 'several' })); await post(e, payload({ helms: 'several' }));
+    expect((await e.DB.prepare("SELECT bucket,installs FROM daily_usage_totals WHERE dimension='helms' AND installs>0").all()).results).toEqual([{ bucket: 'several', installs: 1 }]);
+    const waits: Promise<unknown>[] = [];
+    worker.scheduled({ scheduledTime: NOW + (RETENTION_DAYS + 1) * DAY, cron: '17 3 * * *' }, e, { waitUntil: (p) => waits.push(p) });
+    await Promise.all(waits);
+    expect(await e.DB.prepare('SELECT COUNT(*) AS n FROM usage_submissions').first()).toEqual({ n: 0 });
+    expect(await e.DB.prepare("SELECT installs FROM daily_usage_totals WHERE dimension='helms' AND bucket='several'").first()).toEqual({ installs: 1 });
+    expect((await e.DB.prepare("SELECT name FROM pragma_table_info('daily_usage_totals')").all<{ name: string }>()).results.map((r) => r.name)).toEqual(['date', 'dimension', 'bucket', 'installs']);
+  });
   it('stores config for 90 days, retains only anonymous harness/model counts, and corrects retries atomically', async () => {
     const e = env();
     const trap = workerProfile({ harness: 'codex', model: 'gpt-5', effort: 'high', permissionMode: 'default' });
@@ -283,7 +314,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     const waits: Promise<unknown>[] = [];
     worker.scheduled({ scheduledTime: NOW + (RETENTION_DAYS + 1) * DAY, cron: '17 3 * * *' }, e, { waitUntil: (p) => waits.push(p) });
     await Promise.all(waits);
-    for (const table of ['submissions', 'trap_submissions', 'worker_submissions', 'attribution_submissions']) {
+    for (const table of ['submissions', 'trap_submissions', 'worker_submissions', 'attribution_submissions', 'usage_submissions']) {
       expect((await e.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n).toBe(0);
     }
     expect((await e.DB.prepare('SELECT SUM(catches_today) AS n FROM daily_worker_totals').first<{ n: number }>())?.n).toBe(3);
