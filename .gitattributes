@@ -1,4 +1,5 @@
 # The glass page is built from these and compared byte for byte against the
 # legacy fixture: keep them LF on every checkout, Windows included.
 apps/cli/glass/** text eol=lf
+apps/cli/glass/assets/*.png binary -eol
 apps/cli/test/fixtures/*.html text eol=lf
