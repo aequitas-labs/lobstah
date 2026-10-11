@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { WINDOWS_PROCESS_SNAPSHOT } from './windows-processes.js';
 
 /** One row of the process table. `pgid` is absent on Windows. */
 export interface ProcRow {
@@ -7,7 +8,7 @@ export interface ProcRow {
   pgid?: number;
 }
 
-/** The process table: `ps` on POSIX, CIM through PowerShell on Windows. */
+/** The process table: `ps` on POSIX, a native Tool Help snapshot on Windows. */
 export function listProcesses(): ProcRow[] {
   if (process.platform === 'win32') {
     const out = execFileSync(
@@ -16,7 +17,7 @@ export function listProcesses(): ProcRow[] {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
+        WINDOWS_PROCESS_SNAPSHOT,
       ],
       { encoding: 'utf8', windowsHide: true, timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] },
     );

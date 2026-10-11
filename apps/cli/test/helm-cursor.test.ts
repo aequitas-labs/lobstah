@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  addWatch,
   appendStatus,
   claimNext,
   complete,
@@ -14,6 +15,8 @@ import {
   noticesDir,
   postNotice,
   readHelm,
+  readStatusLog,
+  statusPath,
   takeHelm,
   writeHold,
 } from '@lobstah/core';
@@ -152,6 +155,28 @@ describe('man wait reports only delivered catches', () => {
   };
   const unreported = () => landedCatches(loadConfig()).find((c) => c.id === ID)?.unreported;
 
+  it('does not swallow a completion during the initial watch check after registration', () => {
+    signOn(HELM);
+    enqueue({ id: ID, repo: 'r', brief: 'b' });
+    claimNext('work');
+    const script = path.join(home, 'complete-during-watch.cjs');
+    fs.writeFileSync(script, `
+      const fs = require('node:fs');
+      const watcher = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(home, 'watchers', `${HELM}.json`))}, 'utf8'));
+      if (watcher.kind !== 'man') throw new Error('watcher not registered');
+      fs.appendFileSync(${JSON.stringify(statusPath(ID, 'work'))}, JSON.stringify({
+        at: new Date().toISOString(), verb: 'done', note: 'landed during startup'
+      }) + '\\n');
+      console.log(JSON.stringify({ cursor: '1', events: [] }));
+    `);
+    addWatch('during-startup', `"${process.execPath}" "${script}"`, { owner: 'man' });
+    const result = wait(HELM);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout).toContain('landed during startup');
+    expect(result.stdout).not.toContain('timeout: true');
+    expect(readCursor('fleet')).toBe(readStatusLog(ID, 'work').at(-1)!.at);
+  });
+
   it('advances through a done event delivered to the helm watcher', async () => {
     signOn(HELM);
     enqueue({ id: ID, repo: 'r', brief: 'b' });
@@ -159,18 +184,22 @@ describe('man wait reports only delivered catches', () => {
     const env: NodeJS.ProcessEnv = { ...process.env, LOBSTAH_HOME: home };
     delete env.CLAUDE_CODE_SESSION_ID;
     const child = spawn(process.execPath, [cli, 'man', 'wait', '--session', HELM, '--timeout', '5'], { env, stdio: 'pipe' });
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', resolve);
+    });
     let stdout = '';
     child.stdout.on('data', (chunk) => { stdout += String(chunk); });
     try {
       const deadline = Date.now() + 4_000;
       while (!liveWatcher(HELM, 'man') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
       expect(liveWatcher(HELM, 'man')).toBeDefined();
-      // The watcher registers before capturing its event baseline.
-      await new Promise((r) => setTimeout(r, 500));
+      // Registration is the readiness signal: no sleep to guess whether the
+      // child's gates and baseline scan have finished on a busy runner.
       const at = appendStatus(ID, 'work', 'done', 'landed').at;
       complete(ID, 'work');
       expect(unreported()).toBe(true);
-      const exit = await new Promise<number | null>((resolve) => child.once('exit', resolve));
+      const exit = await exited;
       expect(exit, stdout).toBe(0);
       expect(stdout).toContain(ID);
       expect(readCursor('fleet')).toBe(at);
