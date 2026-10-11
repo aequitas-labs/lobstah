@@ -19,6 +19,18 @@ public struct GlassShowResult: Decodable, Equatable {
   }
 }
 
+/// The glass an item belongs to: the hosted glass of its wharf (already at the
+/// item), or the local glass.
+public struct GlassAddress: Equatable {
+  public let url: URL
+  public let hosted: Bool
+
+  public init(url: URL, hosted: Bool) {
+    self.url = url
+    self.hosted = hosted
+  }
+}
+
 /// A pet click's glass target: the hash an open glass page moves to, and the
 /// URL a new tab opens when no page is open.
 public struct GlassTarget: Equatable {

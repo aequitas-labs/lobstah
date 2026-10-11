@@ -61,8 +61,23 @@ function report(v: unknown): ReportInput & { at: string } {
   }
   return out;
 }
+/**
+ * The wharf's glass, as the wharf names it (`X-Lobstah-Glass`): an exact
+ * HTTPS origin (HTTP for loopback tests only), never a path or credentials.
+ * A click opens this address in a browser, so anything else is refused.
+ */
+export function glassOrigin(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 512) return undefined;
+  try {
+    const u = new URL(value);
+    const loopback = u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+    return u.origin === value && (u.protocol === 'https:' || loopback) ? value : undefined;
+  } catch { return undefined; }
+}
 /** One instance per named wharf/grounds. Never falls back to local on errors. */
 export class WharfBackend implements CoordinationBackend {
+  /** Where this wharf's glass is, once a response has named it. */
+  glass?: string;
   constructor(public location: BackendLocation, private token: string,
     private options: { session?: string; worker?: string; fetch?: typeof fetch } = {}) {
     if (!token) throw new BackendError(401, `set the credential in ${location.tokenEnv}`);
@@ -77,6 +92,7 @@ export class WharfBackend implements CoordinationBackend {
       response = await (this.options.fetch ?? fetch)(url, { method: method ?? (body === undefined ? 'GET' : 'POST'), headers,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(5000), redirect: 'manual' });
     } catch { throw new BackendError(503, 'backend unavailable; state unknown (no local fallback)'); }
+    this.glass = glassOrigin(response.headers.get('X-Lobstah-Glass')) ?? this.glass;
     try { return await responseValue(response); }
     catch (error) { if (error instanceof BackendError) throw error; throw new BackendError(503, 'backend response interrupted; state unknown'); }
   }

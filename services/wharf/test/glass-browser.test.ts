@@ -123,6 +123,12 @@ it('can be installed: a manifest and star-with-lobster icons, public, with no ac
   expect((await SELF.fetch('https://state.test/manifest.webmanifest')).status).toBe(404);
   expect((await SELF.fetch('https://glass.test/manifest.webmanifest', { method: 'POST', headers: { Origin: 'https://glass.test' }, body: '{}' })).status).toBe(404);
 });
+it('names its glass on the API host’s account answers, not without a credential and not on the glass host', async () => {
+  await job();
+  const list = await api('dispatches'); expect(list.status).toBe(200); expect(list.headers.get('x-lobstah-glass')).toBe('https://glass.test');
+  const refused = await SELF.fetch(`https://state.test/v1/accounts/${account}/dispatches`); expect(refused.status).toBe(401); expect(refused.headers.get('x-lobstah-glass')).toBeNull();
+  expect((await browser('dispatches')).headers.get('x-lobstah-glass')).toBeNull();
+});
 it('returns a signed-in person to the item their link named', async () => {
   const link = 'https://glass.test/#decision/card';
   const start = await SELF.fetch('https://glass.test/api/auth/sign-in/social', { method: 'POST', headers: { Origin: 'https://glass.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'github', callbackURL: link }) });

@@ -3,7 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { agentEnvironment, backendScope, enqueue, ensureLayout, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, WharfBackend } from '@lobstah/core';
+import { agentEnvironment, appendStatus, backendScope, claimNext, enqueue, ensureLayout, glassOrigin, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, WharfBackend } from '@lobstah/core';
+import { hostedGlassLink } from '../src/hosted-view.js';
 import { commandScope, wharfCommand } from '../src/wharf-commands.js';
 import { buildGlassSnapshot, glassDispatchJson } from '../src/glass.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
@@ -71,6 +72,39 @@ it('local + two wharves coexist in glass, tend and the pet; unreachable grounds 
   await refreshHostedViews(loadConfig()); expect(readHostedViews(loadConfig()).find((v) => v.wharf === 'cloud')!.observedAt).toBe(observed);
   expect(buildGlassSnapshot().dispatches.find((d) => d.backend)?.verb).toBe('unknown');
   expect(lobItems(buildTendReport().attention, { lobs: true, preview: false })).toHaveLength(0);
+});
+it('a wharf item carries its grounds and its hosted glass link once the wharf names its glass; a local item carries neither', async () => {
+  const at = new Date().toISOString();
+  const answer = (glass?: string) => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.startsWith('http://127.0.0.1')) throw new Error('offline');
+    return Response.json([{ id: 'remote-job', repo: 'remote', brief: '# Remote task', state: 'active', status: { verb: 'needs-decision', note: 'which?', at } }],
+      { headers: glass ? { 'X-Lobstah-Glass': glass } : {} });
+  }));
+  const item = () => buildTendReport().attention.find((a) => a.note?.startsWith('[away@cloud]'))!;
+  // An older wharf names no glass: the item says where it is from, and the click stays as it was.
+  answer(); await refreshHostedViews(loadConfig());
+  expect(item()).toMatchObject({ kind: 'question', grounds: 'away', wharf: 'cloud' }); expect(item().glass).toBeUndefined();
+  // Only an exact HTTPS origin is an address a click may open.
+  for (const refused of ['http://glass.example', 'https://glass.example/path', 'https://user:secret@glass.example', 'javascript:alert(1)', 'https://glass.example/#job/x']) {
+    answer(refused); await refreshHostedViews(loadConfig()); expect(item().glass, refused).toBeUndefined();
+  }
+  answer('https://glass.example'); await refreshHostedViews(loadConfig());
+  expect(item()).toMatchObject({ grounds: 'away', wharf: 'cloud', glass: 'https://glass.example/#job/remote-job' });
+  expect(readHostedViews(loadConfig()).find((v) => v.wharf === 'cloud')!.glass).toBe('https://glass.example');
+  // One answer without the header, or an unreachable wharf, keeps the last address named.
+  answer(); await refreshHostedViews(loadConfig()); expect(item().glass).toBe('https://glass.example/#job/remote-job');
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); })); await refreshHostedViews(loadConfig());
+  expect(item()).toMatchObject({ quiet: true, glass: 'https://glass.example/#job/remote-job' });
+  enqueue({ id: 'local-job', repo: 'local', brief: 'Local task' }); claimNext('work'); appendStatus('local-job', 'work', 'needs-decision', 'local question');
+  const local = buildTendReport().attention.find((a) => a.id === 'local-job')!;
+  expect(local.kind).toBe('question'); expect(local.grounds).toBeUndefined(); expect(local.wharf).toBeUndefined(); expect(local.glass).toBeUndefined();
+});
+it('builds hosted glass links for the item kinds the glass routes, from safe ids only', () => {
+  expect(hostedGlassLink({ glass: 'https://glass.example' }, 'decision', 'card_1')).toBe('https://glass.example/#decision/card_1');
+  expect(hostedGlassLink({ glass: 'https://glass.example' }, 'report', 'r-1')).toBe('https://glass.example/#report/r-1');
+  expect(hostedGlassLink({ glass: 'https://glass.example' }, 'job', '../boats')).toBeUndefined();
+  expect(hostedGlassLink({}, 'job', 'job')).toBeUndefined();
+  expect(glassOrigin('http://127.0.0.1:8788')).toBe('http://127.0.0.1:8788'); expect(glassOrigin('https://glass.example/')).toBeUndefined(); expect(glassOrigin(null)).toBeUndefined();
 });
 it('remote CLI mutations use the selected wharf and never the local queue; unsupported operations refuse', async () => {
   const fetcher = vi.fn(async (_url: string, init: RequestInit) => Response.json(JSON.parse(String(init.body)))); vi.stubGlobal('fetch', fetcher);

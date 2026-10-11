@@ -27,15 +27,25 @@ export function hostedDispatch(view: HostedView, d: DispatchView): GlassDispatch
 export function hostedDispatches(config: Config): GlassDispatch[] {
   return readHostedViews(config).flatMap((view) => view.dispatches.map((d) => hostedDispatch(view, d)));
 }
+/**
+ * The hosted glass at one item: `#job/<id>`, `#decision/<id>` or `#report/<id>`
+ * (services/wharf/glass/src/route.ts). Nothing when the wharf has not named
+ * its glass, or the id is not one the glass would accept in a link.
+ */
+export function hostedGlassLink(view: Pick<HostedView, 'glass'>, kind: 'job' | 'decision' | 'report', id: string): string | undefined {
+  return view.glass && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? `${view.glass}/#${kind}/${id}` : undefined;
+}
 export function hostedAttention(config: Config, now: number): TendAttention[] {
   return readHostedViews(config).flatMap((view) => view.dispatches.flatMap((d): TendAttention[] => {
     const status = d.status;
     if (!status || !['needs-decision', 'blocked', 'done', 'failed'].includes(status.verb) || d.state === 'cancelled') return [];
     const id = hostedId(view, d.id); const lane = d.lane ?? 'work';
+    const glass = hostedGlassLink(view, 'job', d.id);
     return [{ key: `${lane}:${id}`, id, lane, kind: status.verb === 'done' || status.verb === 'failed' ? 'landed' : 'question',
       stateHash: `${status.at}:${status.verb}`, verb: status.verb, at: status.at, standingSince: status.at,
       ageSecs: Math.max(0, Math.floor((now - Date.parse(status.at)) / 1000)), quiet: !!view.unavailable,
       note: `[${view.grounds}@${view.wharf}] ${view.unavailable ?? status.note ?? status.verb}`, repo: d.repo,
+      grounds: view.grounds, wharf: view.wharf, ...(glass ? { glass } : {}),
     }];
   }));
 }

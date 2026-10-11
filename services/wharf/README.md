@@ -287,7 +287,16 @@ go through `wharf recover <dispatch> <report.json>`, not a new final report.
 
 The daemon's existing cadence refreshes independent observational wharf caches.
 Glass and tend show local and remote work together, labelled by grounds/wharf;
-the pet reads the same attention feed. An unreachable wharf shows unknown state
+the pet reads the same attention feed. A wharf dispatch that needs a decision, is
+blocked, or landed is an attention item carrying its `grounds`, its `wharf`, and
+`glass`: the hosted glass at that job (`<glass origin>/#job/<id>`). A click on its
+pet opens that link; items of local grounds carry none and open the local glass.
+The boat learns the glass origin from the `X-Lobstah-Glass` header on the wharf's
+authenticated API answers and keeps the last one named; it accepts only an exact
+HTTPS origin (HTTP on loopback). Until a wharf names its glass, the click is
+unchanged. Decisions and reports filed on a wharf (`man ask`, `man file`) are not
+in the boat's cache, so they are not attention items and no pet walks for them.
+An unreachable wharf shows unknown state
 without blocking local work. Wharf grounds reject unsupported local operations
 (pools, cull, harness attach, PR watches) rather than mutating local authority.
 
