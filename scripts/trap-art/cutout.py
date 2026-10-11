@@ -1,10 +1,12 @@
 """Cut a trap illustration out of its paper background and ground shadow.
 
-    python3 scripts/trap-art/cutout.py [in.webp] [out.png]
+    python3 scripts/trap-art/cutout.py [--net] [in.webp] [out.png]
 
-Defaults: docs/assets/traps/source.webp -> docs/assets/traps/base.png.
+Defaults: --net docs/assets/traps/source.webp -> docs/assets/traps/base.png.
 Works on any flat light background (the cream source paper, or the plain
-white Gemini is asked for). Needs numpy and pillow.
+white Gemini is asked for). --net also clears the paper seen through the
+trap's netting; leave it off for props, whose enclosed whites are part of
+the drawing. Needs numpy and pillow.
 """
 import sys
 from collections import deque
@@ -16,8 +18,11 @@ from PIL import Image, ImageFilter
 from lab import rgb2lab
 
 ROOT = Path(__file__).resolve().parents[2]
-src_path = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'docs/assets/traps/source.webp'
-out_path = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / 'docs/assets/traps/base.png'
+args = sys.argv[1:]
+net = '--net' in args or not args
+args = [a for a in args if a != '--net']
+src_path = Path(args[0]) if args else ROOT / 'docs/assets/traps/source.webp'
+out_path = Path(args[1]) if len(args) > 1 else ROOT / 'docs/assets/traps/base.png'
 
 src = np.asarray(Image.open(src_path).convert('RGB')).astype(float) / 255
 h, w = src.shape[:2]
@@ -41,7 +46,8 @@ while q:
             gone[ny, nx] = True
             q.append((ny, nx))
 # Paper seen through the netting is enclosed, so the flood misses it.
-gone |= np.sqrt(((lab - paper) ** 2).sum(-1)) < 8
+if net:
+    gone |= np.sqrt(((lab - paper) ** 2).sum(-1)) < 8
 
 # Soften a 2px edge band: unblend each pixel from the paper colour around it.
 mask = Image.fromarray((gone * 255).astype(np.uint8))
