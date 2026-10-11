@@ -103,6 +103,43 @@ it('answers a published card and downloads only the document’s own files with 
   expect((await browser(`documents/another/files/${file.id}`)).status).toBe(404);
   expect((await browser(`documents/card/files/${file.id}/extra`)).status).toBe(404);
 });
+it('can be installed: a manifest and star-with-lobster icons, public, with no account data and no service worker', async () => {
+  const page = await SELF.fetch('https://glass.test/'); const content = await page.text();
+  expect(content).toContain('<link rel="manifest" href="/manifest.webmanifest">'); expect(content).toContain('<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">');
+  expect(page.headers.get('content-security-policy')).toContain("manifest-src 'self'"); expect(content).not.toContain('serviceWorker');
+  const response = await SELF.fetch('https://glass.test/manifest.webmanifest'); expect(response.status).toBe(200);
+  expect(response.headers.get('content-type')).toBe('application/manifest+json'); expect(response.headers.get('set-cookie')).toBeNull();
+  const manifest = await response.json<{ name: string; start_url: string; scope: string; display: string; icons: { src: string; sizes: string; type: string; purpose: string }[] }>();
+  expect(manifest).toMatchObject({ name: 'lobstah spyglass', start_url: '/', scope: '/', display: 'standalone' });
+  expect(manifest.icons.map((i) => `${i.sizes} ${i.purpose}`)).toEqual(['192x192 any', '512x512 any', '512x512 maskable']);
+  for (const icon of [...manifest.icons, { src: '/icons/apple-touch-icon.png', sizes: '180x180' }, { src: '/icons/favicon.png', sizes: '64x64' }]) {
+    const image = await SELF.fetch('https://glass.test' + icon.src); expect(image.status, icon.src).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/png'); expect(image.headers.get('x-content-type-options')).toBe('nosniff');
+    // A PNG whose header states the size the manifest promises.
+    const bytes = new DataView(await image.arrayBuffer()); expect(bytes.getUint32(0)).toBe(0x89504e47);
+    expect(`${bytes.getUint32(16)}x${bytes.getUint32(20)}`).toBe(icon.sizes);
+  }
+  for (const path of ['/icons/missing.png', '/icons/..%2Fglass.css', '/icons/constructor', '/sw.js']) expect((await SELF.fetch('https://glass.test' + path)).status, path).toBe(404);
+  expect((await SELF.fetch('https://state.test/manifest.webmanifest')).status).toBe(404);
+  expect((await SELF.fetch('https://glass.test/manifest.webmanifest', { method: 'POST', headers: { Origin: 'https://glass.test' }, body: '{}' })).status).toBe(404);
+});
+it('returns a signed-in person to the item their link named', async () => {
+  const link = 'https://glass.test/#decision/card';
+  const start = await SELF.fetch('https://glass.test/api/auth/sign-in/social', { method: 'POST', headers: { Origin: 'https://glass.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'github', callbackURL: link }) });
+  expect(start.status).toBe(200);
+  const state = new URL((await start.json<{ url: string }>()).url).searchParams.get('state')!;
+  const outbound = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url === 'https://github.com/login/oauth/access_token') return Response.json({ access_token: 'browser-stub', token_type: 'bearer', scope: 'read:user,user:email' });
+    if (url === 'https://api.github.com/user') return Response.json({ id: 123, login: 'browser-test', name: 'Browser Test', email: 'browser@example.test', avatar_url: null });
+    if (url === 'https://api.github.com/user/emails') return Response.json([{ email: 'browser@example.test', primary: true, verified: true }]);
+    throw new Error('unexpected OAuth destination');
+  });
+  try {
+    const callback = await SELF.fetch(`https://glass.test/api/auth/callback/github?code=stub&state=${encodeURIComponent(state)}`, { redirect: 'manual', headers: { Cookie: cookies(start) } });
+    expect(callback.status).toBe(302); expect(callback.headers.get('location')).toBe(link);
+  } finally { outbound.mockRestore(); }
+});
 it('requires a separate in-page deletion confirmation and then removes identity and account data', async () => {
   await job();
   expect((await browser('account', {}, 'DELETE')).status).toBe(400);

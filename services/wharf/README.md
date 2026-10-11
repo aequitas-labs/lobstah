@@ -345,6 +345,16 @@ expiry; answers emit decision-answer events. Owner cancellation fences a job
 immediately without touching the helm seat. Revoke and account deletion require
 separate in-page confirmations on the boat list.
 
+The glass host also serves `/manifest.webmanifest` and PNG icons under `/icons/`
+(the lobster with its star, from `docs/assets`; one maskable), so a browser can
+install the glass as an app. Both are public and carry no account data. There is
+no service worker: nothing is cached or available offline.
+
+The URL hash is the page's place: a view (`#jobs`), or one item open over its
+view (`#decision/<id>`, `#report/<id>`, `#job/<id>`, `#trap/<id>`). A link opens
+the glass on that item, and sign-in returns to the same link. An id that is not
+listed for the signed-in account says so and reads nothing.
+
 Snapshots poll every fifteen seconds. Missing check-ins or a failed feed are
 unknown, not completion. Remote sessions show their boat and a validated command
 to copy, never a pretend focus-window action. Markdown is rendered as elements;

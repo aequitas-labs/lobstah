@@ -2,13 +2,14 @@ import { Window } from 'happy-dom';
 import { afterEach, expect, it } from 'vitest';
 import { GLASS_SCRIPT, GLASS_CSS } from '../../../services/wharf/src/glass-page.generated.js';
 import { snapshot, jobs, detail, markdown } from './fixtures/wharf-glass.js';
+import { parseRoute, routeHash } from '../../../services/wharf/glass/src/route.js';
 let windows: Window[] = [];
 afterEach(async () => { await Promise.all(windows.map((w) => w.happyDOM.close())); windows = []; });
-async function page(path = '/') {
+async function page(path = '/', signedOut = false) {
   const window = new Window({ url: 'https://glass.test' + path, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
   windows.push(window); const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] = [], reads: string[] = [], copied: string[] = [], intervals: (() => void)[] = [];
-  let unauthenticated = false;
+  let unauthenticated = signedOut;
   const sockets: { url: string; onopen?: () => void; onmessage?: (e: { data: string }) => void; onclose?: () => void; closed: boolean; close(): void }[] = [];
   w.WebSocket = class {
     onopen?: () => void; onmessage?: (e: { data: string }) => void; onclose?: () => void; closed = false;
@@ -18,6 +19,8 @@ async function page(path = '/') {
   w.setInterval = (fn: () => void) => { intervals.push(fn); return intervals.length; }; w.clearInterval = () => {};
   w.fetch = async (path: string, init: RequestInit = {}) => {
     reads.push(path);
+    // Sign-in answers a signed-out page; the fixture sends it back to the same document.
+    if (path === '/api/auth/sign-in/social') { writes.push({ path, body: JSON.parse(String(init.body)), headers: init.headers as Record<string, string>, credentials: init.credentials }); return Response.json({ url: window.location.href }); }
     if (unauthenticated) return Response.json({ error: 'sign in' }, { status: 401 });
     if (init.method && init.method !== 'GET') { writes.push({ path, body: JSON.parse(String(init.body)), headers: init.headers as Record<string, string>, credentials: init.credentials }); return Response.json({ success: true }); }
     if (path === '/api/glass') return Response.json(snapshot);
@@ -91,4 +94,48 @@ it('sign-out stops polling instead of restoring account details on the next inte
   const g = await page(); await g.click('sign out'); const reads = g.reads.length; await g.poll();
   expect(g.reads).toHaveLength(reads); expect(g.doc.querySelector('nav')).toBeNull();
   expect(g.doc.body.textContent).not.toContain('Choose the next catch');
+});
+it('opens on the decision, report or job its link names, in that item’s view', async () => {
+  const decision = await page('/#decision/card');
+  expect(decision.doc.querySelector('[role=dialog]')?.textContent).toContain('Choose the next catch'); expect(decision.reads).toContain('/api/glass/documents/card/files/md');
+  expect(decision.doc.querySelector('nav a.on')?.textContent).toBe('deck');
+  const report = await page('/#report/report');
+  expect(report.doc.querySelector('[role=dialog]')?.textContent).toContain('Wharf progress'); expect(report.reads).toContain('/api/glass/documents/report/files/report-md');
+  expect(report.doc.querySelector('nav a.on')?.textContent).toBe('reports');
+  const job = await page('/#job/job');
+  expect(job.doc.querySelector('[role=dialog]')?.textContent).toContain('Browser controls'); expect(job.reads).toContain('/api/glass/dispatches/job/detail');
+  expect(job.doc.querySelector('nav a.on')?.textContent).toBe('jobs');
+  expect((await page('/#reports')).doc.querySelector('nav a.on')?.textContent).toBe('reports');
+});
+it('says so when a link names nothing on this wharf, and reads no file for it', async () => {
+  for (const hash of ['#decision/withdrawn', '#report/card', '#job/another']) {
+    const g = await page('/' + hash); const modal = g.doc.querySelector('[role=dialog]')!;
+    expect(modal.textContent, hash).toContain(`No ${hash.slice(1).split('/')[0]} with this id is listed on this wharf`);
+    expect(g.reads.some((r) => r.includes('/files/') || r.endsWith('/detail')), hash).toBe(false);
+    await g.click('×'); expect(g.doc.querySelector('[role=dialog]')).toBeNull();
+  }
+  // Anything that is not a view or an item is the deck, with nothing open.
+  const g = await page('/#decision/../boats'); expect(g.doc.querySelector('[role=dialog]')).toBeNull(); expect(g.doc.querySelector('nav a.on')?.textContent).toBe('deck');
+});
+it('keeps the URL on the open item, returns it to the view on close, and follows a link opened in the page', async () => {
+  const g = await page(); await g.click('Choose the next catch'); expect(g.window.location.hash).toBe('#decision/card');
+  await g.click('×'); expect(g.window.location.hash).toBe('#deck');
+  await g.tab('jobs'); await g.click('Build the hosted spyglass'); expect(g.window.location.hash).toBe('#job/job');
+  await g.click('×'); expect(g.window.location.hash).toBe('#jobs');
+  g.window.location.hash = '#report/report'; g.window.dispatchEvent(new g.window.Event('hashchange')); await g.settle();
+  expect(g.doc.querySelector('[role=dialog]')?.textContent).toContain('Wharf progress'); expect(g.doc.querySelector('nav a.on')?.textContent).toBe('reports');
+  g.window.location.hash = '#boats'; g.window.dispatchEvent(new g.window.Event('hashchange')); await g.settle();
+  expect(g.doc.querySelector('[role=dialog]')).toBeNull(); expect(g.doc.body.textContent).toContain('last check-in');
+});
+it('carries a link through sign-in: the item waits behind the sign-in button and returns as the callback', async () => {
+  const g = await page('/#decision/card', true); expect(g.doc.body.textContent).toContain('sign in with GitHub'); expect(g.doc.querySelector('[role=dialog]')).toBeNull();
+  expect(g.window.location.hash).toBe('#decision/card');
+  await g.click('sign in with GitHub'); expect(g.writes[0]).toMatchObject({ path: '/api/auth/sign-in/social', body: { provider: 'github', callbackURL: 'https://glass.test/#decision/card' } });
+});
+it('reads a view or one item from the hash and nothing else', () => {
+  expect(parseRoute('#job/abc_DEF-1')).toEqual({ tab: 'jobs', item: { kind: 'job', id: 'abc_DEF-1' } });
+  expect(parseRoute('#trap/kind-crab')).toEqual({ tab: 'traps', item: { kind: 'trap', id: 'kind-crab' } });
+  expect(parseRoute('#boats')).toEqual({ tab: 'boats' });
+  for (const hash of ['', '#', '#job/', '#job/a/b', '#job/a?b', '#job/' + 'a'.repeat(129), '#account/x', '#decision/<script>', '#Deck']) expect(parseRoute(hash), hash).toEqual({ tab: 'deck' });
+  for (const hash of ['#deck', '#reports', '#decision/card', '#report/r1']) expect(routeHash(parseRoute(hash))).toBe(hash);
 });
