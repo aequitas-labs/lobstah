@@ -4,7 +4,7 @@ import { lobstahHome, uniqueTempPath } from './paths.js';
 import type { BackendScope } from './backend-scope.js';
 import { backendScopes, eachBackend } from './backend-scope.js';
 import type { Config } from './config.js';
-import type { DispatchView, WharfDocumentSummary } from './backend-model.js';
+import type { DispatchView, WharfAck, WharfDocumentSummary } from './backend-model.js';
 import { BackendError, WharfBackend } from './wharf-backend.js';
 import { wharfCredential } from './wharf-credentials.js';
 export interface HostedView {
@@ -40,10 +40,10 @@ export function wharfFor(scope: BackendScope, options: { session?: string; worke
 }
 /** The local daemon's existing cadence drives independent remote snapshots. */
 export async function refreshHostedViews(config: Config): Promise<void> {
-  const old = readHostedViews(config);
+  const known = readHostedViews(config);
   const rows = await eachBackend(backendScopes(config).filter((s) => s.kind === 'wharf'), async (s) => {
     const wharf = wharfFor(s); const listed = await wharf.list(); const dispatches = listed.filter((d) => s.repos.includes(d.repo));
-    const readAt = Date.parse(old.find((v) => v.grounds === s.grounds)?.documentsAt ?? '');
+    const readAt = Date.parse(known.find((v) => v.grounds === s.grounds)?.documentsAt ?? '');
     if (Date.now() - readAt < DOCUMENTS_EVERY_MS) return { dispatches, glass: wharf.glass };
     let documents: WharfDocumentSummary[];
     // A wharf from before documents has no such route: it has none to show, and its jobs still read.
@@ -53,18 +53,41 @@ export async function refreshHostedViews(config: Config): Promise<void> {
     const here = new Set(dispatches.map((d) => d.id)), elsewhere = new Set(listed.filter((d) => !here.has(d.id)).map((d) => d.id));
     return { dispatches, glass: wharf.glass, documents: documents.filter((d) => !d.dispatch || !elsewhere.has(d.dispatch)) };
   });
+  // Read again now: an ack this boat recorded while the wharf was answering is in the cache, not in that answer.
+  const old = readHostedViews(config);
   const views = rows.map(({ scope, value, unavailable }): HostedView => {
     const before = old.find((v) => v.grounds === scope.grounds);
+    const jobAck = (d: DispatchView) => before?.dispatches.find((x) => x.id === d.id)?.ack;
+    const dispatches = value?.dispatches.map((d) => (!d.ack && jobAck(d)?.status === d.status?.at ? { ...d, ack: jobAck(d) } : d));
+    const documents = value?.documents?.map((d) => { const was = before?.documents?.find((x) => x.id === d.id)?.ack; return !d.ack && was ? { ...d, ack: was } : d; });
     // An answer that names no glass keeps the last one named: the address outlives one bad read.
     const glass = value?.glass ?? before?.glass;
     return { grounds: scope.grounds, wharf: scope.wharf!, url: scope.location!.url, account: scope.location!.account,
       checkedAt: new Date().toISOString(), observedAt: value ? new Date().toISOString() : before?.observedAt ?? '',
-      dispatches: value?.dispatches ?? before?.dispatches ?? [], ...(unavailable ? { unavailable } : {}), ...(glass ? { glass } : {}),
-      ...(value?.documents ? { documents: value.documents, documentsAt: new Date().toISOString() }
+      dispatches: dispatches ?? before?.dispatches ?? [], ...(unavailable ? { unavailable } : {}), ...(glass ? { glass } : {}),
+      ...(documents ? { documents, documentsAt: new Date().toISOString() }
         : before?.documents ? { documents: before.documents, documentsAt: before.documentsAt } : {}) };
   });
   if (!rows.length) return;
+  writeCache(views);
+}
+function writeCache(views: HostedView[]) {
   const file = cachePath(); const tmp = uniqueTempPath(file); fs.writeFileSync(tmp, JSON.stringify(views)); fs.renameSync(tmp, file);
+}
+/**
+ * The wharf accepted an ack from this boat: show it now, without waiting for
+ * the next read of that wharf. Only the cached item gains its ack; the wharf
+ * stays the record.
+ */
+export function recordHostedAck(view: Pick<HostedView, 'grounds' | 'wharf' | 'url' | 'account'>, item: { document: string; ack: WharfAck } | { dispatch: string; ack: WharfAck & { status: string } }): void {
+  let rows: HostedView[];
+  try { rows = JSON.parse(fs.readFileSync(cachePath(), 'utf8')); } catch { return; }
+  // Every grounds on that wharf account reads the same documents and jobs.
+  for (const row of rows.filter((r) => r.url === view.url && r.account === view.account)) {
+    if ('document' in item) row.documents = row.documents?.map((d) => (d.id === item.document && !d.ack ? { ...d, ack: item.ack } : d));
+    else row.dispatches = row.dispatches.map((d) => (d.id === item.dispatch && d.status?.at === item.ack.status ? { ...d, ack: item.ack } : d));
+  }
+  writeCache(rows);
 }
 /** Only the dispatch capability is handed to an agent subprocess. */
 export function agentEnvironment(config: Config, scope: BackendScope, token: string, base = process.env): NodeJS.ProcessEnv {

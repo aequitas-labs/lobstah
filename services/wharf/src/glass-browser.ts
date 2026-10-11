@@ -26,7 +26,8 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
     || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
     || /^(documents|dispatches)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));
   const input = request.method === 'POST' && (route === 'requests'
-    || /^documents\/[A-Za-z0-9_-]+\/answer$/.test(route)
+    || /^documents\/[A-Za-z0-9_-]+\/(answer|ack)$/.test(route)
+    || /^dispatches\/[A-Za-z0-9_-]+\/ack$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/cancel$/.test(route)
     || /^boats\/[A-Za-z0-9_-]+\/revoke$/.test(route));
   const deleting = request.method === 'DELETE' && route === 'account';

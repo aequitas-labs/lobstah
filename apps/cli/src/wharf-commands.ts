@@ -1,10 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, isVerb, waitingFields, toonKV,
+import { backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
   readBrokerAgent, brokerRequest, WharfBackend, type BrokerPoll } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
+import { hostedItem, isHostedKey } from './hosted-view.js';
 import { wharfRepoIdentity } from './wharf-repo.js';
 import { wharfLogin } from './wharf-login.js';
 import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-soak.js';
@@ -36,8 +37,12 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   const agentScope = backendScopes(config).find((s) => s.kind === 'wharf' && readBrokerAgent(s.grounds));
   if (agentScope && OVERVIEW.has(cmd)) throw new Error('a hosted trap sees only its own catch; use inbox or wharf receipt');
   if (!grounds && OVERVIEW.has(cmd) && !pos.length) { await refreshHostedViews(config); return false; }
-  // An acknowledgement is this boat's own display file, for an item of any grounds: the wharf records none.
-  if (cmd === 'attention') return false;
+  if (cmd === 'attention') {
+    // An item of a grounds on a wharf is acknowledged on that wharf, so every boat and the hosted glass agree.
+    if ((pos[0] === 'ack' || pos[0] === 'unack') && pos[1] && isHostedKey(pos[1])) { await hostedAck(config, pos[0], pos[1], opts.opt('--request-key')); return true; }
+    // Every other ack is this boat's own display file, whatever grounds the boat has.
+    return false;
+  }
   const boundScope = grounds ? undefined : agentScope;
   const scope = boundScope ?? commandScope(config, grounds, opts.opt('--repo'));
   if (agentScope && scope?.grounds !== agentScope.grounds) throw new Error('a hosted trap cannot select another grounds or boat credential');
@@ -209,6 +214,28 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   return true;
 }
 
+/**
+ * `lobstah attention ack <key>` for a wharf item: tell the item's wharf, write
+ * no local ack file, and show the ack in this boat's cache at once. The first
+ * ack stands there, so `unack` has nothing it may remove.
+ */
+async function hostedAck(config: Config, action: string, key: string, requestKey: string = randomUUID()): Promise<void> {
+  if (action === 'unack') throw new Error(`an acknowledgement on a wharf stands, so ${key} cannot be unacknowledged; nothing was changed`);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestKey)) throw new Error('request key must use 1–128 identifier characters');
+  const item = hostedItem(config, key);
+  if (!item) throw new Error(`no wharf item ${key} in this boat's view; lobstah attention lists the keys`);
+  const backend = wharfFor(backendScope(config, item.view.grounds));
+  if ('document' in item) {
+    const ack = await backend.ackDocument(item.document, requestKey);
+    recordHostedAck(item.view, { document: item.document, ack });
+    console.log(toonKV({ key, kind: item.kind, acked: true, by: ack.by, at: ack.at, stateHash: item.stateHash }));
+    return;
+  }
+  if (!item.statusAt) throw new Error(`${key} has reported nothing to acknowledge`);
+  const ack = await backend.ackDispatch(item.dispatch, item.statusAt, requestKey);
+  recordHostedAck(item.view, { dispatch: item.dispatch, ack });
+  console.log(toonKV({ key, kind: item.kind, acked: true, by: ack.by, at: ack.at, stateHash: item.stateHash }));
+}
 /** Remote agents must never sign on, beat or claim in this boat's local fleet. */
 export async function wharfHook(cmd: string | undefined, args: string[]): Promise<boolean> {
   if (!(cmd === 'hook' || (cmd === 'soak' && args[0] === 'beat') || cmd === 'man:brief' || cmd === 'man:haul')) return false;

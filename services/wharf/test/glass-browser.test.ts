@@ -146,6 +146,21 @@ it('returns a signed-in person to the item their link named', async () => {
     expect(callback.status).toBe(302); expect(callback.headers.get('location')).toBe(link);
   } finally { outbound.mockRestore(); }
 });
+it('the signed-in page acks a document or a job with its cookie and origin only', async () => {
+  await job();
+  expect((await api('documents', { id: 'card', kind: 'decision', title: 'Choose', options: ['yes'] })).status).toBe(200);
+  expect((await api('documents/card/publish', {})).status).toBe(200);
+  const before = await sql("SELECT value FROM meta WHERE key='helm'");
+  expect((await browser('documents/card/ack', {}, 'POST', { Origin: 'https://evil.test' })).status).toBe(403);
+  expect((await SELF.fetch('https://glass.test/api/glass/documents/card/ack', { method: 'POST', headers: { Origin: 'https://glass.test', 'Idempotency-Key': 'no-cookie' }, body: '{}' })).status).toBe(401);
+  const acked = await browser('documents/card/ack', {}); expect(acked.status).toBe(200);
+  expect(await acked.json()).toMatchObject({ id: 'card', ack: { by: 'person' } });
+  expect((await (await browser('')).json<{ documents: { id: string; ack?: { by: string } }[] }>()).documents[0]).toMatchObject({ id: 'card', ack: { by: 'person' } });
+  // The job route is open to the page too; this job has reported nothing to have seen.
+  expect((await browser('dispatches/job/ack', { at: new Date().toISOString() })).status).toBe(409);
+  expect((await browser('dispatches/job/ack/extra', {})).status).toBe(404);
+  expect(await sql("SELECT value FROM meta WHERE key='helm'")).toEqual(before);
+});
 it('requires a separate in-page deletion confirmation and then removes identity and account data', async () => {
   await job();
   expect((await browser('account', {}, 'DELETE')).status).toBe(400);

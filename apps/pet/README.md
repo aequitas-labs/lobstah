@@ -31,7 +31,9 @@ the wharf's hosted glass at that item instead, in a new tab: the wharf keeps
 that grounds' state and helm seat, so this boat has no helm session or local
 glass page for it. The item itself carries the link (`glass` in
 `lobstah attention --json`); no setting picks between the two glasses. A PR pet
-still opens its PR. Until the wharf has named its glass, the click is the
+still opens its PR. Its acknowledgement is recorded on the wharf, not in a
+local file, so the hosted glass and other boats show it; it cannot be removed.
+Until the wharf has named its glass, the click is the
 local one above. **Open spyglass** always opens the local glass.
 
 A report or decision click (and **Open spyglass**) first uses a glass that

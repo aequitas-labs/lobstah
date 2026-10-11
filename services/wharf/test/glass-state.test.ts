@@ -196,7 +196,7 @@ it('account deletion clears documents, human requests, worker metadata and their
   expect((await env.FILES.list({ prefix: 'a/' })).objects).toEqual([]);
   expect((await call('glass', undefined, boat.token)).status).toBe(410);
 });
-it('a boat with read lists the standing documents its attention feed needs, a work-only boat none, and neither gets a write', async () => {
+it('a boat with read lists the standing documents its attention feed needs, a work-only boat none, and neither answers for the person', async () => {
   const helm = await helmBoat();
   const issue = async (name: string, permissions: string[]) => {
     const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name, permissions }, key: `issue-${++sequence}` })));
@@ -217,9 +217,95 @@ it('a boat with read lists the standing documents its attention feed needs, a wo
   ]);
   expect(feed.glass).toBe('https://glass.test');
   await expect(new WharfBackend(location, worker, { fetch: (input, init) => SELF.fetch(input as string, init) }).documents()).rejects.toMatchObject({ status: 403 });
-  // Reading is all a read boat does: there is no acknowledgement on the wharf, and it cannot answer.
   const before = await sql('SELECT data FROM documents ORDER BY id');
-  expect((await call('documents/card/ack', {}, reader)).status).toBe(404);
   expect((await call('documents/card/answer', { option: 'One' }, reader)).status).toBe(403);
   expect(await sql('SELECT data FROM documents ORDER BY id')).toEqual(before);
+});
+/** A boat by name with exactly these permissions; its credential. */
+async function issue(name: string, permissions: string[]) {
+  const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name, permissions }, key: `issue-${++sequence}` })));
+  expect(result.status).toBe(201); return (result.value as { token: string }).token;
+}
+/** The helm's job, claimed by a worker on that boat: the dispatch token that reports for it. */
+async function claimed(helm: { token: string }) {
+  await dispatch(helm.token, 'boat-seat');
+  expect((await call('workers/sign-on', { worker: 'worker', repo: 'repo', repoRemote: 'github.com/test/repo' }, helm.token)).status).toBe(200);
+  return (await (await call('claims', { worker: 'worker' }, helm.token)).json<{ token: string }>()).token;
+}
+const quiet = async () => ({ events: await sql('SELECT count(*) AS n FROM events'), helm: await sql("SELECT value FROM meta WHERE key='helm'") });
+it('a document ack is one seen-mark by a read boat or the person: the first stands, a work-only boat and a dispatch token are refused', async () => {
+  const helm = await helmBoat(), reader = await issue('pet-boat', ['work', 'read']), worker = await issue('work-boat', ['work']), agent = await claimed(helm);
+  await document('card', 'decision', helm.token, 'boat-seat'); await document('draft', 'decision', helm.token, 'boat-seat'); await document('gone', 'decision', helm.token, 'boat-seat');
+  for (const id of ['card', 'gone']) expect((await call(`documents/${id}/publish`, {}, helm.token, 'boat-seat')).status).toBe(200);
+  expect((await call('documents/gone/withdraw', {}, helm.token, 'boat-seat')).status).toBe(200);
+  const before = await quiet();
+  // Refused: no read layer, a dispatch token, nothing standing to see, and a request without its key.
+  expect((await call('documents/card/ack', {}, worker)).status).toBe(403);
+  expect((await call('documents/card/ack', {}, agent)).status).toBe(403);
+  expect((await call('documents/draft/ack', {}, reader)).status).toBe(409);
+  expect((await call('documents/gone/ack', {}, reader)).status).toBe(409);
+  expect((await call('documents/missing/ack', {}, reader)).status).toBe(404);
+  expect((await call('documents/card/ack/extra', {}, reader)).status).toBe(404);
+  expect((await SELF.fetch('https://state.test/v1/accounts/a/documents/card/ack', { method: 'POST', headers: { Authorization: `Bearer ${reader}` }, body: '{}' })).status).toBe(400);
+  expect((await (await call('documents/card', undefined, reader)).json<WharfDocument>()).ack).toBeUndefined();
+  // The pet's boat acks, with no helm lease and no seat header that means anything.
+  const first = await call('documents/card/ack', {}, reader, 'no-such-seat'); expect(first.status).toBe(200);
+  const ack = (await first.json<WharfDocument>()).ack!; expect(ack).toEqual({ at: expect.any(String), by: 'boat:pet-boat' });
+  // The first ack stands: the person's, the helm's and the same boat's later acks return it.
+  for (const token of [person, helm.token, reader]) expect((await (await call('documents/card/ack', {}, token)).json<WharfDocument>()).ack).toEqual(ack);
+  // Every read of the document carries it; an answer does not disturb it.
+  expect((await (await call('documents', undefined, reader)).json<WharfDocument[]>()).find((d) => d.id === 'card')!.ack).toEqual(ack);
+  expect((await (await call('glass', undefined, reader)).json<{ documents: WharfDocument[] }>()).documents.find((d) => d.id === 'card')!.ack).toEqual(ack);
+  expect((await call('documents/card/answer', { option: 'One' })).status).toBe(200);
+  expect(await (await call('documents/card', undefined, reader)).json<WharfDocument>()).toMatchObject({ ack, answer: { option: 'One' } });
+  // No event (the answer made the only one), so no helm wakes for an ack; the helm seat is as it was.
+  const after = await quiet(); expect(after.helm).toEqual(before.helm); expect(after.events[0]!.n).toBe(Number(before.events[0]!.n) + 1);
+  // The person acks first when they are first.
+  expect((await call('documents/draft/publish', {}, helm.token, 'boat-seat')).status).toBe(200);
+  expect((await (await call('documents/draft/ack', {})).json<WharfDocument>()).ack).toMatchObject({ by: 'person' });
+});
+it('a job ack is keyed on the status it saw: a new report stands unacknowledged, and stale, work-only and dispatch-token acks are refused', async () => {
+  type Job = { status?: { at: string; verb: string }; ack?: { status: string; at: string; by: string } };
+  const helm = await helmBoat(), reader = await issue('pet-boat', ['work', 'read']), worker = await issue('work-boat', ['work']), agent = await claimed(helm);
+  const job = async (token = reader) => (await call('dispatches/job', undefined, token)).json<Job>();
+  // Nothing reported yet: nothing to have seen.
+  expect((await call('dispatches/job/ack', { at: new Date().toISOString() }, reader)).status).toBe(409);
+  expect((await call('dispatches/job/report', { verb: 'needs-decision', note: 'which?' }, agent)).status).toBe(200);
+  const asked = (await job()).status!.at; const before = await quiet();
+  expect((await call('dispatches/job/ack', { at: asked }, worker)).status).toBe(403);
+  // A job's own dispatch token is in scope for the job and still may not ack it.
+  expect((await call('dispatches/job/ack', { at: asked }, agent)).status).toBe(403);
+  expect((await call('dispatches/job/ack', {}, reader)).status).toBe(409);
+  expect((await call('dispatches/job/ack', { at: '2020-01-01T00:00:00.000Z' }, reader)).status).toBe(409);
+  expect((await call('dispatches/missing/ack', { at: asked }, reader)).status).toBe(404);
+  expect((await job()).ack).toBeUndefined();
+  const first = await call('dispatches/job/ack', { at: asked }, reader); expect(first.status).toBe(200);
+  const ack = await first.json<Job['ack']>(); expect(ack).toEqual({ status: asked, at: expect.any(String), by: 'boat:pet-boat' });
+  expect(await (await call('dispatches/job/ack', { at: asked })).json()).toEqual(ack);
+  // The job's reads carry it: the one read, the list a boat polls, and the glass's detail.
+  expect((await job()).ack).toEqual(ack);
+  expect((await (await call('dispatches', undefined, reader)).json<Job[]>())[0]!.ack).toEqual(ack);
+  expect((await (await call('dispatches/job/detail', undefined, reader)).json<Job>()).ack).toEqual(ack);
+  expect(await quiet()).toEqual(before);
+  // The job reports again: that is new to see. The old ack no longer shows and cannot be repeated.
+  expect((await call('dispatches/job/report', { verb: 'done', note: 'landed' }, agent)).status).toBe(200);
+  const landed = (await job()).status!.at; expect(landed).not.toBe(asked); expect((await job()).ack).toBeUndefined();
+  expect((await call('dispatches/job/ack', { at: asked }, reader)).status).toBe(409);
+  expect(await (await call('dispatches/job/ack', { at: landed })).json()).toMatchObject({ status: landed, by: 'person' });
+  expect((await job()).ack).toMatchObject({ status: landed, by: 'person' });
+});
+it('the boat’s client acks through both routes and reads the acks back in its poll', async () => {
+  const helm = await helmBoat(), reader = await issue('pet-boat', ['work', 'read']), agent = await claimed(helm);
+  await document('card', 'decision', helm.token, 'boat-seat'); expect((await call('documents/card/publish', {}, helm.token, 'boat-seat')).status).toBe(200);
+  expect((await call('dispatches/job/report', { verb: 'needs-decision', note: 'which?' }, agent)).status).toBe(200);
+  const location = { kind: 'wharf' as const, url: 'https://state.test', account: 'a', tokenEnv: 'UNUSED' };
+  const boat = new WharfBackend(location, reader, { fetch: (input, init) => SELF.fetch(input as string, init) });
+  const asked = (await boat.list())[0]!.status!.at;
+  const seen = await boat.ackDocument('card', 'client-doc'); expect(seen).toEqual({ at: expect.any(String), by: 'boat:pet-boat' });
+  const job = await boat.ackDispatch('job', asked, 'client-job'); expect(job).toEqual({ status: asked, at: expect.any(String), by: 'boat:pet-boat' });
+  expect((await boat.documents())[0]).toMatchObject({ id: 'card', ack: seen }); expect((await boat.list())[0]!.ack).toEqual(job);
+  // The same key again is the same ack; an ack of a status the job has left is refused.
+  expect(await boat.ackDocument('card', 'client-doc')).toEqual(seen);
+  await expect(boat.ackDispatch('job', '2020-01-01T00:00:00.000Z', 'client-stale')).rejects.toMatchObject({ status: 409 });
+  await expect(new WharfBackend(location, agent, { fetch: (input, init) => SELF.fetch(input as string, init) }).ackDispatch('job', asked, 'client-agent')).rejects.toMatchObject({ status: 403 });
 });

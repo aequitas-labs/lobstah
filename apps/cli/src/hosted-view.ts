@@ -64,21 +64,35 @@ export function hostedDecisionFrames(config: Config): Array<{ dispatch: string; 
 /**
  * Decisions and reports filed on a wharf (`man ask`, `man file`), from the
  * boat's cache. A decision stands until the wharf shows it answered or
- * withdrawn; a report stands until it is acknowledged on this boat. The ack
- * is this boat's own file, like every other ack: the wharf records none.
+ * withdrawn; a report stands until it is acknowledged. The ack is the
+ * wharf's (`acked`), so every boat and the hosted glass agree.
  */
 function hostedDocumentAttention(views: HostedView[], now: number): TendAttention[] {
   return hostedDocuments(views).flatMap(({ view, doc, key, id }): TendAttention[] => {
     if (doc.kind === 'decision' && doc.answered) return [];
     const job = doc.dispatch ? view.dispatches.find((d) => d.id === doc.dispatch) : undefined;
     const glass = hostedGlassLink(view, doc.kind, doc.id);
-    return [{ key, id: job ? hostedId(view, job.id) : id, lane: job?.lane ?? 'work', kind: doc.kind,
+    return [{ key, id: job ? hostedId(view, job.id) : id, lane: job?.lane ?? 'work', kind: doc.kind, ...(doc.ack ? { acked: doc.ack } : {}),
       stateHash: `${doc.id}:${doc.at}`, verb: doc.kind, at: doc.at, standingSince: doc.at,
       ageSecs: Math.max(0, Math.floor((now - Date.parse(doc.at)) / 1000)), quiet: !!view.unavailable,
       note: `[${view.grounds}@${view.wharf}] ${view.unavailable ?? doc.title}`, ...(job ? { repo: job.repo } : {}),
       grounds: view.grounds, wharf: view.wharf, ...(glass ? { glass } : {}),
     }];
   });
+}
+/** A key of an item of a grounds on a wharf: `<lane|decision|report>:srv-<hash>`. */
+export const isHostedKey = (key: string) => /:srv-[0-9a-f]{40}$/.test(key);
+/** What a hosted item key names in the boat's cache: the wharf to tell, and the job or document. */
+export function hostedItem(config: Config, key: string): { view: HostedView; kind: string; stateHash: string } & ({ document: string } | { dispatch: string; statusAt?: string }) | undefined {
+  const views = readHostedViews(config);
+  const found = hostedDocuments(views).find((d) => d.key === key);
+  if (found) return { view: found.view, kind: found.doc.kind, stateHash: `${found.doc.id}:${found.doc.at}`, document: found.doc.id };
+  for (const view of views) for (const d of view.dispatches) {
+    if (`${d.lane ?? 'work'}:${hostedId(view, d.id)}` !== key) continue;
+    const landed = d.status?.verb === 'done' || d.status?.verb === 'failed';
+    return { view, kind: landed ? 'landed' : 'question', stateHash: `${d.status?.at}:${d.status?.verb}`, dispatch: d.id, ...(d.status ? { statusAt: d.status.at } : {}) };
+  }
+  return undefined;
 }
 /**
  * Whether a hosted item's ack still has its item, for cull. The item is in
@@ -100,6 +114,7 @@ export function hostedAttention(config: Config, now: number): TendAttention[] {
     const id = hostedId(view, d.id); const lane = d.lane ?? 'work';
     const glass = hostedGlassLink(view, 'job', d.id);
     return [{ key: `${lane}:${id}`, id, lane, kind: status.verb === 'done' || status.verb === 'failed' ? 'landed' : 'question',
+      ...(d.ack?.status === status.at ? { acked: { at: d.ack.at, by: d.ack.by } } : {}),
       stateHash: `${status.at}:${status.verb}`, verb: status.verb, at: status.at, standingSince: status.at,
       ageSecs: Math.max(0, Math.floor((now - Date.parse(status.at)) / 1000)), quiet: !!view.unavailable,
       note: `[${view.grounds}@${view.wharf}] ${view.unavailable ?? status.note ?? status.verb}`, repo: d.repo,

@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { agentEnvironment, appendStatus, backendScope, claimNext, enqueue, ensureLayout, glassOrigin, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, WharfBackend } from '@lobstah/core';
 import { hostedGlassLink } from '../src/hosted-view.js';
-import { ackItemExists, removeAck, writeAck } from '../src/acks.js';
+import { ackItemExists } from '../src/acks.js';
 import { commandScope, wharfCommand } from '../src/wharf-commands.js';
 import { buildGlassSnapshot, glassDispatchJson } from '../src/glass.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
@@ -138,43 +138,85 @@ it('decisions and reports filed on a wharf reach the attention feed with their g
   fs.writeFileSync(path.join(home, 'config.toml'), fs.readFileSync(path.join(home, 'config.toml'), 'utf8').replace(/^attentionKinds.*\n/, ''));
   expect(wharfItems().map((a) => a.kind)).toEqual(['decision']);
 });
-it('a wharf decision stands until answered or withdrawn, a report until acknowledged on this boat; no ack goes to the wharf', async () => {
-  oneWharf(); const stale = () => { const file = path.join(home, 'hosted-snapshots.json'); const rows = JSON.parse(fs.readFileSync(file, 'utf8')); for (const r of rows) r.documentsAt = '2026-10-10T00:00:00.000Z'; fs.writeFileSync(file, JSON.stringify(rows)); };
-  wharf([], [card(), filed()]); await refreshHostedViews(loadConfig());
+/** The same wharf, also taking acks: each one is logged, and answered as the wharf would. */
+function ackingWharf(jobs: Array<Record<string, any>>, documents: Array<Record<string, any>>, acks: string[] = []) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    const headers = { 'X-Lobstah-Glass': 'https://glass.example' }; const [, kind, id] = /\/(documents|dispatches)\/([^/]+)\/ack$/.exec(url) ?? [];
+    if (!kind) return Response.json(url.endsWith('/documents') ? documents : jobs, { headers });
+    expect(init.method).toBe('POST'); expect((init.headers as Record<string, string>).Authorization).toBe('Bearer helm-cloud'); expect((init.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy();
+    acks.push(`${kind}/${id} ${String(init.body)}`);
+    if (kind === 'documents') { const doc = documents.find((d) => d.id === id)!; doc.ack ??= { at: '2026-10-10T18:00:00.000Z', by: 'boat:this-boat' }; return Response.json(doc, { headers }); }
+    const found = jobs.find((d) => d.id === id)!; const at = JSON.parse(String(init.body)).at;
+    if (found.status.at !== at) return Response.json({ error: 'the job has no such current status; read it again before acknowledging' }, { status: 409 });
+    found.ack ??= { status: at, at: '2026-10-10T18:00:00.000Z', by: 'boat:this-boat' }; return Response.json(found.ack, { headers });
+  }));
+  return acks;
+}
+const flags = (values: Record<string, string> = {}) => ({ opt: (f: string) => values[f], has: (f: string) => f in values, values: () => [] });
+const staleDocuments = () => { const file = path.join(home, 'hosted-snapshots.json'); const rows = JSON.parse(fs.readFileSync(file, 'utf8')); for (const r of rows) r.documentsAt = '2026-10-10T00:00:00.000Z'; fs.writeFileSync(file, JSON.stringify(rows)); };
+it('attention ack for a wharf item tells the wharf, writes no local ack file, and shows at once; unack refuses', async () => {
+  oneWharf(); vi.spyOn(console, 'log').mockImplementation(() => {});
+  const at = '2026-10-10T16:40:00.000Z';
+  const jobs = [{ id: 'remote-job', repo: 'remote', brief: '# Remote task', state: 'active', status: { verb: 'needs-decision', note: 'which?', at } }];
+  const acks = ackingWharf(jobs, [card(), filed()]); await refreshHostedViews(loadConfig());
+  const item = (kind: string) => wharfItems().find((a) => a.kind === kind)!;
+  const keys = { report: item('report').key, decision: item('decision').key, question: item('question').key };
+  expect(wharfItems().some((a) => a.acked)).toBe(false);
+  // The pet's call for each kind: `lobstah attention ack <key> --by pet`.
+  for (const key of Object.values(keys)) expect(await wharfCommand('attention', ['ack', key], flags({ '--by': 'pet' }), loadConfig())).toBe(true);
+  expect(acks).toEqual(['documents/progress {}', 'documents/card {}', `dispatches/remote-job ${JSON.stringify({ at })}`]);
+  // The wharf is the record: nothing under ~/.lobstah/acks, and the boat's cache shows the ack before its next read.
+  expect(fs.existsSync(path.join(home, 'acks'))).toBe(false);
+  for (const kind of ['report', 'decision', 'question']) expect(item(kind).acked, kind).toEqual({ at: '2026-10-10T18:00:00.000Z', by: 'boat:this-boat' });
+  expect(lobItems(wharfItems(), { lobs: true, preview: false })).toEqual([]);
+  // A read that was already in flight, answered without the ack, does not un-acknowledge it here.
+  const before = [card(), filed()]; const stale = [{ ...jobs[0], ack: undefined }];
+  staleDocuments(); wharf(stale, before); await refreshHostedViews(loadConfig());
+  for (const kind of ['report', 'decision', 'question']) expect(item(kind).acked, kind).toBeTruthy();
+  // The job reports again: the new status stands unacknowledged, and it acks under its new time.
+  const later = '2026-10-10T19:00:00.000Z'; jobs[0]!.status = { verb: 'blocked', note: 'stuck', at: later }; delete (jobs[0] as Record<string, unknown>).ack;
+  ackingWharf(jobs, [card(), filed()], acks); await refreshHostedViews(loadConfig());
+  expect(item('question')).toMatchObject({ note: '[away@cloud] stuck' }); expect(item('question').acked).toBeUndefined();
+  expect(await wharfCommand('attention', ['ack', keys.question], flags(), loadConfig())).toBe(true);
+  expect(acks.at(-1)).toBe(`dispatches/remote-job ${JSON.stringify({ at: later })}`); expect(item('question').acked).toBeTruthy();
+  // An acknowledgement on a wharf stands; a key this boat does not know is an error, not a local file.
+  await expect(wharfCommand('attention', ['unack', keys.report], flags(), loadConfig())).rejects.toThrow('stands');
+  await expect(wharfCommand('attention', ['ack', 'report:srv-' + '0'.repeat(40)], flags(), loadConfig())).rejects.toThrow('no wharf item');
+  expect(fs.existsSync(path.join(home, 'acks'))).toBe(false);
+});
+it('a wharf decision stands until answered or withdrawn, a report until acknowledged; another boat’s ack shows here', async () => {
+  oneWharf(); wharf([], [card(), filed()]); await refreshHostedViews(loadConfig());
   const report = wharfItems().find((a) => a.kind === 'report')!, decision = wharfItems().find((a) => a.kind === 'decision')!;
-  // `lobstah attention ack <key> --by pet` writes this boat's ack file, as for every other item.
-  const asked = wharf([], [card(), filed()]);
-  writeAck({ key: report.key, kind: 'report', stateHash: report.stateHash, at: new Date().toISOString(), by: 'pet' });
-  expect(asked).toEqual([]); expect(wharfItems().find((a) => a.kind === 'report')!.acked).toMatchObject({ by: 'pet' });
-  expect(lobItems(wharfItems(), { lobs: true, preview: false }).map((l) => l.href)).toEqual(['https://glass.example/#decision/card']);
-  // Cull keeps the ack while the report is listed, so the pet does not walk again.
   expect(ackItemExists(report.key)).toBe(true); expect(ackItemExists(decision.key)).toBe(true);
-  expect(removeAck(report.key)).toBe(true); expect(wharfItems().find((a) => a.kind === 'report')!.acked).toBeUndefined();
-  // Answered on the wharf: the decision is no longer attention, and an ack of it is orphaned.
-  stale(); wharf([], [card({ answer: { option: 'Keep it small', at: '2026-10-10T17:00:00.000Z', by: 'person' } }), filed()]); await refreshHostedViews(loadConfig());
+  // Acknowledged elsewhere (another boat's pet, or the report opened in the hosted glass): it stops walking here too.
+  staleDocuments(); wharf([], [card(), filed({ ack: { at: '2026-10-10T17:30:00.000Z', by: 'person' } })]); await refreshHostedViews(loadConfig());
+  expect(wharfItems().find((a) => a.kind === 'report')!.acked).toEqual({ at: '2026-10-10T17:30:00.000Z', by: 'person' });
+  expect(lobItems(wharfItems(), { lobs: true, preview: false }).map((l) => l.href)).toEqual(['https://glass.example/#decision/card']);
+  // Answered on the wharf: the decision is no longer attention.
+  staleDocuments(); wharf([], [card({ answer: { option: 'Keep it small', at: '2026-10-10T17:00:00.000Z', by: 'person' } }), filed()]); await refreshHostedViews(loadConfig());
   expect(wharfItems().map((a) => a.kind)).toEqual(['report']); expect(ackItemExists(decision.key)).toBe(false); expect(ackItemExists(report.key)).toBe(true);
   expect(JSON.stringify(readHostedViews(loadConfig()))).not.toContain('Keep it small');
   // Withdrawn or deleted there: gone here.
-  stale(); wharf([], []); await refreshHostedViews(loadConfig());
+  staleDocuments(); wharf([], []); await refreshHostedViews(loadConfig());
   expect(wharfItems()).toEqual([]); expect(ackItemExists(report.key)).toBe(false);
-  // An unreachable wharf is unknown, not gone: the items go quiet and every hosted ack is kept.
-  stale(); wharf([], [filed()]); await refreshHostedViews(loadConfig());
+  // An unreachable wharf is unknown, not gone: the items go quiet, and nothing of theirs is culled as an orphan.
+  staleDocuments(); wharf([], [filed()]); await refreshHostedViews(loadConfig());
   vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); })); await refreshHostedViews(loadConfig());
   expect(wharfItems()).toEqual([expect.objectContaining({ kind: 'report', quiet: true })]); expect(ackItemExists('report:srv-' + '0'.repeat(40))).toBe(true);
 });
-it('attention ack and unack stay on this boat for every grounds layout, without a request or a credential', async () => {
-  const fetcher = vi.fn(async () => { throw new Error('an acknowledgement must not reach the wharf'); }); vi.stubGlobal('fetch', fetcher);
-  const opts = (flags: Record<string, string> = {}) => ({ opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] });
-  const key = 'report:srv-' + 'a'.repeat(40);
+it('acks of local items stay on this boat for every grounds layout, without a request or a credential', async () => {
+  const fetcher = vi.fn(async () => { throw new Error('a local acknowledgement must not reach a wharf'); }); vi.stubGlobal('fetch', fetcher);
   const layouts = [(toml: string) => toml, (toml: string) => toml.replace(/\[grounds\.desk\][^[]*/, ''), (toml: string) => toml.replace(/\[grounds\.desk\][^[]*/, '').replace(/\[grounds\.dev\][^[]*/, '')];
   const original = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
   delete process.env.LOBSTAH_TEST_CLOUD_TOKEN; delete process.env.LOBSTAH_TEST_DEV_TOKEN;
   for (const layout of layouts) {
     fs.writeFileSync(path.join(home, 'config.toml'), layout(original));
     // false: the local handler takes it, and writes ~/.lobstah/acks.
-    expect(await wharfCommand('attention', ['ack', key], opts({ '--by': 'pet' }), loadConfig())).toBe(false);
-    expect(await wharfCommand('attention', ['unack', key], opts(), loadConfig())).toBe(false);
-    expect(await wharfCommand('attention', ['ack', key], opts({ '--grounds': 'away' }), loadConfig())).toBe(false);
+    for (const key of ['work:0a1b2c3d', 'pr:o/r#1', 'decision:0a1b2c3d']) {
+      expect(await wharfCommand('attention', ['ack', key], flags({ '--by': 'pet' }), loadConfig())).toBe(false);
+      expect(await wharfCommand('attention', ['unack', key], flags(), loadConfig())).toBe(false);
+      expect(await wharfCommand('attention', ['ack', key], flags({ '--grounds': 'away' }), loadConfig())).toBe(false);
+    }
   }
   expect(fetcher).not.toHaveBeenCalled();
 });

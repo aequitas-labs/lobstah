@@ -5,7 +5,7 @@ import { snapshot, jobs, detail, markdown } from './fixtures/wharf-glass.js';
 import { parseRoute, routeHash } from '../../../services/wharf/glass/src/route.js';
 let windows: Window[] = [];
 afterEach(async () => { await Promise.all(windows.map((w) => w.happyDOM.close())); windows = []; });
-async function page(path = '/', signedOut = false) {
+async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs } = {}) {
   const window = new Window({ url: 'https://glass.test' + path, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
   windows.push(window); const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] = [], reads: string[] = [], copied: string[] = [], intervals: (() => void)[] = [];
@@ -23,8 +23,8 @@ async function page(path = '/', signedOut = false) {
     if (path === '/api/auth/sign-in/social') { writes.push({ path, body: JSON.parse(String(init.body)), headers: init.headers as Record<string, string>, credentials: init.credentials }); return Response.json({ url: window.location.href }); }
     if (unauthenticated) return Response.json({ error: 'sign in' }, { status: 401 });
     if (init.method && init.method !== 'GET') { writes.push({ path, body: JSON.parse(String(init.body)), headers: init.headers as Record<string, string>, credentials: init.credentials }); return Response.json({ success: true }); }
-    if (path === '/api/glass') return Response.json(snapshot);
-    if (path === '/api/glass/dispatches') return Response.json(jobs);
+    if (path === '/api/glass') return Response.json(data.snapshot ?? snapshot);
+    if (path === '/api/glass/dispatches') return Response.json(data.jobs ?? jobs);
     if (path === '/api/glass/dispatches/job/detail') return Response.json(detail);
     if (path.endsWith('/image') || path.endsWith('/worker-image')) return new Response(new Uint8Array([137, 80, 78, 71]));
     if (path.includes('/files/')) return new Response(markdown);
@@ -138,4 +138,29 @@ it('reads a view or one item from the hash and nothing else', () => {
   expect(parseRoute('#boats')).toEqual({ tab: 'boats' });
   for (const hash of ['', '#', '#job/', '#job/a/b', '#job/a?b', '#job/' + 'a'.repeat(129), '#account/x', '#decision/<script>', '#Deck']) expect(parseRoute(hash), hash).toEqual({ tab: 'deck' });
   for (const hash of ['#deck', '#reports', '#decision/card', '#report/r1']) expect(routeHash(parseRoute(hash))).toBe(hash);
+});
+it('opening a report acks it once with the page’s cookie; a decision or a job is not acked by looking', async () => {
+  const g = await page(); await g.tab('reports'); await g.click('Wharf progress');
+  const acks = () => g.writes.filter((w) => w.path.endsWith('/ack'));
+  expect(acks()).toEqual([expect.objectContaining({ path: '/api/glass/documents/report/ack', body: {}, credentials: 'same-origin' })]);
+  expect(acks()[0]!.headers['Idempotency-Key']).toBeTruthy(); expect(acks()[0]!.headers.Authorization).toBeUndefined();
+  // Still open across polls, closed and opened again: one ack.
+  await g.poll(); await g.click('×'); await g.click('Wharf progress'); await g.poll(); expect(acks()).toHaveLength(1);
+  await g.click('×'); await g.tab('deck'); await g.click('Choose the next catch'); await g.click('×'); await g.tab('jobs'); await g.click('Build the hosted spyglass');
+  expect(acks()).toHaveLength(1);
+});
+it('shows what the wharf records as seen and answered: acked reports, decisions and jobs, by whom', async () => {
+  const ack = { at: '2026-10-10T17:05:00Z', by: 'boat:chris-macbook' };
+  const seen = { ...snapshot, documents: [{ ...snapshot.documents[0]!, ack, answer: { option: 'Keep it small', at: '2026-10-10T17:06:00Z', by: 'person' } }, { ...snapshot.documents[1]!, ack: { at: '2026-10-10T17:07:00Z', by: 'person' } }] };
+  const g = await page('/', false, { snapshot: seen, jobs: [{ ...jobs[0]!, ack: { ...ack, status: jobs[0]!.status!.at } }] });
+  const card = (text: string) => Array.from(g.doc.querySelectorAll('button.card')).find((b) => b.textContent?.includes(text))!;
+  expect(card('Choose the next catch').className).toContain('acked'); expect(card('Choose the next catch').textContent).toContain('answered'); expect(card('Choose the next catch').textContent).toContain('acked by boat:chris-macbook');
+  await g.click('Choose the next catch'); expect(g.doc.querySelector('[role=dialog]')!.textContent).toContain('acked by boat:chris-macbook'); expect(g.doc.querySelector('[role=dialog]')!.textContent).toContain('answered: Keep it small'); await g.click('×');
+  await g.tab('jobs'); expect(card('Build the hosted spyglass').className).toContain('acked'); expect(card('Build the hosted spyglass').textContent).toContain('acked by boat:chris-macbook');
+  await g.click('Build the hosted spyglass'); expect(g.doc.querySelector('[role=dialog] .sub')!.textContent).toContain('acked by boat:chris-macbook'); await g.click('×');
+  // A report already read is shown read, and opening it again tells the wharf nothing.
+  await g.tab('reports'); expect(card('Wharf progress').textContent).toContain('report · read'); expect(card('Wharf progress').textContent).toContain('acked by person');
+  await g.click('Wharf progress'); expect(g.writes.filter((w) => w.path.endsWith('/ack'))).toEqual([]);
+  // Unseen items carry no such mark.
+  const fresh = await page(); expect(fresh.doc.querySelector('.cards')!.textContent).not.toContain('acked by'); expect(fresh.doc.querySelector('button.card.acked')).toBeNull();
 });

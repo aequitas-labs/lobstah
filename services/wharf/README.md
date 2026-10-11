@@ -98,7 +98,7 @@ Boat credentials carry a steering layer (`read < helm < admin`) and independent
 
 | Permission | Allows |
 | --- | --- |
-| read | Account job state, messages, events, boats and evidence downloads |
+| read | Account job state, messages, events, boats and evidence downloads; acknowledging a document or a job's status as seen (its one write) |
 | work | This boat's worker sign-on, claims and renewals |
 | helm | Read plus dispatch, message, cancel and exclusive helm lease operations |
 | admin | Helm plus approved boat enrollment, revoke boats, delete account |
@@ -157,6 +157,8 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Leased helm | POST documents; POST documents/:id/files, publish, withdraw | Author decisions and Markdown reports with scoped uploads |
 | Read | GET documents, documents/:id, documents/:id/files/:file | Published documents and their own uploaded bytes |
 | Signed-in person | POST documents/:id/answer | Record one card answer and ordered event; no helm-seat change |
+| Read boat / signed-in person | POST documents/:id/ack | Mark a published document seen: `ack { at, by }`, the first one stands; no event, no helm seat |
+| Read boat / signed-in person | POST dispatches/:id/ack | Mark the job's current status seen (`{ "at": <that status's time> }`); a newer report stands unacknowledged; no event |
 | Signed-in person | POST requests | Queue a bounded message or trap-start request for the helm |
 | Read / leased helm | GET requests; POST requests/:id/receipt, execute | Explicit receipt then execute a live message request |
 | Addressed work boat | GET requests/starts; POST requests/:id/start | Read only its helm-authorized trap starts; consume once or record repo refusal before expiry |
@@ -300,12 +302,20 @@ unchanged.
 
 The same poll reads `GET documents` (a boat needs `read`, as for jobs), at most
 every thirty seconds, and keeps per document only its id, kind, title, time, job
-and whether it is answered: never its Markdown, options or files. A decision
+whether it is answered, and its ack: never its Markdown, options or files. A decision
 stands until the wharf shows it answered or withdrawn, and hides the raw question
 of the job it is about. A report stands until it is acknowledged, and walks only
-with `report` in `attentionKinds`, as a local report does. Acknowledgements
-(`lobstah attention ack`, a pet click) are this boat's own files, as for every
-other item: the wharf records none, so another boat still shows the item.
+with `report` in `attentionKinds`, as a local report does.
+
+An acknowledgement of a wharf item is recorded on the wharf, so every boat and the
+hosted glass agree. `lobstah attention ack <key>` (a pet click runs it) calls
+`documents/<id>/ack` or `dispatches/<id>/ack` with the boat's credential, writes
+no local ack file, and shows the ack in the boat's cache at once. `by` is
+`boat:<name>` or `person`. The ack is display only: it sends no event, wakes no
+helm and answers nothing. A work-only boat and a dispatch token are refused. A job
+ack names the status time it saw and is refused once the job has reported again,
+so the new status stands. An acknowledgement on a wharf stands: `attention unack`
+refuses for a wharf item. Acks of local items remain this boat's files.
 An unreachable wharf shows unknown state
 without blocking local work. Wharf grounds reject unsupported local operations
 (pools, cull, harness attach, PR watches) rather than mutating local authority.
@@ -373,6 +383,11 @@ The URL hash is the page's place: a view (`#jobs`), or one item open over its
 view (`#decision/<id>`, `#report/<id>`, `#job/<id>`, `#trap/<id>`). A link opens
 the glass on that item, and sign-in returns to the same link. An id that is not
 listed for the signed-in account says so and reads nothing.
+
+Opening a report in the glass acknowledges it once, as the local glass does for
+its own reports. Cards and details show what the wharf records: a decision
+answered, and a document or a job's current status acked, by which boat or by the
+person. Looking at a decision or a job does not acknowledge it.
 
 Snapshots poll every fifteen seconds. Missing check-ins or a failed feed are
 unknown, not completion. Remote sessions show their boat and a validated command

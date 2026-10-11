@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { html, Session, when } from './common.js';
+import { acked, html, Session, when } from './common.js';
 import { Boats } from './boats.js';
 import { Document, Job } from './details.js';
 import { DeviceApproval } from './device.js';
@@ -142,6 +142,14 @@ export function App() {
     selectedDoc = snapshot?.documents.find((d) => d.kind === modal?.kind && d.id === modal.id),
     selectedWorker = modal?.kind === 'trap' ? snapshot?.workers.find((w) => w.id === modal.id) : undefined;
   const found = selectedJob ?? selectedDoc ?? selectedWorker;
+  // Opening a report is reading it: the wharf records that once, as the local glass does for its own.
+  // State only. A failed ack leaves the report unread; the next load of the page tries again.
+  const acking = useRef(new Set<string>());
+  useEffect(() => {
+    if (selectedDoc?.kind !== 'report' || selectedDoc.ack || acking.current.has(selectedDoc.id)) return;
+    acking.current.add(selectedDoc.id);
+    json(`/api/glass/documents/${selectedDoc.id}/ack`, {}).then(() => refresh(), () => {});
+  }, [selectedDoc?.id, selectedDoc?.kind, !!selectedDoc?.ack]);
   useEffect(() => {
     if (!modal) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -172,7 +180,7 @@ export function App() {
       .filter((d) => d.kind === kind)
       .map(
         (d) =>
-          html`<button class="card" onClick=${() => setModal({ kind, id: d.id })}><div class="top"><b>${d.title}</b><span class="badge">${kind === 'decision' ? (d.answer ? 'answered' : 'needs decision') : 'report'}</span></div><div class="meta">${d.author} · ${when(d.at)}</div></button>`,
+          html`<button class=${'card' + (d.ack ? ' acked' : '')} onClick=${() => setModal({ kind, id: d.id })}><div class="top"><b>${d.title}</b><span class="badge">${kind === 'decision' ? (d.answer ? 'answered' : 'needs decision') : d.ack ? 'report · read' : 'report'}</span></div><div class="meta">${d.author} · ${when(d.at)}${acked(d.ack)}</div></button>`,
       );
   return html`<div class="headerline"><h1>🦞✨ spyglass <span class="dim">wharf</span></h1>${!signedOut && html`<button class="btn" onClick=${signOut}>sign out</button>`}</div>
     <div class="chips"><span class="chip">helm ${snapshot && !error ? (snapshot.helmLive ? 'live' : 'unknown / no live lease') : 'unknown'}</span><span class="chip dim">polling · 15s · ${jobs.length} jobs</span></div>
@@ -183,7 +191,7 @@ export function App() {
         : snapshot &&
           html`<nav class="tabs" aria-label="Spyglass views">${TABS.map((t) => html`<a href=${'#' + t} class=${tab === t ? 'on' : ''} onClick=${() => setTab(t)}>${t}</a>`)}</nav>
       ${tab === 'deck' && html`<h2>Decisions</h2><div class="cards">${cards('decision')}</div><h2>Human requests</h2>${snapshot.requests.map((r) => html`<div class="msg"><b>${r.kind}</b> · ${r.dispatch ?? r.boat} · ${requestState(r)}<div>${r.text ?? r.repo}</div></div>`)}`}
-      ${tab === 'jobs' && html`<div class="cards">${jobs.map((j) => html`<button class="card" onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${j.brief.split('\n')[0]}</b><span class="badge">${j.status?.verb ?? j.state}</span></div><div class="meta">${j.repo} · ${j.boatName ?? snapshot.boats.find((b) => b.id === j.claimedBoat)?.name ?? j.claimedBoat ?? 'unclaimed'}</div><div class="note">${j.status?.note ?? j.unservable?.note}</div></button>`)}</div>`}
+      ${tab === 'jobs' && html`<div class="cards">${jobs.map((j) => html`<button class=${'card' + (j.ack ? ' acked' : '')} onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${j.brief.split('\n')[0]}</b><span class="badge">${j.status?.verb ?? j.state}</span></div><div class="meta">${j.repo} · ${j.boatName ?? snapshot.boats.find((b) => b.id === j.claimedBoat)?.name ?? j.claimedBoat ?? 'unclaimed'}${acked(j.ack)}</div><div class="note">${j.status?.note ?? j.unservable?.note}</div></button>`)}</div>`}
       ${tab === 'traps' && html`<div class="cards">${snapshot.workers.map((w) => html`<button class="card" onClick=${() => setModal({ kind: 'trap', id: w.id })}><div class="top"><b>${w.id}</b><span class="badge">${w.harness ?? 'unknown harness'}</span></div><div class="meta">${w.boatName} · ${when(w.lastCheckIn)}</div><div class="note">${w.current ? 'job ' + w.current : 'no current job'} · ${w.repoRemote}</div></button>`)}</div>`}
       ${tab === 'boats' && html`<${Boats} boats=${snapshot.boats} action=${action} deleteAccount=${deleteAccount} />`}
       ${tab === 'reports' && html`<div class="cards">${cards('report')}${jobs.filter((j) => j.status?.evidence?.files?.length).map((j) => html`<button class="card" onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${j.brief.split('\n')[0]}</b><span class="badge">catch files</span></div><div class="meta">${j.workerId ?? 'headless worker'} · ${when(j.status?.at)}</div></button>`)}</div>`}

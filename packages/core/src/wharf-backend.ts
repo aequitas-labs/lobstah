@@ -1,4 +1,4 @@
-import type { BackendLocation, BackendMessage, ClaimReceipt, CoordinationBackend, DispatchInput, DispatchView, EventBatch, ReportInput, WharfDocumentSummary } from './backend-model.js';
+import type { BackendLocation, BackendMessage, ClaimReceipt, CoordinationBackend, DispatchInput, DispatchView, EventBatch, ReportInput, WharfAck, WharfDocumentSummary } from './backend-model.js';
 
 export class BackendError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -61,6 +61,9 @@ function report(v: unknown): ReportInput & { at: string } {
   }
   return out;
 }
+function ack(v: unknown): WharfAck {
+  const r = record(v); return { at: string(r.at), by: string(r.by).slice(0, 200) };
+}
 /**
  * The wharf's glass, as the wharf names it (`X-Lobstah-Glass`): an exact
  * HTTPS origin (HTTP for loopback tests only), never a path or credentials.
@@ -103,6 +106,7 @@ export class WharfBackend implements CoordinationBackend {
       const r = record(v); if (!['queued', 'active', 'done', 'cancelled'].includes(String(r.state))) throw new BackendError(502, 'invalid dispatch state');
       const unservable = r.unservable ? record(r.unservable) : undefined;
       return { ...input(r), state: r.state as DispatchView['state'], ...(r.status ? { status: report(r.status) } : {}),
+        ...(r.ack ? { ack: { ...ack(r.ack), status: string(record(r.ack).status) } } : {}),
         ...(r.boatName ? { boatName: string(r.boatName) } : {}),
         ...(r.workerId ? { workerId: string(r.workerId) } : {}), ...(r.claimedBoat ? { claimedBoat: string(r.claimedBoat) } : {}),
         ...(unservable ? { unservable: { repo: string(unservable.repo), note: string(unservable.note) } } : {}) };
@@ -121,8 +125,18 @@ export class WharfBackend implements CoordinationBackend {
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || (r.kind !== 'decision' && r.kind !== 'report')) throw new BackendError(502, 'invalid document');
       if (r.published !== true || r.withdrawn) return [];
       return [{ id, kind: r.kind, title: string(r.title).slice(0, 200), at: string(r.at),
-        ...(r.dispatch !== undefined ? { dispatch: string(r.dispatch) } : {}), ...(r.answer ? { answered: true as const } : {}) }];
+        ...(r.dispatch !== undefined ? { dispatch: string(r.dispatch) } : {}), ...(r.answer ? { answered: true as const } : {}),
+        ...(r.ack ? { ack: ack(r.ack) } : {}) }];
     });
+  }
+  /** A person has seen this decision or report. The first ack stands; this returns the one that does. */
+  async ackDocument(id: string, key: string): Promise<WharfAck> {
+    return ack(record(await this.request(`documents/${encodeURIComponent(id)}/ack`, {}, key)).ack);
+  }
+  /** A person has seen this job's status of `statusAt`. Refused once the job has reported again. */
+  async ackDispatch(id: string, statusAt: string, key: string): Promise<WharfAck & { status: string }> {
+    const value = record(await this.request(`dispatches/${encodeURIComponent(id)}/ack`, { at: statusAt }, key));
+    return { ...ack(value), status: string(value.status) };
   }
   async claim(key: string): Promise<ClaimReceipt | null> {
     const value = await this.request('claims', { worker: this.options.worker }, key); if (value === null) return null;
