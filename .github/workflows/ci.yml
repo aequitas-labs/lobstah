@@ -23,15 +23,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # Temporary evidence for this PR; removed after all 20 runs pass.
-      - name: Repeat Windows flake regression tests 20 times
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          for iteration in {1..20}; do
-            echo "Windows regression pass $iteration/20"
-            pnpm exec vitest run apps/cli/test/helm-cursor.test.ts packages/runner/test/reap.test.ts -t 'advances through|initial watch check|stops the child|leaves processes' || exit $?
-          done
       - run: pnpm test
       # Exercise the Worker's SQL tests on both OSes (Node 20 has no node:sqlite).
       - uses: actions/setup-node@v4
