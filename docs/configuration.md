@@ -128,6 +128,12 @@ send a continuation.
 |---|---|---|
 | `port` | `4949` | Localhost port for the glass. `LOBSTAH_GLASS_PORT` takes precedence. |
 
+## `[pet]` — report and decision clicks
+
+| Key | Default | Meaning |
+|---|---|---|
+| `open` | `"tab"` | `tab` opens the item in a new browser tab; `helm` focuses the helm through its existing focus ladder (falls back to the item's page). `app` tries an installed Chrome glass at the exact local address, then `glass show`; absent, hidden or unresponsive apps fall back to a tab. Native launch/delivery remains unverified; Safari currently takes the fallback. Applies only to reports and decisions, never PR links. Existing presence expiry windows are unchanged. |
+
 ## `[watch]` — watch delivery
 
 | Key | Default | Meaning |

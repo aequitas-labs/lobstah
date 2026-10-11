@@ -20,6 +20,7 @@ public struct AttentionItem: Decodable, Equatable {
   public var kind: String? = nil
   /** pr:* kinds: the PR this pet walks for. */
   public var prUrl: String? = nil
+  public var petOpen: String? = nil
   /** The hash of the state the item stands on; a new one re-stands an acked item. */
   public var stateHash: String? = nil
 
@@ -110,12 +111,23 @@ public func clickAttentionItem(
   open: @escaping (URL) -> Void,
   focusHelm: @escaping (URL) -> Void,
   showGlass: (GlassTarget, @escaping () -> Void) -> Void = { _, otherwise in otherwise() },
+  showApp: (GlassTarget, @escaping () -> Void) -> Void = { _, otherwise in otherwise() },
   acknowledge: ([String]) -> Void
 ) {
   if let target = item.glassTarget(glass: glass) {
     let isDecision = item.kind == "decision"
-    showGlass(target) {
-      if isDecision && helmLive { focusHelm(target.url) } else { open(target.url) }
+    switch item.petOpen {
+    case "tab":
+      open(target.url)
+    case "app":
+      showApp(target) { open(target.url) }
+    case "helm":
+      focusHelm(target.url)
+    default:
+      // An older CLI has no setting: preserve its existing routing.
+      showGlass(target) {
+        if isDecision && helmLive { focusHelm(target.url) } else { open(target.url) }
+      }
     }
   } else if let url = item.prLink {
     open(url)

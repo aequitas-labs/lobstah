@@ -52,6 +52,8 @@ export interface TendAttention {
   repo?: string;
   /** pr:* kinds: the evidence fields the kind derives from. */
   prUrl?: string;
+  /** Report/decision click route from [pet].open; PR clicks are independent. */
+  petOpen?: 'tab' | 'app' | 'helm';
   number?: number;
   state?: string;
   draft?: boolean;

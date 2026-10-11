@@ -63,6 +63,49 @@ func showGlass(_ target: GlassTarget, otherwise: @escaping () -> Void) {
   }
 }
 
+/** Raise an installed Chrome glass, then hand it the item. Never select tabs. */
+func showInstalledGlass(_ target: GlassTarget, otherwise: @escaping () -> Void) {
+  let roots = [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Chrome Apps.localized"),
+               FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications"),
+               URL(fileURLWithPath: "/Applications")]
+  DispatchQueue.global().async {
+    let apps = roots.flatMap { (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)) ?? [] }
+    let candidate = apps.sorted { $0.path < $1.path }.first { app in
+      guard app.pathExtension == "app", let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any] else { return false }
+      return isInstalledChromeGlass(info, glass: glassURL)
+    }
+    DispatchQueue.main.async {
+      guard let candidate else { otherwise(); return }
+      var finished = false
+      func finish(_ delivered: Bool) {
+        guard !finished else { return }
+        finished = true
+        if !delivered { otherwise() }
+      }
+      // Also bound a launch callback that never arrives. Main-thread owned.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 8) { finish(false) }
+      let config = NSWorkspace.OpenConfiguration()
+      config.activates = true
+      NSWorkspace.shared.openApplication(at: candidate, configuration: config) { app, error in
+        DispatchQueue.main.async {
+          guard !finished else { return }
+          guard error == nil, let app, app.activate() else { finish(false); return }
+          DispatchQueue.global().async {
+            let deadline = Date().addingTimeInterval(5)
+            var delivered = false
+            while Date() < deadline {
+              let result = decodeGlassShow(execute("/usr/bin/env", ["lobstah"] + glassShowArguments(target.hash, port: glassPort, installedOnly: true), timeout: 2).outcome)
+              if result?.delivered == true { delivered = true; break }
+              Thread.sleep(forTimeInterval: 0.25)
+            }
+            DispatchQueue.main.async { finish(delivered && NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier) }
+          }
+        }
+      }
+    }
+  }
+}
+
 /** The spyglass, from a menu: an open glass page comes forward as it is, else a new tab. */
 func openSpyglass() {
   showGlass(GlassTarget(hash: "", url: glassURL)) { NSWorkspace.shared.open(glassURL) }
@@ -191,6 +234,7 @@ final class PetView: NSView {
       open: { NSWorkspace.shared.open($0) },
       focusHelm: { focusHelm(fallback: $0) },
       showGlass: showGlass,
+      showApp: showInstalledGlass,
       acknowledge: ackAttention)
   }
   override func updateTrackingAreas() {
@@ -503,6 +547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if extra > 0 {
           let last = shown.removeLast()
           shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", key: last.key, kind: last.kind, prUrl: last.prUrl, stateHash: last.stateHash))
+          shown[shown.count - 1].petOpen = last.petOpen
         }
         let visibleKeys = Set(shown.map(\.identity))
         for key in self.petsByKey.keys.filter({ !visibleKeys.contains($0) }) {

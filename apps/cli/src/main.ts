@@ -3072,7 +3072,7 @@ async function mainCli(): Promise<void> {
         if (!validShowHash(hash) || pos.length > 2) {
           throw new UsageError('glass show takes one hash: #<tab>, #decision/<key>, or #report/<key>');
         }
-        const shown = await requestShow(port, hash);
+        const shown = await requestShow(port, hash, 2000, has('--app'));
         if (has('--json')) console.log(JSON.stringify(shown));
         else
           console.log(
