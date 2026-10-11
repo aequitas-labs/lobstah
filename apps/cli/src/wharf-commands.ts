@@ -36,6 +36,8 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   const agentScope = backendScopes(config).find((s) => s.kind === 'wharf' && readBrokerAgent(s.grounds));
   if (agentScope && OVERVIEW.has(cmd)) throw new Error('a hosted trap sees only its own catch; use inbox or wharf receipt');
   if (!grounds && OVERVIEW.has(cmd) && !pos.length) { await refreshHostedViews(config); return false; }
+  // An acknowledgement is this boat's own display file, for an item of any grounds: the wharf records none.
+  if (cmd === 'attention') return false;
   const boundScope = grounds ? undefined : agentScope;
   const scope = boundScope ?? commandScope(config, grounds, opts.opt('--repo'));
   if (agentScope && scope?.grounds !== agentScope.grounds) throw new Error('a hosted trap cannot select another grounds or boat credential');

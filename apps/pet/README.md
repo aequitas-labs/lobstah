@@ -25,7 +25,8 @@ stays until the decision is answered or withdrawn.
 Clicking a report pet opens the glass at the report. Opening a report in
 the glass acknowledges it.
 
-An item of a grounds on a wharf (`wharf = "<name>"` in `[grounds.*]`) opens
+An item of a grounds on a wharf (`wharf = "<name>"` in `[grounds.*]`), whether
+a job's question or landing or a decision or report filed there, opens
 the wharf's hosted glass at that item instead, in a new tab: the wharf keeps
 that grounds' state and helm seat, so this boat has no helm session or local
 glass page for it. The item itself carries the link (`glass` in

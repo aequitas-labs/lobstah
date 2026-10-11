@@ -289,13 +289,23 @@ The daemon's existing cadence refreshes independent observational wharf caches.
 Glass and tend show local and remote work together, labelled by grounds/wharf;
 the pet reads the same attention feed. A wharf dispatch that needs a decision, is
 blocked, or landed is an attention item carrying its `grounds`, its `wharf`, and
-`glass`: the hosted glass at that job (`<glass origin>/#job/<id>`). A click on its
+`glass`: the hosted glass at that job (`<glass origin>/#job/<id>`). So is a
+decision or a report filed on the wharf (`man ask`, `man file`), with
+`#decision/<id>` or `#report/<id>`. A click on its
 pet opens that link; items of local grounds carry none and open the local glass.
 The boat learns the glass origin from the `X-Lobstah-Glass` header on the wharf's
 authenticated API answers and keeps the last one named; it accepts only an exact
 HTTPS origin (HTTP on loopback). Until a wharf names its glass, the click is
-unchanged. Decisions and reports filed on a wharf (`man ask`, `man file`) are not
-in the boat's cache, so they are not attention items and no pet walks for them.
+unchanged.
+
+The same poll reads `GET documents` (a boat needs `read`, as for jobs), at most
+every thirty seconds, and keeps per document only its id, kind, title, time, job
+and whether it is answered: never its Markdown, options or files. A decision
+stands until the wharf shows it answered or withdrawn, and hides the raw question
+of the job it is about. A report stands until it is acknowledged, and walks only
+with `report` in `attentionKinds`, as a local report does. Acknowledgements
+(`lobstah attention ack`, a pet click) are this boat's own files, as for every
+other item: the wharf records none, so another boat still shows the item.
 An unreachable wharf shows unknown state
 without blocking local work. Wharf grounds reject unsupported local operations
 (pools, cull, harness attach, PR watches) rather than mutating local authority.

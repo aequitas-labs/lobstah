@@ -4,6 +4,7 @@ import type { Account } from '../src/account.js';
 import { glassTables } from '../src/glass-state.js';
 import { authFixtures } from './auth-fixture.js';
 import type { WharfDocument, WharfHumanRequest } from '../../../packages/core/src/backend-model.js';
+import { WharfBackend } from '../../../packages/core/src/wharf-backend.js';
 
 let sequence = 0;
 const person = 'test-helm-a';
@@ -194,4 +195,31 @@ it('account deletion clears documents, human requests, worker metadata and their
   for (const table of glassTables) expect(await sql(`SELECT count(*) AS n FROM ${table}`)).toEqual([{ n: 0 }]);
   expect((await env.FILES.list({ prefix: 'a/' })).objects).toEqual([]);
   expect((await call('glass', undefined, boat.token)).status).toBe(410);
+});
+it('a boat with read lists the standing documents its attention feed needs, a work-only boat none, and neither gets a write', async () => {
+  const helm = await helmBoat();
+  const issue = async (name: string, permissions: string[]) => {
+    const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name, permissions }, key: `issue-${++sequence}` })));
+    expect(result.status).toBe(201); return (result.value as { token: string }).token;
+  };
+  const reader = await issue('pet-boat', ['work', 'read']), worker = await issue('work-boat', ['work']);
+  await dispatch(helm.token, 'boat-seat');
+  for (const id of ['card', 'answered', 'gone', 'draft']) expect((await call('documents', { id, kind: 'decision', title: `Decision ${id}`, options: ['One'], ...(id === 'card' ? { dispatch: 'job' } : {}) }, helm.token, 'boat-seat')).status).toBe(200);
+  for (const id of ['card', 'answered', 'gone']) expect((await call(`documents/${id}/publish`, {}, helm.token, 'boat-seat')).status).toBe(200);
+  expect((await call('documents/answered/answer', { option: 'One' })).status).toBe(200);
+  expect((await call('documents/gone/withdraw', {}, helm.token, 'boat-seat')).status).toBe(200);
+  const location = { kind: 'wharf' as const, url: 'https://state.test', account: 'a', tokenEnv: 'UNUSED' };
+  const feed = new WharfBackend(location, reader, { fetch: (input, init) => SELF.fetch(input as string, init) });
+  const listed = await feed.documents();
+  expect(listed.map((d) => ({ ...d, at: 'at' })).sort((x, y) => x.id.localeCompare(y.id))).toEqual([
+    { id: 'answered', kind: 'decision', title: 'Decision answered', at: 'at', answered: true },
+    { id: 'card', kind: 'decision', title: 'Decision card', at: 'at', dispatch: 'job' },
+  ]);
+  expect(feed.glass).toBe('https://glass.test');
+  await expect(new WharfBackend(location, worker, { fetch: (input, init) => SELF.fetch(input as string, init) }).documents()).rejects.toMatchObject({ status: 403 });
+  // Reading is all a read boat does: there is no acknowledgement on the wharf, and it cannot answer.
+  const before = await sql('SELECT data FROM documents ORDER BY id');
+  expect((await call('documents/card/ack', {}, reader)).status).toBe(404);
+  expect((await call('documents/card/answer', { option: 'One' }, reader)).status).toBe(403);
+  expect(await sql('SELECT data FROM documents ORDER BY id')).toEqual(before);
 });

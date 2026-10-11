@@ -19,6 +19,7 @@ import {
   ageLabel,
   displayState,
   displayGrounds,
+  listDecisions,
   executorPath,
   laneDirs,
   lastEventAt,
@@ -89,7 +90,7 @@ import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { reportAttention } from './report-file.js';
 import { decisionAttention, hideFramedQuestions } from './decisions.js';
 import { worktreeView } from './worktree-view.js';
-import { backendViews, hostedAttention } from './hosted-view.js';
+import { backendViews, hostedAttention, hostedDecisionFrames } from './hosted-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
@@ -949,7 +950,7 @@ export function buildTendReport(now = Date.now()): TendReport {
   const walking = attention.filter((a) => a.kind === 'watch' || a.kind === 'dispatch-progress' ||
     (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) : enabled.has(a.kind)));
   // A question the helm framed as a decision shows as that decision.
-  const shown = enabled.has('decision') ? hideFramedQuestions(walking) : walking;
+  const shown = enabled.has('decision') ? hideFramedQuestions(walking, [...listDecisions(), ...hostedDecisionFrames(cfg)]) : walking;
   attention.length = 0;
   // Acks are display-only: they annotate, never remove. The verdict below
   // and every wake path ignore them.

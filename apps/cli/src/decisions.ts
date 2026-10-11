@@ -35,7 +35,7 @@ export function decisionAttention(now: number, decisions: DecisionMeta[] = stand
  * withdrawn. An answered one keeps hiding it until the worker reports
  * again or the helm sends the answer on.
  */
-export function hideFramedQuestions(attention: TendAttention[], decisions: DecisionMeta[] = listDecisions()): TendAttention[] {
+export function hideFramedQuestions(attention: TendAttention[], decisions: Array<Pick<DecisionMeta, 'dispatch' | 'lane' | 'askedAt'>> = listDecisions()): TendAttention[] {
   return attention.filter(
     (a) =>
       a.kind !== 'question' ||

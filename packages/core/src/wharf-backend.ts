@@ -1,4 +1,4 @@
-import type { BackendLocation, BackendMessage, ClaimReceipt, CoordinationBackend, DispatchInput, DispatchView, EventBatch, ReportInput } from './backend-model.js';
+import type { BackendLocation, BackendMessage, ClaimReceipt, CoordinationBackend, DispatchInput, DispatchView, EventBatch, ReportInput, WharfDocumentSummary } from './backend-model.js';
 
 export class BackendError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -106,6 +106,22 @@ export class WharfBackend implements CoordinationBackend {
         ...(r.boatName ? { boatName: string(r.boatName) } : {}),
         ...(r.workerId ? { workerId: string(r.workerId) } : {}), ...(r.claimedBoat ? { claimedBoat: string(r.claimedBoat) } : {}),
         ...(unservable ? { unservable: { repo: string(unservable.repo), note: string(unservable.note) } } : {}) };
+    });
+  }
+  /**
+   * The published decisions and reports of this account that are not
+   * withdrawn (`GET documents`, read permission), reduced to what an
+   * attention item needs. Markdown, options, attachments and answers stay on
+   * the wharf.
+   */
+  async documents(): Promise<WharfDocumentSummary[]> {
+    const value = await this.request('documents'); if (!Array.isArray(value)) throw new BackendError(502, 'invalid document list');
+    return value.flatMap((v): WharfDocumentSummary[] => {
+      const r = record(v); const id = string(r.id);
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || (r.kind !== 'decision' && r.kind !== 'report')) throw new BackendError(502, 'invalid document');
+      if (r.published !== true || r.withdrawn) return [];
+      return [{ id, kind: r.kind, title: string(r.title).slice(0, 200), at: string(r.at),
+        ...(r.dispatch !== undefined ? { dispatch: string(r.dispatch) } : {}), ...(r.answer ? { answered: true as const } : {}) }];
     });
   }
   async claim(key: string): Promise<ClaimReceipt | null> {

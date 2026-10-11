@@ -31,6 +31,12 @@ export interface WharfDocument extends WharfDocumentInput {
   markdown?: WharfFile; attachments: WharfFile[];
   answer?: { option?: string; text?: string; at: string; by: string };
 }
+/** What a boat keeps of a wharf decision or report: enough for an attention item, never its content. */
+export interface WharfDocumentSummary {
+  id: string; kind: 'decision' | 'report'; title: string; at: string; dispatch?: string;
+  /** A decision a person has answered: it no longer stands. */
+  answered?: true;
+}
 export interface WharfHumanRequest {
   id: string; kind: 'message' | 'trap-request'; dispatch?: string; text?: string; boat?: string; repo?: string;
   at: string; expiresAt: string; state: 'queued' | 'received' | 'authorized' | 'fulfilled' | 'expired'; by: string;

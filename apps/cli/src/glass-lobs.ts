@@ -20,6 +20,8 @@ export interface LobAttention {
   /** Acknowledged (the pet's shared ack): it doesn't walk. */
   acked?: unknown;
   quiet?: boolean;
+  /** An item of a grounds on a wharf: the hosted glass at this item. */
+  glass?: string;
 }
 
 export interface LobItem {
@@ -69,6 +71,9 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
     .map((x) => {
       const label = labels[x.kind ?? ''] ?? '';
       const hide = x.key !== undefined ? { hideKey: x.key, hideHash: x.stateHash ?? '' } : {};
+      // A wharf's decision or report has no card or page here: it opens in the hosted glass.
+      if ((x.kind === 'decision' || x.kind === 'report') && x.key && x.glass)
+        return { key: x.kind + ':' + x.key, text: x.note || x.verb, label, href: x.glass, ...hide };
       // A decision or a worker's raw question goes to its card on the deck,
       // where it is answered in place.
       if (x.kind === 'decision' && x.key) return { key: 'decision:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
