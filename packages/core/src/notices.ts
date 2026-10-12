@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { readStackEpochs, stackReadyEnabled, stackStateHash } from './pr-stacks.js';
 import { loadConfig } from './config.js';
+import { dispatchProgress } from './dispatch-progress.js';
 
 /**
  * Helm notices: the attention channel for events that are not status-log
@@ -19,6 +20,7 @@ export type NoticeKind =
   | 'trap-available'
   | 'trap-batch'
   | 'trap-claim-idle'
+  | 'dispatch-progress'
   | 'trap-stowed'
   | 'trap-defective'
   | 'trap-ghosted'
@@ -197,8 +199,10 @@ export function unseenNotices(
       if (through > seen) fs.writeFileSync(cursorFile(), through);
     }
   }
+  const progress = owned.some((n) => n.kind === 'dispatch-progress') ? dispatchProgress() : [];
   const waking = owned.filter((n) => {
     if (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)) return false;
+    if (n.kind === 'dispatch-progress') return progress.some((p) => p.id === n.refId && p.stateHash === n.stateHash);
     if (n.kind !== 'stack-ready') return true;
     const epoch = n.refId ? readStackEpochs()[n.refId] : undefined;
     return !!epoch?.ready && n.stateHash === stackStateHash({ id: n.refId! }, epoch.epoch) && stackReadyEnabled(loadConfig());

@@ -9,6 +9,8 @@ import {
   waitingText,
   waitingView,
   activityLine,
+  dispatchProgress,
+  dispatchQueueReason,
   activityView,
   readActivity,
   answeredAt,
@@ -36,6 +38,7 @@ import {
   prNewestFirst,
   prStandingKinds,
   queuedDescriptor,
+  storedDescriptor,
   readEvidence,
   readPr,
   readPrs,
@@ -105,6 +108,7 @@ export interface TendDispatch {
   /** Budget exhaustion is work saved for continuation, not a worker error. */
   outOfTimeWorkSaved?: boolean;
   note?: string;
+  queueReason?: string;
   at?: string;
   /** A needs-decision / blocked the helm (or anyone) has answered but the worker hasn't acted on yet. */
   answeredAt?: string;
@@ -622,6 +626,7 @@ export function heldReason(id: string, lane: Lane, hold = readHold()): string | 
 }
 
 function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket'], staleSecs: number): TendDispatch {
+  const descriptor = storedDescriptor(id, lane);
   const log = readStatusLog(id, lane);
   const last = log.at(-1);
   // A trap's claim with no report yet is `working`, dated from the claim.
@@ -641,6 +646,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     state,
     ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
     note: held ?? last?.note,
+    ...(bucket === 'queued' && descriptor ? { queueReason: dispatchQueueReason(descriptor, lane) } : {}),
     // Queued work has no log yet; its time is when it entered the queue.
     at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),
     ...(answered ? { answeredAt: answered } : {}),
@@ -923,6 +929,11 @@ export function buildTendReport(now = Date.now()): TendReport {
     { readySettleSecs: cfg.readySettleSecs, now, trunk: (r) => prStackTrunk(cfg, r) },
   ).stacks.filter((s) => s.open);
   attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now));
+  attention.push(...dispatchProgress(now, cfg).map((p): TendAttention => ({
+    kind: 'dispatch-progress', key: `progress:${p.lane}:${p.id}`, stateHash: p.stateHash,
+    id: p.id, lane: p.lane, verb: p.state, ageSecs: p.ageSecs, at: p.since,
+    note: p.text, repo: p.repo,
+  })));
   // Man-owned member events are represented by the same current stack item,
   // not an independent watch lobster (including obsolete Approval Gate events).
   const stackKeys = new Set(attention.flatMap((a) => a.stack?.members.map((m) => `watch:${m.key}`) ?? []));
@@ -930,7 +941,7 @@ export function buildTendReport(now = Date.now()): TendReport {
   // attentionKinds (config.toml) picks what walks; watch events are
   // machinery wakes and always stand.
   const enabled = new Set<string>(cfg.attentionKinds);
-  const walking = attention.filter((a) => a.kind === 'watch' ||
+  const walking = attention.filter((a) => a.kind === 'watch' || a.kind === 'dispatch-progress' ||
     (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) : enabled.has(a.kind)));
   // A question the helm framed as a decision shows as that decision.
   const shown = enabled.has('decision') ? hideFramedQuestions(walking) : walking;
@@ -954,7 +965,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     ? 'daemon-down'
     : stalled
       ? 'stalled'
-      : attention.some((a) => a.kind === 'question' || a.kind === 'decision' || a.kind === 'watch')
+      : attention.some((a) => a.kind === 'question' || a.kind === 'decision' || a.kind === 'watch' || a.kind === 'dispatch-progress')
         ? 'needs-attention'
         : inFlight.length + queued.length > 0
           ? 'working'
@@ -1117,6 +1128,7 @@ export function renderTend(r: TendReport): string {
               (d) =>
                 `${d.id.slice(0, 8)}:${d.outOfTimeWorkSaved ? 'out of time, work saved' : d.state}` +
                 (d.state === 'held' && d.note ? ` (${named(d.note.replace(/^held: /, ''))})` : '') +
+                (d.queueReason ? ` (${named(d.queueReason)})` : '') +
                 (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
                 (d.waiting ? ` (${waitingText(d.waiting)})` : '') +
                 (d.awaitingReply ? ` (awaiting reply · ${ageLabel(Date.now() - (Date.parse(d.awaitingReply.sentAt) || Date.now()))})` : ''),

@@ -116,7 +116,15 @@ export function claimNext(lane: Lane, skip?: (d: Descriptor) => boolean): string
 export function requeue(id: string, lane: Lane): void {
   const dirs = laneDirs(lane);
   const activeDir = path.join(dirs.active, id);
-  fs.renameSync(path.join(activeDir, 'descriptor.json'), path.join(dirs.queue, `${id}.json`));
+  // Queue age is time waiting for THIS claim, not the earlier worker's run.
+  // Stamp before publishing the queue entry: rewriting it after the rename
+  // could race a new claimant and resurrect an already claimed dispatch.
+  const file = path.join(activeDir, 'descriptor.json');
+  const d = { ...readDescriptor(id, lane), queuedAt: new Date().toISOString() };
+  const tmp = uniqueTempPath(file);
+  fs.writeFileSync(tmp, JSON.stringify(d, null, 2));
+  atomicRenameSync(tmp, file);
+  fs.renameSync(file, path.join(dirs.queue, `${id}.json`));
   fs.rmSync(activeDir, { recursive: true, force: true });
 }
 

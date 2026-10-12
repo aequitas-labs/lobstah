@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   answeredAt, appendStatus, claimNext, complete, ensureLayout, laneDirs, queuedDescriptor,
-  storedDescriptor, takeHelm, unhandled, unhandledTrapMessages,
+  storedDescriptor, takeHelm, unhandled, unhandledTrapMessages, mergeEvidence,
 } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -94,13 +94,17 @@ describe('send wakes a finished dispatch', () => {
   it('keeps a signed-on trap sticky, and falls back to a headless worker when it is gone', () => {
     dispatch(A);
     finish(A);
+    dispatch(B); expect(claimNext('work')).toBe(B); appendStatus(B, 'work', 'working', 'unrelated work');
     const done = path.join(laneDirs('work').done, A);
     fs.writeFileSync(path.join(done, 'claim.json'), JSON.stringify({ by: 'wt:seat' }));
     fs.writeFileSync(path.join(home, 'soaking', 'seat.json'), JSON.stringify({
       trapId: 'seat', worktree: home, cwd: home, repo: 'r', harness: 'codex', sessionId: 's',
-      signedOnAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(), firstParkedAt: new Date().toISOString(),
+      signedOnAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(), firstParkedAt: new Date().toISOString(), claimed: B,
     }));
     const sticky = lobstah('send', A, 'again');
+    expect(sticky.stdout).toContain('delivery: wt:seat');
+    expect(sticky.stdout).toContain(`busy on dispatch ${B}`);
+    expect(lobstah('status', startedId(sticky.stdout)).stdout).toContain(`busy on dispatch ${B}`);
     expect(queuedDescriptor(startedId(sticky.stdout), 'work')?.for).toBe('wt:seat');
     fs.rmSync(path.join(home, 'soaking', 'seat.json'));
     const queuedId = startedId(sticky.stdout);
@@ -110,6 +114,21 @@ describe('send wakes a finished dispatch', () => {
     const headless = lobstah('send', A, 'third');
     expect(headless.stdout).toContain('headless worker');
     expect(queuedDescriptor(startedId(headless.stdout), 'work')?.for).toBeUndefined();
+  });
+
+  it('does not address a headless continuation to its stale earlier trap receipt, and names the pool', () => {
+    dispatch(A); finish(A);
+    fs.writeFileSync(path.join(home, 'soaking', 'seat.json'), JSON.stringify({ trapId: 'seat', sessionId: 's', repo: 'r',
+      harness: 'codex', worktree: home, cwd: home, heartbeatAt: new Date().toISOString(), claimed: B }));
+    mergeEvidence(A, 'work', { deliveredTo: 'wt:seat', deliveredAt: '2026-10-01T00:00:00.000Z',
+      worker: { harness: 'codex', model: null, config: { effort: null, permissionMode: null }, observedAt: '2026-10-02T00:00:00.000Z' } });
+    const file = path.join(laneDirs('work').done, A, 'descriptor.json');
+    fs.writeFileSync(file, JSON.stringify({ ...storedDescriptor(A, 'work'), pool: 'warm' }));
+    const sent = lobstah('send', A, 'again');
+    expect(sent.status, sent.stderr).toBe(0);
+    const d = queuedDescriptor(startedId(sent.stdout), 'work')!;
+    expect(d.for).toBeUndefined(); expect(d.pool).toBe('warm');
+    expect(sent.stdout).toContain('delivery: unaddressed (pool warm)');
   });
 
   it('delivers to a live trap claim; dispatch chooses an explicit follow-up address', () => {

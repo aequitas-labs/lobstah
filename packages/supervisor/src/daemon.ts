@@ -36,6 +36,7 @@ import {
   trapNameForId,
   noticeOrphanedBait,
   noticeIdleTrapClaims,
+  noticeDispatchProgress,
   readSessionClaim,
   isTrapCatch,
   isFinished,
@@ -639,6 +640,8 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
       if (st) reconcileOne(st, cfg, log, hooks.spawnRunner, wedgeGrace);
     }
   }
+
+  noticeDispatchProgress(now, cfg);
 
   if (cfg.notifyCommand) {
     const verbs = cfg.notifyVerbs ?? DEFAULT_NOTIFY_VERBS;

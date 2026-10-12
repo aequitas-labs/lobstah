@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm } from '@lobstah/core';
+import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm,
+  noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { charter, HELM_REMINDER } from '../src/charter.js';
 
@@ -133,6 +134,41 @@ describe('lobstah hook stop (alias: man haul)', () => {
       expect(none.stdout).toBe('');
     });
   }
+});
+
+it('Stop lists overdue queues and stalls beside send expectations even after the wake was consumed', () => {
+  takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+  const queued = '99999999-9999-4999-8999-999999999999';
+  enqueue({ id: queued, repo: 'web', brief: 'b', for: 'wt:absent', queuedAt: new Date(Date.now() - 200_000).toISOString() });
+  const silent = '88888888-8888-4888-8888-888888888888';
+  enqueue({ id: silent, repo: 'web', brief: 'b' });
+  // The addressed queue remains sticky; claim this fixture explicitly.
+  expect(claimNext('work', (d) => d.id !== silent)).toBe(silent);
+  fs.writeFileSync(statusPath(silent, 'work'), JSON.stringify({ at: new Date(Date.now() - 1300_000).toISOString(), verb: 'working', note: 'old note' }) + '\n');
+  expectReply({ dispatchId: queued, lane: 'work', from: HELM, text: 'do it' });
+  noticeDispatchProgress(); unseenNotices(true);
+  const stopped = hook(['hook', 'stop'], { session_id: HELM, hook_event_name: 'Stop' });
+  expect(stopped.status, stopped.stderr).toBe(0);
+  expect(stopped.stdout).toContain('queued-too-long');
+  expect(stopped.stdout).toContain('not signed on');
+  expect(stopped.stdout).toContain('stalled');
+  expect(stopped.stdout).toContain('old note');
+  expect(stopped.stdout).toContain('sent ·');
+  // Grounds scoping: neither unrelated queued work nor its reason leaks.
+  fs.rmSync(path.join(laneDirs('work').queue, `${queued}.json`));
+  appendStatus(silent, 'work', 'paused', 'wait');
+  enqueue({ id: 'foreign', repo: 'other', brief: 'b', queuedAt: new Date(Date.now() - 200_000).toISOString() });
+  expect(hook(['hook', 'stop'], { session_id: HELM }).stdout).not.toContain('queued-too-long');
+});
+
+it('man wait wakes without polling status when the daemon posts an overdue queue notice', () => {
+  const id = '77777777-7777-4777-8777-777777777777';
+  enqueue({ id, repo: 'web', brief: 'b', for: 'wt:absent', queuedAt: new Date(Date.now() - 200_000).toISOString() });
+  noticeDispatchProgress();
+  const woke = hook(['man', 'wait', '--timeout', '1'], {});
+  expect(woke.status, woke.stderr).toBe(0);
+  expect(woke.stdout).toContain('queued-too-long');
+  expect(woke.stdout).toContain('not signed on');
 });
 
 describe('lobstah hook post-tool-use (alias: soak beat)', () => {

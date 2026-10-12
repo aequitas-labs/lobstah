@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import type { Config } from './config.js';
 import { readHold } from './disk.js';
 import type { Notice } from './notices.js';
+import { dispatchProgress } from './dispatch-progress.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import type { WindowRef } from './window.js';
 import { listWatches } from './watch.js';
@@ -246,6 +247,8 @@ export function wakeFloorMs(h: HelmRegistration | undefined): number {
  */
 export function noticeStands(n: Notice): boolean {
   switch (n.kind) {
+    case 'dispatch-progress':
+      return dispatchProgress().some((p) => p.id === n.refId && p.stateHash === n.stateHash);
     case 'disk-held':
       return readHold() !== undefined;
     case 'watch-failing':
