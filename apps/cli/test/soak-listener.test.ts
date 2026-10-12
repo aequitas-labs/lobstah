@@ -6,6 +6,8 @@ import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_pr
 import { fileURLToPath } from 'node:url';
 import { ensureLayout, trapBySession } from '@lobstah/core';
 import { liveWatcher } from '../src/watchers.js';
+import { stopChildren } from '../../../test/child-process.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end: two traps on one machine, each with a `soak --wait` listener.
 // Both run the same command line, so a pattern match cannot tell them apart;
@@ -76,9 +78,11 @@ beforeEach(() => {
   git(primary, 'push', '-q', 'origin', 'HEAD:main');
   fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = '${primary}'\ntrunk = 'main'\n`);
 });
-afterEach(() => {
-  for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
-  fs.rmSync(tmp, { recursive: true, force: true });
+afterEach(async () => {
+  // A listener stands in its trap's worktree: it must be gone before the
+  // worktree can be removed on Windows.
+  await stopChildren(children.splice(0));
+  removeTempDir(tmp);
   delete process.env.LOBSTAH_HOME;
 });
 
@@ -142,5 +146,20 @@ describe('a second soak --wait', () => {
     await exited(a);
     const again = await listen(A, wtA);
     expect(liveWatcher(A, 'trap')?.pid).toBe(again.pid);
+  });
+});
+
+describe('stow --remove', () => {
+  processTest("removes the worktree the session's listener stands in", async () => {
+    const wtA = signOn(A);
+    git(wtA, 'branch', '--set-upstream-to=origin/main');
+    const a = await listen(A, wtA);
+    // From the primary checkout: only the listener is inside the worktree.
+    const res = run(primary, 'stow', '--session', A, '--remove');
+    expect(res.status, res.stdout + res.stderr).toBe(0);
+    expect(res.stdout, res.stdout + res.stderr).toMatch(/^worktree: removed$/m);
+    expect(fs.existsSync(wtA)).toBe(false);
+    await exited(a);
+    expect(liveWatcher(A, 'trap')).toBeUndefined();
   });
 });

@@ -19,6 +19,7 @@ import {
 } from '@lobstah/core';
 import type { GlassSnapshot } from '@lobstah/core';
 import { REQUEST_KIND_MAX_BYTES, buildGlassSnapshot, requestBodyCap, serveGlass } from '../src/glass.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 let repoDir: string;
@@ -40,7 +41,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

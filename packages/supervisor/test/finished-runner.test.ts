@@ -7,6 +7,7 @@ import type { ChildProcess } from 'node:child_process';
 import { claimNext, DEFAULT_LIMITS, DEFAULT_SOAK, enqueue, ensureLayout, laneDirs, readStatusLog, statusPath } from '@lobstah/core';
 import { reconcileOne } from '../src/daemon.js';
 import type { ActiveState } from '../src/daemon.js';
+import { stopChildren } from '../../../test/child-process.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -16,8 +17,8 @@ beforeEach(() => {
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
 });
-afterEach(() => {
-  for (const c of children.splice(0)) c.kill('SIGKILL');
+afterEach(async () => {
+  await stopChildren(children.splice(0));
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });

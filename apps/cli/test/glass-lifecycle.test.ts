@@ -3,10 +3,11 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { glassLines, glassPort, probeGlass, readGlassState, stopGlass } from '../src/glass-lifecycle.js';
 import { killAndWait, reservePort, type ReservedPort } from './reserved-port.js';
+import { stopChildren } from '../../../test/child-process.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -140,6 +141,53 @@ describe('glass process lifecycle', () => {
       expect(await probeGlass(port)).toMatchObject({ version: '0.4.0', service: 'lobstah-glass' });
       expect(glassLines(port, (await probeGlass(port))!, true).stale).toContain('0.4.0');
     } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  /**
+   * A glass whose version request gets no answer `unanswered` times (the
+   * connection is cut, as when the request arrives before the glass listens),
+   * then names `pid`. Its /data answers throughout, as a listening glass does.
+   */
+  function glassAnsweringLate(pid: number, unanswered: number) {
+    let cut = 0;
+    return http.createServer((req, res) => {
+      if (req.url === '/api/version' && cut++ < unanswered) return void req.socket.destroy();
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        req.url === '/data'
+          ? JSON.stringify({ version: '0.5.7', dispatches: [], helms: [] })
+          : JSON.stringify({ service: 'lobstah-glass', version: '0.5.7', pid }),
+      );
+    });
+  }
+
+  it('a version request that gets no answer is not an older glass', async () => {
+    const server = glassAnsweringLate(process.pid, 1);
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    try {
+      // The older data endpoint would answer, without a pid: --detach would
+      // take its own child for another glass, and stop would forget a live one.
+      expect(await probeGlass(port)).toBeUndefined();
+      expect(await probeGlass(port)).toMatchObject({ pid: process.pid });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('stop still stops a glass whose version request got no answer once', async () => {
+    const glass = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    const server = glassAnsweringLate(glass.pid!, 1);
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const file = path.join(home, 'state', 'glass.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ pid: glass.pid, port, version: '0.5.7', startedAt: new Date().toISOString() }));
+    try {
+      expect(await stopGlass()).toMatchObject({ stopped: true, pid: glass.pid });
+      expect(fs.existsSync(file)).toBe(false);
+    } finally {
+      await stopChildren([glass]);
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });

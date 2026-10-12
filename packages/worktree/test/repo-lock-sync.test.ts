@@ -5,6 +5,8 @@ import * as path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { withRepoLockSync } from '../src/index.js';
+import { stopChildren } from '../../../test/child-process.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // The synchronous form of the per-repo git lock (#127), for the release pass.
 let root: string;
@@ -17,9 +19,9 @@ beforeEach(() => {
   execFileSync('git', ['init', '-q', repo]);
   lock = path.join(repo, '.git', 'lobstah-git.lock');
 });
-afterEach(() => {
-  for (const c of children.splice(0)) c.kill('SIGKILL');
-  fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await stopChildren(children.splice(0));
+  removeTempDir(root);
 });
 
 /** Another process holds the lock and lets go after `ms`. */
