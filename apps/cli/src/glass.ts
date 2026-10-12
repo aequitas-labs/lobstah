@@ -69,7 +69,7 @@ import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { buildTendReport, landedCatches } from './tend.js';
 import type { LandedCatch } from './tend.js';
-import { GLASS_PAGE } from './glass-page.generated.js';
+import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -960,7 +960,17 @@ export function serveGlass(
       res.end(JSON.stringify({ service: 'lobstah-glass', version: lobstahVersion(), pid: process.pid }));
       return;
     }
-    if (req.url === '/lob.png' && lob) {
+    if (req.url === '/manifest.webmanifest' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/manifest+json', 'cache-control': 'no-cache' });
+      res.end(JSON.stringify({
+        id: '/', name: 'lobstah glass', short_name: 'lobstah', start_url: '/', scope: '/',
+        display: 'standalone', background_color: '#0e1116', theme_color: '#0e1116',
+        icons: [192, 512].map((size) => ({ src: `/app-icon-${size}.png`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any' })),
+      }));
+    } else if (req.method === 'GET' && Object.hasOwn(GLASS_APP_ICONS, req.url ?? '')) {
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
+      res.end(Buffer.from(GLASS_APP_ICONS[req.url!]!, 'base64'));
+    } else if (req.url === '/lob.png' && lob) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
       res.end(fs.readFileSync(lob));
     } else if (req.url === '/star.png' && star) {

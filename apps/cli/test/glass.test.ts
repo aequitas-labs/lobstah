@@ -182,6 +182,21 @@ describe('glass snapshot', () => {
     expect(html.match(/<style>/g)).toHaveLength(1);
     expect(html).not.toMatch(/<script[^>]* src=|<link[^>]*stylesheet/);
     expect(html).toContain('<title>spyglass</title>');
+    expect(html).toContain('rel="manifest" href="/manifest.webmanifest"');
+    expect(html).toContain('rel="apple-touch-icon" href="/app-icon-512.png"');
+    const manifestResponse = await fetch(`http://127.0.0.1:${port}/manifest.webmanifest`);
+    expect(manifestResponse.headers.get('content-type')).toBe('application/manifest+json');
+    const manifest = await manifestResponse.json() as { icons: Array<{ src: string; sizes: string }> };
+    expect(manifest).toMatchObject({ id: '/', name: 'lobstah glass', start_url: '/', scope: '/', display: 'standalone' });
+    for (const icon of manifest.icons) {
+      const response = await fetch(`http://127.0.0.1:${port}${icon.src}`);
+      expect(response.headers.get('content-type')).toBe('image/png');
+      const png = Buffer.from(await response.arrayBuffer());
+      expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+      const size = Number(icon.sizes.split('x')[0]);
+      expect(png.readUInt32BE(16)).toBe(size);
+      expect(png.readUInt32BE(20)).toBe(size);
+    }
     const data = (await (await fetch(`http://127.0.0.1:${port}/data`)).json()) as { version: string };
     expect(data.version).toBeTruthy();
     server.close();
