@@ -126,8 +126,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   telemetry: { subverbs: ['status', 'enable', 'disable', 'show'], flags: { '--json': {} }, flagSubverbs: { '--json': ['status'] }, maxPositionals: 1 },
   glass: {
     subverbs: ['stop', 'status', 'install', 'uninstall', 'restart', 'show'],
-    flags: { '--port': { value: '<n>' }, '--detach': {}, '--json': {} },
-    flagSubverbs: { '--json': ['show'] },
+    flags: { '--port': { value: '<n>' }, '--detach': {}, '--json': {}, '--app': {} },
+    flagSubverbs: { '--json': ['show'], '--app': ['show'] },
   },
   pet: { subverbs: ['install', 'uninstall'], flags: { '--binary': { value: '<path>' } } },
   repos: { subverbs: ['add'], flags: { '--pickup': {}, '--key': { value: '<k>' } }, positionals: '[<path>]' },

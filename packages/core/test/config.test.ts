@@ -35,6 +35,15 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('defaults pet clicks to tabs and validates all explicit routes', () => {
+    expect(loadConfig().pet.open).toBe('tab');
+    for (const open of ['tab', 'app', 'helm']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[pet]\nopen = "${open}"\n`);
+      expect(loadConfig().pet.open).toBe(open);
+    }
+    fs.writeFileSync(path.join(home, 'config.toml'), '[pet]\nopen = "browser"\n');
+    expect(() => loadConfig()).toThrow('[pet].open must be');
+  });
   it('defaults repair cooldown off and validates the watch override', () => {
     expect(loadConfig().watch.repairCooldownSecs).toBe(0);
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[watch]\nrepairCooldownSecs = 3600\n');

@@ -90,7 +90,8 @@ export async function sendPresence(): Promise<void> {
   inflight = true;
   try {
     const vis = document.hidden ? 'hidden' : 'visible';
-    const r = await fetch(`/api/presence?page=${id()}&vis=${vis}`, { method: 'POST', cache: 'no-store' });
+    const app = window.matchMedia?.('(display-mode: standalone)').matches ? '&app=1' : '';
+    const r = await fetch(`/api/presence?page=${id()}&vis=${vis}${app}`, { method: 'POST', cache: 'no-store' });
     if (!r.ok) return;
     applyShow(((await r.json()) as { show?: unknown } | null)?.show);
   } catch {

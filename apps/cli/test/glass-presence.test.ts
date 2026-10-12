@@ -3,6 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { request as httpRequest } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ensureLayout } from '@lobstah/core';
@@ -74,6 +76,26 @@ describe('validShowHash: what location.hash accepts', () => {
 });
 
 describe('GlassPresence', () => {
+  it('app shows select a visible standalone Chrome page, never a tab or Safari', () => {
+    let now = 1_000_000;
+    const p = new GlassPresence(() => now);
+    p.seen('page-tab', true, CHROME_UA);
+    p.seen('page-safari', true, SAFARI_UA, true);
+    expect(p.show('#prs', true)).toEqual({ delivered: false });
+    p.seen('page-app', false, CHROME_UA, true);
+    expect(p.show('#prs', true)).toEqual({ delivered: false });
+    p.seen('page-app', true, CHROME_UA, true);
+    now += 1;
+    p.seen('page-tab', true, CHROME_UA);
+    const show = p.show('#report/r-1', true);
+    expect(show).toMatchObject({ delivered: true, page: 'page-app', visible: true });
+    expect(p.seen('page-tab', true, CHROME_UA)).toBeNull();
+    expect(p.seen('page-app', true, CHROME_UA, true)).toEqual({ id: show.id, hash: '#report/r-1' });
+    now += 10_001;
+    expect(p.show('#prs', true)).toEqual({ delivered: false });
+    // Legacy selection and its existing expiry still work.
+    expect(p.show('#prs').delivered).toBe(true);
+  });
   it('has no target until a page is seen, and forgets a page after three minutes', () => {
     let now = 1_000_000;
     const p = new GlassPresence(() => now);
@@ -213,6 +235,20 @@ describe('the glass server', () => {
     const next = await presence('page-claude1', 'visible', CLAUDE_PANE_UA);
     expect(next.body).toEqual({ ok: true, show: { id: r.body.id, hash: '#decision/fleet%2Fabc' } });
     expect((await presence('page-claude1', 'visible', CLAUDE_PANE_UA)).body).toEqual({ ok: true, show: null });
+  });
+
+  it('the app CLI selector reaches only the installed page', async () => {
+    const port = Number(new URL(base).port);
+    await presence('page-browser', 'visible', CHROME_UA);
+    expect(await requestShow(port, '#prs', 2000, true)).toEqual({ delivered: false });
+    await raw('/api/presence?page=page-installed&vis=visible&app=1', { headers: { Origin: base, 'User-Agent': CHROME_UA } });
+    const cli = path.resolve(import.meta.dirname, '../dist/main.js');
+    const { stdout } = await promisify(execFile)(process.execPath, [cli, 'glass', 'show', '#decision/abc', '--port', String(port), '--json', '--app'], { env: { ...process.env, LOBSTAH_HOME: home } });
+    const result = JSON.parse(stdout) as { id: string };
+    expect(result).toMatchObject({ delivered: true, page: 'page-installed', visible: true });
+    expect((await presence('page-browser', 'visible', CHROME_UA)).body.show).toBeNull();
+    expect((await raw('/api/presence?page=page-installed&vis=visible&app=1', { headers: { Origin: base, 'User-Agent': CHROME_UA } })).body.show).toEqual({ id: result.id, hash: '#decision/abc' });
+    expect((await raw('/api/show', { headers: { 'content-type': 'application/json', 'x-lobstah-show-secret': secret }, body: JSON.stringify({ hash: '#prs', app: 'yes' }) })).status).toBe(400);
   });
 
   it('forgets a page on its goodbye beacon', async () => {

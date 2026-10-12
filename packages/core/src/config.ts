@@ -243,6 +243,11 @@ export interface GlassConfig {
   port: number;
 }
 
+export type PetOpen = 'tab' | 'app' | 'helm';
+export interface PetConfig {
+  open: PetOpen;
+}
+
 /** A named territory: the subset of configured repos one helm oversees. */
 export interface GroundsConfig {
   repos: string[];
@@ -255,6 +260,7 @@ export interface Config {
   soak: SoakConfig;
   helm: HelmConfig;
   glass: GlassConfig;
+  pet: PetConfig;
   watch: WatchConfig;
   grounds: Record<string, GroundsConfig>;
   /** Worktree pools for headless dispatches (`[pools.<name>]`). */
@@ -351,6 +357,8 @@ function expandHome(p: string): string {
 export function loadConfig(): Config {
   const file = configPath();
   const raw = fs.existsSync(file) ? (parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
+  const petOpen = (raw.pet as Partial<PetConfig> | undefined)?.open ?? 'tab';
+  if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   if (typeof watch.repairCooldownSecs !== 'number' || !Number.isFinite(watch.repairCooldownSecs) || watch.repairCooldownSecs < 0) {
     throw new Error(`[watch].repairCooldownSecs must be a non-negative number in ${configPath()}`);
@@ -391,6 +399,7 @@ export function loadConfig(): Config {
     soak: parseSoak(raw.soak),
     helm: { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) },
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
+    pet: { open: petOpen },
     watch,
     grounds,
     pools: parsePools(raw.pools, repos),

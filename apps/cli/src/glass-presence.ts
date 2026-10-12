@@ -54,6 +54,7 @@ export function glassHost(userAgent: string): GlassHost {
 export interface GlassPage {
   id: string;
   visible: boolean;
+  standalone: boolean;
   userAgent: string;
   host: GlassHost;
   seenAt: number;
@@ -87,12 +88,12 @@ export class GlassPresence {
    * A page's poll or heartbeat. Returns the show queued for it, once: the
    * show leaves the queue as it is handed over.
    */
-  seen(id: string, visible: boolean, userAgent: string): GlassShow | null {
+  seen(id: string, visible: boolean, userAgent: string, standalone = false): GlassShow | null {
     const now = this.clock();
     this.prune(now);
     const ua = userAgent.slice(0, UA_MAX);
     this.pages.delete(id);
-    this.pages.set(id, { id, visible, userAgent: ua, host: glassHost(ua), seenAt: now });
+    this.pages.set(id, { id, visible, standalone, userAgent: ua, host: glassHost(ua), seenAt: now });
     while (this.pages.size > MAX_PAGES) this.pages.delete(this.pages.keys().next().value!);
     const show = this.shows.get(id);
     if (!show) return null;
@@ -110,16 +111,17 @@ export class GlassPresence {
    * The page a show goes to: the most recently seen page that is on screen,
    * else the most recently seen page. Undefined when none was seen recently.
    */
-  target(): GlassPage | undefined {
+  target(installedOnly = false): GlassPage | undefined {
     const now = this.clock();
     this.prune(now);
     const recent = [...this.pages.values()].sort((a, b) => b.seenAt - a.seenAt);
+    if (installedOnly) return recent.find((p) => p.standalone && p.host === 'chrome' && p.visible && now - p.seenAt <= PRESENCE_VISIBLE_MS);
     return recent.find((p) => p.visible && now - p.seenAt <= PRESENCE_VISIBLE_MS) ?? recent[0];
   }
 
   /** Queue `hash` for the page in front. One show waits per page; a newer one replaces it. */
-  show(hash: string): ShowResult {
-    const page = this.target();
+  show(hash: string, installedOnly = false): ShowResult {
+    const page = this.target(installedOnly);
     if (!page) return { delivered: false };
     const now = this.clock();
     const id = randomBytes(9).toString('base64url');
@@ -193,9 +195,9 @@ export function showSecretMatches(supplied: unknown): boolean {
  * Ask the glass on `port` to show `hash` in an open page. Rejects when the
  * glass does not answer, or refuses the request.
  */
-export function requestShow(port: number, hash: string, timeoutMs = 2000): Promise<ShowResult> {
+export function requestShow(port: number, hash: string, timeoutMs = 2000, installedOnly = false): Promise<ShowResult> {
   const secret = ensureShowSecret();
-  const body = JSON.stringify({ hash });
+  const body = JSON.stringify({ hash, ...(installedOnly ? { app: true } : {}) });
   return new Promise((resolve, reject) => {
     const req = http.request(
       {

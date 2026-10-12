@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, claimNext, enqueue, ensureLayout, executorPath, holdWatch, laneDirs } from '@lobstah/core';
+import { addWatch, appendStatus, askDecision, claimNext, enqueue, ensureLayout, executorPath, holdWatch, laneDirs } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { observeSessionWorker, signOnTrap, takeHelm } from '@lobstah/core';
@@ -23,6 +23,12 @@ function heartbeat(agoMs = 0): void {
 }
 
 describe('man tend — the fleet verdict', () => {
+  it('passes the configured report/decision click route through the pet feed', () => {
+    askDecision({ title: 'Choose a route', options: ['A', 'B'], by: 'helm' });
+    expect(buildTendReport().attention.find((a) => a.kind === 'decision')?.petOpen).toBe('tab');
+    fs.writeFileSync(path.join(home, 'config.toml'), '[pet]\nopen = "helm"\n');
+    expect(buildTendReport().attention.find((a) => a.kind === 'decision')?.petOpen).toBe('helm');
+  });
   it('lists local metadata for traps and the helm without telemetry enabled', () => {
     observeSessionWorker({ session_id: 's', model: 'local-model', permission_mode: 'plan' }, 'codex');
     const wt = path.join(home, 'wt'); fs.mkdirSync(wt);

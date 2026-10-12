@@ -995,6 +995,9 @@ export function buildTendReport(now = Date.now()): TendReport {
   }));
 
   const pools = poolViews(cfg);
+  for (const item of attention) {
+    if (item.kind === 'report' || item.kind === 'decision') item.petOpen = cfg.pet.open;
+  }
   const helms = listHelms().map((h) => ({
     grounds: h.grounds,
     man: helmLabel(h),

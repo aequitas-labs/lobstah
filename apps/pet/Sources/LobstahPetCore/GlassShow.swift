@@ -77,8 +77,18 @@ public func glassRoute(_ result: GlassShowResult?, helm: HelmRegistration?, defa
 }
 
 /// The CLI call behind a click: ask the glass on `port` to show `hash`.
-public func glassShowArguments(_ hash: String, port: Int) -> [String] {
-  ["glass", "show", hash, "--port", String(port), "--json"]
+public func glassShowArguments(_ hash: String, port: Int, installedOnly: Bool = false) -> [String] {
+  ["glass", "show", hash, "--port", String(port), "--json"] + (installedOnly ? ["--app"] : [])
+}
+
+/// Match Chrome's installed-app metadata to this exact loopback glass, not
+/// an app's user-chosen name or a browser tab. Safari launching is unverified.
+public func isInstalledChromeGlass(_ info: [String: Any], glass: URL) -> Bool {
+  guard info["CrBundleIdentifier"] as? String == "com.google.Chrome",
+        let bundle = info["CFBundleIdentifier"] as? String, bundle.hasPrefix("com.google.Chrome.app."),
+        let shortcut = info["CrAppModeShortcutURL"] as? String, let url = URL(string: shortcut) else { return false }
+  return url.scheme == "http" && url.host == "127.0.0.1" && url.port == glass.port
+    && (url.path.isEmpty || url.path == "/") && url.user == nil && url.password == nil
 }
 
 /// A show's answer, or nil when the CLI failed (no glass, an older lobstah).

@@ -84,6 +84,8 @@ describe('parseArgs — one flag-extraction step (axi P6)', () => {
   });
 
   it('rejects flags outside the subcommand that reads them', () => {
+    expect(ok('glass', ['show', '#prs', '--app', '--json']).flags).toEqual({ '--app': true, '--json': true });
+    expect(parseArgs('glass', ['status', '--app'])?.error).toMatch(/--app requires glass show/);
     expect(parseArgs('watch', ['--apply'])?.error).toMatch(/--apply requires watch backfill/);
     expect(parseArgs('watch', ['hold', 'pr:o/r#1', '--apply'])?.error).toMatch(/--apply requires watch backfill/);
     expect(ok('watch', ['backfill', '--apply']).flags).toEqual({ '--apply': true });

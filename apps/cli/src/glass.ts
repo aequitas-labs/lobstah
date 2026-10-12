@@ -887,7 +887,7 @@ export function serveGlass(
         presence.gone(page);
         return reply(200, { ok: true, show: null });
       }
-      return reply(200, { ok: true, show: presence.seen(page, vis === 'visible', req.headers['user-agent'] ?? '') });
+      return reply(200, { ok: true, show: presence.seen(page, vis === 'visible', req.headers['user-agent'] ?? '', q.get('app') === '1') });
     }
     if (req.url === '/api/show') {
       // Local only: the pet and the CLI, never a web page. The secret lives in
@@ -921,13 +921,17 @@ export function serveGlass(
       req.on('end', () => {
         if (size > 4096) return reply(413, { delivered: false, reason: 'The request is too large.' });
         let hash: unknown;
+        let app: unknown;
         try {
-          hash = (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { hash?: unknown })?.hash;
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { hash?: unknown; app?: unknown };
+          hash = body?.hash;
+          app = body?.app;
         } catch {
           return reply(400, { delivered: false, reason: 'Invalid JSON.' });
         }
         if (!validShowHash(hash)) return reply(400, { delivered: false, reason: 'Invalid hash.' });
-        reply(200, presence.show(hash));
+        if (app !== undefined && typeof app !== 'boolean') return reply(400, { delivered: false, reason: 'Invalid app selector.' });
+        reply(200, presence.show(hash, app === true));
       });
       req.on('error', () => reply(400, { delivered: false, reason: 'The request failed.' }));
       return;
