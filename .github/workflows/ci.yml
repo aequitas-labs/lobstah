@@ -48,10 +48,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # Before anything else starts powershell.exe on this machine.
-      - name: A first powershell start stopped part way, then the next start
-        shell: bash
-        run: node scripts/tmp-windows-probes.mjs cold-interrupt ${{ (matrix.replica == 1 || matrix.replica == 2) && '500' || ((matrix.replica == 3 || matrix.replica == 4) && '1500' || '2500') }}
       - name: Full suite with the stall trace
         if: always()
         shell: bash
