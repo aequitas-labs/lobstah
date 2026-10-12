@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { claimBait, enqueue, ensureLayout, heartbeatTrap, listNotices, readTrap, signOnTrap } from '@lobstah/core';
 import { tick } from '../src/daemon.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
 const TTL = 60_000;
@@ -17,7 +18,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

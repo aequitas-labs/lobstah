@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { closeRequest, ensureLayout, listReservations, listTraps, queuedDescriptor, readTrapAnchor, reserveTrap, writeRequest, type TrapRegistration } from '@lobstah/core';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end: reservations (what `man throw` makes) and soak --ticket through the built CLI, against
 // a throwaway repo with a bare origin. Every test has its own LOBSTAH_HOME.
@@ -59,7 +60,7 @@ beforeEach(() => {
   config();
 });
 afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true });
+  removeTempDir(tmp);
   delete process.env.LOBSTAH_HOME;
 });
 

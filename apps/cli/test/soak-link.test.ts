@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureLayout, listTraps, signOnTrap } from '@lobstah/core';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { focusRegistration } from '../src/focus.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end: soak --link through the built CLI, in each session's own
 // environment. The CLI decides whether a session link fits the surface the
@@ -42,7 +43,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = '${primary}'\ntrunk = 'main'\n`);
 });
 afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true });
+  removeTempDir(tmp);
   delete process.env.LOBSTAH_HOME;
 });
 

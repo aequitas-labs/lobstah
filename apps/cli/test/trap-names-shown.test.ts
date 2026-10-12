@@ -16,6 +16,7 @@ import {
 } from '@lobstah/core';
 import type { TrapRegistration } from '@lobstah/core';
 import { buildGlassSnapshot } from '../src/glass.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * A dispatch names its trap by name wherever it shows one: the live
@@ -32,7 +33,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 

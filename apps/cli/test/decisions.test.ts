@@ -27,6 +27,7 @@ import {
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { applyCull, planCull } from '../src/cull.js';
 import { buildGlassSnapshot, serveAttachment, serveGlass } from '../src/glass.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * Decisions end to end: `man ask` stores one, asks stand side by side and
@@ -54,7 +55,7 @@ beforeEach(() => {
   fs.mkdirSync(src);
 });
 afterEach(() => {
-  fs.rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 
