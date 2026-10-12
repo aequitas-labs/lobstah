@@ -28,6 +28,7 @@ import type { Adapter, AdapterRun, AdapterStartOpts } from '@lobstah/adapters';
 import { main } from '../src/run.js';
 import { allocate } from '@lobstah/worktree';
 import { processTest as it } from '../../../test/process-test.js';
+import { stubGh } from '../../../test/stub-gh.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
@@ -39,6 +40,7 @@ import { removeTempDir } from '../../../test/temp-dir.js';
 let root: string;
 let home: string;
 let setupLog: string;
+let gh: ReturnType<typeof stubGh>;
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
@@ -82,8 +84,12 @@ beforeEach(() => {
   git(seed, 'push', '-q', 'origin', 'main');
   git(root, 'clone', '-q', origin, path.join(root, 'clone'));
   writeConfig();
+  // The runner looks for a draft PR after it pushes. These tests are not
+  // about PRs: none of them starts the machine's own gh.
+  gh = stubGh(path.join(root, 'bin'));
 });
 afterEach(() => {
+  gh.restore();
   removeTempDir(root);
   delete process.env.LOBSTAH_HOME;
   delete process.env.CODEX_HOME;
@@ -262,29 +268,19 @@ describe('a follow-up reuses its origin chain’s worktree', () => {
     // A drafted PR already has a watch; keep this integration test focused on
     // follow-up reuse rather than launching another CLI process under CI load.
     addWatch('pr:example/repo#17', 'echo {}', { owner: 'dispatch:origin' });
-    const bin = path.join(root, 'bin');
-    fs.mkdirSync(bin);
-    const calls = path.join(root, 'gh-calls');
-    const gh = path.join(bin, 'gh');
-    fs.writeFileSync(gh, `#!/bin/sh\necho "$*" >> ${JSON.stringify(calls)}\nexit 1\n`);
-    fs.chmodSync(gh, 0o755);
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ''}`;
-    try {
-      const id = kind === 'repair' ? 'repair' : 'sent';
-      enqueue({ id, repo: 'r', brief, followUp: 'origin' });
-      expect(claimNext('work')).toBe(id);
-      const worker = harness(commit(`${kind} work`));
-      await main(path.join(laneDirs('work').active, id), 'work', worker.deps);
-      expect(readEvidence(id, 'work').prUrl).toBe(prUrl);
-      expect(worker.prompts[0]).toContain('Head branch: feature/pr');
-      expect(readWatch('pr:example/repo#17')?.key).toBe('pr:example/repo#17');
-      expect(git(path.join(root, 'origin.git'), 'branch', '--list', 'lobstah/repair')).toBe('');
-      expect(git(path.join(root, 'origin.git'), 'branch', '--list', 'lobstah/sent')).toBe('');
-      expect(fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '').not.toContain('pr create');
-    } finally {
-      process.env.PATH = previousPath;
-    }
+    // Only the follow-up's gh calls count: the origin's run looked for a PR too.
+    fs.rmSync(gh.calls, { force: true });
+    const id = kind === 'repair' ? 'repair' : 'sent';
+    enqueue({ id, repo: 'r', brief, followUp: 'origin' });
+    expect(claimNext('work')).toBe(id);
+    const worker = harness(commit(`${kind} work`));
+    await main(path.join(laneDirs('work').active, id), 'work', worker.deps);
+    expect(readEvidence(id, 'work').prUrl).toBe(prUrl);
+    expect(worker.prompts[0]).toContain('Head branch: feature/pr');
+    expect(readWatch('pr:example/repo#17')?.key).toBe('pr:example/repo#17');
+    expect(git(path.join(root, 'origin.git'), 'branch', '--list', 'lobstah/repair')).toBe('');
+    expect(git(path.join(root, 'origin.git'), 'branch', '--list', 'lobstah/sent')).toBe('');
+    expect(fs.existsSync(gh.calls) ? fs.readFileSync(gh.calls, 'utf8') : '').not.toContain('pr create');
   });
 
   it('reuses a finished origin’s clean worktree: same checkout, same HEAD, no second setup', async () => {
