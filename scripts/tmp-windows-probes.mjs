@@ -203,8 +203,132 @@ async function glass(N, stopFile) {
   for (const o of odd.slice(0, 16)) console.log('  odd:', JSON.stringify(o));
 }
 
+/** What `git worktree remove` leaves when a process stands in the worktree. */
+async function gitRemove() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-gitremove-'));
+  const git = (cwd, ...args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+  const repo = path.join(root, 'repo');
+  git(root, 'init', '-q', '-b', 'main', repo);
+  fs.writeFileSync(path.join(repo, 'f.txt'), 'one\n');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-q', '-m', 'init');
+  const wt = path.join(root, 'wt');
+  git(repo, 'worktree', 'add', '-q', '-b', 'side', wt);
+  const child = await standIn(wt);
+  const res = git(repo, 'worktree', 'remove', wt);
+  console.log('git worktree remove with a process standing in it:', {
+    status: res.status,
+    stderr: res.stderr.trim(),
+    directoryExists: fs.existsSync(wt),
+    entriesLeft: fs.existsSync(wt) ? fs.readdirSync(wt) : [],
+    stillListedByGit: git(repo, 'worktree', 'list').stdout.includes('side'),
+  });
+  child.kill('SIGKILL');
+  await exited(child);
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
+/**
+ * Durations of reuse.test.ts's "a restarted dispatch recovers..." cases in
+ * each checkout named in LOBSTAH_PROBE_TREES (label=dir, comma separated),
+ * alternating. With `paired`, apps/cli/test/soak-worktree.test.ts runs beside
+ * it from the same checkout, started 38 s earlier, as in the full suite.
+ */
+async function reuseCompare(N, paired) {
+  const trees = Object.fromEntries((process.env.LOBSTAH_PROBE_TREES ?? `branch=${process.cwd()}`).split(',').map((e) => e.split('=')));
+  const first = "keeps the earlier attempt's branch and commits";
+  const samples = Object.fromEntries(Object.keys(trees).map((k) => [k, { first: [], second: [], failed: 0, runs: 0 }]));
+  // No shell: the test name pattern has spaces.
+  const vitest = (cwd, args, opts = {}) => [process.execPath, [path.resolve(cwd, 'node_modules/vitest/vitest.mjs'), 'run', ...args], { cwd, windowsHide: true, ...opts }];
+  for (let i = 0; i < N; i++) {
+    for (const [label, dir] of Object.entries(trees)) {
+      const out = path.join(os.tmpdir(), `lobstah-reuse-${process.pid}-${label}-${i}.json`);
+      let beside;
+      if (paired) {
+        beside = spawn(...vitest(dir, ['apps/cli/test/soak-worktree.test.ts'], { stdio: 'ignore' }));
+        await sleep(38_000);
+      }
+      const t = Date.now();
+      const res = spawnSync(...vitest(dir, ['packages/runner/test/reuse.test.ts', '-t', 'a restarted dispatch recovers its unrecorded worktree', '--reporter=json', `--outputFile=${out}`], { encoding: 'utf8', timeout: 600_000 }));
+      if (beside) await exited(beside);
+      const s = samples[label];
+      s.runs++;
+      try {
+        const report = JSON.parse(fs.readFileSync(out, 'utf8'));
+        const cases = report.testResults.flatMap((f) => f.assertionResults).filter((a) => a.status !== 'skipped' && a.status !== 'pending');
+        const a = cases.find((c) => c.title === first);
+        const b = cases.find((c) => c.title === `${first} and uncommitted changes`);
+        if (a) s.first.push(a.duration);
+        if (b) s.second.push(b.duration);
+        const bad = cases.filter((c) => c.status !== 'passed');
+        if (bad.length) {
+          s.failed++;
+          console.log(`${new Date().toISOString()} ${label} run ${i} FAILED:`, bad.map((c) => `${c.title} (${Math.round(c.duration)}ms): ${(c.failureMessages?.[0] ?? '').split('\n')[0]}`));
+        }
+        console.log(`${new Date().toISOString()} ${label} run ${i}${paired ? ' paired' : ''}: first ${Math.round(a?.duration ?? -1)}ms, second ${Math.round(b?.duration ?? -1)}ms, vitest wall ${Date.now() - t}ms`);
+      } catch (err) {
+        s.failed++;
+        console.log(`${label} run ${i}: no report (${err.message}); exit ${res.status}; ${(res.stderr ?? '').slice(-400)}`);
+      }
+      fs.rmSync(out, { force: true });
+    }
+  }
+  console.log(`reuse.test.ts "${first}" (first case in the file) and its "... and uncommitted changes" sibling, ms${paired ? ', beside soak-worktree.test.ts' : ', nothing else running'}:`);
+  console.table(Object.fromEntries(Object.entries(samples).flatMap(([k, s]) => [[`${k}: first case`, { runs: s.runs, failedRuns: s.failed, ...stats(s.first) }], [`${k}: second case`, { runs: s.runs, failedRuns: s.failed, ...stats(s.second) }]])));
+}
+
+/**
+ * The first start of gh.exe and powershell.exe on this machine since it
+ * booted, against later starts. With `beside`, the first starts happen while
+ * apps/cli/test/soak-worktree.test.ts runs (38 s in), as in the full suite.
+ * Must run before anything else in the job has started either tool.
+ */
+async function coldTools(beside) {
+  if (process.platform !== 'win32') return console.log('cold-tools: not Windows');
+  const { WINDOWS_PROCESS_SNAPSHOT } = await import('../packages/runner/dist/windows-processes.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-cold-'));
+  const git = (cwd, ...args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+  git(root, 'init', '-q', '--bare', '-b', 'main', path.join(root, 'origin.git'));
+  const repo = path.join(root, 'repo');
+  git(root, 'clone', '-q', path.join(root, 'origin.git'), repo);
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+  git(repo, 'checkout', '-q', '-b', 'lobstah/interrupted');
+  const run = (file, args) => {
+    const t = process.hrtime.bigint();
+    const res = spawnSync(file, args, { cwd: repo, encoding: 'utf8', windowsHide: true, timeout: 300_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    return { ms: Math.round(Number(process.hrtime.bigint() - t) / 1e6), status: res.status, err: res.error?.code, said: ((res.stderr || res.stdout) ?? '').trim().split(/\r?\n/)[0]?.slice(0, 90) };
+  };
+  const tools = {
+    'gh pr view (as the runner calls it)': () => run('gh', ['pr', 'view', 'lobstah/interrupted', '--json', 'url', '--jq', '.url']),
+    'powershell snapshot (listProcesses)': () => run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PROCESS_SNAPSHOT]),
+    'node -e 0 (control)': () => run(process.execPath, ['-e', '0']),
+  };
+  let load;
+  if (beside) {
+    load = spawn(process.execPath, [path.resolve('node_modules/vitest/vitest.mjs'), 'run', 'apps/cli/test/soak-worktree.test.ts'], { stdio: 'ignore', windowsHide: true });
+    await sleep(38_000);
+  }
+  const first = {};
+  for (const [k, f] of Object.entries(tools)) {
+    const r = f();
+    first[k] = r;
+    console.log(`${new Date().toISOString()} first start${beside ? ' beside soak-worktree.test.ts' : ' on an idle runner'}: ${k}: ${r.ms}ms (exit ${r.status}${r.err ? ` ${r.err}` : ''}; ${r.said.startsWith('To use GitHub CLI') ? 'gh: set GH_TOKEN...' : r.said ? 'output ok' : 'no output'})`);
+  }
+  const second = Object.fromEntries(Object.entries(tools).map(([k, f]) => [k, f().ms]));
+  if (load) await exited(load);
+  const later = Object.fromEntries(Object.keys(tools).map((k) => [k, []]));
+  for (let i = 0; i < 8; i++) for (const [k, f] of Object.entries(tools)) later[k].push(f().ms);
+  console.table(Object.fromEntries(Object.keys(tools).map((k) => [k, { condition: beside ? 'beside soak-worktree' : 'idle', firstStartMs: first[k].ms, secondStartMs: second[k], laterIdleMedianMs: stats(later[k]).median, laterIdleMaxMs: stats(later[k]).max }])));
+  const defender = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '$s = Get-MpComputerStatus; "defender realtime=$($s.RealTimeProtectionEnabled) antivirus=$($s.AntivirusEnabled) onaccess=$($s.OnAccessProtectionEnabled)"'], { encoding: 'utf8', timeout: 120_000 });
+  console.log((defender.stdout || defender.stderr || '').trim().split(/\r?\n/)[0]);
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
 if (mode === 'ebusy') await ebusy(N);
 else if (mode === 'powershell') await powershell(N, process.argv[4] ?? 'idle');
 else if (mode === 'powershell-watch') await powershellWatch(process.argv[3], process.argv[4] ?? 'load');
 else if (mode === 'glass') await glass(N, process.argv[4]);
+else if (mode === 'git-remove') await gitRemove();
+else if (mode === 'cold-tools') await coldTools(process.argv[3] === 'beside');
+else if (mode === 'reuse-compare') await reuseCompare(N, process.argv[4] === 'paired');
 else throw new Error(`unknown mode ${mode}`);

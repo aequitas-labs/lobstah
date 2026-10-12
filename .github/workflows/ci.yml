@@ -39,6 +39,47 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # Before anything else starts gh.exe or powershell.exe on this machine.
+      - name: First start of gh and powershell, idle (odd replicas) or beside the suite's load (even)
+        shell: bash
+        run: node scripts/tmp-windows-probes.mjs cold-tools ${{ (matrix.replica == 2 || matrix.replica == 4 || matrix.replica == 6) && 'beside' || 'idle' }}
+      - name: What git leaves when a process stands in a worktree it removes
+        if: always() && matrix.replica == 1
+        run: node scripts/tmp-windows-probes.mjs git-remove
+      - name: Full suite with the stall trace
+        if: always()
+        shell: bash
+        run: |
+          LOBSTAH_STALL_TRACE=stall-trace LOBSTAH_STALL_SLOW_MS=10000 pnpm test; code=$?
+          echo "=== stall traces"; cat stall-trace/*.log || true
+          exit $code
+      - name: Affected tests, ten consecutive runs
+        if: always()
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            echo "=== iteration $i"
+            pnpm exec vitest run apps/cli/test/soak-listener.test.ts apps/cli/test/glass-lifecycle.test.ts packages/runner/test/reap.test.ts packages/runner/test/reuse.test.ts || exit 1
+          done
+
+  # TEMPORARY evidence job: removed before this PR is ready.
+  windows-reuse-compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2, 3, 4]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
@@ -50,39 +91,29 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Build main beside this branch, for comparison
+      - name: Build main and the wharf stack's top beside this branch
         shell: bash
         run: |
           git worktree add ../base origin/main
-          cd ../base && pnpm install --frozen-lockfile && pnpm build
-      - name: What holds a killed process's directory
-        if: always() && matrix.replica == 1
-        run: node scripts/tmp-windows-probes.mjs ebusy 100
-      - name: PowerShell timings on an idle runner
-        if: always()
-        run: node scripts/tmp-windows-probes.mjs powershell 12 idle
-      - name: Glass first launch on an idle runner, main and this branch alternating
-        if: always()
-        shell: bash
-        run: LOBSTAH_PROBE_CLI=../base/apps/cli/dist/main.js node scripts/tmp-windows-probes.mjs glass 40
-      - name: Full suite with the stall trace; process snapshot and glass sampled under its load
+          git worktree add ../stack origin/codex/wharf-anonymous-telemetry
+          git -C ../base log -1 --format='main: %h %s'
+          git -C ../stack log -1 --format='stack top: %h %s'
+          (cd ../base && pnpm install --frozen-lockfile && pnpm build)
+          (cd ../stack && pnpm install --frozen-lockfile && pnpm build)
+      # The first run on this machine starts gh.exe for the first time: the
+      # order rotates so each checkout gets that first run on some replica.
+      - name: reuse.test.ts first case beside soak-worktree.test.ts, as in the full suite
         if: always()
         shell: bash
         run: |
-          rm -f stop.flag
-          node scripts/tmp-windows-probes.mjs powershell-watch stop.flag suite > watch.log 2>&1 &
-          LOBSTAH_PROBE_CLI=../base/apps/cli/dist/main.js node scripts/tmp-windows-probes.mjs glass 100000 stop.flag > glass.log 2>&1 &
-          LOBSTAH_STALL_TRACE=stall-trace LOBSTAH_STALL_SLOW_MS=12000 pnpm test; code=$?
-          touch stop.flag; wait
-          echo "=== process snapshot latency under the suite's load"; cat watch.log
-          echo "=== glass first launch under the suite's load"; cat glass.log
-          echo "=== stall traces"; cat stall-trace/*.log || true
-          exit $code
-      - name: Affected tests, five consecutive runs
+          case "${{ matrix.replica }}" in
+            1) trees="main=../base,stack=../stack,branch=." ;;
+            2) trees="stack=../stack,main=../base,branch=." ;;
+            3) trees="main=../base,branch=.,stack=../stack" ;;
+            4) trees="stack=../stack,branch=.,main=../base" ;;
+          esac
+          LOBSTAH_PROBE_TREES="$trees" node scripts/tmp-windows-probes.mjs reuse-compare 3 paired
+      - name: The same with nothing else running
         if: always()
         shell: bash
-        run: |
-          for i in 1 2 3 4 5; do
-            echo "=== iteration $i"
-            pnpm exec vitest run apps/cli/test/soak-listener.test.ts apps/cli/test/glass-lifecycle.test.ts packages/runner/test/reap.test.ts packages/runner/test/reuse.test.ts || exit 1
-          done
+        run: LOBSTAH_PROBE_TREES="main=../base,stack=../stack,branch=." node scripts/tmp-windows-probes.mjs reuse-compare 8
