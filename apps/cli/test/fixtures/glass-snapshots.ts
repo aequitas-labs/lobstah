@@ -268,10 +268,39 @@ export function acceptanceFleet(): GlassFullSnapshot {
   return d;
 }
 
-/**
- * One trap in each live state: working a catch, idle and listening, parked on
- * a review wait, and idle with a stale heartbeat (not listening).
- */
+/** Two repos in every deck section, including dispatch-linked and repo-less items. */
+export function repoFilterFleet(): GlassFullSnapshot {
+  const d = base();
+  d.version = '0.7.4';
+  d.repoKeys = ['web', 'api', 'empty'];
+  d.dispatches.push(dispatch('empty-done', { repo: 'empty', bucket: 'done', verb: 'done' }));
+  for (const [i, repo] of ['web', 'api'].entries()) {
+    const id = `${repo}-work`;
+    d.dispatches.push(dispatch(id, { repo, title: `${repo} implementation`, note: `${repo} implementation` }),
+      dispatch(`${repo}-queued`, { repo, bucket: 'queued', verb: 'queued', title: `${repo} queued`, note: `${repo} queued` }));
+    d.traps.push(trap(repo, { repo, name: `${repo}-crab`, label: `${repo}-crab`, worktree: `/repos/${repo}/worktree` }));
+    d.landed.push({ key: `work:${id}`, id, lane: 'work', verb: 'done', at: ago(MIN), note: `${repo} landed`, unreported: true });
+    d.reports.push({ key: `report:work:${id}`, dispatch: id, lane: 'work', title: `${repo} report`, author: `${repo}-crab`, filedAt: ago(MIN), stateHash: id, bytes: 30, attachments: [] });
+    d.decisions ??= [];
+    d.decisions.push({ key: `decision:${repo}`, dispatch: id, lane: 'work', title: `${repo} decision`, detail: 'Choose a base', options: ['main', 'feature'], attachments: [], askedBy: 'helm', askedAt: ago(MIN), stateHash: id });
+    d.attention.push({ kind: 'decision', key: `decision:${repo}`, id, lane: 'work', verb: 'decision', note: `${repo} decision`, ageSecs: 60, stateHash: id });
+    d.attention.push({ kind: 'question', key: `work:${id}`, id, lane: 'work', verb: 'needs-decision', note: `${repo} question`, ageSecs: 60, stateHash: id, at: ago(MIN) });
+    const number = 41 + i;
+    const key = `pr:acme/${repo}#${number}`;
+    d.prs.push(glassPr(evidencePr(number), { key, repo, forgeRepo: `acme/${repo}`, url: `https://github.com/acme/${repo}/pull/${number}`, title: `${repo} pull request`, stackId: key, position: 0 }));
+    d.stacks.push({ id: key, repo, numbers: [number], floor: 'main', open: true, nextNumber: number, behind: 0 });
+    d.attention.push({ kind: 'pr:ready', key, id, lane: 'work', verb: 'pr:ready', note: `${repo} PR ready`, ageSecs: 60, stateHash: id, repo });
+    d.notices.push({ seq: repo, kind: 'caught', text: `${repo} notice`, at: ago(MIN), repo });
+  }
+  d.decisions!.push({ key: 'decision:global', title: 'Global decision', detail: '', options: [], attachments: [], askedBy: 'helm', askedAt: ago(MIN), stateHash: 'global' });
+  d.attention.push({ kind: 'decision', key: 'decision:global', id: '', lane: 'work', verb: 'decision', note: 'Global decision', ageSecs: 60, stateHash: 'global' });
+  d.reports.push({ key: 'report:helm:global', title: 'Global report', author: 'helm', filedAt: ago(MIN), stateHash: 'global', bytes: 30, attachments: [] });
+  d.traps.push(trap('global', { repo: undefined, name: 'global-crab', label: 'global-crab' }));
+  d.notices.push({ seq: 'global', kind: 'caught', text: 'Global notice', at: ago(MIN) });
+  return d;
+}
+
+/** One trap in each live state: working, listening, parked on review, and stale. */
 export function trapStatesFleet(): GlassFullSnapshot {
   const d = acceptanceFleet();
   const c = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
