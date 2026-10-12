@@ -1,5 +1,14 @@
 import type { GlassBeats, GlassDispatch, GlassOlderKind, GlassOlderPage, GlassSnapshot, StatsPage } from '@lobstah/core';
-import { addOlder, answerSummary, applyBeats, decisionCards, modalItem, openDecisionOrder, unreadDecisions } from '../../src/glass-diff.js';
+import {
+  addOlder,
+  answerSummary,
+  applyBeats,
+  decisionCards,
+  filteredDecisionCards,
+  modalItem,
+  openDecisionOrder,
+  unreadDecisions,
+} from '../../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, ModalType } from '../../src/glass-diff.js';
 import { saveLobHidden, savePrefs } from './prefs.js';
 import { getState, setState, viewOf } from './store.js';
@@ -33,7 +42,7 @@ export function receive(snapshot: GlassSnapshot): void {
     ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
     // The shown decision left (answered elsewhere, withdrawn): show the oldest open one, or close.
     ...(decisionModal?.key && !live.has(decisionModal.key) && !drafts[decisionModal.key]?.sent
-      ? { decisionModal: nextOpen(cards, kept, decisionModal.key) }
+      ? { decisionModal: nextOpen(filteredDecisionCards(snapshot, getState().prefs), kept, decisionModal.key) }
       : {}),
   });
 }
@@ -52,14 +61,23 @@ function nextOpen(
 
 /** The cards the page shows now. */
 function currentCards() {
-  const view = viewOf(getState());
-  return view ? decisionCards(view.attention || [], view.decisions || []) : [];
+  const state = getState();
+  const view = viewOf(state);
+  return view ? filteredDecisionCards(view, state.prefs) : [];
 }
 
 /** The open decisions the modal steps through, oldest first. */
 export function modalOrder(): ReturnType<typeof decisionCards> {
-  const { drafts } = getState();
-  return openDecisionOrder(currentCards(), (k) => !!drafts[k]?.sent);
+  const state = getState();
+  const cards = currentCards();
+  // A direct decision link still opens its target, even with another repo selected.
+  const key = state.decisionModal?.key;
+  const view = viewOf(state);
+  const target =
+    key && view && !cards.some((c) => c.key === key)
+      ? decisionCards(view.attention || [], view.decisions || [], view.dispatches).find((c) => c.key === key)
+      : undefined;
+  return openDecisionOrder(target ? [...cards, target] : cards, (k) => !!state.drafts[k]?.sent);
 }
 
 /** The unread decisions, oldest first: the alert's and the badge's count. */

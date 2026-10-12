@@ -200,13 +200,19 @@ export type DecisionCard =
  * its record, and each raw `question`. tend already hides a question its
  * decision frames.
  */
-export function decisionCards(attention: readonly TendAttention[], decisions: readonly GlassDecision[]): DecisionCard[] {
+export function decisionCards(
+  attention: readonly TendAttention[],
+  decisions: readonly GlassDecision[],
+  dispatches: readonly GlassDispatchSummary[] = [],
+): DecisionCard[] {
   const byKey = new Map(decisions.map((d) => [d.key, d]));
+  const repos = dispatchRepos(dispatches);
   const cards: DecisionCard[] = [];
   for (const a of attention) {
     if (a.kind === 'decision') {
       const d = byKey.get(a.key);
       if (!d) continue;
+      const repo = linkedRepo(d, repos) ?? a.repo;
       cards.push({
         kind: 'decision',
         key: d.key,
@@ -215,11 +221,12 @@ export function decisionCards(attention: readonly TendAttention[], decisions: re
         options: d.options,
         attachments: d.attachments,
         ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),
-        ...(d.repo ? { repo: d.repo } : {}),
+        ...(repo ? { repo } : {}),
         at: d.askedAt,
         ...((d.viewedAt ?? a.viewedAt) ? { viewedAt: d.viewedAt ?? a.viewedAt } : {}),
       });
     } else if (a.kind === 'question') {
+      const repo = linkedRepo({ ...a, dispatch: a.id }, repos);
       cards.push({
         kind: 'question',
         key: a.key,
@@ -227,7 +234,7 @@ export function decisionCards(attention: readonly TendAttention[], decisions: re
         note: a.note || a.verb,
         dispatch: a.id,
         lane: a.lane,
-        ...(a.repo ? { repo: a.repo } : {}),
+        ...(repo ? { repo } : {}),
         at: a.at ?? '',
         ...(a.viewedAt ? { viewedAt: a.viewedAt } : {}),
       });
@@ -376,9 +383,27 @@ export function isStale(iso: string | undefined, ms: number, now: number): boole
 }
 
 type Filterable = Pick<GlassDispatchSummary, 'id' | 'lane' | 'repo' | 'verb' | 'note' | 'title' | 'for'>;
+/** Repo-less work belongs to All repos; fleet-wide notices remain visible in every repo. */
+const matchesRepo = (repo: string | undefined, st: Partial<GlassPrefs>, global = false): boolean =>
+  !st.repo || repo === st.repo || (global && !repo);
+
+const dispatchRepos = (dispatches: readonly GlassDispatchSummary[]) =>
+  new Map(dispatches.map((x) => [`${x.lane}:${x.id}`, x.repo]));
+const linkedRepo = (x: { repo?: string; dispatch?: string; lane?: string }, repos: Map<string, string | undefined>): string | undefined =>
+  x.repo || (x.dispatch ? repos.get(`${x.lane ?? 'work'}:${x.dispatch}`) : undefined);
+
+/** Shared selection for deck rows, unread badges, alerts and decision navigation. */
+export function filteredDecisionCards(d: GlassSnapshot, st: Partial<GlassPrefs>): DecisionCard[] {
+  const query = String(st.q || '').toLowerCase();
+  return decisionCards(d.attention || [], d.decisions || [], d.dispatches).filter((c) =>
+    matchesRepo(c.repo, st) &&
+    (!query || [c.kind, c.repo, c.dispatch, c.kind === 'decision' ? `${c.title} ${c.detail}` : c.note].join(' ').toLowerCase().includes(query)),
+  );
+}
+
 export function matches(x: Filterable, st: Partial<GlassPrefs>): boolean {
   if (st.lane && x.lane !== st.lane) return false;
-  if (st.repo && x.repo !== st.repo) return false;
+  if (!matchesRepo(x.repo, st)) return false;
   if (st.verb && x.verb !== st.verb) return false;
   if (st.q) {
     const q = st.q.toLowerCase();
@@ -466,56 +491,53 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     (a.live ? (Date.parse(a.signedOnAt || '') || 0) - (Date.parse(b.signedOnAt || '') || 0)
       : signedOffAt(b) - signedOffAt(a)) ||
     (a.name ?? a.trapId).localeCompare(b.name ?? b.trapId));
-  const deckTraps = orderedTraps
-    .filter(
-      (t) =>
-        (seated(t) || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000))) &&
-        hasQuery(t.name, t.trapId, t.repo, t.worktree),
-    );
+  const repos = dispatchRepos(d.dispatches);
+  const inRepo = (x: { repo?: string; dispatch?: string; lane?: string }) => matchesRepo(linkedRepo(x, repos), st);
+  const traps = orderedTraps.filter((t) => inRepo(t) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness));
+  const reports = (d.reports || []).filter((r) => inRepo(r) && hasQuery(r.title, r.author, r.dispatch, linkedRepo(r, repos))).sort(reportOrder);
+  const stacks = (d.stacks || []).filter(inRepo);
+  const prs = (d.prs || []).filter(inRepo);
+  const deckTraps = traps.filter((t) =>
+    seated(t) || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000)),
+  );
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
   return {
     chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat), stats: d.stats },
     deck: {
       view: st.view,
-      decisions: decisionCards(d.attention || [], d.decisions || []).filter((c) =>
-        c.kind === 'decision' ? hasQuery(c.kind, c.repo, c.title, c.dispatch, c.detail) : hasQuery(c.kind, c.repo, c.note, c.dispatch),
-      ),
-      prAttention: (d.attention || []).filter((a) => a.kind && a.kind.startsWith('pr:')).map(noAge),
+      decisions: filteredDecisionCards(d, st),
+      prAttention: (d.attention || []).filter((a) =>
+        a.kind && a.kind.startsWith('pr:') && inRepo({ ...a, repo: a.repo ?? (d.prs || []).find((p) => p.key === a.key)?.repo, dispatch: a.id }),
+      ).map(noAge),
       landed: (d.landed || [])
-        .filter((a) => recent(a.at, LANDED_WINDOW_MS) && hasQuery(a.repo, a.note, a.id))
+        .filter((a) => inRepo({ ...a, dispatch: a.id }) && recent(a.at, LANDED_WINDOW_MS) && hasQuery(a.repo, a.note, a.id))
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, LANDED_MAX),
-      reports: (d.reports || []).filter((r) => hasQuery(r.title, r.author, r.dispatch, r.repo)).sort(reportOrder),
-      inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', repo: '', verb: '' })),
+      reports,
+      inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', verb: '' })),
       traps: deckTraps.map((t) => seat(trapView(d, t))),
-      stacks: (d.stacks || []).filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
-      prs: (d.prs || []).filter((p) => p.state === 'OPEN'),
+      stacks: stacks.filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
+      prs: prs.filter((p) => p.state === 'OPEN'),
       error: d.attentionError,
     },
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },
     traps: {
       view: st.view,
-      list: orderedTraps
-        .filter((t) => (!st.repo || t.repo === st.repo) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness))
-        .map((t) => seat(trapView(d, t))),
+      list: traps.map((t) => seat(trapView(d, t))),
     },
     prs: {
       view: st.view,
-      stacks: (d.stacks || []).filter((s) => !st.repo || s.repo === st.repo),
-      prs: (d.prs || []).filter(
-        (p) => (!st.repo || p.repo === st.repo) && hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName),
-      ),
+      stacks,
+      prs: prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)),
       watches: (d.watches || []).filter((w) => !String(w.key).startsWith('pr:')),
     },
     reports: {
       view: st.view,
-      list: (d.reports || [])
-        .filter((r) => (!st.repo || r.repo === st.repo) && hasQuery(r.title, r.author, r.dispatch, r.repo))
-        .sort(reportOrder),
+      list: reports,
     },
     notices: {
       list: (d.notices || []).filter(
-        (n) => (!st.repo || !n.repo || n.repo === st.repo) && (!st.noticeKind || n.kind === st.noticeKind) && hasQuery(n.kind, n.text, n.repo),
+        (n) => matchesRepo(n.repo, st, true) && (!st.noticeKind || n.kind === st.noticeKind) && hasQuery(n.kind, n.text, n.repo),
       ),
     },
     foot: { version: d.version, repoUrl: d.repoUrl },

@@ -112,7 +112,7 @@ describe('glass section selectors', () => {
     expect([later.chips.daemonStale, later.chips.helms[0].stale, later.traps.list[0].stale]).toEqual([true, true, true]);
   });
 
-  it('filters dispatches by lane, repo, verb, and search; in flight ignores all but search', () => {
+  it('filters dispatches by lane, repo, verb, and search; in flight ignores lane and verb, not repo', () => {
     const s = { ...snapshot(), dispatches: [dispatch('d1', 'working', 'on it'), { ...dispatch('d2', 'blocked', 'stuck'), lane: 'chore', repo: 'api' }] };
     const ids = (st: Record<string, string>) => diff.sectionInputs(s, ui({ st: { view: 'table', lane: '', repo: '', verb: '', q: '', ...st } }), NOW).dispatches.list.map((x: { id: string }) => x.id);
     expect(ids({})).toEqual(['d1', 'd2']);
@@ -120,8 +120,9 @@ describe('glass section selectors', () => {
     expect(ids({ repo: 'web' })).toEqual(['d1']);
     expect(ids({ verb: 'blocked' })).toEqual(['d2']);
     expect(ids({ q: 'STUCK' })).toEqual(['d2']);
-    const deck = diff.sectionInputs(s, ui({ st: { view: 'table', lane: 'chore', repo: 'api', verb: 'blocked', q: 'on it' } }), NOW).deck;
+    const deck = diff.sectionInputs(s, ui({ st: { view: 'table', lane: 'chore', repo: 'web', verb: 'blocked', q: 'on it' } }), NOW).deck;
     expect(deck.inflight.map((x: { id: string }) => x.id)).toEqual(['d1']);
+    expect(diff.sectionInputs(s, ui({ st: { repo: 'api', q: 'on it' } }), NOW).deck.inflight).toEqual([]);
   });
 
   it('keeps PR standing out of On deck decisions; the deck carries it with the open PRs', () => {
