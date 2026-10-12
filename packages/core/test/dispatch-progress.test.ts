@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { appendStatus, claimNext, dispatchProgress, dispatchQueueReason, enqueue, ensureLayout,
-  laneDirs, listNotices, loadConfig, noticeDispatchProgress, noticeStands, unseenNotices, writeActivity, touchEvents } from '../src/index.js';
+  laneDirs, listNotices, loadConfig, noticeDispatchProgress, noticeStands, unseenNotices, writeActivity, touchEvents, requeue, queuedAt } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -92,6 +92,15 @@ it('honors configured thresholds and disabling either condition', () => {
   expect(dispatchProgress()[0]?.state).toBe('stalled');
   fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\nqueuedNoticeSecs = 0\nstalledNoticeSecs = 0\n');
   expect(dispatchProgress()).toHaveLength(0);
+});
+
+it('starts a fresh queue age when a long-running catch is requeued, preserving its descriptor', () => {
+  enqueue({ id: 'retry', repo: 'r', brief: 'preserve me', for: 'wt:missing' }); claimNext('work');
+  advance(3600); requeue('retry', 'work');
+  expect(queuedAt('retry', 'work')).toBe(new Date().toISOString());
+  expect(dispatchProgress()).toHaveLength(0);
+  advance(180);
+  expect(dispatchProgress()[0]?.state).toBe('queued-too-long');
 });
 
 it.each(['queuedNoticeSecs', 'stalledNoticeSecs'])('validates %s instead of silently disabling notices', (key) => {
