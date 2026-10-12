@@ -112,7 +112,7 @@ describe('reapStarted — stops what the runner started', () => {
     const t = await tree(false);
     // tree() has already received the child's grandchild PID. Its OS process
     // exists before spawn returns: one snapshot, not repeated provider polls.
-    expect(startedBy(t.root, await listProcesses())).toContain(t.grandchild);
+    expect(startedBy(t.root, listProcesses())).toContain(t.grandchild);
 
     const n = await reapStarted(t.root, 500);
     expect(n).toBeGreaterThanOrEqual(2);
@@ -124,7 +124,7 @@ describe('reapStarted — stops what the runner started', () => {
     const t = await tree(true);
     expect(await until(() => !alive(t.child), 10_000)).toBe(true);
     expect(alive(t.grandchild)).toBe(true);
-    expect(startedBy(t.root, await listProcesses())).toContain(t.grandchild);
+    expect(startedBy(t.root, listProcesses())).toContain(t.grandchild);
 
     await reapStarted(t.root, 500);
     expect(await until(() => !alive(t.grandchild), 10_000)).toBe(true);

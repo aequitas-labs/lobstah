@@ -1,8 +1,5 @@
-import { execFile, execFileSync } from 'node:child_process';
-import { promisify } from 'node:util';
+import { execFileSync } from 'node:child_process';
 import { WINDOWS_PROCESS_SNAPSHOT } from './windows-processes.js';
-
-const run = promisify(execFile);
 
 /** One row of the process table. `pgid` is absent on Windows. */
 export interface ProcRow {
@@ -11,31 +8,31 @@ export interface ProcRow {
   pgid?: number;
 }
 
-/** How long the process table may take to read, on any platform. */
-const LIST_MS = 30_000;
-
-/**
- * The process table: `ps` on POSIX, a native Tool Help snapshot on Windows.
- * It does not block the event loop while the command runs: the first
- * powershell.exe start on a Windows machine since it booted takes about ten
- * times as long as later ones (about 3 s against 0.4 s on idle CI runners),
- * and on a slow runner it has outlasted the whole bound.
- */
-export async function listProcesses(): Promise<ProcRow[]> {
+/** The process table: `ps` on POSIX, a native Tool Help snapshot on Windows. */
+export function listProcesses(): ProcRow[] {
   if (process.platform === 'win32') {
-    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PROCESS_SNAPSHOT], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: LIST_MS,
-    });
-    return stdout
+    const out = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        WINDOWS_PROCESS_SNAPSHOT,
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    return out
       .split(/\r?\n/)
       .map((l) => l.trim().split(/\s+/).map(Number))
       .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid))
       .map(([pid, ppid]) => ({ pid: pid!, ppid: ppid! }));
   }
-  const { stdout } = await run('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8', timeout: LIST_MS });
-  return stdout
+  const out = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  return out
     .split('\n')
     .map((l) => l.trim().split(/\s+/).map(Number))
     .filter(([pid, ppid, pgid]) => Number.isInteger(pid) && Number.isInteger(ppid) && Number.isInteger(pgid))
@@ -114,7 +111,7 @@ export async function stopPids(pids: number[], graceMs = 2000): Promise<void> {
 export async function reapStarted(root: number = process.pid, graceMs?: number): Promise<number> {
   let rows: ProcRow[];
   try {
-    rows = await listProcesses();
+    rows = listProcesses();
   } catch {
     return 0;
   }
