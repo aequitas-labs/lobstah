@@ -11,6 +11,8 @@ export default defineConfig({
     environment: 'node',
     // No test names or clears the tab of the terminal running the suite.
     env: { LOBSTAH_TERMINAL_TITLE: '0' },
+    // TEMPORARY: removed before this PR is ready.
+    setupFiles: process.env.LOBSTAH_STALL_TRACE ? ['test/tmp-stall-trace.ts'] : [],
     ...(windows && {
       maxWorkers: 2,
       minWorkers: 1,
