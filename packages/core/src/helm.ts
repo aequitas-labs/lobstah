@@ -248,6 +248,7 @@ export function wakeFloorMs(h: HelmRegistration | undefined): number {
 export function noticeStands(n: Notice): boolean {
   switch (n.kind) {
     case 'dispatch-progress':
+    case 'trap-idle-working':
       return dispatchProgress().some((p) => p.id === n.refId && p.stateHash === n.stateHash);
     case 'disk-held':
       return readHold() !== undefined;

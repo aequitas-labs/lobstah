@@ -5,7 +5,8 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm,
-  noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath } from '@lobstah/core';
+  noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop } from '@lobstah/core';
+import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { charter, HELM_REMINDER } from '../src/charter.js';
 
@@ -115,6 +116,24 @@ describe('lobstah hook user-prompt-submit', () => {
 });
 
 describe('lobstah hook stop (alias: man haul)', () => {
+  for (const harness of ['claude', 'codex'] as const) {
+    it(`${harness}: working blocks once, then passes without an arm/park loop`, () => {
+      const trapId = trap('working-session', harness);
+      const id = '77777777-7777-4777-8777-777777777777';
+      enqueue({ id, repo: 'web', brief: 'b' }); claimNext('work');
+      fs.writeFileSync(path.join(laneDirs('work').active, id, 'claim.json'), JSON.stringify({ by: `wt:${trapId}`, sessionId: 'working-session', at: new Date().toISOString() }));
+      const reg = readTrap(trapId)!;
+      fs.writeFileSync(path.join(home, 'soaking', `${trapId}.json`), JSON.stringify({ ...reg, claimed: id }));
+      appendStatus(id, 'work', 'working', 'still executing', undefined, undefined, true);
+      const first = hook(['hook', 'stop'], { session_id: 'working-session' });
+      expect(first.status, first.stderr).toBe(0);
+      expect(JSON.parse(first.stdout).reason).toContain('about to go idle');
+      expect(JSON.parse(first.stdout).reason).toContain('waiting on an external await, report paused and name it');
+      expect(hook(['hook', 'stop'], { session_id: 'working-session' }).stdout).toBe('');
+      expect(hook(['hook', 'stop'], { session_id: 'working-session', stop_hook_active: true }).stdout).toBe('');
+    });
+
+  }
   for (const [label, args] of [['hook stop', PAIRS.stop[0]], ['man haul', PAIRS.stop[1]]] as const) {
     it(`${label}: a trap wakes on its message; the helm is asked to arm; neither role is inert`, () => {
       const trapId = trap('trap-session');
@@ -134,6 +153,32 @@ describe('lobstah hook stop (alias: man haul)', () => {
       expect(none.stdout).toBe('');
     });
   }
+});
+
+it('idle-working attention appears in helm Stop, tend and status with the full note', () => {
+  const trapId = trap('idle-session');
+  const id = '77777777-7777-4777-8777-777777777777';
+  enqueue({ id, repo: 'web', brief: 'b' }); claimNext('work');
+  fs.writeFileSync(path.join(laneDirs('work').active, id, 'claim.json'), JSON.stringify({ by: `wt:${trapId}`, sessionId: 'idle-session', at: new Date().toISOString() }));
+  const reg = { ...readTrap(trapId)!, claimed: id };
+  fs.writeFileSync(path.join(home, 'soaking', `${trapId}.json`), JSON.stringify(reg));
+  const note = 'Holding both PRs until Chris says the design is settled; full final question?';
+  appendStatus(id, 'work', 'working', note, undefined, undefined, true);
+  trapWorkingStop(reg, true, Date.now() - 120_000);
+  takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+  noticeDispatchProgress(); unseenNotices(true);
+  const stopped = hook(['hook', 'stop'], { session_id: HELM });
+  expect(stopped.status, stopped.stderr).toBe(0);
+  expect(stopped.stdout).toContain('idle-while-working');
+  expect(stopped.stdout).toContain(note);
+  expect(renderTend(buildTendReport())).toContain(note);
+  expect(buildTendReport().attention.find((a) => a.id === id)?.verb).toBe('idle-while-working');
+  const status = hook(['status', id], {});
+  expect(status.status, status.stderr).toBe(0);
+  expect(status.stdout).toContain('attention: idle-while-working');
+  expect(status.stdout).toContain(note);
+  expect(hook(['status'], {}).stdout).toContain('idle-while-working');
+  expect(hook(['status', `wt:${trapId}`], {}).stdout).toContain('idle-while-working');
 });
 
 it('Stop lists overdue queues and stalls beside send expectations even after the wake was consumed', () => {

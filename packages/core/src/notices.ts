@@ -21,6 +21,7 @@ export type NoticeKind =
   | 'trap-batch'
   | 'trap-claim-idle'
   | 'dispatch-progress'
+  | 'trap-idle-working'
   | 'trap-stowed'
   | 'trap-defective'
   | 'trap-ghosted'
@@ -199,10 +200,10 @@ export function unseenNotices(
       if (through > seen) fs.writeFileSync(cursorFile(), through);
     }
   }
-  const progress = owned.some((n) => n.kind === 'dispatch-progress') ? dispatchProgress() : [];
+  const progress = owned.some((n) => n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') ? dispatchProgress() : [];
   const waking = owned.filter((n) => {
     if (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)) return false;
-    if (n.kind === 'dispatch-progress') return progress.some((p) => p.id === n.refId && p.stateHash === n.stateHash);
+    if (n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') return progress.some((p) => p.id === n.refId && p.stateHash === n.stateHash);
     if (n.kind !== 'stack-ready') return true;
     const epoch = n.refId ? readStackEpochs()[n.refId] : undefined;
     return !!epoch?.ready && n.stateHash === stackStateHash({ id: n.refId! }, epoch.epoch) && stackReadyEnabled(loadConfig());

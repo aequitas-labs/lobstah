@@ -86,6 +86,8 @@ import {
   cancelQueued,
   unseenNotices,
   dispatchProgress,
+  trapWorkingStop,
+  resumeTrapTurn,
   dispatchQueueReason,
   consumeRelievedNotice,
   groundsErrors,
@@ -863,9 +865,11 @@ const HOOK_COMMANDS: Record<string, string[]> = {
 async function mainCli(): Promise<void> {
   let [cmd, ...args] = process.argv.slice(2);
   if (cmd === 'hook' && args[0] === 'user-prompt-submit') {
-    // Add context, never block a prompt or change fleet state.
+    // A new user turn resumes a trap; the helm gets its non-blocking reminder.
     try {
       const hook = readHookStdin();
+      const trap = hook?.session_id ? trapBySession(hook.session_id) : undefined;
+      if (trap) resumeTrapTurn(trap, true);
       if (hook?.session_id && !trapBySession(hook.session_id) && helmOf(hook.session_id)) {
         console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: HELM_REMINDER } }));
       }
@@ -1050,15 +1054,18 @@ async function mainCli(): Promise<void> {
       if (!id) {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
         console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'waiting', 'activity']));
+        for (const p of dispatchProgress()) console.log(p.text);
         const pools = poolViews(loadConfig());
         if (pools.length > 0) console.log(`\n${toonTable('pools', poolRows(pools), POOL_COLUMNS)}`);
         break;
       }
       const namedTrap = trapByAddress(id);
       if (namedTrap) {
+        const progress = dispatchProgress().find((p) => p.id === namedTrap.claimed);
         console.log(toonKV({ trap: `wt:${namedTrap.trapId}`, name: namedTrap.name, label: trapLabel(namedTrap),
           session: namedTrap.sessionId, repo: namedTrap.repo ?? '(addressed only)', worktree: namedTrap.worktree,
-          claimed: namedTrap.claimed, heartbeatAt: namedTrap.heartbeatAt }));
+          claimed: namedTrap.claimed, heartbeatAt: namedTrap.heartbeatAt,
+          ...(progress ? { attention: progress.state, reason: progress.text } : {}) }));
         break;
       }
       if (id.startsWith('wt:') || /^[a-z]+-[a-z]+$/.test(id)) throw new Error(unknownTrapMessage(id));
@@ -1073,12 +1080,14 @@ async function mainCli(): Promise<void> {
       // Activity only while the dispatch is live: a finished one did its last thing.
       const live = fs.existsSync(path.join(laneDirs(lane).active, id));
       const activity = live ? activityView(readActivity(id, lane), wedgeSecs()) : undefined;
+      const progress = live ? dispatchProgress().find((p) => p.id === id && p.lane === lane) : undefined;
       const waitingNow = live ? waitingView(log.at(-1)) : undefined;
       console.log(
         toonKV({
           id,
           lane,
           state,
+          ...(progress ? { attention: progress.state, reason: progress.text } : {}),
           ...(descriptor?.systemRepair ? {
             repairPr: descriptor.pr?.url ?? '(unknown)',
             worker: trapAddressText(claim?.by ?? descriptor.for ?? 'headless', 'label', names),
@@ -2327,6 +2336,22 @@ async function mainCli(): Promise<void> {
       try {
         const hook = readHookStdin();
         const trapReg = hook?.session_id ? trapBySession(hook.session_id) : undefined;
+        if (trapReg) {
+          // Cancellation and inbox steering keep their existing priority.
+          // This is a single peek, not the automatic background park.
+          if (hasOpenCatch(trapReg)) {
+            const last = readStatusLog(trapReg.claimed!, findLane(trapReg.claimed!)).at(-1);
+            if (last?.verb === 'working' && last.reported && (await soakPark(trapReg.trapId, '0')) === 'woke') {
+              resumeTrapTurn(trapReg);
+              break;
+            }
+          }
+          const stop = trapWorkingStop(trapReg, hook?.stop_hook_active);
+          if (stop) {
+            if (stop.reason) console.log(JSON.stringify({ decision: 'block', reason: stop.reason }));
+            break; // Second Stop passes; never turn this into a park-renewal loop.
+          }
+        }
         // An unconfirmed sign-on title: remind once per turn (a continued turn
         // is not reminded again), at most TITLE_REMINDERS times; the last one
         // says so, and then the hook stops asking.
@@ -2460,7 +2485,7 @@ async function mainCli(): Promise<void> {
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
                 ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
-                ...notices.filter((n) => n.kind !== 'dispatch-progress').map((n) => noticeLine(n)),
+                ...notices.filter((n) => n.kind !== 'dispatch-progress' && n.kind !== 'trap-idle-working').map((n) => noticeLine(n)),
                 ...progress,
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
@@ -2519,7 +2544,7 @@ async function mainCli(): Promise<void> {
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
-          ...fleetNotices.filter((n) => n.kind !== 'dispatch-progress').map((n) => noticeLine(n)),
+          ...fleetNotices.filter((n) => n.kind !== 'dispatch-progress' && n.kind !== 'trap-idle-working').map((n) => noticeLine(n)),
           ...progressLines(),
           ...replies.map(replyLine),
           ...unanswered.map(sentLine),
