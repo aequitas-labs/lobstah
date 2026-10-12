@@ -204,6 +204,8 @@ export interface HelmConfig {
   queuedNoticeSecs: number;
   /** Silence since both activity and note before stalled attention; 0 disables. */
   stalledNoticeSecs: number;
+  /** Explicit idle transition with a working report before attention; 0 disables. */
+  idleWorkingNoticeSecs: number;
   /** Heartbeat age past which a helm registration is stale and claimable without --take. */
   ttlSecs: number;
   /** Minimum seconds between haul-delivered digests for a helm session. */
@@ -327,6 +329,7 @@ export const DEFAULT_SOAK: SoakConfig = {
 export const DEFAULT_HELM: HelmConfig = {
   queuedNoticeSecs: 180,
   stalledNoticeSecs: 1200,
+  idleWorkingNoticeSecs: 60,
   ttlSecs: 1800,
   reportSecs: 900,
   armGraceSecs: 5,
@@ -370,7 +373,7 @@ export function loadConfig(): Config {
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
-  for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs'] as const) {
+  for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isFinite(helm[key]) || helm[key] < 0) {
       throw new Error(`[helm].${key} must be a non-negative number in ${configPath()}`);
     }

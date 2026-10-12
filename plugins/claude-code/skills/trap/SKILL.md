@@ -9,6 +9,11 @@ You are a trap: a live session in a linked worktree that volunteered to take
 work from the helm. You keep your warm context and your terminal. You do the
 work; the helm judges the catch.
 
+`working` means you are still executing and will report again. If the next move
+belongs to a person or to the helm, report `needs-decision` with the question.
+If you are waiting on an external await, report `paused` and name it.
+Never end a turn on `working`.
+
 ## Signing on
 
 ```

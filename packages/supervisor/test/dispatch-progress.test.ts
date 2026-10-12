@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { enqueue, ensureLayout, claimNext, appendStatus, listNotices, laneDirs } from '@lobstah/core';
+import { enqueue, ensureLayout, claimNext, appendStatus, listNotices, laneDirs, trapWorkingStop, unseenNotices } from '@lobstah/core';
 import { tick } from '../src/daemon.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
@@ -13,6 +13,25 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), '[limits]\nmaxConcurrent = 0\n');
 });
 afterEach(() => { vi.useRealTimers(); delete process.env.LOBSTAH_HOME; removeTempDir(home); });
+it('idle-working wakes promptly, backs off, clears on a waiting report and never doubles as stalled', () => {
+  const trap = { trapId: 'seat', name: 'kind-crab', sessionId: 'session', harness: 'codex', worktree: home, cwd: home,
+    claimed: 'idle', signedOnAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() };
+  enqueue({ id: 'idle', repo: 'r', brief: 'b' }); claimNext('work');
+  fs.writeFileSync(path.join(home, 'soaking', 'seat.json'), JSON.stringify(trap));
+  fs.writeFileSync(path.join(laneDirs('work').active, 'idle', 'claim.json'), JSON.stringify({ by: 'wt:seat', sessionId: 'session', at: new Date().toISOString() }));
+  appendStatus('idle', 'work', 'working', 'waiting on a person but wrongly reported working', undefined, undefined, true);
+  trapWorkingStop(trap); trapWorkingStop(trap);
+  vi.setSystemTime(Date.now() + 59_000); tick();
+  expect(listNotices().filter((n) => n.kind === 'trap-idle-working')).toHaveLength(0);
+  vi.setSystemTime(Date.now() + 1000); tick(); tick();
+  expect(listNotices().filter((n) => n.kind === 'trap-idle-working')).toHaveLength(1);
+  expect(unseenNotices(true).find((n) => n.kind === 'trap-idle-working')?.text).toContain('kind-crab');
+  vi.setSystemTime(Date.now() + 900_000); tick();
+  expect(listNotices().filter((n) => n.kind === 'trap-idle-working')).toHaveLength(2);
+  expect(listNotices().filter((n) => n.kind === 'dispatch-progress' && n.refId === 'idle')).toHaveLength(0);
+  appendStatus('idle', 'work', 'needs-decision', 'which design?', undefined, undefined, true);
+  expect(unseenNotices(false).filter((n) => n.kind === 'trap-idle-working')).toHaveLength(0);
+});
 it('the daemon wakes queued and stalled work, not paused work, once per backoff interval', () => {
   enqueue({ id: 'silent', repo: 'r', brief: 'b' }); claimNext('work');
   fs.writeFileSync(path.join(laneDirs('work').active, 'silent', 'claim.json'), JSON.stringify({ by: 'wt:seat', at: new Date().toISOString() }));

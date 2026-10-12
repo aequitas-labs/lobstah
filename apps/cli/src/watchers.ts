@@ -1,30 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, atomicRenameSync, lobstahHome } from '@lobstah/core';
+import { uniqueTempPath, atomicRenameSync, lobstahHome, readSessionWatcher } from '@lobstah/core';
+import type { SessionWatcher } from '@lobstah/core';
+export type { SessionWatcher } from '@lobstah/core';
 
 /** A foreground wait whose completion notification wakes its harness session. */
-export interface SessionWatcher {
-  sessionId: string;
-  kind: 'man' | 'trap';
-  pid: number;
-  heartbeatAt: string;
-  trapId?: string;
-}
-
-const STALE_MS = 5_000;
 const HEARTBEAT_MS = 1_500;
 const watcherDir = () => path.join(lobstahHome(), 'watchers');
 const watcherFile = (sessionId: string) => path.join(watcherDir(), `${encodeURIComponent(sessionId)}.json`);
 
 function liveRegistration(sessionId: string, now = Date.now()): SessionWatcher | undefined {
-  try {
-    const w = JSON.parse(fs.readFileSync(watcherFile(sessionId), 'utf8')) as SessionWatcher;
-    const beat = Date.parse(w.heartbeatAt);
-    if (w.sessionId !== sessionId || !Number.isInteger(w.pid) || w.pid <= 0 || !Number.isFinite(beat) || now - beat > STALE_MS) return undefined;
-    return w;
-  } catch {
-    return undefined;
-  }
+  return readSessionWatcher(sessionId, now);
 }
 
 export function liveWatcher(sessionId: string, kind: SessionWatcher['kind'], trapId?: string, now = Date.now()): SessionWatcher | undefined {

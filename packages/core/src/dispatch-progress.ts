@@ -5,6 +5,7 @@ import path from 'node:path';
 import { laneDirs } from './paths.js';
 import { activeIds, pendingIds, queuedAt, storedDescriptor, cancelRequested } from './queue.js';
 import { readSessionClaim, trapByAddress, trapLabel, hasOpenCatch } from './soak.js';
+import { idleWorkingTrap } from './trap-turn.js';
 import { readStatusLog } from './status.js';
 import { readActivity, ageLabel } from './activity.js';
 import { lastEventAt } from './events.js';
@@ -36,7 +37,7 @@ export interface DispatchProgress {
   id: string;
   lane: Lane;
   repo: string;
-  state: 'queued-too-long' | 'stalled';
+  state: 'queued-too-long' | 'stalled' | 'idle-while-working';
   since: string;
   ageSecs: number;
   stateHash: string;
@@ -64,6 +65,17 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): 
       if (last && ['done', 'failed', 'paused', 'needs-decision', 'blocked'].includes(last.verb)) continue;
       const d = storedDescriptor(id, lane);
       const claim = readSessionClaim(id, lane);
+      const trap = claim?.by ? trapByAddress(claim.by) : undefined;
+      const idle = trap ? idleWorkingTrap(trap, now) : undefined;
+      if (d && idle) {
+        const ageSecs = (now - Date.parse(idle.since)) / 1000;
+        if (cfg.helm.idleWorkingNoticeSecs > 0 && ageSecs >= cfg.helm.idleWorkingNoticeSecs) {
+          out.push({ id, lane, repo: d.repo, state: 'idle-while-working', since: idle.since, ageSecs,
+            thresholdSecs: cfg.helm.idleWorkingNoticeSecs, stateHash: `idle-working:${idle.since}`,
+            text: `idle-while-working ${id}: ${trapLabel(trap!)} ended its turn ${ageLabel(ageSecs * 1000)} ago while reporting working; last note: ${idle.note}. Read the note, resolve the question on a card, or ask the worker to keep working.` });
+        }
+        continue; // Explicitly idle is not a silent execution stall.
+      }
       let startedAt: string | undefined;
       try { startedAt = JSON.parse(fs.readFileSync(path.join(laneDirs(lane).active, id, 'runner.json'), 'utf8')).startedAt; }
       catch { /* A trap has a claim, not a runner. */ }
@@ -85,7 +97,7 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): 
 export function noticeDispatchProgress(now = Date.now(), cfg = loadConfig()): void {
   for (const p of dispatchProgress(now, cfg)) {
     const reminder = Math.floor(Math.log2(1 + Math.max(0, p.ageSecs - p.thresholdSecs) / 900));
-    postNotice({ kind: 'dispatch-progress', refId: p.id, repo: p.repo, text: p.text,
+    postNotice({ kind: p.state === 'idle-while-working' ? 'trap-idle-working' : 'dispatch-progress', refId: p.id, repo: p.repo, text: p.text,
       stateHash: p.stateHash, dedupeKey: `dispatch-progress-${p.lane}-${p.id}-${p.stateHash}-${reminder}` });
   }
 }
