@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { listProcesses, reapStarted, startedBy } from '../src/reap.js';
+import { listProcesses, reapStarted, startTwice, startedBy } from '../src/reap.js';
 
 describe('startedBy — the processes a root started', () => {
   it('lists every descendant, never the root or unrelated processes', () => {
@@ -45,6 +45,33 @@ describe('startedBy — the processes a root started', () => {
       { pid: 12, ppid: 11 },
     ];
     expect(startedBy(10, rows).sort((a, b) => a - b)).toEqual([11, 12]);
+  });
+});
+
+describe('startTwice — a read that is slow to start gets a second start in the same time', () => {
+  const stoppedByTimeout = () => Object.assign(new Error('timed out'), { killed: true });
+
+  it('starts again when the first start was stopped at half time, and gives each half the time', async () => {
+    const given: number[] = [];
+    const out = await startTwice(async (ms) => {
+      given.push(ms);
+      if (given.length === 1) throw stoppedByTimeout();
+      return 'rows';
+    }, 30_000);
+    expect(out).toBe('rows');
+    expect(given).toEqual([15_000, 15_000]);
+  });
+
+  it('does not start a third time', async () => {
+    let starts = 0;
+    await expect(startTwice(async () => { starts++; throw stoppedByTimeout(); })).rejects.toThrow('timed out');
+    expect(starts).toBe(2);
+  });
+
+  it('does not start again after a failure that was not the timeout', async () => {
+    let starts = 0;
+    await expect(startTwice(async () => { starts++; throw new Error('powershell.exe not found'); })).rejects.toThrow('not found');
+    expect(starts).toBe(1);
   });
 });
 
@@ -112,7 +139,7 @@ describe('reapStarted — stops what the runner started', () => {
     const t = await tree(false);
     // tree() has already received the child's grandchild PID. Its OS process
     // exists before spawn returns: one snapshot, not repeated provider polls.
-    expect(startedBy(t.root, listProcesses())).toContain(t.grandchild);
+    expect(startedBy(t.root, await listProcesses())).toContain(t.grandchild);
 
     const n = await reapStarted(t.root, 500);
     expect(n).toBeGreaterThanOrEqual(2);
@@ -124,7 +151,7 @@ describe('reapStarted — stops what the runner started', () => {
     const t = await tree(true);
     expect(await until(() => !alive(t.child), 10_000)).toBe(true);
     expect(alive(t.grandchild)).toBe(true);
-    expect(startedBy(t.root, listProcesses())).toContain(t.grandchild);
+    expect(startedBy(t.root, await listProcesses())).toContain(t.grandchild);
 
     await reapStarted(t.root, 500);
     expect(await until(() => !alive(t.grandchild), 10_000)).toBe(true);
