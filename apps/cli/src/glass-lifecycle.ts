@@ -98,11 +98,16 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** The version endpoint proves that the occupant is a lobstah glass. */
-function probeVersionEndpoint(port: number, timeoutMs: number): Promise<GlassInfo | undefined> {
+/**
+ * The version endpoint proves that the occupant is a lobstah glass, and names
+ * its pid. `absent` means something answered the request without being that
+ * endpoint (a glass from before it existed answers 404). Undefined means
+ * nothing answered: the connection was refused or reset, or timed out.
+ */
+function probeVersionEndpoint(port: number, timeoutMs: number): Promise<GlassInfo | 'absent' | undefined> {
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (info?: GlassInfo) => {
+    const finish = (info?: GlassInfo | 'absent') => {
       if (settled) return;
       settled = true;
       resolve(info);
@@ -110,7 +115,7 @@ function probeVersionEndpoint(port: number, timeoutMs: number): Promise<GlassInf
     const req = http.get(`${glassUrl(port)}/api/version`, { timeout: timeoutMs }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
-        finish();
+        finish('absent');
         return;
       }
       let body = '';
@@ -118,7 +123,7 @@ function probeVersionEndpoint(port: number, timeoutMs: number): Promise<GlassInf
       res.on('data', (chunk: string) => {
         body += chunk;
         if (body.length > 1024) {
-          finish();
+          finish('absent');
           req.destroy();
         }
       });
@@ -126,9 +131,9 @@ function probeVersionEndpoint(port: number, timeoutMs: number): Promise<GlassInf
       res.on('end', () => {
         try {
           const info = JSON.parse(body) as GlassInfo;
-          finish(info.service === 'lobstah-glass' && Number.isInteger(info.pid) && typeof info.version === 'string' ? info : undefined);
+          finish(info.service === 'lobstah-glass' && Number.isInteger(info.pid) && typeof info.version === 'string' ? info : 'absent');
         } catch {
-          finish();
+          finish('absent');
         }
       });
     });
@@ -180,8 +185,16 @@ function probeLegacyGlass(port: number, timeoutMs: number): Promise<GlassInfo | 
   });
 }
 
+/**
+ * The glass answering on `port`. Only a glass that answered the version
+ * request without having that endpoint is asked the older way, and that
+ * answer carries no pid. A version request that got no answer is no glass
+ * yet: a glass that starts listening a moment later would answer the older
+ * request, and its missing pid would read as some other glass.
+ */
 export async function probeGlass(port: number, timeoutMs = 400): Promise<GlassInfo | undefined> {
-  return (await probeVersionEndpoint(port, timeoutMs)) ?? (await probeLegacyGlass(port, timeoutMs));
+  const info = await probeVersionEndpoint(port, timeoutMs);
+  return info === 'absent' ? probeLegacyGlass(port, timeoutMs) : info;
 }
 
 export function glassLines(port: number, info: GlassInfo, already = false): Record<string, string> {
