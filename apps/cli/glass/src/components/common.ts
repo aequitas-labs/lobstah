@@ -6,6 +6,7 @@ import type { ResumeSession } from '../../../src/glass-diff.js';
 import type { DispatchDetail, ModalType } from '../../../src/glass-diff.js';
 import { copyText, loadOlder, openLightbox, openTrapWindow, requestTrap, showModal } from '../actions.js';
 import { getState } from '../store.js';
+import { prReviewUrl } from '../../../../../packages/core/src/pr-review.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 import { workerMetadata } from '../../../../../packages/core/src/worker-metadata.js';
@@ -336,7 +337,7 @@ export function prCell(x: GlassDispatchSummary) {
     return [
       x.prList.map((p, i) => [
         i ? ' → ' : '',
-        html`<a href=${p.url} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`,
+        html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`,
         p.badge && [' ', html`<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>`],
       ]),
       x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
@@ -348,8 +349,11 @@ export function prCell(x: GlassDispatchSummary) {
   const many = x.evidence && x.evidence.prUrls && x.evidence.prUrls.length > 1 ? x.evidence.prUrls : undefined;
   return [
     many
-      ? many.map((u, i) => [i ? ' ' : '', html`<a href=${u} target="_blank" rel="noopener" onClick=${stop}>#${u.split('/').pop()}</a>`])
-      : html`<a href=${url} target="_blank" rel="noopener" onClick=${stop}>PR</a>`,
+      ? many.map((u, i) => [
+          i ? ' ' : '',
+          html`<a href=${reviewLink(u)} target="_blank" rel="noopener" onClick=${stop}>#${u.split('/').pop()}</a>`,
+        ])
+      : html`<a href=${reviewLink(url)} target="_blank" rel="noopener" onClick=${stop}>PR</a>`,
     b && [' ', html`<span class=${'badge ' + prBadgeClass(b)} title=${'observed ' + b.observedAt}>${b.text}</span>`],
     x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
   ];
@@ -387,7 +391,9 @@ export function kindCell(x: Pick<TendAttention, 'kind' | 'verb'>) {
 }
 
 export const prLink = (p: Pick<GlassPr, 'url' | 'number'>) =>
-  html`<a href=${p.url} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`;
+  html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`;
+
+export const reviewLink = (url: string) => prReviewUrl(url, getState().snapshot?.reviewTools);
 
 /** A PR card's name: the number bold, then the title; the number alone when there is no title. One line, cut with an ellipsis. */
 export const prName = (p: Pick<GlassPr, 'number' | 'title'>) =>

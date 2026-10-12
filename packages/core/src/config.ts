@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import type { Descriptor, DispatchLimits } from './types.js';
 import { lobstahHome } from './paths.js';
+import { validReviewTool } from './pr-review.js';
 
 export interface HarnessDefaults {
   default?: string;
@@ -13,6 +14,8 @@ export interface HarnessDefaults {
 
 export interface RepoConfig {
   path: string;
+  /** PR click destination: a preset or HTTPS template. */
+  review?: string;
   origin?: string;
   trunk: string;
   setup?: string[];
@@ -370,8 +373,10 @@ export function loadConfig(): Config {
   const reposRaw = (raw.repos ?? {}) as Record<string, Record<string, unknown>>;
   const repos: Record<string, RepoConfig> = {};
   for (const [key, r] of Object.entries(reposRaw)) {
+    if (r.review !== undefined && !validReviewTool(r.review)) throw new Error(`[repos.${key}].review must be github, graphite, linear, linear-app, or an HTTPS template with {owner}, {repo}, {number}`);
     repos[key] = {
       path: expandHome(String(r.path ?? '')),
+      ...(r.review !== undefined ? { review: r.review as string } : {}),
       origin: r.origin ? String(r.origin) : undefined,
       trunk: String(r.trunk ?? 'main'),
       setup: Array.isArray(r.setup) ? r.setup.map(String) : undefined,

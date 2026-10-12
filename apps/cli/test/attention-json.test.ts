@@ -61,6 +61,17 @@ type Item = Record<string, unknown>;
 const withoutAge = (items: Item[]) => items.map(({ ageSecs: _age, ...rest }) => rest);
 
 describe('attention --json', () => {
+  it.each([
+    ['linear', 'https://linear.review/acme/web/pull/9'],
+    ['linear-app', 'linear://review/acme/web/pull/9'],
+  ])('feeds the pet the %s destination while keeping the canonical PR identity', (tool, reviewUrl) => {
+    fs.appendFileSync(path.join(home, 'config.toml'), `\n[repos.web]\npath = "/missing"\norigin = "git@github.com:acme/web.git"\nreview = "${tool}"\n`);
+    standingItems();
+    const result = lobstah('attention', '--json');
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout) as { attention: Item[] };
+    expect(parsed.attention.find((a) => a.kind === 'pr:draft')).toMatchObject({ key: 'pr:acme/web#9', prUrl: PR_URL, reviewUrl });
+  });
   it('prints only { attention }, with the same items and fields as man tend --json', () => {
     standingItems();
     expect(lobstah('attention', 'ack', 'pr:acme/web#9', '--by', 'pet').status).toBe(0);

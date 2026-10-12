@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { reviewTools } from './review-tools.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -645,6 +646,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     now: new Date().toISOString(),
     version: lobstahVersion(),
     repoUrl: REPO_URL,
+    reviewTools: reviewTools(cfg),
     daemon: executor ? { version: executor.version, heartbeat: executor.heartbeat } : undefined,
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
     helms,
