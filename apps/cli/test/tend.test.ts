@@ -23,6 +23,16 @@ function heartbeat(agoMs = 0): void {
 }
 
 describe('man tend — the fleet verdict', () => {
+  it('shows queue reasons immediately and standing progress after the threshold', () => {
+    heartbeat();
+    enqueue({ id: 'waiting', repo: 'r', brief: 'work', for: 'wt:missing', queuedAt: new Date(Date.now() - 200_000).toISOString() });
+    const r = buildTendReport();
+    expect(r.verdict).toBe('needs-attention');
+    expect(r.stories.flatMap((s) => s.dispatches).find((d) => d.id === 'waiting')?.queueReason).toContain('not signed on');
+    expect(r.attention.filter((a) => a.kind === 'dispatch-progress')).toHaveLength(1);
+    expect(renderTend(r)).toContain('queued-too-long');
+    expect(renderTend(r)).toContain('not signed on');
+  });
   it('passes the configured report/decision click route through the pet feed', () => {
     askDecision({ title: 'Choose a route', options: ['A', 'B'], by: 'helm' });
     expect(buildTendReport().attention.find((a) => a.kind === 'decision')?.petOpen).toBe('tab');

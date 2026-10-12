@@ -200,6 +200,10 @@ export interface SoakConfig {
 }
 
 export interface HelmConfig {
+  /** Queued age before lack of a claim needs attention; 0 disables. */
+  queuedNoticeSecs: number;
+  /** Silence since both activity and note before stalled attention; 0 disables. */
+  stalledNoticeSecs: number;
   /** Heartbeat age past which a helm registration is stale and claimable without --take. */
   ttlSecs: number;
   /** Minimum seconds between haul-delivered digests for a helm session. */
@@ -321,6 +325,8 @@ export const DEFAULT_SOAK: SoakConfig = {
 };
 
 export const DEFAULT_HELM: HelmConfig = {
+  queuedNoticeSecs: 180,
+  stalledNoticeSecs: 1200,
   ttlSecs: 1800,
   reportSecs: 900,
   armGraceSecs: 5,
@@ -363,6 +369,12 @@ export function loadConfig(): Config {
   const petOpen = (raw.pet as Partial<PetConfig> | undefined)?.open ?? 'tab';
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
+  const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
+  for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs'] as const) {
+    if (typeof helm[key] !== 'number' || !Number.isFinite(helm[key]) || helm[key] < 0) {
+      throw new Error(`[helm].${key} must be a non-negative number in ${configPath()}`);
+    }
+  }
   if (typeof watch.repairCooldownSecs !== 'number' || !Number.isFinite(watch.repairCooldownSecs) || watch.repairCooldownSecs < 0) {
     throw new Error(`[watch].repairCooldownSecs must be a non-negative number in ${configPath()}`);
   }
@@ -402,7 +414,7 @@ export function loadConfig(): Config {
     harness: (raw.harness as HarnessDefaults) ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
     soak: parseSoak(raw.soak),
-    helm: { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) },
+    helm,
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
     pet: { open: petOpen },
     watch,

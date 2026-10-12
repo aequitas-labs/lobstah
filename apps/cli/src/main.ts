@@ -85,6 +85,8 @@ import {
   bounceTrapMessages,
   cancelQueued,
   unseenNotices,
+  dispatchProgress,
+  dispatchQueueReason,
   consumeRelievedNotice,
   groundsErrors,
   captureWindow,
@@ -947,6 +949,7 @@ async function mainCli(): Promise<void> {
         address = `wt:${trap.trapId}`;
       }
       const trap = trapByAddress(address);
+      if (trap && hasOpenCatch(trap)) warnings.push(`${dispatchQueueReason({ ...d, for: address }, lane)}; sticky work stays queued. Cancel and re-dispatch unaddressed, or cancel and re-address to another trap.`);
       const reserved = trap ? undefined : reservationByAddress(address);
       if (!trap && !reserved) throw new Error(`${unknownTrapMessage(address)} — \`lobstah man tend\` lists live traps`);
       address = `wt:${(trap ?? reserved)!.trapId}`;
@@ -1081,7 +1084,7 @@ async function mainCli(): Promise<void> {
             worker: trapAddressText(claim?.by ?? descriptor.for ?? 'headless', 'label', names),
             ...(state === 'queued' && descriptor.for ? { waitingForTrap: descriptor.systemRepair.trapWaitUntil ?? true } : {}),
           } : {}),
-          ...(state === 'queued' ? { queued: since } : {}),
+          ...(state === 'queued' ? { queued: since, queueReason: descriptor ? dispatchQueueReason(descriptor, lane) : 'descriptor unavailable' } : {}),
           ...dispatchTrap(id, lane, names),
           ...(descriptor?.pool || readEvidence(id, lane).pool ? { pool: readEvidence(id, lane).pool ?? `${descriptor!.pool} (no worktree yet)` } : {}),
           lastNote: log.at(-1)?.note === undefined ? undefined : nameTrapsIn(log.at(-1)!.note!, 'label', names),
@@ -1222,6 +1225,7 @@ async function mainCli(): Promise<void> {
           attachments,
         );
         console.log(`delivered: inbox of ${member.id}${member.bucket === 'queue' ? ' (queued)' : ''}`);
+        if (member.bucket === 'queue') console.log(toonKV({ delivery: member.descriptor.for ?? member.descriptor.pool ?? 'unaddressed', queueReason: dispatchQueueReason(member.descriptor, member.lane) }));
         const expects = !has('--no-reply');
         if (expects) expectReply({ dispatchId: member.id, lane: member.lane, from, text });
         console.log(toonKV({ id: member.id, from, queued: name, ...(expects ? { reply: 'expected' } : {}) }));
@@ -1236,10 +1240,15 @@ async function mainCli(): Promise<void> {
       let headless = false;
       const claimFile = path.join(laneDirs(origin.lane)[origin.bucket], origin.id, 'claim.json');
       let claimedBy: string | undefined;
+      const originEvidence = readEvidence(origin.id, origin.lane);
       try {
         claimedBy = (JSON.parse(fs.readFileSync(claimFile, 'utf8')) as { by?: string }).by;
       } catch {
-        claimedBy = readEvidence(origin.id, origin.lane).deliveredTo;
+        // A trap receipt survives requeue. A later headless launch is the
+        // actual executor, not that earlier (possibly now busy) trap.
+        const launched = Date.parse(originEvidence.worker?.observedAt ?? '') || 0;
+        const delivered = Date.parse(originEvidence.deliveredAt ?? '') || 0;
+        if (!originEvidence.worker || delivered > launched) claimedBy = originEvidence.deliveredTo;
       }
       const trap = claimedBy?.startsWith('wt:') ? readTrap(claimedBy.slice('wt:'.length)) : undefined;
       if (trap && Date.now() - (Date.parse(trap.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000) address = claimedBy;
@@ -1250,6 +1259,7 @@ async function mainCli(): Promise<void> {
         brief: `Follow-up instruction from ${from} on dispatch ${origin.id}:\n${text}`,
         followUp: origin.id,
         for: address,
+        ...(!address && origin.descriptor.pool ? { pool: origin.descriptor.pool } : {}),
       };
       const warnings = startDispatch(followUp, origin.lane, values('--attach'), sender);
       if (!has('--no-reply')) expectReply({ dispatchId: followUp.id, lane: origin.lane, from, text });
@@ -1259,7 +1269,8 @@ async function mainCli(): Promise<void> {
         sendMessage(origin.id, origin.lane, `[from ${from}]\n${text}`, from);
       }
       console.log(`started: follow-up ${followUp.id} of ${origin.id}`);
-      if (headless) console.log('delivery: unaddressed; a headless worker will take it');
+      if (headless) console.log(`delivery: unaddressed${followUp.pool ? ` (pool ${followUp.pool})` : ''}; a matching trap or headless worker may take it`);
+      else console.log(`delivery: ${trapAddressText(address!, 'label')} (sticky; follows the previous trap claim)`);
       for (const warning of warnings) console.log(toonKV({ warning }));
       break;
     }
@@ -2425,6 +2436,7 @@ async function mainCli(): Promise<void> {
               }
             : undefined;
         const helmNoticeFilter = helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
+        const progressLines = () => dispatchProgress().filter((p) => !helmRepos || helmRepos.has(p.repo)).map((p) => `- ${p.text}`);
         // The helm's cursor starts at its sign-on (see `man wait`).
         const helmWakes = noticeWakes(helm);
         const helmFloorMs = wakeFloorMs(helm);
@@ -2439,7 +2451,8 @@ async function mainCli(): Promise<void> {
           // note wakes man wait. Alone it never blocks a stop that has a live
           // watcher; with no watcher it rides on the arm block below. Due sent
           // lines are listed with any block, paced like a question.
-          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0;
+          const progress = progressLines();
+          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0;
           const unanswered = blocking ? dueUnanswered(true, remindMs, Date.now(), matchHelm) : [];
           if (blocking) {
             emit(
@@ -2447,7 +2460,8 @@ async function mainCli(): Promise<void> {
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
                 ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
-                ...notices.map((n) => noticeLine(n)),
+                ...notices.filter((n) => n.kind !== 'dispatch-progress').map((n) => noticeLine(n)),
+                ...progress,
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
                 ...(replies.length || unanswered.length ? [SENT_HINT] : []),
@@ -2463,6 +2477,7 @@ async function mainCli(): Promise<void> {
           emit(
             [
               ...(sent.length ? ['A send still waits on its reply:', ...sent.map(sentLine), SENT_HINT] : []),
+              ...progressLines(),
               `Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
                 '(it wakes this session when the fleet needs you), then end your turn. ' +
                 armGraceNote(graceSecs),
@@ -2480,7 +2495,7 @@ async function mainCli(): Promise<void> {
         let replies = takeReplies(true, matchHelm);
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
         const quiet = () =>
-          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0;
+          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0 && progressLines().length === 0;
         if (quiet()) {
           const baseline = captureWaitBaseline();
           while (Date.now() < deadline) {
@@ -2504,7 +2519,8 @@ async function mainCli(): Promise<void> {
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
-          ...fleetNotices.map((n) => noticeLine(n)),
+          ...fleetNotices.filter((n) => n.kind !== 'dispatch-progress').map((n) => noticeLine(n)),
+          ...progressLines(),
           ...replies.map(replyLine),
           ...unanswered.map(sentLine),
           ...(replies.length || unanswered.length ? [SENT_HINT] : []),

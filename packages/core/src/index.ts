@@ -44,6 +44,7 @@ export * from './worktree-safety.js';
 export * from './roster.js';
 export * from './throw-plan.js';
 export * from './activity.js';
+export * from './dispatch-progress.js';
 export * from './slots.js';
 export * from './worker-metadata.js';
 export * from './session-workers.js';

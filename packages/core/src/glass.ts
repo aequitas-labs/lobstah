@@ -17,7 +17,7 @@ import type { ActivityView } from './activity.js';
  */
 
 /** tend's attention kinds: the configurable ones plus `watch`. */
-export type TendAttentionKind = AttentionKind | 'watch';
+export type TendAttentionKind = AttentionKind | 'watch' | 'dispatch-progress';
 
 /** One attention item exactly as `man tend` derives it. */
 export interface TendAttention {
