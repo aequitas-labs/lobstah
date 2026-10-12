@@ -101,7 +101,7 @@ function pidAlive(pid: number): boolean {
 /**
  * The version endpoint proves that the occupant is a lobstah glass, and names
  * its pid. `absent` means something answered the request without being that
- * endpoint (a glass from before it existed answers 404). Undefined means
+ * endpoint, as a glass from before the endpoint existed does. Undefined means
  * nothing answered: the connection was refused or reset, or timed out.
  */
 function probeVersionEndpoint(port: number, timeoutMs: number): Promise<GlassInfo | 'absent' | undefined> {

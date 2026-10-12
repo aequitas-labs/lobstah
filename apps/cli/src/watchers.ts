@@ -73,6 +73,9 @@ const pidAlive = (pid: number): boolean => {
 /**
  * Wait up to graceMs for `pid` to exit. True when it is gone. Until then the
  * process keeps the directory it stands in, which Windows will not remove.
+ * Windows reports a process gone a few milliseconds before it lets go of
+ * that directory (measured on CI: under 5 ms), so a caller that removes
+ * the directory at once can still be refused.
  */
 export async function processGone(pid: number, graceMs: number, pollMs = 50): Promise<boolean> {
   const deadline = Date.now() + Math.max(0, graceMs);
