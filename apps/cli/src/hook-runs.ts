@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome } from '@lobstah/core';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from '@lobstah/core';
 
 /** The hooks lobstah's plugins declare, by the harness event name. */
 export const LOBSTAH_HOOKS = ['Stop', 'SessionStart', 'PostToolUse', 'SessionEnd'] as const;
@@ -35,7 +35,7 @@ export function recordHookRun(event: string | undefined, harness: string | undef
     const file = hookRunsPath();
     const tmp = uniqueTempPath(file);
     fs.writeFileSync(tmp, JSON.stringify(runs, null, 2));
-    fs.renameSync(tmp, file);
+    atomicRenameSync(tmp, file);
   } catch {
     // A hook never fails over its own bookkeeping.
   }

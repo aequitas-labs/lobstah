@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { postNotice } from './notices.js';
 
 interface Budget {
@@ -26,7 +26,7 @@ function write(s: BudgetState): void {
   fs.mkdirSync(lobstahHome(), { recursive: true });
   const tmp = uniqueTempPath(file());
   fs.writeFileSync(tmp, JSON.stringify(s));
-  fs.renameSync(tmp, file());
+  atomicRenameSync(tmp, file());
 }
 
 function withBudgetLock<T>(action: () => T): T {

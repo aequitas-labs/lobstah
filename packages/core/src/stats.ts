@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, laneDirs, lobstahHome, readDirIfPresent } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, laneDirs, lobstahHome, readDirIfPresent } from './paths.js';
 import type { Lane } from './types.js';
 import type { Evidence } from './types.js';
 import { sanitizeWorker, workerProfile } from './worker-profile.js';
@@ -269,7 +269,7 @@ function writeStore(store: StatsStore): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(store));
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 /** One process at a time changes the store; a crashed holder's lock goes stale after two minutes. */

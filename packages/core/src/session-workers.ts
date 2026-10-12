@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { workerMetadata } from './worker-metadata.js';
 import type { WorkerMetadata } from './worker-metadata.js';
 import { updateTrapWorker } from './soak.js';
@@ -37,7 +37,7 @@ export function observeSessionWorker(input: { session_id?: string; model?: unkno
       fs.mkdirSync(path.dirname(p), { recursive: true });
       const tmp = uniqueTempPath(p);
       fs.writeFileSync(tmp, text);
-      fs.renameSync(tmp, p);
+      atomicRenameSync(tmp, p);
     }
     updateTrapWorker(input.session_id, next);
     updateHelmWorker(input.session_id, next);

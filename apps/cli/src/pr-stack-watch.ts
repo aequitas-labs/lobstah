@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome, loadConfig, parsePrRef, PR_VIEW_FIELDS, prStackTrunk, readPrs, readWatch, cachedPrStackLink, githubBlockedUntil } from '@lobstah/core';
+import { uniqueTempPath, atomicRenameSync, lobstahHome, loadConfig, parsePrRef, PR_VIEW_FIELDS, prStackTrunk, readPrs, readWatch, cachedPrStackLink, githubBlockedUntil } from '@lobstah/core';
 import type { GhPrView, PrRef } from '@lobstah/core';
 import { addPrWatch, observePr, pollSecs } from './pr-watch.js';
 
@@ -71,5 +71,5 @@ export function discoverPrStack(ref: PrRef, opts: { now?: number; fetch?: FetchS
     }
   }
   const tmp = uniqueTempPath(file);
-  fs.writeFileSync(tmp, JSON.stringify(checked)); fs.renameSync(tmp, file);
+  fs.writeFileSync(tmp, JSON.stringify(checked)); atomicRenameSync(tmp, file);
 }

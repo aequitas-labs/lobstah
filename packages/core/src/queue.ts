@@ -1,13 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Descriptor, Lane } from './types.js';
-import { uniqueTempPath, laneDirs, readDirIfPresent } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './paths.js';
 import { appendStatus } from './status.js';
 
 function atomicWrite(file: string, content: string): void {
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 export function enqueue(d: Descriptor, lane: Lane = 'work'): void {

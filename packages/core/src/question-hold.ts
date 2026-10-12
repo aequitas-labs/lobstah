@@ -5,7 +5,7 @@ import { loadConfig } from './config.js';
 import { liveHelms } from './helm.js';
 import type { HelmRegistration } from './helm.js';
 import { answeredAt } from './inbox.js';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { activeIds, pendingIds, storedDescriptor } from './queue.js';
 import { readStatusLog } from './status.js';
 import type { Lane, StatusEntry } from './types.js';
@@ -78,7 +78,7 @@ function writeRelease(r: QuestionRelease): void {
   const file = releaseFile(r.key);
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(r, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }
 
 export function listReleases(): QuestionRelease[] {

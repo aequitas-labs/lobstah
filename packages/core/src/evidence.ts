@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import type { Evidence, Lane } from './types.js';
-import { uniqueTempPath, evidencePath } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, evidencePath } from './paths.js';
 
 export function readEvidence(id: string, lane: Lane): Evidence {
   try {
@@ -14,5 +14,5 @@ export function mergeEvidence(id: string, lane: Lane, patch: Evidence): void {
   const file = evidencePath(id, lane);
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify({ ...readEvidence(id, lane), ...patch }, null, 2));
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
 }

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { uniqueTempPath, lobstahHome, readDirIfPresent } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome, readDirIfPresent } from './paths.js';
 import { classifyGhError, firstMeaningfulLine, isBackoffKind } from './gh-errors.js';
 import type { GhErrorKind } from './gh-errors.js';
 import { postNotice } from './notices.js';
@@ -111,7 +111,7 @@ function eventsPath(key: string): string {
 }
 
 /** Publish/retire under a short lock, never while running the external check. */
-function withWatchLock<T>(key: string, action: () => T): T {
+function withWatchLock<T>(key: string, action: (deadline: number) => T): T {
   fs.mkdirSync(watchesDir(), { recursive: true });
   const lock = `${watchPath(key)}.lock`;
   const deadline = Date.now() + 10_000;
@@ -138,7 +138,7 @@ function withWatchLock<T>(key: string, action: () => T): T {
     }
   }
   try {
-    return action();
+    return action(deadline);
   } finally {
     for (;;) {
       try {
@@ -152,12 +152,12 @@ function withWatchLock<T>(key: string, action: () => T): T {
   }
 }
 
-function writeWatchUnlocked(w: Watch): void {
+function writeWatchUnlocked(w: Watch, deadline: number): void {
   const file = watchPath(w.key);
   const tmp = uniqueTempPath(file);
   try {
     fs.writeFileSync(tmp, JSON.stringify(w, null, 2));
-    fs.renameSync(tmp, file);
+    atomicRenameSync(tmp, file, deadline);
   } finally {
     fs.rmSync(tmp, { force: true });
   }
@@ -169,9 +169,9 @@ function currentWatch(w: Watch): boolean {
 
 /** A stale update is quiet: only watch add may create a missing record. */
 function writeWatch(w: Watch, create = false): boolean {
-  return withWatchLock(w.key, () => {
+  return withWatchLock(w.key, (deadline) => {
     if (!create && !currentWatch(w)) return false;
-    writeWatchUnlocked(w);
+    writeWatchUnlocked(w, deadline);
     return true;
   });
 }
@@ -357,7 +357,7 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
     maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, ...(isPrPresetWatch(w) ? { LOBSTAH_PR_BATCH: '1' } : {}) },
   });
-  return withWatchLock(w.key, () => {
+  return withWatchLock(w.key, (deadline) => {
     // A terminal PR or an explicit removal can retire this watch during the exec.
     if (!currentWatch(w)) return { watch: w, fresh: [] };
     if (res.status !== 0 || res.error) {
@@ -365,7 +365,7 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
       const toonError = /^error:.*$/m.exec(res.stdout ?? '')?.[0];
       const reason = res.error?.message || firstMeaningfulLine(toonError, res.stderr, res.stdout) || 'no output';
       recordWatchFailure(w, reason, res.status ?? undefined, now);
-      writeWatchUnlocked(w);
+      writeWatchUnlocked(w, deadline);
       return { watch: w, fresh: [] };
     }
     let parsed: { cursor?: unknown; events?: unknown; done?: unknown; error?: unknown };
@@ -373,7 +373,7 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
       parsed = JSON.parse(res.stdout) as typeof parsed;
     } catch {
       recordWatchFailure(w, `unparseable check output: ${res.stdout.slice(0, 200).trim()}`, undefined, now);
-      writeWatchUnlocked(w);
+      writeWatchUnlocked(w, deadline);
       return { watch: w, fresh: [] };
     }
     if (typeof parsed.error === 'string' && parsed.error) recordWatchFailure(w, parsed.error, undefined, now);
@@ -389,7 +389,7 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
     const fresh = appendWatchEvents(w.key, events);
     if (parsed.cursor !== undefined) w.cursor = String(parsed.cursor);
     if (parsed.done === true) w.done = true;
-    writeWatchUnlocked(w);
+    writeWatchUnlocked(w, deadline);
     return { watch: w, fresh };
   });
 }

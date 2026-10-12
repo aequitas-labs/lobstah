@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import type { TrapRegistration } from './soak.js';
 import type { WindowRef } from './window.js';
 import type { TrapRevision } from './worktree-safety.js';
@@ -109,7 +109,7 @@ function writeEntry(entry: RosterEntry): RosterEntry {
   const file = rosterPath(entry.trapId);
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, `${JSON.stringify(entry, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  atomicRenameSync(tmp, file);
   return entry;
 }
 
