@@ -29,3 +29,31 @@ jobs:
         with:
           node-version: 24
       - run: pnpm exec vitest run services/telemetry/test/worker.test.ts
+
+  # TEMPORARY evidence job: removed before this PR is ready.
+  windows-ebusy-evidence:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Probe what holds a killed process's directory
+        run: node scripts/tmp-windows-ebusy-probe.mjs 100
+      - name: stow --remove with a live listener
+        if: always()
+        run: pnpm exec vitest run apps/cli/test/soak-listener.test.ts -t "stow --remove"
+      - name: Listener teardown, 30 consecutive runs
+        if: always()
+        shell: bash
+        run: |
+          for i in $(seq 1 30); do
+            echo "=== iteration $i"
+            pnpm exec vitest run apps/cli/test/soak-listener.test.ts -t "soak stop-listener|a second soak" || exit 1
+          done
