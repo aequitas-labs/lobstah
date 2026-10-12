@@ -324,11 +324,41 @@ async function coldTools(beside) {
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
+/**
+ * Does a first powershell.exe start that is stopped part way still leave the
+ * next start quick? The first start is stopped after `cutMs` through the same
+ * execFile timeout the runner uses. Must run before anything else in the job
+ * has started powershell.exe.
+ */
+async function coldInterrupt(cutMs) {
+  if (process.platform !== 'win32') return console.log('cold-interrupt: not Windows');
+  const { WINDOWS_PROCESS_SNAPSHOT } = await import('../packages/runner/dist/windows-processes.js');
+  const { promisify } = await import('node:util');
+  const { execFile } = await import('node:child_process');
+  const run = promisify(execFile);
+  const start = async (timeout) => {
+    const t = process.hrtime.bigint();
+    try {
+      const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PROCESS_SNAPSHOT], { encoding: 'utf8', windowsHide: true, timeout });
+      return { ms: Math.round(Number(process.hrtime.bigint() - t) / 1e6), rows: stdout.split(/\r?\n/).filter(Boolean).length };
+    } catch (err) {
+      return { ms: Math.round(Number(process.hrtime.bigint() - t) / 1e6), killed: err.killed === true, code: err.code };
+    }
+  };
+  const first = await start(cutMs);
+  const second = await start(15_000);
+  const third = await start(15_000);
+  console.log(`first powershell start, stopped after ${cutMs}ms:`, first);
+  console.log('second start, right after:', second);
+  console.log('third start:', third);
+}
+
 if (mode === 'ebusy') await ebusy(N);
 else if (mode === 'powershell') await powershell(N, process.argv[4] ?? 'idle');
 else if (mode === 'powershell-watch') await powershellWatch(process.argv[3], process.argv[4] ?? 'load');
 else if (mode === 'glass') await glass(N, process.argv[4]);
 else if (mode === 'git-remove') await gitRemove();
+else if (mode === 'cold-interrupt') await coldInterrupt(Number(process.argv[3] ?? 1000));
 else if (mode === 'cold-tools') await coldTools(process.argv[3] === 'beside');
 else if (mode === 'reuse-compare') await reuseCompare(N, process.argv[4] === 'paired');
 else throw new Error(`unknown mode ${mode}`);

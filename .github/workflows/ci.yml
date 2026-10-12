@@ -48,13 +48,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # Before anything else starts gh.exe or powershell.exe on this machine.
-      - name: First start of gh and powershell, idle (odd replicas) or beside the suite's load (even)
+      # Before anything else starts powershell.exe on this machine.
+      - name: A first powershell start stopped part way, then the next start
         shell: bash
-        run: node scripts/tmp-windows-probes.mjs cold-tools ${{ (matrix.replica == 2 || matrix.replica == 4 || matrix.replica == 6) && 'beside' || 'idle' }}
-      - name: What git leaves when a process stands in a worktree it removes
-        if: always() && matrix.replica == 1
-        run: node scripts/tmp-windows-probes.mjs git-remove
+        run: node scripts/tmp-windows-probes.mjs cold-interrupt ${{ (matrix.replica == 1 || matrix.replica == 2) && '500' || ((matrix.replica == 3 || matrix.replica == 4) && '1500' || '2500') }}
       - name: Full suite with the stall trace
         if: always()
         shell: bash
@@ -70,50 +67,3 @@ jobs:
             echo "=== iteration $i"
             pnpm exec vitest run apps/cli/test/soak-listener.test.ts apps/cli/test/glass-lifecycle.test.ts packages/runner/test/reap.test.ts packages/runner/test/reuse.test.ts || exit 1
           done
-
-  # TEMPORARY evidence job: removed before this PR is ready.
-  windows-reuse-compare:
-    strategy:
-      fail-fast: false
-      matrix:
-        replica: [1, 2, 3, 4]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - name: Build main and the wharf stack's top beside this branch
-        shell: bash
-        run: |
-          git worktree add ../base origin/main
-          git worktree add ../stack origin/codex/wharf-anonymous-telemetry
-          git -C ../base log -1 --format='main: %h %s'
-          git -C ../stack log -1 --format='stack top: %h %s'
-          (cd ../base && pnpm install --frozen-lockfile && pnpm build)
-          (cd ../stack && pnpm install --frozen-lockfile && pnpm build)
-      # The first run on this machine starts gh.exe for the first time: the
-      # order rotates so each checkout gets that first run on some replica.
-      - name: reuse.test.ts first case beside soak-worktree.test.ts, as in the full suite
-        if: always()
-        shell: bash
-        run: |
-          case "${{ matrix.replica }}" in
-            1) trees="main=../base,stack=../stack,branch=." ;;
-            2) trees="stack=../stack,main=../base,branch=." ;;
-            3) trees="main=../base,branch=.,stack=../stack" ;;
-            4) trees="stack=../stack,branch=.,main=../base" ;;
-          esac
-          LOBSTAH_PROBE_TREES="$trees" node scripts/tmp-windows-probes.mjs reuse-compare 3 paired
-      - name: The same with nothing else running
-        if: always()
-        shell: bash
-        run: LOBSTAH_PROBE_TREES="main=../base,stack=../stack,branch=." node scripts/tmp-windows-probes.mjs reuse-compare 8
