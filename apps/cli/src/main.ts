@@ -226,7 +226,7 @@ import { explainRefusal, resolveSessionId, type ResolvedSession } from './sessio
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
-import { alreadyArmed, armWatcher, awaitWatcher, sessionWatcher, stopWatcher } from './watchers.js';
+import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -2897,6 +2897,9 @@ async function mainCli(): Promise<void> {
       if (!own) {
         gateHelm(caller);
       }
+      // Read before the sign-off: the listener drops its claim as it leaves.
+      const manned = readTrap(trapId);
+      const listener = manned ? liveWatcher(manned.sessionId, 'trap', trapId) : undefined;
       const reg = stowTrap(trapId, own ? 'signed off' : 'stowed by the helm', sessionId);
       // Clear the tab name sign-on set.
       if (reg?.window) await setTerminalTitle(reg.window, '');
@@ -2929,6 +2932,11 @@ async function mainCli(): Promise<void> {
         } else {
           // Branch cleanup may follow: keep the revision under the trap's protected ref.
           recordRosterRevision(trapId, protectTrapRevision(wtDir, trapId));
+          // The trap's `soak --wait` listener stands in the worktree, and
+          // Windows cannot remove a directory a process stands in. The
+          // listener leaves on its own at its next poll, now that the
+          // registration is gone: wait until it has.
+          if (listener && process.platform === 'win32') await processGone(listener.pid, 5_000);
           const removal = await removeIfSafe(wtDir, {
             ignore: [TRAP_ANCHOR_FILE],
             branches: anchor?.branch ? [anchor.branch] : [],

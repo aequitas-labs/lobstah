@@ -71,6 +71,19 @@ const pidAlive = (pid: number): boolean => {
 };
 
 /**
+ * Wait up to graceMs for `pid` to exit. True when it is gone. Until then the
+ * process keeps the directory it stands in, which Windows will not remove.
+ */
+export async function processGone(pid: number, graceMs: number, pollMs = 50): Promise<boolean> {
+  const deadline = Date.now() + Math.max(0, graceMs);
+  while (pidAlive(pid)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return true;
+}
+
+/**
  * End this session's own watcher: SIGTERM to the pid its registration
  * records, then wait up to graceMs for it to exit. Nothing else is touched —
  * the pid comes from this session's file, heartbeated within seconds, so it
