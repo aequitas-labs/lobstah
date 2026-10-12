@@ -15,31 +15,19 @@ export interface ProcRow {
 const LIST_MS = 30_000;
 
 /**
- * Run `start` within `totalMs`, in two halves: a start that is still running
- * at half time is stopped and started once more. The first PowerShell start
- * on a Windows machine since it booted is about ten times slower than later
- * ones (about 3 s against 0.4 s on CI runners), and on a busy runner it has
- * outlasted the whole bound, after which the next start finished in time.
- */
-export async function startTwice<T>(start: (timeoutMs: number) => Promise<T>, totalMs = LIST_MS): Promise<T> {
-  try {
-    return await start(totalMs / 2);
-  } catch (err) {
-    // execFile sets `killed` when its timeout stopped the process.
-    if (!(err as { killed?: boolean }).killed) throw err;
-    return start(totalMs / 2);
-  }
-}
-
-/**
  * The process table: `ps` on POSIX, a native Tool Help snapshot on Windows.
- * It does not block the event loop while the command runs.
+ * It does not block the event loop while the command runs: the first
+ * powershell.exe start on a Windows machine since it booted takes about ten
+ * times as long as later ones (about 3 s against 0.4 s on idle CI runners),
+ * and on a slow runner it has outlasted the whole bound.
  */
 export async function listProcesses(): Promise<ProcRow[]> {
   if (process.platform === 'win32') {
-    const { stdout } = await startTwice((timeout) =>
-      run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PROCESS_SNAPSHOT], { encoding: 'utf8', windowsHide: true, timeout }),
-    );
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PROCESS_SNAPSHOT], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: LIST_MS,
+    });
     return stdout
       .split(/\r?\n/)
       .map((l) => l.trim().split(/\s+/).map(Number))
