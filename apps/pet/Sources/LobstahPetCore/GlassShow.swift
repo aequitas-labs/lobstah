@@ -93,14 +93,21 @@ public func glassShowArguments(_ hash: String, port: Int, installedOnly: Bool = 
   ["glass", "show", hash, "--port", String(port), "--json"] + (installedOnly ? ["--app"] : [])
 }
 
-/// Match Chrome's installed-app metadata to this exact loopback glass, not
+/// Match Chrome's installed-app metadata to this item's exact glass origin, not
 /// an app's user-chosen name or a browser tab. Safari launching is unverified.
 public func isInstalledChromeGlass(_ info: [String: Any], glass: URL) -> Bool {
   guard info["CrBundleIdentifier"] as? String == "com.google.Chrome",
         let bundle = info["CFBundleIdentifier"] as? String, bundle.hasPrefix("com.google.Chrome.app."),
         let shortcut = info["CrAppModeShortcutURL"] as? String, let url = URL(string: shortcut) else { return false }
-  return url.scheme == "http" && url.host == "127.0.0.1" && url.port == glass.port
-    && (url.path.isEmpty || url.path == "/") && url.user == nil && url.password == nil
+  let safe = url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(url.host ?? ""))
+  return safe && url.scheme == glass.scheme && url.host == glass.host && url.port == glass.port
+    && (url.path.isEmpty || url.path == "/") && url.user == nil && url.password == nil && url.query == nil
+}
+
+/// Only the local glass accepts the local CLI's presence/show handoff.
+/// A hosted installed app receives its own URL, never a command to a local page.
+public func usesLocalGlassShow(_ target: GlassTarget, local: URL) -> Bool {
+  target.url.scheme == local.scheme && target.url.host == local.host && target.url.port == local.port
 }
 
 /// A show's answer, or nil when the CLI failed (no glass, an older lobstah).

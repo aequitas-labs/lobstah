@@ -3,6 +3,45 @@ import XCTest
 @testable import LobstahPetCore
 
 final class ClickRoutingTests: XCTestCase {
+  func testWharfReportsAndDecisionsUseTheirOwnGlassUnderEveryRoute() {
+    let local = URL(string: "http://127.0.0.1:63169")!
+    for kind in ["report", "decision"] {
+      for route in ["tab", "app", "helm"] {
+        for delivered in [true, false] {
+          let url = URL(string: "https://glass.example/#\(kind)/remote")!
+          var item = AttentionItem(id: "remote", verb: kind, note: nil, key: "\(kind):remote", kind: kind, grounds: "away", glass: url.absoluteString)
+          item.petOpen = route
+          var actions: [String] = []
+          clickAttentionItem(item, glass: local, helmLive: true,
+            open: { XCTAssertEqual($0, url); actions.append("tab") },
+            focusHelm: { XCTAssertEqual($0, url); actions.append("helm") },
+            showGlass: { _, _ in XCTFail("hosted clicks never move a local page") },
+            showApp: { target, otherwise in
+              XCTAssertEqual(target, GlassTarget(hash: "#\(kind)/remote", url: url))
+              XCTAssertFalse(usesLocalGlassShow(target, local: local))
+              actions.append("app")
+              if !delivered { otherwise() }
+            }, acknowledge: { _ in actions.append("ack") })
+          let expected = route == "app" ? (delivered ? ["app", "ack"] : ["app", "tab", "ack"]) : [route, "ack"]
+          XCTAssertEqual(actions, expected)
+        }
+      }
+    }
+  }
+
+  func testInstalledAppMatchesHostedOriginAndLocalShowStaysLocal() {
+    let hosted = URL(string: "https://glass.example/#report/r")!
+    var info: [String: Any] = ["CrBundleIdentifier": "com.google.Chrome", "CFBundleIdentifier": "com.google.Chrome.app.abc", "CrAppModeShortcutURL": "https://glass.example/"]
+    XCTAssertTrue(isInstalledChromeGlass(info, glass: hosted))
+    for other in ["https://other.example/", "http://glass.example/", "https://glass.example:8443/", "http://127.0.0.1:63169/", "https://user@glass.example/", "https://glass.example/?redirect=elsewhere"] {
+      info["CrAppModeShortcutURL"] = other
+      XCTAssertFalse(isInstalledChromeGlass(info, glass: hosted))
+    }
+    let local = URL(string: "http://127.0.0.1:63169")!
+    XCTAssertTrue(usesLocalGlassShow(GlassTarget(hash: "#report/r", url: local.appendingPathComponent("report/r")), local: local))
+    XCTAssertFalse(usesLocalGlassShow(GlassTarget(hash: "#report/r", url: hosted), local: local))
+  }
+
   func testAppAttemptSuccessAndFallback() {
     let glass = URL(string: "http://127.0.0.1:63169")!
     for kind in ["report", "decision"] {
@@ -46,8 +85,11 @@ final class ClickRoutingTests: XCTestCase {
     for route in ["tab", "app", "helm"] {
       let data = Data("{\"attention\":[{\"id\":\"a\",\"verb\":\"pr:ready\",\"kind\":\"pr:ready\",\"prUrl\":\"https://github.com/acme/web/pull/42\",\"reviewUrl\":\"linear://review/acme/web/pull/42\",\"petOpen\":\"\(route)\"}]}".utf8)
       let item = try XCTUnwrap(JSONDecoder().decode(AttentionReport.self, from: data).attention.first)
+      var hostedItem = item
+      hostedItem.grounds = "away"
+      hostedItem.glass = "https://glass.example/#job/remote"
       var opened: URL?
-      clickAttentionItem(item, glass: URL(string: "http://127.0.0.1:63169")!,
+      clickAttentionItem(hostedItem, glass: URL(string: "http://127.0.0.1:63169")!,
         open: { opened = $0 }, focusHelm: { _ in XCTFail("PRs never focus helm") },
         showApp: { _, _ in XCTFail("PRs never open the glass app") }, acknowledge: { _ in })
       XCTAssertEqual(opened?.absoluteString, "linear://review/acme/web/pull/42")

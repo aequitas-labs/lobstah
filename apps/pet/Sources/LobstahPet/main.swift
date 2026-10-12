@@ -72,7 +72,7 @@ func showInstalledGlass(_ target: GlassTarget, otherwise: @escaping () -> Void) 
     let apps = roots.flatMap { (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)) ?? [] }
     let candidate = apps.sorted { $0.path < $1.path }.first { app in
       guard app.pathExtension == "app", let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any] else { return false }
-      return isInstalledChromeGlass(info, glass: glassURL)
+      return isInstalledChromeGlass(info, glass: target.url)
     }
     DispatchQueue.main.async {
       guard let candidate else { otherwise(); return }
@@ -86,6 +86,18 @@ func showInstalledGlass(_ target: GlassTarget, otherwise: @escaping () -> Void) 
       DispatchQueue.main.asyncAfter(deadline: .now() + 8) { finish(false) }
       let config = NSWorkspace.OpenConfiguration()
       config.activates = true
+      if !usesLocalGlassShow(target, local: glassURL) {
+        // The hosted glass has no local presence endpoint. Deliver the URL to
+        // its installed app directly; never move an unrelated local glass.
+        NSWorkspace.shared.open([target.url], withApplicationAt: candidate, configuration: config) { app, error in
+          DispatchQueue.main.async {
+            guard !finished else { return }
+            guard error == nil, let app, app.activate() else { finish(false); return }
+            finish(NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier)
+          }
+        }
+        return
+      }
       NSWorkspace.shared.openApplication(at: candidate, configuration: config) { app, error in
         DispatchQueue.main.async {
           guard !finished else { return }

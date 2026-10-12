@@ -87,6 +87,10 @@ public struct AttentionItem: Decodable, Equatable {
    * opens when none is open. Nil for every other kind.
    */
   public func glassTarget(glass: URL) -> GlassTarget? {
+    let address = glassAddress(local: glass)
+    if address.hosted && (kind == "report" || kind == "decision") {
+      return GlassTarget(hash: address.url.fragment.map { "#\($0)" } ?? "", url: address.url)
+    }
     guard let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
     if let url = reportLink(glass: glass) { return GlassTarget(hash: "#report/\(encoded)", url: url) }
     if let url = decisionLink(glass: glass) { return GlassTarget(hash: "#decision/\(encoded)", url: url) }
@@ -128,10 +132,9 @@ public struct AttentionItem: Decodable, Equatable {
 /// live helm's session, which frames it, or with no live helm opens its glass
 /// card; a report opens its page. PRs open their URLs. Other items focus the
 /// helm. `focusHelm` gets the glass URL to open when no helm step works.
-/// An item of a grounds on a wharf opens its hosted glass instead
-/// (`glassAddress`), whatever its kind, unless it is a PR: the wharf holds
-/// that grounds' helm seat and state, so this boat has no helm registration
-/// or local glass page for it. `glass` is the local glass.
+/// Reports and decisions use the configured route with their own glass
+/// (`glassAddress`). Other hosted items open that glass directly; PRs always
+/// use the repo's review tool. `glass` is the local glass.
 public func clickAttentionItem(
   _ item: AttentionItem,
   glass: URL,
@@ -143,8 +146,8 @@ public func clickAttentionItem(
   acknowledge: ([String]) -> Void
 ) {
   let address = item.glassAddress(local: glass)
-  if address.hosted, item.prLink == nil {
-    open(address.url)
+  if let url = item.prLink {
+    open(url)
   } else if let target = item.glassTarget(glass: glass) {
     let isDecision = item.kind == "decision"
     switch item.petOpen {
@@ -156,12 +159,16 @@ public func clickAttentionItem(
       focusHelm(target.url)
     default:
       // An older CLI has no setting: preserve its existing routing.
-      showGlass(target) {
-        if isDecision && helmLive { focusHelm(target.url) } else { open(target.url) }
+      if address.hosted {
+        open(target.url)
+      } else {
+        showGlass(target) {
+          if isDecision && helmLive { focusHelm(target.url) } else { open(target.url) }
+        }
       }
     }
-  } else if let url = item.prLink {
-    open(url)
+  } else if address.hosted {
+    open(address.url)
   } else {
     focusHelm(glass)
   }
