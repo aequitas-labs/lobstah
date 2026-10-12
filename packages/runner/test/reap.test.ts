@@ -110,7 +110,9 @@ async function tree(orphan: boolean): Promise<{ root: number; child: number; gra
 describe('reapStarted — stops what the runner started', () => {
   it('stops the child and the grandchild, and leaves the root alive', async () => {
     const t = await tree(false);
-    expect(await until(() => startedBy(t.root, listProcesses()).includes(t.grandchild), 10_000)).toBe(true);
+    // tree() has already received the child's grandchild PID. Its OS process
+    // exists before spawn returns: one snapshot, not repeated provider polls.
+    expect(startedBy(t.root, listProcesses())).toContain(t.grandchild);
 
     const n = await reapStarted(t.root, 500);
     expect(n).toBeGreaterThanOrEqual(2);

@@ -2126,6 +2126,10 @@ async function mainCli(): Promise<void> {
       // Register first: the Stop hook checks for this file right after the
       // helm backgrounds the wait, so the only window left is process startup.
       // A failed gate below exits, and the exit handler drops the file.
+      // Snapshot before advertising readiness. A completion posted once the
+      // registration is visible must not become part of a later baseline
+      // while gates or the initial watch checks are still running.
+      const baseline = !has('--peek') ? captureWaitBaseline() : {};
       const waiter = !has('--peek') && sid ? armWatcher(sid, 'man') : undefined;
       // Strict helm rule: wait consumes attention events — the helm's wakes.
       // With a claimed lobstah man anywhere, only that session may run it, and
@@ -2219,7 +2223,6 @@ async function mainCli(): Promise<void> {
           peekDigest();
           break;
         }
-        const baseline = captureWaitBaseline();
         while (Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 1500));
           if (callerHelm) heartbeatHelm(callerHelm.sessionId); // waiting IS liveness
