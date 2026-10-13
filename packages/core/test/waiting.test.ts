@@ -36,18 +36,18 @@ afterEach(() => {
 describe('paused --waiting-on: the status entry says what it waits on', () => {
   it('round-trips waitingOn, link, and until', () => {
     const now = Date.now();
-    appendStatus('p1', 'work', 'paused', 'in human review', undefined, {
+    appendStatus('p1', 'work', 'paused', 'in PR review', undefined, {
       waitingOn: 'review',
-      link: 'https://ume.example.com/s/abc',
+      link: 'https://github.com/o/r/pull/1',
       until: '4h',
     });
     const e = readStatusLog('p1', 'work').at(-1)!;
-    expect(e).toMatchObject({ verb: 'paused', note: 'in human review', waitingOn: 'review', link: 'https://ume.example.com/s/abc' });
+    expect(e).toMatchObject({ verb: 'paused', note: 'in PR review', waitingOn: 'review', link: 'https://github.com/o/r/pull/1' });
     expect(Date.parse(e.until!) - now).toBeGreaterThanOrEqual(4 * 3600_000 - 1000);
     expect(Date.parse(e.until!) - now).toBeLessThanOrEqual(4 * 3600_000 + 5000);
     expect(pausedWaiting(e)).toBe(true);
     const v = waitingView(e, Date.parse(e.at) + 12 * 60_000)!;
-    expect(waitingText(v)).toBe('waiting on review for 12m https://ume.example.com/s/abc');
+    expect(waitingText(v)).toBe('waiting on review for 12m https://github.com/o/r/pull/1');
   });
 
   it('allows --waiting-on and --link only with paused, needs-decision, blocked', () => {
@@ -70,6 +70,14 @@ describe('paused --waiting-on: the status entry says what it waits on', () => {
     expect(parseUntil('30m', now)).toBe('2026-09-28T12:30:00.000Z');
     expect(parseUntil('2d', now)).toBe('2026-09-30T12:00:00.000Z');
     expect(parseUntil('2026-10-01T09:00Z', now)).toBe('2026-10-01T09:00:00.000Z');
+  });
+
+  it('refuses human pauses before writing, but accepts the same needs-decision', () => {
+    for (const waiting of [{ waitingOn: 'person' }, { waitingOn: 'review', link: 'https://ume.example.com/s/abc' }]) {
+      expect(() => appendStatus('human', 'work', 'paused', 'please look', undefined, waiting)).toThrow('report needs-decision with the question or the thing to look at');
+      expect(readStatusLog('human', 'work')).toEqual([]);
+      expect(appendStatus('question', 'work', 'needs-decision', 'please look', undefined, waiting).verb).toBe('needs-decision');
+    }
   });
 
   it('paused without --waiting-on is not a wait on something external', () => {

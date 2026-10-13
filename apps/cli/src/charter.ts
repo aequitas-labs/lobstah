@@ -24,6 +24,7 @@ Role:
 - ${TRAP_REUSE_RULE} Use \`lobstah dispatch --repo <key> --trap-any --brief <file>\`.
 - Resolve queued-too-long and stalled notices at once after a dispatch or send. Never report work as under way before it is claimed.
 - When you relay a worker's round to the human, put the question the worker is waiting on onto a card. Read a quiet trap's last note before you call it working.
+- Read each pause and decide if the human needs to act.
 
 Fences:
 - The daemon claims, spawns, and restarts workers. Do not supervise a running catch.

@@ -303,13 +303,18 @@ describe('a parked dispatch releases on whichever PR lobstah knows for it', () =
     const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
     parked('d1', { waitingOn: 'review', noPr: true });
     const run = (...args: string[]) => spawnSync(process.execPath, [cli, 'report', 'd1', 'paused', ...args], { env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8' });
-    const none = run('in review', '--waiting-on', 'review', '--link', 'https://example.com/review/1');
+    const human = run('in review', '--waiting-on', 'review', '--link', 'https://example.com/review/1');
+    expect(human.status).toBe(2);
+    expect(human.stdout).toContain('report needs-decision');
+    const none = run('in review', '--waiting-on', 'review');
     expect(none.status, none.stderr).toBe(0);
     expect(none.stdout).toContain('warning: "no PR known for this wait');
     const linked = run('in review', '--waiting-on', 'review', '--link', PR);
     expect(linked.status, linked.stderr).toBe(0);
     expect(linked.stdout).not.toContain('warning');
     const person = run('asked Ana', '--waiting-on', 'person');
+    expect(person.status).toBe(2);
+    expect(person.stdout).toContain('report needs-decision');
     expect(person.stdout).not.toContain('warning');
   });
 });
@@ -426,7 +431,7 @@ describe('a parked dispatch holds no slot', () => {
   });
 
   it('an operator message wakes it into the same session when a slot is free, before new work', () => {
-    parked('p1', { waitingOn: 'person' });
+    parked('p1', { waitingOn: 'external' });
     enqueue({ id: 'q1', repo: 'r', brief: 'next' });
     sendMessage('p1', 'work', 'approved, go on');
     const { spawned } = daemonTick();

@@ -1107,6 +1107,7 @@ export function renderTend(r: TendReport): string {
                 (d.queueReason ? ` (${named(d.queueReason)})` : '') +
                 (d.answeredAt ? ` (answered ${Math.max(0, Math.round((Date.now() - Date.parse(d.answeredAt)) / 60_000))}m ago)` : '') +
                 (d.waiting ? ` (${waitingText(d.waiting)})` : '') +
+                (d.state === 'paused' ? ` — ${named(d.note ?? '(no note)')}${!d.waiting && d.at ? ` (paused for ${ageLabel(Date.now() - Date.parse(d.at))})` : ''}` : '') +
                 (d.awaitingReply ? ` (awaiting reply · ${ageLabel(Date.now() - (Date.parse(d.awaitingReply.sentAt) || Date.now()))})` : ''),
             )
             .join(' → '),

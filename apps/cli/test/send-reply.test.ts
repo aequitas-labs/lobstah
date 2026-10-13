@@ -142,8 +142,9 @@ describe('a send expects a reply', () => {
     expect(awaitingReply(next!)).toBeDefined();
     report(next!, 'paused', 'waiting on CI');
     const wait = lobstah(['man', 'wait', '--timeout', '1']);
-    expect(wait.stdout).toContain('event: reply');
+    expect(wait.stdout).not.toContain('event: reply'); // paused has its own wake, not a duplicate reply
     expect(wait.stdout).toContain('verb: paused');
+    expect(awaitingReply(next!)).toBeUndefined();
   });
 });
 

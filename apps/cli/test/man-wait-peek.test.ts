@@ -45,6 +45,20 @@ function lobstah(...args: string[]) {
 }
 
 describe('man wait --peek — a check, never a park', () => {
+  it('a pause wakes once with its waiting kind, link and full note, then stays quiet', () => {
+    const id = 'pause';
+    enqueue({ id, repo: 'r', brief: 'b' }); claimNext('work');
+    appendStatus(id, 'work', 'paused', 'CI pending; read the whole pause', undefined, { waitingOn: 'pr', link: 'https://github.com/o/r/pull/1' });
+    const res = lobstah('man', 'wait', '--timeout', '1');
+    expect(res.status, res.stdout).toBe(0);
+    expect(res.stdout).toContain('verb: paused');
+    expect(res.stdout).toContain('waitingOn: pr');
+    expect(res.stdout).toContain('https://github.com/o/r/pull/1');
+    expect(res.stdout).toContain('CI pending; read the whole pause');
+    expect(res.stdout).toContain('decide if the human needs to act');
+    expect(lobstah('man', 'wait', '--peek').stdout).toContain('standing: none');
+  });
+
   it('returns promptly with exit 0 and standing: none on an empty home', () => {
     const res = lobstah('man', 'wait', '--peek');
     expect(res.signal).toBeNull(); // not killed by the spawn timeout

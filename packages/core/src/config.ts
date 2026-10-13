@@ -278,7 +278,7 @@ export interface Config {
   pools: Record<string, PoolConfig>;
   /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
   notifyCommand?: string;
-  /** Verbs that fire notifyCommand. Default: needs-decision, blocked, done, failed. */
+  /** Verbs that fire notifyCommand. Default: needs-decision, blocked, paused, done, failed. */
   notifyVerbs?: string[];
   /** Re-fire an unanswered attention state every this many seconds (0 disables). Default 900. */
   remindSecs?: number;

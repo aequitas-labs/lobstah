@@ -29,7 +29,7 @@ function lobstah(...args: string[]) {
 }
 
 const id = 'bbbbbbbb-1111-2222-3333-444444444444';
-const LINK = 'https://ume.example.com/s/abc';
+const LINK = 'https://github.com/o/r/pull/1';
 
 function active(): void {
   enqueue({ id, repo: 'web', brief: 'work' });
@@ -40,12 +40,12 @@ function active(): void {
 describe('report paused --waiting-on --link', () => {
   it('round-trips through the CLI and shows in status, ls, tend, and the glass', () => {
     active();
-    const rep = lobstah('report', id, 'paused', 'plan is in human review', '--waiting-on', 'review', '--link', LINK, '--until', '8h');
+    const rep = lobstah('report', id, 'paused', 'PR is in review', '--waiting-on', 'review', '--link', LINK, '--until', '8h');
     expect(rep.status, rep.stdout).toBe(0);
     expect(rep.stdout).toContain('waitingOn: review');
     expect(rep.stdout).toContain(`link: ${LINK}`);
     const e = readStatusLog(id, 'work').at(-1)!;
-    expect(e).toMatchObject({ verb: 'paused', note: 'plan is in human review', waitingOn: 'review', link: LINK });
+    expect(e).toMatchObject({ verb: 'paused', note: 'PR is in review', waitingOn: 'review', link: LINK });
     expect(e.until).toBeDefined();
 
     const status = lobstah('status', id);
@@ -59,6 +59,7 @@ describe('report paused --waiting-on --link', () => {
     const d = tend.stories.flatMap((s) => s.dispatches).find((x) => x.id === id)!;
     expect(d.waiting).toMatchObject({ on: 'review', link: LINK, since: e.at });
     expect(renderTend(tend)).toContain(`${id.slice(0, 8)}:paused (waiting on review for`);
+    expect(renderTend(tend)).toContain('— PR is in review');
     // paused is a state, not a question: no attention.
     expect(tend.attention).toEqual([]);
     expect(tend.verdict).not.toBe('needs-attention');
@@ -77,6 +78,16 @@ describe('report paused --waiting-on --link', () => {
     ]) {
       const res = lobstah('report', id, ...args);
       expect(res.status, args.join(' ')).toBe(2);
+    }
+    expect(readStatusLog(id, 'work').map((e) => e.verb)).toEqual(['working']);
+  });
+
+  it('refuses person and non-PR review pauses with the needs-decision instruction', () => {
+    active();
+    for (const args of [['--waiting-on', 'person'], ['--waiting-on', 'review', '--link', 'https://ume.example.com/plan']]) {
+      const res = lobstah('report', id, 'paused', 'please look at this', ...args);
+      expect(res.status, res.stdout).toBe(2);
+      expect(res.stdout).toContain('report needs-decision with the question or the thing to look at');
     }
     expect(readStatusLog(id, 'work').map((e) => e.verb)).toEqual(['working']);
   });

@@ -10,7 +10,7 @@ export interface NotifyEvent {
   entry: StatusEntry;
 }
 
-export const DEFAULT_NOTIFY_VERBS = ['needs-decision', 'blocked', 'done', 'failed'];
+export const DEFAULT_NOTIFY_VERBS = ['needs-decision', 'blocked', 'paused', 'done', 'failed'];
 
 function cursorPath(id: string, lane: Lane): string {
   return path.join(laneDirs(lane).state, `${id}.notified`);
@@ -127,6 +127,8 @@ function readAttnCursor(file: string): AttnCursor {
  * even read it; a newer needs-decision stands again. Acks never matter here.
  * remindMs of 0 disables reminders (pure at-most-once).
  * Pass consume=false to peek without touching cursors.
+ * Pauses use the same delivery cursor, but wake once only: no reminders or
+ * acknowledgement state. The helm reads the pause and judges what to do.
  */
 export function attentionNow(
   consume = true,
@@ -142,15 +144,15 @@ export function attentionNow(
       if (match && !match(id, lane)) continue;
       const log = readStatusLog(id, lane);
       const state = reconcile({ log, lastEventAt: lastEventAt(id, lane) });
-      if (state !== 'needs-decision' && state !== 'blocked') continue;
+      if (state !== 'needs-decision' && state !== 'blocked' && state !== 'paused') continue;
       const index = log.length - 1 - [...log].reverse().findIndex((e) => e.verb === state);
       const entry = log[index];
       if (!entry) continue;
-      if (answeredAt(id, lane, entry.at) !== undefined) continue; // answered: nothing to remind
+      if (state !== 'paused' && answeredAt(id, lane, entry.at) !== undefined) continue; // answered: nothing to remind
       const file = attnCursorPath(id, lane);
       const cursor = readAttnCursor(file);
       const fresh = index >= cursor.seen;
-      const remind = !fresh && remindMs > 0 && now - cursor.at > remindMs;
+      const remind = state !== 'paused' && !fresh && remindMs > 0 && now - cursor.at > remindMs;
       if (!fresh && !remind) continue;
       out.push({ id, lane, entry });
       if (consume) fs.writeFileSync(file, JSON.stringify({ seen: Math.max(cursor.seen, index + 1), at: now }));
@@ -174,11 +176,17 @@ export function freshWakeEvents(
       const seen = baseline[key] ?? 0;
       if (log.length > seen) {
         baseline[key] = log.length;
-        for (const entry of log.slice(seen)) {
+        for (const [offset, entry] of log.slice(seen).entries()) {
           if (!verbs.includes(entry.verb)) continue;
           // A question already answered by the time we look is not a wake.
           if ((entry.verb === 'needs-decision' || entry.verb === 'blocked') && answeredAt(id, lane, entry.at) !== undefined) continue;
           out.push({ id, lane, entry });
+          // A pause delivered during a wait must not wake again on re-arm.
+          if (entry.verb === 'paused') {
+            const file = attnCursorPath(id, lane);
+            const cursor = readAttnCursor(file);
+            fs.writeFileSync(file, JSON.stringify({ seen: Math.max(cursor.seen, seen + offset + 1), at: Date.now() }));
+          }
         }
       }
     }
