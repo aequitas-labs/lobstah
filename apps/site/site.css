@@ -946,7 +946,7 @@ p {
   --wave: 9px;
   --from: -26%;
   --to: 106%;
-  --rest: 20%;
+  --rest: 36%;
 }
 .lane.near {
   --wl: 84%;
@@ -955,7 +955,7 @@ p {
   --wave: 12px;
   --from: -36%;
   --to: 106%;
-  --rest: 4%;
+  --rest: 66%;
 }
 .fleet .sea {
   background: var(--sea);
