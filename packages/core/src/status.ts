@@ -4,6 +4,7 @@ import type { Lane, StatusEntry, Verb, WaitingOn } from './types.js';
 import { statusPath } from './paths.js';
 import { ageLabel } from './activity.js';
 import { recordCatch } from './stats.js';
+import { parsePrRef } from './pr.js';
 
 export function isVerb(v: string): v is Verb {
   return (VERBS as readonly string[]).includes(v);
@@ -62,6 +63,9 @@ export function waitingFields(verb: Verb, w: WaitingFields, now = Date.now()): P
     out.link = url.href;
   }
   if (w.until !== undefined) out.until = parseUntil(w.until, now);
+  if (verb === 'paused' && (out.waitingOn === 'person' || (out.waitingOn === 'review' && out.link && !parsePrRef(out.link)))) {
+    throw new Error('Waiting on a human requires needs-decision: report needs-decision with the question or the thing to look at.');
+  }
   return out;
 }
 

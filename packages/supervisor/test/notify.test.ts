@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { appendStatus, ensureLayout } from '@lobstah/core';
-import { attentionNow, notifiableIds, pendingNotifications } from '../src/notify.js';
+import { attentionNow, captureWaitBaseline, freshWakeEvents, notifiableIds, pendingNotifications } from '../src/notify.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -18,6 +18,31 @@ afterEach(() => {
 });
 
 describe('notifications', () => {
+  it('a pause before arming wakes once, without reminders; a later pause wakes again', () => {
+    fs.mkdirSync(path.join(home, 'active', 'pause'));
+    appendStatus('pause', 'work', 'paused', 'CI pending', undefined, { waitingOn: 'pr', link: 'https://github.com/o/r/pull/1' });
+    const now = Date.now();
+    expect(attentionNow(false)).toHaveLength(1);
+    expect(attentionNow(true, 1, now)).toMatchObject([{ id: 'pause', entry: { waitingOn: 'pr', note: 'CI pending' } }]);
+    expect(attentionNow(true, 1, now + 86400_000)).toEqual([]);
+    expect(pendingNotifications('pause', 'work')).toHaveLength(1);
+    expect(pendingNotifications('pause', 'work')).toEqual([]);
+    appendStatus('pause', 'work', 'working');
+    appendStatus('pause', 'work', 'paused', 'deploy pending', undefined, { waitingOn: 'deploy' });
+    expect(attentionNow()).toMatchObject([{ entry: { note: 'deploy pending' } }]);
+  });
+
+  it('a pause during an armed wait is consumed for the next re-arm, with grounds scoping', () => {
+    fs.mkdirSync(path.join(home, 'active', 'pause'));
+    appendStatus('pause', 'work', 'working');
+    const baseline = captureWaitBaseline();
+    appendStatus('pause', 'work', 'paused', 'waiting outside', undefined, { waitingOn: 'external' });
+    expect(freshWakeEvents(baseline, undefined, () => false)).toEqual([]);
+    expect(freshWakeEvents(baseline)).toMatchObject([{ entry: { verb: 'paused', waitingOn: 'external', note: 'waiting outside' } }]);
+    expect(freshWakeEvents(baseline)).toEqual([]);
+    expect(attentionNow(true, 1, Date.now() + 86400_000)).toEqual([]);
+  });
+
   it('emits only wake-worthy verbs, once each', () => {
     appendStatus('n1', 'work', 'working');
     appendStatus('n1', 'work', 'needs-decision', 'which db?');

@@ -21,6 +21,7 @@ import {
   AttachmentError,
   addWatch,
   appendStatus,
+  activeIds,
   baitBrief,
   cancelRequested,
   claimBait,
@@ -2209,14 +2210,16 @@ async function mainCli(): Promise<void> {
         const deadline = timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : Number.POSITIVE_INFINITY;
         const emit = (evs: ReturnType<typeof attentionNow>) => {
           for (const e of evs) {
-            console.log(toonKV({ id: e.id, lane: e.lane, verb: e.entry.verb, note: e.entry.note, at: e.entry.at }));
+            console.log(toonKV({ id: e.id, lane: e.lane, verb: e.entry.verb, waitingOn: e.entry.waitingOn, link: e.entry.link, note: e.entry.note, at: e.entry.at }));
           }
           const ev = evs[0]!;
           console.log(
             `next: run \`lobstah status ${ev.id}\` for full state` +
               (ev.entry.verb === 'needs-decision' || ev.entry.verb === 'blocked'
                 ? `, then send an answer with \`lobstah send ${ev.id} "<answer>"\` when you can decide, or frame it with \`lobstah man ask ${ev.id}\` when it needs the human`
-                : `, collect the evidence, then \`lobstah send ${ev.id} "<instruction>"\` to wake a follow-up if needed`) +
+                : ev.entry.verb === 'paused'
+                  ? `, read the pause and decide if the human needs to act; put that choice on a card with \`lobstah man ask ${ev.id}\``
+                  : `, collect the evidence, then \`lobstah send ${ev.id} "<instruction>"\` to wake a follow-up if needed`) +
               `, then re-arm a background \`lobstah man wait${sid ? ` --session ${sid}` : ''}\`.`,
           );
         };
@@ -2460,7 +2463,16 @@ async function mainCli(): Promise<void> {
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
         const dueDigest = () => (helm ? dueHelmDigest(helm, cfgHaul.helm.reportSecs) : undefined);
-        const trapsAtStop = () => trapSummary(cfgHaul, helm?.repos);
+        const trapsAtStop = () => {
+          const pauses = (['work', 'chore'] as Lane[]).flatMap((lane) => activeIds(lane).flatMap((id) => {
+            const entry = readStatusLog(id, lane).at(-1);
+            const repo = repoOf(id, lane);
+            if (entry?.verb !== 'paused' || (helm && repo !== undefined && !helm.repos.includes(repo))) return [];
+            return [`- paused ${id} · waiting on ${entry.waitingOn ?? 'unspecified'} for ${ageLabel(Date.now() - Date.parse(entry.at))} — ${entry.note ?? '(no note)'}${entry.link ? ` ${entry.link}` : ''}`];
+          }));
+          // Informational only: an already delivered pause never blocks a stop.
+          return [trapSummary(cfgHaul, helm?.repos), ...pauses].filter(Boolean).join('\n');
+        };
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
           advanceCursor(helm!.grounds, d.now);
           emit(
@@ -3421,7 +3433,7 @@ trunk = "main"
           `# lobstah workspace definitions — the descriptor's repo key resolves here.
 # Top-level keys must come before any [section].
 # notifyCommand = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
-# notifyVerbs   = ["needs-decision", "blocked", "done", "failed"]   # the default
+# notifyVerbs   = ["needs-decision", "blocked", "paused", "done", "failed"]   # the default
 
 ${exampleRepo}[harness]
 default = "claude"

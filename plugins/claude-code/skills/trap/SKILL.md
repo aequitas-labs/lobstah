@@ -14,6 +14,8 @@ belongs to a person or to the helm, report `needs-decision` with the question.
 If you are waiting on an external await, report `paused` and name it.
 Never end a turn on `working`.
 
+Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`.
+
 ## Signing on
 
 ```
@@ -102,10 +104,10 @@ naming a dispatch id. Then:
   `done "<one-line note>" --report <file.md>`, its images added with `--attach`.
 - After you act on a message from the helm, say what you did in your next
   note. Any verb reaches the helm.
-- Before you wait on something outside lobstah (a ume review, a PR review, a
-  deploy), report `paused "<note>" --waiting-on review|pr|deploy|person|external
+- Before you wait on something external (a PR review or a deploy), report
+  `paused "<note>" --waiting-on review|pr|deploy|external
   --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,
-  not a question: nobody is paged. Report `working` when you resume. When the
+  not a question: the helm gets one wake to read it. Report `working` when you resume. When the
   PR you wait on merges, lobstah finishes the dispatch `done`; closed without
   merge, `failed`. For `review` or `pr`, `--link` is the PR's URL. If the
   report prints a `warning`, lobstah knows no PR for the wait: report again

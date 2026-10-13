@@ -5,10 +5,11 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm,
-  noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop } from '@lobstah/core';
+  noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop, baitBrief } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { charter, HELM_REMINDER } from '../src/charter.js';
+import { attentionNow } from '@lobstah/supervisor';
 
 /**
  * `lobstah hook <event>` runs what the older hook command runs, for a helm, a
@@ -116,6 +117,34 @@ describe('lobstah hook user-prompt-submit', () => {
 });
 
 describe('lobstah hook stop (alias: man haul)', () => {
+  it('lists current pauses with note and age after delivery, scoped to the helm', () => {
+    takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+    for (const [id, repo] of [['pause', 'web'], ['foreign', 'other']]) {
+      enqueue({ id, repo, brief: 'b' }); claimNext('work');
+      appendStatus(id, 'work', 'paused', `${id} note`, '2026-10-01T00:00:00Z', { waitingOn: 'external' });
+    }
+    attentionNow(true);
+    const stopped = hook(['hook', 'stop'], { session_id: HELM });
+    expect(stopped.status, stopped.stderr).toBe(0);
+    const reason = JSON.parse(stopped.stdout).reason;
+    expect(reason).toMatch(/paused pause · waiting on external for \S+ — pause note/);
+    expect(reason).not.toContain('foreign note');
+    expect(renderTend(buildTendReport())).toContain('pause note');
+    appendStatus('pause', 'work', 'working', 'resumed');
+    expect(hook(['hook', 'stop'], { session_id: HELM }).stdout).not.toContain('pause note');
+  });
+
+  it('keeps the human-wait rule in bait and both plugins, and pause triage in the charter', () => {
+    const rule = 'Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`.';
+    expect(baitBrief('job', { repo: 'web', brief: 'work' })).toContain(rule);
+    for (const plugin of ['codex', 'claude-code']) {
+      for (const skill of ['trap', 'man']) {
+        expect(fs.readFileSync(fileURLToPath(new URL(`../../../plugins/${plugin}/skills/${skill}/SKILL.md`, import.meta.url)), 'utf8')).toContain(rule);
+      }
+    }
+    expect(charter({ name: 'fleet', repos: ['web'] })).toContain('Read each pause and decide if the human needs to act.');
+  });
+
   for (const harness of ['claude', 'codex'] as const) {
     it(`${harness}: working blocks once, then passes without an arm/park loop`, () => {
       const trapId = trap('working-session', harness);

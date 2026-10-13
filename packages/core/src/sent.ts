@@ -12,7 +12,7 @@ import type { Lane, StatusEntry } from './types.js';
  * The first status entry on the dispatch after `sentAt` that the worker
  * reported (`lobstah report`), or any entry with a verb that already wakes
  * the helm, satisfies it. A waking verb needs nothing more: the helm hears
- * it anyway. A `working` or `paused` note is delivered once as a reply.
+ * it anyway. A `working` note is delivered once as a reply.
  * Entries lobstah writes itself (a claim, a delivered message) are not
  * notes and do not satisfy it.
  */
@@ -28,7 +28,7 @@ export interface SentExpectation {
 }
 
 /** Verbs that wake the helm on their own; a send answered by one needs no reply event. */
-export const WAKING_VERBS: readonly string[] = ['needs-decision', 'blocked', 'done', 'failed'];
+export const WAKING_VERBS: readonly string[] = ['needs-decision', 'blocked', 'paused', 'done', 'failed'];
 
 export type ReplyState =
   | { kind: 'awaiting' }

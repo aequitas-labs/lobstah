@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, enqueue, ensureLayout, pendingIds, readDescriptor, slotUsage } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, pendingIds, readDescriptor, slotUsage, statusPath } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { PickupState } from '../src/state.js';
 import { dispatchLoop } from '../src/loops/dispatch.js';
@@ -765,7 +765,8 @@ describe('merge loop', () => {
     await mergeLoop(ms, policy, st);
     const id = pendingIds('chore')[0]!;
     claimNext('chore');
-    appendStatus(id, 'chore', 'paused', 'still waiting', undefined, { waitingOn });
+    // Legacy person pauses must remain readable even though new reports refuse them.
+    fs.appendFileSync(statusPath(id, 'chore'), JSON.stringify({ at: new Date().toISOString(), verb: 'paused', note: 'still waiting', waitingOn }) + '\n');
     await mergeLoop(ms, policy, st);
     expect(readMergeView()!.open[0]?.gate).toBe(`conflict-chore:${id}`);
     expect(st.rebase('fake-merge#1')?.uuid).toBe(id);
