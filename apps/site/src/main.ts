@@ -1,21 +1,23 @@
-// The marketing page's script. The page reads without it: the scene then
-// stands at its first frame and every word is still there. This file tells the
-// scene which beat of the story is on screen, pauses loops nobody can see, and
-// runs the copy buttons and the "still water" switch.
+// The marketing page's script. This file tells the scene which beat of the
+// story is on screen, pauses loops nobody can see, gives each lobster its own
+// pace, and runs the copy buttons and the "still water" switch.
 
 const root = document.documentElement;
 const STILL_KEY = 'lobstah-still';
 
+/** Copy what the install control is showing: the prompt or commands of its open tab. */
 function copyButtons(): void {
-  for (const btn of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('button[data-copy-panel]')) {
     btn.addEventListener('click', async () => {
-      const text = btn.dataset.copy ?? '';
+      const box = btn.closest('.handoff');
+      const tabs = [...(box?.querySelectorAll<HTMLInputElement>('.tab-input') ?? [])];
+      const panel = box?.querySelectorAll('.panel')[tabs.findIndex((t) => t.checked)];
+      if (!panel) return;
       try {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(panel.textContent ?? '');
       } catch {
-        // No clipboard permission (an insecure origin, an old browser): select the command instead.
-        const code = btn.parentElement?.querySelector('code');
-        if (code) getSelection()?.selectAllChildren(code);
+        // No clipboard permission (an insecure origin, an old browser): select the text instead.
+        getSelection()?.selectAllChildren(panel);
         return;
       }
       btn.textContent = 'copied';
@@ -31,7 +33,7 @@ function copyButtons(): void {
  */
 function followBeats(story: HTMLElement): void {
   const beats = [...story.querySelectorAll('.beat')];
-  // A beat is current once its caption has reached the middle of the screen.
+  // A beat is current once it has reached the middle of the screen.
   const middle = new IntersectionObserver(
     (entries) => {
       for (const e of entries) if (e.isIntersecting) story.dataset.beat = String(beats.indexOf(e.target));
@@ -47,6 +49,16 @@ function pauseOffScreen(): void {
     for (const e of entries) e.target.classList.toggle('off', !e.isIntersecting);
   });
   for (const el of document.querySelectorAll('.story, .strip')) seen.observe(el);
+}
+
+/** Each lobster at the foot of the page walks at its own pace, picked afresh on every visit. */
+function lobsterPaces(): void {
+  for (const lob of document.querySelectorAll<HTMLElement>('.strip .lob')) {
+    const pace = 11 + Math.random() * 17;
+    lob.style.setProperty('--pace', `${pace.toFixed(1)}s`);
+    // A negative head start puts each one somewhere along its walk already.
+    lob.style.setProperty('--head', `${(-Math.random() * pace).toFixed(1)}s`);
+  }
 }
 
 /** "Still water": the same still page that reduced motion gives, by hand, remembered in this browser. */
@@ -70,6 +82,7 @@ function stillSwitch(): void {
 }
 
 copyButtons();
+lobsterPaces();
 stillSwitch();
 if ('IntersectionObserver' in window) {
   const story = document.querySelector<HTMLElement>('.story');

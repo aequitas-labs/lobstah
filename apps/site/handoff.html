@@ -1,0 +1,22 @@
+<!-- The install control, used in the hero and again at the end. {{id}} keeps each copy's tabs apart. -->
+<div class="handoff" id="handoff-{{id}}">
+  <p class="handoff-title">Give this to your agent</p>
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-claude" checked />
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-codex" />
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-hand" />
+  <div class="tabs">
+    <label for="{{id}}-claude">Claude Code</label>
+    <label for="{{id}}-codex">Codex</label>
+    <label for="{{id}}-hand">By hand</label>
+    <button class="btn" type="button" data-copy-panel>copy</button>
+  </div>
+  <pre
+    class="panel p-claude"
+  ><code>Install lobstah: run npm i -g lobstah, lobstah init --scan ~/src and lobstah daemon install. Then tell me to type /plugin marketplace add aequitas-labs/lobstah and /plugin install lobstah@lobstah, and to open a new session with /lobstah:man.</code></pre>
+  <pre
+    class="panel p-codex"
+  ><code>Install lobstah: run npm i -g lobstah, lobstah init --scan ~/src, lobstah daemon install, codex plugin marketplace add aequitas-labs/lobstah and codex plugin add lobstah@lobstah. Then tell me to trust its hooks in /hooks and open a new session with $lobstah:man.</code></pre>
+  <pre class="panel p-hand"><code>npm i -g lobstah
+lobstah init --scan ~/src
+lobstah daemon install</code></pre>
+</div>

@@ -22,13 +22,14 @@ node scripts/build-site.mjs --serve --wharf --port 4951 --out /tmp/lobstah-site-
 
 ## How it is put together
 
-| File          | Holds                                                                                               |
-| ------------- | --------------------------------------------------------------------------------------------------- |
-| `index.html`  | the page: the story (one pinned scene and its five captions), the cards under it, the lobster strip |
-| `site.css`    | the page's own styles; the scene, read off one dial (`--p`), then the loops                         |
-| `src/main.ts` | tells the scene which beat is on screen, pauses loops, the copy buttons, "still water"              |
-| `assets/`     | the art layers, cut from the three drawings in `art/originals`                                      |
-| `art/cut.py`  | the cutter that made `assets/` (a maintainer tool; the build never runs it)                         |
+| File           | Holds                                                                                               |
+| -------------- | --------------------------------------------------------------------------------------------------- |
+| `index.html`   | the page: the story (one pinned scene and its five captions), the cards under it, the lobster strip |
+| `handoff.html` | the "Give this to your agent" control, included in the hero and at the end                          |
+| `site.css`     | the page's own styles; the scene, read off one dial (`--p`), then the loops                         |
+| `src/main.ts`  | tells the scene which beat is on screen, pauses loops, the copy buttons, "still water"              |
+| `assets/`      | the art layers, cut from the three drawings in `art/originals`                                      |
+| `art/cut.py`   | the cutter that made `assets/` (a maintainer tool; the build never runs it)                         |
 
 `scripts/build-site.mjs` reads the design tokens and the card, badge, button
 and lobster rules from `apps/cli/glass/glass.css`, so the page wears the
@@ -41,13 +42,13 @@ The story is one scene, pinned behind the copy: one sky and one sea from
 sunrise to the haul, with the same wave lines drifting throughout. A single
 number, `--p`, says how far through it we are:
 
-| `--p` | Beat                                                                            |
-| ----- | ------------------------------------------------------------------------------- |
-| 0     | sunrise over calm water; the headline and the install command                   |
-| 1     | the boat has crossed and dropped three traps, each under its own buoy           |
-| 2     | the sun has set                                                                 |
-| 3     | the camera is close on one buoy: it bobs, then its flag goes up with a question |
-| 4     | the camera is back; every trap has a lobster in it                              |
+| `--p` | Beat                                                                                                              |
+| ----- | ----------------------------------------------------------------------------------------------------------------- |
+| 0     | sunrise over calm water; the headline and the install command                                                     |
+| 1     | the boat has crossed and dropped three traps, each under its own buoy                                             |
+| 2     | the sun has set                                                                                                   |
+| 3     | the camera is close on one buoy: it works, then its flag goes up with a question, and an answer is picked         |
+| 4     | the camera is back; every buoy has its flag up, each says something different, and every trap has a lobster in it |
 
 Every moving thing takes its place from `--p`, so the scene is the same
 picture however `--p` is driven:
@@ -61,10 +62,15 @@ Loops (the bob, the drifting wave lines, the lobsters' walk) run only under
 `:root.motion`, and pause when they are off screen or the tab is hidden. Only
 `transform`, `scale` and `opacity` change. There is no animation runtime.
 
-The sunrise glow, the dusk, the stars and the sun are CSS gradients and a
-circle; the water is one SVG wave path. The lobster in each hauled trap and the
-lobsters in the strip at the foot of the page are the glass's sprite, each with
-its star.
+The captions sit in the sky, fixed, one at a time, so none ever crosses a
+buoy. The sunrise glow, the dusk, the stars and the sun are CSS gradients and
+a circle; the water's surface is one SVG wave, a fill and one moving line. The
+lobster in each hauled trap and the lobsters in the strip at the foot of the
+page are the glass's sprite, each with its star. Each lobster in the strip
+walks at a pace picked afresh on every visit.
+
+Without JavaScript the scene still plays where the browser ties animation to
+the scroll; elsewhere it stays at sunrise.
 
 ## The art
 
@@ -83,6 +89,7 @@ its brown outline reads on the dark page.
 `apps/site/test/site.test.ts` builds the page and checks that its first load
 stays under 300 KB, that it fetches nothing from another origin and no
 animation runtime, that the wharf section is out unless asked for, that the
-install call is in the hero and the star call only at the bottom, that the
-lobster strip is at the foot of the page and not fixed to the screen, and that
-every lobster keeps its star.
+install control is in the hero and at the end with the real commands, that the
+one star call is at the bottom with the lobster's star, that the lobster strip
+is at the foot of the page and not fixed to the screen, and that every lobster
+keeps its star.

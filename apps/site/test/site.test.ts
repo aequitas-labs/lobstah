@@ -11,6 +11,7 @@ import {
   expandArt,
   firstLoadWeight,
   holdWharf,
+  includePartials,
   pickRules,
   topLevelRules,
   webpSize,
@@ -63,6 +64,12 @@ describe('the site build helpers', () => {
     );
   });
 
+  it('puts a partial where the page asks for it, filled from the include line', () => {
+    const partial = '<!-- a note for the source reader -->\n<div id="box-{{id}}"></div>\n';
+    expect(includePartials('<a>\n  <!-- include box.html id=hero -->\n<b>\n', () => partial)).toBe('<a>\n<div id="box-hero"></div>\n<b>\n');
+    expect(() => includePartials('<!-- include box.html -->\n', () => partial)).toThrow(/needs id=/);
+  });
+
   it('holds the wharf section out unless asked for it', () => {
     const page = '<a>\n  <!-- wharf:start (held) -->\n  <b>wharf</b>\n  <!-- wharf:end -->\n<c>\n';
     expect(holdWharf(page, false)).toBe('<a>\n<c>\n');
@@ -104,14 +111,29 @@ describe('the built page', () => {
     expect(visibleText(withWharf.html)).toContain('The glass, hosted. Check the water from your phone.');
   });
 
-  it('puts the install call in the hero and the star call at the bottom only', () => {
+  it('hands the install to an agent in the hero and again at the end, with the command by hand', () => {
     const hero = built.html.slice(built.html.indexOf('id="hero"'), built.html.indexOf('id="set"'));
-    expect(hero).toContain('data-copy="npm i -g lobstah"');
-    expect(built.html.match(/data-copy="npm i -g lobstah"/g)).toHaveLength(2);
+    expect(hero).toContain('Give this to your agent');
+    expect(built.html.match(/class="handoff" id="handoff-\w+"/g)).toEqual([
+      'class="handoff" id="handoff-hero"',
+      'class="handoff" id="handoff-start"',
+    ]);
+    // Every tab carries the real install command; the harness tabs name their real plugin steps.
+    const panels = built.html.match(/<pre\s+class="panel[^>]*>[\s\S]*?<\/pre>/g) ?? [];
+    expect(panels).toHaveLength(6);
+    for (const panel of panels) expect(panel).toContain('npm i -g lobstah');
+    expect(built.html).toContain('/plugin marketplace add aequitas-labs/lobstah');
+    expect(built.html).toContain('codex plugin marketplace add aequitas-labs/lobstah');
+    expect(built.html).not.toMatch(/\{\{\w+\}\}|<!-- include/);
+  });
+
+  it("puts the star call at the bottom only, with the lobster's own star", () => {
     const star = [...built.html.matchAll(/class="starcall" href="https:\/\/github\.com\/aequitas-labs\/lobstah"/g)];
     expect(star).toHaveLength(1);
-    // after the story and the feature cards, never on the first screen
-    expect(star[0].index).toBeGreaterThan(built.html.indexOf('id="more"'));
+    const at = star[0].index ?? 0;
+    expect(at).toBeGreaterThan(built.html.indexOf('id="start"'));
+    expect(built.html.slice(at, at + 200)).toContain('src="assets/star.png"');
+    expect(visibleText(built.html)).not.toContain('★');
   });
 
   it('keeps the lobster strip at the very bottom of the page, not fixed to the screen', () => {

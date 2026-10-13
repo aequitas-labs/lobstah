@@ -26,7 +26,11 @@
   <body>
     <svg width="0" height="0" class="defs" aria-hidden="true" focusable="false">
       <defs>
-        <!-- One wave line, 24 crests in 1200 units, closed below. Shifting it by half its width joins without a seam. -->
+        <!-- One wave, 24 crests in 1200 units: the line alone, and the same line closed below for the fill. Shifting either by half its width joins without a seam. -->
+        <path
+          id="wave-line"
+          d="M0 7q12.5-7 25 0t25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0"
+        />
         <path
           id="wave-fill"
           d="M0 7q12.5-7 25 0t25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0V15H0Z"
@@ -41,21 +45,24 @@
 
     <!--
       The story: one scene, pinned behind the copy, that the scroll plays from
-      sunrise to the haul. Five beats; each caption rides over the scene.
+      sunrise to the haul. Five beats. The captions sit in the sky, clear of the water.
     -->
     <section class="story" id="story" data-beat="0">
-      <div
-        class="pin"
-        role="img"
-        aria-label="One calm sea, from sunrise to night. A lobster boat crosses and drops three traps, each under its own buoy. The sun sets. One buoy bobs, then raises a white flag: it has a question. At the end every trap has a lobster in it."
-      >
-        <div class="world">
+      <div class="pin">
+        <div
+          class="world"
+          role="img"
+          aria-label="One calm sea, from sunrise to night. A lobster boat crosses and drops three traps, each under its own buoy. The sun sets. One buoy bobs while it works, then raises a white flag: it has a question, and an answer is picked. At the end every buoy has its flag up and every trap has a lobster in it."
+        >
           <div class="sky warm"></div>
           <div class="sky dusk"></div>
           <div class="sky stars"></div>
           <div class="sun"></div>
           <div class="sea">
-            <svg class="wave drift slow" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+            <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
+              <use href="#wave-fill" />
+              <use class="edge" href="#wave-line" />
+            </svg>
           </div>
 
           <div class="track">
@@ -87,7 +94,10 @@
 
           <div class="at-water float d1">
             <div class="buoy-art">
-              <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 160px, 110px" alt="" /></div>
+              <div class="bob">
+                <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+                <img data-art="buoy-body" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+              </div>
             </div>
           </div>
           <div class="at-water float d2">
@@ -100,7 +110,10 @@
           </div>
           <div class="at-water float d3">
             <div class="buoy-art">
-              <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 160px, 110px" alt="" /></div>
+              <div class="bob later">
+                <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+                <img data-art="buoy-body" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+              </div>
             </div>
           </div>
 
@@ -126,15 +139,53 @@
           </div>
         </div>
 
-        <!-- Labels sit outside the world, so the zoom does not scale their text. -->
-        <span class="badge tag d1">fix the flaky login test</span>
-        <span class="badge tag d2">upgrade the SDK</span>
-        <span class="badge tag d3">answer the review on #212</span>
-        <span class="badge say working">working</span>
-        <div class="card say ask"><span class="badge needs">needs you</span><b>Redis or memory?</b></div>
-        <span class="badge ok got d1">catch ready</span>
-        <span class="badge ok got d2">catch ready</span>
-        <span class="badge ok got d3">catch ready</span>
+        <!-- Labels and notes sit outside the world, so the zoom does not scale their text. -->
+        <div class="notes" aria-hidden="true">
+          <span class="badge tag d1">fix the flaky login test</span>
+          <span class="badge tag d2">add a session cache</span>
+          <span class="badge tag d3">answer the review on #212</span>
+
+          <!-- The middle buoy's note: working, then a question with an answer picked, then answered. -->
+          <div class="card note mid work">
+            <span class="badge">working</span><span class="dots"><i></i><i></i><i></i></span>
+          </div>
+          <div class="card note mid ask">
+            <span class="badge needs">needs you</span>
+            <b>Which cache?</b>
+            <ul class="opts">
+              <li class="picked">Redis</li>
+              <li>In-memory</li>
+              <li>Ask the team</li>
+            </ul>
+          </div>
+
+          <!-- At the haul each trap says something different. -->
+          <div class="card note end d1"><span class="badge ok">catch</span><b>PR #212 · 8/8</b><span class="by">Claude Code</span></div>
+          <div class="card note end d2"><span class="badge ok">answered</span><b>Redis · PR #214</b><span class="by">Codex</span></div>
+          <div class="card note end d3"><span class="badge ok">catch</span><b>review answered</b><span class="by">Claude Code</span></div>
+        </div>
+
+        <!-- Captions: fixed in the sky, one at a time. -->
+        <div class="caps">
+          <div class="cap c1">
+            <h2>Set the traps.</h2>
+            <p>
+              Lob a brief into a trap and walk away. Each job runs in its own git worktree, on Claude Code or Codex. Set one trap or set
+              ten.
+            </p>
+          </div>
+          <div class="cap c2">
+            <h2>Go do something else.</h2>
+            <p>
+              A trap doesn't fish faster for being watched, and an agent doesn't code faster either. A daemon does the watching, with no
+              model in the loop.
+            </p>
+          </div>
+          <div class="cap c4">
+            <h2>Haul up the lobstahs.</h2>
+            <p>You step in only when a catch is ready. The trap comes up with a pull request, the evidence, and a report.</p>
+          </div>
+        </div>
       </div>
 
       <div class="beats">
@@ -145,163 +196,164 @@
               Set your traps and go do something else. lobstah runs your coding agents in the background and tells you when one has a catch,
               or a question.
             </p>
-            <p class="tagline">Harness-agnostic, token-efficient supervision for coding agents.</p>
-            <div class="install">
-              <code>npm i -g lobstah</code>
-              <button class="btn" type="button" data-copy="npm i -g lobstah">copy</button>
-            </div>
-            <p class="fine">
-              Open source, MIT. Node 20 or later. macOS, Linux, Windows.
-              <a href="https://github.com/aequitas-labs/lobstah#install-">Other ways to install</a>
-            </p>
+            <!-- include handoff.html id=hero -->
+            <p class="fine">Open source, MIT · macOS, Linux, Windows</p>
           </div>
         </div>
-        <div class="beat" id="set">
-          <div class="cap">
-            <h2>Set the traps.</h2>
-            <p>
-              Lob a brief into a trap and walk away. Each job runs in its own git worktree, on Claude Code or Codex. Set one trap or set
-              ten.
-            </p>
-          </div>
-        </div>
-        <div class="beat" id="away">
-          <div class="cap">
-            <h2>Go do something else.</h2>
-            <p>
-              A trap doesn't fish faster for being watched, and an agent doesn't code faster either. A daemon does the watching, with no
-              model in the loop.
-            </p>
-          </div>
-        </div>
-        <div class="beat" id="buoy">
-          <div class="cap">
-            <h2>The buoy tells you.</h2>
-            <p>
-              Bobbing: it is working. Flag up: it needs a decision. Pulled under: a catch. Gone still: something stopped, and the helm
-              already knows.
-            </p>
-            <p class="fine">
-              Workers report in six words: working, needs-decision, blocked, paused, done, failed. lobstah accepts no others.
-            </p>
-          </div>
-        </div>
-        <div class="beat last" id="haul">
-          <div class="cap">
-            <h2>Haul up the lobstahs.</h2>
-            <p>You step in only when a catch is ready. The trap comes up with a pull request, the evidence, and a report.</p>
-          </div>
-        </div>
+        <div class="beat" id="set"></div>
+        <div class="beat" id="away"></div>
+        <div class="beat" id="buoy"><h2 class="sr-only">The buoy tells you: working, then a question.</h2></div>
+        <div class="beat last" id="haul"></div>
       </div>
     </section>
 
     <main>
-      <!-- The sections under the story: a few words and a picture each -->
-      <section class="features" id="more">
-        <article class="card feature">
-          <img class="pic" data-art="buoy-body" data-sizes="48px" alt="" />
-          <div>
-            <h2>Token-efficient supervision</h2>
-            <p>A daemon watches every worker, with no model in the loop.</p>
+      <!-- How it works: the daemon, then the two ways to run it -->
+      <section class="sec" id="how">
+        <h2>How it works</h2>
+        <p class="lead">A daemon does the watching, with no model in the loop.</p>
+        <ol class="flow">
+          <li><b>You lob a brief.</b> Each job gets its own git worktree.</li>
+          <li><b>The daemon supervises.</b> It tells a dead worker from a stuck one and recovers each.</li>
+          <li><b>It wakes you only when needed.</b> A catch, or a question.</li>
+        </ol>
+        <div class="modes">
+          <article class="card mode">
+            <span class="badge">driven</span>
+            <h3>The lobstah man</h3>
+            <p>One Claude Code or Codex session takes the helm. You talk to it; it sends out the work and brings you the catch.</p>
             <ul class="chips">
-              <li>tells dead from stuck</li>
-              <li>recovers each</li>
-              <li>agents read the fleet in TOON</li>
+              <li><code>/lobstah:man</code></li>
+              <li>each question is a card on the glass</li>
             </ul>
-          </div>
-        </article>
-
-        <article class="card feature">
-          <img class="pic wide" data-art="boat-body" data-sizes="96px" alt="" />
-          <div>
-            <h2>Bring your own harness</h2>
-            <p>lobstah is the boat, not the fisherman.</p>
+          </article>
+          <article class="card mode">
+            <span class="badge">autonomous</span>
+            <h3>The background router</h3>
+            <p>No session open. Lob in a brief, or let your tracker do it. lobstah pings you when a worker needs you.</p>
             <ul class="chips">
-              <li>Claude Code</li>
-              <li>Codex</li>
-              <li>both in one fleet</li>
-              <li>swap mid-job</li>
+              <li><code>lobstah dispatch</code></li>
+              <li>pings through any command you choose</li>
             </ul>
-          </div>
-        </article>
+          </article>
+        </div>
+        <p class="fine">Both run on the same daemon. Start with the router and add a helm when you like.</p>
+      </section>
 
-        <article class="card feature">
-          <img class="pic" src="assets/icon-192.png" width="64" height="64" alt="" />
-          <div>
-            <h2>Three ways to be at the wheel</h2>
-            <ul class="ways">
-              <li><b>The lobstah man.</b> One session you talk to.</li>
-              <li><b>The helm.</b> One seat for each set of repos.</li>
-              <li><b>The glass.</b> A live page. Each question is a card.</li>
-            </ul>
-            <ul class="chips">
-              <li>OpenClaw: four tools and <code>/lobstah</code></li>
-            </ul>
-          </div>
-        </article>
+      <!-- Harness -->
+      <section class="sec harness" id="harness">
+        <div class="trap-pic">
+          <img data-art="trap" data-sizes="(min-width: 720px) 300px, 180px" alt="" />
+          <span class="harness-mark h-claude"><i class="glyph">&gt;_</i>Claude Code</span>
+          <span class="harness-mark h-codex"><i class="glyph">&gt;_</i>Codex</span>
+        </div>
+        <div>
+          <h2>Bring your own harness</h2>
+          <p class="lead">lobstah is the boat, not the fisherman.</p>
+          <ul class="chips">
+            <li>both in one fleet</li>
+            <li>pick the harness for each job</li>
+            <li>swap mid-job</li>
+            <li>a session you have open can be a trap</li>
+          </ul>
+        </div>
+      </section>
 
-        <article class="card feature">
-          <img class="pic wide" data-art="trap" data-sizes="96px" alt="" />
-          <div>
-            <h2>Works with what you have</h2>
-            <p>No webhooks, no tunnel. lobstah polls.</p>
-            <ul class="chips">
-              <li>GitHub PRs and stacks</li>
-              <li>Linear</li>
-              <li>GitHub issues</li>
-              <li>CI and any command</li>
-              <li>Graphite</li>
-              <li>ntfy or Slack</li>
-            </ul>
-          </div>
-        </article>
+      <!-- Integrations: one row that scrolls sideways -->
+      <section class="sec" id="integrations">
+        <h2>Integrations</h2>
+        <p class="lead">No webhooks, no tunnel. lobstah polls.</p>
+        <ul class="scroller" tabindex="0" aria-label="Integrations">
+          <li class="card int">
+            <i class="glyph">PR</i><b>GitHub pull requests</b><span>Workers open them. lobstah watches checks, reviews and conflicts.</span>
+          </li>
+          <li class="card int"><i class="glyph">≡</i><b>PR stacks</b><span>One wake when a whole stack is ready, bottom first.</span></li>
+          <li class="card int"><i class="glyph">#</i><b>GitHub issues</b><span>Assign an issue and it becomes a job.</span></li>
+          <li class="card int"><i class="glyph">Li</i><b>Linear</b><span>Assign an issue. Status comes back as comments.</span></li>
+          <li class="card int">
+            <i class="glyph">CI</i><b>CI and any command</b
+            ><span><code>lobstah watch</code> stands watch on anything with a command line.</span>
+          </li>
+          <li class="card int"><i class="glyph">Gr</i><b>Graphite and Linear review</b><span>PR links open where you review.</span></li>
+          <li class="card int">
+            <i class="glyph">!</i><b>ntfy, Slack, anything</b><span>One config line pings you through any command.</span>
+          </li>
+          <li class="card int">
+            <i class="glyph">OC</i><b>OpenClaw</b><span>Four tools and <code>/lobstah</code> for your fleet's agents.</span>
+          </li>
+        </ul>
+      </section>
 
-        <!-- wharf:start (held out of the page until the wharf ships; `--wharf` includes it) -->
-        <article class="card feature" id="wharf">
-          <img class="pic wide" data-art="boat-bunting-left" data-sizes="96px" alt="" />
-          <div>
-            <h2>The wharf</h2>
-            <p>The glass, hosted. Check the water from your phone.</p>
-            <ul class="chips">
-              <li>sign in with GitHub</li>
-              <li>your code stays on your boat</li>
-              <li>revoke a boat any time</li>
-            </ul>
-          </div>
-        </article>
-        <!-- wharf:end -->
-
-        <article class="card feature">
-          <span class="pic lobpic"
-            ><span class="pet-art"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span
-          ></span>
-          <div>
-            <h2>You are only called when a lobster is caught</h2>
-            <p>A catch, or a question. Nothing else.</p>
-            <ul class="chips">
-              <li>a catch: PR, evidence, report</li>
-              <li>a question: one card, until you answer</li>
-              <li>a quiet worker wakes the helm, not you</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="card feature wide start">
-          <div>
-            <h2>Three commands to the first catch</h2>
-            <pre><code>npm i -g lobstah
-lobstah init --scan ~/src
-lobstah dispatch --repo myapp --brief ./brief.md</code></pre>
-            <p>Then go do something else.</p>
-            <div class="calls">
-              <div class="install">
-                <code>npm i -g lobstah</code>
-                <button class="btn" type="button" data-copy="npm i -g lobstah">copy</button>
+      <!-- wharf:start (held out of the page until the wharf ships; `--wharf` includes it) -->
+      <section class="sec" id="wharf">
+        <h2>The wharf</h2>
+        <p class="lead">The glass, hosted. Check the water from your phone. Your code stays on your boat.</p>
+        <ul class="scroller frames" tabindex="0" aria-label="What the wharf looks like">
+          <li class="phone">
+            <div class="screen" aria-label="The deck: decisions waiting for you">
+              <div class="w-head">
+                <b>spyglass <span class="dim">wharf</span></b
+                ><span class="btn">sign out</span>
               </div>
-              <a class="starcall" href="https://github.com/aequitas-labs/lobstah">★ Star on GitHub</a>
+              <div class="w-chips"><span class="chip">helm live</span><span class="chip dim">polling · 15s · 3 jobs</span></div>
+              <div class="w-tabs">
+                <span class="on">deck</span><span>jobs</span><span>traps</span><span>boats</span><span>reports</span>
+              </div>
+              <div class="w-h">Decisions</div>
+              <div class="card">
+                <div class="top"><b>Which cache?</b><span class="badge">needs decision</span></div>
+                <div class="meta">helm · 2m</div>
+              </div>
+              <div class="card">
+                <div class="top"><b>Cut 0.7.6?</b><span class="badge">answered</span></div>
+                <div class="meta">helm · 1h</div>
+              </div>
             </div>
-          </div>
-        </article>
+            <span class="fine">The deck</span>
+          </li>
+          <li class="phone">
+            <div class="screen" aria-label="A decision card with its options">
+              <div class="w-head"><b>Which cache?</b><span class="btn">×</span></div>
+              <div class="meta">decision · helm · 2m</div>
+              <p class="w-body">The session cache needs a home. Redis is shared across instances; in-memory needs no setup.</p>
+              <div class="w-opts"><span class="btn on">Redis</span><span class="btn">In-memory</span></div>
+              <div class="w-answer">shared, please</div>
+              <span class="btn">answer card</span>
+            </div>
+            <span class="fine">Answer a card</span>
+          </li>
+          <li class="phone">
+            <div class="screen" aria-label="Your boats, each with its access">
+              <div class="w-tabs">
+                <span>deck</span><span>jobs</span><span>traps</span><span class="on">boats</span><span>reports</span>
+              </div>
+              <div class="card">
+                <div class="top"><b>macbook</b><span class="badge">work + helm</span></div>
+                <div class="meta">last check-in 1m</div>
+                <div class="w-foot"><span class="btn">revoke…</span></div>
+              </div>
+              <div class="card">
+                <div class="top"><b>mini</b><span class="badge">work + read</span></div>
+                <div class="meta">last check-in 4m</div>
+                <div class="w-foot"><span class="btn">revoke…</span></div>
+              </div>
+            </div>
+            <span class="fine">Your boats</span>
+          </li>
+        </ul>
+      </section>
+      <!-- wharf:end -->
+
+      <!-- Get started -->
+      <section class="sec start" id="start">
+        <h2>Get started</h2>
+        <p class="lead">Hand it to your agent, then go do something else.</p>
+        <!-- include handoff.html id=start -->
+        <p>
+          <a class="starcall" href="https://github.com/aequitas-labs/lobstah"
+            ><img class="pixstar" src="assets/star.png" width="15" height="15" alt="" />Star on GitHub</a
+          >
+        </p>
       </section>
     </main>
 

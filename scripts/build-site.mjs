@@ -128,6 +128,22 @@ export function holdWharf(page, include) {
   return page.replace(block, include ? '$1' : '');
 }
 
+/**
+ * Put a partial where the page asks for it: `<!-- include handoff.html id=hero -->`
+ * becomes that file, with each `{{id}}` in it filled from the comment.
+ */
+export function includePartials(page, readPartial) {
+  return page.replace(/[ \t]*<!-- include (\S+)((?: \w+=\S+)*) -->\n/g, (_, file, pairs) => {
+    const values = Object.fromEntries([...pairs.matchAll(/(\w+)=(\S+)/g)].map((m) => [m[1], m[2]]));
+    return readPartial(file)
+      .replace(/<!--[\s\S]*?-->\n?/g, '')
+      .replace(/\{\{(\w+)\}\}/g, (whole, key) => {
+        if (!(key in values)) throw new Error(`${file} needs ${key}= on its include line`);
+        return values[key];
+      });
+  });
+}
+
 /** Turn every `<img data-art="name" data-sizes="…">` into a sized image with one source per cut width. */
 export function expandArt(page, sizeOf) {
   const used = new Set();
@@ -185,6 +201,7 @@ export async function buildSite({ wharf = false, minify = true, outDir = path.jo
   const css = await esbuild.transform(sheet, { loader: 'css', minify, legalComments: 'none' });
   const assets = path.join(site, 'assets');
   let page = holdWharf(read(path.join(site, 'index.html')), wharf);
+  page = includePartials(page, (file) => read(path.join(site, file)));
   page = page.replace(/[ \t]*<!-- scripts\/build-site\.mjs[^>]*-->\n/g, '');
   const art = expandArt(page, (f) => webpSize(fs.readFileSync(path.join(assets, f))));
   page = inline(art.html, CSS_TAG, `<style>${css.code.trimEnd().replace(/<\/(style)/gi, '<\\/$1')}</style>`);
