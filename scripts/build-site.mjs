@@ -166,14 +166,14 @@ export function inlineIcons(page, readIcon) {
 /** Turn every `<img data-art="name" data-sizes="…">` into a sized image with one source per cut width. */
 export function expandArt(page, sizeOf) {
   const used = new Set();
-  const html = page.replace(/<img([^>]*?)\sdata-art="([^"]+)"\sdata-sizes="([^"]+)"([^>]*?)\/>/g, (_, before, name, sizes, after) => {
+  const html = page.replace(/<img([^>]*?)\s+data-art="([^"]+)"\s+data-sizes="([^"]+)"\s*([^>]*?)\/>/g, (_, before, name, sizes, after) => {
     const widths = ART_WIDTHS[name];
     if (!widths) throw new Error(`unknown art layer "${name}"`);
     const files = widths.map((w) => `${name}-${w}.webp`);
     files.forEach((f) => used.add(f));
     const { width, height } = sizeOf(files[0]);
     const srcset = files.map((f, i) => `assets/${f} ${widths[i]}w`).join(', ');
-    return `<img${before} src="assets/${files[0]}" srcset="${srcset}" sizes="${sizes}" width="${width}" height="${height}" decoding="async"${after}/>`;
+    return `<img${before} src="assets/${files[0]}" srcset="${srcset}" sizes="${sizes}" width="${width}" height="${height}" decoding="async" ${after}/>`;
   });
   if (/data-art=/.test(html)) throw new Error('an <img data-art> is missing its data-sizes');
   return { html, used: [...used] };

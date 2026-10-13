@@ -86,14 +86,15 @@ Each layer of a group shares one canvas, so the page stacks the boat's layers
 onto its own brown outline, so nothing pale is left around it and it sits
 flush on the dark page and on the water.
 
-## The fleet from above
+## The fleet
 
-The wharf section (built only with `--wharf`) leads with the sea seen from
-above: three boats, each with its own buoys, drawn in SVG in the page's
-palette. A camera goes to each trap as it reports, a flag goes up there with a
-note naming the boat, and then the camera pulls back to the whole fleet. It
-plays by itself on a 26 second loop while it is in view, not from the scroll.
-With motion off it is one still frame with three flags up.
+The wharf section (built only with `--wharf`) leads with open water seen from
+a little above. The view never moves. Three lanes of water lie one behind
+another, the far one small and high, the near one large and low. Each has a
+row of buoys and one boat that crosses it, all made from the same art layers
+as the story. As a trap reports, its buoy's flag goes up with a note naming
+the boat. It plays by itself, on a loop, while it is in view, not from the
+scroll. With motion off it is one still frame with three flags up.
 
 ## Limits the tests hold
 

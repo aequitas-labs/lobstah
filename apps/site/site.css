@@ -742,6 +742,10 @@ p {
 .hero .sub {
   font-size: 17px;
 }
+/* The headline is not held to the copy's narrow column. */
+.beats .cap > h1 {
+  max-width: none;
+}
 
 /* ================= sections under the story ================= */
 .sec {
@@ -888,7 +892,14 @@ p {
   width: 24px;
   height: 24px;
 }
-/* The fleet from above: boats, their buoys, and a camera that visits each trap as it reports. */
+/*
+ * The fleet, from a little above the water. The view never moves. Three lanes
+ * of water lie one behind another, the far one small and high, the near one
+ * large and low; each has its buoys and one boat that crosses it. A lane is
+ * the story's water again: things float on a line, and a see-through layer in
+ * front dims what is under the surface. The nearer lanes are painted later,
+ * so they lie over the farther ones.
+ */
 .fleet-wrap {
   display: grid;
   gap: var(--space-4);
@@ -903,82 +914,114 @@ p {
   overflow: hidden;
   background: var(--sea);
   aspect-ratio: 4 / 3;
+  /* lets sizes be worked out from the scene's width (cqw) */
+  container-type: inline-size;
 }
-.fleet svg {
+.fleet img {
   display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
 }
-.fleet .ripples {
-  fill: url(#td-ripples);
+/* A strip of night sky above the far water. */
+.fleet-sky {
+  position: absolute;
+  inset: 0 0 82%;
+  background: linear-gradient(var(--bg), #1c1a26);
 }
-#td-ripples path {
-  fill: none;
-  stroke: var(--line);
-  stroke-width: 1.5;
-  stroke-linecap: round;
+.lane {
+  position: absolute;
+  inset: 0;
+  /* its own layer, so its front water covers only what is farther away */
+  isolation: isolate;
 }
-.fleet .tethers {
-  fill: none;
-  stroke: var(--rope);
-  stroke-width: 1;
-  stroke-dasharray: 2 5;
-  opacity: 0.45;
+.lane.far {
+  --wl: 30%;
+  --fw: 3.4cqw;
+  --bw: 13cqw;
+  --wave: 6px;
+  --from: 108%;
+  --to: -20%;
+  --rest: 60%;
 }
-#td-boat .hull {
-  fill: #c98f56;
-  stroke: #844a37;
-  stroke-width: 2.5;
+.lane.mid {
+  --wl: 52%;
+  --fw: 5cqw;
+  --bw: 20cqw;
+  --wave: 9px;
+  --from: -26%;
+  --to: 106%;
+  --rest: 20%;
 }
-#td-boat .deck {
-  fill: #d9b696;
-  stroke: #844a37;
-  stroke-width: 1.2;
+.lane.near {
+  --wl: 80%;
+  --fw: 7.5cqw;
+  --bw: 30cqw;
+  --wave: 12px;
+  --from: -36%;
+  --to: 106%;
+  --rest: 4%;
 }
-#td-boat .cabin {
-  fill: #f1e9d7;
-  stroke: #844a37;
-  stroke-width: 1.5;
+.fleet .sea {
+  background: var(--sea);
 }
-#td-boat .crate {
-  fill: #c98f56;
-  stroke: #844a37;
-  stroke-width: 1;
+.fleet .wave {
+  height: var(--wave);
 }
-#td-buoy .float {
-  fill: #c24e3d;
-  stroke: #844a37;
-  stroke-width: 2;
+.fbuoy {
+  left: calc(var(--x) - var(--fw) * 0.25);
+  width: var(--fw);
+  /* a raised flag, for the buoys that have one */
+  --flag: 1;
 }
-#td-buoy .pole {
-  fill: #d9b696;
-  stroke: #844a37;
-  stroke-width: 1;
+/* A boat crosses its lane. At rest, with motion off, it sits where --rest puts it. */
+.sail {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  transform: translateX(var(--rest));
 }
-.td-flag {
-  fill: #f1e9d7;
-  stroke: #8a7a66;
-  stroke-width: 1;
+.sail .boat {
+  left: 0;
+  width: var(--bw);
 }
-.fleet text {
-  fill: var(--fg);
-  font: bold 13px var(--font-mono);
-  text-anchor: middle;
-  paint-order: stroke;
-  stroke: var(--sea);
-  stroke-width: 4;
+/* The far boat sails the other way, so it is turned to face where it is going. */
+.lane.far .boat-art {
+  scale: -1 1;
+}
+.who {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--bw) * 0.83 + 4px);
+  translate: -50% 0;
+  font-size: 11px;
+  color: var(--fg);
 }
 .fleet-notes .badge {
   position: absolute;
-  left: 10px;
-  bottom: 10px;
-  max-width: calc(100% - 20px);
+  z-index: 8;
+  max-width: 62%;
   white-space: normal;
   font-size: 12px;
   /* still: only the summary shows */
   opacity: 0;
 }
+.fleet-notes .na {
+  left: 44%;
+  bottom: calc(20% + 7.5cqw * 1.24 + 8px);
+}
+.fleet-notes .nb {
+  left: 34%;
+  bottom: calc(48% + 5cqw * 1.24 + 8px);
+}
+.fleet-notes .nc {
+  left: 30%;
+  bottom: calc(70% + 3.4cqw * 1.24 + 8px);
+}
 .fleet-notes .nz {
+  left: 10px;
+  bottom: 10px;
   opacity: 1;
 }
 /* The hosted glass, drawn small beside it. */
@@ -1146,6 +1189,9 @@ footer p {
   .fleet {
     aspect-ratio: 16 / 9;
   }
+  .who {
+    font-size: 12px;
+  }
 }
 
 /* ================= motion ================= */
@@ -1198,32 +1244,12 @@ footer p {
     background-position-x: calc(var(--lw) * -4);
   }
 }
-/* The fleet's camera: out wide, in on each reporting trap in turn, out wide again. */
-@keyframes fleet-cam {
-  0%,
-  8% {
-    transform: none;
+@keyframes sail {
+  from {
+    transform: translateX(var(--from));
   }
-  15%,
-  27% {
-    transform: translate(-200px, -39px) scale(2.4);
-  }
-  35%,
-  47% {
-    transform: translate(-812px, -219px) scale(2.4);
-  }
-  55%,
-  67% {
-    transform: translate(-752px, -567px) scale(2.4);
-  }
-  77%,
-  100% {
-    transform: none;
-  }
-}
-@keyframes fleet-ripples {
   to {
-    transform: translateX(96px);
+    transform: translateX(var(--to));
   }
 }
 /* A flag goes up when its trap reports, and stays up until the loop starts again. */
@@ -1269,36 +1295,36 @@ footer p {
 @keyframes note-a {
   0%,
   17%,
-  31%,
+  34%,
   100% {
     opacity: 0;
   }
   20%,
-  28% {
+  31% {
     opacity: 1;
   }
 }
 @keyframes note-b {
   0%,
   37%,
-  51%,
+  54%,
   100% {
     opacity: 0;
   }
   40%,
-  48% {
+  51% {
     opacity: 1;
   }
 }
 @keyframes note-c {
   0%,
   57%,
-  71%,
+  74%,
   100% {
     opacity: 0;
   }
   60%,
-  68% {
+  71% {
     opacity: 1;
   }
 }
@@ -1369,21 +1395,36 @@ footer p {
 .motion .scroller.off .row {
   animation-play-state: paused;
 }
-/* The fleet plays on its own, on a 26 second loop, while it is in view. */
-.motion .fleet .cam {
-  animation: fleet-cam 26s ease-in-out infinite;
+/* The fleet works by itself while it is in view: the boats cross, and flags go up on a 26 second round. */
+.motion .fleet .sail {
+  animation: sail 44s linear infinite;
 }
-.motion .fleet .ripples {
-  animation: fleet-ripples 14s linear infinite;
+/* Each boat keeps its own time, and starts part of the way across, so the three are never in step. */
+.motion .lane.far .sail {
+  animation-duration: 70s;
+  animation-delay: -6s;
 }
-.motion .fleet .fa {
-  animation: flag-a 26s linear infinite;
+.motion .lane.mid .sail {
+  animation-duration: 54s;
+  animation-delay: -31s;
 }
-.motion .fleet .fb {
-  animation: flag-b 26s linear infinite;
+.motion .lane.near .sail {
+  animation-delay: -9s;
 }
-.motion .fleet .fc {
-  animation: flag-c 26s linear infinite;
+.motion .fleet .fa .flag {
+  animation:
+    flag-a 26s linear infinite,
+    sway 4s ease-in-out infinite;
+}
+.motion .fleet .fb .flag {
+  animation:
+    flag-b 26s linear infinite,
+    sway 4s ease-in-out infinite;
+}
+.motion .fleet .fc .flag {
+  animation:
+    flag-c 26s linear infinite,
+    sway 4s ease-in-out infinite;
 }
 .motion .fleet .na {
   animation: note-a 26s linear infinite;
@@ -1437,5 +1478,13 @@ footer p {
     animation: story linear both;
     animation-timeline: view();
     animation-range: contain 0% contain 100%;
+  }
+}
+
+/* On a wide screen the headline runs the full width of the page on one line, sized to fit it. */
+@media (min-width: 1024px) {
+  .beats .cap > h1 {
+    font-size: min(66px, calc((100vw - 2 * var(--space-4)) / 16.4));
+    white-space: nowrap;
   }
 }
