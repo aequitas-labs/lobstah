@@ -101,26 +101,45 @@ describe('the built page', () => {
 
   it('keeps the wharf out of the published page', () => {
     expect(built.html).not.toMatch(/wharf/i);
-    expect(visibleText(withWharf.html)).toContain('The wharf: check the water from your phone');
+    expect(visibleText(withWharf.html)).toContain('The glass, hosted. Check the water from your phone.');
   });
 
   it('puts the install call in the hero and the star call at the bottom only', () => {
     const hero = built.html.slice(built.html.indexOf('id="hero"'), built.html.indexOf('id="set"'));
     expect(hero).toContain('data-copy="npm i -g lobstah"');
-    expect(hero).not.toContain('Star on GitHub');
     expect(built.html.match(/data-copy="npm i -g lobstah"/g)).toHaveLength(2);
-    expect(built.html.match(/class="starcall" href="https:\/\/github\.com\/aequitas-labs\/lobstah"/g)).toHaveLength(2);
+    const star = [...built.html.matchAll(/class="starcall" href="https:\/\/github\.com\/aequitas-labs\/lobstah"/g)];
+    expect(star).toHaveLength(1);
+    // after the story and the feature cards, never on the first screen
+    expect(star[0].index).toBeGreaterThan(built.html.indexOf('id="more"'));
+  });
+
+  it('keeps the lobster strip at the very bottom of the page, not fixed to the screen', () => {
+    expect(built.html.indexOf('class="strip"')).toBeGreaterThan(built.html.indexOf('</footer>'));
+    const css = built.html.slice(built.html.indexOf('<style>'), built.html.indexOf('</style>'));
+    // The glass fixes its lobsters to the window; here they belong to the strip.
+    expect(css).toMatch(/\.lob\{[^}]*position:absolute/);
+    expect(css).toMatch(/\.strip\{[^}]*position:relative/);
   });
 
   it('keeps the star with every lobster', () => {
     const lobsters = built.html.match(/class="sprite"/g) ?? [];
     expect(lobsters.length).toBeGreaterThan(0);
-    expect(built.html.match(/<span class="pet-art"><span class="sprite"><\/span><img class="star"/g)).toHaveLength(lobsters.length);
+    expect(built.html.match(/class="pet-art[^"]*">\s*<span class="sprite"><\/span>\s*<img class="star"/g)).toHaveLength(lobsters.length);
   });
 
-  it('draws every scene still unless motion is switched on', () => {
+  it('tells the story as one scene with five beats', () => {
+    expect(built.html.match(/class="pin"/g)).toHaveLength(1);
+    const beats = [...built.html.matchAll(/class="beat[^"]*" id="([a-z]+)"/g)].map((m) => m[1]);
+    expect(beats).toEqual(['hero', 'set', 'away', 'buoy', 'haul']);
     const css = built.html.slice(built.html.indexOf('<style>'), built.html.indexOf('</style>'));
-    // Every animation the page starts sits under `.motion`; the glass's own lobster rules are switched off outside it.
+    // Each later beat has a place on the story's dial, for browsers the scroll cannot drive.
+    for (const beat of [1, 2, 3, 4]) expect(css).toMatch(new RegExp(`\\.story\\[data-beat="?'?${beat}'?"?\\]\\{--p:`));
+  });
+
+  it('stands still unless motion is switched on', () => {
+    const css = built.html.slice(built.html.indexOf('<style>'), built.html.indexOf('</style>'));
+    // Every loop the page starts sits under `.motion`; the glass's own lobster rules are switched off outside it.
     const rules = topLevelRules(css).filter(
       (r: { selector: string; text: string }) => !r.selector.startsWith('@') && /animation(-name)?:/.test(r.text),
     );
@@ -130,5 +149,10 @@ describe('the built page', () => {
     expect(always.map((r: { selector: string }) => r.selector).sort()).toEqual(['.lob', '.pet-art .sprite']);
     expect(css).toMatch(/\.lob\{[^}]*animation:none/);
     expect(css).toMatch(/\.pet-art \.sprite\{[^}]*animation:none/);
+    // The scroll drives the scene only where the browser supports it, and only with motion on.
+    const scroll = topLevelRules(css).filter((r: { text: string }) => r.text.includes('animation-timeline'));
+    expect(scroll).toHaveLength(1);
+    expect(scroll[0].selector).toMatch(/^@supports/);
+    expect(scroll[0].text).toContain('.motion .story');
   });
 });

@@ -1,11 +1,10 @@
-// The marketing page's script. The page is complete without it: every scene
-// is a still picture in the base styles. This file only starts motion that the
-// stylesheet has already prepared, and stops it again when nobody can see it.
+// The marketing page's script. The page reads without it: the scene then
+// stands at its first frame and every word is still there. This file tells the
+// scene which beat of the story is on screen, pauses loops nobody can see, and
+// runs the copy buttons and the "still water" switch.
 
 const root = document.documentElement;
 const STILL_KEY = 'lobstah-still';
-/** How long the hero waits, in view and idle, before the buoy dips. */
-const HERO_BEAT_MS = 3000;
 
 function copyButtons(): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
@@ -25,51 +24,29 @@ function copyButtons(): void {
   }
 }
 
-/** The hero's one timed event: after a beat in view, the buoy dips and the card rises. Once. */
-function heroBeat(hero: Element): (visible: boolean) => void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return (visible) => {
-    if (hero.classList.contains('told')) return;
-    clearTimeout(timer);
-    if (visible) timer = setTimeout(() => hero.classList.add('told'), HERO_BEAT_MS);
-  };
+/**
+ * Tell the story which beat is on screen. Where the scroll drives the scene
+ * directly the stylesheet ignores this; elsewhere it is what moves the scene,
+ * by a transition, or by a plain cut when motion is off.
+ */
+function followBeats(story: HTMLElement): void {
+  const beats = [...story.querySelectorAll('.beat')];
+  // A beat is current once its caption has reached the middle of the screen.
+  const middle = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) if (e.isIntersecting) story.dataset.beat = String(beats.indexOf(e.target));
+    },
+    { rootMargin: '-50% 0px -50% 0px' },
+  );
+  for (const beat of beats) middle.observe(beat);
 }
 
-/**
- * Mark what is on screen. `.in` (set once) starts a scene's play-once motion;
- * `.off` pauses its loops while it is out of view.
- */
-function watchScenes(): void {
-  const hero = document.querySelector('.hero');
-  const beat = hero ? heroBeat(hero) : undefined;
-  if (!('IntersectionObserver' in window)) {
-    for (const el of document.querySelectorAll('.scene')) el.classList.add('in');
-    hero?.classList.add('told');
-    return;
-  }
-  const seen = new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) {
-        e.target.classList.toggle('off', !e.isIntersecting);
-        if (e.target === hero) beat?.(e.isIntersecting);
-      }
-    },
-    { rootMargin: '10% 0px' },
-  );
-  const played = new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) {
-        if (!e.isIntersecting) continue;
-        e.target.classList.add('in');
-        played.unobserve(e.target);
-      }
-    },
-    { threshold: 0.35 },
-  );
-  for (const el of document.querySelectorAll('.scene')) {
-    seen.observe(el);
-    played.observe(el);
-  }
+/** `.off` pauses the loops of anything that is out of view. */
+function pauseOffScreen(): void {
+  const seen = new IntersectionObserver((entries) => {
+    for (const e of entries) e.target.classList.toggle('off', !e.isIntersecting);
+  });
+  for (const el of document.querySelectorAll('.story, .strip')) seen.observe(el);
 }
 
 /** "Still water": the same still page that reduced motion gives, by hand, remembered in this browser. */
@@ -93,6 +70,10 @@ function stillSwitch(): void {
 }
 
 copyButtons();
-watchScenes();
 stillSwitch();
+if ('IntersectionObserver' in window) {
+  const story = document.querySelector<HTMLElement>('.story');
+  if (story) followBeats(story);
+  pauseOffScreen();
+}
 document.addEventListener('visibilitychange', () => root.classList.toggle('hidden', document.hidden));

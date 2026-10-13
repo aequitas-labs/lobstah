@@ -252,7 +252,10 @@ if (isMain) {
       clearTimeout(timer);
       timer = setTimeout(once, 50);
     };
-    for (const f of ['index.html', 'site.css', 'src', 'assets']) fs.watch(path.join(site, f), { recursive: true }, rebuild);
+    // Watch the folder, not each file: an editor that saves by replacing a file would otherwise slip the watch.
+    fs.watch(site, { recursive: true }, (_, file) => {
+      if (file && !String(file).startsWith('dist')) rebuild();
+    });
     fs.watch(glassCss, rebuild);
     serve(built?.outDir ?? outDir ?? path.join(site, 'dist'), port);
   }
