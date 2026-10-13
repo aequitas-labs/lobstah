@@ -1,0 +1,1461 @@
+/*
+ * The marketing page's styles. scripts/build-site.mjs puts the glass's design
+ * tokens (:root) and its card, badge, button and lobster rules in front of
+ * this file, so the page wears the glass's theme and cannot drift from it.
+ *
+ * The story is one scene, pinned behind the copy. A single number, --p, says
+ * how far through it we are: 0 at sunrise, 1 when the traps are set, 2 at
+ * night, 3 close on one buoy with its question answered, 4 at the haul. Every
+ * moving thing takes its place from --p, so the scene is the same picture
+ * whichever way --p is driven:
+ *
+ *   - by the scroll itself, where the browser can tie an animation to it;
+ *   - by a short transition from beat to beat, where it cannot;
+ *   - by a plain jump from beat to beat, for reduced motion and "still water".
+ *
+ * Loops (the bob, the drifting waves, the thinking dots, the lobsters' walk)
+ * run only under `:root.motion`.
+ */
+@property --p {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+:root {
+  /* the sea: the glass's ground, one step toward blue */
+  --sea: #121a27;
+  --sea-line: var(--line-hover);
+  --rope: #c9a56b;
+  --rope-edge: #6b3f22;
+  --page: 1080px;
+  /* the height of the bar at the top */
+  --bar: 44px;
+}
+body {
+  font: 16px/1.55 var(--font-mono);
+  padding: 0 var(--space-4);
+  display: block;
+  min-height: 0;
+  overflow-x: clip;
+  overflow-wrap: anywhere;
+}
+.defs {
+  position: absolute;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+main,
+footer,
+.beats .cap {
+  max-width: var(--page);
+  margin-inline: auto;
+}
+a {
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration: underline;
+}
+code {
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  font: inherit;
+  font-size: 0.92em;
+}
+pre {
+  margin: 0;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+h1 {
+  font-size: clamp(30px, 8.4vw, 60px);
+  line-height: 1.08;
+  margin: 0 0 14px;
+}
+h2 {
+  font-size: clamp(20px, 4.6vw, 26px);
+  line-height: 1.2;
+  color: var(--fg);
+  text-transform: none;
+  letter-spacing: 0;
+  margin: 0 0 8px;
+}
+h3 {
+  font-size: 17px;
+  margin: 8px 0 4px;
+}
+p {
+  margin: 0 0 12px;
+}
+.fine {
+  color: var(--dim);
+  font-size: 13px;
+}
+.lead {
+  font-size: 17px;
+}
+
+/*
+ * The bar at the top. At first it lies over the top of the scene with no
+ * ground of its own and scrolls away with the hero. It stays away for the
+ * whole story. Once the story has passed, the script fixes it to the screen
+ * (.stuck) on a dark see-through ground. It is out of the page's flow both
+ * ways, so nothing moves when it changes.
+ */
+.top {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 20;
+  padding-inline: var(--space-4);
+}
+.top .bar {
+  max-width: var(--page);
+  height: var(--bar);
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: nowrap;
+}
+.top .brand,
+.top .acts,
+.top .gh,
+.top .count {
+  display: flex;
+  align-items: center;
+}
+.top .brand {
+  gap: 7px;
+  color: var(--dim);
+  font-size: 14px;
+  font-weight: bold;
+}
+.top .acts {
+  gap: 12px;
+}
+.top .gh {
+  gap: 6px;
+  color: var(--dim);
+  font-size: 13px;
+  text-decoration: none;
+}
+.top .gh:hover {
+  color: var(--fg);
+}
+.top .ico {
+  width: 16px;
+  height: 16px;
+}
+.top .count {
+  gap: 3px;
+}
+/* a small star before the count, drawn here */
+.top .count::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  background: currentColor;
+  clip-path: polygon(50% 0, 62% 35%, 98% 35%, 68% 57%, 79% 92%, 50% 71%, 21% 92%, 32% 57%, 2% 35%, 38% 35%);
+}
+.top [hidden] {
+  display: none;
+}
+.top.stuck {
+  position: fixed;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+/* On a narrow phone the mark stands for the word, and on the narrowest the count goes too. */
+@media (max-width: 400px) {
+  .top .gh-name {
+    display: none;
+  }
+}
+@media (max-width: 340px) {
+  .top .count {
+    display: none;
+  }
+}
+
+/* The glass's card, as a page element: not clickable. */
+.card {
+  cursor: default;
+}
+.card:hover {
+  border-color: var(--line);
+}
+.badge {
+  background: var(--card);
+}
+.badge.ok {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.badge.needs {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.btn {
+  font-size: 13px;
+  padding: 3px 10px;
+  min-height: 28px;
+}
+.chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chips li {
+  border: 1px solid var(--line);
+  border-radius: var(--badge-radius);
+  background: var(--inset);
+  padding: 2px 8px;
+  font-size: 13px;
+}
+.chips code {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+/* A product's own mark, small, with its name beside it. */
+.ico {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: currentColor;
+}
+.ico[data-mark='claude-code'] {
+  color: #d97757;
+}
+.ico[data-mark='linear'] {
+  color: #5e6ad2;
+}
+
+/* ---- the install control: four tabs, one thing to paste ---- */
+.handoff {
+  max-width: 34rem;
+  margin: 14px 0 10px;
+  border: 1px solid var(--lobstah);
+  border-radius: var(--card-radius);
+  background: var(--card);
+  padding: 10px 12px 12px;
+  text-shadow: none;
+}
+.handoff-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  margin: 0 0 8px;
+}
+.tab-input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.handoff .tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.handoff .tabs label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 9px;
+  color: var(--dim);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.handoff .tabs .ico {
+  width: 15px;
+  height: 15px;
+}
+.handoff .panel,
+.handoff .tip {
+  display: none;
+}
+.handoff .panel {
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.handoff .tip {
+  margin: 8px 0 0;
+}
+.tab-input:nth-of-type(1):checked ~ .handoff-bar label:nth-of-type(1),
+.tab-input:nth-of-type(2):checked ~ .handoff-bar label:nth-of-type(2),
+.tab-input:nth-of-type(3):checked ~ .handoff-bar label:nth-of-type(3),
+.tab-input:nth-of-type(4):checked ~ .handoff-bar label:nth-of-type(4) {
+  color: var(--fg);
+  border-color: var(--lobstah);
+}
+.tab-input:nth-of-type(1):focus-visible ~ .handoff-bar label:nth-of-type(1),
+.tab-input:nth-of-type(2):focus-visible ~ .handoff-bar label:nth-of-type(2),
+.tab-input:nth-of-type(3):focus-visible ~ .handoff-bar label:nth-of-type(3),
+.tab-input:nth-of-type(4):focus-visible ~ .handoff-bar label:nth-of-type(4) {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+.tab-input:nth-of-type(1):checked ~ .panel:nth-of-type(1),
+.tab-input:nth-of-type(2):checked ~ .panel:nth-of-type(2),
+.tab-input:nth-of-type(3):checked ~ .panel:nth-of-type(3),
+.tab-input:nth-of-type(4):checked ~ .panel:nth-of-type(4),
+.tab-input:nth-of-type(1):checked ~ .tip:nth-of-type(1),
+.tab-input:nth-of-type(2):checked ~ .tip:nth-of-type(2),
+.tab-input:nth-of-type(3):checked ~ .tip:nth-of-type(3),
+.tab-input:nth-of-type(4):checked ~ .tip:nth-of-type(4) {
+  display: block;
+}
+.starcall {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 1px solid var(--line-hover);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--fg);
+  padding: 6px 14px;
+  white-space: nowrap;
+}
+.starcall:hover {
+  border-color: var(--lobstah);
+  text-decoration: none;
+}
+/* the lobster's own star, kept as crisp pixels */
+.pixstar {
+  width: 18px;
+  height: 18px;
+  image-rendering: pixelated;
+}
+
+/* ================= the story ================= */
+.story {
+  position: relative;
+  /* the scene runs edge to edge, past the page's side padding */
+  margin-inline: calc(var(--space-4) * -1);
+  --p: 0;
+  /* one beat's worth of scroll */
+  --beat: 130svh;
+}
+/* Where the scroll cannot drive --p, each beat sets it. */
+.story[data-beat='1'] {
+  --p: 1.22;
+}
+.story[data-beat='2'] {
+  --p: 2.05;
+}
+.story[data-beat='3'] {
+  --p: 3.15;
+}
+.story[data-beat='4'] {
+  --p: 4;
+}
+.pin {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  overflow: hidden;
+  /* lets sizes be worked out from the scene's width (cqw) */
+  container-type: inline-size;
+  /* where the water's surface sits, from the top: low on a phone, where the hero's copy is tall */
+  --wl: 70%;
+  --fw: 9cqw; /* the buoy drawing's width; the buoy itself is about half of it */
+  --tw: 15cqw; /* a trap's width */
+  --bw: 40cqw; /* the boat's width */
+  --zoom: 2; /* how much closer the camera comes: 1 + zoom */
+  /* Each part of the story as a 0 to 1 dial, read off --p. */
+  --boat: clamp(0, (var(--p) - 0.2) / 0.9, 1);
+  --s1: clamp(0, (var(--p) - 0.55) / 0.25, 1);
+  --s2: clamp(0, (var(--p) - 0.74) / 0.25, 1);
+  --s3: clamp(0, (var(--p) - 0.93) / 0.25, 1);
+  --set: clamp(0, (var(--p) - 1.2) / 0.75, 1);
+  --night: clamp(0, (var(--p) - 1.7) / 0.4, 1);
+  --tags: calc(1 - clamp(0, (var(--p) - 1.4) / 0.15, 1));
+  --z: calc(clamp(0, (var(--p) - 2.25) / 0.45, 1) - clamp(0, (var(--p) - 3.3) / 0.35, 1));
+  --work: calc(clamp(0, (var(--p) - 2.3) / 0.15, 1) - clamp(0, (var(--p) - 2.7) / 0.08, 1));
+  --asked: clamp(0, (var(--p) - 2.78) / 0.12, 1);
+  --pick: clamp(0, (var(--p) - 3) / 0.08, 1);
+  /* the question card leaves once its answer is picked, before the haul */
+  --gone: clamp(0, (var(--p) - 3.2) / 0.1, 1);
+  --haul: clamp(0, (var(--p) - 3.5) / 0.4, 1);
+  --got: clamp(0, (var(--p) - 3.85) / 0.1, 1);
+  /* which caption is up */
+  --c1: calc(clamp(0, (var(--p) - 0.5) / 0.15, 1) - clamp(0, (var(--p) - 1.25) / 0.15, 1));
+  --c2: calc(clamp(0, (var(--p) - 1.5) / 0.15, 1) - clamp(0, (var(--p) - 2.12) / 0.12, 1));
+  --c4: clamp(0, (var(--p) - 3.6) / 0.15, 1);
+  /* how big the camera makes things right now */
+  --cam: calc(1 + var(--zoom) * var(--z));
+}
+/* The camera: everything in the world grows about the middle buoy on the waterline. */
+.world {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% var(--wl);
+  transform: scale(var(--cam));
+}
+.layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.world img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* ---- sky ---- */
+.sky {
+  position: absolute;
+  inset: 0 0 calc(100% - var(--wl));
+}
+/* Sunrise: a red glow low over the water. It fades as the sun goes down. */
+.sky.warm {
+  background:
+    radial-gradient(ellipse 60% 55% at 72% 100%, rgb(235 102 68 / 0.5), transparent 72%),
+    linear-gradient(to top, #6b2a22, #3a1c25 28%, transparent 68%);
+  opacity: calc(1 - var(--set));
+}
+.sky.dusk {
+  background: linear-gradient(to top, #2c2238, transparent 62%);
+  opacity: calc(var(--set) * (1 - var(--night) * 0.7));
+}
+.sky.stars {
+  background:
+    radial-gradient(1.2px 1.2px at 11% 22%, var(--fg) 98%, transparent), radial-gradient(1px 1px at 27% 61%, var(--fg) 98%, transparent),
+    radial-gradient(1.4px 1.4px at 41% 12%, var(--fg) 98%, transparent), radial-gradient(1px 1px at 58% 44%, var(--fg) 98%, transparent),
+    radial-gradient(1.2px 1.2px at 69% 18%, var(--fg) 98%, transparent), radial-gradient(1px 1px at 83% 52%, var(--fg) 98%, transparent),
+    radial-gradient(1.3px 1.3px at 93% 9%, var(--fg) 98%, transparent), radial-gradient(1px 1px at 5% 71%, var(--fg) 98%, transparent);
+  opacity: calc(var(--night) * 0.6);
+}
+.sun {
+  position: absolute;
+  left: 72%;
+  top: var(--wl);
+  width: 15cqw;
+  aspect-ratio: 1;
+  margin: -13cqw 0 0 -7.5cqw;
+  border-radius: 50%;
+  background: var(--lobstah);
+  box-shadow: 0 0 9cqw rgb(235 102 68 / 0.45);
+  transform: translateY(calc(var(--set) * 190%));
+  opacity: calc(1 - var(--night));
+}
+
+/*
+ * The sea is two layers. Things in the water sit between them, so the front
+ * one dims what is under the surface. Each layer is a box with a wave on top.
+ * The front layer is drawn solid and made see-through as a whole: were the
+ * box and the wave see-through one by one, the row where they overlap would
+ * be darker, and that row would be a straight line that never moves. The only
+ * line at the surface is the back wave's own, and it drifts.
+ */
+.sea {
+  position: absolute;
+  inset: var(--wl) 0 0;
+  /* it runs down into the page's ground, so the scene has no bottom edge */
+  background: linear-gradient(var(--sea) 55%, var(--bg));
+  z-index: 1;
+}
+.sea.front {
+  z-index: 5;
+  opacity: 0.55;
+}
+.wave {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  width: 200%;
+  height: 12px;
+  /* the fill laps over the box below it, so no seam can open between them */
+  margin-bottom: -2px;
+  fill: var(--sea);
+  stroke: none;
+}
+.wave .edge {
+  fill: none;
+  stroke: var(--sea-line);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Anything that floats hangs from a zero-height anchor on the waterline. */
+.at-water {
+  position: absolute;
+  top: var(--wl);
+  height: 0;
+  z-index: 3;
+}
+.buoy-art {
+  position: relative;
+  /* 62% of the buoy drawing is above the water */
+  transform: translateY(-62%);
+}
+.boat-art {
+  position: relative;
+  aspect-ratio: 718 / 694;
+  /* the waterline crosses the hull 86% of the way down the drawing */
+  transform: translateY(-86%);
+}
+.rock {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 86%;
+}
+
+/* ---- the boat crosses ---- */
+.track {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  transform: translateX(calc(-45% + 150% * var(--boat)));
+}
+.boat {
+  left: 0;
+  width: var(--bw);
+}
+
+/* ---- three traps, each under its own buoy ---- */
+.d1 {
+  --x: 18%;
+  --s: var(--s1);
+  --d: 0.58;
+  --flag: var(--got);
+}
+.d2 {
+  --x: 50%;
+  --s: var(--s2);
+  --d: 0.36;
+  --flag: var(--asked);
+}
+.d3 {
+  --x: 82%;
+  --s: var(--s3);
+  --d: 0.16;
+  --flag: var(--got);
+}
+.float {
+  /* the pole stands a quarter of the way across the drawing: put the pole, not the box, on --x, so the rope hangs from it */
+  left: calc(var(--x) - var(--fw) * 0.25);
+  width: var(--fw);
+  opacity: min(1, calc(var(--s) * 10));
+}
+.drop {
+  position: absolute;
+  top: var(--wl);
+  bottom: 0;
+  left: calc(var(--x) - var(--tw) / 2);
+  width: var(--tw);
+  z-index: 2;
+  opacity: min(1, calc(var(--s) * 10));
+  /* how far down the sea the trap is now: it sinks to --d, then the haul brings it up near the surface */
+  --depth: calc(var(--d) * var(--s) - (var(--d) - 0.1) * var(--haul));
+}
+.sink {
+  position: absolute;
+  inset: 0;
+  transform: translateY(calc(var(--depth) * 100%));
+}
+/* The rope runs from the foot of the buoy's pole down to the trap's handle. */
+.rope {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  height: 100%;
+  width: 0;
+  margin-left: -1px;
+  border-left: 2px solid var(--rope);
+  outline: 1px solid var(--rope-edge);
+  transform-origin: top;
+  transform: scaleY(calc(var(--depth) + 0.02));
+}
+/* The lobster in each hauled trap, drawn in front of the water so it stays bright. */
+.drop.riders {
+  z-index: 6;
+  opacity: var(--haul);
+}
+.pet-art.small {
+  --lw: calc(var(--tw) * 0.8);
+  position: absolute;
+  left: 10%;
+  top: calc(var(--tw) * 0.1);
+  width: var(--lw);
+  height: calc(var(--lw) * 0.78);
+}
+.pet-art.small .sprite {
+  width: 100%;
+  height: 100%;
+}
+.pet-art.small .star {
+  left: 76%;
+  top: -18%;
+  width: auto;
+  height: 26%;
+}
+.pet-art .sprite {
+  display: block;
+  background-image: url(assets/lob-sprite.png);
+  animation: none;
+}
+/* A flag goes up when a buoy has something for you: a question, then a catch. */
+.buoy-art .flag {
+  /* the flag's edge on the pole */
+  transform-origin: 30% 18%;
+  scale: var(--flag) calc(0.6 + 0.4 * var(--flag));
+  opacity: min(1, calc(var(--flag) * 4));
+}
+
+/* ---- labels and notes: outside the world, so the zoom leaves their text alone ---- */
+.notes {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  font-size: 12px;
+  pointer-events: none;
+}
+.tag,
+.note {
+  position: absolute;
+}
+/* A work label sits just under its trap. */
+.tag {
+  top: calc(var(--wl) + (100% - var(--wl)) * var(--d) + var(--tw) * 0.772 + 4px);
+  color: var(--fg);
+  opacity: calc(clamp(0, (var(--s) - 0.9) * 10, 1) * var(--tags));
+}
+.tag.d1 {
+  left: 4%;
+}
+.tag.d2 {
+  left: 50%;
+  translate: -50% 0;
+}
+.tag.d3 {
+  right: 4%;
+}
+/* A note stands just above its buoy, wherever the camera has put it. */
+.note {
+  padding: 6px 9px;
+  font-size: 12px;
+  line-height: 1.35;
+  /* the top of the buoy drawing on screen */
+  bottom: calc(100% - var(--wl) + var(--fw) * 1.24 * var(--cam) + 8px);
+}
+.note b {
+  display: block;
+}
+.note .by {
+  color: var(--dim);
+}
+.note.mid {
+  left: calc(50% - var(--fw) * 0.3 * var(--cam));
+}
+.note.work {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  opacity: var(--work);
+}
+.dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fg);
+  opacity: 0.75;
+}
+.note.ask {
+  border-color: var(--bad);
+  width: min(46cqw, 190px);
+  opacity: calc(var(--asked) - var(--gone));
+  transform: translateY(calc((1 - var(--asked)) * 8px));
+}
+.note.ask b {
+  margin: 4px 0 6px;
+}
+.opts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.opts li {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 8px 2px 24px;
+  background: var(--inset);
+}
+/* the selection box, and its tick once an answer is picked */
+.opts li::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -5px;
+  border: 1px solid var(--dim);
+  border-radius: 2px;
+}
+.opts .picked::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--ok);
+  border-radius: 5px;
+  background:
+    linear-gradient(var(--ok), var(--ok)) 8px 50% / 9px 9px no-repeat,
+    color-mix(in srgb, var(--ok) 14%, transparent);
+  opacity: var(--pick);
+}
+/* At the haul, each buoy's note says something different. */
+.note.end {
+  opacity: var(--got);
+  max-width: 30cqw;
+}
+.note.end.d1 {
+  left: 3%;
+}
+.note.end.d2 {
+  left: 50%;
+  translate: -50% 0;
+}
+.note.end.d3 {
+  right: 3%;
+}
+
+/* ---- captions: fixed in the sky, one at a time, clear of every buoy ---- */
+.caps {
+  position: absolute;
+  /* under the bar, however short the screen */
+  inset: max(9svh, var(--bar) + 12px) var(--space-4) auto;
+  z-index: 7;
+  max-width: var(--page);
+  margin-inline: auto;
+}
+.caps .cap {
+  position: absolute;
+  inset: 0 0 auto;
+  max-width: 34rem;
+}
+.caps .c1 {
+  opacity: var(--c1);
+}
+.caps .c2 {
+  opacity: var(--c2);
+}
+.caps .c4 {
+  opacity: var(--c4);
+}
+.cap {
+  text-shadow:
+    0 0 14px var(--bg),
+    0 0 4px var(--bg);
+}
+.beats {
+  position: relative;
+  z-index: 2;
+  margin-top: -100svh;
+  padding-inline: var(--space-4);
+  /* the scene shows through; only the controls take clicks */
+  pointer-events: none;
+}
+.beats a,
+.beats .handoff {
+  pointer-events: auto;
+}
+.beat {
+  min-height: var(--beat);
+}
+.beat.hero {
+  /* clear of the bar */
+  padding-top: calc(var(--bar) + 8px);
+}
+.beat.last {
+  min-height: 100svh;
+}
+.beats .cap > * {
+  max-width: 34rem;
+}
+.hero .sub {
+  font-size: 17px;
+}
+/* The headline is not held to the copy's narrow column. */
+.beats .cap > h1 {
+  max-width: none;
+}
+
+/* ================= sections under the story ================= */
+.sec {
+  margin-top: 72px;
+  /* a jump to a section lands clear of the bar */
+  scroll-margin-top: calc(var(--bar) + 12px);
+}
+.flow {
+  list-style: none;
+  counter-reset: step;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.flow li {
+  counter-increment: step;
+  position: relative;
+  padding: 8px 12px 8px 46px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: var(--card);
+}
+.flow li::before {
+  content: counter(step);
+  position: absolute;
+  left: 12px;
+  top: 8px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--lobstah);
+  color: var(--bg);
+  font-weight: bold;
+  font-size: 13px;
+}
+.modes {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: 10px;
+}
+.mode {
+  padding: 14px 16px;
+  overflow: visible;
+}
+.mode p {
+  margin-bottom: 10px;
+}
+.mode .kind {
+  margin: 0;
+  color: var(--dim);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+/* The harness section: the trap, with a sign for each harness on it. */
+.harness {
+  display: grid;
+  gap: var(--space-4);
+  align-items: center;
+}
+.trap-pic {
+  position: relative;
+  max-width: 300px;
+  padding: 26px 0 30px;
+}
+.trap-pic img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.harness-mark {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid var(--line-hover);
+  border-radius: var(--card-radius);
+  background: var(--card);
+  font-size: 14px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+.h-claude {
+  left: 0;
+  top: 0;
+}
+.h-codex {
+  right: 0;
+  bottom: 0;
+}
+/*
+ * A row that runs edge to edge and can be swiped or scrolled sideways. With
+ * motion on, the script adds a second copy of the cards and the row drifts by
+ * itself, slowly, and stops under a pointer or the keyboard's focus.
+ */
+.scroller {
+  /* out to both edges of the window; the first card still lines up with the page */
+  margin: 0 calc(50% - 50vw);
+  padding: 4px 0 14px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.scroller:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+.scroller .row {
+  list-style: none;
+  display: flex;
+  gap: var(--space-3);
+  width: max-content;
+  margin: 0;
+  /* the gap after the last card too, so two copies in a row make a whole number of steps */
+  padding: 0 var(--space-3) 0 max(var(--space-4), calc(50vw - var(--page) / 2));
+}
+.scroller .row > li {
+  flex: 0 0 auto;
+}
+/* The second copy exists only to make the drift seamless. */
+:root:not(.motion) .scroller .copy {
+  display: none;
+}
+.int {
+  width: 220px;
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  overflow: visible;
+}
+.int span {
+  color: var(--dim);
+  font-size: 14px;
+}
+.int .marks {
+  display: flex;
+  gap: 8px;
+  color: var(--fg);
+  min-height: 24px;
+}
+.int .marks .ico {
+  width: 24px;
+  height: 24px;
+}
+/*
+ * The fleet, from a little above the water. The view never moves. Three lanes
+ * of water lie one behind another, the far one small and high, the near one
+ * large and low; each has its buoys and one boat that crosses it. Things float
+ * on a lane's line, and the lane's own water is painted solid in front of
+ * them, so a hull or a buoy sits in the water and its foot is out of sight.
+ * The nearer lanes are painted later, so they lie over the farther ones.
+ */
+.fleet {
+  position: relative;
+  margin: 0 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  background: var(--sea);
+  aspect-ratio: 6 / 5;
+  /* lets sizes be worked out from the scene's width (cqw) */
+  container-type: inline-size;
+}
+.fleet img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* A strip of night sky above the far water. */
+.fleet-sky {
+  position: absolute;
+  inset: 0 0 82%;
+  background: linear-gradient(var(--bg), #1c1a26);
+}
+.lane {
+  position: absolute;
+  inset: 0;
+  /* its own layer, so its front water covers only what is farther away */
+  isolation: isolate;
+}
+.lane.far {
+  --wl: 30%;
+  --fw: 3.4cqw;
+  --bw: 13cqw;
+  --wave: 6px;
+  --from: 108%;
+  --to: -20%;
+  --rest: 60%;
+}
+.lane.mid {
+  --wl: 54%;
+  --fw: 5cqw;
+  --bw: 20cqw;
+  --wave: 9px;
+  --from: -26%;
+  --to: 106%;
+  --rest: 36%;
+}
+.lane.near {
+  --wl: 84%;
+  --fw: 7.5cqw;
+  --bw: 30cqw;
+  --wave: 12px;
+  --from: -36%;
+  --to: 106%;
+  --rest: 66%;
+}
+.fleet .sea {
+  background: var(--sea);
+  opacity: 1;
+}
+.fleet .wave {
+  height: var(--wave);
+}
+.fbuoy {
+  left: calc(var(--x) - var(--fw) * 0.25);
+  width: var(--fw);
+  /* a raised flag, for the buoys that have one */
+  --flag: 1;
+}
+/* A boat crosses its lane. At rest, with motion off, it sits where --rest puts it. */
+.sail {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  transform: translateX(var(--rest));
+}
+.sail .boat {
+  left: 0;
+  width: var(--bw);
+}
+/* The far boat sails the other way, so it is turned to face where it is going. */
+.lane.far .boat-art {
+  scale: -1 1;
+}
+.who {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--bw) * 0.83 + 4px);
+  translate: -50% 0;
+  font-size: 11px;
+  color: var(--fg);
+}
+/* A note stands over its buoy, as in the story: the same card, the same colour for each state. */
+.fnote {
+  position: absolute;
+  z-index: 8;
+  left: var(--x);
+  bottom: calc(100% - var(--wl) + var(--fw) * 1.24 + 6px);
+  padding: 4px 7px;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.fnote b {
+  display: block;
+}
+.fnote.work {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fnote.ask {
+  border-color: var(--bad);
+}
+/* each note takes its lane's waterline and buoy size, and its own buoy's place along it */
+.fnote.nc {
+  --wl: 30%;
+  --fw: 3.4cqw;
+  --x: 22%;
+}
+.fnote.nb {
+  --wl: 54%;
+  --fw: 5cqw;
+  --x: 64%;
+}
+.fnote.na {
+  --wl: 84%;
+  --fw: 7.5cqw;
+  --x: 26%;
+}
+footer {
+  margin-top: 48px;
+  display: block;
+  font-size: 14px;
+}
+footer p {
+  margin: 0 0 8px;
+}
+
+/* ---- the lobster strip: at the very bottom of the page ---- */
+.strip {
+  position: relative;
+  height: 76px;
+  margin: 18px calc(var(--space-4) * -1) 0;
+  overflow: hidden;
+}
+.lob {
+  position: absolute;
+  cursor: default;
+  /* still: the lobsters stand in a row */
+  left: 8%;
+  animation: none;
+}
+.l2 {
+  left: 42%;
+}
+.l3 {
+  left: 76%;
+}
+
+@media (min-width: 720px) {
+  .pin {
+    --wl: 62%;
+    --fw: 4.2cqw;
+    --tw: 8cqw;
+    --bw: 22cqw;
+  }
+  .sun {
+    width: 8cqw;
+    margin: -7cqw 0 0 -4cqw;
+    box-shadow: 0 0 6cqw rgb(235 102 68 / 0.45);
+  }
+  .notes,
+  .note {
+    font-size: 13px;
+  }
+  .tag.d1 {
+    left: calc(18% - var(--tw) / 2);
+  }
+  .tag.d3 {
+    right: auto;
+    left: calc(82% - var(--tw) / 2);
+  }
+  .note.end {
+    max-width: 22cqw;
+  }
+  .note.end.d1 {
+    left: 18%;
+    translate: -50% 0;
+  }
+  .note.end.d3 {
+    right: auto;
+    left: 82%;
+    translate: -50% 0;
+  }
+  .flow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .modes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .harness {
+    grid-template-columns: 300px minmax(0, 1fr);
+    gap: 40px;
+  }
+  .fleet {
+    aspect-ratio: 16 / 9;
+  }
+  .fnote {
+    padding: 6px 9px;
+    font-size: 12px;
+  }
+  /* The night caption stands to the right, and the haul's in the middle. */
+  .caps .c2 {
+    margin-left: auto;
+    text-align: right;
+  }
+  .caps .c4 {
+    margin-inline: auto;
+    text-align: center;
+  }
+  .who {
+    font-size: 12px;
+  }
+}
+
+/* ================= motion ================= */
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(-2%) rotate(-1.5deg);
+  }
+  50% {
+    transform: translateY(2.5%) rotate(1.5deg);
+  }
+}
+@keyframes drift {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes rock {
+  0%,
+  100% {
+    transform: rotate(-1deg);
+  }
+  50% {
+    transform: rotate(1.2deg);
+  }
+}
+@keyframes sway {
+  0%,
+  100% {
+    transform: skewY(-2deg);
+  }
+  50% {
+    transform: skewY(2deg);
+  }
+}
+@keyframes think {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: none;
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@keyframes step-small {
+  to {
+    background-position-x: calc(var(--lw) * -4);
+  }
+}
+@keyframes sail {
+  from {
+    transform: translateX(var(--from));
+  }
+  to {
+    transform: translateX(var(--to));
+  }
+}
+/* On each round a trap gets to work, one hauls a catch, one asks; the notes and flags stay up until the round starts again. */
+@keyframes note-a {
+  0%,
+  22% {
+    opacity: 0;
+  }
+  25%,
+  95% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes note-b {
+  0%,
+  42% {
+    opacity: 0;
+  }
+  45%,
+  95% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes note-c {
+  0%,
+  4% {
+    opacity: 0;
+  }
+  7%,
+  95% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes bar-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes bar-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes drift-row {
+  to {
+    transform: translateX(calc(var(--shift) * -1));
+  }
+}
+@keyframes story {
+  from {
+    --p: 0;
+  }
+  to {
+    --p: 4;
+  }
+}
+
+/* Loops: one wave motion from the first screen to the last, a gentle bob, a slow rock. */
+.motion .bob {
+  animation: bob 5s ease-in-out infinite;
+}
+.motion .bob.late {
+  animation-delay: -1.7s;
+}
+.motion .bob.later {
+  animation-delay: -3.1s;
+}
+.motion .drift {
+  animation: drift 26s linear infinite;
+}
+.motion .rock {
+  animation: rock 7s ease-in-out infinite;
+}
+.motion .buoy-art .flag {
+  animation: sway 4s ease-in-out infinite;
+}
+.motion .dots i {
+  animation: think 1.2s ease-in-out infinite;
+}
+.motion .dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.motion .dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+.motion .pet-art.small .sprite {
+  animation: step-small 0.5s steps(4) infinite;
+}
+/* The bar fades in when it is fixed to the screen, and out when it lets go; with motion off it is simply there or not. */
+.motion .top.stuck {
+  animation: bar-in 0.3s ease-out;
+}
+.motion .top.stuck.leaving {
+  animation: bar-out 0.25s ease-in forwards;
+}
+/* The integrations drift by, and wait while a pointer or the keyboard is on them. */
+.motion .scroller.auto .row {
+  animation: drift-row 48s linear infinite;
+}
+.motion .scroller.auto:hover .row,
+.motion .scroller.auto:focus-within .row,
+.motion .scroller.auto:focus .row,
+.motion .scroller.off .row {
+  animation-play-state: paused;
+}
+/* The fleet works by itself while it is in view: the boats cross, and notes and flags come up on a 26 second round. */
+.motion .fleet .sail {
+  animation: sail 44s linear infinite;
+}
+/* Each boat keeps its own time, and starts part of the way across, so the three are never in step. */
+.motion .lane.far .sail {
+  animation-duration: 70s;
+  animation-delay: -6s;
+}
+.motion .lane.mid .sail {
+  animation-duration: 54s;
+  animation-delay: -31s;
+}
+.motion .lane.near .sail {
+  animation-delay: -9s;
+}
+.motion .fleet .fa .flag {
+  animation:
+    note-a 26s linear infinite,
+    sway 4s ease-in-out infinite;
+}
+.motion .fleet .fb .flag {
+  animation:
+    note-b 26s linear infinite,
+    sway 4s ease-in-out infinite;
+}
+.motion .fleet .na {
+  animation: note-a 26s linear infinite;
+}
+.motion .fleet .nb {
+  animation: note-b 26s linear infinite;
+}
+.motion .fleet .nc {
+  animation: note-c 26s linear infinite;
+}
+/* The lobsters walk: the glass's own crawl and step, each at the pace the script gives it. */
+.motion .lob {
+  left: 0;
+  animation: crawl var(--pace, 18s) linear var(--head, 0s) infinite;
+}
+.motion .lob.l2 {
+  --pace: 23s;
+  --head: -9s;
+}
+.motion .lob.l3 {
+  --pace: 14s;
+  --head: -4s;
+}
+.motion .lob .sprite {
+  animation: step 0.5s steps(4) infinite;
+}
+/* Nothing loops while nobody can see it. */
+.motion .off .bob,
+.motion .off .drift,
+.motion .off .rock,
+.motion .off .flag,
+.motion .off .dots i,
+.motion .off .sprite,
+.motion .off.strip .lob,
+.motion .fleet.off *,
+.motion.hidden * {
+  animation-play-state: paused !important;
+}
+
+/* Without scroll-driven animation, the scene moves from beat to beat in one easy step. */
+.motion .story {
+  transition: --p 2.4s ease-in-out;
+}
+/* With it, the scroll is the clock: --p runs from 0 to 4 while the scene is pinned. */
+@supports (animation-timeline: view()) {
+  .motion .story {
+    transition: none;
+    animation: story linear both;
+    animation-timeline: view();
+    animation-range: contain 0% contain 100%;
+  }
+}
+
+/* On a wide screen the headline runs the full width of the page on one line, sized to fit it. */
+@media (min-width: 1024px) {
+  .beats .cap > h1 {
+    font-size: min(66px, calc((100vw - 2 * var(--space-4)) / 16.4));
+    white-space: nowrap;
+  }
+}

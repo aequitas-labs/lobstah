@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>lobstah: nobody stares at the water</title>
+    <meta
+      name="description"
+      content="Set your traps and go do something else. lobstah runs your coding agents in the background and tells you when one has a catch, or a question."
+    />
+    <meta name="theme-color" content="#0e1116" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <link rel="apple-touch-icon" href="assets/icon-192.png" />
+    <!-- Motion is opt-in: without this class the scene stands still. -->
+    <script>
+      (function () {
+        var still = false;
+        try {
+          still = localStorage.getItem('lobstah-still') === '1';
+        } catch (e) {}
+        if (!still && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.documentElement.classList.add('motion');
+      })();
+    </script>
+    <!-- scripts/build-site.mjs inlines site.css here, after the glass's tokens and card rules -->
+    <link rel="stylesheet" href="./site.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" class="defs" aria-hidden="true" focusable="false">
+      <defs>
+        <!-- One wave, 24 crests in 1200 units: the line alone, and the same line closed below for the fill. Shifting either by half its width joins without a seam. -->
+        <path
+          id="wave-line"
+          d="M0 7q12.5-7 25 0t25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0"
+        />
+        <path
+          id="wave-fill"
+          d="M0 7q12.5-7 25 0t25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0V15H0Z"
+        />
+      </defs>
+    </svg>
+
+    <!-- The bar: see-through at the top of the page; the script fixes it to the screen, with the install button, once the story has passed. -->
+    <header class="top">
+      <div class="bar">
+        <span class="brand"><img class="mark" src="assets/favicon.png" width="22" height="22" alt="" />lobstah</span>
+        <div class="acts">
+          <a class="gh" href="https://github.com/aequitas-labs/lobstah" aria-label="lobstah on GitHub"
+            ><!-- icon github --><span class="gh-name">GitHub</span><span class="count" hidden></span
+          ></a>
+          <button class="btn" type="button" id="copy-install" hidden>copy install</button>
+        </div>
+      </div>
+    </header>
+
+    <!--
+      The story: one scene, pinned behind the copy, that the scroll plays from
+      sunrise to the haul. Five beats. The captions sit in the sky, clear of the water.
+    -->
+    <section class="story" id="story" data-beat="0">
+      <div class="pin">
+        <div
+          class="world"
+          role="img"
+          aria-label="One calm sea, from sunrise to night. A lobster boat crosses and drops three traps, each under its own buoy. The sun sets. One buoy bobs while it works, then raises a white flag: it has a question, and an answer is picked. At the end every buoy has its flag up and every trap has a lobster in it."
+        >
+          <div class="sky warm"></div>
+          <div class="sky dusk"></div>
+          <div class="sky stars"></div>
+          <div class="sun"></div>
+          <div class="sea">
+            <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
+              <use href="#wave-fill" />
+              <use class="edge" href="#wave-line" />
+            </svg>
+          </div>
+
+          <div class="track">
+            <div class="at-water boat">
+              <div class="boat-art">
+                <div class="rock">
+                  <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 300px, 160px" alt="" />
+                  <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 300px, 160px" alt="" />
+                  <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 300px, 160px" alt="" />
+                  <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 300px, 160px" alt="" />
+                  <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 300px, 160px" alt="" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="drop d1">
+            <i class="rope"></i>
+            <div class="sink"><img class="trap" data-art="trap" data-sizes="(min-width: 720px) 320px, 180px" alt="" /></div>
+          </div>
+          <div class="drop d2">
+            <i class="rope"></i>
+            <div class="sink"><img class="trap" data-art="trap" data-sizes="(min-width: 720px) 320px, 180px" alt="" /></div>
+          </div>
+          <div class="drop d3">
+            <i class="rope"></i>
+            <div class="sink"><img class="trap" data-art="trap" data-sizes="(min-width: 720px) 320px, 180px" alt="" /></div>
+          </div>
+
+          <div class="at-water float d1">
+            <div class="buoy-art">
+              <div class="bob">
+                <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+                <img data-art="buoy-body" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+              </div>
+            </div>
+          </div>
+          <div class="at-water float d2">
+            <div class="buoy-art">
+              <div class="bob late">
+                <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+                <img data-art="buoy-body" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+              </div>
+            </div>
+          </div>
+          <div class="at-water float d3">
+            <div class="buoy-art">
+              <div class="bob later">
+                <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+                <img data-art="buoy-body" data-sizes="(min-width: 720px) 160px, 110px" alt="" />
+              </div>
+            </div>
+          </div>
+
+          <div class="sea front">
+            <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+          </div>
+
+          <!-- In front of the water: the lobster in each hauled trap, with its star. -->
+          <div class="drop riders d1">
+            <div class="sink">
+              <span class="pet-art small"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span>
+            </div>
+          </div>
+          <div class="drop riders d2">
+            <div class="sink">
+              <span class="pet-art small"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span>
+            </div>
+          </div>
+          <div class="drop riders d3">
+            <div class="sink">
+              <span class="pet-art small"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Labels and notes sit outside the world, so the zoom does not scale their text. -->
+        <div class="notes" aria-hidden="true">
+          <span class="badge tag d1">fix the flaky login test</span>
+          <span class="badge tag d2">add a session cache</span>
+          <span class="badge tag d3">answer the review on #212</span>
+
+          <!-- The middle buoy's note: working, then a question with an answer picked, then answered. -->
+          <div class="card note mid work">
+            <span class="badge">working</span><span class="dots"><i></i><i></i><i></i></span>
+          </div>
+          <div class="card note mid ask">
+            <span class="badge needs">needs you</span>
+            <b>Which cache?</b>
+            <ul class="opts">
+              <li class="picked">Redis</li>
+              <li>In-memory</li>
+              <li>Ask the team</li>
+            </ul>
+          </div>
+
+          <!-- At the haul each trap says something different. -->
+          <div class="card note end d1"><span class="badge ok">catch</span><b>PR #212 · 8/8</b><span class="by">Claude Code</span></div>
+          <div class="card note end d2"><span class="badge ok">answered</span><b>Redis · PR #214</b><span class="by">Codex</span></div>
+          <div class="card note end d3"><span class="badge ok">catch</span><b>review answered</b><span class="by">Claude Code</span></div>
+        </div>
+
+        <!-- Captions: fixed in the sky, one at a time. -->
+        <div class="caps">
+          <div class="cap c1">
+            <h2>Set the traps.</h2>
+            <p>
+              Lob a brief into a trap and walk away. Each job runs in its own git worktree, on Claude Code or Codex. Set one trap or set
+              ten.
+            </p>
+          </div>
+          <div class="cap c2">
+            <h2>Go do something else.</h2>
+            <p>
+              A trap doesn't fish faster for being watched, and an agent doesn't code faster either. A daemon does the watching, with no
+              model in the loop.
+            </p>
+          </div>
+          <div class="cap c4">
+            <h2>Haul up the lobstahs.</h2>
+            <p>You step in only when a catch is ready. The trap comes up with a pull request, the evidence, and a report.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="beats">
+        <div class="beat hero" id="hero">
+          <div class="cap">
+            <h1>Nobody stares at the water.</h1>
+            <p class="sub">
+              Set your traps and go do something else. lobstah runs your coding agents in the background and tells you when one has a catch,
+              or a question.
+            </p>
+            <!-- include handoff.html id=hero -->
+            <p class="fine">Open source, MIT · macOS, Linux, Windows · <a href="https://github.com/aequitas-labs/lobstah">GitHub</a></p>
+          </div>
+        </div>
+        <div class="beat" id="set"></div>
+        <div class="beat" id="away"></div>
+        <div class="beat" id="buoy"><h2 class="sr-only">The buoy tells you: working, then a question.</h2></div>
+        <div class="beat last" id="haul"></div>
+      </div>
+    </section>
+
+    <main>
+      <!-- How it works: the daemon, then the two ways to run it -->
+      <section class="sec" id="how">
+        <h2>How it works</h2>
+        <p class="lead">A daemon does the watching, with no model in the loop.</p>
+        <ol class="flow">
+          <li><b>You lob a brief.</b> Each job gets its own git worktree.</li>
+          <li><b>The daemon supervises.</b> It tells a dead worker from a stuck one and recovers each.</li>
+          <li><b>It wakes you only when needed.</b> A catch, or a question.</li>
+        </ol>
+        <div class="modes">
+          <article class="card mode">
+            <p class="kind">Driven</p>
+            <h3>The lobstah man</h3>
+            <p>One Claude Code or Codex session takes the helm. You talk to it; it sends out the work and brings you the catch.</p>
+            <p>The spyglass is its companion: a page where you act on decisions, read reports and see the status of the fleet.</p>
+          </article>
+          <article class="card mode">
+            <p class="kind">Autonomous</p>
+            <h3>The background router</h3>
+            <p>No session open. Lob in a brief, or let your tracker do it.</p>
+            <p>lobstah pings you when a worker needs you, through hooks you configure.</p>
+          </article>
+        </div>
+        <p class="fine">Both run on the same daemon. Start with the router and add a helm when you like.</p>
+      </section>
+
+      <!-- Harness -->
+      <section class="sec harness" id="harness">
+        <div class="trap-pic">
+          <img data-art="trap" data-sizes="(min-width: 720px) 300px, 180px" alt="" />
+          <span class="harness-mark h-claude"><!-- icon claude-code -->Claude Code</span>
+          <span class="harness-mark h-codex"><!-- icon codex -->Codex</span>
+        </div>
+        <div>
+          <h2>Bring your own harness</h2>
+          <p class="lead">
+            A trap can be a CLI session or a desktop app session, on Claude Code or Codex. Any session you already have open can opt in as a
+            trap, and then the helm directs it.
+          </p>
+        </div>
+      </section>
+
+      <!-- Integrations: one row of groups that scrolls sideways -->
+      <section class="sec" id="integrations">
+        <h2>Integrations</h2>
+        <div class="scroller" tabindex="0" role="group" aria-label="Integrations">
+          <ul class="row">
+            <li class="card int">
+              <span class="marks"><!-- icon github --></span>
+              <b>PRs</b>
+              <span>Workers open pull requests on GitHub. lobstah watches checks, reviews and conflicts, and repairs what it can.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon stack --></span>
+              <b>PR stacks</b>
+              <span>One wake when a whole stack is ready, bottom first.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon github --><!-- icon linear --></span>
+              <b>Issues</b>
+              <span>Assign an issue on GitHub or Linear and it becomes a job. Status comes back as comments.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon github --><!-- icon graphite --><!-- icon linear --></span>
+              <b>PR reviews</b>
+              <span>PR links open where you review: GitHub, Graphite or Linear.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon eyes --></span>
+              <b>CI</b>
+              <span><code>lobstah watch</code> stands watch on a CI run, or anything with a command line.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon slack --></span>
+              <b>Notifications</b>
+              <span>One command of yours runs when a worker needs you: post to Slack, ntfy, anything.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon openclaw --></span>
+              <b>OpenClaw</b>
+              <span>Four tools and <code>/lobstah</code> for your fleet's agents.</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- wharf:start (held out of the page until the wharf ships; `--wharf` includes it) -->
+      <section class="sec" id="wharf">
+        <h2>The wharf</h2>
+        <p class="lead">A wharf manages a fleet of machines, each working its own traps.</p>
+        <!-- The fleet, from a little above the water: three boats at three distances, each working its own buoys. The view never moves; the boats do. -->
+        <figure
+          class="fleet"
+          role="img"
+          aria-label="Open water seen from a little above. Three lobster boats, named studio, mini and macbook, move across it at three distances, each past its own row of buoys. One buoy is working, one has its flag up with a question, and one has its flag up with a catch."
+        >
+          <div class="fleet-sky"></div>
+          <div class="lane far">
+            <div class="sail">
+              <div class="at-water boat">
+                <div class="boat-art">
+                  <div class="rock">
+                    <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                    <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                    <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                    <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                    <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                  </div>
+                </div>
+                <span class="badge who">studio</span>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 22%">
+              <div class="buoy-art">
+                <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 40px, 24px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 50%">
+              <div class="buoy-art">
+                <div class="bob late"><img data-art="buoy-body" data-sizes="(min-width: 720px) 40px, 24px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 78%">
+              <div class="buoy-art">
+                <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 40px, 24px" alt="" /></div>
+              </div>
+            </div>
+            <div class="sea front">
+              <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
+                <use href="#wave-fill" />
+                <use class="edge" href="#wave-line" />
+              </svg>
+            </div>
+          </div>
+          <div class="lane mid">
+            <div class="sail">
+              <div class="at-water boat">
+                <div class="boat-art">
+                  <div class="rock">
+                    <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                    <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                    <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                    <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                    <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                  </div>
+                </div>
+                <span class="badge who">mini</span>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 12%">
+              <div class="buoy-art">
+                <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 38%">
+              <div class="buoy-art">
+                <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water fbuoy fb" style="--x: 64%">
+              <div class="buoy-art">
+                <div class="bob late">
+                  <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 60px, 30px" alt="" /><img
+                    data-art="buoy-body"
+                    data-sizes="(min-width: 720px) 60px, 30px"
+                    alt=""
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 90%">
+              <div class="buoy-art">
+                <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="sea front">
+              <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
+                <use href="#wave-fill" />
+                <use class="edge" href="#wave-line" />
+              </svg>
+            </div>
+          </div>
+          <div class="lane near">
+            <div class="sail">
+              <div class="at-water boat">
+                <div class="boat-art">
+                  <div class="rock">
+                    <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                    <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                    <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                    <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                    <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                  </div>
+                </div>
+                <span class="badge who">macbook</span>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 58%">
+              <div class="buoy-art">
+                <div class="bob late"><img data-art="buoy-body" data-sizes="(min-width: 720px) 80px, 40px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water fbuoy fa" style="--x: 26%">
+              <div class="buoy-art">
+                <div class="bob">
+                  <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 80px, 40px" alt="" /><img
+                    data-art="buoy-body"
+                    data-sizes="(min-width: 720px) 80px, 40px"
+                    alt=""
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 88%">
+              <div class="buoy-art">
+                <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 80px, 40px" alt="" /></div>
+              </div>
+            </div>
+            <div class="sea front">
+              <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
+                <use href="#wave-fill" />
+                <use class="edge" href="#wave-line" />
+              </svg>
+            </div>
+          </div>
+          <div class="fleet-notes" aria-hidden="true">
+            <div class="card fnote work nc">
+              <span class="badge">working</span><span class="dots"><i></i><i></i><i></i></span>
+            </div>
+            <div class="card fnote ask nb"><span class="badge needs">needs you</span><b>Which cache?</b></div>
+            <div class="card fnote na"><span class="badge ok">catch</span><b>PR #212 · 8/8</b></div>
+          </div>
+        </figure>
+      </section>
+      <!-- wharf:end -->
+
+      <!-- Get started -->
+      <section class="sec start" id="start">
+        <h2>Get started</h2>
+        <p class="lead">One paste, then go do something else.</p>
+        <!-- include handoff.html id=start -->
+        <p>
+          <a class="starcall" href="https://github.com/aequitas-labs/lobstah"
+            ><img class="pixstar" src="assets/star.png" width="15" height="15" alt="" />Star on GitHub</a
+          >
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        <a href="https://github.com/aequitas-labs/lobstah/blob/main/LICENSE">MIT</a> ·
+        <a href="https://github.com/aequitas-labs/lobstah">GitHub</a> · <a href="https://www.npmjs.com/package/lobstah">npm</a> ·
+        <a href="https://github.com/aequitas-labs/lobstah#readme">docs</a> ·
+        <a href="https://github.com/aequitas-labs/lobstah/blob/main/PRIVACY.md">privacy</a>
+      </p>
+      <p class="fine">
+        <button class="btn" type="button" id="still" aria-pressed="false">still water</button> stops every animation on this page.
+      </p>
+    </footer>
+
+    <!-- The lobster strip: the glass's own lobster, each with its star. It sits at the very bottom of the page. -->
+    <div class="strip">
+      <span class="lob l1" aria-hidden="true"
+        ><span class="pet-art"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span
+      ></span>
+      <span class="lob l2" aria-hidden="true"
+        ><span class="pet-art"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span
+      ></span>
+      <span class="lob l3" aria-hidden="true"
+        ><span class="pet-art"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span
+      ></span>
+    </div>
+
+    <!-- scripts/build-site.mjs bundles src/main.ts and inlines it here -->
+    <script src="./src/main.ts"></script>
+  </body>
+</html>

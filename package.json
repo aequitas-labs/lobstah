@@ -8,8 +8,10 @@
   "scripts": {
     "build": "pnpm -r run build",
     "glass:dev": "node scripts/build-glass.mjs --watch",
+    "site:build": "node scripts/build-site.mjs",
+    "site:dev": "node scripts/build-site.mjs --serve",
     "test": "vitest run",
-    "lint": "pnpm typecheck && tsc -p services/telemetry && prettier --check apps/cli/glass",
+    "lint": "pnpm typecheck && tsc -p services/telemetry && tsc -p apps/site && prettier --check apps/cli/glass apps/site scripts/build-site.mjs",
     "typecheck": "pnpm -r run build --noEmit",
     "build:npm": "node scripts/build-npm.mjs",
     "build:plugin": "node scripts/build-plugin.mjs",

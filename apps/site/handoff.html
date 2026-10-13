@@ -1,0 +1,37 @@
+<!-- The install control, used in the hero and again at the end. {{id}} keeps each copy's tabs apart. -->
+<div class="handoff" id="handoff-{{id}}">
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-claude" checked />
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-codex" />
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-openclaw" />
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-hand" />
+  <div class="handoff-bar">
+    <div class="tabs">
+      <label for="{{id}}-claude"><!-- icon claude-code -->Claude Code</label>
+      <label for="{{id}}-codex"><!-- icon codex -->Codex</label>
+      <label for="{{id}}-openclaw"><!-- icon openclaw -->OpenClaw</label>
+      <label for="{{id}}-hand">By hand</label>
+    </div>
+    <button class="btn" type="button" data-copy-panel>copy</button>
+  </div>
+  <!-- The first three are prompts to paste into that agent; the last is the commands themselves. -->
+  <pre
+    class="panel"
+  ><code>Install lobstah from npm, set it up for my repos, install its daemon, and add its plugin. Then take the helm as /lobstah:man</code></pre>
+  <pre
+    class="panel"
+  ><code>Install lobstah from npm, set it up for my repos, install its daemon, and add its plugin. Then take the helm as $lobstah:man</code></pre>
+  <pre
+    class="panel"
+  ><code>Install lobstah from npm, set it up for my repos, install its daemon, and install its OpenClaw plugin from npm: lobstah-openclaw-plugin.</code></pre>
+  <pre class="panel"><code>npm i -g lobstah
+lobstah init --scan ~/src
+lobstah daemon install</code></pre>
+  <p class="fine tip">Paste it into Claude Code.</p>
+  <p class="fine tip">Paste it into Codex. Trusting its hooks is yours to do, in <code>/hooks</code>.</p>
+  <p class="fine tip">Paste it into OpenClaw, on the gateway host.</p>
+  <p class="fine tip">
+    Then add the plugin for your harness:
+    <a href="https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/claude-code.md#install">Claude Code</a>,
+    <a href="https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/codex.md#install">Codex</a>.
+  </p>
+</div>
