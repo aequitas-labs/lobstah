@@ -9,7 +9,8 @@
       content="Set your traps and go do something else. lobstah runs your coding agents in the background and tells you when one has a catch, or a question."
     />
     <meta name="theme-color" content="#0e1116" />
-    <link rel="icon" type="image/png" href="assets/icon-192.png" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <link rel="apple-touch-icon" href="assets/icon-192.png" />
     <!-- Motion is opt-in: without this class the scene stands still. -->
     <script>
       (function () {
@@ -197,7 +198,7 @@
               or a question.
             </p>
             <!-- include handoff.html id=hero -->
-            <p class="fine">Open source, MIT · macOS, Linux, Windows</p>
+            <p class="fine">Open source, MIT · macOS, Linux, Windows · <a href="https://github.com/aequitas-labs/lobstah">GitHub</a></p>
           </div>
         </div>
         <div class="beat" id="set"></div>
@@ -219,22 +220,16 @@
         </ol>
         <div class="modes">
           <article class="card mode">
-            <span class="badge">driven</span>
+            <p class="kind">Driven</p>
             <h3>The lobstah man</h3>
             <p>One Claude Code or Codex session takes the helm. You talk to it; it sends out the work and brings you the catch.</p>
-            <ul class="chips">
-              <li><code>/lobstah:man</code></li>
-              <li>each question is a card on the glass</li>
-            </ul>
+            <p>The spyglass is its companion: a page where you act on decisions, read reports and see the status of the fleet.</p>
           </article>
           <article class="card mode">
-            <span class="badge">autonomous</span>
+            <p class="kind">Autonomous</p>
             <h3>The background router</h3>
-            <p>No session open. Lob in a brief, or let your tracker do it. lobstah pings you when a worker needs you.</p>
-            <ul class="chips">
-              <li><code>lobstah dispatch</code></li>
-              <li>pings through any command you choose</li>
-            </ul>
+            <p>No session open. Lob in a brief, or let your tracker do it.</p>
+            <p>lobstah pings you when a worker needs you, through hooks you configure.</p>
           </article>
         </div>
         <p class="fine">Both run on the same daemon. Start with the router and add a helm when you like.</p>
@@ -259,44 +254,45 @@
       <!-- Integrations: one row of groups that scrolls sideways -->
       <section class="sec" id="integrations">
         <h2>Integrations</h2>
-        <p class="lead">No webhooks, no tunnel. lobstah polls.</p>
-        <ul class="scroller" tabindex="0" aria-label="Integrations">
-          <li class="card int">
-            <span class="marks"><!-- icon github --></span>
-            <b>PRs</b>
-            <span>Workers open pull requests on GitHub. lobstah watches checks, reviews and conflicts, and repairs what it can.</span>
-          </li>
-          <li class="card int">
-            <span class="marks"><!-- icon stack --></span>
-            <b>PR stacks</b>
-            <span>One wake when a whole stack is ready, bottom first.</span>
-          </li>
-          <li class="card int">
-            <span class="marks"><!-- icon github --><!-- icon linear --></span>
-            <b>Issues</b>
-            <span>Assign an issue on GitHub or Linear and it becomes a job. Status comes back as comments.</span>
-          </li>
-          <li class="card int">
-            <span class="marks"><!-- icon github --><!-- icon graphite --><!-- icon linear --></span>
-            <b>PR reviews</b>
-            <span>PR links open where you review: GitHub, Graphite or Linear.</span>
-          </li>
-          <li class="card int">
-            <span class="marks"><!-- icon eyes --></span>
-            <b>CI</b>
-            <span><code>lobstah watch</code> stands watch on a CI run, or anything with a command line.</span>
-          </li>
-          <li class="card int">
-            <span class="marks"><!-- icon slack --></span>
-            <b>Notifications</b>
-            <span>One command of yours runs when a worker needs you: post to Slack, ntfy, anything.</span>
-          </li>
-          <li class="card int">
-            <span class="marks"><!-- icon openclaw --></span>
-            <b>OpenClaw</b>
-            <span>Four tools and <code>/lobstah</code> for your fleet's agents.</span>
-          </li>
-        </ul>
+        <div class="scroller" tabindex="0" role="group" aria-label="Integrations">
+          <ul class="row">
+            <li class="card int">
+              <span class="marks"><!-- icon github --></span>
+              <b>PRs</b>
+              <span>Workers open pull requests on GitHub. lobstah watches checks, reviews and conflicts, and repairs what it can.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon stack --></span>
+              <b>PR stacks</b>
+              <span>One wake when a whole stack is ready, bottom first.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon github --><!-- icon linear --></span>
+              <b>Issues</b>
+              <span>Assign an issue on GitHub or Linear and it becomes a job. Status comes back as comments.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon github --><!-- icon graphite --><!-- icon linear --></span>
+              <b>PR reviews</b>
+              <span>PR links open where you review: GitHub, Graphite or Linear.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon eyes --></span>
+              <b>CI</b>
+              <span><code>lobstah watch</code> stands watch on a CI run, or anything with a command line.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon slack --></span>
+              <b>Notifications</b>
+              <span>One command of yours runs when a worker needs you: post to Slack, ntfy, anything.</span>
+            </li>
+            <li class="card int">
+              <span class="marks"><!-- icon openclaw --></span>
+              <b>OpenClaw</b>
+              <span>Four tools and <code>/lobstah</code> for your fleet's agents.</span>
+            </li>
+          </ul>
+        </div>
       </section>
 
       <!-- wharf:start (held out of the page until the wharf ships; `--wharf` includes it) -->

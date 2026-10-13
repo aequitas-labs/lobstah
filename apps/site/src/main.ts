@@ -48,7 +48,7 @@ function pauseOffScreen(): void {
   const seen = new IntersectionObserver((entries) => {
     for (const e of entries) e.target.classList.toggle('off', !e.isIntersecting);
   });
-  for (const el of document.querySelectorAll('.story, .strip, .fleet')) seen.observe(el);
+  for (const el of document.querySelectorAll('.story, .strip, .fleet, .scroller')) seen.observe(el);
 }
 
 /** Each lobster at the foot of the page walks at its own pace, picked afresh on every visit. */
@@ -58,6 +58,33 @@ function lobsterPaces(): void {
     lob.style.setProperty('--pace', `${pace.toFixed(1)}s`);
     // A negative head start puts each one somewhere along its walk already.
     lob.style.setProperty('--head', `${(-Math.random() * pace).toFixed(1)}s`);
+  }
+}
+
+/**
+ * Let the integrations row drift by itself. A second copy of the cards follows
+ * the first, hidden from screen readers, so the loop has no end to show; the
+ * stylesheet moves the row by exactly one copy's width and starts again.
+ */
+function driftRow(): void {
+  for (const row of document.querySelectorAll<HTMLElement>('.scroller')) {
+    const track = row.querySelector<HTMLElement>('.row');
+    if (!track) continue;
+    const cards = [...track.children] as HTMLElement[];
+    for (const card of cards) {
+      const copy = card.cloneNode(true) as HTMLElement;
+      copy.classList.add('copy');
+      copy.setAttribute('aria-hidden', 'true');
+      track.append(copy);
+    }
+    const measure = () =>
+      track.style.setProperty(
+        '--shift',
+        `${cards.reduce((w, c) => w + c.offsetWidth, 0) + cards.length * parseFloat(getComputedStyle(track).columnGap || '0')}px`,
+      );
+    measure();
+    addEventListener('resize', measure);
+    row.classList.add('auto');
   }
 }
 
@@ -83,6 +110,7 @@ function stillSwitch(): void {
 
 copyButtons();
 lobsterPaces();
+driftRow();
 stillSwitch();
 if ('IntersectionObserver' in window) {
   const story = document.querySelector<HTMLElement>('.story');

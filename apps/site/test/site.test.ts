@@ -132,7 +132,8 @@ describe('the built page', () => {
 
   it('offers a one-paste install in the hero and again at the end, for each harness and by hand', () => {
     const hero = built.html.slice(built.html.indexOf('id="hero"'), built.html.indexOf('id="set"'));
-    expect(hero).toContain('Set it up in one paste');
+    expect(hero).toContain('class="handoff"');
+    expect(hero).toContain('macOS, Linux, Windows · <a href="https://github.com/aequitas-labs/lobstah">GitHub</a>');
     expect(built.html.match(/class="handoff" id="handoff-\w+"/g)).toEqual([
       'class="handoff" id="handoff-hero"',
       'class="handoff" id="handoff-start"',
@@ -150,6 +151,14 @@ describe('the built page', () => {
     );
     expect(openclaw).toContain('openclaw plugins install lobstah-openclaw-plugin');
     expect(built.html).not.toMatch(/\{\{\w+\}\}|<!-- include|<!-- icon/);
+  });
+
+  it("uses the glass's own favicon and app icon", () => {
+    expect(built.html).toContain('<link rel="icon" type="image/png" href="assets/favicon.png" />');
+    const byName = Object.fromEntries(built.files.map((f) => [f.name, f.bytes]));
+    const repo = path.join(here, '..', '..', '..');
+    expect(byName['favicon.png']).toBe(fs.statSync(path.join(repo, 'docs', 'assets', 'favicon.png')).size);
+    expect(byName['icon-192.png']).toBe(fs.statSync(path.join(repo, 'apps', 'cli', 'glass', 'assets', 'app-icon-192.png')).size);
   });
 
   it('shows real marks for the harnesses and the integrations', () => {

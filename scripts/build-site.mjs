@@ -38,11 +38,12 @@ export const ART_WIDTHS = {
   trap: [180, 320],
 };
 
-/** Files the page uses that live elsewhere in the repo: the glass's lobster, its star, and the app icon. */
+/** Files the page uses that live elsewhere in the repo: the glass's lobster, its star, its app icon and its favicon. */
 const SHARED = {
   'lob-sprite.png': ['docs', 'assets', 'lob-sprite.png'],
   'star.png': ['docs', 'assets', 'star.png'],
   'icon-192.png': ['apps', 'cli', 'glass', 'assets', 'app-icon-192.png'],
+  'favicon.png': ['docs', 'assets', 'favicon.png'],
 };
 
 /** The glass rules the page reuses, by selector, in the glass's own order. */

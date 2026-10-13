@@ -1,18 +1,17 @@
 <!-- The install control, used in the hero and again at the end. {{id}} keeps each copy's tabs apart. -->
 <div class="handoff" id="handoff-{{id}}">
-  <div class="handoff-head">
-    <p class="handoff-title">Set it up in one paste</p>
-    <button class="btn" type="button" data-copy-panel>copy</button>
-  </div>
   <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-claude" checked />
   <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-codex" />
   <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-openclaw" />
   <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-hand" />
-  <div class="tabs">
-    <label for="{{id}}-claude"><!-- icon claude-code -->Claude Code</label>
-    <label for="{{id}}-codex"><!-- icon codex -->Codex</label>
-    <label for="{{id}}-openclaw"><!-- icon openclaw -->OpenClaw</label>
-    <label for="{{id}}-hand">By hand</label>
+  <div class="handoff-bar">
+    <div class="tabs">
+      <label for="{{id}}-claude"><!-- icon claude-code -->Claude Code</label>
+      <label for="{{id}}-codex"><!-- icon codex -->Codex</label>
+      <label for="{{id}}-openclaw"><!-- icon openclaw -->OpenClaw</label>
+      <label for="{{id}}-hand">By hand</label>
+    </div>
+    <button class="btn" type="button" data-copy-panel>copy</button>
   </div>
   <pre
     class="panel"
