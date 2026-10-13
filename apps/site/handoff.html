@@ -16,26 +16,19 @@
   <!-- The first three are prompts to paste into that agent; the last is the commands themselves. -->
   <pre
     class="panel"
-  ><code>Install lobstah from npm (the package is lobstah), set it up for my repos, install its daemon, and add its Claude Code plugin: lobstah@lobstah, from the aequitas-labs/lobstah marketplace. Then tell me to open a new session and type /lobstah:man to take the helm.</code></pre>
+  ><code>Install lobstah from npm, set it up for my repos, install its daemon, and add its plugin. Then take the helm as /lobstah:man</code></pre>
   <pre
     class="panel"
-  ><code>Install lobstah from npm (the package is lobstah), set it up for my repos, install its daemon, and add its Codex plugin: lobstah@lobstah, from the aequitas-labs/lobstah marketplace. Then tell me to trust its hooks in /hooks, which I do myself, and to open a new session and type $lobstah:man to take the helm.</code></pre>
+  ><code>Install lobstah from npm, set it up for my repos, install its daemon, and add its plugin. Then take the helm as $lobstah:man</code></pre>
   <pre
     class="panel"
-  ><code>Install lobstah from npm on this gateway host (the package is lobstah), set it up for my repos, install its daemon, and install its OpenClaw plugin from npm: lobstah-openclaw-plugin. Then tell me to type /lobstah in chat to see the fleet.</code></pre>
+  ><code>Install lobstah from npm, set it up for my repos, install its daemon, and install its OpenClaw plugin from npm: lobstah-openclaw-plugin.</code></pre>
   <pre class="panel"><code>npm i -g lobstah
 lobstah init --scan ~/src
 lobstah daemon install</code></pre>
-  <p class="fine tip">
-    Paste it into Claude Code. It installs the CLI and the plugin and starts the daemon; you take the helm in a new session.
-  </p>
-  <p class="fine tip">
-    Paste it into Codex. It installs the CLI and the plugin and starts the daemon. Trusting the hooks is yours to do, in
-    <code>/hooks</code>.
-  </p>
-  <p class="fine tip">
-    Paste it into OpenClaw, to an agent on the gateway host. Your fleet's agents get four tools, and you get <code>/lobstah</code> in chat.
-  </p>
+  <p class="fine tip">Paste it into Claude Code.</p>
+  <p class="fine tip">Paste it into Codex. Trusting its hooks is yours to do, in <code>/hooks</code>.</p>
+  <p class="fine tip">Paste it into OpenClaw, on the gateway host.</p>
   <p class="fine tip">
     Then add the plugin for your harness:
     <a href="https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/claude-code.md#install">Claude Code</a>,

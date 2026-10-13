@@ -140,20 +140,16 @@ describe('the built page', () => {
     ]);
     const panels = (built.html.match(/<pre\s+class="panel[^>]*>[\s\S]*?<\/pre>/g) ?? []).map((p) => p.replace(/&amp;/g, '&'));
     expect(panels).toHaveLength(8);
-    // Each harness tab is a prompt that names the npm package, that harness's plugin, the daemon and the next step; by hand is the real commands.
-    const [claude, codex, openclaw, hand] = panels;
-    for (const prompt of [claude, codex, openclaw]) {
-      expect(prompt).toContain('Install lobstah from npm');
-      expect(prompt).toContain('install its daemon');
-      expect(prompt).not.toContain('&&');
-    }
-    expect(claude).toContain('its Claude Code plugin: lobstah@lobstah, from the aequitas-labs/lobstah marketplace');
-    expect(claude).toContain('/lobstah:man');
-    expect(codex).toContain('its Codex plugin: lobstah@lobstah, from the aequitas-labs/lobstah marketplace');
-    expect(codex).toContain('trust its hooks in /hooks, which I do myself');
-    expect(codex).toContain('$lobstah:man');
-    expect(openclaw).toContain('its OpenClaw plugin from npm: lobstah-openclaw-plugin');
-    expect(hand).toContain('npm i -g lobstah\nlobstah init --scan ~/src\nlobstah daemon install');
+    // Each harness tab is a prompt to paste into that agent, in Chris's words; by hand is the real commands.
+    const text = (panel: string) => panel.replace(/<[^>]+>/g, '');
+    const [claude, codex, openclaw, hand] = panels.map(text);
+    const setUp = 'Install lobstah from npm, set it up for my repos, install its daemon, and add its plugin. Then take the helm as ';
+    expect(claude).toBe(`${setUp}/lobstah:man`);
+    expect(codex).toBe(`${setUp}$lobstah:man`);
+    expect(openclaw).toBe(
+      'Install lobstah from npm, set it up for my repos, install its daemon, and install its OpenClaw plugin from npm: lobstah-openclaw-plugin.',
+    );
+    expect(hand).toBe('npm i -g lobstah\nlobstah init --scan ~/src\nlobstah daemon install');
     expect(built.html).not.toMatch(/\{\{\w+\}\}|<!-- include|<!-- icon/);
   });
 
