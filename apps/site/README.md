@@ -92,9 +92,12 @@ The wharf section (built only with `--wharf`) leads with open water seen from
 a little above. The view never moves. Three lanes of water lie one behind
 another, the far one small and high, the near one large and low. Each has a
 row of buoys and one boat that crosses it, all made from the same art layers
-as the story. As a trap reports, its buoy's flag goes up with a note naming
-the boat. It plays by itself, on a loop, while it is in view, not from the
-scroll. With motion off it is one still frame with three flags up.
+as the story. Each lane's water is painted solid in front of what floats on
+it, so the foot of a hull or a buoy is under the surface. On each round three
+buoys get a note in the story's own colours: one working, one with a catch
+and one that needs you, the last two with their flags up. It plays by itself,
+on a loop, while it is in view, not from the scroll. With motion off it is one
+still frame with all three notes showing.
 
 ## Limits the tests hold
 

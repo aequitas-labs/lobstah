@@ -895,25 +895,19 @@ p {
 /*
  * The fleet, from a little above the water. The view never moves. Three lanes
  * of water lie one behind another, the far one small and high, the near one
- * large and low; each has its buoys and one boat that crosses it. A lane is
- * the story's water again: things float on a line, and a see-through layer in
- * front dims what is under the surface. The nearer lanes are painted later,
- * so they lie over the farther ones.
+ * large and low; each has its buoys and one boat that crosses it. Things float
+ * on a lane's line, and the lane's own water is painted solid in front of
+ * them, so a hull or a buoy sits in the water and its foot is out of sight.
+ * The nearer lanes are painted later, so they lie over the farther ones.
  */
-.fleet-wrap {
-  display: grid;
-  gap: var(--space-4);
-  align-items: center;
-  margin-bottom: 10px;
-}
 .fleet {
   position: relative;
-  margin: 0;
+  margin: 0 0 10px;
   border: 1px solid var(--line);
   border-radius: var(--card-radius);
   overflow: hidden;
   background: var(--sea);
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 6 / 5;
   /* lets sizes be worked out from the scene's width (cqw) */
   container-type: inline-size;
 }
@@ -946,7 +940,7 @@ p {
   --rest: 60%;
 }
 .lane.mid {
-  --wl: 52%;
+  --wl: 54%;
   --fw: 5cqw;
   --bw: 20cqw;
   --wave: 9px;
@@ -955,7 +949,7 @@ p {
   --rest: 20%;
 }
 .lane.near {
-  --wl: 80%;
+  --wl: 84%;
   --fw: 7.5cqw;
   --bw: 30cqw;
   --wave: 12px;
@@ -965,6 +959,7 @@ p {
 }
 .fleet .sea {
   background: var(--sea);
+  opacity: 1;
 }
 .fleet .wave {
   height: var(--wave);
@@ -998,115 +993,43 @@ p {
   font-size: 11px;
   color: var(--fg);
 }
-.fleet-notes .badge {
+/* A note stands over its buoy, as in the story: the same card, the same colour for each state. */
+.fnote {
   position: absolute;
   z-index: 8;
-  max-width: 62%;
-  white-space: normal;
-  font-size: 12px;
-  /* still: only the summary shows */
-  opacity: 0;
+  left: var(--x);
+  bottom: calc(100% - var(--wl) + var(--fw) * 1.24 + 6px);
+  padding: 4px 7px;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
 }
-.fleet-notes .na {
-  left: 44%;
-  bottom: calc(20% + 7.5cqw * 1.24 + 8px);
+.fnote b {
+  display: block;
 }
-.fleet-notes .nb {
-  left: 34%;
-  bottom: calc(48% + 5cqw * 1.24 + 8px);
-}
-.fleet-notes .nc {
-  left: 30%;
-  bottom: calc(70% + 3.4cqw * 1.24 + 8px);
-}
-.fleet-notes .nz {
-  left: 10px;
-  bottom: 10px;
-  opacity: 1;
-}
-/* The hosted glass, drawn small beside it. */
-.phone {
-  display: grid;
-  gap: 6px;
-  justify-items: center;
-}
-.screen {
-  width: 250px;
-  min-height: 330px;
-  padding: 12px 10px;
-  border: 2px solid var(--line-hover);
-  border-radius: 22px;
-  background: var(--bg);
-  font-size: 12px;
-  display: grid;
-  gap: 8px;
-  align-content: start;
-}
-.screen .card {
-  padding: 8px 10px;
-}
-.screen .meta {
-  margin: 0;
-}
-.screen .card .top > b {
-  white-space: normal;
-}
-.w-head {
+.fnote.work {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-.w-chips,
-.w-opts,
-.w-foot {
-  display: flex;
   gap: 6px;
-  flex-wrap: wrap;
 }
-.screen .chip {
-  padding: 1px 7px;
-  font-size: 11px;
+.fnote.ask {
+  border-color: var(--bad);
 }
-.screen .btn {
-  font-size: 11px;
-  min-height: 0;
-  padding: 1px 8px;
-  width: fit-content;
+/* each note takes its lane's waterline and buoy size, and its own buoy's place along it */
+.fnote.nc {
+  --wl: 30%;
+  --fw: 3.4cqw;
+  --x: 22%;
 }
-.screen .btn.on {
-  color: var(--fg);
-  border-color: var(--link);
+.fnote.nb {
+  --wl: 54%;
+  --fw: 5cqw;
+  --x: 64%;
 }
-.w-tabs {
-  display: flex;
-  gap: 10px;
-  border-bottom: 1px solid var(--line);
-  color: var(--dim);
-  padding-bottom: 4px;
-}
-.w-tabs .on {
-  color: var(--fg);
-}
-.w-h {
-  color: var(--dim);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 11px;
-}
-.w-body {
-  margin: 0;
-}
-.w-answer {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--inset);
-  padding: 6px 8px;
-  min-height: 44px;
-}
-.w-foot {
-  margin-top: 6px;
+.fnote.na {
+  --wl: 84%;
+  --fw: 7.5cqw;
+  --x: 26%;
 }
 footer {
   margin-top: 48px;
@@ -1183,11 +1106,21 @@ footer p {
     grid-template-columns: 300px minmax(0, 1fr);
     gap: 40px;
   }
-  .fleet-wrap {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
   .fleet {
     aspect-ratio: 16 / 9;
+  }
+  .fnote {
+    padding: 6px 9px;
+    font-size: 12px;
+  }
+  /* The night caption stands to the right, and the haul's in the middle. */
+  .caps .c2 {
+    margin-left: auto;
+    text-align: right;
+  }
+  .caps .c4 {
+    margin-inline: auto;
+    text-align: center;
   }
   .who {
     font-size: 12px;
@@ -1252,91 +1185,43 @@ footer p {
     transform: translateX(var(--to));
   }
 }
-/* A flag goes up when its trap reports, and stays up until the loop starts again. */
-@keyframes flag-a {
-  0%,
-  17% {
-    opacity: 0;
-  }
-  20%,
-  97% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-@keyframes flag-b {
-  0%,
-  37% {
-    opacity: 0;
-  }
-  40%,
-  97% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-@keyframes flag-c {
-  0%,
-  57% {
-    opacity: 0;
-  }
-  60%,
-  97% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
+/* On each round a trap gets to work, one hauls a catch, one asks; the notes and flags stay up until the round starts again. */
 @keyframes note-a {
   0%,
-  17%,
-  34%,
-  100% {
+  22% {
     opacity: 0;
   }
-  20%,
-  31% {
+  25%,
+  95% {
     opacity: 1;
+  }
+  100% {
+    opacity: 0;
   }
 }
 @keyframes note-b {
   0%,
-  37%,
-  54%,
-  100% {
+  42% {
     opacity: 0;
   }
-  40%,
-  51% {
+  45%,
+  95% {
     opacity: 1;
+  }
+  100% {
+    opacity: 0;
   }
 }
 @keyframes note-c {
   0%,
-  57%,
-  74%,
-  100% {
+  4% {
     opacity: 0;
   }
-  60%,
-  71% {
+  7%,
+  95% {
     opacity: 1;
   }
-}
-@keyframes note-z {
-  0%,
-  6%,
-  80%,
   100% {
-    opacity: 1;
-  }
-  12%,
-  74% {
     opacity: 0;
   }
 }
@@ -1395,7 +1280,7 @@ footer p {
 .motion .scroller.off .row {
   animation-play-state: paused;
 }
-/* The fleet works by itself while it is in view: the boats cross, and flags go up on a 26 second round. */
+/* The fleet works by itself while it is in view: the boats cross, and notes and flags come up on a 26 second round. */
 .motion .fleet .sail {
   animation: sail 44s linear infinite;
 }
@@ -1413,17 +1298,12 @@ footer p {
 }
 .motion .fleet .fa .flag {
   animation:
-    flag-a 26s linear infinite,
+    note-a 26s linear infinite,
     sway 4s ease-in-out infinite;
 }
 .motion .fleet .fb .flag {
   animation:
-    flag-b 26s linear infinite,
-    sway 4s ease-in-out infinite;
-}
-.motion .fleet .fc .flag {
-  animation:
-    flag-c 26s linear infinite,
+    note-b 26s linear infinite,
     sway 4s ease-in-out infinite;
 }
 .motion .fleet .na {
@@ -1434,9 +1314,6 @@ footer p {
 }
 .motion .fleet .nc {
   animation: note-c 26s linear infinite;
-}
-.motion .fleet .nz {
-  animation: note-z 26s linear infinite;
 }
 /* The lobsters walk: the glass's own crawl and step, each at the pace the script gives it. */
 .motion .lob {

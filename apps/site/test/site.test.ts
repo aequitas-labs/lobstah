@@ -125,7 +125,7 @@ describe('the built page', () => {
 
   it('keeps the wharf out of the published page', () => {
     expect(built.html).not.toMatch(/wharf/i);
-    expect(visibleText(withWharf.html)).toContain('One glass for a fleet of machines and all their traps.');
+    expect(visibleText(withWharf.html)).toContain('A wharf manages a fleet of machines, each working its own traps.');
     // the fleet from above plays on its own, and only with motion on
     expect(withWharf.html).toContain('class="fleet"');
   });

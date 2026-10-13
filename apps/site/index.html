@@ -298,180 +298,150 @@
       <!-- wharf:start (held out of the page until the wharf ships; `--wharf` includes it) -->
       <section class="sec" id="wharf">
         <h2>The wharf</h2>
-        <p class="lead">One glass for a fleet of machines and all their traps.</p>
-        <div class="fleet-wrap">
-          <!-- The fleet, from a little above the water: three boats at three distances, each working its own buoys. The view never moves; the boats do. -->
-          <figure
-            class="fleet"
-            role="img"
-            aria-label="Open water seen from a little above. Three lobster boats, named studio, mini and macbook, move across it at three distances, each past its own row of buoys. One buoy in each row has its flag up: a catch has been reported."
-          >
-            <div class="fleet-sky"></div>
-            <div class="lane far">
-              <div class="sail">
-                <div class="at-water boat">
-                  <div class="boat-art">
-                    <div class="rock">
-                      <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
-                      <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
-                      <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
-                      <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
-                      <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
-                    </div>
-                  </div>
-                  <span class="badge who">studio</span>
-                </div>
-              </div>
-              <div class="at-water fbuoy" style="--x: 22%">
-                <div class="buoy-art">
-                  <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 40px, 24px" alt="" /></div>
-                </div>
-              </div>
-              <div class="at-water fbuoy fc" style="--x: 50%">
-                <div class="buoy-art">
-                  <div class="bob late">
-                    <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 40px, 24px" alt="" /><img
-                      data-art="buoy-body"
-                      data-sizes="(min-width: 720px) 40px, 24px"
-                      alt=""
-                    />
+        <p class="lead">A wharf manages a fleet of machines, each working its own traps. Every boat and every trap shows in one place.</p>
+        <!-- The fleet, from a little above the water: three boats at three distances, each working its own buoys. The view never moves; the boats do. -->
+        <figure
+          class="fleet"
+          role="img"
+          aria-label="Open water seen from a little above. Three lobster boats, named studio, mini and macbook, move across it at three distances, each past its own row of buoys. One buoy is working, one has its flag up with a question, and one has its flag up with a catch."
+        >
+          <div class="fleet-sky"></div>
+          <div class="lane far">
+            <div class="sail">
+              <div class="at-water boat">
+                <div class="boat-art">
+                  <div class="rock">
+                    <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                    <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                    <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                    <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
+                    <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 120px, 60px" alt="" />
                   </div>
                 </div>
-              </div>
-              <div class="at-water fbuoy" style="--x: 78%">
-                <div class="buoy-art">
-                  <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 40px, 24px" alt="" /></div>
-                </div>
-              </div>
-              <div class="sea front">
-                <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
-                  <use href="#wave-fill" />
-                  <use class="edge" href="#wave-line" />
-                </svg>
+                <span class="badge who">studio</span>
               </div>
             </div>
-            <div class="lane mid">
-              <div class="sail">
-                <div class="at-water boat">
-                  <div class="boat-art">
-                    <div class="rock">
-                      <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
-                      <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
-                      <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
-                      <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
-                      <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
-                    </div>
-                  </div>
-                  <span class="badge who">mini</span>
-                </div>
-              </div>
-              <div class="at-water fbuoy" style="--x: 12%">
-                <div class="buoy-art">
-                  <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
-                </div>
-              </div>
-              <div class="at-water fbuoy" style="--x: 38%">
-                <div class="buoy-art">
-                  <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
-                </div>
-              </div>
-              <div class="at-water fbuoy fb" style="--x: 64%">
-                <div class="buoy-art">
-                  <div class="bob late">
-                    <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 60px, 30px" alt="" /><img
-                      data-art="buoy-body"
-                      data-sizes="(min-width: 720px) 60px, 30px"
-                      alt=""
-                    />
-                  </div>
-                </div>
-              </div>
-              <div class="at-water fbuoy" style="--x: 90%">
-                <div class="buoy-art">
-                  <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
-                </div>
-              </div>
-              <div class="sea front">
-                <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
-                  <use href="#wave-fill" />
-                  <use class="edge" href="#wave-line" />
-                </svg>
+            <div class="at-water fbuoy" style="--x: 22%">
+              <div class="buoy-art">
+                <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 40px, 24px" alt="" /></div>
               </div>
             </div>
-            <div class="lane near">
-              <div class="sail">
-                <div class="at-water boat">
-                  <div class="boat-art">
-                    <div class="rock">
-                      <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
-                      <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
-                      <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
-                      <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
-                      <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
-                    </div>
-                  </div>
-                  <span class="badge who">macbook</span>
-                </div>
-              </div>
-              <div class="at-water fbuoy" style="--x: 26%">
-                <div class="buoy-art">
-                  <div class="bob late"><img data-art="buoy-body" data-sizes="(min-width: 720px) 80px, 40px" alt="" /></div>
-                </div>
-              </div>
-              <div class="at-water fbuoy fa" style="--x: 58%">
-                <div class="buoy-art">
-                  <div class="bob">
-                    <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 80px, 40px" alt="" /><img
-                      data-art="buoy-body"
-                      data-sizes="(min-width: 720px) 80px, 40px"
-                      alt=""
-                    />
-                  </div>
-                </div>
-              </div>
-              <div class="at-water fbuoy" style="--x: 88%">
-                <div class="buoy-art">
-                  <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 80px, 40px" alt="" /></div>
-                </div>
-              </div>
-              <div class="sea front">
-                <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
-                  <use href="#wave-fill" />
-                  <use class="edge" href="#wave-line" />
-                </svg>
+            <div class="at-water fbuoy" style="--x: 50%">
+              <div class="buoy-art">
+                <div class="bob late"><img data-art="buoy-body" data-sizes="(min-width: 720px) 40px, 24px" alt="" /></div>
               </div>
             </div>
-            <div class="fleet-notes" aria-hidden="true">
-              <span class="badge na"><b>macbook</b> · fix the flaky login test · PR #212</span>
-              <span class="badge nb"><b>mini</b> · add a session cache · PR #214</span>
-              <span class="badge nc"><b>studio</b> · answer the review · report filed</span>
-              <span class="badge nz">three boats · ten traps · one glass</span>
-            </div>
-          </figure>
-          <div class="phone">
-            <div class="screen" aria-label="The hosted glass: the deck, with decisions waiting for you">
-              <div class="w-head">
-                <b>spyglass <span class="dim">wharf</span></b
-                ><span class="btn">sign out</span>
-              </div>
-              <div class="w-chips"><span class="chip">helm live</span><span class="chip dim">polling · 15s · 3 jobs</span></div>
-              <div class="w-tabs">
-                <span class="on">deck</span><span>jobs</span><span>traps</span><span>boats</span><span>reports</span>
-              </div>
-              <div class="w-h">Decisions</div>
-              <div class="card">
-                <div class="top"><b>Which cache?</b><span class="badge">needs decision</span></div>
-                <div class="meta">helm · 2m</div>
-              </div>
-              <div class="card">
-                <div class="top"><b>Cut 0.7.6?</b><span class="badge">answered</span></div>
-                <div class="meta">helm · 1h</div>
+            <div class="at-water fbuoy" style="--x: 78%">
+              <div class="buoy-art">
+                <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 40px, 24px" alt="" /></div>
               </div>
             </div>
-            <span class="fine">The glass, hosted, on your phone</span>
+            <div class="sea front">
+              <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
+                <use href="#wave-fill" />
+                <use class="edge" href="#wave-line" />
+              </svg>
+            </div>
           </div>
-        </div>
-        <p class="fine">Each machine signs in as a named boat. Your code stays on your boat, and you can revoke a boat at any time.</p>
+          <div class="lane mid">
+            <div class="sail">
+              <div class="at-water boat">
+                <div class="boat-art">
+                  <div class="rock">
+                    <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                    <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                    <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                    <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                    <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 180px, 90px" alt="" />
+                  </div>
+                </div>
+                <span class="badge who">mini</span>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 12%">
+              <div class="buoy-art">
+                <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 38%">
+              <div class="buoy-art">
+                <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water fbuoy fb" style="--x: 64%">
+              <div class="buoy-art">
+                <div class="bob late">
+                  <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 60px, 30px" alt="" /><img
+                    data-art="buoy-body"
+                    data-sizes="(min-width: 720px) 60px, 30px"
+                    alt=""
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 90%">
+              <div class="buoy-art">
+                <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="sea front">
+              <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
+                <use href="#wave-fill" />
+                <use class="edge" href="#wave-line" />
+              </svg>
+            </div>
+          </div>
+          <div class="lane near">
+            <div class="sail">
+              <div class="at-water boat">
+                <div class="boat-art">
+                  <div class="rock">
+                    <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                    <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                    <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                    <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                    <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 270px, 130px" alt="" />
+                  </div>
+                </div>
+                <span class="badge who">macbook</span>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 58%">
+              <div class="buoy-art">
+                <div class="bob late"><img data-art="buoy-body" data-sizes="(min-width: 720px) 80px, 40px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water fbuoy fa" style="--x: 26%">
+              <div class="buoy-art">
+                <div class="bob">
+                  <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 80px, 40px" alt="" /><img
+                    data-art="buoy-body"
+                    data-sizes="(min-width: 720px) 80px, 40px"
+                    alt=""
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="at-water fbuoy" style="--x: 88%">
+              <div class="buoy-art">
+                <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 80px, 40px" alt="" /></div>
+              </div>
+            </div>
+            <div class="sea front">
+              <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none">
+                <use href="#wave-fill" />
+                <use class="edge" href="#wave-line" />
+              </svg>
+            </div>
+          </div>
+          <div class="fleet-notes" aria-hidden="true">
+            <div class="card fnote work nc">
+              <span class="badge">working</span><span class="dots"><i></i><i></i><i></i></span>
+            </div>
+            <div class="card fnote ask nb"><span class="badge needs">needs you</span><b>Which cache?</b></div>
+            <div class="card fnote na"><span class="badge ok">catch</span><b>PR #212 · 8/8</b></div>
+          </div>
+        </figure>
       </section>
       <!-- wharf:end -->
 
@@ -495,7 +465,6 @@
         <a href="https://github.com/aequitas-labs/lobstah#readme">docs</a> ·
         <a href="https://github.com/aequitas-labs/lobstah/blob/main/PRIVACY.md">privacy</a>
       </p>
-      <p class="fine">lobstah shares an anonymous daily count of catches. One command turns it off.</p>
       <p class="fine">
         <button class="btn" type="button" id="still" aria-pressed="false">still water</button> stops every animation on this page.
       </p>
