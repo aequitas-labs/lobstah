@@ -862,6 +862,9 @@ p {
 .screen .meta {
   margin: 0;
 }
+.screen .card .top > b {
+  white-space: normal;
+}
 .w-head {
   display: flex;
   justify-content: space-between;
