@@ -292,6 +292,7 @@ export function signOnTrap(opts: {
   /** The batch throw whose reservation this sign-on redeems. */
   batch?: string;
   ttlMs: number;
+  creationReason?: string;
   now?: number;
 }): SignOnResult {
   if (opts.link !== undefined && !validSessionLink(opts.link)) {
@@ -345,7 +346,7 @@ export function signOnTrap(opts: {
     ...(sameSession && prior.titlePending ? { titlePending: prior.titlePending } : {}),
   };
   atomicWrite(regPath(trapId), JSON.stringify(reg, null, 2));
-  recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: protectTrapRevision(opts.worktree, trapId, now), now });
+  recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: protectTrapRevision(opts.worktree, trapId, now), creationReason: opts.creationReason, now });
   // Back within the grace: held messages deliver at the next park.
   releaseSignedOff(trapId);
   if (!prior) {
@@ -632,13 +633,18 @@ export function claimBait(reg: TrapRegistration): { id: string; lane: Lane; desc
     ['chore', addressed],
     ['work', addressed],
     // Pool work wants a fresh headless session in a pool worktree: never a trap's.
-    ['work', (d: Descriptor) => d.for === undefined && d.pool === undefined && reg.repo !== undefined && d.repo === reg.repo],
+    ['chore', (d: Descriptor) => d.trapAny === true && d.for === undefined && reg.repo !== undefined && d.repo === reg.repo && (!d.harness || d.harness === reg.harness)],
+    ['work', (d: Descriptor) => d.for === undefined && d.pool === undefined && reg.repo !== undefined && d.repo === reg.repo && (!d.trapAny || !d.harness || d.harness === reg.harness)],
   ] as Array<[Lane, (d: Descriptor) => boolean]>) {
     const id = claimNext(lane, (d) => !pass(d));
     if (!id) continue;
     const descriptor = JSON.parse(
       fs.readFileSync(path.join(laneDirs(lane).active, id, 'descriptor.json'), 'utf8'),
     ) as Descriptor;
+    if (descriptor.trapAny) {
+      descriptor.for = mine;
+      atomicWrite(path.join(laneDirs(lane).active, id, 'descriptor.json'), JSON.stringify(descriptor, null, 2));
+    }
     const claim: SessionClaim = {
       by: mine,
       sessionId: reg.sessionId,
@@ -675,7 +681,7 @@ export function trapReady(reg: TrapRegistration, deferMs: number, now = Date.now
  */
 export function daemonSkip(traps: TrapRegistration[], deferMs: number, now = Date.now()): (d: Descriptor) => boolean {
   return (d) => {
-    if (d.for !== undefined) return true; // sticky — never the daemon's
+    if (d.for !== undefined || d.trapAny) return true; // sticky / trap-only — never the daemon's
     if (d.pool !== undefined) return false; // pool work is never a trap's
     return traps.some((r) => r.repo === d.repo && trapReady(r, deferMs, now));
   };

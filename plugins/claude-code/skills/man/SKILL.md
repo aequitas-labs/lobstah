@@ -70,6 +70,11 @@ Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
 
 ## Rules
 
+- Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.
+  `lobstah dispatch --repo <key> --trap-any --brief <file>` selects in that order;
+  at the repo's `traps` cap it waits for a suitable free trap. `man throw --new`
+  shows free, stowed and ghosted candidates and needs `--reason "<why>"` when any exist.
+
 - Background work gets dispatched, not done inline. Write briefs that stand
   alone — the worker has no other context.
 - Addressed work is sticky: `--for <trap-name>` waits for that trap and never

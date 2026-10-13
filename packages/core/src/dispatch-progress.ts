@@ -13,6 +13,7 @@ import { slotUsage } from './slots.js';
 import { poolWaits } from './pools.js';
 import { readHold, holdReason } from './disk.js';
 import { postNotice } from './notices.js';
+import { trapCapacityReason } from './trap-availability.js';
 import type { Descriptor, Lane } from './types.js';
 
 /** Observational only: never reroute sticky work or acquire a worker slot. */
@@ -25,6 +26,7 @@ export function dispatchQueueReason(d: Descriptor, lane: Lane, cfg = loadConfig(
     return `addressed to ${trapLabel(trap)}, waiting for its session to take the brief`;
   }
   if (!cfg.repos[d.repo]) return `repo ${d.repo} is not configured`;
+  if (d.trapAny) return trapCapacityReason(cfg, d.repo, d.harness, now);
   if (poolWaits(d, cfg)) return `pool ${d.pool} has no free worktree`;
   const ceiling = lane === 'chore' ? cfg.limits.choreConcurrent : cfg.limits.maxConcurrent;
   if (slotUsage(lane).headless >= ceiling) return `no free headless slot (${ceiling} ${lane} slots)`;

@@ -591,7 +591,7 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   const trapSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
   // A queue-mode pool dispatch stays queued while its pool has no free worktree.
   const workSkip = (d: Descriptor) => trapSkip(d) || poolWaits(d, cfg);
-  const choreSkip = (d: Descriptor) => (d.for !== undefined &&
+  const choreSkip = (d: Descriptor) => d.trapAny === true || (d.for !== undefined &&
     (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil))) || poolWaits(d, cfg);
   const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : choreSkip);
   for (const lane of ['chore', 'work'] as Lane[]) {

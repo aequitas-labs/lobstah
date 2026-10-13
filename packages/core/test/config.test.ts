@@ -35,6 +35,17 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('validates the optional repo trap count', () => {
+    expect(loadConfig().repos.myapp?.traps).toBeUndefined();
+    for (const traps of ['0', '2', '10']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[repos.myapp]\npath = '/tmp/app'\ntraps = ${traps}\n`);
+      expect(loadConfig().repos.myapp?.traps).toBe(Number(traps));
+    }
+    for (const traps of ['-1', '2.5', '"2"', 'true']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[repos.myapp]\npath = '/tmp/app'\ntraps = ${traps}\n`);
+      expect(() => loadConfig()).toThrow('[repos.myapp].traps must be a non-negative whole number');
+    }
+  });
   it('validates repo review presets and templates', () => {
     expect(loadConfig().repos.myapp?.review).toBeUndefined();
     for (const review of ['github', 'graphite', 'linear', 'linear-app', 'https://review.example/{owner}/{repo}/{number}']) {

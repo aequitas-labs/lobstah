@@ -137,8 +137,11 @@ describe('man throw --all', () => {
     expect(res.stdout).toContain('plan: dry run — launches nothing');
     expect(res.stdout).toMatch(/amber-gull \(wt:[0-9a-f]{8}\),r,cold,/);
     const fresh = lobstah(primary, 'man', 'throw', '--new', '--count', '3', '--repo', 'r', '--dry-run');
-    expect(fresh.status, fresh.stderr).toBe(0);
-    expect(fresh.stdout).toMatch(/^throw\[3\]/m);
+    expect(fresh.status).not.toBe(0);
+    expect(fresh.stdout).toContain('--reason');
+    const justified = lobstah(primary, 'man', 'throw', '--new', '--count', '3', '--repo', 'r', '--dry-run', '--reason', 'parallel work needs more traps');
+    expect(justified.status, justified.stderr).toBe(0);
+    expect(justified.stdout).toMatch(/^throw\[3\]/m);
     expect(listTraps()).toEqual([]);
   });
 });

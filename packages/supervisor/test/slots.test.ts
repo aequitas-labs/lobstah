@@ -67,6 +67,19 @@ describe('only daemon-spawned work spends headless slots', () => {
     expect(activeIds('work')).toHaveLength(3);
   });
 
+  it('leaves trap-any work and chores queued even with free headless slots', () => {
+    for (const lane of ['work', 'chore'] as const) enqueue({ id: `trap-any-${lane}`, repo: 'demo', brief: 'b', trapAny: true }, lane);
+    const spawned: string[] = [];
+    let reads = 0;
+    tick(() => {}, { spawnRunner: (st) => { spawned.push(st.id); }, freeBytes: () => { reads++; return 100 * GB; } });
+    expect(spawned).toEqual([]);
+    expect(reads).toBe(0);
+    expect(activeIds('work')).toEqual([]);
+    expect(activeIds('chore')).toEqual([]);
+    expect(fs.existsSync(path.join(laneDirs('work').queue, 'trap-any-work.json'))).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('chore').queue, 'trap-any-chore.json'))).toBe(true);
+  });
+
   it('uses the same counting rule in the chore lane', () => {
     activeTrap('trap-chore', 'chore');
     enqueue({ id: 'headless-chore', repo: 'demo', brief: 'chore' }, 'chore');

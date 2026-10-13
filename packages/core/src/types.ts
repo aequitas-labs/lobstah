@@ -50,6 +50,8 @@ export interface Descriptor {
    * there. A trap catch ignores it.
    */
   pool?: string;
+  /** Queue for a suitable trap for this repo. Never headless; becomes sticky at claim. */
+  trapAny?: boolean;
   /**
    * The existing PR this dispatch works on (a repair or a rebase). The
    * runner pushes no branch and opens no PR for it; the worker pushes to

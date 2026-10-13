@@ -22,7 +22,7 @@ import {
   type ThrowPlanRow,
   type TrapRegistration,
 } from '@lobstah/core';
-import { launchShellText, startCommand, throwTrap, ThrowTimeoutError, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
+import { launchShellText, startCommand, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // A throw through the real reservation, checkout, and sign-on paths. Only
@@ -115,6 +115,27 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
 const idle = (seen: TerminalLaunch[]) => (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (l) => void seen.push(l) });
 
 describe('man throw <name>', () => {
+  processTest('trap-any brings back the same stowed trap instead of creating another checkout', async () => {
+    const reg = stowedTrap();
+    stow(reg);
+    claudeTranscript(reg.worktree, SESSION);
+    const seen: TerminalLaunch[] = [];
+    const choice = await trapForRepo({ cfg: loadConfig(), repo: 'r', adapter: fakeTerminal(SESSION, seen), timeoutSecs: 30 });
+    expect(choice).toMatchObject({ action: 'resumed', registration: { trapId: reg.trapId, worktree: reg.worktree } });
+    expect(seen).toHaveLength(1);
+    expect(listTraps()).toHaveLength(1);
+  });
+
+  processTest('a justified fresh throw records its reason through ticket sign-on into the roster', async () => {
+    stowedTrap();
+    const seen: TerminalLaunch[] = [];
+    await expect(throwNew({ cfg: loadConfig(), repo: 'r', adapter: fakeTerminal(OTHER, seen) })).rejects.toThrow('--reason');
+    expect(seen).toHaveLength(0);
+    const result = await throwNew({ cfg: loadConfig(), repo: 'r', reason: 'isolated second workload', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(readRoster(result.registration.trapId)?.creationReason).toBe('isolated second workload');
+    stow(result.registration);
+    expect(readRoster(result.registration.trapId)?.creationReason).toBe('isolated second workload');
+  });
   processTest('resumes from the transcript directory, returns under the same id and name, and takes --for work', async () => {
     const reg = stowedTrap();
     stow(reg, true);

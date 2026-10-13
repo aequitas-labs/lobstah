@@ -29,6 +29,9 @@ import {
   hasOpenCatch,
   heartbeatTrap,
   listTraps,
+  trapAvailability,
+  guardNewTraps,
+  reusableTraps,
   readTrap,
   trapByAddress,
   trapIdForName,
@@ -220,7 +223,8 @@ import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReporte
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
-import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, throwBatch, throwTrap } from './throw.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, throwBatch, throwTrap, trapForRepo } from './throw.js';
+import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle } from './terminal-title.js';
@@ -237,12 +241,15 @@ const HELP = `lobstah — supervision framework for coding agents
 work (humans and agents):
   dispatch (--repo <key> | --pool <name>) (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
-           [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap>] [--chore] [--id <uuid>]
+           [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap> | --trap-any] [--chore] [--id <uuid>]
                                   queue a supervised dispatch; prints the id.
                                   --for addresses the work to a signed-on
                                   worktree (sticky: waits for that trap,
                                   never falls back headless; session:<id>
-                                  resolves to its trap). --pool runs it in a
+                                  resolves to its trap). --trap-any reuses a
+                                  free trap, returns a roster trap, then creates
+                                  below the repo's traps cap; at capacity waits.
+                                  --pool runs it in a
                                   warm worktree of [pools.<name>]: reset to a
                                   fresh branch, new session
   ls [--all]                      queue, active, recent done      (alias: buoys)
@@ -1004,6 +1011,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'dispatch': {
+      if (has('--trap-any') && (opt('--for') !== undefined || opt('--pool') !== undefined)) throw new UsageError('--trap-any cannot be combined with --for or --pool');
       const poolName = opt('--pool');
       const pool = poolName !== undefined ? loadConfig().pools[poolName] : undefined;
       if (poolName !== undefined) {
@@ -1030,8 +1038,20 @@ async function mainCli(): Promise<void> {
         ...(poolName !== undefined ? { pool: poolName } : {}),
       };
       const lane: Lane = has('--chore') ? 'chore' : 'work';
-      const warnings = startDispatch(d, lane, values('--attach'), callerSession(opt('--session')));
-      console.log(toonKV({ id: d.id, repo, lane, ...(d.for ? { for: d.for } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
+      const caller = callerSession(opt('--session'));
+      let selected: Awaited<ReturnType<typeof trapForRepo>> | undefined;
+      if (has('--trap-any')) {
+        gateHelm(caller);
+        const cfg = loadConfig();
+        const helm = caller?.id ? helmOf(caller.id) : undefined;
+        if (helm && !helm.repos.includes(repo)) throw new Error(`repo ${repo} is outside grounds ${helm.grounds}`);
+        if (d.harness && d.harness !== 'claude' && d.harness !== 'codex') throw new UsageError('--harness takes claude or codex');
+        selected = await trapForRepo({ cfg, repo, harness: d.harness, by: caller?.id });
+        if (selected.registration) d.for = `wt:${selected.registration.trapId}`;
+        else d.trapAny = true;
+      }
+      const warnings = startDispatch(d, lane, values('--attach'), caller);
+      console.log(toonKV({ id: d.id, repo, lane, ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(selected ? { trapAction: selected.action, reason: selected.why } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
@@ -1055,17 +1075,25 @@ async function mainCli(): Promise<void> {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
         console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'waiting', 'activity']));
         for (const p of dispatchProgress()) console.log(p.text);
+        console.log(trapSummary(loadConfig()));
         const pools = poolViews(loadConfig());
         if (pools.length > 0) console.log(`\n${toonTable('pools', poolRows(pools), POOL_COLUMNS)}`);
         break;
       }
       const namedTrap = trapByAddress(id);
       if (namedTrap) {
+        const availability = trapAvailability(namedTrap);
         const progress = dispatchProgress().find((p) => p.id === namedTrap.claimed);
         console.log(toonKV({ trap: `wt:${namedTrap.trapId}`, name: namedTrap.name, label: trapLabel(namedTrap),
           session: namedTrap.sessionId, repo: namedTrap.repo ?? '(addressed only)', worktree: namedTrap.worktree,
-          claimed: namedTrap.claimed, heartbeatAt: namedTrap.heartbeatAt,
+          availability: availability.text, claimed: availability.dispatch, harness: namedTrap.harness, heartbeatAt: namedTrap.heartbeatAt,
           ...(progress ? { attention: progress.state, reason: progress.text } : {}) }));
+        break;
+      }
+      const rostered = rosterByAddress(id);
+      if (rostered) {
+        console.log(toonKV({ trap: `wt:${rostered.trapId}`, name: rostered.name, state: rostered.state === 'ghosted' ? 'ghosted' : 'stowed', repo: rostered.repo,
+          harness: rostered.profile?.harness ?? rostered.harness, worktree: rostered.worktree, creationReason: rostered.creationReason }));
         break;
       }
       if (id.startsWith('wt:') || /^[a-z]+-[a-z]+$/.test(id)) throw new Error(unknownTrapMessage(id));
@@ -1801,7 +1829,9 @@ async function mainCli(): Promise<void> {
         return name !== undefined ? resolveGrounds(cfgThrow, name) : undefined;
       })();
       const json = has('--json');
-      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs };
+      const reason = opt('--reason')?.trim();
+      if (has('--reason') && !reason) throw new UsageError('--reason must explain why a new trap is needed');
+      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason };
       if (has('--new')) {
         // Fresh traps: --count of them, for --repo (or a glass request's repo, or the grounds' only repo).
         if (pos.length > 0 || has('--all')) throw new UsageError(`--new starts fresh traps: no names, no --all\n\n${usageFor('man:throw')!}`);
@@ -1823,10 +1853,16 @@ async function mainCli(): Promise<void> {
         if (harness !== undefined && harness !== 'claude' && harness !== 'codex') throw new UsageError('--harness takes claude or codex');
         const count = Number(opt('--count') ?? '1');
         if (!Number.isInteger(count) || count < 1) throw new UsageError('--count takes a whole number, 1 or more');
+        const existing = reusableTraps(cfgThrow, repoKey);
+        if (existing.length) {
+          if (json) console.error(JSON.stringify({ existing }));
+          else console.log(toonTable('existing-traps', existing, ['name', 'trap', 'state', 'harness', 'why']));
+        }
+        guardNewTraps(cfgThrow, repoKey, count, reason);
         if (dry) {
           const profile = freshProfile(cfgThrow, repoKey, harness);
           const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>' });
-          console.log(toonKV({ plan: 'dry run — launches nothing', new: `${count} fresh ${repoKey} trap(s)` }));
+          console.log(toonKV({ plan: 'dry run — launches nothing', new: `${count} fresh ${repoKey} trap(s)`, reason }));
           console.log(
             toonTable(
               'throw',
@@ -2009,18 +2045,22 @@ async function mainCli(): Promise<void> {
       console.log(
         toonTable(
           'roster',
-          entries.map((e) => ({
-            trap: trapLabel(e),
-            repo: e.repo ?? '',
-            state: e.state,
-            harness: e.harness,
-            model: e.model ?? '',
-            session: e.sessionId.slice(0, 8),
-            revision: e.head ? `${e.head.slice(0, 12)}${e.branch ? ` (${e.branch})` : ''}` : '',
-            left: e.leftAt ? `${e.leftAt} (${e.leftReason ?? ''})` : '',
-            profile: profileText(e.profile),
-          })),
-          ['trap', 'repo', 'state', 'harness', 'model', 'session', 'revision', 'left', 'profile'],
+          entries.map((e) => {
+            const live = readTrap(e.trapId);
+            return {
+              trap: trapLabel(e),
+              repo: e.repo ?? '',
+              state: live ? trapAvailability(live).text : e.state,
+              harness: e.harness,
+              model: e.model ?? '',
+              session: e.sessionId.slice(0, 8),
+              revision: e.head ? `${e.head.slice(0, 12)}${e.branch ? ` (${e.branch})` : ''}` : '',
+              left: e.leftAt ? `${e.leftAt} (${e.leftReason ?? ''})` : '',
+              profile: profileText(e.profile),
+              creationReason: e.creationReason ?? '',
+            };
+          }),
+          ['trap', 'repo', 'state', 'harness', 'model', 'session', 'revision', 'left', 'profile', 'creationReason'],
         ),
       );
       console.log(toonHelp(['lobstah man throw --plan --all   (what a throw would do for every eligible trap)']));
@@ -2420,10 +2460,11 @@ async function mainCli(): Promise<void> {
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
         const dueDigest = () => (helm ? dueHelmDigest(helm, cfgHaul.helm.reportSecs) : undefined);
+        const trapsAtStop = () => trapSummary(cfgHaul, helm?.repos);
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
           advanceCursor(helm!.grounds, d.now);
           emit(
-            `Fleet report for grounds "${helm!.grounds}":\n${renderDigest(d)}\n` +
+            `Fleet report for grounds "${helm!.grounds}":\n${renderDigest(d)}\n${trapsAtStop()}\n` +
               'Handle anything actionable; the Stop hook checks again at turn end.',
           );
         };
@@ -2441,6 +2482,7 @@ async function mainCli(): Promise<void> {
               [
                 'Fleet notices need a decision:',
                 ...idleNotices.map((n) => noticeLine(n, '')),
+                trapsAtStop(),
                 'Each notice names its own remedy. The Stop hook checks again at turn end.',
               ].join('\n'),
             );
@@ -2487,6 +2529,7 @@ async function mainCli(): Promise<void> {
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
                 ...notices.filter((n) => n.kind !== 'dispatch-progress' && n.kind !== 'trap-idle-working').map((n) => noticeLine(n)),
                 ...progress,
+                trapsAtStop(),
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
                 ...(replies.length || unanswered.length ? [SENT_HINT] : []),
@@ -2503,6 +2546,7 @@ async function mainCli(): Promise<void> {
             [
               ...(sent.length ? ['A send still waits on its reply:', ...sent.map(sentLine), SENT_HINT] : []),
               ...progressLines(),
+              trapsAtStop(),
               `Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
                 '(it wakes this session when the fleet needs you), then end your turn. ' +
                 armGraceNote(graceSecs),
@@ -2554,6 +2598,7 @@ async function mainCli(): Promise<void> {
           [
             'A lobstah dispatch, watched source, or fleet notice needs attention:',
             ...lines,
+            trapsAtStop(),
             'Check a dispatch with `lobstah status <id>`. For a needs-decision or blocked, send an answer with `lobstah send <id> "<answer>"` when you can decide, or frame it with `lobstah man ask <id>` when it needs the human.',
             'A watch line means an external source updated (e.g. a review round) — handle it directly.',
             'A notice line names its own decision or remedy.',
@@ -2802,6 +2847,7 @@ async function mainCli(): Promise<void> {
           link: linkIgnored ? undefined : linkFlag,
           ...(reservation ? { trapId: reservation.trapId } : {}),
           ...(reservation?.batch ? { batch: reservation.batch } : {}),
+          ...(reservation?.creationReason ? { creationReason: reservation.creationReason } : {}),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
       } catch (err) {

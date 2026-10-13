@@ -34,6 +34,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     flags: {
       '--repo': { value: '<key>' },
       '--pool': { value: '<name>' },
+      '--trap-any': {},
       '--brief': { value: '<file>' },
       '--bait': { value: '<file>' },
       '--brief-text': { value: '<text>' },
@@ -140,6 +141,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--plan': {},
       '--dry-run': {},
       '--new': {},
+      '--reason': { value: '<text>' },
       '--count': { value: '<n>' },
       '--harness': { value: HARNESS },
       '--request': { value: '<id>' },
@@ -218,13 +220,13 @@ export const COMMANDS: Record<string, CommandSpec> = {
 
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
-  dispatch: `Queue supervised work; prints id. --for <name>, wt:<name>, or wt:<id> targets a signed-on trap
-(sticky; session:<id> resolves to it). A claimed helm requires --session
-<helm-id> to address work. Repeat --attach to copy files into owned state.
---pool <name>: fresh session in a warm [pools.<name>] worktree. Alias: set --bait.`,
+  dispatch: `Queue work; prints id. --for <name>, wt:<name>, wt:<id> is sticky; session:<id> resolves to its trap.
+--trap-any: free live → return stowed → new below the repo's traps cap; at capacity waits, never headless.
+--pool <name>: fresh headless session in a warm worktree. --for, --trap-any and --pool are exclusive.
+A claimed helm requires --session <helm-id> for trap work. Repeat --attach to copy files. Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
-wt:<name>, or wt:<id> shows its live registration. Alias: buoy.`,
+wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster record. Alias: buoy.`,
   focus: `Bring a live trap's recorded session or window forward on this machine.
 Accepts its name or id with or without wt:. Reports the focus step, or why it could
 not focus. A session link can open on any supported platform; native window
@@ -322,10 +324,10 @@ under the given directories.`,
   'man:manual': `The lobstah man's manual.`,
   'man:tend': `The whole-fleet pass: verdict, unanswered questions, each work item's chain,
 PR, and merge gate. Pure disk read.`,
-  'man:throw': `Bring roster traps back under their own id and name, or start fresh ones, and
-wait until they listen. <trap>: one; --all: every eligible trap in the grounds; --repo:
-one repo's; --new [--count N] [--request <id>]: fresh traps from the harness defaults.
-Live or starting traps refuse. --dry-run (or --plan) shows each trap's plan and launches nothing.`,
+  'man:throw': `Bring roster traps back, or start fresh, and wait until they listen; live/starting traps refuse.
+<trap>: one; --all: grounds; --repo: one repo; --new [--count N] [--request <id>]: fresh traps.
+--new shows reusable traps; --reason is required when any exist and never overrides the repo's traps cap.
+--dry-run (or --plan) applies the same guards and launches nothing.`,
   'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull. set (the
 helm's) saves how a throw starts it; default or key= clears a field. forget removes a
 stowed trap's record, worktree, and protected ref (refused while it has unpushed commits).`,
