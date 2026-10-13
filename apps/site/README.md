@@ -14,6 +14,12 @@ pnpm site:build      # build once into apps/site/dist
 `node scripts/build-site.mjs --wharf` includes the wharf section. It is held
 out of the page until the wharf ships.
 
+To look at both versions at once, give the second one its own folder and port:
+
+```bash
+node scripts/build-site.mjs --serve --wharf --port 4951 --out /tmp/lobstah-site-wharf
+```
+
 ## How it is put together
 
 | File          | Holds                                                                       |

@@ -7,6 +7,7 @@
 //   node scripts/build-site.mjs            build once into apps/site/dist
 //   node scripts/build-site.mjs --serve    build, serve on 127.0.0.1:4950, rebuild on change (pnpm site:dev)
 //   node scripts/build-site.mjs --wharf    include the wharf section (held out until the wharf ships)
+//   node scripts/build-site.mjs --out dir  write somewhere other than apps/site/dist (a second preview: --serve --wharf --port 4951 --out dir)
 //   node scripts/build-site.mjs --dev      unminified, for reading the page source
 import * as esbuild from 'esbuild';
 import * as fs from 'node:fs';
@@ -225,10 +226,11 @@ if (isMain) {
   const args = process.argv.slice(2);
   const serving = args.includes('--serve');
   const port = Number(args[args.indexOf('--port') + 1]) || 4950;
+  const outDir = args.includes('--out') ? path.resolve(args[args.indexOf('--out') + 1]) : undefined;
   const once = async () => {
     const t = Date.now();
     try {
-      const built = await buildSite({ wharf: args.includes('--wharf'), minify: !serving && !args.includes('--dev') });
+      const built = await buildSite({ wharf: args.includes('--wharf'), minify: !serving && !args.includes('--dev'), outDir });
       const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
       const small = firstLoadWeight(built.html, built.files, 'small');
       const large = firstLoadWeight(built.html, built.files, 'large');
@@ -252,6 +254,6 @@ if (isMain) {
     };
     for (const f of ['index.html', 'site.css', 'src', 'assets']) fs.watch(path.join(site, f), { recursive: true }, rebuild);
     fs.watch(glassCss, rebuild);
-    serve(built?.outDir ?? path.join(site, 'dist'), port);
+    serve(built?.outDir ?? outDir ?? path.join(site, 'dist'), port);
   }
 }
