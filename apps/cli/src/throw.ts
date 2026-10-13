@@ -2,6 +2,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   dropReservation,
+  guardNewTraps,
+  repoTrapCount,
+  selectRepoTrap,
   planThrow,
   postNotice,
   readReservation,
@@ -182,6 +185,7 @@ export interface ThrowOptions {
   /** The batch this throw belongs to: its trap's availability is the batch's summary. */
   batch?: string;
   onLaunch?: (launched: Launched) => void;
+  reason?: string;
 }
 
 /** A throw that launched but did not come back in time. */
@@ -337,6 +341,7 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
   const started = Date.now();
   const repo = opts.cfg.repos[opts.repo];
   if (!repo) throw new Error(`no repo "${opts.repo}" is configured (configured: ${Object.keys(opts.cfg.repos).join(', ') || 'none'})`);
+  guardNewTraps(opts.cfg, opts.repo, 1, opts.reason);
   const profile = freshProfile(opts.cfg, opts.repo, opts.harness);
   const terminal = opts.cfg.soak.terminal ?? 'terminal';
   const adapter = resolveAdapter(opts, terminal, `a new ${opts.repo} trap`, opts.cfg.soak.terminal ? 'config' : 'default');
@@ -346,6 +351,8 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     startSecs: opts.timeoutSecs ?? DEFAULT_TRAP_START_SECS,
     by: opts.by,
     ...(opts.request ? { request: opts.request } : {}),
+    creationReason: opts.reason?.trim() || `no free live or stowed ${opts.repo} trap existed at creation`,
+    maxTraps: repo.traps,
     ...(opts.batch ? { batch: opts.batch } : {}),
   });
   const label = trapLabel(reservation);
@@ -359,7 +366,7 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     command,
     adapter,
     started,
-    launched: { trap: label, action: 'new', why: `fresh ${opts.repo} trap from the ${profile.harness} defaults`, checkout: 'created', terminal },
+    launched: { trap: label, action: 'new', why: reservation.creationReason!, checkout: 'created', terminal },
   });
 }
 
@@ -399,9 +406,10 @@ export async function throwBatch(
       );
     }
   } else {
+    guardNewTraps(opts.cfg, opts.repo, opts.count, opts.reason);
     for (let i = 0; i < opts.count; i++) {
       jobs.push(
-        throwNew({ ...each, repo: opts.repo, ...(opts.harness ? { harness: opts.harness } : {}) }).then(
+        throwNew({ ...each, reason: opts.reason ?? `requested batch of ${opts.count} new traps; no reusable trap at batch start`, repo: opts.repo, ...(opts.harness ? { harness: opts.harness } : {}) }).then(
           (r) => ({ trap: r.trap, result: 'new', why: r.why, seconds: r.seconds }) as BatchResult,
           (err: unknown) => ({ trap: `new ${opts.repo} trap ${i + 1}`, result: 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
         ),
@@ -424,6 +432,22 @@ export async function throwBatch(
     by: opts.by,
   });
   return results;
+}
+
+/** Dispatch selection uses exactly the roster throw's resume/recreate safety checks. */
+export async function trapForRepo(opts: ThrowOptions & { repo: string; harness?: string }): Promise<{ registration?: TrapRegistration; action: 'reused' | 'resumed' | 'cold' | 'new' | 'waiting'; why: string }> {
+  const choice = selectRepoTrap(opts.cfg, opts.repo, opts.harness);
+  if (choice.action === 'reuse') return { registration: choice.registration, action: 'reused', why: choice.why };
+  if (choice.action === 'wait') return { action: 'waiting', why: choice.why };
+  if (choice.action === 'return') {
+    const r = await throwTrap({ ...opts, address: `wt:${choice.row.trapId}` });
+    return { registration: r.registration, action: r.action === 'resume' ? 'resumed' : 'cold', why: choice.why };
+  }
+  // Capacity is checked again immediately before reservation in throwNew.
+  const count = repoTrapCount(opts.cfg, opts.repo);
+  if (count.limit !== undefined && count.used >= count.limit) return { action: 'waiting', why: `${count.text}; waiting for a free trap` };
+  const r = await throwNew({ ...opts, reason: choice.why });
+  return { registration: r.registration, action: 'new', why: choice.why };
 }
 
 /** What `man throw` prints once the terminal opened. */

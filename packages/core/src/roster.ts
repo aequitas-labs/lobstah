@@ -78,6 +78,7 @@ export interface RosterEntry {
   lastCatch?: string;
   /** The saved configuration a throw applies. */
   profile?: TrapProfile;
+  creationReason?: string;
   updatedAt: string;
 }
 
@@ -184,7 +185,7 @@ export function forgetRoster(trapId: string): RosterEntry | undefined {
  */
 export function recordRosterSignOn(
   reg: TrapRegistration,
-  opts: { soakBranch?: string; revision?: TrapRevision; now?: number } = {},
+  opts: { soakBranch?: string; revision?: TrapRevision; creationReason?: string; now?: number } = {},
 ): RosterEntry {
   const at = new Date(opts.now ?? Date.now()).toISOString();
   const prior = readRoster(reg.trapId);
@@ -202,6 +203,7 @@ export function recordRosterSignOn(
     signedOnAt: reg.signedOnAt,
     state: 'live',
     updatedAt: at,
+    ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
   };
   setOrDrop(entry, 'repo', reg.repo);
   setOrDrop(entry, 'createdWorktree', reg.createdWorktree || undefined);

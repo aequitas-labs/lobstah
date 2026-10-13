@@ -43,6 +43,7 @@ export * from './worktrees.js';
 export * from './worktree-safety.js';
 export * from './roster.js';
 export * from './throw-plan.js';
+export * from './trap-availability.js';
 export * from './activity.js';
 export * from './dispatch-progress.js';
 export * from './session-watcher.js';

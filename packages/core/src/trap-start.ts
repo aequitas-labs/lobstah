@@ -4,7 +4,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, soakingDir } from './paths.js';
 import { postNotice } from './notices.js';
 import { pendingIds, queuedDescriptor } from './queue.js';
-import { newTrapId, readTrap, trapLabel } from './soak.js';
+import { newTrapId, readTrap, listTraps, trapLabel } from './soak.js';
+import { listRoster } from './roster.js';
 import { reserveTrapName, trapIdForName } from './trap-names.js';
 
 /**
@@ -28,6 +29,8 @@ export interface TrapReservation {
   /** Set when the deadline passed unredeemed. A failed reservation can still be redeemed. */
   failedAt?: string;
   reason?: string;
+  /** Why the helm chose another new trap instead of reuse. */
+  creationReason?: string;
   /** The session that reserved it. */
   by?: string;
   /** The `trap-request` request this reservation answers. */
@@ -144,9 +147,33 @@ export function reserveTrap(opts: {
   by?: string;
   request?: string;
   returning?: { trapId: string; worktree: string };
+  creationReason?: string;
   batch?: string;
+  /** A new throw enforces its configured repo cap under a cross-process reservation lock. */
+  maxTraps?: number;
   now?: number;
 }): { reservation: TrapReservation; ticket: string } {
+  if (!opts.returning && opts.maxTraps !== undefined) {
+    fs.mkdirSync(soakingDir(), { recursive: true });
+    const lock = path.join(soakingDir(), `${hashTicket(opts.repo)}.capacity-lock`);
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      try { fs.mkdirSync(lock); break; }
+      catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+        try { if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock); } catch { /* another writer released it */ }
+        if (Date.now() >= deadline) throw new Error(`trap capacity locked for repo ${opts.repo}; try again`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    }
+    try {
+      const entries = new Map([...listRoster(), ...listTraps(), ...listReservations()].filter((r) => r.repo === opts.repo).map((r) => [r.trapId, r.name ?? `wt:${r.trapId}`]));
+      if (entries.size >= opts.maxTraps) throw new Error(`${opts.repo}: ${entries.size}/${opts.maxTraps} traps; cannot create more. Existing traps: ${[...entries.values()].join(', ') || '(none)'}. Use dispatch --trap-any, or stow and man roster forget an unwanted trap.`);
+      // The reservation is visible before releasing the cap lock, including across processes.
+      const { maxTraps: _cap, ...unguarded } = opts;
+      return reserveTrap(unguarded);
+    } finally { fs.rmdirSync(lock); }
+  }
   const now = opts.now ?? Date.now();
   let trapId = opts.returning?.trapId ?? newTrapId();
   if (opts.returning) {
@@ -192,6 +219,7 @@ export function reserveTrap(opts: {
     deadline: new Date(now + (opts.startSecs ?? DEFAULT_TRAP_START_SECS) * 1000).toISOString(),
     ...(opts.by ? { by: opts.by } : {}),
     ...(opts.request ? { request: opts.request } : {}),
+    ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
     ...(opts.returning ? { worktree: opts.returning.worktree } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   };

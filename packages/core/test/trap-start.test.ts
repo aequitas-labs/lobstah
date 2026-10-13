@@ -38,6 +38,15 @@ afterEach(() => {
 const T0 = Date.parse('2026-09-01T00:00:00Z');
 
 describe('trap reservations', () => {
+  it('counts a new reservation before another capped throw, but lets an existing trap return', () => {
+    const first = reserveTrap({ repo: 'r', maxTraps: 1, creationReason: 'need first trap' }).reservation;
+    expect(first.creationReason).toBe('need first trap');
+    expect(() => reserveTrap({ repo: 'r', maxTraps: 1 })).toThrow('1/1 traps');
+    const next = reserveTrap({ repo: 'other', maxTraps: 1 }).reservation;
+    expect(next.repo).toBe('other');
+    dropReservation(first.trapId);
+    expect(() => reserveTrap({ repo: 'r', maxTraps: 0, returning: { trapId: first.trapId, worktree: '/kept' } })).not.toThrow();
+  });
   it('reserves a name and id, stores only the ticket hash, and posts trap-starting', () => {
     const { reservation, ticket } = reserveTrap({ repo: 'r', harness: 'claude', name: 'amber-gull', startSecs: 60, now: T0 });
     expect(ticket).toMatch(TRAP_TICKET_RE);

@@ -14,6 +14,8 @@ export interface HarnessDefaults {
 
 export interface RepoConfig {
   path: string;
+  /** Maximum rostered traps for this repo (live, stowed and ghosted); absent means unlimited. */
+  traps?: number;
   /** PR click destination: a preset or HTTPS template. */
   review?: string;
   origin?: string;
@@ -388,9 +390,13 @@ export function loadConfig(): Config {
   const reposRaw = (raw.repos ?? {}) as Record<string, Record<string, unknown>>;
   const repos: Record<string, RepoConfig> = {};
   for (const [key, r] of Object.entries(reposRaw)) {
+    if (r.traps !== undefined && (typeof r.traps !== 'number' || !Number.isSafeInteger(r.traps) || r.traps < 0)) {
+      throw new Error(`[repos.${key}].traps must be a non-negative whole number`);
+    }
     if (r.review !== undefined && !validReviewTool(r.review)) throw new Error(`[repos.${key}].review must be github, graphite, linear, linear-app, or an HTTPS template with {owner}, {repo}, {number}`);
     repos[key] = {
       path: expandHome(String(r.path ?? '')),
+      ...(r.traps !== undefined ? { traps: r.traps as number } : {}),
       ...(r.review !== undefined ? { review: r.review as string } : {}),
       origin: r.origin ? String(r.origin) : undefined,
       trunk: String(r.trunk ?? 'main'),

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { reviewTools } from './review-tools.js';
+import { trapRows, repoTrapRows } from './trap-list.js';
 import {
   workerLabel,
   questionViewedAt,
@@ -24,7 +25,6 @@ import {
   listHelms,
   listNotices,
   listTraps,
-  listReservations,
   trapLabel,
   trapNamer,
   nameTrapsIn,
@@ -186,10 +186,11 @@ export interface TendTrap {
   repo: string;
   worktree: string;
   claimed?: string;
+  availability?: string;
   /** never | now (parked) | <age>s ago | starting (due in <n>s) | start failed */
   listening: string;
   /** Set for a reserved trap no session has signed on as yet. */
-  state?: 'starting' | 'start-failed';
+  state?: 'starting' | 'start-failed' | 'stowed' | 'ghosted';
 }
 
 export interface TendAwaiting {
@@ -581,6 +582,7 @@ export interface TendReport {
   stories: TendStory[];
   watches: TendWatch[];
   traps: TendTrap[];
+  repoTraps?: Array<{ repo: string; traps: string }>;
   /** Addressed bait waiting for its trap — sticky, never the daemon's. */
   awaiting: TendAwaiting[];
   notices: TendNotice[];
@@ -971,34 +973,7 @@ export function buildTendReport(now = Date.now()): TendReport {
           ? 'working'
           : 'idle';
 
-  const traps: TendTrap[] = listTraps().map((r) => {
-    const hbAgeSecs = Math.max(0, Math.round((now - (Date.parse(r.heartbeatAt) || 0)) / 1000));
-    return {
-      trap: `wt:${r.trapId}`,
-      name: r.name,
-      label: trapLabel(r),
-      session: r.sessionId.slice(0, 8),
-      worker: workerLabel(r),
-      repo: r.repo ?? '(addressed only)',
-      worktree: r.worktree,
-      claimed: r.claimed,
-      listening: r.firstParkedAt === undefined ? 'never' : hbAgeSecs <= 10 ? 'now' : `${hbAgeSecs}s ago`,
-    };
-  });
-  // Reserved traps: the address exists, no session has signed on as it yet.
-  for (const r of listReservations()) {
-    const failed = r.failedAt !== undefined || now > (Date.parse(r.deadline) || 0);
-    traps.push({
-      trap: `wt:${r.trapId}`,
-      name: r.name,
-      label: trapLabel(r),
-      session: '',
-      repo: r.repo,
-      worktree: '',
-      listening: failed ? 'start failed' : `starting (due in ${Math.max(0, Math.round(((Date.parse(r.deadline) || 0) - now) / 1000))}s)`,
-      state: failed ? 'start-failed' : 'starting',
-    });
-  }
+  const traps: TendTrap[] = trapRows(now);
 
   const notices: TendNotice[] = listNotices(5).map((n) => ({
     kind: n.kind,
@@ -1040,6 +1015,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     stories,
     watches,
     traps,
+    repoTraps: repoTrapRows(cfg),
     awaiting,
     notices,
     helms,
@@ -1188,6 +1164,9 @@ export function renderTend(r: TendReport): string {
     lines.push('');
     lines.push(toonTable('pools', poolRows(r.pools), POOL_COLUMNS));
   }
+  if (r.repoTraps?.length) {
+    lines.push('', toonTable('repo-traps', r.repoTraps, ['repo', 'traps']));
+  }
   if (r.watches.length > 0) {
     lines.push('');
     lines.push(
@@ -1216,11 +1195,11 @@ export function renderTend(r: TendReport): string {
           session: s.session,
           worker: s.worker ?? '',
           repo: s.repo,
-          claimed: s.claimed ? s.claimed.slice(0, 8) : '',
+          availability: s.availability ?? (s.claimed ? `busy on ${s.claimed}` : 'free'),
           listening: s.listening,
           worktree: s.worktree,
         })),
-        ['name', 'trap', 'session', 'worker', 'repo', 'claimed', 'listening', 'worktree'],
+        ['name', 'trap', 'session', 'worker', 'repo', 'availability', 'listening', 'worktree'],
       ),
     );
   }
