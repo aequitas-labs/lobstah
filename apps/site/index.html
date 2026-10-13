@@ -244,42 +244,57 @@
       <section class="sec harness" id="harness">
         <div class="trap-pic">
           <img data-art="trap" data-sizes="(min-width: 720px) 300px, 180px" alt="" />
-          <span class="harness-mark h-claude"><i class="glyph">&gt;_</i>Claude Code</span>
-          <span class="harness-mark h-codex"><i class="glyph">&gt;_</i>Codex</span>
+          <span class="harness-mark h-claude"><!-- icon claude-code -->Claude Code</span>
+          <span class="harness-mark h-codex"><!-- icon codex -->Codex</span>
         </div>
         <div>
           <h2>Bring your own harness</h2>
-          <p class="lead">lobstah is the boat, not the fisherman.</p>
-          <ul class="chips">
-            <li>both in one fleet</li>
-            <li>pick the harness for each job</li>
-            <li>swap mid-job</li>
-            <li>a session you have open can be a trap</li>
-          </ul>
+          <p class="lead">
+            A trap can be a CLI session or a desktop app session, on Claude Code or Codex. Any session you already have open can opt in as a
+            trap, and then the helm directs it.
+          </p>
         </div>
       </section>
 
-      <!-- Integrations: one row that scrolls sideways -->
+      <!-- Integrations: one row of groups that scrolls sideways -->
       <section class="sec" id="integrations">
         <h2>Integrations</h2>
         <p class="lead">No webhooks, no tunnel. lobstah polls.</p>
         <ul class="scroller" tabindex="0" aria-label="Integrations">
           <li class="card int">
-            <i class="glyph">PR</i><b>GitHub pull requests</b><span>Workers open them. lobstah watches checks, reviews and conflicts.</span>
-          </li>
-          <li class="card int"><i class="glyph">≡</i><b>PR stacks</b><span>One wake when a whole stack is ready, bottom first.</span></li>
-          <li class="card int"><i class="glyph">#</i><b>GitHub issues</b><span>Assign an issue and it becomes a job.</span></li>
-          <li class="card int"><i class="glyph">Li</i><b>Linear</b><span>Assign an issue. Status comes back as comments.</span></li>
-          <li class="card int">
-            <i class="glyph">CI</i><b>CI and any command</b
-            ><span><code>lobstah watch</code> stands watch on anything with a command line.</span>
-          </li>
-          <li class="card int"><i class="glyph">Gr</i><b>Graphite and Linear review</b><span>PR links open where you review.</span></li>
-          <li class="card int">
-            <i class="glyph">!</i><b>ntfy, Slack, anything</b><span>One config line pings you through any command.</span>
+            <span class="marks"><!-- icon github --></span>
+            <b>PRs</b>
+            <span>Workers open pull requests on GitHub. lobstah watches checks, reviews and conflicts, and repairs what it can.</span>
           </li>
           <li class="card int">
-            <i class="glyph">OC</i><b>OpenClaw</b><span>Four tools and <code>/lobstah</code> for your fleet's agents.</span>
+            <span class="marks"><!-- icon stack --></span>
+            <b>PR stacks</b>
+            <span>One wake when a whole stack is ready, bottom first.</span>
+          </li>
+          <li class="card int">
+            <span class="marks"><!-- icon github --><!-- icon linear --></span>
+            <b>Issues</b>
+            <span>Assign an issue on GitHub or Linear and it becomes a job. Status comes back as comments.</span>
+          </li>
+          <li class="card int">
+            <span class="marks"><!-- icon github --><!-- icon graphite --><!-- icon linear --></span>
+            <b>PR reviews</b>
+            <span>PR links open where you review: GitHub, Graphite or Linear.</span>
+          </li>
+          <li class="card int">
+            <span class="marks"><!-- icon eyes --></span>
+            <b>CI</b>
+            <span><code>lobstah watch</code> stands watch on a CI run, or anything with a command line.</span>
+          </li>
+          <li class="card int">
+            <span class="marks"><!-- icon slack --></span>
+            <b>Notifications</b>
+            <span>One command of yours runs when a worker needs you: post to Slack, ntfy, anything.</span>
+          </li>
+          <li class="card int">
+            <span class="marks"><!-- icon openclaw --></span>
+            <b>OpenClaw</b>
+            <span>Four tools and <code>/lobstah</code> for your fleet's agents.</span>
           </li>
         </ul>
       </section>
@@ -287,10 +302,73 @@
       <!-- wharf:start (held out of the page until the wharf ships; `--wharf` includes it) -->
       <section class="sec" id="wharf">
         <h2>The wharf</h2>
-        <p class="lead">The glass, hosted. Check the water from your phone. Your code stays on your boat.</p>
-        <ul class="scroller frames" tabindex="0" aria-label="What the wharf looks like">
-          <li class="phone">
-            <div class="screen" aria-label="The deck: decisions waiting for you">
+        <p class="lead">One glass for a fleet of machines and all their traps.</p>
+        <div class="fleet-wrap">
+          <!-- Seen from above: three boats, each with its own buoys. The camera goes to each trap as it reports, then pulls back. -->
+          <figure
+            class="fleet"
+            role="img"
+            aria-label="The sea from above. Three boats, named macbook, mini and studio, each with four trap buoys around it. One buoy by each boat has its flag up: a catch has been reported."
+          >
+            <svg viewBox="0 0 800 450" preserveAspectRatio="xMidYMid slice">
+              <defs>
+                <pattern id="td-ripples" width="96" height="60" patternUnits="userSpaceOnUse">
+                  <path d="M10 18q11-7 22 0M58 46q11-7 22 0" />
+                </pattern>
+                <g id="td-boat">
+                  <path class="hull" d="M0-40C18-26 20 12 13 38H-13C-20 12-18-26 0-40Z" />
+                  <path class="deck" d="M0-30C11-20 13 10 8 30H-8C-13 10-11-20 0-30Z" />
+                  <rect class="cabin" x="-8" y="-12" width="16" height="20" rx="2" />
+                  <rect class="crate" x="-6" y="14" width="6" height="6" />
+                  <rect class="crate" x="1" y="16" width="6" height="6" />
+                </g>
+                <g id="td-buoy">
+                  <circle class="float" r="7" />
+                  <circle class="pole" r="2.2" />
+                </g>
+                <path id="td-flag" d="M0 0q7-5 13-1q4 2 8-1l-2 10q-5 3-9 0q-5-3-10 1Z" />
+              </defs>
+              <g class="cam">
+                <rect class="ripples" x="-120" y="-60" width="1040" height="570" />
+                <g class="tethers">
+                  <path d="M170 150 250 110M170 150 95 90M170 150 120 235M170 150 245 215" />
+                  <path d="M590 120 505 185M590 120 680 70M590 120 700 190M590 120 520 60" />
+                  <path d="M390 335 480 330M390 335 300 390M390 335 310 285M390 335 455 410" />
+                </g>
+                <use href="#td-boat" transform="translate(170 150) rotate(-24)" />
+                <use href="#td-boat" transform="translate(590 120) rotate(28)" />
+                <use href="#td-boat" transform="translate(390 335) rotate(82)" />
+                <text x="170" y="206">macbook</text>
+                <text x="590" y="176">mini</text>
+                <text x="390" y="380">studio</text>
+                <g class="buoys">
+                  <use href="#td-buoy" x="250" y="110" />
+                  <use href="#td-buoy" x="95" y="90" />
+                  <use href="#td-buoy" x="120" y="235" />
+                  <use href="#td-buoy" x="245" y="215" />
+                  <use href="#td-buoy" x="505" y="185" />
+                  <use href="#td-buoy" x="680" y="70" />
+                  <use href="#td-buoy" x="700" y="190" />
+                  <use href="#td-buoy" x="520" y="60" />
+                  <use href="#td-buoy" x="480" y="330" />
+                  <use href="#td-buoy" x="300" y="390" />
+                  <use href="#td-buoy" x="310" y="285" />
+                  <use href="#td-buoy" x="455" y="410" />
+                </g>
+                <use class="td-flag fa" href="#td-flag" x="251" y="98" />
+                <use class="td-flag fb" href="#td-flag" x="506" y="173" />
+                <use class="td-flag fc" href="#td-flag" x="481" y="318" />
+              </g>
+            </svg>
+            <div class="fleet-notes" aria-hidden="true">
+              <span class="badge na"><b>macbook</b> · fix the flaky login test · PR #212</span>
+              <span class="badge nb"><b>mini</b> · add a session cache · PR #214</span>
+              <span class="badge nc"><b>studio</b> · answer the review · report filed</span>
+              <span class="badge nz">three boats · twelve traps · one glass</span>
+            </div>
+          </figure>
+          <div class="phone">
+            <div class="screen" aria-label="The hosted glass: the deck, with decisions waiting for you">
               <div class="w-head">
                 <b>spyglass <span class="dim">wharf</span></b
                 ><span class="btn">sign out</span>
@@ -309,45 +387,17 @@
                 <div class="meta">helm · 1h</div>
               </div>
             </div>
-            <span class="fine">The deck</span>
-          </li>
-          <li class="phone">
-            <div class="screen" aria-label="A decision card with its options">
-              <div class="w-head"><b>Which cache?</b><span class="btn">×</span></div>
-              <div class="meta">decision · helm · 2m</div>
-              <p class="w-body">The session cache needs a home. Redis is shared across instances; in-memory needs no setup.</p>
-              <div class="w-opts"><span class="btn on">Redis</span><span class="btn">In-memory</span></div>
-              <div class="w-answer">shared, please</div>
-              <span class="btn">answer card</span>
-            </div>
-            <span class="fine">Answer a card</span>
-          </li>
-          <li class="phone">
-            <div class="screen" aria-label="Your boats, each with its access">
-              <div class="w-tabs">
-                <span>deck</span><span>jobs</span><span>traps</span><span class="on">boats</span><span>reports</span>
-              </div>
-              <div class="card">
-                <div class="top"><b>macbook</b><span class="badge">work + helm</span></div>
-                <div class="meta">last check-in 1m</div>
-                <div class="w-foot"><span class="btn">revoke…</span></div>
-              </div>
-              <div class="card">
-                <div class="top"><b>mini</b><span class="badge">work + read</span></div>
-                <div class="meta">last check-in 4m</div>
-                <div class="w-foot"><span class="btn">revoke…</span></div>
-              </div>
-            </div>
-            <span class="fine">Your boats</span>
-          </li>
-        </ul>
+            <span class="fine">The glass, hosted, on your phone</span>
+          </div>
+        </div>
+        <p class="fine">Each machine signs in as a named boat. Your code stays on your boat, and you can revoke a boat at any time.</p>
       </section>
       <!-- wharf:end -->
 
       <!-- Get started -->
       <section class="sec start" id="start">
         <h2>Get started</h2>
-        <p class="lead">Hand it to your agent, then go do something else.</p>
+        <p class="lead">One paste, then go do something else.</p>
         <!-- include handoff.html id=start -->
         <p>
           <a class="starcall" href="https://github.com/aequitas-labs/lobstah"

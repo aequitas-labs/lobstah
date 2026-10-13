@@ -25,9 +25,10 @@ node scripts/build-site.mjs --serve --wharf --port 4951 --out /tmp/lobstah-site-
 | File           | Holds                                                                                               |
 | -------------- | --------------------------------------------------------------------------------------------------- |
 | `index.html`   | the page: the story (one pinned scene and its five captions), the cards under it, the lobster strip |
-| `handoff.html` | the "Give this to your agent" control, included in the hero and at the end                          |
+| `handoff.html` | the "Set it up in one paste" control, included in the hero and at the end                           |
 | `site.css`     | the page's own styles; the scene, read off one dial (`--p`), then the loops                         |
 | `src/main.ts`  | tells the scene which beat is on screen, pauses loops, the copy buttons, "still water"              |
+| `icons/`       | the product marks, inlined by the build; `icons/SOURCES.md` says where each came from               |
 | `assets/`      | the art layers, cut from the three drawings in `art/originals`                                      |
 | `art/cut.py`   | the cutter that made `assets/` (a maintainer tool; the build never runs it)                         |
 
@@ -42,13 +43,13 @@ The story is one scene, pinned behind the copy: one sky and one sea from
 sunrise to the haul, with the same wave lines drifting throughout. A single
 number, `--p`, says how far through it we are:
 
-| `--p` | Beat                                                                                                              |
-| ----- | ----------------------------------------------------------------------------------------------------------------- |
-| 0     | sunrise over calm water; the headline and the install command                                                     |
-| 1     | the boat has crossed and dropped three traps, each under its own buoy                                             |
-| 2     | the sun has set                                                                                                   |
-| 3     | the camera is close on one buoy: it works, then its flag goes up with a question, and an answer is picked         |
-| 4     | the camera is back; every buoy has its flag up, each says something different, and every trap has a lobster in it |
+| `--p` | Beat                                                                                                                     |
+| ----- | ------------------------------------------------------------------------------------------------------------------------ |
+| 0     | sunrise over calm water; the headline and the install command                                                            |
+| 1     | the boat has crossed and dropped three traps, each under its own buoy                                                    |
+| 2     | the sun has set                                                                                                          |
+| 3     | the camera is close on one buoy: it works, then its flag goes up with a question, an answer is picked, and the card goes |
+| 4     | the camera is back; every buoy has its flag up, each says something different, and every trap has a lobster in it        |
 
 Every moving thing takes its place from `--p`, so the scene is the same
 picture however `--p` is driven:
@@ -81,15 +82,25 @@ python3 apps/site/art/cut.py --sheet /tmp/sheet.png   # needs Pillow, numpy and 
 ```
 
 Each layer of a group shares one canvas, so the page stacks the boat's layers
-(bunting, crane, hook, body) with no offsets. Every layer has a cream edge so
-its brown outline reads on the dark page.
+(bunting, crane, hook, body) with no offsets. Every layer's edge is pulled in
+onto its own brown outline, so nothing pale is left around it and it sits
+flush on the dark page and on the water.
+
+## The fleet from above
+
+The wharf section (built only with `--wharf`) leads with the sea seen from
+above: three boats, each with its own buoys, drawn in SVG in the page's
+palette. A camera goes to each trap as it reports, a flag goes up there with a
+note naming the boat, and then the camera pulls back to the whole fleet. It
+plays by itself on a 26 second loop while it is in view, not from the scroll.
+With motion off it is one still frame with three flags up.
 
 ## Limits the tests hold
 
 `apps/site/test/site.test.ts` builds the page and checks that its first load
 stays under 300 KB, that it fetches nothing from another origin and no
 animation runtime, that the wharf section is out unless asked for, that the
-install control is in the hero and at the end with the real commands, that the
-one star call is at the bottom with the lobster's star, that the lobster strip
-is at the foot of the page and not fixed to the screen, and that every lobster
-keeps its star.
+install control is in the hero and at the end with the real commands for each
+harness, that every mark has a source note, that the one star call is at the
+bottom with the lobster's star, that the lobster strip is at the foot of the
+page and not fixed to the screen, and that every lobster keeps its star.

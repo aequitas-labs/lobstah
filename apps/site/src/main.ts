@@ -48,7 +48,7 @@ function pauseOffScreen(): void {
   const seen = new IntersectionObserver((entries) => {
     for (const e of entries) e.target.classList.toggle('off', !e.isIntersecting);
   });
-  for (const el of document.querySelectorAll('.story, .strip')) seen.observe(el);
+  for (const el of document.querySelectorAll('.story, .strip, .fleet')) seen.observe(el);
 }
 
 /** Each lobster at the foot of the page walks at its own pace, picked afresh on every visit. */

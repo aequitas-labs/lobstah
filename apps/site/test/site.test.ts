@@ -12,6 +12,7 @@ import {
   firstLoadWeight,
   holdWharf,
   includePartials,
+  inlineIcons,
   pickRules,
   topLevelRules,
   webpSize,
@@ -70,6 +71,22 @@ describe('the site build helpers', () => {
     expect(() => includePartials('<!-- include box.html -->\n', () => partial)).toThrow(/needs id=/);
   });
 
+  it('draws a mark inline, untouched but for its wrapper', () => {
+    const file = '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Thing</title><path d="M1 2h3"/></svg>';
+    expect(inlineIcons('<b><!-- icon thing --></b>', () => file)).toBe(
+      '<b><svg class="ico" data-mark="thing" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M1 2h3"/></svg></b>',
+    );
+    expect(() => inlineIcons('<!-- icon thing -->', () => '<p>not a drawing</p>')).toThrow(/not a plain SVG/);
+  });
+
+  it('keeps a source note for every mark in the repo', () => {
+    const icons = path.join(here, '..', 'icons');
+    const sources = fs.readFileSync(path.join(icons, 'SOURCES.md'), 'utf8');
+    const files = fs.readdirSync(icons).filter((f) => f.endsWith('.svg'));
+    expect(files.length).toBeGreaterThan(5);
+    for (const f of files) expect(sources).toContain('`' + f + '`');
+  });
+
   it('holds the wharf section out unless asked for it', () => {
     const page = '<a>\n  <!-- wharf:start (held) -->\n  <b>wharf</b>\n  <!-- wharf:end -->\n<c>\n';
     expect(holdWharf(page, false)).toBe('<a>\n<c>\n');
@@ -108,23 +125,36 @@ describe('the built page', () => {
 
   it('keeps the wharf out of the published page', () => {
     expect(built.html).not.toMatch(/wharf/i);
-    expect(visibleText(withWharf.html)).toContain('The glass, hosted. Check the water from your phone.');
+    expect(visibleText(withWharf.html)).toContain('One glass for a fleet of machines and all their traps.');
+    // the fleet from above plays on its own, and only with motion on
+    expect(withWharf.html).toContain('class="fleet"');
   });
 
-  it('hands the install to an agent in the hero and again at the end, with the command by hand', () => {
+  it('offers a one-paste install in the hero and again at the end, for each harness and by hand', () => {
     const hero = built.html.slice(built.html.indexOf('id="hero"'), built.html.indexOf('id="set"'));
-    expect(hero).toContain('Give this to your agent');
+    expect(hero).toContain('Set it up in one paste');
     expect(built.html.match(/class="handoff" id="handoff-\w+"/g)).toEqual([
       'class="handoff" id="handoff-hero"',
       'class="handoff" id="handoff-start"',
     ]);
-    // Every tab carries the real install command; the harness tabs name their real plugin steps.
-    const panels = built.html.match(/<pre\s+class="panel[^>]*>[\s\S]*?<\/pre>/g) ?? [];
-    expect(panels).toHaveLength(6);
+    const panels = (built.html.match(/<pre\s+class="panel[^>]*>[\s\S]*?<\/pre>/g) ?? []).map((p) => p.replace(/&amp;/g, '&'));
+    expect(panels).toHaveLength(8);
+    // Every tab starts from the real CLI install; each harness tab chains its real plugin step and a first run.
     for (const panel of panels) expect(panel).toContain('npm i -g lobstah');
-    expect(built.html).toContain('/plugin marketplace add aequitas-labs/lobstah');
-    expect(built.html).toContain('codex plugin marketplace add aequitas-labs/lobstah');
-    expect(built.html).not.toMatch(/\{\{\w+\}\}|<!-- include/);
+    const [claude, codex, openclaw] = panels;
+    expect(claude).toContain(
+      'claude plugin marketplace add aequitas-labs/lobstah && claude plugin install lobstah@lobstah && claude "/lobstah:man"',
+    );
+    expect(codex).toContain(
+      "codex plugin marketplace add aequitas-labs/lobstah && codex plugin add lobstah@lobstah && codex '$lobstah:man'",
+    );
+    expect(openclaw).toContain('openclaw plugins install lobstah-openclaw-plugin');
+    expect(built.html).not.toMatch(/\{\{\w+\}\}|<!-- include|<!-- icon/);
+  });
+
+  it('shows real marks for the harnesses and the integrations', () => {
+    const marks = new Set([...built.html.matchAll(/class="ico" data-mark="([\w-]+)"/g)].map((m) => m[1]));
+    expect([...marks].sort()).toEqual(['claude-code', 'codex', 'eyes', 'github', 'graphite', 'linear', 'openclaw', 'slack', 'stack']);
   });
 
   it("puts the star call at the bottom only, with the lobster's own star", () => {

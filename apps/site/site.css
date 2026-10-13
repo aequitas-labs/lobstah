@@ -165,23 +165,21 @@ p {
   padding: 0;
   background: none;
 }
-/* A small square sign where a brand mark would go: letters, not logos. */
-.glyph {
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
+/* A product's own mark, small, with its name beside it. */
+.ico {
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
-  border: 1px solid var(--line-hover);
-  border-radius: var(--radius);
-  background: var(--inset);
-  color: var(--fg);
-  font-style: normal;
-  font-size: 12px;
-  font-weight: bold;
+  fill: currentColor;
+}
+.ico[data-mark='claude-code'] {
+  color: #d97757;
+}
+.ico[data-mark='linear'] {
+  color: #5e6ad2;
 }
 
-/* ---- "Give this to your agent": three tabs, one thing to copy ---- */
+/* ---- the install control: four tabs, one thing to paste ---- */
 .handoff {
   max-width: 34rem;
   margin: 14px 0 10px;
@@ -191,8 +189,15 @@ p {
   padding: 10px 12px 12px;
   text-shadow: none;
 }
+.handoff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
 .handoff-title {
-  margin: 0 0 8px;
+  margin: 0;
   font-weight: bold;
 }
 .tab-input {
@@ -202,44 +207,62 @@ p {
 }
 .handoff .tabs {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  gap: 2px;
   border-bottom: 1px solid var(--line);
   margin: 0 0 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .handoff .tabs label {
-  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 9px;
   color: var(--dim);
   border-bottom: 2px solid transparent;
   cursor: pointer;
   font-size: 14px;
   white-space: nowrap;
 }
-.handoff .tabs .btn {
-  margin-left: auto;
+.handoff .tabs .ico {
+  width: 15px;
+  height: 15px;
+}
+.handoff .panel,
+.handoff .tip {
+  display: none;
 }
 .handoff .panel {
-  display: none;
   padding: 8px 10px;
   font-size: 12.5px;
   line-height: 1.45;
   white-space: pre-wrap;
 }
+.handoff .tip {
+  margin: 8px 0 0;
+}
 .tab-input:nth-of-type(1):checked ~ .tabs label:nth-of-type(1),
 .tab-input:nth-of-type(2):checked ~ .tabs label:nth-of-type(2),
-.tab-input:nth-of-type(3):checked ~ .tabs label:nth-of-type(3) {
+.tab-input:nth-of-type(3):checked ~ .tabs label:nth-of-type(3),
+.tab-input:nth-of-type(4):checked ~ .tabs label:nth-of-type(4) {
   color: var(--fg);
   border-color: var(--lobstah);
 }
 .tab-input:nth-of-type(1):focus-visible ~ .tabs label:nth-of-type(1),
 .tab-input:nth-of-type(2):focus-visible ~ .tabs label:nth-of-type(2),
-.tab-input:nth-of-type(3):focus-visible ~ .tabs label:nth-of-type(3) {
+.tab-input:nth-of-type(3):focus-visible ~ .tabs label:nth-of-type(3),
+.tab-input:nth-of-type(4):focus-visible ~ .tabs label:nth-of-type(4) {
   outline: 2px solid var(--link);
   outline-offset: -2px;
 }
-.tab-input:nth-of-type(1):checked ~ .p-claude,
-.tab-input:nth-of-type(2):checked ~ .p-codex,
-.tab-input:nth-of-type(3):checked ~ .p-hand {
+.tab-input:nth-of-type(1):checked ~ .panel:nth-of-type(1),
+.tab-input:nth-of-type(2):checked ~ .panel:nth-of-type(2),
+.tab-input:nth-of-type(3):checked ~ .panel:nth-of-type(3),
+.tab-input:nth-of-type(4):checked ~ .panel:nth-of-type(4),
+.tab-input:nth-of-type(1):checked ~ .tip:nth-of-type(1),
+.tab-input:nth-of-type(2):checked ~ .tip:nth-of-type(2),
+.tab-input:nth-of-type(3):checked ~ .tip:nth-of-type(3),
+.tab-input:nth-of-type(4):checked ~ .tip:nth-of-type(4) {
   display: block;
 }
 .starcall {
@@ -312,6 +335,8 @@ p {
   --work: calc(clamp(0, (var(--p) - 2.3) / 0.15, 1) - clamp(0, (var(--p) - 2.7) / 0.08, 1));
   --asked: clamp(0, (var(--p) - 2.78) / 0.12, 1);
   --pick: clamp(0, (var(--p) - 3) / 0.08, 1);
+  /* the question card leaves once its answer is picked, before the haul */
+  --gone: clamp(0, (var(--p) - 3.2) / 0.1, 1);
   --haul: clamp(0, (var(--p) - 3.5) / 0.4, 1);
   --got: clamp(0, (var(--p) - 3.85) / 0.1, 1);
   /* which caption is up */
@@ -382,8 +407,11 @@ p {
 
 /*
  * The sea is two layers. Things in the water sit between them, so the front
- * one dims what is under the surface. The surface is only the wave: its fill
- * and one moving line. Both layers drift together, so there is one edge.
+ * one dims what is under the surface. Each layer is a box with a wave on top.
+ * The front layer is drawn solid and made see-through as a whole: were the
+ * box and the wave see-through one by one, the row where they overlap would
+ * be darker, and that row would be a straight line that never moves. The only
+ * line at the surface is the back wave's own, and it drifts.
  */
 .sea {
   position: absolute;
@@ -394,7 +422,7 @@ p {
 }
 .sea.front {
   z-index: 5;
-  background: linear-gradient(color-mix(in srgb, var(--sea) 55%, transparent) 55%, var(--bg));
+  opacity: 0.55;
 }
 .wave {
   position: absolute;
@@ -402,8 +430,8 @@ p {
   bottom: 100%;
   width: 200%;
   height: 12px;
-  /* the fill laps a hair over the sea below it, so no seam shows between them */
-  margin-bottom: -1px;
+  /* the fill laps over the box below it, so no seam can open between them */
+  margin-bottom: -2px;
   fill: var(--sea);
   stroke: none;
 }
@@ -412,9 +440,6 @@ p {
   stroke: var(--sea-line);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
-}
-.sea.front .wave {
-  fill-opacity: 0.55;
 }
 
 /* Anything that floats hangs from a zero-height anchor on the waterline. */
@@ -431,7 +456,7 @@ p {
 }
 .boat-art {
   position: relative;
-  aspect-ratio: 733 / 709;
+  aspect-ratio: 718 / 694;
   /* the waterline crosses the hull 86% of the way down the drawing */
   transform: translateY(-86%);
 }
@@ -473,8 +498,8 @@ p {
   --flag: var(--got);
 }
 .float {
-  /* the pole stands 25.8% across the drawing: put the pole, not the box, on --x, so the rope hangs from it */
-  left: calc(var(--x) - var(--fw) * 0.258);
+  /* the pole stands a quarter of the way across the drawing: put the pole, not the box, on --x, so the rope hangs from it */
+  left: calc(var(--x) - var(--fw) * 0.25);
   width: var(--fw);
   opacity: min(1, calc(var(--s) * 10));
 }
@@ -538,7 +563,7 @@ p {
 /* A flag goes up when a buoy has something for you: a question, then a catch. */
 .buoy-art .flag {
   /* the flag's edge on the pole */
-  transform-origin: 31% 19%;
+  transform-origin: 30% 18%;
   scale: var(--flag) calc(0.6 + 0.4 * var(--flag));
   opacity: min(1, calc(var(--flag) * 4));
 }
@@ -608,7 +633,7 @@ p {
 .note.ask {
   border-color: var(--bad);
   width: min(46cqw, 190px);
-  opacity: calc(var(--asked) - var(--got));
+  opacity: calc(var(--asked) - var(--gone));
   transform: translateY(calc((1 - var(--asked)) * 8px));
 }
 .note.ask b {
@@ -790,7 +815,7 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 10px 4px 4px;
+  padding: 5px 11px 5px 9px;
   border: 1px solid var(--line-hover);
   border-radius: var(--card-radius);
   background: var(--card);
@@ -814,6 +839,7 @@ p {
   /* out to both edges of the window; the first card still lines up with the page */
   margin: 0 calc(50% - 50vw);
   padding: 4px max(var(--space-4), calc(50vw - var(--page) / 2)) 14px;
+  scroll-padding-inline: max(var(--space-4), calc(50vw - var(--page) / 2));
   overflow-x: auto;
   scroll-snap-type: x proximity;
   scrollbar-width: thin;
@@ -838,7 +864,110 @@ p {
   color: var(--dim);
   font-size: 14px;
 }
-/* The wharf: its real screens, drawn small. */
+.int .marks {
+  display: flex;
+  gap: 8px;
+  color: var(--fg);
+  min-height: 24px;
+}
+.int .marks .ico {
+  width: 24px;
+  height: 24px;
+}
+/* The fleet from above: boats, their buoys, and a camera that visits each trap as it reports. */
+.fleet-wrap {
+  display: grid;
+  gap: var(--space-4);
+  align-items: center;
+  margin-bottom: 10px;
+}
+.fleet {
+  position: relative;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  background: var(--sea);
+  aspect-ratio: 4 / 3;
+}
+.fleet svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.fleet .ripples {
+  fill: url(#td-ripples);
+}
+#td-ripples path {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.fleet .tethers {
+  fill: none;
+  stroke: var(--rope);
+  stroke-width: 1;
+  stroke-dasharray: 2 5;
+  opacity: 0.45;
+}
+#td-boat .hull {
+  fill: #c98f56;
+  stroke: #844a37;
+  stroke-width: 2.5;
+}
+#td-boat .deck {
+  fill: #d9b696;
+  stroke: #844a37;
+  stroke-width: 1.2;
+}
+#td-boat .cabin {
+  fill: #f1e9d7;
+  stroke: #844a37;
+  stroke-width: 1.5;
+}
+#td-boat .crate {
+  fill: #c98f56;
+  stroke: #844a37;
+  stroke-width: 1;
+}
+#td-buoy .float {
+  fill: #c24e3d;
+  stroke: #844a37;
+  stroke-width: 2;
+}
+#td-buoy .pole {
+  fill: #d9b696;
+  stroke: #844a37;
+  stroke-width: 1;
+}
+.td-flag {
+  fill: #f1e9d7;
+  stroke: #8a7a66;
+  stroke-width: 1;
+}
+.fleet text {
+  fill: var(--fg);
+  font: bold 13px var(--font-mono);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--sea);
+  stroke-width: 4;
+}
+.fleet-notes .badge {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  max-width: calc(100% - 20px);
+  white-space: normal;
+  font-size: 12px;
+  /* still: only the summary shows */
+  opacity: 0;
+}
+.fleet-notes .nz {
+  opacity: 1;
+}
+/* The hosted glass, drawn small beside it. */
 .phone {
   display: grid;
   gap: 6px;
@@ -952,6 +1081,12 @@ footer p {
   left: 76%;
 }
 
+/* On a phone the hero is tall: the control keeps its tabs and its line, and the sun stays in view. */
+@media (max-width: 719px) {
+  .hero .handoff .tip {
+    display: none;
+  }
+}
 @media (min-width: 720px) {
   .pin {
     --wl: 62%;
@@ -996,6 +1131,12 @@ footer p {
   .harness {
     grid-template-columns: 300px minmax(0, 1fr);
     gap: 40px;
+  }
+  .fleet-wrap {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .fleet {
+    aspect-ratio: 16 / 9;
   }
 }
 
@@ -1049,6 +1190,122 @@ footer p {
     background-position-x: calc(var(--lw) * -4);
   }
 }
+/* The fleet's camera: out wide, in on each reporting trap in turn, out wide again. */
+@keyframes fleet-cam {
+  0%,
+  8% {
+    transform: none;
+  }
+  15%,
+  27% {
+    transform: translate(-200px, -39px) scale(2.4);
+  }
+  35%,
+  47% {
+    transform: translate(-812px, -219px) scale(2.4);
+  }
+  55%,
+  67% {
+    transform: translate(-752px, -567px) scale(2.4);
+  }
+  77%,
+  100% {
+    transform: none;
+  }
+}
+@keyframes fleet-ripples {
+  to {
+    transform: translateX(96px);
+  }
+}
+/* A flag goes up when its trap reports, and stays up until the loop starts again. */
+@keyframes flag-a {
+  0%,
+  17% {
+    opacity: 0;
+  }
+  20%,
+  97% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes flag-b {
+  0%,
+  37% {
+    opacity: 0;
+  }
+  40%,
+  97% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes flag-c {
+  0%,
+  57% {
+    opacity: 0;
+  }
+  60%,
+  97% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes note-a {
+  0%,
+  17%,
+  31%,
+  100% {
+    opacity: 0;
+  }
+  20%,
+  28% {
+    opacity: 1;
+  }
+}
+@keyframes note-b {
+  0%,
+  37%,
+  51%,
+  100% {
+    opacity: 0;
+  }
+  40%,
+  48% {
+    opacity: 1;
+  }
+}
+@keyframes note-c {
+  0%,
+  57%,
+  71%,
+  100% {
+    opacity: 0;
+  }
+  60%,
+  68% {
+    opacity: 1;
+  }
+}
+@keyframes note-z {
+  0%,
+  6%,
+  80%,
+  100% {
+    opacity: 1;
+  }
+  12%,
+  74% {
+    opacity: 0;
+  }
+}
 @keyframes story {
   from {
     --p: 0;
@@ -1089,6 +1346,34 @@ footer p {
 .motion .pet-art.small .sprite {
   animation: step-small 0.5s steps(4) infinite;
 }
+/* The fleet plays on its own, on a 26 second loop, while it is in view. */
+.motion .fleet .cam {
+  animation: fleet-cam 26s ease-in-out infinite;
+}
+.motion .fleet .ripples {
+  animation: fleet-ripples 14s linear infinite;
+}
+.motion .fleet .fa {
+  animation: flag-a 26s linear infinite;
+}
+.motion .fleet .fb {
+  animation: flag-b 26s linear infinite;
+}
+.motion .fleet .fc {
+  animation: flag-c 26s linear infinite;
+}
+.motion .fleet .na {
+  animation: note-a 26s linear infinite;
+}
+.motion .fleet .nb {
+  animation: note-b 26s linear infinite;
+}
+.motion .fleet .nc {
+  animation: note-c 26s linear infinite;
+}
+.motion .fleet .nz {
+  animation: note-z 26s linear infinite;
+}
 /* The lobsters walk: the glass's own crawl and step, each at the pace the script gives it. */
 .motion .lob {
   left: 0;
@@ -1113,6 +1398,7 @@ footer p {
 .motion .off .dots i,
 .motion .off .sprite,
 .motion .off.strip .lob,
+.motion .fleet.off *,
 .motion.hidden * {
   animation-play-state: paused !important;
 }

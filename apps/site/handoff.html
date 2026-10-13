@@ -1,22 +1,40 @@
 <!-- The install control, used in the hero and again at the end. {{id}} keeps each copy's tabs apart. -->
 <div class="handoff" id="handoff-{{id}}">
-  <p class="handoff-title">Give this to your agent</p>
-  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-claude" checked />
-  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-codex" />
-  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-hand" />
-  <div class="tabs">
-    <label for="{{id}}-claude">Claude Code</label>
-    <label for="{{id}}-codex">Codex</label>
-    <label for="{{id}}-hand">By hand</label>
+  <div class="handoff-head">
+    <p class="handoff-title">Set it up in one paste</p>
     <button class="btn" type="button" data-copy-panel>copy</button>
   </div>
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-claude" checked />
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-codex" />
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-openclaw" />
+  <input class="tab-input" type="radio" name="handoff-{{id}}" id="{{id}}-hand" />
+  <div class="tabs">
+    <label for="{{id}}-claude"><!-- icon claude-code -->Claude Code</label>
+    <label for="{{id}}-codex"><!-- icon codex -->Codex</label>
+    <label for="{{id}}-openclaw"><!-- icon openclaw -->OpenClaw</label>
+    <label for="{{id}}-hand">By hand</label>
+  </div>
   <pre
-    class="panel p-claude"
-  ><code>Install lobstah: run npm i -g lobstah, lobstah init --scan ~/src and lobstah daemon install. Then tell me to type /plugin marketplace add aequitas-labs/lobstah and /plugin install lobstah@lobstah, and to open a new session with /lobstah:man.</code></pre>
+    class="panel"
+  ><code>npm i -g lobstah &amp;&amp; lobstah init --scan ~/src &amp;&amp; lobstah daemon install &amp;&amp; claude plugin marketplace add aequitas-labs/lobstah &amp;&amp; claude plugin install lobstah@lobstah &amp;&amp; claude "/lobstah:man"</code></pre>
   <pre
-    class="panel p-codex"
-  ><code>Install lobstah: run npm i -g lobstah, lobstah init --scan ~/src, lobstah daemon install, codex plugin marketplace add aequitas-labs/lobstah and codex plugin add lobstah@lobstah. Then tell me to trust its hooks in /hooks and open a new session with $lobstah:man.</code></pre>
-  <pre class="panel p-hand"><code>npm i -g lobstah
+    class="panel"
+  ><code>npm i -g lobstah &amp;&amp; lobstah init --scan ~/src &amp;&amp; lobstah daemon install &amp;&amp; codex plugin marketplace add aequitas-labs/lobstah &amp;&amp; codex plugin add lobstah@lobstah &amp;&amp; codex '$lobstah:man'</code></pre>
+  <pre
+    class="panel"
+  ><code>npm i -g lobstah &amp;&amp; lobstah init --scan ~/src &amp;&amp; lobstah daemon install &amp;&amp; openclaw plugins install lobstah-openclaw-plugin</code></pre>
+  <pre class="panel"><code>npm i -g lobstah
 lobstah init --scan ~/src
 lobstah daemon install</code></pre>
+  <p class="fine tip">Paste it in a terminal. It installs the CLI and the plugin, starts the daemon, and opens Claude Code at the helm.</p>
+  <p class="fine tip">
+    Paste it in a terminal. It installs the CLI and the plugin, starts the daemon, and opens Codex at the helm. Codex asks once to trust
+    lobstah's hooks: open <code>/hooks</code>.
+  </p>
+  <p class="fine tip">Run it on the gateway host. Your fleet's agents get four tools, and you get <code>/lobstah</code> in chat.</p>
+  <p class="fine tip">
+    Then add the plugin for your harness:
+    <a href="https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/claude-code.md#install">Claude Code</a>,
+    <a href="https://github.com/aequitas-labs/lobstah/blob/main/docs/harness/codex.md#install">Codex</a>.
+  </p>
 </div>

@@ -135,12 +135,30 @@ export function holdWharf(page, include) {
 export function includePartials(page, readPartial) {
   return page.replace(/[ \t]*<!-- include (\S+)((?: \w+=\S+)*) -->\n/g, (_, file, pairs) => {
     const values = Object.fromEntries([...pairs.matchAll(/(\w+)=(\S+)/g)].map((m) => [m[1], m[2]]));
-    return readPartial(file)
-      .replace(/<!--[\s\S]*?-->\n?/g, '')
-      .replace(/\{\{(\w+)\}\}/g, (whole, key) => {
-        if (!(key in values)) throw new Error(`${file} needs ${key}= on its include line`);
-        return values[key];
-      });
+    return (
+      readPartial(file)
+        // notes for the source reader go; an `icon` request stays for inlineIcons
+        .replace(/<!--(?! icon )[\s\S]*?-->\n?/g, '')
+        .replace(/\{\{(\w+)\}\}/g, (whole, key) => {
+          if (!(key in values)) throw new Error(`${file} needs ${key}= on its include line`);
+          return values[key];
+        })
+    );
+  });
+}
+
+/**
+ * Draw a mark where the page asks for it: `<!-- icon github -->` becomes that
+ * file's drawing, inline. Only the wrapper is ours; the shapes are untouched.
+ */
+export function inlineIcons(page, readIcon) {
+  return page.replace(/<!-- icon ([\w-]+) -->/g, (_, name) => {
+    const svg = readIcon(name);
+    const viewBox = svg.match(/viewBox="([^"]+)"/)?.[1];
+    const inner = svg.match(/<svg[^>]*>([\s\S]*)<\/svg>/)?.[1];
+    if (!viewBox || inner === undefined) throw new Error(`icons/${name}.svg is not a plain SVG with a viewBox`);
+    const shapes = inner.replace(/<title>[\s\S]*?<\/title>/, '').trim();
+    return `<svg class="ico" data-mark="${name}" viewBox="${viewBox}" aria-hidden="true" focusable="false">${shapes}</svg>`;
   });
 }
 
@@ -202,6 +220,7 @@ export async function buildSite({ wharf = false, minify = true, outDir = path.jo
   const assets = path.join(site, 'assets');
   let page = holdWharf(read(path.join(site, 'index.html')), wharf);
   page = includePartials(page, (file) => read(path.join(site, file)));
+  page = inlineIcons(page, (name) => read(path.join(site, 'icons', `${name}.svg`)));
   page = page.replace(/[ \t]*<!-- scripts\/build-site\.mjs[^>]*-->\n/g, '');
   const art = expandArt(page, (f) => webpSize(fs.readFileSync(path.join(assets, f))));
   page = inline(art.html, CSS_TAG, `<style>${css.code.trimEnd().replace(/<\/(style)/gi, '<\\/$1')}</style>`);

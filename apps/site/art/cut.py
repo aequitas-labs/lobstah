@@ -10,7 +10,8 @@ and CI read the committed files in apps/site/assets and never run this.
 Each source is a flat drawing on an off-white ground with closed outlines. A
 fill from the image edges finds the ground; ground-coloured gaps the fill
 cannot reach (net holes, the sky between the rigging) are cleared by colour.
-Every layer gets a cream edge so its brown outline reads on the dark page.
+Each layer's edge is then pulled in a little, onto its own brown outline, so
+no pale fringe of the ground is left and the piece sits flush on the dark page.
 Layers of one group share a canvas, so the page stacks them with no offsets.
 """
 import os
@@ -23,9 +24,8 @@ from PIL import Image, ImageDraw, ImageFilter
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, 'originals')
 OUT = os.path.normpath(os.path.join(HERE, '..', 'assets'))
-CREAM = (243, 234, 214)
 MARK = (255, 0, 255)
-EDGE = 5  # cream edge, in source pixels
+SHRINK = 2  # how far each edge is pulled in, in source pixels, to shed the ground's fringe
 
 
 def load(name):
@@ -82,15 +82,12 @@ def disc(size, c, r):
     return np.array(m) > 0
 
 
-def layer(im, mask, edge=EDGE):
-    """The masked drawing over a cream edge, full canvas, RGBA."""
-    alpha = Image.fromarray((mask * 255).astype('uint8')).filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(0.7))
+def layer(im, mask):
+    """The masked drawing, full canvas, RGBA, with a clean edge and nothing around it."""
+    alpha = Image.fromarray((mask * 255).astype('uint8')).filter(ImageFilter.MinFilter(2 * SHRINK + 1)).filter(ImageFilter.GaussianBlur(0.6))
     art = im.copy()
     art.putalpha(alpha)
-    rim = alpha.filter(ImageFilter.MaxFilter(2 * edge + 1)).filter(ImageFilter.GaussianBlur(0.8))
-    under = Image.new('RGBA', im.size, CREAM + (0,))
-    under.putalpha(rim)
-    return Image.alpha_composite(under, art)
+    return art
 
 
 def bbox(layers, pad=2):
@@ -139,7 +136,7 @@ def cut_trap():
     w, h = im.size
     ground = im.getpixel((6, 6))
     solid = ~flood(im, edges(w, h), 22) & ~near(im, ground, 22)
-    return {'trap': layer(im, component(solid, centre(solid)), edge=4)}
+    return {'trap': layer(im, component(solid, centre(solid)))}
 
 
 def cut_boat():
@@ -154,6 +151,8 @@ def cut_boat():
     gaps = near(im, ground, 16)
     gaps[430:, 520:] = False
     gaps[560:, :] = False
+    # one more pocket of ground: between the mast, its stay and the roof
+    gaps[425:475, 548:612] = near(im, ground, 16)[425:475, 548:612]
     whole = ~(bg | shadow | gaps)
     whole = component(whole, centre(whole))
 
@@ -184,7 +183,11 @@ def cut_boat():
     right[:225, :] = False
     right[418:, :] = False
     right = component(right, (608, 344))
-    body = whole & ~crane & ~hook & ~left & ~right
+    # The boom's last stretch, where it meets the crates, stays on the body too:
+    # the crane layer lies exactly over it, and no gap opens between the two.
+    foot = crane.copy()
+    foot[:, :452] = False
+    body = whole & ~(crane & ~foot) & ~hook & ~left & ~right
     body = component(body, centre(body))
     return {
         'boat-body': layer(im, body),
