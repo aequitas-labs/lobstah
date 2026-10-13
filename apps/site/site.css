@@ -113,9 +113,10 @@ p {
 
 /*
  * The bar at the top. At first it lies over the top of the scene with no
- * ground of its own and scrolls away with the hero. Once the hero has gone
- * the script fixes it to the screen (.stuck) on a dark see-through ground.
- * It is out of the page's flow both ways, so nothing moves when it changes.
+ * ground of its own and scrolls away with the hero. It stays away for the
+ * whole story. Once the story has passed, the script fixes it to the screen
+ * (.stuck) on a dark see-through ground. It is out of the page's flow both
+ * ways, so nothing moves when it changes.
  */
 .top {
   position: absolute;
@@ -1303,7 +1304,11 @@ footer p {
 }
 @keyframes bar-in {
   from {
-    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
+@keyframes bar-out {
+  to {
     opacity: 0;
   }
 }
@@ -1352,9 +1357,12 @@ footer p {
 .motion .pet-art.small .sprite {
   animation: step-small 0.5s steps(4) infinite;
 }
-/* The bar slides in when it is fixed to the screen; with motion off it is simply there. */
+/* The bar fades in when it is fixed to the screen, and out when it lets go; with motion off it is simply there or not. */
 .motion .top.stuck {
-  animation: bar-in 0.25s ease-out;
+  animation: bar-in 0.3s ease-out;
+}
+.motion .top.stuck.leaving {
+  animation: bar-out 0.25s ease-in forwards;
 }
 /* The integrations drift by, and wait while a pointer or the keyboard is on them. */
 .motion .scroller.auto .row {

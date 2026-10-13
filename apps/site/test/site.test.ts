@@ -130,7 +130,7 @@ describe('the built page', () => {
     expect(withWharf.html).toContain('class="fleet"');
   });
 
-  it('offers a one-paste install in the hero and again at the end, for each harness and by hand', () => {
+  it('offers an install prompt in the hero and again at the end, for each harness, and the commands by hand', () => {
     const hero = built.html.slice(built.html.indexOf('id="hero"'), built.html.indexOf('id="set"'));
     expect(hero).toContain('class="handoff"');
     expect(hero).toContain('macOS, Linux, Windows · <a href="https://github.com/aequitas-labs/lobstah">GitHub</a>');
@@ -140,16 +140,20 @@ describe('the built page', () => {
     ]);
     const panels = (built.html.match(/<pre\s+class="panel[^>]*>[\s\S]*?<\/pre>/g) ?? []).map((p) => p.replace(/&amp;/g, '&'));
     expect(panels).toHaveLength(8);
-    // Every tab starts from the real CLI install; each harness tab chains its real plugin step and a first run.
-    for (const panel of panels) expect(panel).toContain('npm i -g lobstah');
-    const [claude, codex, openclaw] = panels;
-    expect(claude).toContain(
-      'claude plugin marketplace add aequitas-labs/lobstah && claude plugin install lobstah@lobstah && claude "/lobstah:man"',
-    );
-    expect(codex).toContain(
-      "codex plugin marketplace add aequitas-labs/lobstah && codex plugin add lobstah@lobstah && codex '$lobstah:man'",
-    );
-    expect(openclaw).toContain('openclaw plugins install lobstah-openclaw-plugin');
+    // Each harness tab is a prompt that names the npm package, that harness's plugin, the daemon and the next step; by hand is the real commands.
+    const [claude, codex, openclaw, hand] = panels;
+    for (const prompt of [claude, codex, openclaw]) {
+      expect(prompt).toContain('Install lobstah from npm');
+      expect(prompt).toContain('install its daemon');
+      expect(prompt).not.toContain('&&');
+    }
+    expect(claude).toContain('its Claude Code plugin: lobstah@lobstah, from the aequitas-labs/lobstah marketplace');
+    expect(claude).toContain('/lobstah:man');
+    expect(codex).toContain('its Codex plugin: lobstah@lobstah, from the aequitas-labs/lobstah marketplace');
+    expect(codex).toContain('trust its hooks in /hooks, which I do myself');
+    expect(codex).toContain('$lobstah:man');
+    expect(openclaw).toContain('its OpenClaw plugin from npm: lobstah-openclaw-plugin');
+    expect(hand).toContain('npm i -g lobstah\nlobstah init --scan ~/src\nlobstah daemon install');
     expect(built.html).not.toMatch(/\{\{\w+\}\}|<!-- include|<!-- icon/);
   });
 

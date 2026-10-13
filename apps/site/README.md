@@ -102,9 +102,10 @@ still frame with all three notes showing.
 ## Limits the tests hold
 
 `apps/site/test/site.test.ts` builds the page and checks that its first load
-stays under 300 KB, that it fetches nothing from another origin and no
-animation runtime, that the wharf section is out unless asked for, that the
-install control is in the hero and at the end with the real commands for each
-harness, that every mark has a source note, that the one star call is at the
+stays under 300 KB, that it loads no image, style or animation runtime from
+another origin (the script makes one request of its own, to GitHub's API for
+the star count), that the wharf section is out unless asked for, that the
+install control is in the hero and at the end with a prompt for each harness
+and the real commands by hand, that every mark has a source note, that the one star call is at the
 bottom with the lobster's star, that the lobster strip is at the foot of the
 page and not fixed to the screen, and that every lobster keeps its star.

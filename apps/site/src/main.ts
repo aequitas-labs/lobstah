@@ -117,20 +117,41 @@ async function starCount(): Promise<void> {
 }
 
 /**
- * Fix the bar to the screen once the hero has scrolled away, and give it a
- * button that copies the first tab's install line. While the hero is in view
- * the install control is right there, so the bar has no button.
+ * Fix the bar to the screen once the story has scrolled past it, which is
+ * where "How it works" begins, and let it go again on the way back up: the
+ * bar never lies over the scene. Fixed, it has a button that copies the first
+ * tab's install prompt.
  */
 function stickBar(): void {
   const bar = document.querySelector<HTMLElement>('.top');
-  const hero = document.querySelector('#hero .cap');
+  const story = document.querySelector('.story');
   const btn = document.querySelector<HTMLButtonElement>('#copy-install');
-  if (!bar || !hero || !btn) return;
-  new IntersectionObserver(([e]) => {
-    const gone = !e.isIntersecting && e.boundingClientRect.bottom <= 0;
-    bar.classList.toggle('stuck', gone);
-    btn.hidden = !gone;
-  }).observe(hero);
+  if (!bar || !story || !btn) return;
+  const height = bar.offsetHeight;
+  let shown = false;
+  const letGo = () => {
+    bar.classList.remove('stuck', 'leaving');
+    btn.hidden = true;
+  };
+  const show = (on: boolean) => {
+    if (on === shown) return;
+    shown = on;
+    if (on) {
+      bar.classList.remove('leaving');
+      bar.classList.add('stuck');
+      btn.hidden = false;
+    } else if (root.classList.contains('motion')) {
+      // Fade out where it is, then let go.
+      bar.classList.add('leaving');
+      setTimeout(() => !shown && letGo(), 250);
+    } else {
+      letGo();
+    }
+  };
+  // The story has passed once its foot is above the bar's own.
+  new IntersectionObserver(([e]) => show(!e.isIntersecting && e.boundingClientRect.bottom <= height), {
+    rootMargin: `-${height}px 0px 0px 0px`,
+  }).observe(story);
   btn.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(document.querySelector('#hero .panel')?.textContent ?? '');
