@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>lobstah: nobody stares at the water</title>
+    <meta
+      name="description"
+      content="Set your traps and go do something else. lobstah runs your coding agents in the background and tells you when one has a catch, or a question."
+    />
+    <meta name="theme-color" content="#0e1116" />
+    <link rel="icon" type="image/png" href="assets/icon-192.png" />
+    <!-- Motion is opt-in: without this class the page is the finished still picture. -->
+    <script>
+      (function () {
+        var still = false;
+        try {
+          still = localStorage.getItem('lobstah-still') === '1';
+        } catch (e) {}
+        if (!still && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.documentElement.classList.add('motion');
+      })();
+    </script>
+    <!-- scripts/build-site.mjs inlines site.css here, after the glass's tokens and card rules -->
+    <link rel="stylesheet" href="./site.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" class="defs" aria-hidden="true" focusable="false">
+      <defs>
+        <!-- One wave line, 24 crests in 1200 units. Shifting it by half its width joins without a seam. -->
+        <path
+          id="wave-line"
+          d="M0 7q12.5-7 25 0t25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0"
+        />
+        <path
+          id="wave-fill"
+          d="M0 7q12.5-7 25 0t25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0 25 0V15H0Z"
+        />
+      </defs>
+    </svg>
+
+    <header class="top">
+      <img class="mark" src="assets/icon-192.png" width="36" height="36" alt="" />
+      <span class="name">lobstah</span>
+    </header>
+
+    <main>
+      <!-- 1. Hero: an empty, calm sea -->
+      <section class="scene hero" id="hero">
+        <div class="hero-copy">
+          <h1>Nobody stares at the water.</h1>
+          <p class="sub">
+            Set your traps and go do something else. lobstah runs your coding agents in the background and tells you when one has a catch,
+            or a question.
+          </p>
+          <p class="tagline">Harness-agnostic, token-efficient supervision for coding agents.</p>
+          <div class="install">
+            <code>npm i -g lobstah</code>
+            <button class="btn" type="button" data-copy="npm i -g lobstah">copy</button>
+          </div>
+          <p class="fine">
+            Open source, MIT. Node 20 or later. macOS, Linux, Windows.
+            <a href="https://github.com/aequitas-labs/lobstah#install-">Other ways to install</a>
+          </p>
+        </div>
+        <div class="stage hero-sea" role="img" aria-label="A calm, empty sea. One red buoy. A small card beside it reads: catch ready.">
+          <div class="sea">
+            <svg class="wave drift slow" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+          </div>
+          <div class="at-water catch-slot">
+            <div class="card catch">
+              <span class="badge ok">catch ready</span>
+              <b class="title">fix the flaky login test</b>
+              <div class="meta">PR #212 · checks 8/8</div>
+            </div>
+          </div>
+          <div class="at-water hero-buoy">
+            <div class="buoy-art">
+              <div class="bob">
+                <div class="dip"><img data-art="buoy-body" data-sizes="(min-width: 720px) 120px, 64px" alt="" /></div>
+              </div>
+            </div>
+          </div>
+          <div class="sea front">
+            <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+          </div>
+          <div class="at-water hero-buoy rings">
+            <div class="ripple"><i></i><i></i></div>
+          </div>
+        </div>
+        <p class="aside">You were not watching. It told you anyway.</p>
+      </section>
+
+      <!-- 2. Set the traps -->
+      <section class="scene scroll-scene set" id="set">
+        <div class="scene-copy">
+          <h2>Set the traps.</h2>
+          <p>
+            Lob a brief into a trap and walk away. Each job runs in its own git worktree, on Claude Code or Codex. Set one trap or set ten.
+          </p>
+        </div>
+        <div class="scene-body">
+          <div
+            class="stage deep"
+            role="img"
+            aria-label="A lobster boat crosses the sea and drops three traps. Each sinks on a rope under its own buoy, with a label: fix the flaky login test, upgrade the SDK, answer the review on #212."
+          >
+            <div class="sea">
+              <svg class="wave drift slow" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+            </div>
+            <div class="track">
+              <div class="at-water boat">
+                <div class="boat-art">
+                  <div class="rock">
+                    <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 380px, 150px" alt="" />
+                    <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 380px, 150px" alt="" />
+                    <div class="layer rig">
+                      <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 380px, 150px" alt="" />
+                      <img class="layer" data-art="boat-hook" data-sizes="(min-width: 720px) 380px, 150px" alt="" />
+                    </div>
+                    <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 380px, 150px" alt="" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="drop d1">
+              <div class="sink">
+                <i class="rope"></i>
+                <img class="trap" data-art="trap" data-sizes="(min-width: 720px) 130px, 60px" alt="" />
+              </div>
+            </div>
+            <div class="drop d2">
+              <div class="sink">
+                <i class="rope"></i>
+                <img class="trap" data-art="trap" data-sizes="(min-width: 720px) 130px, 60px" alt="" />
+              </div>
+            </div>
+            <div class="drop d3">
+              <div class="sink">
+                <i class="rope"></i>
+                <img class="trap" data-art="trap" data-sizes="(min-width: 720px) 130px, 60px" alt="" />
+              </div>
+            </div>
+            <div class="at-water float f1">
+              <div class="buoy-art">
+                <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water float f2">
+              <div class="buoy-art">
+                <div class="bob late"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="at-water float f3">
+              <div class="buoy-art">
+                <div class="bob later"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+              </div>
+            </div>
+            <div class="sea front">
+              <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+            </div>
+            <span class="badge tag t1">fix the flaky login test</span>
+            <span class="badge tag t2">upgrade the SDK</span>
+            <span class="badge tag t3">answer the review on #212</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Go do something else -->
+      <section class="scene scroll-scene away" id="away">
+        <div class="scene-copy">
+          <h2>Go do something else.</h2>
+          <p>
+            A trap doesn't fish faster for being watched, and an agent doesn't code faster either. A daemon does the watching, with no model
+            in the loop.
+          </p>
+        </div>
+        <div class="scene-body">
+          <div
+            class="stage"
+            role="img"
+            aria-label="The same sea later in the day. The boat has gone. Three buoys sit on still water as the light turns to dusk."
+          >
+            <div class="sky day"></div>
+            <div class="sky dusk"></div>
+            <div class="sun"></div>
+            <p class="clock"><span class="t1">2:10 pm</span><span class="t2">4:45 pm</span></p>
+            <div class="sea">
+              <svg class="wave" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+            </div>
+            <div class="at-water float f1">
+              <div class="buoy-art"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+            </div>
+            <div class="at-water float f2">
+              <div class="buoy-art"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+            </div>
+            <div class="at-water float f3">
+              <div class="buoy-art"><img data-art="buoy-body" data-sizes="(min-width: 720px) 60px, 30px" alt="" /></div>
+            </div>
+            <div class="sea front">
+              <svg class="wave" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. The buoy tells you -->
+      <section class="scene buoys" id="buoys">
+        <div class="scene-copy">
+          <h2>The buoy tells you.</h2>
+          <p>
+            Bobbing: it is working. Flag up: it needs a decision. Pulled under: a catch. Gone still: something stopped, and the helm already
+            knows.
+          </p>
+        </div>
+        <div class="tiles">
+          <figure class="tile working">
+            <div class="stage" role="img" aria-label="A buoy bobbing gently.">
+              <div class="sea">
+                <svg class="wave drift slow" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+              </div>
+              <div class="at-water tile-buoy">
+                <div class="buoy-art">
+                  <div class="bob"><img data-art="buoy-body" data-sizes="(min-width: 720px) 90px, 64px" alt="" /></div>
+                </div>
+              </div>
+              <div class="sea front">
+                <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+              </div>
+            </div>
+            <figcaption>
+              <b>Bobbing</b><span><code>working</code>. Nothing is needed.</span>
+            </figcaption>
+          </figure>
+          <figure class="tile asking">
+            <div class="stage" role="img" aria-label="A buoy with its white flag up. A card beside it asks: Redis or memory?">
+              <div class="sea">
+                <svg class="wave drift slow" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+              </div>
+              <div class="at-water tile-buoy">
+                <div class="buoy-art">
+                  <img class="layer flag" data-art="buoy-flag" data-sizes="(min-width: 720px) 90px, 64px" alt="" />
+                  <img data-art="buoy-body" data-sizes="(min-width: 720px) 90px, 64px" alt="" />
+                </div>
+              </div>
+              <div class="sea front">
+                <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+              </div>
+              <div class="card note ask"><b>Redis or memory?</b></div>
+            </div>
+            <figcaption>
+              <b>Flag up</b><span><code>needs-decision</code> or <code>blocked</code>. The question becomes a card.</span>
+            </figcaption>
+          </figure>
+          <figure class="tile caught">
+            <div class="stage" role="img" aria-label="A buoy pulled under the surface, with ripples. A card reads: catch ready.">
+              <div class="sea">
+                <svg class="wave drift slow" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+              </div>
+              <div class="at-water tile-buoy">
+                <div class="buoy-art">
+                  <div class="under"><img data-art="buoy-body" data-sizes="(min-width: 720px) 90px, 64px" alt="" /></div>
+                </div>
+              </div>
+              <div class="sea front">
+                <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+              </div>
+              <div class="at-water tile-buoy rings">
+                <div class="ripple"><i></i><i></i></div>
+              </div>
+              <div class="card note got"><span class="badge ok">catch ready</span></div>
+            </div>
+            <figcaption>
+              <b>Pulled under</b><span><code>done</code>. A catch is on the line.</span>
+            </figcaption>
+          </figure>
+          <figure class="tile still">
+            <div
+              class="stage"
+              role="img"
+              aria-label="A buoy sitting dead still on flat water. A dotted line runs from it to a note that reads: helm told."
+            >
+              <div class="sea flat"></div>
+              <div class="at-water tile-buoy">
+                <div class="buoy-art"><img data-art="buoy-body" data-sizes="(min-width: 720px) 90px, 64px" alt="" /></div>
+              </div>
+              <div class="sea front flat"></div>
+              <svg class="signal" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M33 24Q44 11 56 13" /></svg>
+              <div class="card note told"><span class="badge warned">helm told</span></div>
+            </div>
+            <figcaption>
+              <b>Gone still</b><span>Stalled, or quiet while it says <code>working</code>. The helm is told.</span>
+            </figcaption>
+          </figure>
+        </div>
+        <p class="fine six">
+          Workers report in six words: working, needs-decision, blocked, paused, done, failed. lobstah accepts no others.
+        </p>
+      </section>
+
+      <!-- 5. Haul up the lobstahs -->
+      <section class="scene scroll-scene haul" id="haul">
+        <div class="scene-copy">
+          <h2>Haul up the lobstahs.</h2>
+          <p>You step in only when a catch is ready. The trap comes up with a pull request, the evidence, and a report.</p>
+        </div>
+        <div class="scene-body split">
+          <div class="stage" role="img" aria-label="The boat's crane hauls a trap up out of the water.">
+            <div class="sea">
+              <svg class="wave drift slow" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+            </div>
+            <div class="at-water boat">
+              <div class="boat-art">
+                <div class="rock">
+                  <img class="layer" data-art="boat-bunting-left" data-sizes="(min-width: 720px) 420px, 240px" alt="" />
+                  <img class="layer" data-art="boat-bunting-right" data-sizes="(min-width: 720px) 420px, 240px" alt="" />
+                  <img class="layer" data-art="boat-crane" data-sizes="(min-width: 720px) 420px, 240px" alt="" />
+                  <div class="layer hoist">
+                    <div class="lift">
+                      <i class="rope"></i><img class="trap" data-art="trap" data-sizes="(min-width: 720px) 120px, 70px" alt="" />
+                    </div>
+                  </div>
+                  <img class="layer" data-art="boat-body" data-sizes="(min-width: 720px) 420px, 240px" alt="" />
+                </div>
+              </div>
+            </div>
+            <div class="sea front">
+              <svg class="wave drift" viewBox="0 0 1200 15" preserveAspectRatio="none"><use href="#wave-fill" /></svg>
+            </div>
+          </div>
+          <div
+            class="haul-cards"
+            role="img"
+            aria-label="Three cards come up with the trap: pull request 212, open, checks 8 of 8; the evidence; and a report."
+          >
+            <div class="card c1">
+              <div class="top"><b>PR #212</b><span class="badge pr-open">open</span></div>
+              <div class="meta">checks 8/8 · no conflicts</div>
+            </div>
+            <div class="card c2">
+              <div class="top"><b>evidence</b></div>
+              <div class="meta">branch · 3 commits · session</div>
+            </div>
+            <div class="card c3">
+              <div class="top"><b>report</b></div>
+              <div class="meta">what changed, what was tested</div>
+            </div>
+            <p class="yours"><span>open the PR</span><span>send it back</span></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- The sections under the story -->
+      <section class="features" id="more">
+        <article class="card feature wide">
+          <h2>Token-efficient supervision</h2>
+          <p>
+            You were promised agents that do the work. Somehow, watching them became the work: which one is stuck, which one is waiting on
+            an answer nobody saw, which one died forty minutes ago.
+          </p>
+          <p>Watching is why you run two agents instead of ten.</p>
+          <p>
+            lobstah does the watching with a daemon, with no model in the loop. It tells a dead worker from a stuck one and recovers each.
+            When an agent asks how the fleet is doing, the answer is one short read in TOON, a compact format built for agents.
+          </p>
+          <p>So the whole fleet fits in one conversation.</p>
+        </article>
+
+        <article class="card feature">
+          <h2>Bring your own harness</h2>
+          <p>
+            lobstah is the boat, not the fisherman. Your agents do the fishing: Claude Code and Codex, signed in with your own accounts.
+          </p>
+          <p>
+            Mix both in one fleet and choose the harness for each job. Move a running job from one to the other with
+            <code>lobstah swap</code>.
+          </p>
+          <p>A session you already have open can sign on as a trap and take work too.</p>
+        </article>
+
+        <article class="card feature">
+          <h2>Three ways to be at the wheel</h2>
+          <p>
+            <b>The lobstah man.</b> One Claude Code or Codex session that you talk to. It writes the briefs, sends out the work, answers the
+            workers, and brings you the catch.
+          </p>
+          <p>
+            <b>The helm.</b> The seat that session holds. One helm for each grounds, a set of your repos, so two sessions never steer the
+            same fleet. A charter says what the helm may decide and what it must ask you.
+          </p>
+          <p>
+            <b>The glass.</b> A live page of the whole fleet. Each question is its own card. Pick an option or write an answer, then send.
+          </p>
+          <p class="dim">Or no session at all: lobstah runs in the background and pings you through any command you choose.</p>
+          <h3>Already run an OpenClaw fleet?</h3>
+          <p>
+            The lobstah plugin gives your fleet's agents four tools: dispatch, status, send and cancel. Operators get a
+            <code>/lobstah</code> chat command that shows status without waking a model.
+          </p>
+          <p>An agent hands the job to lobstah and stays free to talk. The daemon does the supervising.</p>
+        </article>
+
+        <article class="card feature">
+          <h2>Works with what you have</h2>
+          <p>
+            <b>GitHub.</b> Workers open pull requests. lobstah watches each one: checks, reviews, conflicts. It repairs a failed check or a
+            conflict by itself, at most twice per commit. It tells you when a whole stack is ready, bottom first.
+          </p>
+          <p>
+            <b>Linear and GitHub issues.</b> Assign an issue and it becomes a job. Status comes back as comments. Reply on the issue and
+            your reply reaches the running agent. No webhooks and no tunnel: lobstah polls.
+          </p>
+          <p>
+            <b>CI and anything else.</b> <code>lobstah watch</code> stands watch on anything with a command line. Its events wake you like a
+            job would.
+          </p>
+          <p><b>Your review tool.</b> PR links open where you review: GitHub, Graphite, Linear, or your own URL.</p>
+          <p><b>Your pager.</b> One config line sends pings to ntfy, Slack, or anything a shell command can reach.</p>
+        </article>
+
+        <!-- wharf:start (held out of the page until the wharf ships; `--wharf` includes it) -->
+        <article class="card feature" id="wharf">
+          <h2>The wharf: check the water from your phone</h2>
+          <p>The glass, hosted. Sign in with GitHub, add it to your home screen, and answer a card from anywhere.</p>
+          <p>Your code stays on your boat. The wharf holds briefs, messages, reports and the evidence you choose to upload.</p>
+          <p>Each machine signs in as a named boat. You can revoke a boat at any time.</p>
+        </article>
+        <!-- wharf:end -->
+
+        <article class="card feature">
+          <h2>You are only called when a lobster is caught</h2>
+          <p>lobstah brings you in for two things: a catch, or a question it cannot settle without you.</p>
+          <p><b>A catch.</b> A pull request, the evidence and a report, ready to read.</p>
+          <p><b>A question.</b> One card, with the choices on it. It keeps asking until you answer.</p>
+          <p>
+            <b>Nothing else.</b> A dead worker is restarted. A stuck one is stopped and nudged. A trap that goes quiet while it says
+            “working” wakes the helm, not you.
+          </p>
+          <p>Your agents just bring home the lobstahs.</p>
+        </article>
+
+        <article class="card feature wide start">
+          <h2>Three commands to the first catch</h2>
+          <pre><code>npm i -g lobstah
+lobstah init --scan ~/src
+lobstah dispatch --repo myapp --brief ./brief.md</code></pre>
+          <p>Then go do something else.</p>
+          <div class="install">
+            <code>npm i -g lobstah</code>
+            <button class="btn" type="button" data-copy="npm i -g lobstah">copy</button>
+          </div>
+          <p><a class="starcall" href="https://github.com/aequitas-labs/lobstah">★ Star on GitHub</a></p>
+          <p class="fine">On macOS, a desktop lobster can walk each question to you: <code>lobstah pet install</code>.</p>
+        </article>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        <a href="https://github.com/aequitas-labs/lobstah/blob/main/LICENSE">MIT</a> ·
+        <a href="https://github.com/aequitas-labs/lobstah">GitHub</a> · <a href="https://www.npmjs.com/package/lobstah">npm</a> ·
+        <a href="https://github.com/aequitas-labs/lobstah#readme">docs</a> ·
+        <a href="https://github.com/aequitas-labs/lobstah/blob/main/PRIVACY.md">privacy</a>
+      </p>
+      <p class="fine">lobstah shares an anonymous daily count of catches. One command turns it off.</p>
+      <p class="fine">
+        <button class="btn" type="button" id="still" aria-pressed="false">still water</button> stops every animation on this page.
+      </p>
+    </footer>
+
+    <!-- The lobster strip: the glass's own lobster, each with its star. The star call lives here. -->
+    <div class="strip">
+      <span class="lob l1" aria-hidden="true"
+        ><span class="pet-art"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span
+      ></span>
+      <span class="lob l2" aria-hidden="true"
+        ><span class="pet-art"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span
+      ></span>
+      <span class="lob l3" aria-hidden="true"
+        ><span class="pet-art"><span class="sprite"></span><img class="star" src="assets/star.png" alt="" /></span
+      ></span>
+      <a class="starcall" href="https://github.com/aequitas-labs/lobstah">★ Star on GitHub</a>
+    </div>
+
+    <!-- scripts/build-site.mjs bundles src/main.ts and inlines it here -->
+    <script src="./src/main.ts"></script>
+  </body>
+</html>
