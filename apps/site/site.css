@@ -1081,12 +1081,6 @@ footer p {
   left: 76%;
 }
 
-/* On a phone the hero is tall: the control keeps its tabs and its line, and the sun stays in view. */
-@media (max-width: 719px) {
-  .hero .handoff .tip {
-    display: none;
-  }
-}
 @media (min-width: 720px) {
   .pin {
     --wl: 62%;
