@@ -28,10 +28,12 @@
   --rope: #c9a56b;
   --rope-edge: #6b3f22;
   --page: 1080px;
+  /* the height of the bar at the top */
+  --bar: 44px;
 }
 body {
   font: 16px/1.55 var(--font-mono);
-  padding: var(--page-pad-block) var(--space-4) 0;
+  padding: 0 var(--space-4);
   display: block;
   min-height: 0;
   overflow-x: clip;
@@ -49,7 +51,6 @@ body {
   white-space: nowrap;
 }
 main,
-.top,
 footer,
 .beats .cap {
   max-width: var(--page);
@@ -109,17 +110,88 @@ p {
 .lead {
   font-size: 17px;
 }
+
+/*
+ * The bar at the top. At first it lies over the top of the scene with no
+ * ground of its own and scrolls away with the hero. Once the hero has gone
+ * the script fixes it to the screen (.stuck) on a dark see-through ground.
+ * It is out of the page's flow both ways, so nothing moves when it changes.
+ */
 .top {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 20;
+  padding-inline: var(--space-4);
+}
+.top .bar {
+  max-width: var(--page);
+  height: var(--bar);
+  margin-inline: auto;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: nowrap;
 }
-.top .mark {
-  border-radius: 8px;
+.top .brand,
+.top .acts,
+.top .gh,
+.top .count {
+  display: flex;
+  align-items: center;
 }
-.top .name {
+.top .brand {
+  gap: 7px;
+  color: var(--dim);
+  font-size: 14px;
   font-weight: bold;
+}
+.top .acts {
+  gap: 12px;
+}
+.top .gh {
+  gap: 6px;
+  color: var(--dim);
+  font-size: 13px;
+  text-decoration: none;
+}
+.top .gh:hover {
+  color: var(--fg);
+}
+.top .ico {
+  width: 16px;
+  height: 16px;
+}
+.top .count {
+  gap: 3px;
+}
+/* a small star before the count, drawn here */
+.top .count::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  background: currentColor;
+  clip-path: polygon(50% 0, 62% 35%, 98% 35%, 68% 57%, 79% 92%, 50% 71%, 21% 92%, 32% 57%, 2% 35%, 38% 35%);
+}
+.top [hidden] {
+  display: none;
+}
+.top.stuck {
+  position: fixed;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+/* On a narrow phone the mark stands for the word, and on the narrowest the count goes too. */
+@media (max-width: 400px) {
+  .top .gh-name {
+    display: none;
+  }
+}
+@media (max-width: 340px) {
+  .top .count {
+    display: none;
+  }
 }
 
 /* The glass's card, as a page element: not clickable. */
@@ -691,7 +763,8 @@ p {
 /* ---- captions: fixed in the sky, one at a time, clear of every buoy ---- */
 .caps {
   position: absolute;
-  inset: 9svh var(--space-4) auto;
+  /* under the bar, however short the screen */
+  inset: max(9svh, var(--bar) + 12px) var(--space-4) auto;
   z-index: 7;
   max-width: var(--page);
   margin-inline: auto;
@@ -731,7 +804,8 @@ p {
   min-height: var(--beat);
 }
 .beat.hero {
-  padding-top: 8px;
+  /* clear of the bar */
+  padding-top: calc(var(--bar) + 8px);
 }
 .beat.last {
   min-height: 100svh;
@@ -750,6 +824,8 @@ p {
 /* ================= sections under the story ================= */
 .sec {
   margin-top: 72px;
+  /* a jump to a section lands clear of the bar */
+  scroll-margin-top: calc(var(--bar) + 12px);
 }
 .flow {
   list-style: none;
@@ -1225,6 +1301,12 @@ footer p {
     opacity: 0;
   }
 }
+@keyframes bar-in {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
 @keyframes drift-row {
   to {
     transform: translateX(calc(var(--shift) * -1));
@@ -1269,6 +1351,10 @@ footer p {
 }
 .motion .pet-art.small .sprite {
   animation: step-small 0.5s steps(4) infinite;
+}
+/* The bar slides in when it is fixed to the screen; with motion off it is simply there. */
+.motion .top.stuck {
+  animation: bar-in 0.25s ease-out;
 }
 /* The integrations drift by, and wait while a pointer or the keyboard is on them. */
 .motion .scroller.auto .row {

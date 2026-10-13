@@ -4,6 +4,7 @@
 
 const root = document.documentElement;
 const STILL_KEY = 'lobstah-still';
+const REPO = 'aequitas-labs/lobstah';
 
 /** Copy what the install control is showing: the prompt or commands of its open tab. */
 function copyButtons(): void {
@@ -88,6 +89,61 @@ function driftRow(): void {
   }
 }
 
+/** 1234 stars read "1.2k". */
+function short(n: number): string {
+  return n < 1000 ? String(n) : `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+}
+
+/**
+ * Show the repo's star count beside the GitHub mark. The number comes from
+ * GitHub when the page opens; if GitHub does not answer, the link stands
+ * without one.
+ */
+async function starCount(): Promise<void> {
+  const link = document.querySelector<HTMLElement>('.top .gh');
+  const count = link?.querySelector<HTMLElement>('.count');
+  if (!link || !count) return;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}`, { headers: { Accept: 'application/vnd.github+json' } });
+    if (!res.ok) return;
+    const stars: unknown = (await res.json()).stargazers_count;
+    if (typeof stars !== 'number') return;
+    count.textContent = short(stars);
+    count.hidden = false;
+    link.setAttribute('aria-label', `lobstah on GitHub, ${stars} ${stars === 1 ? 'star' : 'stars'}`);
+  } catch {
+    // Offline, blocked or rate limited: no number.
+  }
+}
+
+/**
+ * Fix the bar to the screen once the hero has scrolled away, and give it a
+ * button that copies the first tab's install line. While the hero is in view
+ * the install control is right there, so the bar has no button.
+ */
+function stickBar(): void {
+  const bar = document.querySelector<HTMLElement>('.top');
+  const hero = document.querySelector('#hero .cap');
+  const btn = document.querySelector<HTMLButtonElement>('#copy-install');
+  if (!bar || !hero || !btn) return;
+  new IntersectionObserver(([e]) => {
+    const gone = !e.isIntersecting && e.boundingClientRect.bottom <= 0;
+    bar.classList.toggle('stuck', gone);
+    btn.hidden = !gone;
+  }).observe(hero);
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(document.querySelector('#hero .panel')?.textContent ?? '');
+    } catch {
+      // No clipboard permission: go to the install control instead.
+      location.hash = 'start';
+      return;
+    }
+    btn.textContent = 'copied';
+    setTimeout(() => (btn.textContent = 'copy install'), 1500);
+  });
+}
+
 /** "Still water": the same still page that reduced motion gives, by hand, remembered in this browser. */
 function stillSwitch(): void {
   const btn = document.querySelector<HTMLButtonElement>('#still');
@@ -112,9 +168,11 @@ copyButtons();
 lobsterPaces();
 driftRow();
 stillSwitch();
+void starCount();
 if ('IntersectionObserver' in window) {
   const story = document.querySelector<HTMLElement>('.story');
   if (story) followBeats(story);
   pauseOffScreen();
+  stickBar();
 }
 document.addEventListener('visibilitychange', () => root.classList.toggle('hidden', document.hidden));

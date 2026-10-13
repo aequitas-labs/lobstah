@@ -39,9 +39,17 @@
       </defs>
     </svg>
 
+    <!-- The bar: see-through at the top of the page; the script fixes it to the screen, with the install button, once the hero has gone. -->
     <header class="top">
-      <img class="mark" src="assets/icon-192.png" width="36" height="36" alt="" />
-      <span class="name">lobstah</span>
+      <div class="bar">
+        <span class="brand"><img class="mark" src="assets/favicon.png" width="22" height="22" alt="" />lobstah</span>
+        <div class="acts">
+          <a class="gh" href="https://github.com/aequitas-labs/lobstah" aria-label="lobstah on GitHub"
+            ><!-- icon github --><span class="gh-name">GitHub</span><span class="count" hidden></span
+          ></a>
+          <button class="btn" type="button" id="copy-install" hidden>copy install</button>
+        </div>
+      </div>
     </header>
 
     <!--
