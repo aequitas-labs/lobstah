@@ -6,6 +6,7 @@ import { backendScopes, eachBackend } from './backend-scope.js';
 import type { Config } from './config.js';
 import type { DispatchView } from './backend-model.js';
 import { WharfBackend } from './wharf-backend.js';
+import { wharfCredential } from './wharf-credentials.js';
 export interface HostedView { grounds: string; wharf: string; url: string; account: string; observedAt: string; checkedAt?: string; dispatches: DispatchView[]; unavailable?: string }
 function cachePath() { return path.join(lobstahHome(), 'hosted-snapshots.json'); }
 export function readHostedViews(config: Config, now = Date.now()): HostedView[] {
@@ -20,7 +21,7 @@ export function readHostedViews(config: Config, now = Date.now()): HostedView[] 
 }
 export function wharfFor(scope: BackendScope, options: { session?: string; worker?: string; fetch?: typeof fetch } = {}): WharfBackend {
   if (scope.kind !== 'wharf') throw new Error('this grounds uses local files');
-  return new WharfBackend(scope.location, process.env[scope.location.tokenEnv] ?? '', options);
+  return new WharfBackend(scope.location, wharfCredential(scope), options);
 }
 /** The local daemon's existing cadence drives independent remote snapshots. */
 export async function refreshHostedViews(config: Config): Promise<void> {
@@ -36,5 +37,5 @@ export async function refreshHostedViews(config: Config): Promise<void> {
 export function agentEnvironment(config: Config, scope: BackendScope, token: string, base = process.env): NodeJS.ProcessEnv {
   const env = { ...base }; for (const s of Object.values(config.wharves ?? {})) delete env[s.tokenEnv];
   if (scope.kind !== 'wharf' || !token.startsWith(`d.${scope.location.account}.`)) throw new Error('dispatch token required');
-  env[scope.location.tokenEnv] = token; env.LOBSTAH_GROUNDS = scope.grounds; return env;
+  env[scope.location.tokenEnv] = token; env.LOBSTAH_GROUNDS = scope.grounds; env.LOBSTAH_WHARF_AGENT = '1'; return env;
 }

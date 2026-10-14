@@ -1,10 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { backendScope, backendScopes, BackendError, wharfFor, refreshHostedViews, isVerb, waitingFields, toonKV } from '@lobstah/core';
+import { backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, isVerb, waitingFields, toonKV } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
 import { wharfRepoIdentity } from './wharf-repo.js';
+import { wharfLogin } from './wharf-login.js';
 
 export function commandScope(config: Config, grounds?: string, repo?: string): BackendScope | undefined {
   if (grounds) return backendScope(config, grounds);
@@ -35,8 +36,13 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     return false;
   }
   if (scope.kind === 'local') {
+    if (cmd === 'wharf' && ['login', 'logout'].includes(pos[0] ?? '')) throw new Error('login requires configured wharf grounds');
     if (cmd === 'dispatch' && opts.opt('--boat')) throw new Error('--boat addressing requires wharf grounds; nothing was queued locally');
     return false;
+  }
+  if (cmd === 'wharf' && ['login', 'logout'].includes(pos[0] ?? '')) {
+    if (pos.length !== 1) throw new Error('login/logout acts only as this boat; no positional boat argument');
+    await wharfLogin(scope, pos[0]!, opts); return true;
   }
   const session = resolveSessionId({ flag: opts.opt('--session') })?.id;
   const worker = opts.opt('--worker');
@@ -50,7 +56,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     const boats = await backend.request('boats');
     if (!Array.isArray(boats)) throw new Error('invalid boat list');
     const found = boats.find((b) => b && typeof b === 'object' && b.name === name.toLowerCase());
-    if (!found || typeof found.id !== 'string') throw new Error(`boat ${name} not found; issue its credential with wharf issue-boat`);
+    if (!found || typeof found.id !== 'string') throw new Error(`boat ${name} not found; enroll it with wharf login on that boat`);
     return found.id;
   };
   switch (cmd) {
@@ -148,7 +154,7 @@ export async function wharfHook(cmd: string | undefined, args: string[]): Promis
   const scope = commandScope(loadConfig(), process.env.LOBSTAH_GROUNDS);
   if (scope?.kind !== 'wharf') return false;
   try {
-    const token = process.env[scope.location.tokenEnv] ?? '';
+    const token = wharfCredential(scope);
     if (args[0] === 'post-tool-use' || (cmd === 'soak' && args[0] === 'beat')) {
       const pieces = token.split('.');
       if (pieces[0] === 'd' && pieces[1] === scope.location.account && pieces[2]) await wharfFor(scope).heartbeat(pieces[2], randomUUID());

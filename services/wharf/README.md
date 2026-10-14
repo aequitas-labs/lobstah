@@ -4,8 +4,9 @@ An optional coordination authority, separate from telemetry. One person's accoun
 is one SQLite Durable Object; R2 holds evidence files. Briefs, messages, reports
 and explicitly uploaded evidence go to the chosen wharf. Checkouts, harness
 credentials and local env are not automatically uploaded. Local files remain the default.
-This service has not been deployed. There is no domain, sign-in UI, OAuth, billing,
-second runtime, socket, alarm or background timer.
+This service has not been deployed. GitHub admission and boat approval APIs are
+implemented; the hosted glass UI follows in the next slice. There is no domain,
+billing, second runtime, socket, alarm or background timer.
 
 ## Local development and tests
 
@@ -13,26 +14,71 @@ Use Node 24 and pnpm. `pnpm --filter @lobstah/wharf test` runs in the
 Workers runtime with local SQLite and R2. Test credentials are test-only fixtures.
 For local HTTP development, supply secrets in ignored `services/wharf/.dev.vars`
 and run `pnpm --filter @lobstah/wharf exec wrangler dev --local`.
-Never use real PATs in tests or pass secrets in process arguments.
+Never use real credentials in tests or pass secrets in process arguments.
 
 ## Settings for a maintainer's eventual deployment
 
 Choose the service address outside the repository. Provision an R2 bucket, replace
 the placeholder bucket name in wrangler.jsonc, and use the `v1` SQLite migration.
+Provision a separate D1 database for authentication, replace its placeholder ID,
+and apply `migrations/0001_auth.sql`. Coordination still uses the account's SQLite
+Durable Object; core does not import this service or Better Auth.
 There are no real Cloudflare account ids or resource ids in the repository.
 
-Two secrets are required:
+Three secrets are required:
 
-- `HELM_PAT_HASHES`: JSON mapping each account identifier to an array of SHA-256
-  hashes of independently generated, high-entropy personal access tokens. Give the
-  plaintext PAT to that person's helm through a secure channel. The operator
-  provisions/removes hashes; no public registration API exists in phase 0.
+- `AUTH_SECRET`: a high-entropy Better Auth signing/encryption secret (at least
+  32 characters). GitHub provider tokens are encrypted at rest in D1.
+- `GITHUB_CLIENT_SECRET`: the GitHub OAuth application's secret. Configure its
+  callback to `<GLASS_ORIGIN>/api/auth/callback/github`.
 - `TOKEN_SECRET`: a separate high-entropy signing secret for retryable dispatch
   capabilities. Rotating it invalidates reconstruction of an old claim response;
   existing token hashes remain valid until their leases expire.
 
 Keep secrets outside git and logs. Use Cloudflare's secret settings at deployment;
 this build requires no login, resource creation or deployment.
+
+Set `GLASS_ORIGIN` and `API_ORIGIN` to distinct exact HTTPS origins (loopback HTTP
+is allowed for local tests), `GITHUB_CLIENT_ID` to the OAuth application's public
+ID, and `GITHUB_ALLOWLIST` to a JSON array of stable numeric GitHub account IDs,
+represented as strings. Admission never matches a mutable login or email.
+Non-invited sign-ins are refused before storing/linking a person; every existing
+person session and device redemption rechecks admission. Each random auth user
+ID owns exactly one account. There is no team or account selector in authentication.
+
+Better Auth is pinned to **1.7.6**, published 2026-09-24, more than two weeks before
+this choice. Its GitHub provider, native D1 store and device-code state machine
+are tested in the Workers runtime with a stubbed provider, including the committed
+migration. The custom grant uses the library's one-time consumption/expiry/polling
+checks but issues only a boat capability, never a person session, to the CLI.
+Browser cookies are secure, HttpOnly and host-only on the glass. The API rejects
+cookies, takes bearer tokens, refuses redirects and accepts exactly the configured
+glass origin. No unrelated Better Auth mutation endpoints are exposed.
+The configured plugins are bearer and device authorization only: no Magic Link
+or OAuth Proxy. The September 30 advisories for 1.7.6 require those absent
+plugins; their routes are also refused by the HTTP allowlist. The device client/
+scope approval fix predates this pin. Recheck upstream advisories before deployment;
+this narrow configuration is not a claim that every 1.7.6 plugin is safe.
+
+`lobstah wharf login --grounds <grounds> [--name <boat>] [--helm|--work-only]`
+prints a browser approval URL/code and stores only that wharf's boat credential
+under `~/.lobstah/credentials/`, with owner-only file permissions where supported.
+Normal login requests work plus read; the browser approves as requested, lowers
+access, or refuses. The default boat name is the cleaned short system name (or
+hostname), never a random name. `--name` overrides it; re-login keeps the existing
+name unless overridden. Account-local collisions gain a numeric suffix shown
+before approval. A collision arising after approval refuses redemption rather
+than silently changing the approved name. Boat names stay within the wharf account
+and are not telemetry. Re-login proves the current boat credential before changing
+its name/access and preserves its stable ID; a fresh request cannot steal an
+existing name. No separate enrol command, person token store or admin request.
+`login --credential-file <file>` (or `-` for stdin) imports an existing boat token
+after checking it; it does not change access. `wharf logout` removes the local
+credential only; invalidate it with revoke on the signed-in boat list. Explicit
+token environment variables still take precedence; unset a legacy variable to
+use the saved login. Job subprocesses get only their dispatch token and do not
+fall back to stored boats. The glass UI/approval page follows next; these APIs
+are currently exercised by local tests.
 
 Limits are configurable non-secret vars: 120 authenticated requests/minute/account,
 10,000 stored rows, 100 MiB account storage, and 25 MiB/file. Limits are abuse caps,
@@ -44,8 +90,8 @@ must retain results and must not infer success or claim locally during an outage
 
 Person credentials carry the `admin` steering layer, never `work`: boats fish,
 people steer and administer. Worker sign-on, claim and renew refuse a person
-credential with an enrolment instruction. The sign-in slice will replace the
-temporary operator-provisioned PATs, not expand their work authority.
+credential with an enrolment instruction. GitHub-backed browser sessions replace
+the temporary operator-provisioned PATs without expanding their work authority.
 
 Boat credentials carry a steering layer (`read < helm < admin`) and independent
 `work` permission, chosen on issue or rotation:
@@ -57,9 +103,10 @@ Boat credentials carry a steering layer (`read < helm < admin`) and independent
 | helm | Read plus dispatch, message, cancel and exclusive helm lease operations |
 | admin | Helm plus approved boat enrollment, revoke boats, delete account |
 
-Omission defaults to `work` plus `read`. This interim slice's `POST boats` accepts
-`permissions`; the sign-in slice replaces that operator route with approved login.
-An `admin` grant additionally requires `confirmAdmin: true`. The signed-in glass
+Omission defaults to `work` plus `read`. The public operator `POST boats` route
+is removed; only the approved device grant drives the private issuer.
+An `admin` grant requires explicit confirmation in the model and is never requested
+by CLI login. The signed-in glass
 lists boats and permits revocation only, plus confirmed account deletion on that
 same page. Boat name and access change only through login on that boat, approved
 as requested, with less access, or refused. There are no grant/rename/edit controls
@@ -91,8 +138,8 @@ administration requires `admin`. A different live helm needs explicit takeover.
 
 | Scope | Route | Operation |
 | --- | --- | --- |
-| Helm PAT | POST helm/take, helm/renew, helm/release | Exclusive, fenced helm session |
-| Helm PAT | POST/GET boats; POST boats/:id/revoke | Issue once, list metadata, revoke |
+| Person/helm boat | POST helm/take, helm/renew, helm/release | Exclusive, fenced helm session |
+| Person admin | GET boats; POST boats/:id/revoke | List metadata, revoke |
 | Boat | POST workers/sign-on, workers/renew | Bind a logical worker to this boat |
 | Boat | POST claims | Atomically claim eligible dispatch; receive agent token |
 | Helm | POST/GET dispatches; GET dispatches/:id | Enqueue/follow-up, bounded list/read |
@@ -103,14 +150,14 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Agent | GET dispatches/:id/messages; POST dispatches/:id/messages/:message/receipt | Read without side effects, then explicitly receipt |
 | Agent | POST dispatches/:id/files | Bounded binary upload; X-File-Name header |
 | Helm/agent | GET dispatches/:id/files/:file | Authorized download, attachment and nosniff |
-| Helm PAT | DELETE account root | Delete rows/files; persistent tombstone prevents recreation |
+| Person admin | DELETE account root | Delete rows/files and auth identity; same-key retry receipt and tombstone |
 | Helm | GET events?after=:cursor | Up to 100 wharf-ordered events; returned opaque cursor |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
-issuance response is retried for metadata only; revoke/reissue to receive a new
+issuance response is retried for metadata only; approve another login to receive a new
 secret. Work-only boats cannot read dispatch content, enqueue, cancel, manage
 credentials, take helm or delete accounts. Coding agents receive only the token returned by a
-claim, not their boat credential or the PAT. Agent tokens cannot claim.
+claim, not their boat credential or a person session. Agent tokens cannot claim.
 
 Claims last 90 seconds and carry a monotonically increasing dispatch epoch.
 Renew before expiry. Revocation rejects the next boat request and prevents
@@ -133,9 +180,10 @@ Reading messages does not mark them received. `done` refuses unreceived messages
 
 Account deletion serialises with uploads, rejects new requests, deletes every
 account-prefixed R2 object and clears coordination rows. A retry resumes cleanup
-after an R2 error. Only the hashed deletion-key tombstone remains to prevent a
-still-provisioned PAT from recreating deleted data. The operator should remove
-that account's PAT hashes. There is no cross-account cleanup or automatic timer.
+after an R2 error. Only a minimal hashed deletion-key receipt/tombstone remains
+for the same retry; the person's sessions, GitHub identity and pending device
+codes are removed too. Old boat and dispatch credentials cannot recreate that
+account. There is no cross-account cleanup or automatic timer.
 
 ## Opt-in CLI routing
 
@@ -160,11 +208,11 @@ Remote HTTPS is required except for loopback development. The chosen grounds'
 repos must also exist in the normal repo configuration. Multiple wharves can be
 used simultaneously; no command silently fails over to local state.
 
-With the PAT in the configured environment variable, take the helm using
-`lobstah man helm --grounds away --session <id>`, then dispatch/send/cancel with
-the same grounds/session. `lobstah wharf issue-boat <name> --grounds away`
-issues the trusted launcher's one-time credential. On that boat, set its
-credential (not the PAT) in the wharf's token environment variable and use
+On the boat, use `lobstah wharf login --grounds away --helm` and approve in the
+signed-in browser (or import an existing boat credential from a file). Take the
+helm using `lobstah man helm --grounds away --session <id>`, then dispatch/send/
+cancel with the same grounds/session. To fish instead, log in with work access
+and use
 `lobstah soak --grounds away --worker <id> --repo remote-repo --wait`.
 The claimed brief includes the epoch, expiry and dispatch capability.
 
@@ -210,7 +258,7 @@ background timer or connection.
 
 Boat IDs are account-scoped identities, not credential IDs. Names use letters,
 digits, `-` or `_`, at most 64 characters, normalized to lowercase and unique
-per account. The sign-in slice's `wharf login` creates a boat or rotates its current
+per account. `wharf login` creates a boat or rotates its current
 credential after approval: its ID, worker repos and addressed work remain intact, while the
 previous credential fails on its next request. Retries reveal no credential.
 
