@@ -25,6 +25,17 @@ stays until the decision is answered or withdrawn.
 Clicking a report pet opens the glass at the report. Opening a report in
 the glass acknowledges it.
 
+An item of a grounds on a wharf (`wharf = "<name>"` in `[grounds.*]`), whether
+a job's question or landing or a decision or report filed there, opens
+the wharf's hosted glass at that item instead, in a new tab: the wharf keeps
+that grounds' state and helm seat, so this boat has no helm session or local
+glass page for it. The item itself carries the link (`glass` in
+`lobstah attention --json`); no setting picks between the two glasses. A PR pet
+still opens its PR. Its acknowledgement is recorded on the wharf, not in a
+local file, so the hosted glass and other boats show it; it cannot be removed.
+Until the wharf has named its glass, the click is the
+local one above. **Open spyglass** always opens the local glass.
+
 A report or decision click (and **Open spyglass**) first uses a glass that
 is already open. The pet runs `lobstah glass show '<#hash>' --json`; when a
 glass page reported in the last three minutes, that page moves to the item

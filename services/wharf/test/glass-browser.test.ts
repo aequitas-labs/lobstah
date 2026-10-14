@@ -60,6 +60,17 @@ it('requires its cookie, not an API bearer, and derives the account rather than 
   expect((await browser('accounts/b/dispatches')).status).toBe(404);
   expect((await SELF.fetch(`https://state.test/v1/accounts/${account}/dispatches`, { headers: { Cookie: cookie } })).status).toBe(401);
 });
+it('accepts cookie-scoped wake hints without a helm lease and fences expired sessions', async () => {
+  const response = await browser('wake', undefined, 'GET', { Upgrade: 'websocket' }); expect(response.status).toBe(101);
+  const socket = response.webSocket!; socket.accept();
+  const closed = new Promise((resolve) => socket.addEventListener('close', resolve, { once: true }));
+  const previous = await env.AUTH_DB.prepare('SELECT expiresAt FROM session WHERE token=?').bind(token).first<{ expiresAt: number }>();
+  await env.AUTH_DB.prepare('UPDATE session SET expiresAt=0 WHERE token=?').bind(token).run();
+  // A private fixture emits an account event after expiry: no content is delivered.
+  await env.ACCOUNTS.getByName(account).handle(JSON.stringify({ account, helm: true, personId: account, token, path: 'helm/take', method: 'POST', body: { session: 'fixture' }, key: 'expired-wake' }));
+  await closed; expect(socket.readyState).not.toBe(WebSocket.OPEN);
+  await env.AUTH_DB.prepare('UPDATE session SET expiresAt=? WHERE token=?').bind(previous!.expiresAt, token).run();
+});
 it('rejects cross-origin or missing-origin writes, malformed and oversized bodies', async () => {
   await job();
   const body = { id: 'message', kind: 'message', dispatch: 'job', text: 'hello' };
@@ -91,6 +102,64 @@ it('answers a published card and downloads only the document’s own files with 
   expect(download.headers.get('x-content-type-options')).toBe('nosniff'); expect(download.headers.get('content-disposition')).toBe('attachment'); expect(new TextDecoder().decode(await download.arrayBuffer())).toBe('<script>literal</script>');
   expect((await browser(`documents/another/files/${file.id}`)).status).toBe(404);
   expect((await browser(`documents/card/files/${file.id}/extra`)).status).toBe(404);
+});
+it('can be installed: a manifest and star-with-lobster icons, public, with no account data and no service worker', async () => {
+  const page = await SELF.fetch('https://glass.test/'); const content = await page.text();
+  expect(content).toContain('<link rel="manifest" href="/manifest.webmanifest">'); expect(content).toContain('<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">');
+  expect(page.headers.get('content-security-policy')).toContain("manifest-src 'self'"); expect(content).not.toContain('serviceWorker');
+  const response = await SELF.fetch('https://glass.test/manifest.webmanifest'); expect(response.status).toBe(200);
+  expect(response.headers.get('content-type')).toBe('application/manifest+json'); expect(response.headers.get('set-cookie')).toBeNull();
+  const manifest = await response.json<{ name: string; start_url: string; scope: string; display: string; icons: { src: string; sizes: string; type: string; purpose: string }[] }>();
+  expect(manifest).toMatchObject({ name: 'lobstah spyglass', start_url: '/', scope: '/', display: 'standalone' });
+  expect(manifest.icons.map((i) => `${i.sizes} ${i.purpose}`)).toEqual(['192x192 any', '512x512 any', '512x512 maskable']);
+  for (const icon of [...manifest.icons, { src: '/icons/apple-touch-icon.png', sizes: '180x180' }, { src: '/icons/favicon.png', sizes: '64x64' }]) {
+    const image = await SELF.fetch('https://glass.test' + icon.src); expect(image.status, icon.src).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/png'); expect(image.headers.get('x-content-type-options')).toBe('nosniff');
+    // A PNG whose header states the size the manifest promises.
+    const bytes = new DataView(await image.arrayBuffer()); expect(bytes.getUint32(0)).toBe(0x89504e47);
+    expect(`${bytes.getUint32(16)}x${bytes.getUint32(20)}`).toBe(icon.sizes);
+  }
+  for (const path of ['/icons/missing.png', '/icons/..%2Fglass.css', '/icons/constructor', '/sw.js']) expect((await SELF.fetch('https://glass.test' + path)).status, path).toBe(404);
+  expect((await SELF.fetch('https://state.test/manifest.webmanifest')).status).toBe(404);
+  expect((await SELF.fetch('https://glass.test/manifest.webmanifest', { method: 'POST', headers: { Origin: 'https://glass.test' }, body: '{}' })).status).toBe(404);
+});
+it('names its glass on the API host’s account answers, not without a credential and not on the glass host', async () => {
+  await job();
+  const list = await api('dispatches'); expect(list.status).toBe(200); expect(list.headers.get('x-lobstah-glass')).toBe('https://glass.test');
+  const refused = await SELF.fetch(`https://state.test/v1/accounts/${account}/dispatches`); expect(refused.status).toBe(401); expect(refused.headers.get('x-lobstah-glass')).toBeNull();
+  expect((await browser('dispatches')).headers.get('x-lobstah-glass')).toBeNull();
+});
+it('returns a signed-in person to the item their link named', async () => {
+  const link = 'https://glass.test/#decision/card';
+  const start = await SELF.fetch('https://glass.test/api/auth/sign-in/social', { method: 'POST', headers: { Origin: 'https://glass.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'github', callbackURL: link }) });
+  expect(start.status).toBe(200);
+  const state = new URL((await start.json<{ url: string }>()).url).searchParams.get('state')!;
+  const outbound = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url === 'https://github.com/login/oauth/access_token') return Response.json({ access_token: 'browser-stub', token_type: 'bearer', scope: 'read:user,user:email' });
+    if (url === 'https://api.github.com/user') return Response.json({ id: 123, login: 'browser-test', name: 'Browser Test', email: 'browser@example.test', avatar_url: null });
+    if (url === 'https://api.github.com/user/emails') return Response.json([{ email: 'browser@example.test', primary: true, verified: true }]);
+    throw new Error('unexpected OAuth destination');
+  });
+  try {
+    const callback = await SELF.fetch(`https://glass.test/api/auth/callback/github?code=stub&state=${encodeURIComponent(state)}`, { redirect: 'manual', headers: { Cookie: cookies(start) } });
+    expect(callback.status).toBe(302); expect(callback.headers.get('location')).toBe(link);
+  } finally { outbound.mockRestore(); }
+});
+it('the signed-in page acks a document or a job with its cookie and origin only', async () => {
+  await job();
+  expect((await api('documents', { id: 'card', kind: 'decision', title: 'Choose', options: ['yes'] })).status).toBe(200);
+  expect((await api('documents/card/publish', {})).status).toBe(200);
+  const before = await sql("SELECT value FROM meta WHERE key='helm'");
+  expect((await browser('documents/card/ack', {}, 'POST', { Origin: 'https://evil.test' })).status).toBe(403);
+  expect((await SELF.fetch('https://glass.test/api/glass/documents/card/ack', { method: 'POST', headers: { Origin: 'https://glass.test', 'Idempotency-Key': 'no-cookie' }, body: '{}' })).status).toBe(401);
+  const acked = await browser('documents/card/ack', {}); expect(acked.status).toBe(200);
+  expect(await acked.json()).toMatchObject({ id: 'card', ack: { by: 'person' } });
+  expect((await (await browser('')).json<{ documents: { id: string; ack?: { by: string } }[] }>()).documents[0]).toMatchObject({ id: 'card', ack: { by: 'person' } });
+  // The job route is open to the page too; this job has reported nothing to have seen.
+  expect((await browser('dispatches/job/ack', { at: new Date().toISOString() })).status).toBe(409);
+  expect((await browser('dispatches/job/ack/extra', {})).status).toBe(404);
+  expect(await sql("SELECT value FROM meta WHERE key='helm'")).toEqual(before);
 });
 it('requires a separate in-page deletion confirmation and then removes identity and account data', async () => {
   await job();

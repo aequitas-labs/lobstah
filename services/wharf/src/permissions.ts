@@ -24,6 +24,8 @@ export function requiredPermission(path: string, method: string): Permission | u
   if (path === '_issue' || path === 'boats' && method === 'POST' || path.startsWith('boats/') && method !== 'GET' || !path && method === 'DELETE') return 'admin';
   if (path === '_claim' || path === 'claims' || path.startsWith('workers/')) return 'work';
   if (path.startsWith('helm/') || path === 'dispatches' && method === 'POST' || /^dispatches\/[^/]+\/(cancel|messages)$/.test(path) && method === 'POST') return 'helm';
+  // An acknowledgement is the one write of the read layer: it marks an item seen and changes nothing else.
+  if (/^(documents|dispatches)\/[^/]+\/ack$/.test(path) && method === 'POST') return 'read';
   if (method === 'GET') return 'read';
   return undefined;
 }

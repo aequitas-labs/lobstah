@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, laneDirs, lobstahHome, parsePrRef, prStandingKinds, readEvidence, readPr, readStackEpochs, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
 import type { Lane, PrEvidence } from '@lobstah/core';
+import { hostedItemExists, isHostedKey } from './hosted-view.js';
 
 /**
  * Attention acks: a human has seen an item. Display-only — an ack hides the
@@ -138,6 +139,10 @@ export function ackItemExists(key: string, culling: ReadonlySet<string> = new Se
     return stack ? Object.keys(stack.heads).some((pr) => readPr(pr)?.state === 'OPEN') : readPr(key.slice('stack:'.length))?.state === 'OPEN';
   }
   if (key.startsWith('watch:')) return readWatch(key.slice('watch:'.length)) !== undefined;
+  // An item of a grounds on a wharf lives in the boat's cache of it, never on this disk.
+  if (isHostedKey(key)) {
+    try { return hostedItemExists(key); } catch { return true; }
+  }
   // An answered decision is no longer attention: its ack is orphaned.
   if (key.startsWith('decision:')) return readDecision(key) !== undefined && readDecisionAnswer(key) === undefined;
   if (key.startsWith('report:')) {
