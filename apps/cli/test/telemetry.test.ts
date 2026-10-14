@@ -29,8 +29,8 @@ describe('lobstah telemetry', () => {
     expect(r.stdout).not.toContain(home);
   });
 
-  it('status reports the empty endpoint and each off switch; disable writes the config', () => {
-    expect(run(['status']).stdout).toContain('endpoint: (none — this build sends nothing)');
+  it('status reports the receiver and each off switch; disable writes the config', () => {
+    expect(run(['status']).stdout).toContain('endpoint: https://t.lobstah.dev');
     expect(JSON.parse(run(['status', '--json'], { DO_NOT_TRACK: '1' }).stdout)).toMatchObject({ sharing: false, offBy: ['env: DO_NOT_TRACK'] });
     expect(run(['disable']).stdout).toContain('sharing: off');
     expect(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')).toContain('[telemetry]\nshare = false');

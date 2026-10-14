@@ -32,8 +32,8 @@ import type { CatchUsage, BoatAccess, GroundsBucket, UsageBucket } from './telem
  * - A send is fire and forget: 2 s timeout, no retry, silent on errors.
  */
 
-/** Where the daily payload goes. Empty: this build sends nothing. */
-export const TELEMETRY_ENDPOINT = '';
+/** Receiver origin; daily submissions use /v1/daily. */
+export const TELEMETRY_ENDPOINT = 'https://t.lobstah.dev';
 
 export const TELEMETRY_SCHEMA = 2;
 
@@ -385,10 +385,12 @@ export async function sendTelemetry(opts: {
     if (!state?.noticeShownAt) return 'no-notice';
     const date = utcDate(now);
     if (state.lastSentDate === date) return 'already-sent';
+    const submission = new URL(endpoint);
+    if (submission.pathname === '/') submission.pathname = '/v1/daily';
     const body = serializeTelemetryPayload(buildTelemetryPayload(state.installId, now));
     updateTelemetryState((s) => ({ ...s, lastSentDate: date }));
     sending = true;
-    const res = await (opts.fetch ?? anonymousTelemetryPost)(endpoint, {
+    const res = await (opts.fetch ?? anonymousTelemetryPost)(submission.href, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body,
