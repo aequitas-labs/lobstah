@@ -1,0 +1,30 @@
+// The marketing site on Cloudflare: the built page and the files beside it,
+// served as static assets at lobstah.dev. Not deployed by anything in this
+// repo: see "Deploying" in README.md for the steps a maintainer with
+// Cloudflare access runs. No secret lives in this file.
+{
+  "name": "lobstah-site",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-06",
+
+  // A deploy builds the site first, with its real address, so the canonical
+  // link, the social card, sitemap.xml and llms.txt all carry it.
+  "build": { "command": "node ../../scripts/build-site.mjs --site-url https://lobstah.dev" },
+
+  // The Worker runs before the assets only so that www can be sent to the
+  // bare name; every other request goes straight to the files in dist.
+  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": true },
+
+  // Both names belong to the Worker. Cloudflare makes the DNS records.
+  "routes": [
+    { "pattern": "lobstah.dev", "custom_domain": true },
+    { "pattern": "www.lobstah.dev", "custom_domain": true },
+  ],
+
+  // No request logs, as for the telemetry Worker.
+  "observability": {
+    "enabled": false,
+    "logs": { "enabled": false, "invocation_logs": false },
+  },
+  "logpush": false,
+}

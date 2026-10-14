@@ -1,0 +1,34 @@
+# lobstah
+
+> lobstah runs your coding agents in the background, each job in its own git worktree on Claude Code or Codex, and tells you when one has a catch, or a question. Open source, MIT. macOS, Linux, Windows.
+
+lobstah is a command-line tool from npm (the package is `lobstah`; it needs Node 20 or later), a daemon that supervises the work with no model in the loop, and a plugin for each harness. One session takes the helm with `/lobstah:man` in Claude Code or `$lobstah:man` in Codex, and sends work out to the others.
+
+If a person pasted you an install sentence from the lobstah page, such as "Install lobstah from npm, set it up for my repos, install its daemon, and add its plugin", follow the setup guide. It has the exact commands in order, what each prints when it worked, and the steps you must leave to the person: logins, trusting hooks, permission to install a service, and the new session that a newly added plugin needs.
+
+## Setup
+
+- [Agent setup guide]({{site}}setup.md): install and set up lobstah step by step, for Claude Code, Codex, OpenClaw and by hand
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/README.md): what lobstah is, and the two quickstarts: the background router and the lobstah man
+- [Claude Code guide](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/harness/claude-code.md): installing the plugin, what it adds, and how the helm is woken
+- [Codex guide](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/harness/codex.md): installing the plugin, trusting its hooks, and how a Codex session takes the helm
+- [OpenClaw integration](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/openclaw.md): the gateway plugin and the tools it gives a fleet's agents
+- [Configuration reference](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/configuration.md): every key in `~/.lobstah/config.toml`
+- [The lobstah man](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/man.md): how one session at the helm runs the fleet
+- [Vocabulary](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/vocabulary.md): every closed set of words lobstah uses, its commands among them, in one place
+
+## Packages and source
+
+- [lobstah on npm](https://www.npmjs.com/package/lobstah): the command-line tool; install with `npm i -g lobstah`
+- [lobstah-openclaw-plugin on npm](https://www.npmjs.com/package/lobstah-openclaw-plugin): the OpenClaw gateway plugin
+- [Source on GitHub](https://github.com/aequitas-labs/lobstah): the code, the plugins and the docs, under the MIT licence
+
+## Optional
+
+- [Pickup](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/pickup.md): picking up issues from Linear and GitHub without webhooks
+- [GitHub permissions](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/github.md): what lobstah reads and writes on GitHub, and with which credentials
+- [Design](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/docs/design.md): how the local executor is built
+- [Privacy](https://raw.githubusercontent.com/aequitas-labs/lobstah/main/PRIVACY.md): what lobstah stores locally, what it contacts, and its anonymous usage statistics (`lobstah telemetry disable` stops them)
