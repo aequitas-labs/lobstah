@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { agentEnvironment, appendStatus, backendScope, claimNext, enqueue, ensureLayout, glassOrigin, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, WharfBackend } from '@lobstah/core';
+import { agentEnvironment, appendStatus, backendScope, claimNext, enqueue, ensureLayout, glassOrigin, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, readStatsStore, WharfBackend } from '@lobstah/core';
 import { hostedGlassLink } from '../src/hosted-view.js';
 import { ackItemExists } from '../src/acks.js';
 import { commandScope, wharfCommand } from '../src/wharf-commands.js';
@@ -223,10 +223,10 @@ it('acks of local items stay on this boat for every grounds layout, without a re
 it('reads documents on the existing poll, at most every thirty seconds, and never opens another channel', async () => {
   oneWharf(); const asked = wharf([], [filed()]);
   await refreshHostedViews(loadConfig()); await refreshHostedViews(loadConfig()); await refreshHostedViews(loadConfig());
-  expect(asked).toEqual(['dispatches', 'documents', 'dispatches', 'dispatches']); expect(wharfItems()).toHaveLength(1);
+  expect(asked).toEqual(['_boat', 'dispatches', 'documents', 'dispatches', 'dispatches']); expect(wharfItems()).toHaveLength(1);
   const file = path.join(home, 'hosted-snapshots.json'); const rows = JSON.parse(fs.readFileSync(file, 'utf8'));
   rows[0].documentsAt = new Date(Date.now() - 31_000).toISOString(); fs.writeFileSync(file, JSON.stringify(rows));
-  await refreshHostedViews(loadConfig()); expect(asked.slice(4)).toEqual(['dispatches', 'documents']);
+  await refreshHostedViews(loadConfig()); expect(asked.slice(5)).toEqual(['dispatches', 'documents']);
 });
 it('a wharf without documents still shows its jobs; a boat without read gets nothing; a malformed list is unknown state', async () => {
   oneWharf(); const at = new Date().toISOString();
@@ -237,7 +237,7 @@ it('a wharf without documents still shows its jobs; a boat without read gets not
   // A work-only boat is refused the job list itself, so it never asks for documents.
   fs.rmSync(path.join(home, 'hosted-snapshots.json')); const asked: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string) => { asked.push(url.split('/').at(-1)!); return Response.json({ error: 'read permission required' }, { status: 403 }); }));
-  await refreshHostedViews(loadConfig()); expect(asked).toEqual(['dispatches']); expect(wharfItems()).toEqual([]);
+  await refreshHostedViews(loadConfig()); expect(asked).toEqual(['_boat', 'dispatches']); expect(wharfItems()).toEqual([]);
   fs.rmSync(path.join(home, 'hosted-snapshots.json')); wharf([job], [{ id: '../x', kind: 'decision', title: 't', at, published: true }]); await refreshHostedViews(loadConfig());
   expect(readHostedViews(loadConfig())[0]!.unavailable).toMatch('unknown'); expect(wharfItems()).toEqual([]);
 });
@@ -358,6 +358,15 @@ it('wharf man ask/file upload scoped Markdown and attachments, publish, and retr
   expect(fs.existsSync(path.join(home, 'decisions')) ? fs.readdirSync(path.join(home, 'decisions')) : []).toEqual([]);
 });
 
+it('accepted wharf completion retries update only local catch counters, never telemetry identity or transport', async () => {
+  const fetcher = vi.fn(async () => Response.json({ catch: { withHelm: true, at: new Date().toISOString() } }));
+  vi.stubGlobal('fetch', fetcher); vi.spyOn(console, 'log').mockImplementation(() => {});
+  const opts = flags({ '--grounds': 'away', '--request-key': 'finish' });
+  for (let i = 0; i < 2; i++) await wharfCommand('report', ['job', 'done', 'finished'], opts, loadConfig());
+  expect(readStatsStore()).toMatchObject({ totalCatches: 1, utc: { catches: 1, usage: { withHelm: 1, onWharf: 1 } } });
+  expect(fs.existsSync(path.join(home, 'telemetry.json'))).toBe(false);
+  expect(fetcher.mock.calls).toHaveLength(2);
+});
 it('worker reports upload only their dispatch files and human-request CLI verbs carry the helm lease', async () => {
   const markdown = path.join(home, 'report.md'); fs.writeFileSync(markdown, '# Evidence');
   const fetcher = vi.fn(async (url: string, init: RequestInit) => url.endsWith('/files') ? Response.json({ id: 'markdown-id' }) : Response.json(init.body ? JSON.parse(String(init.body)) : []));

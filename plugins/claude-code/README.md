@@ -72,10 +72,11 @@ Everything else — the manual, the pattern, the trade-offs — lives in
 
 ## Telemetry
 
-This plugin sends nothing itself: its hooks run `lobstah` commands that only
-read and write files under `~/.lobstah`. The `lobstah` CLI it drives shares an
+This plugin sends no telemetry itself: its hooks run `lobstah` commands.
+Local files under `~/.lobstah` are the default; an optional wharf coordinates
+work across boats. The `lobstah` CLI it drives shares an
 anonymous daily count, on by default. Once per UTC day the lobstah daemon (not
-a hook) sends `catches: {today, total}` for the UTC day and all-time, plus up
+a hook) sends schema 2 with `catches.today` and `catches.total` for the UTC day and all-time, plus up
 to 100 `traps: [{name, today, harness, model, config}]` entries with automatically generated names
 and recorded provenance. Custom names (`--name`) and older names with unknown
 provenance stay local; their catches remain in the totals. Names are not
@@ -85,7 +86,16 @@ permission-mode enums. Missing observations stay null; custom or unrecognised
 models become `other`. No arbitrary config is sent. The payload also includes the lobstah version, OS family,
 CPU architecture, the UTC date, and a random install id. It never sends
 repository names or paths, code, briefs, session ids, PR URLs,
-hostnames, or usernames. Nothing is sent until a one-time notice has been shown
+hostnames, or usernames. It also sends bucketed counts of boats and local/wharf
+grounds, fixed choices for wharf use and work/read/helm access, and daily
+catches with/without a live helm and on local/wharf grounds. Unobserved history
+stays unknown. Helm presence distinguishes none, one and several (null when
+unreadable). Boat count is one without a wharf, the largest visible account
+roster otherwise, or null when unreadable. Signing in never links the random
+install id to an account. Telemetry uses its own daily clock and fresh
+connection without wharf credentials or cookies; self-hosted wharves receive
+none. No account/boat identifiers, wharf addresses, grounds names, tokens or
+times finer than the UTC date are sent. Nothing is sent until a one-time notice has been shown
 in a terminal, and no release sends anything yet because the endpoint is not
 set.
 
@@ -94,5 +104,12 @@ set.
 `~/.lobstah/config.toml`, `LOBSTAH_TELEMETRY=0`, `DO_NOT_TRACK=1`, or `CI` set.
 Full details, including retention (90 days for per-install, per-trap and
 worker/config rows; retained daily totals contain counts including harness/model
-aggregates, no names or config), are in
+aggregates and usage-bucket histograms, no names or config), are in
 [PRIVACY.md](https://github.com/aequitas-labs/lobstah/blob/main/PRIVACY.md).
+
+## What a wharf holds
+
+An optional wharf holds your account, boats, dispatches, messages and files.
+Account deletion removes its work and files; a minimal hashed deletion
+receipt remains for safe retries. Operational storage is separate from
+anonymous telemetry; signing in never links an account to the install id.

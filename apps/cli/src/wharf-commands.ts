@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
-  readBrokerAgent, brokerRequest, WharfBackend, type BrokerPoll } from '@lobstah/core';
+  readBrokerAgent, brokerRequest, WharfBackend, recordWharfCatch, type BrokerPoll } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
 import { hostedItem, isHostedKey } from './hosted-view.js';
@@ -140,6 +140,13 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       const r: ReportInput = { verb, ...(pos.length > 2 ? { note: pos.slice(2).join(' ') } : {}), ...waiting,
         evidence: { prUrls: opts.values('--pr'), files } };
       await backend.report(pos[0] ?? '', r, base);
+      if (verb === 'done') {
+        // Only this boat's accepted report counts. Never send telemetry or create its ID here.
+        try {
+          const receipt = createHash('sha256').update(JSON.stringify([scope.location.url, scope.location.account, pos[0]])).digest('hex');
+          recordWharfCatch(receipt, backend.completion?.withHelm ?? null, backend.completion?.at ?? new Date().toISOString());
+        } catch { /* Usage cannot fail an accepted report. */ }
+      }
       if (agent) await brokerRequest(verb === 'done' || verb === 'failed' ? 'finish' : 'progress', { ...brokerBody(agent), dispatch: pos[0] });
       print({ reported: verb }); break;
     }

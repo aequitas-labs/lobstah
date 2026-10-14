@@ -2,12 +2,14 @@ import type { D1Database, Env, ExecutionContext, ScheduledController } from './b
 import { WORKER_HARNESSES, WORKER_MODELS, WORKER_MODEL_RE } from '../../../packages/core/src/worker-profile.js';
 import { WORKER_EFFORTS, WORKER_PERMISSIONS } from '../../../packages/core/src/worker-metadata.js';
 import type { WorkerProfile } from '../../../packages/core/src/worker-profile.js';
+import { CATCH_USAGE_KEYS, USAGE_BUCKETS, GROUNDS_BUCKETS, HELM_COUNTS, WHARF_KINDS } from '../../../packages/core/src/telemetry-usage.js';
+import type { CatchUsage, BoatAccess, GroundsBucket, UsageBucket } from '../../../packages/core/src/telemetry-usage.js';
 
 /**
  * lobstah telemetry Worker (PRIVACY.md). Receives one anonymous daily
  * aggregate per install, serves badges and a public read of aggregate totals.
  *
- * - Strict schema: ten fields, including nested catches and worker metadata, each
+ * - Strict schema: fixed choices and bounded counts, including nested catches and worker metadata, each
  *   validated; unknown fields at every level are rejected.
  * - Idempotent: one row per install id + UTC date, upserted; a retry never
  *   adds to the totals twice.
@@ -22,7 +24,7 @@ export const ACTIVE_DAYS = 30;
 export const MAX_BODY_BYTES = 65536;
 export const MAX_TRAPS = 100;
 export const MAX_WORKERS = 100;
-export const FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'helm', 'traps', 'byWorker'] as const;
+export const FIELDS = ['schema', 'version', 'os', 'arch', 'installId', 'date', 'catches', 'helms', 'helm', 'traps', 'byWorker', 'grounds', 'wharf', 'boats', 'boatAccess'] as const;
 const TRAP_NAME = /^[a-z]{2,8}-[a-z]{2,8}$/;
 const OS = ['macos', 'linux', 'windows', 'other'];
 const ARCH = ['x64', 'arm64', 'other'];
@@ -32,16 +34,21 @@ const MAX_CATCHES_TODAY = 10_000;
 const MAX_TOTAL_CATCHES = 10_000_000;
 
 export interface Submission {
-  schema: 1;
+  schema: 2;
   version: string;
   os: string;
   arch: string;
   installId: string;
   date: string;
-  catches: { today: number; total: number };
+  catches: { today: number; total: number } & CatchUsage;
+  helms: 'none' | 'one' | 'several' | null;
   helm: WorkerProfile | null;
   traps: Array<WorkerProfile & { name: string; today: number }>;
   byWorker: Array<WorkerProfile & { today: number }>;
+  grounds: { total: GroundsBucket; local: GroundsBucket; wharf: GroundsBucket };
+  wharf: 'none' | 'hosted' | 'self-hosted' | 'both';
+  boats: Exclude<UsageBucket, '0'> | null;
+  boatAccess: BoatAccess;
 }
 
 export function utcDate(ms: number): string {
@@ -70,6 +77,16 @@ function profile(v: Record<string, unknown>): WorkerProfile | undefined {
 }
 
 const PROFILE_KEYS = ['harness', 'model', 'config'];
+function keys(v: unknown, allowed: readonly string[]): v is Record<string, unknown> {
+  return object(v) && Object.keys(v).length === allowed.length && Object.keys(v).every((k) => allowed.includes(k));
+}
+function bounds(bucket: string): [number, number] {
+  if (bucket.endsWith('+')) return [Number.parseInt(bucket), Infinity];
+  const parts = bucket.split('-').map(Number); return [parts[0]!, parts[1] ?? parts[0]!];
+}
+function fits(n: number, values: string[]): boolean {
+  return values.reduce((sum, v) => sum + bounds(v)[0], 0) <= n && values.reduce((sum, v) => sum + bounds(v)[1], 0) >= n;
+}
 
 /** The submission, or why it is refused. The date must be today (UTC) give or take a day of clock skew. */
 export function validate(body: unknown, now: number): { ok: true; value: Submission } | { ok: false; error: string } {
@@ -79,7 +96,7 @@ export function validate(body: unknown, now: number): { ok: true; value: Submiss
   if (unknown.length > 0) return { ok: false, error: `unknown field: ${unknown[0]!.slice(0, 40)}` };
   const missing = FIELDS.filter((k) => !(k in b));
   if (missing.length > 0) return { ok: false, error: `missing field: ${missing[0]}` };
-  if (b.schema !== 1) return { ok: false, error: 'schema must be 1' };
+  if (b.schema !== 2) return { ok: false, error: 'schema must be 2' };
   if (typeof b.version !== 'string' || !VERSION.test(b.version)) return { ok: false, error: 'invalid version' };
   if (typeof b.os !== 'string' || !OS.includes(b.os)) return { ok: false, error: 'invalid os' };
   if (typeof b.arch !== 'string' || !ARCH.includes(b.arch)) return { ok: false, error: 'invalid arch' };
@@ -88,9 +105,23 @@ export function validate(body: unknown, now: number): { ok: true; value: Submiss
   if (typeof b.date !== 'string' || ![utcDate(now - day), utcDate(now), utcDate(now + day)].includes(b.date)) {
     return { ok: false, error: 'date must be the current UTC date' };
   }
-  if (!object(b.catches) || Object.keys(b.catches).some((k) => k !== 'today' && k !== 'total')) return { ok: false, error: 'invalid catches' };
+  if (!keys(b.catches, ['today', 'total', ...CATCH_USAGE_KEYS])) return { ok: false, error: 'invalid catches' };
   const { today, total } = b.catches;
   if (!count(today, MAX_CATCHES_TODAY) || !count(total, MAX_TOTAL_CATCHES) || today > total) return { ok: false, error: 'invalid catches counts' };
+  const c = b.catches;
+  if (!CATCH_USAGE_KEYS.every((k) => typeof c[k] === 'string' && (USAGE_BUCKETS as readonly string[]).includes(c[k] as string))) return { ok: false, error: 'invalid catch usage bucket' };
+  const catches: Submission['catches'] = { today, total, withHelm: c.withHelm as UsageBucket, withoutHelm: c.withoutHelm as UsageBucket,
+    helmUnknown: c.helmUnknown as UsageBucket, onLocal: c.onLocal as UsageBucket, onWharf: c.onWharf as UsageBucket, locationUnknown: c.locationUnknown as UsageBucket };
+  if (!fits(today, [catches.withHelm, catches.withoutHelm, catches.helmUnknown]) || !fits(today, [catches.onLocal, catches.onWharf, catches.locationUnknown])) return { ok: false, error: 'inconsistent catch usage buckets' };
+  if (!enumOrNull(b.helms, HELM_COUNTS)) return { ok: false, error: 'invalid helms' };
+  if (b.helms !== 'one' && b.helm !== null) return { ok: false, error: 'helm profile requires one live helm' };
+  if (!keys(b.grounds, ['total', 'local', 'wharf']) || !Object.values(b.grounds).every((v) => typeof v === 'string' && (GROUNDS_BUCKETS as readonly string[]).includes(v)) || b.grounds.total === '0') return { ok: false, error: 'invalid grounds' };
+  const grounds = b.grounds as Submission['grounds'];
+  const [lo, hi] = bounds(grounds.total), [localLo, localHi] = bounds(grounds.local), [wharfLo, wharfHi] = bounds(grounds.wharf);
+  if (lo > localHi + wharfHi || hi < localLo + wharfLo) return { ok: false, error: 'inconsistent grounds' };
+  if (typeof b.wharf !== 'string' || !(WHARF_KINDS as readonly string[]).includes(b.wharf) || (b.wharf === 'none') !== (grounds.wharf === '0')) return { ok: false, error: 'invalid wharf' };
+  if (!enumOrNull(b.boats, USAGE_BUCKETS.slice(1)) || b.wharf === 'none' && b.boats !== '1') return { ok: false, error: 'invalid boats' };
+  if (!keys(b.boatAccess, ['work', 'read', 'helm']) || !Object.values(b.boatAccess).every((v) => v === null || typeof v === 'boolean') || b.wharf === 'none' && Object.values(b.boatAccess).some((v) => v !== false)) return { ok: false, error: 'invalid boatAccess' };
   let helm: WorkerProfile | null = null;
   if (b.helm !== null) {
     if (!object(b.helm) || Object.keys(b.helm).some((k) => !PROFILE_KEYS.includes(k))) return { ok: false, error: 'invalid helm' };
@@ -124,7 +155,22 @@ export function validate(body: unknown, now: number): { ok: true; value: Submiss
     byWorker.push({ ...p, today: w.today });
   }
   if (trapCatches > today) return { ok: false, error: 'worker counts exceed catches.today' };
-  return { ok: true, value: { schema: 1, version: b.version, os: b.os, arch: b.arch, installId: b.installId, date: b.date, catches: { today, total }, helm, traps, byWorker } };
+  return { ok: true, value: { schema: 2, version: b.version, os: b.os, arch: b.arch, installId: b.installId, date: b.date,
+    catches: { today, total, withHelm: catches.withHelm, withoutHelm: catches.withoutHelm, helmUnknown: catches.helmUnknown,
+      onLocal: catches.onLocal, onWharf: catches.onWharf, locationUnknown: catches.locationUnknown },
+    helms: b.helms as Submission['helms'], helm, traps, byWorker, grounds,
+    wharf: b.wharf as Submission['wharf'], boats: b.boats as Submission['boats'],
+    boatAccess: { work: b.boatAccess.work as boolean | null, read: b.boatAccess.read as boolean | null, helm: b.boatAccess.helm as boolean | null } } };
+}
+
+/** Per-day histograms of installs, not account events or time-stamped requests. */
+function usage(s: Submission): Record<string, string> {
+  const flag = (v: boolean | null) => v === null ? 'unknown' : v ? 'yes' : 'no';
+  return { helms: s.helms ?? 'unknown', wharf: s.wharf, boats: s.boats ?? 'unknown',
+    groundsTotal: s.grounds.total, groundsLocal: s.grounds.local, groundsWharf: s.grounds.wharf,
+    workAccess: flag(s.boatAccess.work), readAccess: flag(s.boatAccess.read), helmAccess: flag(s.boatAccess.helm),
+    withHelm: s.catches.withHelm, withoutHelm: s.catches.withoutHelm, helmUnknown: s.catches.helmUnknown,
+    onLocal: s.catches.onLocal, onWharf: s.catches.onWharf, locationUnknown: s.catches.locationUnknown };
 }
 
 /** Counts only: the indefinite table has neither names, config nor identities.
@@ -150,7 +196,16 @@ function attribution(s: Submission): Array<{ harness: string; model: string; tod
  */
 export async function record(db: D1Database, s: Submission): Promise<void> {
   const attributed = JSON.stringify(attribution(s));
+  const snapshot = JSON.stringify(usage(s));
   await db.batch([
+    db.prepare(`INSERT INTO daily_usage_totals (date, dimension, bucket, installs)
+      SELECT ?2, key, value, SUM(n) FROM (
+        SELECT key, value, 1 AS n FROM json_each(?3)
+        UNION ALL SELECT j.key, j.value, -1 AS n FROM usage_submissions u, json_each(u.data) j WHERE u.install_id=?1 AND u.date=?2
+      ) WHERE true GROUP BY key, value
+      ON CONFLICT(date, dimension, bucket) DO UPDATE SET installs=installs+excluded.installs`).bind(s.installId, s.date, snapshot),
+    db.prepare(`INSERT INTO usage_submissions VALUES (?1,?2,?3)
+      ON CONFLICT(install_id,date) DO UPDATE SET data=excluded.data`).bind(s.installId, s.date, snapshot),
     // Replace this install/date's previous contribution, including buckets
     // removed by a correction. One transaction makes retries idempotent.
     db.prepare(`INSERT INTO daily_worker_totals (date, harness, model, catches_today)
@@ -209,6 +264,7 @@ export async function record(db: D1Database, s: Submission): Promise<void> {
 export async function prune(db: D1Database, now: number): Promise<void> {
   const cutoff = utcDate(now - RETENTION_DAYS * 86_400_000);
   await db.batch([
+    db.prepare('DELETE FROM usage_submissions WHERE date < ?1').bind(cutoff),
     db.prepare('DELETE FROM trap_submissions WHERE date < ?1').bind(cutoff),
     db.prepare('DELETE FROM worker_submissions WHERE date < ?1').bind(cutoff),
     db.prepare('DELETE FROM attribution_submissions WHERE date < ?1').bind(cutoff),
@@ -297,7 +353,7 @@ async function badge(env: Env, kind: 'catches' | 'boats' | 'traps', now: number)
 async function stats(env: Env, url: URL, now: number): Promise<Response> {
   const days = Math.min(Math.max(Number.parseInt(url.searchParams.get('days') ?? '30', 10) || 30, 1), 3660);
   const since = utcDate(now - (days - 1) * 86_400_000);
-  const [total, active, rows, workers] = await Promise.all([
+  const [total, active, rows, workers, usages] = await Promise.all([
     totalCatches(env),
     activeCounts(env, now),
     env.DB.prepare(
@@ -307,8 +363,9 @@ async function stats(env: Env, url: URL, now: number): Promise<Response> {
       .all(),
     env.DB.prepare(`SELECT date, NULLIF(harness, '') AS harness, NULLIF(model, '') AS model, catches_today AS catchesToday
                     FROM daily_worker_totals WHERE date >= ?1 AND catches_today > 0 ORDER BY date, harness, model`).bind(since).all(),
+    env.DB.prepare('SELECT date, dimension, bucket, installs FROM daily_usage_totals WHERE date >= ?1 AND installs > 0 ORDER BY date, dimension, bucket').bind(since).all(),
   ]);
-  return json({ totalCatches: total, ...active, activeDays: ACTIVE_DAYS, retentionDays: RETENTION_DAYS, days: rows.results, byWorker: workers.results });
+  return json({ totalCatches: total, ...active, activeDays: ACTIVE_DAYS, retentionDays: RETENTION_DAYS, days: rows.results, byWorker: workers.results, usage: usages.results });
 }
 
 export async function handle(request: Request, env: Env, now = Date.now()): Promise<Response> {

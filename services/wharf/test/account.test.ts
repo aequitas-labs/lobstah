@@ -45,11 +45,32 @@ beforeEach(async () => {
   // New pool shares storage across tests: explicitly delete only test DO data.
   const stub = env.ACCOUNTS.getByName('a');
   await runInDurableObject(stub, async (_instance: Account, state) => {
-    for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'event_details', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'messages', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
+    for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'event_details', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key!='generation'");
     state.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
   });
   expect((await call('helm/take', { session: 'helm' })).status).toBe(200);
+});
+it('observes a live helm at claim or finish; retries retain the server completion receipt', async () => {
+  const b = await boat(); await enqueue(); const c = await claim(b.token);
+  await call('helm/release', {});
+  const body = { verb: 'done', note: 'finished' };
+  const first = await (await call('dispatches/dispatch/report', body, c.token, 'finish-once')).json();
+  expect(first).toMatchObject({ catch: { withHelm: true, at: expect.any(String) } });
+  expect(await (await call('dispatches/dispatch/report', body, c.token, 'finish-once')).json()).toEqual(first);
+  await call('helm/take', { session: 'helm' }); await enqueue('late'); await call('helm/release', {});
+  const later = await claim(b.token); await call('helm/take', { session: 'helm' });
+  expect(await (await call('dispatches/late/report', body, later.token)).json()).toMatchObject({ catch: { withHelm: true } });
+});
+it('preserves absence, legacy unknowns and rejects expired claims without counting a catch', async () => {
+  const b = await boat(); await enqueue(); await call('helm/release', {}); const c = await claim(b.token);
+  expect(await (await call('dispatches/dispatch/report', { verb: 'done', note: 'finished' }, c.token)).json()).toMatchObject({ catch: { withHelm: false } });
+  await call('helm/take', { session: 'helm' }); await enqueue('legacy'); await call('helm/release', {}); const old = await claim(b.token);
+  await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => { state.storage.sql.exec('DELETE FROM catch_context'); });
+  expect(await (await call('dispatches/legacy/report', { verb: 'done', note: 'finished' }, old.token)).json()).toMatchObject({ catch: { withHelm: null } });
+  await call('helm/take', { session: 'helm' }); await enqueue('expired'); const expired = await claim(b.token);
+  await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => { state.storage.sql.exec('UPDATE dispatches SET lease=0 WHERE id=?', 'expired'); });
+  expect((await call('dispatches/expired/report', { verb: 'done', note: 'finished' }, expired.token)).status).toBe(409);
 });
 it('matches canonical remotes across local nicknames, never matching different remotes with the same nickname', async () => {
   const matching = await boat('matching', 'worker-key');

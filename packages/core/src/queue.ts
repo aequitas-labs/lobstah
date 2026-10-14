@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import type { Descriptor, Lane } from './types.js';
 import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './paths.js';
 import { appendStatus } from './status.js';
+import { observeLocalCatch } from './catch-context.js';
 
 function atomicWrite(file: string, content: string): void {
   const tmp = uniqueTempPath(file);
@@ -99,6 +100,7 @@ export function claimNext(lane: Lane, skip?: (d: Descriptor) => boolean): string
     }
     try {
       fs.renameSync(path.join(dirs.queue, `${id}.json`), path.join(activeDir, 'descriptor.json'));
+      try { observeLocalCatch(id, lane, 'claim'); } catch { /* Usage must never prevent a claim. */ }
       return id;
     } catch {
       fs.rmdirSync(activeDir, { recursive: true });

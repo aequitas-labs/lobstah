@@ -5,6 +5,7 @@ import { statusPath } from './paths.js';
 import { ageLabel } from './activity.js';
 import { recordCatch } from './stats.js';
 import { parsePrRef } from './pr.js';
+import { observeLocalCatch } from './catch-context.js';
 
 export function isVerb(v: string): v is Verb {
   return (VERBS as readonly string[]).includes(v);
@@ -90,6 +91,9 @@ export function appendStatus(
     ...extra,
     ...(reported ? { reported: true as const } : {}),
   };
+  if (verb === 'done') {
+    try { observeLocalCatch(id, lane, 'finish'); } catch { /* Unknown is better than failing a report. */ }
+  }
   fs.appendFileSync(statusPath(id, lane), `${JSON.stringify(entry)}\n`);
   if (verb === 'done') {
     try {

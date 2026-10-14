@@ -321,13 +321,12 @@ traps, notices, merge view. Read-only, on 127.0.0.1: looking steers nothing.
 --detach runs it in the background; stop, status, install, uninstall, and
 restart manage it. show <#hash> asks an open glass page to show a tab, a
 #decision/<key>, or a #report/<key> (--json for the pet).`,
-  telemetry: `Anonymous daily counts (PRIVACY.md). Once per UTC day the daemon sends
-catches {today,total}, generated trap names/counts, helm/trap worker metadata,
-headless counts by worker, version, OS family, arch, UTC date, and a random
-install id. Daily local history stays local. status (default; --json) shows whether it is
-on and every off switch in effect. enable / disable set [telemetry] share in
-config.toml. show prints the exact JSON that would be sent. Any one switch
-turns it off: share = false, LOBSTAH_TELEMETRY=0, DO_NOT_TRACK=1, CI set.`,
+  telemetry: `Anonymous daily usage (PRIVACY.md): catches, generated traps, worker metadata,
+helm presence, bucketed boats/grounds, wharf use/access and catch splits, version/platform.
+Unknown history stays unknown; install id is never account-linked. Separate clock/connection.
+status (default; --json) shows sharing and controls. show prints the exact JSON.
+enable / disable set [telemetry] share. Any switch turns sharing off:
+share = false, LOBSTAH_TELEMETRY=0, DO_NOT_TRACK=1, CI set.`,
   repos: `List configured repos, or detect one and append its [repos.*] block.`,
   init: `Create ~/.lobstah + config; --scan appends a [repos.*] block per repo found
 under the given directories.`,

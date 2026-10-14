@@ -105,17 +105,19 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS idem (actor TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(actor,key));
       CREATE TABLE IF NOT EXISTS recoveries (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS claims (dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(dispatch,epoch));
+      CREATE TABLE IF NOT EXISTS catch_context (dispatch TEXT PRIMARY KEY, claim_helm INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, dispatch TEXT NOT NULL, text TEXT NOT NULL, received INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, hash TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0);
       ${glassSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
     this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), event: (k, d, note) => this.event(k, d, note),
-      helmLive: (now) => Number(JSON.parse(this.get('helm') ?? '{}').until) > now });
+      helmLive: (now) => this.helmLive(now) });
   }
   private get(key: string): string | undefined {
     return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key=?', key).toArray()[0]?.value;
   }
+  private helmLive(now: number): boolean { return Number(JSON.parse(this.get('helm') ?? '{}').until) > now; }
   private set(key: string, value: string) { this.ctx.storage.sql.exec('INSERT OR REPLACE INTO meta VALUES (?,?)', key, value); }
   private dispatch(id: string): DispatchRow {
     const d = this.ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches WHERE id=?', id).toArray()[0];
@@ -227,7 +229,7 @@ export class Account extends DurableObject<Env> {
     b.count++; this.set('budget', JSON.stringify(b));
   }
   private capacity() {
-    const tables = ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files', ...glassTables];
+    const tables = ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'files', ...glassTables];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
@@ -293,6 +295,7 @@ export class Account extends DurableObject<Env> {
       const epoch = d.epoch + 1;
       this.ctx.storage.sql.exec("UPDATE dispatches SET state='active',worker=?,boat=?,epoch=?,lease=?,hash=? WHERE id=?", w.id, actor.id, epoch, now + LEASE_MS, c.prepared.hash, d.id);
       this.ctx.storage.sql.exec('INSERT INTO claims VALUES (?,?,?)', d.id, epoch, c.prepared.hash);
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO catch_context VALUES (?,?)', d.id, Number(this.helmLive(now)));
       this.event('claimed', d.id);
       return ok({ id: d.id, dispatch: JSON.parse(d.data), epoch, leaseUntil: new Date(now + LEASE_MS).toISOString() });
     }
@@ -399,7 +402,14 @@ export class Account extends DurableObject<Env> {
         if (report.verb === 'paused' && !report.until) report.until = new Date(now + 86400_000).toISOString();
         this.ctx.storage.sql.exec('INSERT INTO reports(dispatch,data) VALUES (?,?)', d.id, JSON.stringify({ ...report, at: new Date(now).toISOString() }));
         this.ctx.storage.sql.exec('UPDATE dispatches SET state=?,lease=? WHERE id=?', ['done', 'failed'].includes(report.verb) ? 'done' : 'active', this.boatCanWork(d.boat) ? now + LEASE_MS : d.lease, d.id);
-        this.event(report.verb, d.id); return ok();
+        this.event(report.verb, d.id);
+        if (report.verb === 'done') {
+          const claim = this.ctx.storage.sql.exec<{ claim_helm: number }>('SELECT claim_helm FROM catch_context WHERE dispatch=?', d.id).toArray()[0];
+          // A claim made before this observation existed remains unknown unless a helm is live now.
+          const withHelm = this.helmLive(now) || claim?.claim_helm === 1 ? true : claim ? false : null;
+          return ok({ catch: { withHelm, at: new Date(now).toISOString() } });
+        }
+        return ok();
       }
       if (action === 'recovery' && c.method === 'POST') {
         requireThat(actor.kind === 'dispatch', 403, 'dispatch scope required');
@@ -517,7 +527,7 @@ export class Account extends DurableObject<Env> {
           await this.env.FILES.delete(files.objects.map((f) => f.key));
         }
         this.ctx.storage.transactionSync(() => {
-          for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files', ...glassTables]) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+          for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'files', ...glassTables]) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
           this.ctx.storage.sql.exec("DELETE FROM meta WHERE key NOT IN ('deleted','delete-authority')");
         });
         // Keep only a tombstone; the Worker also removes this person's D1 identity.
