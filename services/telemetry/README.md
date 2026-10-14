@@ -131,9 +131,10 @@ XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" WRANGLER_SEND_METRICS=false n
 ```
 
 Rollback does not revert D1 migrations or routing. On the first deployment
-there is no previous version: to take the receiver offline, remove its
-`t.lobstah.dev` route and cron from this config and redeploy with the same
-account selector, retaining the database. Do not delete the database.
+there is no previous version: to take the receiver offline, remove only its
+`t.lobstah.dev` route from this config and redeploy with the same account
+selector. Keep the database and retention cron so installation-linked rows
+still expire. Do not delete the database.
 
 Sending stays off: changing `TELEMETRY_ENDPOINT` to
 `https://t.lobstah.dev/v1/daily` requires a separate decision and release.
