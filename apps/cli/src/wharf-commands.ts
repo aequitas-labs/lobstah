@@ -116,13 +116,9 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     }
     case 'wharf': {
       switch (pos[0]) {
-        case 'issue-boat': print(await backend.request('boats', { name: pos[1] }, key())); break;
-        case 'boats': print(await backend.request('boats')); break;
-        case 'revoke-boat': print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}/revoke`, {}, key())); break;
-        case 'rename-boat': print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}/rename`, { name: pos[2] }, key())); break;
-        case 'remove-boat':
-          if (!opts.has('--confirm')) throw new Error('remove-boat requires --confirm; open addressed work must be cancelled first');
-          print(await backend.request(`boats/${encodeURIComponent(await boatId(pos[1]))}`, {}, key(), 'DELETE')); break;
+        case 'whoami':
+          if (pos.length !== 1) throw new Error('whoami acts only as the current boat; no boat argument');
+          print(await backend.request('_boat')); break;
         case 'renew': print(await backend.request('workers/renew', { worker }, key())); break;
         case 'heartbeat': await backend.heartbeat(pos[1] ?? '', key()); print({ renewed: true }); break;
         case 'receipt': await backend.receipt(pos[1] ?? '', pos[2] ?? '', key()); print({ received: true }); break;
@@ -136,9 +132,6 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
           break;
         }
         case 'recoveries': print(await backend.request(`dispatches/${encodeURIComponent(pos[1] ?? '')}/recoveries`)); break;
-        case 'delete-account':
-          if (!opts.has('--confirm')) throw new Error('delete-account requires --confirm; removes all account rows and files');
-          print(await backend.request('', {}, key(), 'DELETE')); break;
         default: throw new Error('choose a wharf subcommand');
       }
       break;

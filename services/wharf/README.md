@@ -40,13 +40,54 @@ not paid tiers. JSON bodies are bounded at 64 KiB. Rate limits are durable accou
 windows, not IP identities. Store/R2 failure returns an unavailable error; clients
 must retain results and must not infer success or claim locally during an outage.
 
+## Permission layers
+
+Person credentials carry the `admin` steering layer, never `work`: boats fish,
+people steer and administer. Worker sign-on, claim and renew refuse a person
+credential with an enrolment instruction. The sign-in slice will replace the
+temporary operator-provisioned PATs, not expand their work authority.
+
+Boat credentials carry a steering layer (`read < helm < admin`) and independent
+`work` permission, chosen on issue or rotation:
+
+| Permission | Allows |
+| --- | --- |
+| read | Account job state, messages, events, boats and evidence downloads |
+| work | This boat's worker sign-on, claims and renewals |
+| helm | Read plus dispatch, message, cancel and exclusive helm lease operations |
+| admin | Helm plus approved boat enrollment, revoke boats, delete account |
+
+Omission defaults to `work` plus `read`. This interim slice's `POST boats` accepts
+`permissions`; the sign-in slice replaces that operator route with approved login.
+An `admin` grant additionally requires `confirmAdmin: true`. The signed-in glass
+lists boats and permits revocation only, plus confirmed account deletion on that
+same page. Boat name and access change only through login on that boat, approved
+as requested, with less access, or refused. There are no grant/rename/edit controls
+or separate boat-removal route, and no CLI admin commands. The CLI
+acts only as its current boat; `wharf whoami` shows its own name and grants, even
+for a work-only boat. A machine's login will store only its boat credential, never
+a person session. Normal device approval requests work plus read; `--helm` requests
+work plus helm, and `--work-only` requests only work. Admin is not requestable from
+the CLI. Credential import is via stdin/file, not a process argument.
+Only the highest steering layer is stored, not its implied permissions. Replacing
+`helm` with no steering layer removes read access too; explicitly selecting `read`
+is a downgrade. `work` never implies read or steering authority.
+
+Checks precede idempotency replay, so removing a permission immediately fences
+new requests and retries. A helm seat is bound to both the credential principal
+and session; knowing its session id cannot inherit it. A boat with helm still
+needs explicit takeover of another live seat. Boats cannot select another boat
+on sign-on/claim/renew. Agent tokens retain their one dispatch/epoch authority;
+revocation or removal of work prevents lease extension but preserves reporting
+until the original deadline. No local-files authorization changes.
+
 ## Authority and protocol
 
 All routes are under `/v1/accounts/<account>/`, authenticated with a bearer token.
 All mutations require `Idempotency-Key` (1–128 identifier characters). Reusing a
 key with a different request fails. Keys are scoped to authenticated principals.
 Helm mutations require a live helm lease and `X-Lobstah-Helm: <session>`; credential
-administration uses the account PAT. A different live helm needs explicit takeover.
+administration requires `admin`. A different live helm needs explicit takeover.
 
 | Scope | Route | Operation |
 | --- | --- | --- |
@@ -67,8 +108,8 @@ administration uses the account PAT. A different live helm needs explicit takeov
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; revoke/reissue to receive a new
-secret. Boats cannot read dispatch content, enqueue, cancel, manage credentials,
-take helm or delete accounts. Coding agents receive only the token returned by a
+secret. Work-only boats cannot read dispatch content, enqueue, cancel, manage
+credentials, take helm or delete accounts. Coding agents receive only the token returned by a
 claim, not their boat credential or the PAT. Agent tokens cannot claim.
 
 Claims last 90 seconds and carry a monotonically increasing dispatch epoch.
@@ -169,8 +210,8 @@ background timer or connection.
 
 Boat IDs are account-scoped identities, not credential IDs. Names use letters,
 digits, `-` or `_`, at most 64 characters, normalized to lowercase and unique
-per account. `wharf issue-boat <name>` creates that boat or rotates its current
-credential: its ID, worker repos and addressed work remain intact, while the
+per account. The sign-in slice's `wharf login` creates a boat or rotates its current
+credential after approval: its ID, worker repos and addressed work remain intact, while the
 previous credential fails on its next request. Retries reveal no credential.
 
 `dispatch --boat <name>` resolves the name through `GET boats` and sends the
@@ -179,8 +220,7 @@ match; a trap address may additionally narrow the target. Neither address
 falls back. Revocation leaves queued work on that boat and labels it unservable.
 Status and events label the current name, including after a rename.
 
-`wharf revoke-boat <name>` revokes only the credential. `wharf rename-boat
-<old-name> <new-name>` preserves the ID. `wharf remove-boat <name> --confirm`
-explicitly removes the boat only if no queued/active work is addressed to it
-or claimed on it; cancel that work first. Corresponding PAT routes are
-`POST boats/:id/rename` and `DELETE boats/:id`, separate from account deletion.
+The signed-in boat list's revoke action invalidates the credential and is the
+only boat-removal action. Stable IDs and sticky addressed work remain recorded;
+revocation never silently reassigns that work. Renaming or changing access requires
+approved login from the boat; no public grant-editing or rename API exists.
