@@ -81,16 +81,20 @@ children are repos. It does not look deeper, and it skips hidden folders. You
 may pass several folders.
 
 **Worked:** the output has `initialized: true` and an `added:` line naming a
-key for each repo it found. The key is the folder's name.
+key for each repo it found. The key is the folder's name, with any character
+other than a letter, a digit, `-` or `_` changed to `-`: `my.repo` becomes
+`my-repo`.
 
 **Did not work:**
 
 - No `added:` line: nothing was found. A folder that does not exist is skipped
   without an error. Check the path with the person and run it again.
+- A `skipped:` line: another repo already has that key, usually because two
+  repos share a folder name. Run the `lobstah repos add` command the line
+  gives, with a key of the person's choosing.
 - `--scan requires at least one directory`: you left the folder out.
 
-Always pass `--scan` with a folder. Do not run `lobstah init` by itself: see
-"Known problems" below.
+Always pass `--scan` with a folder. `lobstah init` by itself adds no repos.
 
 Then check the result:
 
@@ -117,19 +121,52 @@ In this file, keys that stand alone (such as `notifyCommand`) must come before
 the first `[section]`. A key written under a `[repos.<key>]` block belongs to
 that repo.
 
-### Known problems in `init`, and the safe path
+### Tune it with the person
 
-These are faults in the tool at version 0.7.5, not how it is meant to work.
-Until they are fixed, do this:
+Ask these questions, one at a time, and write only what the person changes. A
+key left out keeps its default. Keys at the top level go above the first
+`[section]`.
 
-| If                                                                             | Then                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| someone ran `lobstah init` with no `--scan`                                    | The file has a made-up `[repos.example]` block, and `lobstah doctor` fails on it. Delete that block, then run the scan.                                                                                                                                                                                                                                                                     |
-| two repos have the same folder name                                            | Only the first is added, and nothing says the second was skipped. Add the second under a name of its own: `lobstah repos add /full/path/to/repo --key other-name`.                                                                                                                                                                                                                          |
-| a repo's folder name has a dot in it                                           | A scan writes its key wrongly, and a second scan then breaks the file. Look for such folders before you scan. If there is one, do not scan its parent: pass each of the other repos to `--scan` by its own path, and add the dotted one with a key that has no dot: `lobstah repos add /full/path/to/my.repo --key my-repo`. If it was scanned already, delete its `[repos.…]` block first. |
-| a repo was on a feature branch when scanned, and its `origin/HEAD` was not set | The feature branch is written as `trunk`. Change `trunk =` in that repo's block to the real main branch.                                                                                                                                                                                                                                                                                    |
-| you want issue pickup on repos that are already in the file                    | Running `lobstah init --scan <folder> --pickup` again changes nothing for them, though the output suggests it. Add `pickup = true` to each repo's block by hand.                                                                                                                                                                                                                            |
-| you want notifications                                                         | Do not uncomment the `notifyCommand` example in the file: its quotes are not valid there. Write your own line above the first `[section]`, in single quotes: `notifyCommand = 'ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"'`.                                                                                                                                              |
+| Ask                                                                               | Key                                                                       | Default                                                                         |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| How many background jobs may run at once?                                         | `maxConcurrent` under `[limits]`                                          | `2`                                                                             |
+| How many trap sessions may each repo have?                                        | `traps` in `[repos.<key>]`                                                | no limit                                                                        |
+| Which worker CLI: Claude Code or Codex? Does any repo need the other one?         | `default` under `[harness]`, and under `[repos.<key>.harness]` for a repo | `"claude"`                                                                      |
+| Which model and effort should workers use?                                        | `model` and `effort`, in the same two blocks                              | the harness's own                                                               |
+| What should stand as attention for the helm, in the glass and on the desktop pet? | `attentionKinds` (top level)                                              | `["question", "decision", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` |
+| Should the computer notify you? With what command, and for which reports?         | `notifyCommand` and `notifyVerbs` (top level)                             | no command; verbs `["needs-decision", "blocked", "paused", "done", "failed"]`   |
+| Which app should open a pull request for review?                                  | `review` in `[repos.<key>]`                                               | `"github"`                                                                      |
+| What must run in a fresh worktree before work starts?                             | `setup` in `[repos.<key>]`                                                | what the scan found from the lockfile                                           |
+
+Notes on the answers:
+
+- `maxConcurrent` counts only jobs the daemon runs on its own. A trap is the
+  person's own session, so it uses no slot; `traps` caps those instead.
+- `harness` `default` is `"claude"` or `"codex"`. A dispatch can still name
+  the other one.
+- `effort` is `low`, `medium`, `high`, `xhigh` or `max`. Left unset, a Claude
+  worker takes the effort from the person's own Claude settings.
+- `attentionKinds` also takes `pr:draft`, `landed`, `report` and
+  `stack-ready`. A list replaces the default: copy the default in and add to
+  it. An unknown kind makes the config fail to load.
+- `notifyCommand` runs in a shell with `LOBSTAH_ID`, `LOBSTAH_VERB` and
+  `LOBSTAH_NOTE` set. Write it in single quotes, or in three single quotes
+  when the command holds a single quote. A desktop notice on macOS:
+
+  ```toml
+  notifyCommand = '''osascript -e 'display notification (system attribute "LOBSTAH_NOTE") with title "lobstah" subtitle (system attribute "LOBSTAH_VERB")' '''
+  ```
+
+  Or a phone, through ntfy:
+  `notifyCommand = 'ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"'`.
+
+- `review` is `github`, `graphite`, `linear`, `linear-app` (the Linear desktop
+  app), or an `https://` address with `{owner}`, `{repo}` and `{number}` in it.
+
+None of these needs a restart. The daemon reads the file again every few
+seconds; a changed harness or effort applies to work sent after the change.
+Run `lobstah repos` after editing: a file that does not parse fails there with
+its line number.
 
 ## 4. Run the doctor
 
