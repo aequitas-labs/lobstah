@@ -194,11 +194,22 @@ describe('telemetry payload', () => {
     expect(JSON.parse(fs.readFileSync(path.join(home, 'telemetry.json'), 'utf8')).installId).toBe(a);
   });
 
-  it('ships with an empty endpoint: this build sends nothing', async () => {
-    expect(TELEMETRY_ENDPOINT).toBe('');
+  it('ships the receiver origin and sends to its daily route after the notice', async () => {
+    expect(TELEMETRY_ENDPOINT).toBe('https://t.lobstah.dev');
+    const r = recorder();
+    expect(await sendTelemetry({ env: CLEAN, fetch: r.fetch, now: NOON })).toBe('no-notice');
+    expect(r.calls).toHaveLength(0);
+    expect(telemetryCliRun({ interactive: true, write: () => {}, env: CLEAN, now: NOON })).toBe(TELEMETRY_NOTICE);
+    expect(await sendTelemetry({ env: CLEAN, fetch: r.fetch, now: NOON })).toBe('sent');
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0]!.url).toBe('https://t.lobstah.dev/v1/daily');
+    expect(r.calls[0]!.init.body).toBe(serializeTelemetryPayload(buildTelemetryPayload(readTelemetryState()!.installId, NOON)));
+  });
+
+  it('still sends nothing when the endpoint is explicitly empty', async () => {
     consented();
     const r = recorder();
-    expect(await sendTelemetry({ env: CLEAN, fetch: r.fetch })).toBe('no-endpoint');
+    expect(await sendTelemetry({ env: CLEAN, endpoint: '', fetch: r.fetch })).toBe('no-endpoint');
     expect(r.calls).toHaveLength(0);
   });
 });
@@ -243,7 +254,7 @@ describe('telemetry sending', () => {
     if (config) disableTelemetry();
     const r = recorder();
     expect(telemetryStatus(env, ENDPOINT).sharing).toBe(false);
-    expect(await sendTelemetry({ env, endpoint: ENDPOINT, fetch: r.fetch, now: NOON })).toBe('off');
+    expect(await sendTelemetry({ env, fetch: r.fetch, now: NOON })).toBe('off');
     expect(r.calls).toHaveLength(0);
   });
 
