@@ -5,8 +5,7 @@ import type { WorkerProfile } from '../../../packages/core/src/worker-profile.js
 
 /**
  * lobstah telemetry Worker (PRIVACY.md). Receives one anonymous daily
- * aggregate per install, serves the project-wide catches badge, and a
- * token-protected read of daily totals.
+ * aggregate per install, serves badges and a public read of aggregate totals.
  *
  * - Strict schema: ten fields, including nested catches and worker metadata, each
  *   validated; unknown fields at every level are rejected.
@@ -19,6 +18,7 @@ import type { WorkerProfile } from '../../../packages/core/src/worker-profile.js
  */
 
 export const RETENTION_DAYS = 90;
+export const ACTIVE_DAYS = 30;
 export const MAX_BODY_BYTES = 65536;
 export const MAX_TRAPS = 100;
 export const MAX_WORKERS = 100;
@@ -171,16 +171,15 @@ export async function record(db: D1Database, s: Submission): Promise<void> {
          SELECT ?2,
                 CASE WHEN prev.today IS NULL THEN 1 ELSE 0 END,
                 MAX(0, ?3 - COALESCE(prev.today, 0)),
-                MAX(0, ?4 - COALESCE(prev.best, 0))
-         FROM (SELECT (SELECT catches_today FROM submissions WHERE install_id = ?1 AND date = ?2) AS today,
-                      (SELECT MAX(total_catches) FROM submissions WHERE install_id = ?1) AS best) AS prev
+                MAX(0, ?3 - COALESCE(prev.today, 0))
+         FROM (SELECT (SELECT catches_today FROM submissions WHERE install_id = ?1 AND date = ?2) AS today) AS prev
          WHERE true
          ON CONFLICT(date) DO UPDATE SET
            active_installs = active_installs + excluded.active_installs,
            catches_today = catches_today + excluded.catches_today,
            new_catches = new_catches + excluded.new_catches`,
       )
-      .bind(s.installId, s.date, s.catches.today, s.catches.total),
+      .bind(s.installId, s.date, s.catches.today),
     db
       .prepare(
         `INSERT INTO submissions (install_id, date, version, os, arch, catches_today, total_catches, helm)
@@ -264,38 +263,43 @@ async function submit(request: Request, env: Env, now: number): Promise<Response
   return new Response(null, { status: 204 });
 }
 
-/** shields.io endpoint JSON: `🦞 N`, N the catches across every sharing install. */
-async function badge(env: Env): Promise<Response> {
+/** Today and the preceding 29 UTC dates, not tomorrow's clock-skew rows. */
+async function activeCounts(env: Env, now: number): Promise<{ activeBoats: number; activeTraps: number }> {
+  const since = utcDate(now - (ACTIVE_DAYS - 1) * 86_400_000);
+  const today = utcDate(now);
+  const [boats, traps] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(DISTINCT install_id) AS n FROM submissions WHERE date BETWEEN ?1 AND ?2')
+      .bind(since, today).first<{ n: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM
+      (SELECT install_id, name FROM trap_submissions WHERE date BETWEEN ?1 AND ?2 GROUP BY install_id, name)`)
+      .bind(since, today).first<{ n: number }>(),
+  ]);
+  return { activeBoats: boats?.n ?? 0, activeTraps: traps?.n ?? 0 };
+}
+
+async function totalCatches(env: Env): Promise<number> {
   const row = await env.DB.prepare('SELECT COALESCE(SUM(new_catches), 0) AS n FROM daily_totals').first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/** shields.io: lifetime daily catches, or distinct boats/traps active in 30 days. */
+async function badge(env: Env, kind: 'catches' | 'boats' | 'traps', now: number): Promise<Response> {
+  const n = kind === 'catches' ? await totalCatches(env) : (await activeCounts(env, now))[kind === 'boats' ? 'activeBoats' : 'activeTraps'];
+  const label = kind === 'catches' ? '🦞' : `${kind} (30d)`;
   return json(
-    { schemaVersion: 1, label: '🦞', message: String(row?.n ?? 0), color: 'e05d44', cacheSeconds: 3600 },
+    { schemaVersion: 1, label, message: String(n), color: 'e05d44', cacheSeconds: 3600 },
     200,
     { 'cache-control': 'public, max-age=300' },
   );
 }
 
-/** Compare via SHA-256 digests: equal-length inputs, no early exit. */
-async function tokenMatches(given: string, expected: string): Promise<boolean> {
-  const enc = new TextEncoder();
-  const [a, b] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(given)), crypto.subtle.digest('SHA-256', enc.encode(expected))]);
-  const x = new Uint8Array(a);
-  const y = new Uint8Array(b);
-  let diff = 0;
-  for (let i = 0; i < x.length; i++) diff |= x[i]! ^ y[i]!;
-  return diff === 0;
-}
-
-/** Totals and active installs per day, for the maintainers. Bearer READ_TOKEN. */
-async function stats(request: Request, env: Env, url: URL, now: number): Promise<Response> {
-  const auth = request.headers.get('authorization') ?? '';
-  const token = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : '';
-  if (!env.READ_TOKEN || !token || !(await tokenMatches(token, env.READ_TOKEN))) {
-    return json({ error: 'unauthorized' }, 401, { 'www-authenticate': 'Bearer' });
-  }
+/** Public aggregates only: never return installation-linked rows or names. */
+async function stats(env: Env, url: URL, now: number): Promise<Response> {
   const days = Math.min(Math.max(Number.parseInt(url.searchParams.get('days') ?? '30', 10) || 30, 1), 3660);
   const since = utcDate(now - (days - 1) * 86_400_000);
-  const [total, rows, workers] = await Promise.all([
-    env.DB.prepare('SELECT COALESCE(SUM(new_catches), 0) AS n FROM daily_totals').first<{ n: number }>(),
+  const [total, active, rows, workers] = await Promise.all([
+    totalCatches(env),
+    activeCounts(env, now),
     env.DB.prepare(
       'SELECT date, active_installs AS activeInstalls, catches_today AS catchesToday, new_catches AS newCatches FROM daily_totals WHERE date >= ?1 ORDER BY date',
     )
@@ -304,15 +308,17 @@ async function stats(request: Request, env: Env, url: URL, now: number): Promise
     env.DB.prepare(`SELECT date, NULLIF(harness, '') AS harness, NULLIF(model, '') AS model, catches_today AS catchesToday
                     FROM daily_worker_totals WHERE date >= ?1 AND catches_today > 0 ORDER BY date, harness, model`).bind(since).all(),
   ]);
-  return json({ totalCatches: total?.n ?? 0, retentionDays: RETENTION_DAYS, days: rows.results, byWorker: workers.results });
+  return json({ totalCatches: total, ...active, activeDays: ACTIVE_DAYS, retentionDays: RETENTION_DAYS, days: rows.results, byWorker: workers.results });
 }
 
 export async function handle(request: Request, env: Env, now = Date.now()): Promise<Response> {
   const url = new URL(request.url);
   try {
     if (url.pathname === '/v1/daily') return request.method === 'POST' ? await submit(request, env, now) : json({ error: 'method not allowed' }, 405, { allow: 'POST' });
-    if (url.pathname === '/badge/catches.json') return request.method === 'GET' ? await badge(env) : json({ error: 'method not allowed' }, 405, { allow: 'GET' });
-    if (url.pathname === '/v1/stats') return request.method === 'GET' ? await stats(request, env, url, now) : json({ error: 'method not allowed' }, 405, { allow: 'GET' });
+    for (const kind of ['catches', 'boats', 'traps'] as const) {
+      if (url.pathname === `/badge/${kind}.json`) return request.method === 'GET' ? await badge(env, kind, now) : json({ error: 'method not allowed' }, 405, { allow: 'GET' });
+    }
+    if (url.pathname === '/v1/stats') return request.method === 'GET' ? await stats(env, url, now) : json({ error: 'method not allowed' }, 405, { allow: 'GET' });
     return json({ error: 'not found' }, 404);
   } catch {
     // No detail and no log: an error message could echo request data.

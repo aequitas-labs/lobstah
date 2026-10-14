@@ -32,8 +32,6 @@ export interface Env {
   SUBMIT_LIMITER?: RateLimit;
   /** One key for every submission: a flood of made-up install ids is capped too. */
   GLOBAL_LIMITER?: RateLimit;
-  /** Bearer token for GET /v1/stats. Unset: the route refuses every request. */
-  READ_TOKEN?: string;
 }
 
 export interface ScheduledController {
