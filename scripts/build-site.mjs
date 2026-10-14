@@ -55,9 +55,10 @@ const SHARED = {
 
 /**
  * The card shown when a link to the page is shared. The build draws it: the
- * glass's own lobster and star on the glass's ground, with the page's tagline
- * beside them. The page itself never loads it.
+ * logo's lobster and star, lifted off their tile, on the glass's ground, with
+ * the page's tagline beside them. The page itself never loads it.
  */
+const LOGO = ['plugins', 'codex', 'assets', 'logo.png'];
 const CARD = { name: 'social-card.png', width: 1200, height: 630 };
 const CARD_ALT = 'The lobstah lobster with its star, beside the words: lobstah. Nobody stares at the water.';
 
@@ -304,55 +305,144 @@ export function glassColor(css, token) {
 }
 
 /**
- * Draw the social card. Everything on it is the repo's own: the ground and
- * the text colours are the glass's tokens, the lobster is the first frame of
- * the glass's sprite with its star where the glass puts it, both enlarged
- * pixel for pixel, and the words are the masks in art/card (drawn in the
- * glass's type by art/card-text.py). Same inputs, same picture: no fonts, no
- * network and no drawing tool are needed at build time.
+ * Lift a drawing off the flat tile it was drawn on. The result says, for each
+ * pixel, how much of it is drawing (1) and how much is tile showing through
+ * (0), so the drawing can be set on another ground with its edges kept as
+ * they were drawn and none of the tile's colour left around it.
+ *
+ * Only the drawing's rim is ever part tile: the pale pixels the tile runs
+ * into, and the one row of ink they touch. A pixel there is a blend of the
+ * tile and of the ink beside it. The ink is taken to be the pixel nearby that
+ * is least like the tile; how far this pixel has moved from the tile toward
+ * that ink is its share. Everything inside the rim is drawing, whatever its
+ * colour: the glint in an eye is not a hole.
  */
-export function socialCard({ css, sprite, star, tagline, name }) {
+export function liftFromTile(image) {
+  const { width, height, data } = image;
+  const size = width * height;
+  const solid = (i) => data[i * 4 + 3] === 255;
+  // The tile's colour is the one most pixels have.
+  const counts = new Map();
+  for (let i = 0; i < size; i++) {
+    if (!solid(i)) continue;
+    const key = (data[i * 4] << 16) | (data[i * 4 + 1] << 8) | data[i * 4 + 2];
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const most = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+  const tile = [most >> 16, (most >> 8) & 255, most & 255];
+  // How unlike the tile each pixel is.
+  const far = new Float32Array(size);
+  for (let i = 0; i < size; i++) far[i] = Math.hypot(data[i * 4] - tile[0], data[i * 4 + 1] - tile[1], data[i * 4 + 2] - tile[2]);
+  const NOISE = 14; // the tile is not perfectly flat: this close to its colour is tile
+  const PALE = 90; // nearer the tile than this is more tile than ink
+  const REACH = 3; // how far to look for the ink beside a rim pixel
+  const neighbours = (i, each) => {
+    const [x, y] = [i % width, Math.floor(i / width)];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if ((dx || dy) && x + dx >= 0 && y + dy >= 0 && x + dx < width && y + dy < height) each((y + dy) * width + x + dx);
+      }
+    }
+  };
+  // The rim: walk in from the picture's edge through pale pixels, then take the one row of ink they touch.
+  const rim = new Uint8Array(size);
+  const queue = [];
+  for (let i = 0; i < size; i++) {
+    const [x, y] = [i % width, Math.floor(i / width)];
+    const edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
+    if (!solid(i) || (edge && far[i] < PALE)) {
+      rim[i] = 1;
+      queue.push(i);
+    }
+  }
+  while (queue.length) {
+    neighbours(queue.pop(), (n) => {
+      if (rim[n] || far[n] >= PALE) return;
+      rim[n] = 1;
+      queue.push(n);
+    });
+  }
+  const pale = rim.slice();
+  for (let i = 0; i < size; i++) if (pale[i]) neighbours(i, (n) => (rim[n] = 1));
+
+  const share = new Float32Array(size).fill(1);
+  for (let i = 0; i < size; i++) {
+    if (!rim[i]) continue;
+    if (!solid(i) || far[i] <= NOISE) {
+      share[i] = 0;
+      continue;
+    }
+    const [x, y] = [i % width, Math.floor(i / width)];
+    let ink = far[i];
+    for (let ny = Math.max(0, y - REACH); ny <= Math.min(height - 1, y + REACH); ny++) {
+      for (let nx = Math.max(0, x - REACH); nx <= Math.min(width - 1, x + REACH); nx++) {
+        if (solid(ny * width + nx)) ink = Math.max(ink, far[ny * width + nx]);
+      }
+    }
+    // A pale smudge with no ink near it is the tile's own unevenness.
+    share[i] = ink < PALE ? 0 : far[i] / ink;
+  }
+  return { tile, share };
+}
+
+/**
+ * Draw the social card. Everything on it is the repo's own: the ground and
+ * the text colours are the glass's tokens, the lobster and its star are the
+ * logo drawing at its own size, lifted off its tile, and the words are the
+ * masks in art/card (drawn in the glass's type by art/card-text.py). Same
+ * inputs, same picture: no fonts, no network and no drawing tool are needed
+ * at build time.
+ */
+export function socialCard({ css, logo, tagline, name }) {
   const { width, height } = CARD;
   const [bg, fg, dim] = ['bg', 'fg', 'dim'].map((token) => glassColor(css, token));
   const rgb = Buffer.alloc(width * height * 3);
   for (let i = 0; i < width * height; i++) rgb.set(bg, i * 3);
-  // Lay `share` (0 to 1) of a colour over the pixel at x, y.
-  const mix = (x, y, color, share) => {
-    if (x < 0 || y < 0 || x >= width || y >= height || share <= 0) return;
-    const at = (y * width + x) * 3;
-    for (let c = 0; c < 3; c++) rgb[at + c] = Math.round(rgb[at + c] * (1 - share) + color[c] * share);
-  };
-  // A piece of pixel art, each of its pixels drawn as a square `scale` wide.
-  const pixels = (image, left, top, scale, frameWidth = image.width) => {
-    for (let y = 0; y < image.height * scale; y++) {
-      for (let x = 0; x < frameWidth * scale; x++) {
-        const from = (Math.floor(y / scale) * image.width + Math.floor(x / scale)) * 4;
-        mix(left + x, top + y, image.data.subarray(from, from + 3), image.data[from + 3] / 255);
+  // Words: a mask says how much ink each pixel has; the colour is the glass's.
+  const words = (mask, left, top, color) => {
+    for (let y = 0; y < mask.height; y++) {
+      for (let x = 0; x < mask.width; x++) {
+        const share = mask.data[y * mask.width + x] / 255;
+        const at = ((top + y) * width + left + x) * 3;
+        for (let c = 0; c < 3; c++) rgb[at + c] = Math.round(rgb[at + c] * (1 - share) + color[c] * share);
       }
     }
   };
-  // Words: a mask says how much ink each pixel has; the colour is the glass's.
-  const words = (mask, left, top, color) => {
-    for (let y = 0; y < mask.height; y++)
-      for (let x = 0; x < mask.width; x++) mix(left + x, top + y, color, mask.data[y * mask.width + x] / 255);
-  };
 
-  // The glass draws the lobster 72 by 56 with its star 56 across and 9 up from its corner, 14 tall. Here, six times that.
-  const scale = 6;
-  const frame = { width: sprite.width / 4, height: sprite.height };
-  const starScale = Math.round((14 * scale) / star.height);
+  // The drawing, and the box its ink fills.
+  const { tile, share } = liftFromTile(logo);
+  const box = { left: logo.width, top: logo.height, right: 0, bottom: 0 };
+  for (let i = 0; i < share.length; i++) {
+    if (share[i] === 0) continue;
+    const [x, y] = [i % logo.width, Math.floor(i / logo.width)];
+    Object.assign(box, {
+      left: Math.min(box.left, x),
+      top: Math.min(box.top, y),
+      right: Math.max(box.right, x),
+      bottom: Math.max(box.bottom, y),
+    });
+  }
+  const art = { width: box.right - box.left + 1, height: box.bottom - box.top + 1 };
   const text = { height: name.height + 34 + tagline.height, width: Math.max(name.width, tagline.width) };
-  const gap = 72;
-  const group = frame.width * scale + gap + text.width;
-  const left = Math.round((width - group) / 2);
-  const top = Math.round((height - frame.height * scale) / 2) + 9 * scale * 0.5;
-  pixels(sprite, left, top, scale, frame.width);
-  pixels(star, left + 56 * scale, top - 9 * scale, starScale);
-  const textLeft = left + frame.width * scale + gap;
+  const gap = 76;
+  const left = Math.round((width - (art.width + gap + text.width)) / 2);
+  const top = Math.round((height - art.height) / 2);
+  // A pixel of the logo is ink over tile. Take the tile's part out and put the ground's in.
+  for (let y = 0; y < art.height; y++) {
+    for (let x = 0; x < art.width; x++) {
+      const i = (box.top + y) * logo.width + box.left + x;
+      if (share[i] === 0) continue;
+      const at = ((top + y) * width + left + x) * 3;
+      for (let c = 0; c < 3; c++) {
+        rgb[at + c] = Math.max(0, Math.min(255, Math.round(logo.data[i * 4 + c] + (1 - share[i]) * (bg[c] - tile[c]))));
+      }
+    }
+  }
+  const textLeft = left + art.width + gap;
   const textTop = Math.round((height - text.height) / 2);
   words(name, textLeft, textTop, dim);
   words(tagline, textLeft, textTop + name.height + 34, fg);
-  return pngEncode(width, height, rgb);
+  return { png: pngEncode(width, height, rgb), art: { left: left - box.left, top: top - box.top } };
 }
 
 const attr = (text) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -472,8 +562,7 @@ export async function buildSite({ wharf = false, minify = true, outDir = path.jo
   const png = (...parts) => pngDecode(fs.readFileSync(path.join(root, ...parts)));
   const card = socialCard({
     css: read(glassCss),
-    sprite: png(...SHARED['lob-sprite.png']),
-    star: png(...SHARED['star.png']),
+    logo: png(...LOGO),
     tagline: png('apps', 'site', 'art', 'card', 'tagline.png'),
     name: png('apps', 'site', 'art', 'card', 'name.png'),
   });
@@ -496,9 +585,9 @@ export async function buildSite({ wharf = false, minify = true, outDir = path.jo
     fs.writeFileSync(path.join(outDir, 'index.html'), page);
     for (const f of files) fs.copyFileSync(f.from, path.join(outDir, 'assets', f.name));
     for (const f of beside) fs.writeFileSync(path.join(outDir, f.name), f.text);
-    fs.writeFileSync(path.join(outDir, 'assets', CARD.name), card);
+    fs.writeFileSync(path.join(outDir, 'assets', CARD.name), card.png);
   }
-  return { html: page, files, beside, card: { ...CARD, png: card }, outDir, wharf, base };
+  return { html: page, files, beside, card: { ...CARD, ...card }, outDir, wharf, base };
 }
 
 const TYPES = {

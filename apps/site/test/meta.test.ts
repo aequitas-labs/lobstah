@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { COMMANDS } from '../../cli/src/usage.js';
 // @ts-expect-error -- a plain .mjs build script, no types
-import { buildSite, glassColor, pngDecode, pngEncode, siteBase } from '../../../scripts/build-site.mjs';
+import { buildSite, glassColor, liftFromTile, pngDecode, pngEncode, siteBase } from '../../../scripts/build-site.mjs';
 // @ts-expect-error -- a plain .js Worker, no types
 import worker, { HOME } from '../worker.js';
 
@@ -252,11 +252,30 @@ describe('the social card', () => {
     expect([back.width, back.height, back.channels]).toEqual([5, 3, 3]);
     expect(back.data.equals(rgb)).toBe(true);
     // the repo's own files, which use every kind of row filter between them
-    expect(png('docs', 'assets', 'lob-sprite.png')).toMatchObject({ width: 288, height: 56, channels: 4 });
+    expect(png('plugins', 'codex', 'assets', 'logo.png')).toMatchObject({ width: 512, height: 512, channels: 4 });
     expect(png('apps', 'site', 'art', 'card', 'tagline.png').channels).toBe(1);
   });
 
-  it("is 1200 by 630, light to load, and made of the glass's own lobster, star and colours", async () => {
+  it('lifts a drawing off its tile: the rim is part tile, the inside is all drawing', () => {
+    // A 9 by 9 cream tile with a dark 3 by 3 square: its left column is half tile, and its middle is as pale as the tile.
+    const tile = [254, 250, 238];
+    const ink = [132, 74, 55];
+    const data = Buffer.alloc(9 * 9 * 4, 255);
+    const put = (x: number, y: number, c: number[]) => data.set(c, (y * 9 + x) * 4);
+    for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) put(x, y, tile);
+    for (let y = 3; y < 6; y++) for (let x = 3; x < 6; x++) put(x, y, ink);
+    for (let y = 3; y < 6; y++) put(2, y, tile.map((t, c) => Math.round((t + ink[c]) / 2))); // prettier-ignore
+    put(4, 4, tile);
+    const lifted = liftFromTile({ width: 9, height: 9, channels: 4, data });
+    const share = (x: number, y: number) => lifted.share[y * 9 + x];
+    expect(lifted.tile).toEqual(tile);
+    expect(share(0, 0)).toBe(0);
+    expect(share(2, 4)).toBeCloseTo(0.5, 1);
+    expect(share(5, 4)).toBe(1);
+    expect(share(4, 4)).toBe(1); // the pale middle is drawing: the tile cannot reach it
+  });
+
+  it("is 1200 by 630, light to load, and made of the logo's own lobster and star on the glass's ground", async () => {
     const built = await buildSite({ write: false, siteUrl: 'https://lobstah.dev' });
     expect(built.card.name).toBe('social-card.png');
     expect(built.card.png.length).toBeLessThan(300 * 1024);
@@ -272,34 +291,31 @@ describe('the social card', () => {
     expect(colours.has(fg.join(','))).toBe(true);
     expect(colours.has(dim.join(','))).toBe(true);
 
-    // The lobster is the sprite's first frame, each pixel a six by six square, with nothing redrawn.
-    const sprite = png('docs', 'assets', 'lob-sprite.png');
-    let left = -1;
-    let top = -1;
-    const solid: Array<[number, number]> = [];
-    for (let y = 0; y < sprite.height; y++)
-      for (let x = 0; x < sprite.width / 4; x++) if (sprite.data[(y * sprite.width + x) * 4 + 3] === 255) solid.push([x, y]);
-    expect(solid.length).toBeGreaterThan(500);
-    // find where the frame's first solid pixel landed, then every other one must follow from it
-    const [fx, fy] = solid[0];
-    search: for (let y = 0; y < card.height; y++) {
-      for (let x = 0; x < card.width; x++) {
-        if (at(card, x, y).join() === at(sprite, fx, fy).join()) {
-          [left, top] = [x - fx * 6, y - fy * 6];
-          break search;
+    // The drawing is the logo at its own size, nothing redrawn: every pixel inside its rim is the logo's pixel.
+    const logo = png('plugins', 'codex', 'assets', 'logo.png');
+    const { tile, share } = liftFromTile(logo) as { tile: number[]; share: Float32Array };
+    const { left, top } = built.card.art as { left: number; top: number };
+    let inside = 0;
+    let star = 0;
+    let fringe = 0;
+    for (let y = 0; y < logo.height; y++) {
+      for (let x = 0; x < logo.width; x++) {
+        const s = share[y * logo.width + x];
+        if (s === 0) continue;
+        const [r, g, b] = at(card, left + x, top + y);
+        if (s === 1) {
+          expect([r, g, b]).toEqual(at(logo, x, y));
+          inside++;
+          // the star stays with the lobster: its yellow is up and to the right of the red
+          if (r > 220 && g > 180 && b < 130 && x > logo.width / 2 && y < logo.height / 2) star++;
+        } else if (Math.hypot(r - tile[0], g - tile[1], b - tile[2]) < 110) {
+          fringe++; // a rim pixel still close to the tile's cream would show as a pale edge on the dark ground
         }
       }
     }
-    expect(left).toBeGreaterThan(0);
-    for (const [x, y] of solid) {
-      expect(at(card, left + x * 6, top + y * 6)).toEqual(at(sprite, x, y));
-      expect(at(card, left + x * 6 + 5, top + y * 6 + 5)).toEqual(at(sprite, x, y));
-    }
-    // The star keeps its place by the lobster: 56 across and 9 up from the lobster's corner, as the glass has it.
-    const star = png('docs', 'assets', 'star.png');
-    const mid = Math.floor(star.width / 2);
-    expect(star.data[(mid * star.width + mid) * 4 + 3]).toBe(255);
-    expect(at(card, left + 56 * 6 + mid * 6 + 1, top - 9 * 6 + mid * 6 + 1)).toEqual(at(star, mid, mid));
+    expect(inside).toBeGreaterThan(30_000);
+    expect(star).toBeGreaterThan(3_000);
+    expect(fringe).toBe(0);
   });
 });
 
