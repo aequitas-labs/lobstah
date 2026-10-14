@@ -118,10 +118,10 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     expect(fs.statSync(`${root}/PRIVACY.md`).isFile()).toBe(true);
   });
 
-  it('both plugins expose the same four skills and no commands; Claude mentions are namespaced', () => {
+  it('both plugins expose the same five skills and no commands; Claude mentions are namespaced', () => {
     for (const plugin of ['claude-code', 'codex']) {
       expect(fs.existsSync(`${root}/plugins/${plugin}/commands`), plugin).toBe(false);
-      expect(fs.readdirSync(`${root}/plugins/${plugin}/skills`).sort(), plugin).toEqual(['man', 'relieve', 'stow', 'trap']);
+      expect(fs.readdirSync(`${root}/plugins/${plugin}/skills`).sort(), plugin).toEqual(['man', 'relieve', 'setup', 'stow', 'trap']);
     }
     const skills = 'plugins/claude-code/skills';
     const files = [

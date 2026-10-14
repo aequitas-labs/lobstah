@@ -27,6 +27,14 @@ const LOCKFILE_SETUP: Array<[string, string[]]> = [
   ['poetry.lock', ['poetry install']],
 ];
 
+/**
+ * A folder name as a repo key: characters a bare TOML key cannot hold (a dot
+ * would nest the table) become `-`, so `my.repo` is keyed `my-repo`.
+ */
+export function repoKeyFor(name: string): string {
+  return name.replace(/[^A-Za-z0-9_-]/g, '-');
+}
+
 /** Read what the repo itself declares: origin, default branch, install step. */
 export function detectRepo(dir: string): DetectedRepo | undefined {
   const abs = path.resolve(dir);
@@ -42,12 +50,15 @@ export function detectRepo(dir: string): DetectedRepo | undefined {
   };
   if (!top || canon(top) !== canon(abs)) return undefined;
   const origin = git(abs, 'remote', 'get-url', 'origin');
-  // origin/HEAD names the forge's default branch; a clone that never fetched
-  // it falls back to the checked-out branch, then to main.
+  // origin/HEAD names the forge's default branch. A clone without it tries a
+  // main or master branch, origin's then local, before the checked-out branch:
+  // a repo scanned while on a feature branch must not get it as trunk.
   const headRef = git(abs, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
-  const trunk = headRef?.replace(/^origin\//, '') ?? git(abs, 'branch', '--show-current') ?? 'main';
+  const has = (ref: string) => git(abs, 'rev-parse', '--verify', '--quiet', ref) !== undefined;
+  const named = ['main', 'master'].find((b) => has(`refs/remotes/origin/${b}`)) ?? ['main', 'master'].find((b) => has(`refs/heads/${b}`));
+  const trunk = headRef?.replace(/^origin\//, '') ?? named ?? (git(abs, 'branch', '--show-current') || 'main');
   const setup = LOCKFILE_SETUP.find(([f]) => fs.existsSync(path.join(abs, f)))?.[1];
-  return { key: path.basename(abs), path: abs, trunk, origin, setup };
+  return { key: repoKeyFor(path.basename(abs)), path: abs, trunk, origin, setup };
 }
 
 /** Git repos directly at or one level under each root — the scan surface. */
@@ -71,9 +82,14 @@ export function scanForRepos(roots: string[]): DetectedRepo[] {
 }
 
 export function configuredRepoKeys(file = configPath()): Set<string> {
-  if (!fs.existsSync(file)) return new Set();
-  const raw = parse(fs.readFileSync(file, 'utf8')) as { repos?: Record<string, unknown> };
-  return new Set(Object.keys(raw.repos ?? {}));
+  return new Set(configuredRepoPaths(file).keys());
+}
+
+/** Configured repo keys, each with its `path` as written. */
+export function configuredRepoPaths(file = configPath()): Map<string, string> {
+  if (!fs.existsSync(file)) return new Map();
+  const raw = parse(fs.readFileSync(file, 'utf8')) as { repos?: Record<string, { path?: unknown }> };
+  return new Map(Object.entries(raw.repos ?? {}).map(([key, r]) => [key, String(r?.path ?? '')]));
 }
 
 /**
@@ -81,7 +97,8 @@ export function configuredRepoKeys(file = configPath()): Set<string> {
  * commented, so a parse-and-rewrite would destroy what the user wrote.
  */
 export function appendRepoBlock(repo: DetectedRepo, opts: { pickup?: boolean } = {}, file = configPath()): void {
-  const lines = [``, `[repos.${repo.key}]`, `path  = ${JSON.stringify(repo.path)}`, `trunk = ${JSON.stringify(repo.trunk)}`];
+  const header = /^[A-Za-z0-9_-]+$/.test(repo.key) ? repo.key : JSON.stringify(repo.key);
+  const lines = [``, `[repos.${header}]`, `path  = ${JSON.stringify(repo.path)}`, `trunk = ${JSON.stringify(repo.trunk)}`];
   if (repo.origin) lines.push(`origin = ${JSON.stringify(repo.origin)}`);
   if (repo.setup) lines.push(`setup  = [${repo.setup.map((s) => JSON.stringify(s)).join(', ')}]`);
   if (opts.pickup) lines.push(`pickup = true`);

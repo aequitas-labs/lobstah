@@ -6,9 +6,10 @@ const it = (name: string, fn: () => void) => baseIt(name, { timeout: 30_000 }, f
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { parse } from 'smol-toml';
-import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from '../src/repos.js';
+import { appendRepoBlock, configuredRepoKeys, detectRepo, repoKeyFor, scanForRepos } from '../src/repos.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let dir: string;
@@ -36,6 +37,20 @@ describe('detectRepo', () => {
     expect(d.origin).toBe('git@github.com:acme/widgets.git');
     expect(d.trunk).toBe('trunk-branch'); // no origin/HEAD in a fresh init — falls back to the checked-out branch
     expect(d.setup).toEqual(['pnpm install']);
+  });
+
+  it('takes a main branch over the checked-out feature branch when origin/HEAD is not set', () => {
+    const repo = makeRepo('widgets');
+    const git = (...a: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { stdio: 'ignore' });
+    git('commit', '-q', '--allow-empty', '-m', 'init');
+    git('branch', 'main');
+    git('checkout', '-q', '-b', 'feature/x');
+    expect(detectRepo(repo)!.trunk).toBe('main');
+  });
+
+  it('keys a dotted folder name with a dash', () => {
+    expect(detectRepo(makeRepo('my.repo'))!.key).toBe('my-repo');
+    expect(repoKeyFor('a b.c')).toBe('a-b-c');
   });
 
   it('returns undefined for a non-repo and for a subdirectory of a repo', () => {
@@ -86,5 +101,48 @@ describe('appendRepoBlock', () => {
       pickup: true,
     });
     expect(configuredRepoKeys(cfg)).toEqual(new Set(['widgets']));
+  });
+
+  it('quotes a key that is not a bare TOML key, so it reads back as written', () => {
+    const cfg = path.join(dir, 'config.toml');
+    appendRepoBlock({ key: 'my.repo', path: '/tmp/my.repo', trunk: 'main' }, {}, cfg);
+    expect(configuredRepoKeys(cfg)).toEqual(new Set(['my.repo']));
+  });
+});
+
+describe('lobstah init', () => {
+  const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+  const run = (home: string, ...args: string[]) => {
+    const res = spawnSync(process.execPath, [cli, 'init', ...args], { encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home }, timeout: 15_000 });
+    expect(res.status, res.stdout + res.stderr).toBe(0);
+    return res.stdout;
+  };
+
+  it('a bare init writes no repo, and its notifyCommand example parses once uncommented', () => {
+    const home = path.join(dir, 'home');
+    run(home);
+    const raw = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
+    expect((parse(raw) as { repos?: unknown }).repos).toBeUndefined();
+    const enabled = raw.replace(/^# (notifyCommand = .*)$/m, '$1');
+    expect((parse(enabled) as { notifyCommand: string }).notifyCommand).toBe('ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"');
+  });
+
+  it('names a repo it skips because another repo has its key, and stays quiet on a rescan', () => {
+    const home = path.join(dir, 'home');
+    makeRepo(path.join('a', 'widgets'));
+    makeRepo(path.join('b', 'widgets'));
+    const out = run(home, '--scan', path.join(dir, 'a'), path.join(dir, 'b'));
+    expect(out).toContain('added: widgets');
+    expect(out).toMatch(/skipped: .*b[\\/]widgets \(key "widgets" is taken; lobstah repos add .* --key <other-name>\)/);
+    expect(run(home, '--scan', path.join(dir, 'a'))).not.toContain('skipped');
+  });
+
+  it('a second scan of a dotted folder keeps the file valid', () => {
+    const home = path.join(dir, 'home');
+    makeRepo(path.join('src', 'my.repo'));
+    expect(run(home, '--scan', path.join(dir, 'src'))).toContain('added: my-repo');
+    run(home, '--scan', path.join(dir, 'src'));
+    const parsed = parse(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')) as { repos: Record<string, unknown> };
+    expect(Object.keys(parsed.repos)).toEqual(['my-repo']);
   });
 });

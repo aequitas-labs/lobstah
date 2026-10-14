@@ -211,7 +211,7 @@ import { installPet, uninstallPet } from './pet.js';
 import { installService, restartService, serviceInstalled, uninstallService } from './service.js';
 import { clearParkRenewal, parkRenewal } from './park-renewal.js';
 import { activeDispatchCounts, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
-import { appendRepoBlock, configuredRepoKeys, detectRepo, scanForRepos } from './repos.js';
+import { appendRepoBlock, configuredRepoKeys, configuredRepoPaths, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
 import {
   addPrWatch,
@@ -3437,13 +3437,13 @@ async function mainCli(): Promise<void> {
     }
     case 'init': {
       if (!fs.existsSync(configPath())) {
-        // --scan fills [repos.*] with real repos; only a bare init needs the
-        // placeholder to show the shape (doctor would flag its fake path).
+        // --scan fills [repos.*] with real repos; only a bare init shows the
+        // shape, commented out so doctor never checks a made-up path.
         const exampleRepo = has('--scan')
           ? ''
-          : `[repos.example]
-path  = "~/src/example"
-trunk = "main"
+          : `# [repos.example]
+# path  = "~/src/example"
+# trunk = "main"
 # origin = "git@github.com:you/example.git"
 # setup  = ["pnpm install"]
 # pickup = true   # opt into [pickup.github] multi-repo tracker pickup
@@ -3453,7 +3453,7 @@ trunk = "main"
           configPath(),
           `# lobstah workspace definitions — the descriptor's repo key resolves here.
 # Top-level keys must come before any [section].
-# notifyCommand = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
+# notifyCommand = 'ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"'
 # notifyVerbs   = ["needs-decision", "blocked", "paused", "done", "failed"]   # the default
 
 ${exampleRepo}[harness]
@@ -3472,14 +3472,21 @@ wallClockSecs      = 3600
 
       const added: string[] = [];
       const unmarked: string[] = [];
+      const skipped: string[] = [];
       if (has('--scan')) {
         const roots = pos;
         if (roots.length === 0) throw new Error('--scan requires at least one directory');
-        const known = configuredRepoKeys();
+        const known = configuredRepoPaths();
         const pickup = has('--pickup');
         for (const repo of scanForRepos(roots)) {
-          if (known.has(repo.key)) continue;
-          known.add(repo.key);
+          const taken = known.get(repo.key);
+          if (taken !== undefined) {
+            // The same repo scanned again is quiet; another repo with the key is not.
+            const same = (p: string) => path.resolve(p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p);
+            if (same(taken) !== same(repo.path)) skipped.push(`${repo.path} (key "${repo.key}" is taken; lobstah repos add ${repo.path} --key <other-name>)`);
+            continue;
+          }
+          known.set(repo.key, repo.path);
           appendRepoBlock(repo, { pickup });
           added.push(repo.key);
           if (!pickup) unmarked.push(repo.key);
@@ -3499,7 +3506,8 @@ wallClockSecs      = 3600
           home: path.dirname(configPath()),
           config: configPath(),
           ...(added.length > 0 ? { added: added.join(', ') } : {}),
-          ...(unmarked.length > 0 ? { note: `none marked pickable — set pickup = true per [repos.*] (or rerun with --pickup)` } : {}),
+          ...(skipped.length > 0 ? { skipped: skipped.join('; ') } : {}),
+          ...(unmarked.length > 0 ? { note: `none marked pickable — set pickup = true in each [repos.<key>] block to opt in` } : {}),
           reference,
           initialized: true,
         }),
