@@ -8,6 +8,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   awaitingReply,
+  displayGrounds,
   codexDesktopThread,
   activeIds,
   activityView,
@@ -362,6 +363,7 @@ export function reportRow(key: string): GlassReport | undefined {
 }
 
 function reportRows(): GlassReport[] {
+  const cfg = loadConfig();
   return listReports().map((r) => {
     const acked = reportAck(r);
     return {
@@ -374,7 +376,7 @@ function reportRows(): GlassReport[] {
       ...(r.dispatch ? { dispatch: r.dispatch } : {}),
       ...(r.lane ? { lane: r.lane } : {}),
       ...(r.trap ? { trap: r.trap } : {}),
-      ...(r.grounds ? { grounds: r.grounds } : {}),
+      ...(r.grounds ? { grounds: displayGrounds(r.grounds, cfg) } : {}),
       ...(r.repo ? { repo: r.repo } : {}),
       bytes: r.bytes,
       attachments: r.attachments,
@@ -523,6 +525,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
     ...h,
+    grounds: displayGrounds(h.grounds, cfg),
     session: h.sessionId.slice(0, 8),
     man: helmLabel(h),
     transcript: transcriptPath(h.harness, h.cwd, h.sessionId),

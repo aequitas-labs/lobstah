@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { lobstahHome } from '@lobstah/core';
+import { lobstahHome, loadConfig, storageGrounds } from '@lobstah/core';
 
 /**
  * The reported-through cursors: one per grounds (default `fleet`), advanced
@@ -13,7 +13,7 @@ import { lobstahHome } from '@lobstah/core';
 export const LOOKBACK_MS = 24 * 3600_000;
 
 function cursorFile(name: string): string {
-  return path.join(lobstahHome(), 'reported', `${name}.json`);
+  return path.join(lobstahHome(), 'reported', `${storageGrounds(name, loadConfig())}.json`);
 }
 
 export function readCursor(name: string): string | undefined {
