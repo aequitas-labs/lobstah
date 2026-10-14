@@ -1,6 +1,6 @@
 # Privacy
 
-Published by aequitas labs LLC. Last updated: 2026-10-07.
+Published by aequitas labs LLC. Last updated: 2026-10-13.
 
 ## Local work and connections
 
@@ -29,6 +29,9 @@ Sharing is on by default. We use telemetry to understand lobstah's usage;
 we do not sell it or share it for advertising. Installation-linked data is
 kept for a limited period. After that, only aggregate counts remain, without
 installation identifiers or worker labels.
+
+Aggregate counts are public. Installation identifiers and worker labels are
+not published.
 
 Run `lobstah telemetry show` to see the exact current contents. The
 [client](packages/core/src/telemetry.ts) and

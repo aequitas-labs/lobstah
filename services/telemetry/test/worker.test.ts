@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import type { D1Database, D1PreparedStatement, D1Result, Env, RateLimit } from '../src/bindings.js';
-import worker, { FIELDS, MAX_BODY_BYTES, MAX_TRAPS, RETENTION_DAYS, handle, utcDate, validate } from '../src/index.js';
+import worker from '../src/worker.js';
+import { FIELDS, MAX_BODY_BYTES, MAX_TRAPS, RETENTION_DAYS, handle, utcDate, validate } from '../src/index.js';
 
 // The client's allowed keys and the Worker's must be the same list.
 import { TELEMETRY_FIELDS, TELEMETRY_MAX_TRAPS, TELEMETRY_MAX_WORKERS } from '../../../packages/core/src/telemetry.js';
@@ -120,9 +121,11 @@ try {
   DatabaseSync = undefined;
 }
 
-function fakeD1(): D1Database {
+function fakeD1(beforeMigration?: (db: Sqlite) => void): D1Database {
   const db = new DatabaseSync!(':memory:');
   db.exec(fs.readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  beforeMigration?.(db);
+  db.exec(fs.readFileSync(new URL('../migrations/0002_daily_catches.sql', import.meta.url), 'utf8'));
   const statement = (sql: string, params: unknown[] = []): D1PreparedStatement => ({
     bind: (...values: unknown[]) => statement(sql, values),
     first: async <T>() => ((db.prepare(sql).all(...params)[0] as T | undefined) ?? null),
@@ -157,7 +160,7 @@ function limiter(limit: number): RateLimit {
 }
 
 function env(over: Partial<Env> = {}): Env {
-  return { DB: fakeD1(), READ_TOKEN: 'read-secret', ...over };
+  return { DB: fakeD1(), ...over };
 }
 
 const post = (e: Env, body: unknown, now = NOW, headers: Record<string, string> = {}) =>
@@ -173,12 +176,91 @@ const post = (e: Env, body: unknown, now = NOW, headers: Record<string, string> 
 const get = (e: Env, path: string, headers: Record<string, string> = {}, now = NOW) => handle(new Request(`https://t.example${path}`, { headers }), e, now);
 const badge = async (e: Env) => (await (await get(e, '/badge/catches.json')).json()) as { schemaVersion: number; label: string; message: string };
 const stats = async (e: Env, days = 30, now = NOW) =>
-  (await (await get(e, `/v1/stats?days=${days}`, { authorization: 'Bearer read-secret' }, now)).json()) as {
+  (await (await get(e, `/v1/stats?days=${days}`, {}, now)).json()) as {
     totalCatches: number;
+    activeBoats: number;
+    activeTraps: number;
+    activeDays: number;
     days: Array<{ date: string; activeInstalls: number; catchesToday: number; newCatches: number }>;
   };
 
 describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
+  it('migrates legacy lifetime-derived totals to daily catches without adding an identity registry', async () => {
+    const e = env({ DB: fakeD1((db) => {
+      db.exec(`INSERT INTO daily_totals VALUES ('${TODAY}', 1, 3, 10000000);
+        INSERT INTO submissions VALUES ('${ID}', '${TODAY}', '0.6.9', 'macos', 'arm64', 3, 10000000, NULL);`);
+    }) });
+    expect((await badge(e)).message).toBe('3');
+    await post(e, payload({ catches: { today: 3, total: 10_000_000 } }));
+    expect((await badge(e)).message).toBe('3');
+    await post(e, payload({ catches: { today: 4, total: 10_000_000 } }));
+    expect((await badge(e)).message).toBe('4');
+    expect((await e.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all<{ name: string }>()).results.map((r) => r.name))
+      .toEqual(['attribution_submissions', 'daily_totals', 'daily_worker_totals', 'submissions', 'trap_submissions', 'worker_submissions']);
+  });
+
+  it('counts only daily catches even when a fresh install reports a huge lifetime total', async () => {
+    const e = env();
+    const huge = payload({ catches: { today: 3, total: 10_000_000 } });
+    expect((await post(e, huge)).status).toBe(204);
+    expect((await post(e, huge)).status).toBe(204);
+    expect((await badge(e)).message).toBe('3');
+    await post(e, payload({ catches: { today: 5, total: 10_000_000 } }));
+    await post(e, huge); // an older snapshot cannot decrease or recount the day
+    expect((await badge(e)).message).toBe('5');
+    expect((await post(e, payload({ catches: { today: 10_000, total: 10_000_000 } }))).status).toBe(204);
+    expect((await post(e, payload({ catches: { today: 10_001, total: 10_000_000 } }))).status).toBe(400);
+    expect((await badge(e)).message).toBe('10000');
+  });
+
+  it('counts distinct active boats and install/name pairs in the last 30 UTC days', async () => {
+    const e = env();
+    const submitAt = async (daysAgo: number, over: Record<string, unknown> = {}) => {
+      const time = NOW - daysAgo * DAY;
+      expect((await post(e, payload({ date: utcDate(time), ...over }), time)).status).toBe(204);
+    };
+    await submitAt(30, { installId: '1b0c8f9e-6a1d-4c2e-9f3a-1b2c3d4e5f60' }); // outside
+    await submitAt(29); // first included UTC date
+    await submitAt(5);
+    await submitAt(0);
+    await submitAt(0, { installId: OTHER }); // same name, different install
+    await submitAt(1, { traps: [{ name: 'amber-gull', today: 2, ...workerProfile() }] });
+    await submitAt(-1, { installId: '2b0c8f9e-6a1d-4c2e-9f3a-1b2c3d4e5f60' }); // skew: not yet active
+    const s = await stats(e, 1);
+    expect(s).toMatchObject({ activeBoats: 2, activeTraps: 3, activeDays: 30 });
+    for (const [kind, label, n] of [['boats', 'boats (30d)', 2], ['traps', 'traps (30d)', 3], ['catches', '🦞', 21]] as const) {
+      const response = await get(e, `/badge/${kind}.json`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ schemaVersion: 1, label, message: String(n), color: 'e05d44', cacheSeconds: 3600 });
+      expect((await handle(new Request(`https://t.example/badge/${kind}.json`, { method: 'POST' }), e, NOW)).status).toBe(405);
+    }
+    expect(await stats(e, 30, NOW + 30 * DAY)).toMatchObject({ activeBoats: 1, activeTraps: 1 });
+    expect(await stats(e, 30, NOW + 31 * DAY)).toMatchObject({ activeBoats: 0, activeTraps: 0, totalCatches: 21 });
+  });
+
+  it('serves open stats containing only aggregates, never install ids, trap names or per-install rows', async () => {
+    const e = env();
+    await post(e, payload());
+    await post(e, payload({ installId: OTHER }));
+    const response = await get(e, '/v1/stats');
+    expect(response.status).toBe(200);
+    const s = await response.json() as Record<string, unknown>;
+    expect(Object.keys(s).sort()).toEqual(['activeBoats', 'activeDays', 'activeTraps', 'byWorker', 'days', 'retentionDays', 'totalCatches']);
+    const text = JSON.stringify(s);
+    for (const privateValue of [ID, OTHER, 'kind-crab', 'install_id', 'installId', 'submissions', 'permissionMode', 'effort']) expect(text).not.toContain(privateValue);
+    expect(s.days).toEqual([{ date: TODAY, activeInstalls: 2, catchesToday: 6, newCatches: 6 }]);
+    expect(s.byWorker).toEqual([{ date: TODAY, harness: null, model: null, catchesToday: 6 }]);
+  });
+
+  it('serves zero badges on an empty store and counts a zero-catch boat as active', async () => {
+    const e = env();
+    for (const kind of ['boats', 'traps', 'catches']) {
+      expect(await (await get(e, `/badge/${kind}.json`)).json()).toMatchObject({ message: '0' });
+    }
+    expect((await post(e, payload({ catches: { today: 0, total: 10_000_000 }, traps: [] }))).status).toBe(204);
+    expect(await stats(e)).toMatchObject({ activeBoats: 1, activeTraps: 0, totalCatches: 0 });
+  });
+
   it('stores config for 90 days, retains only anonymous harness/model counts, and corrects retries atomically', async () => {
     const e = env();
     const trap = workerProfile({ harness: 'codex', model: 'gpt-5', effort: 'high', permissionMode: 'default' });
@@ -205,7 +287,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
       expect((await e.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n).toBe(0);
     }
     expect((await e.DB.prepare('SELECT SUM(catches_today) AS n FROM daily_worker_totals').first<{ n: number }>())?.n).toBe(3);
-    expect((await badge(e)).message).toBe('40');
+    expect((await badge(e)).message).toBe('3');
   });
 
   it('attributes omitted traps to unknown without deriving totals from the bounded list', async () => {
@@ -222,25 +304,25 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     expect((await post(e, payload())).status).toBe(204);
     expect((await post(e, payload())).status).toBe(204);
     expect((await post(e, payload())).status).toBe(204);
-    expect(await badge(e)).toEqual({ schemaVersion: 1, label: '🦞', message: '40', color: 'e05d44', cacheSeconds: 3600 });
-    expect((await stats(e)).days).toEqual([{ date: TODAY, activeInstalls: 1, catchesToday: 3, newCatches: 40 }]);
+    expect(await badge(e)).toEqual({ schemaVersion: 1, label: '🦞', message: '3', color: 'e05d44', cacheSeconds: 3600 });
+    expect((await stats(e)).days).toEqual([{ date: TODAY, activeInstalls: 1, catchesToday: 3, newCatches: 3 }]);
   });
 
-  it('counts each install once per day and only growth in its total', async () => {
+  it('counts each install once per day and only growth within that day', async () => {
     const e = env();
     await post(e, payload({ date: utcDate(NOW - DAY), catches: { today: 1, total: 37 }, traps: [] }), NOW - DAY);
     await post(e, payload());
     await post(e, payload({ installId: OTHER, catches: { today: 2, total: 5 } }));
     // A later same-day submission with higher counts adds only the difference.
     await post(e, payload({ installId: OTHER, catches: { today: 4, total: 7 } }));
-    // A total that went down (a reset store) adds nothing.
+    // A lower lifetime total has no effect on daily accounting.
     await post(e, payload({ date: utcDate(NOW + DAY), catches: { today: 0, total: 10 }, traps: [] }), NOW + DAY);
-    expect((await badge(e)).message).toBe(String(40 + 7));
+    expect((await badge(e)).message).toBe('8');
     const s = await stats(e, 30, NOW + DAY);
-    expect(s.totalCatches).toBe(47);
+    expect(s.totalCatches).toBe(8);
     expect(s.days).toEqual([
-      { date: utcDate(NOW - DAY), activeInstalls: 1, catchesToday: 1, newCatches: 37 },
-      { date: TODAY, activeInstalls: 2, catchesToday: 3 + 4, newCatches: 3 + 7 },
+      { date: utcDate(NOW - DAY), activeInstalls: 1, catchesToday: 1, newCatches: 1 },
+      { date: TODAY, activeInstalls: 2, catchesToday: 3 + 4, newCatches: 3 + 4 },
       { date: utcDate(NOW + DAY), activeInstalls: 1, catchesToday: 0, newCatches: 0 },
     ]);
   });
@@ -264,14 +346,6 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     expect((await post(e, payload({ installId: OTHER }))).status).toBe(429);
   });
 
-  it('guards the read route with the bearer token', async () => {
-    const e = env();
-    expect((await get(e, '/v1/stats')).status).toBe(401);
-    expect((await get(e, '/v1/stats', { authorization: 'Bearer wrong' })).status).toBe(401);
-    expect((await get(env({ READ_TOKEN: undefined }), '/v1/stats', { authorization: 'Bearer ' })).status).toBe(401);
-    expect((await get(e, '/v1/stats', { authorization: 'Bearer read-secret' })).status).toBe(200);
-  });
-
   it(`deletes per-install rows after ${RETENTION_DAYS} days and keeps the daily totals`, async () => {
     const e = env();
     const old = NOW - (RETENTION_DAYS + 1) * DAY;
@@ -286,7 +360,11 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     expect(trapRows.results).toEqual([{ date: TODAY, name: 'kind-crab' }]);
     const s = await stats(e, RETENTION_DAYS + 5);
     expect(s.days.map((d) => d.date)).toEqual([utcDate(old), TODAY]);
-    expect(s.totalCatches).toBe(40);
+    expect(s.totalCatches).toBe(4);
+    expect(s).toMatchObject({ activeBoats: 1, activeTraps: 1 });
+    // The same install returning after expiry adds only this new day's catches.
+    await post(e, payload({ date: utcDate(NOW + 100 * DAY), catches: { today: 2, total: 10_000_000 } }), NOW + 100 * DAY);
+    expect((await badge(e)).message).toBe('6');
     // The table keeps no IP or request metadata column.
     const cols = await e.DB.prepare("SELECT name FROM pragma_table_info('submissions')").all<{ name: string }>();
     expect(cols.results.map((c) => c.name)).toEqual(['install_id', 'date', 'version', 'os', 'arch', 'catches_today', 'total_catches', 'helm']);
@@ -301,7 +379,7 @@ describe.skipIf(!DatabaseSync)('telemetry Worker storage', () => {
     expect((await e.DB.prepare('SELECT name FROM trap_submissions').all()).results).toEqual([{ name: 'amber-gull' }]);
     await post(e, payload({ traps: [] }));
     expect((await e.DB.prepare('SELECT name FROM trap_submissions').all()).results).toEqual([]);
-    expect((await badge(e)).message).toBe('40');
+    expect((await badge(e)).message).toBe('3');
     const cols = await e.DB.prepare("SELECT name FROM pragma_table_info('daily_totals')").all<{ name: string }>();
     expect(cols.results.map((c) => c.name)).toEqual(['date', 'active_installs', 'catches_today', 'new_catches']);
   });
