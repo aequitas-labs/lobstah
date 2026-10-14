@@ -50,6 +50,8 @@ glass's theme and cannot drift from it. The lobsters are the glass's own
 sprite and star from `docs/assets`.
 | `llms.txt` | the page for agents, in the llms.txt shape: what lobstah is and where its guides are; `{{site}}` stands before each address on this site |
 | `setup.md` | the setup guide an agent follows after a person pastes it the install sentence: steps, exact commands, what to leave to the person |
+| `wrangler.jsonc` | where the built site goes on Cloudflare: `lobstah.dev`, with `www.lobstah.dev` sent to it |
+| `worker.js` | the Worker in front of the files; its one job is that redirect |
 
 ## The story
 
@@ -134,6 +136,29 @@ writes four files beside the page.
 reads every `lobstah` command, flag, skill, package and tool name out of
 `setup.md` and `llms.txt` and fails if the code does not have it.
 
+## Deploying
+
+Nothing in this repo deploys the site: no script, no CI job. A maintainer with
+access to the `aequitas labs` Cloudflare account runs it by hand.
+
+The site is a Cloudflare Worker that serves the built folder as static files
+at `lobstah.dev`. `wrangler.jsonc` holds all of it. A deploy builds the site
+first, with `--site-url https://lobstah.dev`, so the address is never typed
+twice. The Worker (`worker.js`) answers both names and sends
+`www.lobstah.dev` to `lobstah.dev`; Cloudflare makes the DNS records for both
+when the Worker is first deployed.
+
+On a machine where wrangler is signed in to more than one Cloudflare account,
+name the sign-in to use. Without `XDG_CONFIG_HOME`, wrangler uses its default
+sign-in, which may be another account:
+
+```bash
+cd apps/site
+XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" npx wrangler@4 whoami    # check the account first
+XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" npx wrangler@4 deploy --dry-run   # build and check, upload nothing
+XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" npx wrangler@4 deploy
+```
+
 ## Limits the tests hold
 
 `apps/site/test/site.test.ts` builds the page and checks that its first load
@@ -148,5 +173,6 @@ page and not fixed to the screen, and that every lobster keeps its star.
 `apps/site/test/meta.test.ts` checks what machines read: that the words a
 visitor reads are the ones in `test/visible-text.txt`, that the guides name
 nothing the code lacks, that `llms.txt` keeps its shape, that no address is
-written until one is given, and that the structured data says only what the
-page and the repo say.
+written until one is given, that the structured data says only what the
+page and the repo say, and that the Worker sends `www` to the bare name and is
+set up for the same address the build is given.

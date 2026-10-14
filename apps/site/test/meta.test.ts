@@ -5,6 +5,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { COMMANDS } from '../../cli/src/usage.js';
 // @ts-expect-error -- a plain .mjs build script, no types
 import { buildSite, siteBase } from '../../../scripts/build-site.mjs';
+// @ts-expect-error -- a plain .js Worker, no types
+import worker, { HOME } from '../worker.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(here, '..', '..', '..');
@@ -226,5 +228,35 @@ describe('what the site gives to agents and to search', () => {
     expect(JSON.stringify(data(placed.html))).not.toMatch(/Rating|Review|FAQPage|Question/);
     const [, website] = data(placed.html)['@graph'];
     expect(website).toEqual({ '@type': 'WebSite', name: 'lobstah', url: 'https://lobstah.dev/', description });
+  });
+});
+
+describe('the site on Cloudflare', () => {
+  const assets = { fetch: (request: Request) => new Response(`files: ${new URL(request.url).pathname}`) };
+  const ask = (url: string): Response => worker.fetch(new Request(url), { ASSETS: assets });
+
+  it('sends www to the bare name, path and query kept, and serves everything else from the files', async () => {
+    const moved = ask('https://www.lobstah.dev/setup.md?from=llms');
+    expect(moved.status).toBe(301);
+    expect(moved.headers.get('location')).toBe('https://lobstah.dev/setup.md?from=llms');
+    const served = ask('https://lobstah.dev/llms.txt');
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe('files: /llms.txt');
+  });
+
+  it('is configured for the same address the build is given, and for the built folder', () => {
+    // wrangler.jsonc is JSON with // comments on lines of their own and a comma after a last item
+    const config = JSON.parse(
+      read('apps', 'site', 'wrangler.jsonc')
+        .replace(/^\s*\/\/.*$/gm, '')
+        .replace(/,(\s*[}\]])/g, '$1'),
+    );
+    expect(config.routes).toEqual([
+      { pattern: HOME, custom_domain: true },
+      { pattern: `www.${HOME}`, custom_domain: true },
+    ]);
+    expect(config.build.command).toBe(`node ../../scripts/build-site.mjs --site-url https://${HOME}`);
+    expect(config.assets).toEqual({ directory: './dist', binding: 'ASSETS', run_worker_first: true });
+    expect(config.main).toBe('worker.js');
   });
 });
