@@ -144,6 +144,7 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Boat | POST claims | Atomically claim eligible dispatch; receive agent token |
 | Helm | POST/GET dispatches; GET dispatches/:id | Enqueue/follow-up, bounded list/read |
 | Helm | POST dispatches/:id/cancel | Cancel, fence the worker |
+| Signed-in person | POST dispatches/:id/cancel | Owner emergency stop, fences epoch without taking a helm seat |
 | Agent | POST dispatches/:id/heartbeat, report | Renew live lease; six report verbs with evidence |
 | Agent | POST dispatches/:id/recovery | Preserve stale result; never finalise replacement |
 | Helm | POST dispatches/:id/messages | Send an instruction |
@@ -152,6 +153,12 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Helm/agent | GET dispatches/:id/files/:file | Authorized download, attachment and nosniff |
 | Person admin | DELETE account root | Delete rows/files and auth identity; same-key retry receipt and tombstone |
 | Helm | GET events?after=:cursor | Up to 100 wharf-ordered events; returned opaque cursor |
+| Read | GET glass, workers, dispatches/:id/detail | Boat/trap metadata, jobs, status history, messages and file metadata |
+| Leased helm | POST documents; POST documents/:id/files, publish, withdraw | Author decisions and Markdown reports with scoped uploads |
+| Read | GET documents, documents/:id, documents/:id/files/:file | Published documents and their own uploaded bytes |
+| Signed-in person | POST documents/:id/answer | Record one card answer and ordered event; no helm-seat change |
+| Signed-in person | POST requests | Queue a bounded message or trap-start request for the helm |
+| Read / leased helm | GET requests; POST requests/:id/receipt, execute | Explicit receipt then execute a live message request |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; approve another login to receive a new
@@ -173,10 +180,26 @@ not client clocks. Polling requests finish immediately; the DO can sleep idle.
 Report evidence is data, not hosted executable HTML. No GitHub polling or worker
 execution is moved into this service.
 
-Files are immutable by idempotency key and dispatch-scoped, including report
+Files are immutable by idempotency key and dispatch- or document-scoped, including report
 Markdown and images. Downloads force octet-stream, attachment disposition,
 nosniff and a sandbox CSP; no cookies, public file URLs or executable report pages.
 Reading messages does not mark them received. `done` refuses unreceived messages.
+
+The signed-in person never takes the helm seat merely by using the glass. Card
+answers are durable events. Send and trap-start actions queue account-local human
+requests for the live helm to read and explicitly receipt. Without a helm, they
+show `waitingForHelm`; queued/received requests expire visibly after ten minutes
+on the next poll and cannot execute late. Only owner cancellation directly acts
+on a job without a seat: it fences the claim epoch and records the person actor.
+Trap-start fulfillment follows in the opted-in boat slice; this slice never launches
+a process. No new server timers or polling loops.
+
+`man ask --title ... --option ... [--detail file.md] [--attach file]`,
+`man file report.md [--attach file]`, worker `report ... --report file.md
+[--attach file]`, and `man tend` now use the selected wharf grounds. Authoring
+uses the existing helm session flag; workers upload with their dispatch token.
+The CLI sends file bytes and basenames, never local paths. Use `--request-key`
+to retry a multi-step upload/publish with stable bounded keys.
 
 Account deletion serialises with uploads, rejects new requests, deletes every
 account-prefixed R2 object and clears coordination rows. A retry resumes cleanup
