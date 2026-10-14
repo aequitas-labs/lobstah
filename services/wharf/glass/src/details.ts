@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { MarkdownElements } from '../../../../apps/cli/glass/src/components/markdown.js';
 import { safeHref } from '../../../../apps/cli/src/glass-markdown.js';
 import { fileText, fileUrl, json } from './api.js';
-import { Files, html, OwnedImage, Session, value, when } from './common.js';
+import { acked, Files, html, OwnedImage, Session, value, when } from './common.js';
 import type { Action } from './common.js';
 import type { Detail, DispatchView, WharfDocument, Worker } from './model.js';
 export function Document({ doc, action, kind = 'documents' }: { doc: WharfDocument; action: Action; kind?: 'documents' | 'dispatches' }) {
@@ -31,7 +31,7 @@ export function Document({ doc, action, kind = 'documents' }: { doc: WharfDocume
     e.preventDefault();
     await action(`documents/${doc.id}/answer`, { ...(option ? { option } : {}), ...(answer.trim() ? { text: answer.trim() } : {}) });
   };
-  return html`<div class="sub">${doc.kind} · ${doc.author} · ${when(doc.at)}</div>
+  return html`<div class="sub">${doc.kind} · ${doc.author} · ${when(doc.at)}${acked(doc.ack)}</div>
     ${
       doc.markdown &&
       html`<div class="mdpage">${
@@ -89,7 +89,7 @@ export function Job({ job, workers, action }: { job: DispatchView; workers: Work
           ]
         : [];
     }) ?? [];
-  return html`<div class="sub">${job.id} · ${job.repo} · ${job.status?.verb ?? job.state} · ${job.boatName ?? worker?.boatName ?? 'boat unknown'}</div>
+  return html`<div class="sub">${job.id} · ${job.repo} · ${job.status?.verb ?? job.state} · ${job.boatName ?? worker?.boatName ?? 'boat unknown'}${acked(job.ack)}</div>
     <div class="sec">brief</div><pre>${job.brief}</pre>
     <div class="sec">status notes / catches</div>${error && html`<div class="bad">${error}</div>`}${detail?.reports.map((s) => html`<div class="catch"><div class="hdr"><b>${s.verb}</b><span class="dim">${when(s.at)}</span></div><pre>${s.note}</pre>${s.waitingOn && html`<div class="waiting">waiting on ${s.waitingOn}${s.until ? ' until ' + s.until : ''}</div>`}${s.evidence?.prUrls?.map((url) => safeHref(url) && html`<div><a href=${safeHref(url)} target="_blank" rel="noopener noreferrer">${url}</a></div>`)}</div>`)}
     <div class="sec">messages</div>${detail?.messages.map((m) => html`<div class="msg"><div class="hdr">${m.received ? 'received' : 'unread'}</div>${m.text}</div>`)}

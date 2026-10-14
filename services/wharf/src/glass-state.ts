@@ -1,4 +1,4 @@
-import type { WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest } from '../../../packages/core/src/backend-model.js';
+import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, repoIdentity, requireThat, text } from './protocol.js';
 import type { Actor, Command } from './account.js';
 
@@ -6,10 +6,11 @@ export const glassSchema = `
   CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS human_requests (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS worker_details (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS dispatch_acks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `;
-export const glassTables = ['documents', 'human_requests', 'worker_details'];
+export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks'];
 type Result = { status: number; value: unknown };
-type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
+type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
 /** Pure synchronous SQL operations inside the account's auth/idempotency transaction. */
 export class GlassState {
   constructor(private sql: SqlStorage, private hooks: Hooks) {}
@@ -23,6 +24,17 @@ export class GlassState {
     const d = this.get<WharfDocument>('documents', identifier(id)); requireThat(d, 404, 'document not found'); return d;
   }
   private person(actor: Actor) { requireThat(actor.kind === 'person', 403, 'signed-in person required'); }
+  /** Who an ack is by: the boat under its current name, or the signed-in person. Never a dispatch token. */
+  private acker(actor: Actor): string {
+    this.hooks.read(actor);
+    if (actor.kind === 'person') return 'person';
+    return `boat:${this.sql.exec<{ name: string }>('SELECT name FROM boats WHERE id=?', actor.id).toArray()[0]?.name ?? actor.id}`;
+  }
+  /** The ack of the status a job stands on now. An ack of an earlier status is not one of this. */
+  dispatchAck(id: string, statusAt: string | undefined): (WharfAck & { status: string }) | undefined {
+    const ack = this.get<WharfAck & { status: string }>('dispatch_acks', id);
+    return ack && ack.status === statusAt ? ack : undefined;
+  }
   expire(now: number) {
     for (const row of this.sql.exec<{ id: string; data: string }>("SELECT * FROM human_requests WHERE json_extract(data,'$.state') IN ('queued','received','authorized') AND json_extract(data,'$.expiresAt')<=?", new Date(now).toISOString()).toArray()) {
       const r = JSON.parse(row.data) as WharfHumanRequest; r.state = 'expired'; this.put('human_requests', row.id, r);
@@ -67,6 +79,19 @@ export class GlassState {
     if (c.path === 'workers' && c.method === 'GET') return ok(this.workers());
     if (c.path === 'glass' && c.method === 'GET') return ok({ boats: this.boats(), workers: this.workers(), documents: this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn),
       requests: this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })), helmLive: this.hooks.helmLive(now) });
+    if (parts[0] === 'dispatches' && parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
+      // A person has seen this job's question or landing. No event, no helm seat, no change to the job.
+      const by = this.acker(actor), id = identifier(parts[1]);
+      requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', id).toArray().length, 404, 'dispatch not found');
+      const last = this.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 1', id).toArray()[0];
+      const status = last ? (JSON.parse(last.data) as { at: string }).at : undefined;
+      // Keyed on the status time: an ack of what the job said before must not hide what it says now.
+      requireThat(status && b.at === status, 409, 'the job has no such current status; read it again before acknowledging');
+      const standing = this.dispatchAck(id, status);
+      if (standing) return ok(standing);
+      const ack = { status, at: new Date(now).toISOString(), by };
+      this.put('dispatch_acks', id, ack); return ok(ack);
+    }
     if (parts[0] === 'documents') {
       if (parts.length === 1 && c.method === 'GET') return ok(this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn));
       if (parts.length === 1 && c.method === 'POST') {
@@ -101,6 +126,12 @@ export class GlassState {
       if (parts.length === 3 && parts[2] === 'withdraw' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(d.kind === 'decision' && !d.answer && !d.withdrawn, 409, 'no standing decision to withdraw');
         d.withdrawn = true; this.put('documents', d.id, d); this.hooks.event('decision-withdrawn', d.dispatch, d.id); return ok(d);
+      }
+      if (parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
+        // Seen, by a boat with read or the person. The first ack stands. No event and no helm seat.
+        const by = this.acker(actor); requireThat(d.published && !d.withdrawn, 409, 'document is not published or was withdrawn');
+        if (!d.ack) { d.ack = { at: new Date(now).toISOString(), by }; this.put('documents', d.id, d); }
+        return ok(d);
       }
       if (parts.length === 3 && parts[2] === 'answer' && c.method === 'POST') {
         // Human input, like the local glass: never takes, renews or steals a helm seat.

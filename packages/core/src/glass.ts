@@ -50,6 +50,15 @@ export interface TendAttention {
   standingSince?: string;
   note?: string;
   repo?: string;
+  /** An item of a grounds on a wharf: that grounds and the wharf's name. Absent for local grounds. */
+  grounds?: string;
+  wharf?: string;
+  /**
+   * An item of a grounds on a wharf: the hosted glass at this item
+   * (`<glass origin>/#job/<id>`), where a click on it goes. Absent for local
+   * grounds (the local glass), and until the wharf has named its glass.
+   */
+  glass?: string;
   /** pr:* kinds: the evidence fields the kind derives from. */
   prUrl?: string;
   /** Click destination only: prUrl remains the canonical watch/ack identity. */

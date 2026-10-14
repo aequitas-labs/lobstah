@@ -3,15 +3,18 @@ import { accountResponse } from './account-response.js';
 import { ApiError, boundedBody, object, requireThat } from './protocol.js';
 import type { Command } from './account.js';
 import { GLASS_CSS, GLASS_SCRIPT } from './glass-page.generated.js';
+import { GLASS_INSTALL_HEAD, glassInstall } from './glass-install.js';
 
 /** Browser-only routes. No account selector, credential issuance or helm seat. */
 export async function glassBrowser(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
+  const install = request.method === 'GET' ? glassInstall(url.pathname) : undefined;
+  if (install) return install;
   if (request.method === 'GET' && ['/', '/device'].includes(url.pathname)) {
     const nonce = crypto.randomUUID();
-    return new Response(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>lobstah spyglass</title><style nonce="${nonce}">${GLASS_CSS}</style></head><body><script nonce="${nonce}">${GLASS_SCRIPT}</script></body></html>`, {
+    return new Response(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>lobstah spyglass</title>${GLASS_INSTALL_HEAD}<style nonce="${nonce}">${GLASS_CSS}</style></head><body><script nonce="${nonce}">${GLASS_SCRIPT}</script></body></html>`, {
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
-        'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' blob: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'` },
+        'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' blob: data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'` },
     });
   }
   requireThat(url.pathname.startsWith('/api/glass'), 404, 'route not found');
@@ -23,7 +26,8 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
     || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
     || /^(documents|dispatches)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));
   const input = request.method === 'POST' && (route === 'requests'
-    || /^documents\/[A-Za-z0-9_-]+\/answer$/.test(route)
+    || /^documents\/[A-Za-z0-9_-]+\/(answer|ack)$/.test(route)
+    || /^dispatches\/[A-Za-z0-9_-]+\/ack$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/cancel$/.test(route)
     || /^boats\/[A-Za-z0-9_-]+\/revoke$/.test(route));
   const deleting = request.method === 'DELETE' && route === 'account';

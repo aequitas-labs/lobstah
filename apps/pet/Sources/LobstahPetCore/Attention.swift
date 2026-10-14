@@ -24,8 +24,12 @@ public struct AttentionItem: Decodable, Equatable {
   public var petOpen: String? = nil
   /** The hash of the state the item stands on; a new one re-stands an acked item. */
   public var stateHash: String? = nil
+  /** An item of a grounds on a wharf: that grounds. Absent for local grounds, and from an older lobstah. */
+  public var grounds: String? = nil
+  /** An item of a grounds on a wharf: the hosted glass at this item. Absent for local grounds. */
+  public var glass: String? = nil
 
-  public init(id: String, verb: String, note: String?, key: String? = nil, acked: AckInfo? = nil, kind: String? = nil, prUrl: String? = nil, stateHash: String? = nil) {
+  public init(id: String, verb: String, note: String?, key: String? = nil, acked: AckInfo? = nil, kind: String? = nil, prUrl: String? = nil, stateHash: String? = nil, grounds: String? = nil, glass: String? = nil) {
     self.id = id
     self.verb = verb
     self.note = note
@@ -34,6 +38,8 @@ public struct AttentionItem: Decodable, Equatable {
     self.kind = kind
     self.prUrl = prUrl
     self.stateHash = stateHash
+    self.grounds = grounds
+    self.glass = glass
   }
 
   /** The identity stays fixed when labels, order, or acknowledgements change. */
@@ -41,6 +47,23 @@ public struct AttentionItem: Decodable, Equatable {
 
   /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
   public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready") ? (reviewUrl ?? prUrl).flatMap(URL.init(string:)) : nil }
+
+  /**
+   * The glass this item belongs to: the one place that picks between the
+   * hosted glass and the local one. An item of a grounds on a wharf names its
+   * hosted glass, already at the item (lobstah builds the link; the wharf
+   * keeps that grounds' state, so the local glass has little to show). Every
+   * other item, and a link that is not HTTPS (HTTP on loopback only), gets
+   * `local`. No setting chooses between them.
+   */
+  public func glassAddress(local: URL) -> GlassAddress {
+    guard let glass, let url = URL(string: glass), let host = url.host, url.user == nil, url.password == nil else {
+      return GlassAddress(url: local, hosted: false)
+    }
+    let loopback = url.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(host)
+    guard url.scheme == "https" || loopback else { return GlassAddress(url: local, hosted: false) }
+    return GlassAddress(url: url, hosted: true)
+  }
 
   /** A report pet clicks through to the report's own page on the spyglass (/report/<key>). */
   public func reportLink(glass: URL) -> URL? {
@@ -64,6 +87,10 @@ public struct AttentionItem: Decodable, Equatable {
    * opens when none is open. Nil for every other kind.
    */
   public func glassTarget(glass: URL) -> GlassTarget? {
+    let address = glassAddress(local: glass)
+    if address.hosted && (kind == "report" || kind == "decision") {
+      return GlassTarget(hash: address.url.fragment.map { "#\($0)" } ?? "", url: address.url)
+    }
     guard let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
     if let url = reportLink(glass: glass) { return GlassTarget(hash: "#report/\(encoded)", url: url) }
     if let url = decisionLink(glass: glass) { return GlassTarget(hash: "#decision/\(encoded)", url: url) }
@@ -105,6 +132,9 @@ public struct AttentionItem: Decodable, Equatable {
 /// live helm's session, which frames it, or with no live helm opens its glass
 /// card; a report opens its page. PRs open their URLs. Other items focus the
 /// helm. `focusHelm` gets the glass URL to open when no helm step works.
+/// Reports and decisions use the configured route with their own glass
+/// (`glassAddress`). Other hosted items open that glass directly; PRs always
+/// use the repo's review tool. `glass` is the local glass.
 public func clickAttentionItem(
   _ item: AttentionItem,
   glass: URL,
@@ -115,7 +145,10 @@ public func clickAttentionItem(
   showApp: (GlassTarget, @escaping () -> Void) -> Void = { _, otherwise in otherwise() },
   acknowledge: ([String]) -> Void
 ) {
-  if let target = item.glassTarget(glass: glass) {
+  let address = item.glassAddress(local: glass)
+  if let url = item.prLink {
+    open(url)
+  } else if let target = item.glassTarget(glass: glass) {
     let isDecision = item.kind == "decision"
     switch item.petOpen {
     case "tab":
@@ -126,12 +159,16 @@ public func clickAttentionItem(
       focusHelm(target.url)
     default:
       // An older CLI has no setting: preserve its existing routing.
-      showGlass(target) {
-        if isDecision && helmLive { focusHelm(target.url) } else { open(target.url) }
+      if address.hosted {
+        open(target.url)
+      } else {
+        showGlass(target) {
+          if isDecision && helmLive { focusHelm(target.url) } else { open(target.url) }
+        }
       }
     }
-  } else if let url = item.prLink {
-    open(url)
+  } else if address.hosted {
+    open(address.url)
   } else {
     focusHelm(glass)
   }

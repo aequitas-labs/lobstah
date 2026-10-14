@@ -10,8 +10,16 @@ export interface ReportInput {
   evidence?: { prUrls?: string[]; files?: string[]; commits?: string[] };
 }
 export interface BackendStatus extends ReportInput { at: string; reported?: true }
+/**
+ * A person has seen an item: recorded on the wharf, so every boat and the
+ * hosted glass agree. Display only; it answers and steers nothing. `by` is
+ * `boat:<name>` or `person`.
+ */
+export interface WharfAck { at: string; by: string }
 export interface DispatchView extends DispatchInput {
   state: 'queued' | 'active' | 'done' | 'cancelled'; status?: BackendStatus;
+  /** The ack of the status this job stands on (`status` is that status's time). A newer report leaves none. */
+  ack?: WharfAck & { status: string };
   boatName?: string; unservable?: { repo: string; note: string };
   workerId?: string; claimedBoat?: string;
 }
@@ -30,6 +38,15 @@ export interface WharfDocument extends WharfDocumentInput {
   at: string; author: string; published: boolean; withdrawn?: boolean;
   markdown?: WharfFile; attachments: WharfFile[];
   answer?: { option?: string; text?: string; at: string; by: string };
+  /** The first ack stands; a published document does not change. */
+  ack?: WharfAck;
+}
+/** What a boat keeps of a wharf decision or report: enough for an attention item, never its content. */
+export interface WharfDocumentSummary {
+  id: string; kind: 'decision' | 'report'; title: string; at: string; dispatch?: string;
+  /** A decision a person has answered: it no longer stands. */
+  answered?: true;
+  ack?: WharfAck;
 }
 export interface WharfHumanRequest {
   id: string; kind: 'message' | 'trap-request'; dispatch?: string; text?: string; boat?: string; repo?: string;

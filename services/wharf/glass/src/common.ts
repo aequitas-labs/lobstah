@@ -7,6 +7,8 @@ export { html };
 export const value = (e: Event) => (e.currentTarget as HTMLInputElement).value;
 export const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : 'unknown');
 export type Action = (path: string, body: unknown) => Promise<boolean>;
+/** How an item says a person has seen it: the wharf's ack, by a boat (its pet or CLI) or the signed-in person. */
+export const acked = (ack?: { at: string; by: string }) => (ack ? ` · acked by ${ack.by} ${when(ack.at)}` : '');
 export function Copy({ command }: { command: string }) {
   const [copied, setCopied] = useState(false),
     [error, setError] = useState(false);

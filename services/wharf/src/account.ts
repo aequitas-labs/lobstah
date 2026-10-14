@@ -110,7 +110,7 @@ export class Account extends DurableObject<Env> {
       ${glassSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
-    this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), event: (k, d, note) => this.event(k, d, note),
+    this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => Number(JSON.parse(this.get('helm') ?? '{}').until) > now });
   }
   private get(key: string): string | undefined {
@@ -161,7 +161,8 @@ export class Account extends DurableObject<Env> {
   private view(d: DispatchRow) {
     const input = JSON.parse(d.data) as DispatchInput; const target = this.targetBoat(input);
     const unservable = this.ctx.storage.sql.exec<{ repo: string; note: string }>('SELECT repo,note FROM unservable WHERE dispatch=?', d.id).toArray()[0];
-    return { ...input, state: d.state, status: this.lastReport(d.id), ...(d.worker ? { workerId: d.worker } : {}), ...(d.boat ? { claimedBoat: d.boat } : {}), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
+    const status = this.lastReport(d.id), ack = this.glass.dispatchAck(d.id, status?.at);
+    return { ...input, state: d.state, status, ...(ack ? { ack } : {}), ...(d.worker ? { workerId: d.worker } : {}), ...(d.boat ? { claimedBoat: d.boat } : {}), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
   }
   private authenticate(c: Command, hash: string, now: number): Actor {
     if (c.helm) return { kind: 'person', id: c.personId ?? 'person', permissions: personPermissions };

@@ -54,7 +54,11 @@ export default {
       const c: Command = { account, helm, personId: person?.id, personSessionId: person && 'sessionId' in person ? person.sessionId : undefined, token, method: request.method, path: route, body,
         key: request.headers.get('Idempotency-Key') ?? undefined, session: request.headers.get('X-Lobstah-Helm') ?? undefined,
         after: url.searchParams.get('after') ?? undefined };
-      return respond(await accountResponse(request, env, c));
+      const response = await accountResponse(request, env, c);
+      if (response.webSocket) return respond(response);
+      // Names this wharf's glass to the boat, so a click on one of its items can open it there.
+      const headers = new Headers(response.headers); headers.set('X-Lobstah-Glass', origins.glass);
+      return respond(new Response(response.body, { status: response.status, headers }));
     } catch (e) {
       if (e instanceof ApiError) return respond(Response.json({ error: e.message }, { status: e.status }));
       // The DO serialises protocol errors, not exception prototypes.
