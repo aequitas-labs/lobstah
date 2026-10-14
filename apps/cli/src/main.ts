@@ -872,6 +872,8 @@ const HOOK_COMMANDS: Record<string, string[]> = {
 
 async function mainCli(): Promise<void> {
   let [cmd, ...args] = process.argv.slice(2);
+  const { wharfHook } = await import('./wharf-commands.js');
+  if (await wharfHook(cmd, args)) return;
   if (cmd === 'hook' && args[0] === 'user-prompt-submit') {
     // A new user turn resumes a trap; the helm gets its non-blocking reminder.
     try {
@@ -938,6 +940,8 @@ async function mainCli(): Promise<void> {
     const value = flags.get(flag);
     return Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
   };
+  const { wharfCommand } = await import('./wharf-commands.js');
+  if (await wharfCommand(cmd, pos, { opt, has, values }, loadConfig())) return;
   const copyFiles = (files: string[], dir: string): Descriptor['attachments'] => {
     if (files.length === 0) return [];
     try {

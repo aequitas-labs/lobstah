@@ -88,6 +88,7 @@ import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { reportAttention } from './report-file.js';
 import { decisionAttention, hideFramedQuestions } from './decisions.js';
 import { worktreeView } from './worktree-view.js';
+import { backendViews, hostedAttention } from './hosted-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
@@ -563,6 +564,7 @@ export function poolRows(pools: PoolView[]): Array<Record<string, string | numbe
 export const POOL_COLUMNS = ['pool', 'repo', 'size', 'free', 'overflow', 'claimed', 'out', 'warming'];
 
 export interface TendReport {
+  backends?: ReturnType<typeof backendViews>;
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
   daemon: { up: boolean; lastHeartbeat?: string };
   counts: {
@@ -930,7 +932,7 @@ export function buildTendReport(now = Date.now()): TendReport {
     records,
     { readySettleSecs: cfg.readySettleSecs, now, trunk: (r) => prStackTrunk(cfg, r) },
   ).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now));
+  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now), ...hostedAttention(cfg, now));
   attention.push(...dispatchProgress(now, cfg).map((p): TendAttention => ({
     kind: 'dispatch-progress', key: `progress:${p.lane}:${p.id}`, stateHash: p.stateHash,
     id: p.id, lane: p.lane, verb: p.state, ageSecs: p.ageSecs, at: p.since,
@@ -998,6 +1000,7 @@ export function buildTendReport(now = Date.now()): TendReport {
 
   return {
     verdict,
+    backends: backendViews(cfg),
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
     counts: {
       queued: queued.length,
@@ -1046,6 +1049,7 @@ export function buildTendReport(now = Date.now()): TendReport {
 
 export function renderTend(r: TendReport): string {
   const lines: string[] = [];
+  for (const b of r.backends ?? []) lines.push(toonKV({ grounds: b.grounds, backend: b.wharf ?? 'local', ...(b.unavailable ? { state: 'unknown', note: b.unavailable } : {}) }));
   // Tables show each trap by name alone; `wt:<id>` only where no name is known.
   const names = trapNamer();
   const named = (text: string) => nameTrapsIn(text, 'name', names);
