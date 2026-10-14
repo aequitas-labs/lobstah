@@ -927,6 +927,15 @@ p {
   overflow-x: auto;
   scrollbar-width: thin;
 }
+/* Where a mouse or trackpad would show a standing scrollbar, the row hides it; it still scrolls by trackpad, shift and the wheel, and the keyboard. */
+@media (hover: hover) and (pointer: fine) {
+  .scroller {
+    scrollbar-width: none;
+  }
+  .scroller::-webkit-scrollbar {
+    display: none;
+  }
+}
 .scroller:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: -2px;
