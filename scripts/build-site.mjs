@@ -9,6 +9,10 @@
 //   node scripts/build-site.mjs --wharf    include the wharf section (held out until the wharf ships)
 //   node scripts/build-site.mjs --out dir  write somewhere other than apps/site/dist (a second preview: --serve --wharf --port 4951 --out dir)
 //   node scripts/build-site.mjs --dev      unminified, for reading the page source
+//   node scripts/build-site.mjs --site-url https://example.org
+//                                          the address the site will be served from: adds the canonical link,
+//                                          the social card's address and image, sitemap.xml, and full addresses
+//                                          in llms.txt. Without it the build leaves those out and keeps links relative.
 import * as esbuild from 'esbuild';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
@@ -21,6 +25,9 @@ const site = path.join(root, 'apps', 'site');
 const glassCss = path.join(root, 'apps', 'cli', 'glass', 'glass.css');
 
 const CSS_TAG = '<link rel="stylesheet" href="./site.css" />';
+const META_TAG = '<!-- head:meta -->';
+const REPO = 'https://github.com/aequitas-labs/lobstah';
+const NPM = 'https://www.npmjs.com/package/lobstah';
 const JS_TAG = '<script src="./src/main.ts"></script>';
 
 /** The page may weigh this much on first load, for any one screen size. */
@@ -45,6 +52,10 @@ const SHARED = {
   'icon-192.png': ['apps', 'cli', 'glass', 'assets', 'app-icon-192.png'],
   'favicon.png': ['docs', 'assets', 'favicon.png'],
 };
+
+/** The card image shown when a link to the page is shared: the repo's own, unchanged. Never loaded by the page itself. */
+const SOCIAL = { name: 'social-preview.png', from: ['docs', 'assets', 'social-preview.png'] };
+const SOCIAL_ALT = 'The lobstah lobster with its star, beside the words: lobstah. Nobody stares at the water.';
 
 /** The glass rules the page reuses, by selector, in the glass's own order. */
 export const GLASS_RULES = [
@@ -196,13 +207,107 @@ export function firstLoadWeight(html, files, pick) {
   return { page, art, shared, total: page + art + shared };
 }
 
+/**
+ * The site's public address, without a trailing slash, or '' when none is
+ * given. Only an http(s) address counts; anything else is an error, never a guess.
+ */
+export function siteBase(siteUrl) {
+  if (!siteUrl) return '';
+  let url;
+  try {
+    url = new URL(siteUrl);
+  } catch {
+    throw new Error(`--site-url must be a full address such as https://example.org, not ${JSON.stringify(siteUrl)}`);
+  }
+  if (!/^https?:$/.test(url.protocol)) throw new Error(`--site-url must start with http:// or https://, not ${url.protocol}//`);
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
+}
+
+/** Width and height of a PNG, from its header. */
+export function pngSize(buf) {
+  if (buf.readUInt32BE(0) !== 0x89504e47 || buf.toString('latin1', 12, 16) !== 'IHDR') throw new Error('not a PNG file');
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+const attr = (text) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+/**
+ * What a search engine, an answer engine or a link preview reads, and a
+ * visitor never sees: the social card, the structured data, and pointers to
+ * the setup guide and llms.txt. Every statement here is already on the page
+ * or in the repo. Addresses that need the site's own address are left out
+ * until `base` is known, so the build never emits a wrong one.
+ */
+export function headMeta({ title, description, base, image }) {
+  const card = base && image;
+  const tags = [
+    ...(base ? [`<link rel="canonical" href="${attr(base)}/" />`] : []),
+    `<link rel="alternate" type="text/markdown" href="setup.md" title="lobstah setup guide, for agents" />`,
+    `<link rel="alternate" type="text/plain" href="llms.txt" title="llms.txt" />`,
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:site_name" content="lobstah" />`,
+    `<meta property="og:title" content="${attr(title)}" />`,
+    `<meta property="og:description" content="${attr(description)}" />`,
+    ...(base ? [`<meta property="og:url" content="${attr(base)}/" />`] : []),
+    ...(card
+      ? [
+          `<meta property="og:image" content="${attr(base)}/assets/${image.name}" />`,
+          `<meta property="og:image:width" content="${image.width}" />`,
+          `<meta property="og:image:height" content="${image.height}" />`,
+          `<meta property="og:image:alt" content="${attr(SOCIAL_ALT)}" />`,
+        ]
+      : []),
+    `<meta name="twitter:card" content="${card ? 'summary_large_image' : 'summary'}" />`,
+    `<meta name="twitter:title" content="${attr(title)}" />`,
+    `<meta name="twitter:description" content="${attr(description)}" />`,
+    ...(card
+      ? [
+          `<meta name="twitter:image" content="${attr(base)}/assets/${image.name}" />`,
+          `<meta name="twitter:image:alt" content="${attr(SOCIAL_ALT)}" />`,
+        ]
+      : []),
+  ];
+  const app = {
+    '@type': ['SoftwareApplication', 'SoftwareSourceCode'],
+    name: 'lobstah',
+    description,
+    applicationCategory: 'DeveloperApplication',
+    operatingSystem: 'macOS, Linux, Windows',
+    softwareRequirements: 'Node.js 20 or later',
+    license: 'https://opensource.org/licenses/MIT',
+    isAccessibleForFree: true,
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    codeRepository: REPO,
+    downloadUrl: NPM,
+    installUrl: NPM,
+    ...(base ? { url: `${base}/` } : {}),
+    sameAs: [REPO, NPM],
+    author: { '@type': 'Organization', name: 'aequitas labs LLC', url: 'https://github.com/aequitas-labs' },
+  };
+  const graph = [app, ...(base ? [{ '@type': 'WebSite', name: 'lobstah', url: `${base}/`, description }] : [])];
+  const data = JSON.stringify({ '@context': 'https://schema.org', '@graph': graph }).replace(/</g, '\\u003c');
+  return [...tags, `<script type="application/ld+json">${data}</script>`].join('\n');
+}
+
+/** robots.txt: everything may be crawled; the sitemap is named once the site has an address. */
+export function robotsTxt(base) {
+  return `User-agent: *\nAllow: /\n${base ? `\nSitemap: ${base}/sitemap.xml\n` : ''}`;
+}
+
+/** sitemap.xml: the page, llms.txt and the setup guide. */
+export function sitemapXml(base) {
+  const urls = ['', 'llms.txt', 'setup.md'].map((p) => `  <url><loc>${attr(`${base}/${p}`)}</loc></url>`);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`;
+}
+
 function inline(page, tag, content) {
   const at = page.indexOf(tag);
   if (at < 0 || page.indexOf(tag, at + 1) >= 0) throw new Error(`index.html must contain ${tag} exactly once`);
   return page.slice(0, at) + content + page.slice(at + tag.length);
 }
 
-export async function buildSite({ wharf = false, minify = true, outDir = path.join(site, 'dist'), write = true } = {}) {
+export async function buildSite({ wharf = false, minify = true, outDir = path.join(site, 'dist'), write = true, siteUrl } = {}) {
+  const base = siteBase(siteUrl);
   // Line endings are the checkout's (CRLF on Windows); the page is the same bytes everywhere.
   const read = (f) => fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
   const js = await esbuild.build({
@@ -227,6 +332,27 @@ export async function buildSite({ wharf = false, minify = true, outDir = path.jo
   page = inline(art.html, CSS_TAG, `<style>${css.code.trimEnd().replace(/<\/(style)/gi, '<\\/$1')}</style>`);
   page = inline(page, JS_TAG, `<script>${js.outputFiles[0].text.trimEnd().replace(/<\/(script)/gi, '<\\/$1')}</script>`);
 
+  // What machines read. The title and the description are the page's own, so they are said once.
+  const title = page.match(/<title>([^<]*)<\/title>/)?.[1];
+  const description = page.match(/<meta\s+name="description"\s+content="([^"]*)"/)?.[1];
+  if (!title || !description) throw new Error('index.html must have a <title> and a meta description');
+  if (description.length > 160) throw new Error(`the meta description is ${description.length} characters; keep it under 160`);
+  const unescape = (text) =>
+    text
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<')
+      .replace(/&amp;/g, '&');
+  const socialFrom = path.join(root, ...SOCIAL.from);
+  const image = { name: SOCIAL.name, ...pngSize(fs.readFileSync(socialFrom)) };
+  page = inline(page, META_TAG, headMeta({ title: unescape(title), description: unescape(description), base, image }));
+  // Files served beside the page. In llms.txt, {{site}} stands before each address on this site.
+  const beside = [
+    { name: 'llms.txt', text: read(path.join(site, 'llms.txt')).replaceAll('{{site}}', base ? `${base}/` : '') },
+    { name: 'setup.md', text: read(path.join(site, 'setup.md')) },
+    { name: 'robots.txt', text: robotsTxt(base) },
+    ...(base ? [{ name: 'sitemap.xml', text: sitemapXml(base) }] : []),
+  ];
+
   const sources = [
     ...art.used.map((name) => [name, path.join(assets, name)]),
     ...Object.entries(SHARED).map(([name, parts]) => [name, path.join(root, ...parts)]),
@@ -237,11 +363,20 @@ export async function buildSite({ wharf = false, minify = true, outDir = path.jo
     fs.mkdirSync(path.join(outDir, 'assets'), { recursive: true });
     fs.writeFileSync(path.join(outDir, 'index.html'), page);
     for (const f of files) fs.copyFileSync(f.from, path.join(outDir, 'assets', f.name));
+    for (const f of beside) fs.writeFileSync(path.join(outDir, f.name), f.text);
+    fs.copyFileSync(socialFrom, path.join(outDir, 'assets', SOCIAL.name));
   }
-  return { html: page, files, outDir, wharf };
+  return { html: page, files, beside, outDir, wharf, base };
 }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.webp': 'image/webp', '.png': 'image/png' };
+const TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.webp': 'image/webp',
+  '.png': 'image/png',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
+};
 
 /** Serve the built page on loopback for a local look. Not a production server. */
 function serve(outDir, port) {
@@ -264,16 +399,17 @@ if (isMain) {
   const serving = args.includes('--serve');
   const port = Number(args[args.indexOf('--port') + 1]) || 4950;
   const outDir = args.includes('--out') ? path.resolve(args[args.indexOf('--out') + 1]) : undefined;
+  const siteUrl = args.includes('--site-url') ? args[args.indexOf('--site-url') + 1] : undefined;
   const once = async () => {
     const t = Date.now();
     try {
-      const built = await buildSite({ wharf: args.includes('--wharf'), minify: !serving && !args.includes('--dev'), outDir });
+      const built = await buildSite({ wharf: args.includes('--wharf'), minify: !serving && !args.includes('--dev'), outDir, siteUrl });
       const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
       const small = firstLoadWeight(built.html, built.files, 'small');
       const large = firstLoadWeight(built.html, built.files, 'large');
       console.log(
         `site: ${kb(small.page)} page, first load ${kb(small.total)} on a phone and ${kb(large.total)} on a desktop` +
-          `${built.wharf ? ', with the wharf section' : ''}, in ${Date.now() - t}ms → ${path.relative(root, built.outDir)}`,
+          `${built.wharf ? ', with the wharf section' : ''}${built.base ? `, for ${built.base}/` : ', no site address'}, in ${Date.now() - t}ms → ${path.relative(root, built.outDir)}`,
       );
       if (large.total > WEIGHT_BUDGET) throw new Error(`first load is over the ${kb(WEIGHT_BUDGET)} budget`);
       return built;
