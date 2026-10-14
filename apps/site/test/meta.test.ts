@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { COMMANDS } from '../../cli/src/usage.js';
 // @ts-expect-error -- a plain .mjs build script, no types
-import { buildSite, siteBase } from '../../../scripts/build-site.mjs';
+import { buildSite, glassColor, pngDecode, pngEncode, siteBase } from '../../../scripts/build-site.mjs';
 // @ts-expect-error -- a plain .js Worker, no types
 import worker, { HOME } from '../worker.js';
 
@@ -94,8 +94,13 @@ describe('the checker for commands in the guides', () => {
 });
 
 describe('what the site gives to agents and to search', () => {
-  let plain: { html: string; beside: Array<{ name: string; text: string }> };
-  let placed: { html: string; beside: Array<{ name: string; text: string }> };
+  type Built = {
+    html: string;
+    beside: Array<{ name: string; text: string }>;
+    card: { name: string; width: number; height: number; png: Buffer };
+  };
+  let plain: Built;
+  let placed: Built;
   const file = (b: typeof plain, name: string) => b.beside.find((f) => f.name === name)?.text;
   beforeAll(async () => {
     plain = await buildSite({ write: false });
@@ -186,7 +191,10 @@ describe('what the site gives to agents and to search', () => {
   it('uses the given address for the canonical link, the card, the sitemap and llms.txt', () => {
     expect(placed.html).toContain('<link rel="canonical" href="https://lobstah.dev/" />');
     expect(placed.html).toContain('<meta property="og:url" content="https://lobstah.dev/" />');
-    expect(placed.html).toContain('<meta property="og:image" content="https://lobstah.dev/assets/social-preview.png" />');
+    expect(placed.html).toContain('<meta property="og:image" content="https://lobstah.dev/assets/social-card.png" />');
+    expect(placed.html).toContain('<meta property="og:image:width" content="1200" />');
+    expect(placed.html).toContain('<meta property="og:image:height" content="630" />');
+    expect(placed.html).toContain('<meta name="twitter:image" content="https://lobstah.dev/assets/social-card.png" />');
     expect(placed.html).toContain('<meta name="twitter:card" content="summary_large_image" />');
     expect(file(placed, 'robots.txt')).toBe('User-agent: *\nAllow: /\n\nSitemap: https://lobstah.dev/sitemap.xml\n');
     expect([...(file(placed, 'sitemap.xml') ?? '').matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])).toEqual([
@@ -228,6 +236,70 @@ describe('what the site gives to agents and to search', () => {
     expect(JSON.stringify(data(placed.html))).not.toMatch(/Rating|Review|FAQPage|Question/);
     const [, website] = data(placed.html)['@graph'];
     expect(website).toEqual({ '@type': 'WebSite', name: 'lobstah', url: 'https://lobstah.dev/', description });
+  });
+});
+
+describe('the social card', () => {
+  type Image = { width: number; height: number; channels: number; data: Buffer };
+  const at = (image: Image, x: number, y: number) => [
+    ...image.data.subarray((y * image.width + x) * image.channels, (y * image.width + x) * image.channels + 3),
+  ];
+  const png = (...parts: string[]): Image => pngDecode(fs.readFileSync(path.join(repo, ...parts)));
+
+  it('reads and writes PNG pixels without loss', () => {
+    const rgb = Buffer.from(Array.from({ length: 5 * 3 * 3 }, (_, i) => (i * 37) % 256));
+    const back = pngDecode(pngEncode(5, 3, rgb));
+    expect([back.width, back.height, back.channels]).toEqual([5, 3, 3]);
+    expect(back.data.equals(rgb)).toBe(true);
+    // the repo's own files, which use every kind of row filter between them
+    expect(png('docs', 'assets', 'lob-sprite.png')).toMatchObject({ width: 288, height: 56, channels: 4 });
+    expect(png('apps', 'site', 'art', 'card', 'tagline.png').channels).toBe(1);
+  });
+
+  it("is 1200 by 630, light to load, and made of the glass's own lobster, star and colours", async () => {
+    const built = await buildSite({ write: false, siteUrl: 'https://lobstah.dev' });
+    expect(built.card.name).toBe('social-card.png');
+    expect(built.card.png.length).toBeLessThan(300 * 1024);
+    const card: Image = pngDecode(built.card.png);
+    expect([card.width, card.height]).toEqual([1200, 630]);
+
+    const css = read('apps', 'cli', 'glass', 'glass.css');
+    const [bg, fg, dim] = ['bg', 'fg', 'dim'].map((token) => glassColor(css, token) as number[]);
+    for (const [x, y] of [[0, 0], [1199, 0], [0, 629], [1199, 629], [600, 20]]) expect(at(card, x, y)).toEqual(bg); // prettier-ignore
+    const colours = new Set<string>();
+    for (let i = 0; i < card.data.length; i += 3) colours.add(card.data.subarray(i, i + 3).join(','));
+    // the tagline in the glass's text colour, the name in its dim one
+    expect(colours.has(fg.join(','))).toBe(true);
+    expect(colours.has(dim.join(','))).toBe(true);
+
+    // The lobster is the sprite's first frame, each pixel a six by six square, with nothing redrawn.
+    const sprite = png('docs', 'assets', 'lob-sprite.png');
+    let left = -1;
+    let top = -1;
+    const solid: Array<[number, number]> = [];
+    for (let y = 0; y < sprite.height; y++)
+      for (let x = 0; x < sprite.width / 4; x++) if (sprite.data[(y * sprite.width + x) * 4 + 3] === 255) solid.push([x, y]);
+    expect(solid.length).toBeGreaterThan(500);
+    // find where the frame's first solid pixel landed, then every other one must follow from it
+    const [fx, fy] = solid[0];
+    search: for (let y = 0; y < card.height; y++) {
+      for (let x = 0; x < card.width; x++) {
+        if (at(card, x, y).join() === at(sprite, fx, fy).join()) {
+          [left, top] = [x - fx * 6, y - fy * 6];
+          break search;
+        }
+      }
+    }
+    expect(left).toBeGreaterThan(0);
+    for (const [x, y] of solid) {
+      expect(at(card, left + x * 6, top + y * 6)).toEqual(at(sprite, x, y));
+      expect(at(card, left + x * 6 + 5, top + y * 6 + 5)).toEqual(at(sprite, x, y));
+    }
+    // The star keeps its place by the lobster: 56 across and 9 up from the lobster's corner, as the glass has it.
+    const star = png('docs', 'assets', 'star.png');
+    const mid = Math.floor(star.width / 2);
+    expect(star.data[(mid * star.width + mid) * 4 + 3]).toBe(255);
+    expect(at(card, left + 56 * 6 + mid * 6 + 1, top - 9 * 6 + mid * 6 + 1)).toEqual(at(star, mid, mid));
   });
 });
 

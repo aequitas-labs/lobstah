@@ -53,9 +53,13 @@ const SHARED = {
   'favicon.png': ['docs', 'assets', 'favicon.png'],
 };
 
-/** The card image shown when a link to the page is shared: the repo's own, unchanged. Never loaded by the page itself. */
-const SOCIAL = { name: 'social-preview.png', from: ['docs', 'assets', 'social-preview.png'] };
-const SOCIAL_ALT = 'The lobstah lobster with its star, beside the words: lobstah. Nobody stares at the water.';
+/**
+ * The card shown when a link to the page is shared. The build draws it: the
+ * glass's own lobster and star on the glass's ground, with the page's tagline
+ * beside them. The page itself never loads it.
+ */
+const CARD = { name: 'social-card.png', width: 1200, height: 630 };
+const CARD_ALT = 'The lobstah lobster with its star, beside the words: lobstah. Nobody stares at the water.';
 
 /** The glass rules the page reuses, by selector, in the glass's own order. */
 export const GLASS_RULES = [
@@ -223,10 +227,132 @@ export function siteBase(siteUrl) {
   return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
 }
 
-/** Width and height of a PNG, from its header. */
-export function pngSize(buf) {
+/**
+ * Read a PNG into its pixels. Enough for the files the card is made of:
+ * 8 bits a channel, grey or RGBA, not interlaced.
+ */
+export function pngDecode(buf) {
   if (buf.readUInt32BE(0) !== 0x89504e47 || buf.toString('latin1', 12, 16) !== 'IHDR') throw new Error('not a PNG file');
-  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  const width = buf.readUInt32BE(16);
+  const height = buf.readUInt32BE(20);
+  const channels = { 0: 1, 2: 3, 6: 4 }[buf[25]];
+  if (buf[24] !== 8 || !channels || buf[28] !== 0) throw new Error('only 8-bit grey, RGB or RGBA PNGs that are not interlaced can be read');
+  const parts = [];
+  for (let at = 8; at < buf.length;) {
+    const length = buf.readUInt32BE(at);
+    if (buf.toString('latin1', at + 4, at + 8) === 'IDAT') parts.push(buf.subarray(at + 8, at + 8 + length));
+    at += length + 12;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(parts));
+  const stride = width * channels;
+  const data = Buffer.alloc(stride * height);
+  // Each row was stored as its difference from the pixels to its left and above; undo that.
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x++) {
+      const left = x >= channels ? data[y * stride + x - channels] : 0;
+      const up = y > 0 ? data[(y - 1) * stride + x] : 0;
+      const corner = x >= channels && y > 0 ? data[(y - 1) * stride + x - channels] : 0;
+      const nearest = () => {
+        const [a, b, c] = [Math.abs(up - corner), Math.abs(left - corner), Math.abs(left + up - 2 * corner)];
+        return a <= b && a <= c ? left : b <= c ? up : corner;
+      };
+      const guess = [0, left, up, (left + up) >> 1, filter === 4 ? nearest() : 0][filter];
+      if (guess === undefined) throw new Error(`unknown PNG row filter ${filter}`);
+      data[y * stride + x] = (raw[y * (stride + 1) + 1 + x] + guess) & 255;
+    }
+  }
+  return { width, height, channels, data };
+}
+
+/** Write RGB pixels as a PNG. */
+export function pngEncode(width, height, rgb) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const chunk = (type, body) => {
+    const out = Buffer.alloc(body.length + 12);
+    out.writeUInt32BE(body.length, 0);
+    out.write(type, 4, 'latin1');
+    body.copy(out, 8);
+    let crc = 0xffffffff;
+    for (let i = 4; i < body.length + 8; i++) crc = crcTable[(crc ^ out[i]) & 255] ^ (crc >>> 8);
+    out.writeUInt32BE((crc ^ 0xffffffff) >>> 0, body.length + 8);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8); // 8 bits a channel, RGB, not interlaced
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) rgb.copy(rows, y * (width * 3 + 1) + 1, y * width * 3, (y + 1) * width * 3);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', zlib.deflateSync(rows, { level: 9 })),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/** One of the glass's colours, by its token name, as [r, g, b]. */
+export function glassColor(css, token) {
+  const hex = css.match(new RegExp(`--${token}:\\s*#([0-9a-f]{6})\\b`, 'i'))?.[1];
+  if (!hex) throw new Error(`glass.css has no six-digit colour --${token}`);
+  return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+}
+
+/**
+ * Draw the social card. Everything on it is the repo's own: the ground and
+ * the text colours are the glass's tokens, the lobster is the first frame of
+ * the glass's sprite with its star where the glass puts it, both enlarged
+ * pixel for pixel, and the words are the masks in art/card (drawn in the
+ * glass's type by art/card-text.py). Same inputs, same picture: no fonts, no
+ * network and no drawing tool are needed at build time.
+ */
+export function socialCard({ css, sprite, star, tagline, name }) {
+  const { width, height } = CARD;
+  const [bg, fg, dim] = ['bg', 'fg', 'dim'].map((token) => glassColor(css, token));
+  const rgb = Buffer.alloc(width * height * 3);
+  for (let i = 0; i < width * height; i++) rgb.set(bg, i * 3);
+  // Lay `share` (0 to 1) of a colour over the pixel at x, y.
+  const mix = (x, y, color, share) => {
+    if (x < 0 || y < 0 || x >= width || y >= height || share <= 0) return;
+    const at = (y * width + x) * 3;
+    for (let c = 0; c < 3; c++) rgb[at + c] = Math.round(rgb[at + c] * (1 - share) + color[c] * share);
+  };
+  // A piece of pixel art, each of its pixels drawn as a square `scale` wide.
+  const pixels = (image, left, top, scale, frameWidth = image.width) => {
+    for (let y = 0; y < image.height * scale; y++) {
+      for (let x = 0; x < frameWidth * scale; x++) {
+        const from = (Math.floor(y / scale) * image.width + Math.floor(x / scale)) * 4;
+        mix(left + x, top + y, image.data.subarray(from, from + 3), image.data[from + 3] / 255);
+      }
+    }
+  };
+  // Words: a mask says how much ink each pixel has; the colour is the glass's.
+  const words = (mask, left, top, color) => {
+    for (let y = 0; y < mask.height; y++)
+      for (let x = 0; x < mask.width; x++) mix(left + x, top + y, color, mask.data[y * mask.width + x] / 255);
+  };
+
+  // The glass draws the lobster 72 by 56 with its star 56 across and 9 up from its corner, 14 tall. Here, six times that.
+  const scale = 6;
+  const frame = { width: sprite.width / 4, height: sprite.height };
+  const starScale = Math.round((14 * scale) / star.height);
+  const text = { height: name.height + 34 + tagline.height, width: Math.max(name.width, tagline.width) };
+  const gap = 72;
+  const group = frame.width * scale + gap + text.width;
+  const left = Math.round((width - group) / 2);
+  const top = Math.round((height - frame.height * scale) / 2) + 9 * scale * 0.5;
+  pixels(sprite, left, top, scale, frame.width);
+  pixels(star, left + 56 * scale, top - 9 * scale, starScale);
+  const textLeft = left + frame.width * scale + gap;
+  const textTop = Math.round((height - text.height) / 2);
+  words(name, textLeft, textTop, dim);
+  words(tagline, textLeft, textTop + name.height + 34, fg);
+  return pngEncode(width, height, rgb);
 }
 
 const attr = (text) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -238,8 +364,8 @@ const attr = (text) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').repla
  * or in the repo. Addresses that need the site's own address are left out
  * until `base` is known, so the build never emits a wrong one.
  */
-export function headMeta({ title, description, base, image }) {
-  const card = base && image;
+export function headMeta({ title, description, base, image = CARD }) {
+  const card = Boolean(base);
   const tags = [
     ...(base ? [`<link rel="canonical" href="${attr(base)}/" />`] : []),
     `<link rel="alternate" type="text/markdown" href="setup.md" title="lobstah setup guide, for agents" />`,
@@ -254,7 +380,7 @@ export function headMeta({ title, description, base, image }) {
           `<meta property="og:image" content="${attr(base)}/assets/${image.name}" />`,
           `<meta property="og:image:width" content="${image.width}" />`,
           `<meta property="og:image:height" content="${image.height}" />`,
-          `<meta property="og:image:alt" content="${attr(SOCIAL_ALT)}" />`,
+          `<meta property="og:image:alt" content="${attr(CARD_ALT)}" />`,
         ]
       : []),
     `<meta name="twitter:card" content="${card ? 'summary_large_image' : 'summary'}" />`,
@@ -263,7 +389,7 @@ export function headMeta({ title, description, base, image }) {
     ...(card
       ? [
           `<meta name="twitter:image" content="${attr(base)}/assets/${image.name}" />`,
-          `<meta name="twitter:image:alt" content="${attr(SOCIAL_ALT)}" />`,
+          `<meta name="twitter:image:alt" content="${attr(CARD_ALT)}" />`,
         ]
       : []),
   ];
@@ -342,9 +468,15 @@ export async function buildSite({ wharf = false, minify = true, outDir = path.jo
       .replace(/&quot;/g, '"')
       .replace(/&lt;/g, '<')
       .replace(/&amp;/g, '&');
-  const socialFrom = path.join(root, ...SOCIAL.from);
-  const image = { name: SOCIAL.name, ...pngSize(fs.readFileSync(socialFrom)) };
-  page = inline(page, META_TAG, headMeta({ title: unescape(title), description: unescape(description), base, image }));
+  page = inline(page, META_TAG, headMeta({ title: unescape(title), description: unescape(description), base }));
+  const png = (...parts) => pngDecode(fs.readFileSync(path.join(root, ...parts)));
+  const card = socialCard({
+    css: read(glassCss),
+    sprite: png(...SHARED['lob-sprite.png']),
+    star: png(...SHARED['star.png']),
+    tagline: png('apps', 'site', 'art', 'card', 'tagline.png'),
+    name: png('apps', 'site', 'art', 'card', 'name.png'),
+  });
   // Files served beside the page. In llms.txt, {{site}} stands before each address on this site.
   const beside = [
     { name: 'llms.txt', text: read(path.join(site, 'llms.txt')).replaceAll('{{site}}', base ? `${base}/` : '') },
@@ -364,9 +496,9 @@ export async function buildSite({ wharf = false, minify = true, outDir = path.jo
     fs.writeFileSync(path.join(outDir, 'index.html'), page);
     for (const f of files) fs.copyFileSync(f.from, path.join(outDir, 'assets', f.name));
     for (const f of beside) fs.writeFileSync(path.join(outDir, f.name), f.text);
-    fs.copyFileSync(socialFrom, path.join(outDir, 'assets', SOCIAL.name));
+    fs.writeFileSync(path.join(outDir, 'assets', CARD.name), card);
   }
-  return { html: page, files, beside, outDir, wharf, base };
+  return { html: page, files, beside, card: { ...CARD, png: card }, outDir, wharf, base };
 }
 
 const TYPES = {

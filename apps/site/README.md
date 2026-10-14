@@ -129,8 +129,13 @@ writes four files beside the page.
   The head points to both.
 - **`robots.txt`**, which lets everything be crawled, and **`sitemap.xml`**,
   which lists the page, `llms.txt` and the setup guide.
-- **The social card image** is `docs/assets/social-preview.png`, copied
-  unchanged. The page itself never loads it.
+- **The social card** (`assets/social-card.png`, 1200 by 630) is drawn by the
+  build: the glass's own lobster and star, enlarged pixel for pixel, on the
+  glass's ground, with the name and the tagline beside them in the glass's
+  colours. The page itself never loads it. The build needs no font and no
+  drawing tool for it. The words are two masks in `art/card`, drawn once in
+  the glass's type by `art/card-text.py` (Pillow, on a Mac); run that only
+  when the words change.
 
 `setup.md` names real commands. When the CLI changes, change the guide: a test
 reads every `lobstah` command, flag, skill, package and tool name out of
