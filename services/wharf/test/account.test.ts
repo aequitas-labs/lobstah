@@ -27,8 +27,9 @@ beforeEach(async () => {
   // New pool shares storage across tests: explicitly delete only test DO data.
   const stub = env.ACCOUNTS.getByName('a');
   await runInDurableObject(stub, async (_instance: Account, state) => {
-    for (const table of ['boats', 'workers', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims']) state.storage.sql.exec(`DELETE FROM ${table}`);
+    for (const table of ['boats', 'workers', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'messages', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key!='generation'");
+    state.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
   });
   expect((await call('helm/take', { session: 'helm' })).status).toBe(200);
 });
@@ -96,4 +97,48 @@ it('stores only boat credential hashes and returns a credential only once', asyn
   await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => {
     expect(state.storage.sql.exec<{ hash: string }>('SELECT hash FROM boats WHERE id=?', first.id).one().hash).toBe(hash);
   });
+});
+it('reading a message does not receipt it; done waits for explicit receipt', async () => {
+  const m = await boat(); await enqueue(); const r = await claim(m.token);
+  await call('dispatches/dispatch/messages', { text: 'new instruction' });
+  const messages = await (await call('dispatches/dispatch/messages', undefined, r.token)).json<{ id: string }[]>();
+  expect(messages).toHaveLength(1);
+  expect((await call('dispatches/dispatch/report', { verb: 'done' }, r.token)).status).toBe(409);
+  expect((await call(`dispatches/dispatch/messages/${messages[0].id}/receipt`, {}, r.token)).status).toBe(200);
+  expect((await call('dispatches/dispatch/report', { verb: 'done' }, r.token)).status).toBe(200);
+});
+it('files are scoped, retryable downloads, never executable pages; deletion removes rows and files', async () => {
+  const m = await boat(); await enqueue(); const r = await claim(m.token);
+  const upload = () => SELF.fetch('https://state.test/v1/accounts/a/dispatches/dispatch/files', {
+    method: 'POST', headers: { Authorization: `Bearer ${r.token}`, 'Idempotency-Key': 'file', 'X-File-Name': 'report.html' }, body: '<script>never run</script>',
+  });
+  const first = await upload(); expect(first.status).toBe(200); const f = await first.json<{ id: string }>();
+  expect(await (await upload()).json()).toEqual({ id: f.id, bytes: 26 });
+  const path = `dispatches/dispatch/files/${f.id}`;
+  expect((await call(path, undefined, m.token)).status).toBe(403);
+  expect((await call(path, undefined, r.token, undefined, 'b')).status).toBe(403);
+  const download = await call(path); expect(download.headers.get('Content-Disposition')).toBe('attachment');
+  expect(download.headers.get('X-Content-Type-Options')).toBe('nosniff');
+  expect(new TextDecoder().decode(await download.arrayBuffer())).toBe('<script>never run</script>');
+  expect((await call(path, undefined, 'test-helm-b')).status).toBe(403);
+  expect((await SELF.fetch('https://state.test/v1/accounts/a/', { method: 'DELETE', headers: { Authorization: `Bearer ${m.token}`, 'Idempotency-Key': 'no-delete' } })).status).toBe(403);
+  for (let i = 0; i < 2; i++) {
+    const res = await SELF.fetch('https://state.test/v1/accounts/a/', { method: 'DELETE', headers: { Authorization: `Bearer ${pat}`, 'Idempotency-Key': 'delete' } });
+    expect(res.status).toBe(200);
+  }
+  expect((await env.FILES.list({ prefix: 'a/' })).objects).toEqual([]);
+  expect((await call('events')).status).toBe(410);
+  await runInDurableObject(env.ACCOUNTS.getByName('a'), async (_instance: Account, state) => {
+    expect(state.storage.sql.exec<{ n: number }>('SELECT count(*) AS n FROM dispatches').one().n).toBe(0);
+    expect(state.storage.sql.exec<{ n: number }>('SELECT count(*) AS n FROM files').one().n).toBe(0);
+  });
+});
+it('account deletion racing an upload leaves no orphan object', async () => {
+  const m = await boat(); await enqueue(); const r = await claim(m.token);
+  const responses = await Promise.all([
+    SELF.fetch('https://state.test/v1/accounts/a/dispatches/dispatch/files', { method: 'POST', headers: { Authorization: `Bearer ${r.token}`, 'Idempotency-Key': 'race-upload' }, body: 'racing file' }),
+    SELF.fetch('https://state.test/v1/accounts/a/', { method: 'DELETE', headers: { Authorization: `Bearer ${pat}`, 'Idempotency-Key': 'race-delete' } }),
+  ]);
+  expect([200, 410]).toContain(responses[0].status); expect(responses[1].status).toBe(200);
+  expect((await env.FILES.list({ prefix: 'a/' })).objects).toEqual([]);
 });
