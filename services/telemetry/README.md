@@ -2,9 +2,9 @@
 
 A small Cloudflare Worker that receives lobstah's anonymous daily counts
 ([PRIVACY.md](../../PRIVACY.md)) and serves public aggregate stats and badges.
-**Deployment awaits approval.** The D1 database is created; the Worker is not
-deployed. The CLI's endpoint constant (`TELEMETRY_ENDPOINT` in
-`packages/core/src/telemetry.ts`) is empty, so no lobstah build sends anything.
+**Deployed at `https://t.lobstah.dev`.** The receiver has no CLI submissions:
+the endpoint constant (`TELEMETRY_ENDPOINT` in `packages/core/src/telemetry.ts`)
+is still empty, so no lobstah build sends anything.
 
 ## Routes
 
@@ -92,7 +92,12 @@ and skip on Node versions without it (before 22.5). CI runs these again on
 Node 24 on Ubuntu and Windows so the SQL is tested on both. `pnpm lint` typechecks
 the Worker.
 
-## Deployment (approval required)
+## Deployment (aequitas labs)
+
+Chris approved the initial deployment directly. Version
+`f2e14ef8-c4ea-4750-aece-714c08291da4` was deployed at
+`2026-10-14T04:16:01.879Z`. Outside checks returned 200 with zero counts for
+all three badges and public `/v1/stats`; posting `{}` to `/v1/daily` returned 400. No valid daily test payload was sent to production.
 
 Use the **aequitas labs** account (`73dd625ed4d46d151a0de5624ff71379`). This
 machine's separate Wrangler sign-in is selected by
