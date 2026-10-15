@@ -129,6 +129,23 @@ send a continuation.
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
 | `todoStaleDays` | `3` | Open helm to-dos (`lobstah todo`) older than this many days add one note to `man tend`. `0` disables. |
 
+## `[wait]` — quiet helm and trap waiters
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `baseTimeoutSecs` | `900` | Initial idle timeout for `man wait`, `soak --wait` and Stop-hook parks, local or on a wharf. A positive `--timeout` overrides the base for that invocation, not the adaptive backoff. |
+| `baseRepeats` | `3` | Consecutive empty timeouts at the base before doubling on each subsequent wait. |
+| `maxTimeoutSecs` | `14400` | Idle timeout cap (4 hours), at least the base. All three settings are positive whole numbers. |
+
+The defaults wait 900, 900, 900, 1800, 3600, 7200, then 14400 seconds.
+History is stored per session across re-arms. An event or user prompt resets
+that session; a dispatch or send resets all this boat's waiters. Already-armed
+waiters adopt a fresh base deadline on their next poll. Polling and liveness
+heartbeats keep their usual cadence, so events still wake immediately.
+`--peek` and zero-time trap probes do not advance the backoff.
+For a cap longer than four hours, use a foreground waiter or increase the
+harness's blocking Stop-hook timeout too.
+
 ## `[glass]` — the spyglass
 
 | Key | Default | Meaning |

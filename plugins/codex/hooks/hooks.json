@@ -42,7 +42,7 @@
             "type": "command",
             "command": "lobstah hook stop",
             "statusMessage": "lobstah park — waiting for the fleet",
-            "timeout": 14400
+            "timeout": 14500
           }
         ]
       }

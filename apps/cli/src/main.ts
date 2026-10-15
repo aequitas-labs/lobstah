@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  IdleWait,
+  resetWaitBackoff,
   workerLabel,
   addTodo,
   closeTodo,
@@ -560,17 +562,17 @@ function confirmTitle(sessionFlag: string | undefined): void {
 type ParkEnd = 'woke' | 'gone' | 'timeout';
 
 async function soakPark(trapId: string, timeout: string | undefined, plain = false): Promise<ParkEnd> {
-  const timeoutSecs = Number(timeout ?? '14000');
-  const deadline = Date.now() + timeoutSecs * 1000;
-  const rearm = `lobstah soak --wait --timeout ${timeoutSecs}`;
+  const idle = new IdleWait(readTrap(trapId)?.sessionId, loadConfig().wait, timeout);
+  const rearm = `lobstah soak --wait${timeout === undefined ? '' : ` --timeout ${timeout}`}`;
   // Self-instructive in plain mode (axi.md P9): every exit tells the session
   // its own next command — a foreground park has no hook to re-arm it.
   const block = plain
     ? (reason: string) => {
+        idle.woke();
         console.log(reason);
         console.log(toonHelp([`${rearm}   (when you finish handling this, run this here to keep listening)`]));
       }
-    : (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
+    : (reason: string) => { idle.woke(); console.log(JSON.stringify({ decision: 'block', reason })); };
   while (true) {
     const reg = heartbeatTrap(trapId, { parked: true });
     if (!reg) {
@@ -634,9 +636,10 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
         return 'woke';
       }
     }
-    if (Date.now() >= deadline) {
+    if (idle.expired()) {
+      idle.timedOut();
       if (plain) {
-        console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs, stillSignedOn: true }));
+        console.log(toonKV({ timeout: true, waitedSecs: idle.timeoutSecs, stillSignedOn: true }));
         console.log(toonHelp([`${rearm}   (no work yet — run this again to keep listening)`, `lobstah stow   (sign off instead)`]));
         process.exitCode = 3;
       }
@@ -892,6 +895,7 @@ async function mainCli(): Promise<void> {
     try {
       const hook = readHookStdin();
       const trap = hook?.session_id ? trapBySession(hook.session_id) : undefined;
+      if (hook?.session_id && (trap || helmOf(hook.session_id))) resetWaitBackoff(hook.session_id);
       if (trap) resumeTrapTurn(trap, true);
       if (hook?.session_id && !trapBySession(hook.session_id) && helmOf(hook.session_id)) {
         console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: HELM_REMINDER } }));
@@ -2272,8 +2276,7 @@ async function mainCli(): Promise<void> {
         groundsName ??= callerHelm.grounds;
       }
       try {
-        const timeoutSecs = Number(opt('--timeout') ?? '0');
-        const deadline = timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : Number.POSITIVE_INFINITY;
+        const idle = new IdleWait(sid, cfgWait.wait, opt('--timeout'));
         const emit = (evs: ReturnType<typeof attentionNow>) => {
           for (const e of evs) {
             console.log(toonKV({ id: e.id, lane: e.lane, verb: e.entry.verb, waitingOn: e.entry.waitingOn, link: e.entry.link, note: e.entry.note, at: e.entry.at }));
@@ -2294,6 +2297,7 @@ async function mainCli(): Promise<void> {
         // A watcher delivery is a report through the newest event it printed.
         // Reminders can be older than the cursor, so never move it backwards.
         const delivered = (...times: string[]) => {
+          if (consume) idle.woke();
           if (!consume || !callerHelm) return;
           const through = Math.max(0, ...times.map((at) => Date.parse(at) || 0));
           if (through > (Date.parse(readCursor(callerHelm.grounds) ?? '') || 0))
@@ -2352,7 +2356,7 @@ async function mainCli(): Promise<void> {
           peekDigest();
           break;
         }
-        while (Date.now() < deadline) {
+        while (idle.probe || !idle.expired()) {
           await new Promise((r) => setTimeout(r, 1500));
           if (callerHelm) heartbeatHelm(callerHelm.sessionId); // waiting IS liveness
           const fresh = freshWakeEvents(baseline, undefined, matchGrounds);
@@ -2386,11 +2390,13 @@ async function mainCli(): Promise<void> {
         // timeout instead of being marked delivered to nobody. Silent when
         // nothing changed — the loop should not train its reader to skim.
         const digest = peekDigest();
-        console.log(toonKV({ timeout: true, waitedSecs: timeoutSecs }));
+        if (digest.changed) idle.woke();
+        else idle.timedOut();
+        console.log(toonKV({ timeout: true, waitedSecs: idle.timeoutSecs }));
         const flags = `${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${displayGrounds(groundsName, loadConfig())}` : ''}`;
         console.log(
           toonHelp([
-            `lobstah man wait --timeout ${timeoutSecs}${flags}   (re-arm and keep waiting)`,
+            `lobstah man wait${opt('--timeout') === undefined ? '' : ` --timeout ${opt('--timeout')}`}${flags}   (re-arm and keep waiting)`,
             ...(digest.changed
               ? [`lobstah man report${flags}   (acknowledge the delta above once handled — until then it re-surfaces)`]
               : []),
@@ -2540,6 +2546,7 @@ async function mainCli(): Promise<void> {
           return [trapSummary(cfgHaul, helm?.repos), ...pauses].filter(Boolean).join('\n');
         };
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
+          if (helm) resetWaitBackoff(helm.sessionId);
           advanceCursor(helm!.grounds, d.now);
           emit(
             `Fleet report for grounds "${displayGrounds(helm!.grounds, cfgHaul)}":\n${renderDigest(d)}\n${trapsAtStop()}\n` +
@@ -2556,6 +2563,7 @@ async function mainCli(): Promise<void> {
             noticeWakes(helm),
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
+            if (helm) resetWaitBackoff(helm.sessionId);
             emit(
               [
                 'Fleet notices need a decision:',
@@ -2600,6 +2608,7 @@ async function mainCli(): Promise<void> {
           const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0;
           const unanswered = blocking ? dueUnanswered(true, remindMs, Date.now(), matchHelm) : [];
           if (blocking) {
+            resetWaitBackoff(hook.session_id);
             emit(
               [
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
@@ -2632,8 +2641,7 @@ async function mainCli(): Promise<void> {
           );
           break;
         }
-        const timeoutSecs = Number(opt('--timeout') ?? '14000');
-        const deadline = Date.now() + timeoutSecs * 1000;
+        const idle = new IdleWait(helm?.sessionId, cfgHaul.wait, opt('--timeout'));
         runDueManWatches();
         let evs = attentionNow(true, remindMs, Date.now(), matchHelm);
         let watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
@@ -2645,7 +2653,7 @@ async function mainCli(): Promise<void> {
           evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0 && progressLines().length === 0;
         if (quiet()) {
           const baseline = captureWaitBaseline();
-          while (Date.now() < deadline) {
+          while (!idle.expired()) {
             await new Promise((r) => setTimeout(r, 1500));
             if (helm) heartbeatHelm(helm.sessionId, { parked: true }); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
@@ -2659,10 +2667,12 @@ async function mainCli(): Promise<void> {
           }
         }
         if (quiet()) {
+          idle.timedOut();
           const d = dueDigest();
           if (d) blockDigest(d);
           break; // timeout — allow the stop; tier 1 covers the horizon
         }
+        idle.woke();
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),

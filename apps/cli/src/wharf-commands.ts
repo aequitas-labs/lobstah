@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
+import { IdleWait, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
   readBrokerAgent, brokerRequest, WharfBackend, recordWharfCatch, type BrokerPoll } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
@@ -122,12 +122,13 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), repo, repoRemote: wharfRepoIdentity(config, repo), brief, lane: opts.has('--chore') ? 'chore' : 'work',
         ...(targetBoat ? { boat: targetBoat } : {}),
         for: opts.opt('--for')?.replace(/^wt:/, ''), followUp: opts.opt('--follow-up'), harness: opts.opt('--harness'), model: opts.opt('--model'), effort: opts.opt('--effort') }, key()));
+      resetWaitBackoff();
       break;
     }
     case 'ls': print(await backend.list()); break;
     case 'status': print(await backend.request(`dispatches/${id()}`)); break;
     case 'cancel': print(await backend.request(`dispatches/${id()}/cancel`, {}, key())); break;
-    case 'send': noFiles(); await backend.send(pos[0] ?? '', pos.slice(1).join(' '), key()); print({ sent: true }); break;
+    case 'send': noFiles(); await backend.send(pos[0] ?? '', pos.slice(1).join(' '), key()); resetWaitBackoff(); print({ sent: true }); break;
     case 'inbox': print(await backend.messages(pos[0] ?? '')); break; // Explicit receipt, never implicit acknowledgement.
     case 'report': {
       const verb = pos[1]; if (!verb || !isVerb(verb)) throw new Error('report requires one of the six verbs');
@@ -169,24 +170,25 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       print(await brokerRequest('launch', { grounds: scope.grounds, repo: opts.opt('--repo') })); break;
     }
     case 'man:wait': {
-      let cursor = opts.opt('--after'); const seconds = Number(opts.opt('--timeout') ?? 600);
-      if (!Number.isFinite(seconds) || seconds < 0) throw new Error('timeout must be nonnegative seconds');
-      const deadline = seconds ? Date.now() + seconds * 1000 : Infinity; let unknown = false; let renewed = 0;
+      let cursor = opts.opt('--after');
+      const idle = new IdleWait(session, config.wait, opts.opt('--timeout'));
+      let unknown = false; let renewed = 0;
       const hints = new WharfWake(scope.location, wharfCredential(scope));
       try {
-      while (Date.now() < deadline) {
+      while (idle.probe || !idle.expired()) {
         try {
           if (Date.now() - renewed > 60_000) { await backend.request('helm/renew', {}, randomUUID()); renewed = Date.now(); }
           const batch = await backend.events(cursor); cursor = batch.cursor;
-          if (batch.events.length) { print(batch); return true; }
+          if (batch.events.length) { idle.woke(); print(batch); return true; }
           unknown = false;
         } catch (e) {
           if (!(e instanceof BackendError) || e.status !== 503) throw e;
           if (!unknown) console.error(toonKV({ grounds: scope.grounds, state: 'unknown', note: 'wharf unavailable; keeping cursor and waiting' }));
           unknown = true;
         }
-        await hints.wait(Math.min(1000, Math.max(0, deadline - Date.now())));
+        await hints.wait(Math.min(1000, idle.probe ? 1000 : idle.remainingMs()));
       }
+      if (!unknown) idle.timedOut(); // Missing remote signal is unknown, not an empty observation.
       print({ cursor, timeout: true });
       } finally { hints.close(); }
       break;
@@ -255,12 +257,13 @@ export async function wharfHook(cmd: string | undefined, args: string[]): Promis
   if (scope?.kind !== 'wharf') return false;
   const input = readHookStdin(), agent = readBrokerAgent(scope.grounds, input?.cwd ?? process.cwd());
   try {
+    if (args[0] === 'user-prompt-submit' && input?.session_id) resetWaitBackoff(input.session_id);
     if (agent) {
       if (input?.session_id && input.session_id !== agent.session) return true;
       if (args[0] === 'session-end') await endBrokerAgent(agent);
       else if (args[0] === 'post-tool-use' || (cmd === 'soak' && args[0] === 'beat')) await brokerRequest('heartbeat', brokerBody(agent));
       else if (args[0] === 'stop' || cmd === 'man:haul') {
-        const p = await waitBrokerAgent(agent, 600);
+        const p = await waitBrokerAgent(agent);
         console.log(JSON.stringify({ decision: 'block', reason: p.claim
           ? `Hosted trap ${agent.trap} assigned dispatch ${p.claim.dispatch.id}. Branch first in ${agent.worktree}; report working, then work and report done/failed.\n${p.claim.dispatch.brief}`
           : p.messages?.length ? `New inbox messages for ${p.dispatch}:\n${p.messages.map((m) => `${m.id}: ${m.text}`).join('\n')}\nReceipt explicitly with lobstah wharf receipt.`
