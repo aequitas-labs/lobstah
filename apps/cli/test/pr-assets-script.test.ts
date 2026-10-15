@@ -49,11 +49,11 @@ it('uploads evidence, pins image/file links, preserves the caller and is idempot
 
 it('rebases and retries a deterministic push race, preserving both uploads and pinning the new commit', () => {
   fs.writeFileSync(path.join(seed, 'other.txt'), 'Concurrent evidence\n'); git(['add', 'other.txt'], seed); git(['commit', '-m', 'Concurrent upload'], seed);
-  const shim = path.join(root, 'shim'); fs.mkdirSync(shim);
-  const realGit = execFileSync(bash, ['-c', 'command -v git'], { env, encoding: 'utf8' }).trim();
-  fs.writeFileSync(path.join(shim, 'git'), '#!/usr/bin/env bash\nset -e\nif [[ $1 == -C && ${3:-} == push && ! -e $RACE_MARKER ]]; then\n  : > "$RACE_MARKER"\n  "$REAL_GIT" -C "$RACE_PEER" push origin pr-evidence >&2\nfi\nexec "$REAL_GIT" "$@"\n', { mode: 0o755 });
-  const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path')!;
-  env = { ...env, [pathKey]: shim + path.delimiter + env[pathKey], REAL_GIT: realGit, RACE_PEER: slash(seed), RACE_MARKER: slash(path.join(root, 'raced')) };
+  // Git for Windows supplies its own command search path. A template hook in
+  // the helper's new clone injects the race portably, without PATH interception.
+  const templates = path.join(root, 'templates'); fs.mkdirSync(path.join(templates, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(templates, 'hooks/pre-push'), '#!/usr/bin/env bash\nset -e\nif [[ ! -e $RACE_MARKER ]]; then\n  : > "$RACE_MARKER"\n  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY\n  git -C "$RACE_PEER" push origin pr-evidence >&2\nfi\n', { mode: 0o755 });
+  env = { ...env, GIT_TEMPLATE_DIR: slash(templates), RACE_PEER: slash(seed), RACE_MARKER: slash(path.join(root, 'raced')) };
   fs.writeFileSync(path.join(source, 'after.png'), 'dummy image');
   const result = run('43', 'after.png'); expect(result.status, result.stderr).toBe(0);
   expect(fs.existsSync(path.join(root, 'raced'))).toBe(true);
