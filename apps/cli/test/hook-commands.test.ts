@@ -10,6 +10,7 @@ import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { charter, HELM_REMINDER } from '../src/charter.js';
 import { attentionNow } from '@lobstah/supervisor';
+import { DEFAULT_WAIT, IdleWait } from '@lobstah/core';
 
 /**
  * `lobstah hook <event>` runs what the older hook command runs, for a helm, a
@@ -79,6 +80,21 @@ describe('lobstah hook session-start (alias: man brief)', () => {
 });
 
 describe('lobstah hook user-prompt-submit', () => {
+  it('resets only the prompted helm or trap session; other sessions stay inert', () => {
+    takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000 });
+    trap('prompted-trap');
+    for (const session of [HELM, 'prompted-trap']) {
+      for (let i = 0; i < 7; i++) new IdleWait(session, DEFAULT_WAIT, undefined, 0).timedOut(14_400_000);
+    }
+    for (const session of [HELM, 'prompted-trap']) {
+      expect(new IdleWait(session, DEFAULT_WAIT).timeoutSecs).toBe(14400);
+      expect(hook(['hook', 'user-prompt-submit'], { session_id: session }).status).toBe(0);
+      expect(new IdleWait(session, DEFAULT_WAIT).timeoutSecs).toBe(900);
+    }
+    const before = fs.readdirSync(path.join(home, 'wait-backoff')).sort();
+    expect(hook(['hook', 'user-prompt-submit'], { session_id: NOBODY }).status).toBe(0);
+    expect(fs.readdirSync(path.join(home, 'wait-backoff')).sort()).toEqual(before);
+  });
   for (const harness of ['claude', 'codex'] as const) {
     it(`${harness}: captures only observed fields on hooks for both registered roles`, () => {
       takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: [] }, ttlMs: 60_000, identity: { harness } });
