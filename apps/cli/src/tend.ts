@@ -96,6 +96,7 @@ import { deriveGlassPrs } from './glass-prs.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import type { RepairChore } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
+import { todoStaleLine, todoTable, todoViews, type TodoView } from './todo.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
 const HEARTBEAT_STALE_MS = 90_000;
@@ -603,6 +604,10 @@ export interface TendReport {
   hold?: DiskHold & { reason: string };
   /** Worktree pools (`[pools.<name>]`): each slot free, claimed, out of rotation, or warming. */
   pools?: PoolView[];
+  /** The helms' open to-dos, every grounds, oldest first within each. */
+  todos?: TodoView[];
+  /** A short note when to-dos sit past `[helm].todoStaleDays`; the helm decides what to do. */
+  todoNote?: string;
 }
 
 function readJson<T>(file: string): T | undefined {
@@ -992,6 +997,13 @@ export function buildTendReport(now = Date.now()): TendReport {
     if (item.kind === 'report' || item.kind === 'decision') item.petOpen = cfg.pet.open;
     if (item.prUrl) item.reviewUrl = prReviewUrl(item.prUrl, tools);
   }
+  let todos: TodoView[] = [];
+  try {
+    todos = todoViews(now);
+  } catch {
+    // an unreadable to-do file never fails tend
+  }
+  const todoNote = todoStaleLine(todos);
   const helms = listHelms().map((h) => ({
     grounds: displayGrounds(h.grounds, cfg),
     man: helmLabel(h),
@@ -1046,6 +1058,8 @@ export function buildTendReport(now = Date.now()): TendReport {
     repairChores: repairChores(records),
     ...(hold ? { hold: { ...hold, reason: holdReason(hold) } } : {}),
     ...(pools.length > 0 ? { pools } : {}),
+    ...(todos.length > 0 ? { todos } : {}),
+    ...(todoNote ? { todoNote } : {}),
   };
 }
 
@@ -1068,6 +1082,7 @@ export function renderTend(r: TendReport): string {
     }),
   );
   if (r.queueWait) lines.push(r.queueWait);
+  if (r.todoNote) lines.push(r.todoNote);
   for (const stack of r.stacks) {
     lines.push(`stack ${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
     if (stack.readiness) lines.push(`${stack.readiness.text} ${stack.readiness.url}`);
@@ -1229,6 +1244,10 @@ export function renderTend(r: TendReport): string {
         ['kind', 'ageMins', 'text'],
       ),
     );
+  }
+  if (r.todos?.length) {
+    lines.push('');
+    lines.push(todoTable(r.todos, new Set(r.todos.map((t) => t.grounds)).size > 1));
   }
   if (r.helms.length > 0) {
     lines.push('');

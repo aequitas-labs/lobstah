@@ -219,6 +219,8 @@ export interface HelmConfig {
   park?: 'arm' | 'block';
   /** Arm mode: seconds the Stop hook polls for a watcher that is still starting before it blocks. */
   armGraceSecs: number;
+  /** Open helm to-dos older than this many days earn a short note in `man tend`; 0 disables. */
+  todoStaleDays: number;
 }
 
 export interface WaitConfig {
@@ -350,6 +352,7 @@ export const DEFAULT_HELM: HelmConfig = {
   ttlSecs: 1800,
   reportSecs: 900,
   armGraceSecs: 5,
+  todoStaleDays: 3,
 };
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
@@ -397,7 +400,7 @@ export function loadConfig(): Config {
       throw new Error(`[wait].${key} must be a positive whole number in ${configPath()}`);
   }
   if (wait.maxTimeoutSecs < wait.baseTimeoutSecs) throw new Error(`[wait].maxTimeoutSecs must be at least baseTimeoutSecs in ${configPath()}`);
-  for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs'] as const) {
+  for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs', 'todoStaleDays'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isFinite(helm[key]) || helm[key] < 0) {
       throw new Error(`[helm].${key} must be a non-negative number in ${configPath()}`);
     }

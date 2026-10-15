@@ -80,6 +80,10 @@ getting woken instead of asking:
                             your grounds; --attach images it names, --title.
                             \`lobstah reports\` lists every report;
                             \`lobstah attention ack <key>\` acks one
+  lobstah todo add "<text>" keep your own reminder, in free text, under your
+                            grounds; \`todo done <id>\`, \`todo drop <id>\`,
+                            \`todo ls\`. Re-injected at every session start;
+                            tend notes the stale ones
   lobstah man ask           put a question the helm cannot decide to the human:
                             [<dispatch-id>] --title, --detail <f.md>,
                             --option (0-6), --attach. The glass shows it as a

@@ -15,6 +15,7 @@ import {
 import { charter } from './charter.js';
 import { inspectSoakSite } from './soak-site.js';
 import { buildTendReport } from './tend.js';
+import { todoContext } from './todo.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 
 const SOAK_WHERE = '(in a linked worktree; from a primary checkout it creates one)';
@@ -56,8 +57,8 @@ function sessionGrounds(cwd: string | undefined): { grounds?: Grounds; placehold
 
 /**
  * The SessionStart brief's additionalContext: the session id, a one-line
- * fleet state, and what this session is — a helm (charter re-injected, so
- * the persona survives restarts and compaction; the start counts as a
+ * fleet state, and what this session is — a helm (charter and open to-dos
+ * re-injected, so both survive restarts and compaction; the start counts as a
  * heartbeat), a trap, or neither (offered the two sign-ons).
  */
 /** The reminder SessionStart and Stop give a trap that has not confirmed its sign-on title. */
@@ -94,10 +95,13 @@ export async function buildBriefContext(sessionId: string, cwd?: string): Promis
   const helmReg = helmOf(sessionId);
   if (helmReg) {
     heartbeatHelm(helmReg.sessionId);
+    // The to-dos ride with the charter, so a restart or compaction drops neither.
+    const todos = todoContext(helmReg.grounds);
     return (
       `lobstah: session id ${sessionId} — you hold the helm for grounds "${displayGrounds(helmReg.grounds, loadConfig())}" ` +
       `(\`lobstah man relieve --session ${sessionId}\` steps down).${fleet}\n\n` +
-      charter({ name: helmReg.grounds, repos: helmReg.repos })
+      charter({ name: helmReg.grounds, repos: helmReg.repos }) +
+      (todos ? `\n\n${todos}` : '')
     );
   }
   const workerTrap = trapBySession(sessionId);
