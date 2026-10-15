@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /Users/chris/.codex/worktrees/07e2/lobstah
+
+ ✓ apps/cli/test/pr-assets-script.test.ts (3 tests) 1137ms
+   ✓ uploads evidence, pins image/file links, preserves the caller and is idempotent  393ms
+   ✓ rebases and retries a deterministic push race, preserving both uploads and pinning the new commit  572ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  11:10:49
+   Duration  1.27s (transform 18ms, setup 0ms, collect 19ms, tests 1.14s, environment 0ms, prepare 30ms)
+

@@ -1,0 +1,1 @@
+{"bypass_actors":[],"conditions":{"ref_name":{"exclude":[],"include":["refs/heads/pr-evidence"]}},"current_user_can_bypass":"never","enforcement":"active","id":25169111,"name":"pr-evidence: preserve evidence history","rules":[{"type":"deletion"},{"type":"non_fast_forward"}]}
