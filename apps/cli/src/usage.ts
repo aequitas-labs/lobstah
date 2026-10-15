@@ -88,6 +88,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--report': { value: '<file.md>' },
       '--attach': { value: '<file>', repeatable: true },
       '--session': { value: '<id>' },
+      '--ask': { value: '<command>' },
+      '--ask-path': { value: '<file>' },
     },
     positionals: '<uuid> <verb> [note...]',
   },
@@ -121,10 +123,24 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
   },
   trap: {
-    subverbs: ['title-set'],
+    subverbs: ['title-set', 'bypass'],
     flags: { '--session': { value: '<id>' } },
     flagSubverbs: { '--session': ['title-set'] },
+    positionals: '[<trap> on|off]',
   },
+  grant: {
+    flags: {
+      '--prefix': {},
+      '--once': {},
+      '--harness': { value: 'claude|codex|any' },
+      '--expires': { value: '<iso|30m|4h|2d>' },
+      '--path': { value: '<file|dir/>' },
+      '--trap': { value: '<name>' },
+    },
+    positionals: '[<command...>]',
+  },
+  grants: { flags: { '--all': {}, '--json': {} }, maxPositionals: 0 },
+  revoke: { flags: {}, positionals: '<grant-id>' },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--remove': {}, '--keep': {}, '--force': {}, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
@@ -197,7 +213,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
   'man:brief': { flags: {} },
-  hook: { flags: {}, subverbs: ['session-start', 'user-prompt-submit', 'stop', 'post-tool-use', 'session-end'], maxPositionals: 1 },
+  hook: { flags: {}, subverbs: ['session-start', 'user-prompt-submit', 'stop', 'post-tool-use', 'session-end', 'permission-request', 'grant-check'], maxPositionals: 1 },
   'man:file': {
     flags: { '--attach': { value: '<file>', repeatable: true }, '--title': { value: '<text>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } },
     positionals: '<file.md>',
@@ -276,7 +292,7 @@ unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note.
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
---waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images.`,
+--waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No.`,
   stats: `Catches: dispatches that finished done. catchesToday counts the local day;
 totalCatches counts all time. Both live in stats.json, which cull folds into
 before deleting, so they survive it; so does a per-local-day count (400 days),
@@ -295,7 +311,18 @@ installs the shipped PR check; with --for, a check that fails after the first
 Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
 --wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
-  trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.`,
+  trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
+\`trap bypass <trap> on|off\` (a person, at a terminal): the trap's next start runs with no permission checks
+(Claude Code bypassPermissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.
+\`trap grant|grants|revoke\` = \`grant|grants|revoke\`.`,
+  grant: `Allow traps to run one command (or, with --prefix, the command with more arguments; never
+anything joined on with ;, &&, | or a redirect), or with --path to write one file (a trailing
+slash: anything under it). For a person at a terminal: it asks to confirm, and refuses inside
+an agent session. --once: one use, within the hour unless --expires. --trap: one trap only.
+Claude Code honours grants through the plugin's mod, Codex through its PermissionRequest hook.`,
+  grants: `What a person has granted: id, what, once or always, harness, trap, who, when, uses.
+--all adds spent, expired and revoked grants. A trap checks a relayed approval here.`,
+  revoke: `Revoke a grant by id. Anyone may take a permission away.`,
   stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
 finalizes; unread messages wait the grace. Keeps the worktree; --remove removes one
 soak created unless dirty, untracked, unpushed, or without upstream (says why);
@@ -378,7 +405,7 @@ the conversation.`,
 neither): session-start runs man brief, user-prompt-submit adds a helm card reminder,
 stop runs man haul (--park, --timeout),
 post-tool-use runs soak beat, session-end runs stow --quiet. The older commands
-stay as aliases.`,
+stay as aliases. permission-request and grant-check allow a trap's call a grant covers.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
 itself with this verb). Not for direct use.`,
   '__pool-warm': `Internal: one warm-up pass over a worktree pool (the daemon re-execs itself

@@ -120,8 +120,10 @@ export function harnessCommand(opts: {
     if (opts.model) argv.push('--model', opts.model);
     for (const [key, value] of Object.entries(opts.config ?? {})) {
       if (key === 'effort') argv.push('--effort', value);
-      else if (key === 'permissionMode') argv.push('--permission-mode', value);
-      else unapplied.push(key);
+      else if (key === 'permissionMode' && opts.config?.bypass !== 'true') argv.push('--permission-mode', value);
+      // A person's `trap bypass on`: no permission checks.
+      else if (key === 'bypass' && value === 'true') argv.push('--permission-mode', 'bypassPermissions');
+      else if (key !== 'permissionMode') unapplied.push(key);
     }
     argv.push(`/lobstah:trap soak --ticket ${opts.ticket}`);
     return { cwd: opts.cwd, env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }, argv, unapplied };
@@ -131,6 +133,8 @@ export function harnessCommand(opts: {
     if (opts.model) argv.push('-m', opts.model);
     for (const [key, value] of Object.entries(opts.config ?? {})) {
       if (key === 'effort') argv.push('-c', `model_reasoning_effort=${JSON.stringify(value)}`);
+      // A person's `trap bypass on`: no approvals and no sandbox.
+      else if (key === 'bypass' && value === 'true') argv.push('--dangerously-bypass-approvals-and-sandbox');
       else unapplied.push(key);
     }
     if (opts.resume) argv.push('resume', opts.resume);

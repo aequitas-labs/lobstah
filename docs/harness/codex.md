@@ -36,6 +36,7 @@ says when the plugin is behind.
 | Stop hook (`lobstah man haul`) | Parks the session at turn end while work is in flight and wakes it when something needs attention. Inert unless the session holds the helm or is soaking. |
 | PostToolUse hook (`lobstah soak beat`) | After a tool call in a soaking session: refreshes the trap's liveness and writes its catch's activity. Needs Codex 0.117.0+ (see [below](#post-tool-hook-what-codex-has)). Older Codex ignores the event, and a trap's liveness then comes from its reports and its park only. |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends and keeps its worktree. |
+| PermissionRequest hook (`lobstah hook permission-request`) | When Codex is about to ask for approval in a trap, a call a person has granted (`lobstah grant`, or Allow on a glass card) is allowed, before the approval reviewer. Anything not granted goes on to Codex's normal approval. Like every hook, it runs only once trusted in `/hooks`; it is new, so it needs that review once. |
 | `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken, and sending a follow-up to finished work. |
 | `trap` skill | The worker: soaking (in a linked worktree, or in one that soak creates), the `wt:` address, the six report verbs, and `paused --waiting-on` before external waits. |
 

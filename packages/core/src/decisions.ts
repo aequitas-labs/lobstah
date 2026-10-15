@@ -29,6 +29,22 @@ import type { Attachment, Lane } from './types.js';
  * asked, so a new question on the same dispatch starts unread.
  */
 
+/**
+ * What a trap asked permission for: one shell command, or one file path for
+ * the write tools. A glass answer of "Allow once" or "Allow always" writes it
+ * to the grants ledger.
+ */
+export interface PermissionAsk {
+  command?: string;
+  path?: string;
+  harness: 'claude' | 'codex' | 'any';
+  /** The trap that asked, when known: an "Allow once" is good for it alone. */
+  trap?: string;
+}
+
+/** The options of a permission card, in order. */
+export const PERMISSION_OPTIONS = ['Allow once', 'Allow always', 'No'] as const;
+
 export interface DecisionMeta {
   /** `decision:<rid>`. */
   key: string;
@@ -49,6 +65,8 @@ export interface DecisionMeta {
   /** `helm` for `man ask`; `worker` for a raw question answered in the glass. */
   askedBy: string;
   askedAt: string;
+  /** Set on a trap's permission request: what it asked to run or write. */
+  permission?: PermissionAsk;
   /** Changes with every ask; an ack holds only while it matches. */
   stateHash: string;
 }
@@ -285,6 +303,8 @@ export interface AskOptions {
   askedBy: string;
   /** A standing decision this one replaces (`man ask --replace <key>`). Without it, every standing decision stays. */
   replace?: string;
+  /** A trap's permission request. */
+  permission?: PermissionAsk;
   /** Per-file limit for attachments (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -365,6 +385,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     ...(opts.grounds ? { grounds: opts.grounds } : {}),
     askedBy: opts.askedBy,
     askedAt,
+    ...(opts.permission ? { permission: opts.permission } : {}),
     stateHash: createHash('sha1').update(`${key}\n${askedAt}\n${title}`).digest('hex').slice(0, 16),
   };
   writeAtomic(path.join(dir, DETAIL_MD), detail);

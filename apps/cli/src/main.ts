@@ -889,6 +889,17 @@ async function mainCli(): Promise<void> {
     } catch { /* a reminder never breaks the user's turn */ }
     return;
   }
+  // The grant hooks: the Claude Code mod's question and Codex's
+  // PermissionRequest. Before any layout or parsing work; they never fail,
+  // and an error means no grant.
+  if (cmd === 'hook' && (args[0] === 'grant-check' || args[0] === 'permission-request')) {
+    const { grantCheckHook, permissionRequestHook } = await import('./grants-cli.js');
+    if (args[0] === 'grant-check') grantCheckHook();
+    else permissionRequestHook();
+    return;
+  }
+  // `trap grant|grants|revoke` are the long names of `grant|grants|revoke`.
+  if (cmd === 'trap' && (args[0] === 'grant' || args[0] === 'grants' || args[0] === 'revoke')) [cmd, ...args] = args as [string, ...string[]];
   // The post-tool hook: before any layout or parsing work, and it never
   // fails. Errors go to the log; the exit code is always 0.
   if ((cmd === 'soak' && args[0] === 'beat') || (cmd === 'hook' && args[0] === 'post-tool-use')) {
@@ -1014,7 +1025,41 @@ async function mainCli(): Promise<void> {
         confirmTitle(opt('--session'));
         break;
       }
+      if (pos[0] === 'bypass') {
+        const [, address, onOff] = pos;
+        if (!address || (onOff !== 'on' && onOff !== 'off')) throw new UsageError(usageFor('trap')!);
+        const { bypassCommand } = await import('./grants-cli.js');
+        bypassCommand(address, onOff === 'on');
+        break;
+      }
       throw new UsageError(usageFor('trap')!);
+    }
+    case 'grant': {
+      const { grantCommand } = await import('./grants-cli.js');
+      const command = pos.join(' ').trim();
+      const file = opt('--path');
+      if ((command === '') === (file === undefined)) throw new UsageError(`grant takes one command, or --path <file>\n\n${usageFor('grant')!}`);
+      if (file !== undefined && has('--prefix')) throw new UsageError('--prefix goes with a command, not --path');
+      grantCommand({
+        ...(file !== undefined ? { path: file } : { command }),
+        prefix: has('--prefix'),
+        once: has('--once'),
+        harness: opt('--harness'),
+        expires: opt('--expires'),
+        trap: opt('--trap'),
+      });
+      break;
+    }
+    case 'grants': {
+      const { grantsCommand } = await import('./grants-cli.js');
+      grantsCommand({ all: has('--all'), json: has('--json') });
+      break;
+    }
+    case 'revoke': {
+      if (!pos[0]) throw new UsageError(usageFor('revoke')!);
+      const { revokeCommand } = await import('./grants-cli.js');
+      revokeCommand(pos[0]);
+      break;
     }
     case 'focus': {
       const address = pos[0];
@@ -1376,6 +1421,12 @@ async function mainCli(): Promise<void> {
           throw err;
         }
       }
+      // A permission request becomes a card with Allow once, Allow always and No.
+      const permCommand = opt('--ask');
+      const permPath = opt('--ask-path');
+      if ((permCommand !== undefined || permPath !== undefined) && verb !== 'needs-decision')
+        throw new UsageError(`--ask and --ask-path go with needs-decision\n\n${usageFor('report')!}`);
+      if (permCommand !== undefined && permPath !== undefined) throw new UsageError('--ask takes a command, --ask-path a file: name one');
       const titleClaim = verb === 'done' || verb === 'failed' ? readSessionClaim(id, lane) : undefined;
       const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true);
@@ -1429,11 +1480,30 @@ async function mainCli(): Promise<void> {
             ? registerWaitWatches(id, lane, entry)
             : [];
       const warning = waitWarning(id, lane, entry);
+      let permissionCard: string | undefined;
+      if (permCommand !== undefined || permPath !== undefined) {
+        const { askPermission } = await import('./grants-cli.js');
+        const claim = readSessionClaim(id, lane);
+        const askingTrap = claim?.by.startsWith('wt:') ? readTrap(claim.by.slice(3)) : undefined;
+        const harness = askingTrap?.harness === 'claude' || askingTrap?.harness === 'codex' ? askingTrap.harness : 'any';
+        permissionCard = askPermission({
+          dispatch: id,
+          lane,
+          ...(storedDescriptor(id, lane)?.repo ? { repo: storedDescriptor(id, lane)!.repo } : {}),
+          ask: {
+            ...(permCommand !== undefined ? { command: permCommand.trim() } : { path: path.resolve(permPath!) }),
+            harness,
+            ...(askingTrap ? { trap: askingTrap.name ?? askingTrap.trapId } : {}),
+          },
+          ...(note ? { note } : {}),
+        }).key;
+      }
       console.log(
         toonKV({
           id,
           verb: entry.verb,
           at: entry.at,
+          ...(permissionCard ? { card: permissionCard } : {}),
           ...(titleTrap?.name ? { title: titleTrap.name } : {}),
           ...(entry.waitingOn ? { waitingOn: entry.waitingOn } : {}),
           ...(entry.link ? { link: entry.link } : {}),

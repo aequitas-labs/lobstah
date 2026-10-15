@@ -35,6 +35,8 @@ row, and the session-start brief says when the plugin is behind.
 | Stop hook (`lobstah man haul`) | At turn end, blocks with standing attention, or with the command to arm a watcher while work is in flight. Inert unless the session holds the helm or is soaking. |
 | PostToolUse hook (`lobstah soak beat`) | After every tool call in a soaking session: refreshes the trap's liveness and writes its catch's activity (the tool name and its primary target, redacted). At most once per 30 seconds per trap. No network, no git; always exits 0, errors go to `~/.lobstah/logs/beat.log`. Inert when not soaking or with `[soak].beat = false`. |
 | SessionEnd hook (`lobstah stow --quiet`) | Signs a soaking session off when it ends and keeps its worktree. |
+| Grants mod (`hooks/grants.mjs`) | Answers Claude Code's `tool.check` for a trap's Bash and write calls: a call that would be put to a prompt or the auto-mode classifier, and that a person has granted (`lobstah grant`, or Allow on a glass card), runs. It leaves alone a call the rules allow or refuse. Mods need a Claude Code version that supports them; they do not run in WSL or the VS Code chat panel. |
+| PermissionRequest hook (`lobstah hook permission-request`) | The same answer where a permission prompt would show. |
 | `man` skill | The orchestrator: the helm, the charter, dispatching, tending, getting woken. |
 | `trap` skill | The worker: soaking (in a linked worktree, or in one that soak creates), the `wt:` address, the six report verbs, and `paused --waiting-on` before waiting on something external (for ume, the non-blocking push when the await cannot run as a tracked background task). |
 
