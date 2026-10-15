@@ -128,6 +128,7 @@ send a continuation.
 | `stalledNoticeSecs` | `1200` | Silence since both a claimed dispatch's last activity and note before dispatch-progress attention. The same reminder backoff applies; activity or a note clears it. Paused, needs-decision and blocked workers use their existing paths. `0` disables. |
 | `idleWorkingNoticeSecs` | `60` | Explicitly idle trap whose last report is working: wake the helm with its full note. A live session-owned background wait exempts it. Tool activity or a new report clears it; reminders use the same backoff. `0` disables. |
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
+| `todoStaleDays` | `3` | Open helm to-dos (`lobstah todo`) older than this many days add one note to `man tend`. `0` disables. |
 
 ## `[wait]` — quiet helm and trap waiters
 

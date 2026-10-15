@@ -71,6 +71,7 @@ import { answerKey, viewKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { buildTendReport, landedCatches } from './tend.js';
+import { todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
@@ -515,6 +516,17 @@ export function serveAttachment(url: string, res: http.ServerResponse): boolean 
   return true;
 }
 
+/** The helms' open to-dos and their stale note; an unreadable file never fails /data. */
+function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
+  try {
+    const todos = todoViews();
+    const todoNote = todoStaleLine(todos);
+    return { ...(todos.length > 0 ? { todos } : {}), ...(todoNote ? { todoNote } : {}) };
+  } catch {
+    return {};
+  }
+}
+
 /** One disk pass, everything the page renders. Pure read. */
 /**
  * `local`: the snapshot goes to this machine's own glass page (a same-host
@@ -669,6 +681,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     stacks,
     ...attention,
     reports: reportRows(),
+    ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
     answerLimits: {
