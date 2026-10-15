@@ -289,21 +289,30 @@ outside the configured repos, or `maxPerDay` jobs already started today
 (UTC) leave the round `requested` with the reason. `lobstah reviews redraft
 <key>` drafts a stale or failed round again at the current head.
 
-**Posting.** `postReview` is the one path to GitHub:
-`POST /repos/{o}/{r}/pulls/{n}/reviews` with the event fixed to `COMMENT`
-(it takes no event argument, so nothing ever approves or requests changes),
-`commit_id` set to the head the draft reviewed, the inline comments, and a
-body ending with `<!-- lobstah:review <round id> -->`. It runs only on a
-human action (`lobstah reviews post <key>`, the glass's Post) or, with
-`[reviews].post = "auto"`, on a fresh draft. A stale draft never auto-posts,
-and posts by hand only with `--stale`, which adds a line saying the PR has
-moved. Each round posts at most once: `posted.json` in the round's directory
-is created with `wx` before the call and removed if the call fails, and a
-review on the PR that already carries the round's marker (another boat
-posted it) is recorded instead of posted again. A failed post keeps its
-reason on the round and is not retried on its own. `lobstah reviews edit`
-replaces the draft's `review.md` or `comments.json`; `lobstah reviews
-dismiss` drops the round without posting.
+**Staging and posting.** With `[reviews].post = "draft"` (the default), a
+fresh draft is staged on the PR as the identity's **pending review**:
+`POST /repos/{o}/{r}/pulls/{n}/reviews` with no event, `commit_id` set to the
+head the draft reviewed, the inline comments, and a body ending with
+`<!-- lobstah:review <round id> -->`. GitHub shows a pending review only to
+its author, so nothing is visible on the PR until Chris opens it in his
+review tool (`[repos.<key>].review`), edits the draft there, and sends it,
+with whatever event he chooses. When the request then disappears from the
+search, pick reads that review once: submitted marks the round `posted` (by
+`review tool`), deleted dismisses it, still pending withdraws it.
+
+With `"auto"`, a fresh draft is posted at once as a comment-only review
+(`event: COMMENT`). `lobstah reviews post <key>` sends a staged review as a
+comment-only review too. Neither path takes an event argument, so lobstah
+itself never approves or requests changes. A stale draft is never staged or
+posted on its own, and posts by hand only with `--stale`, which adds a line
+saying the PR has moved. Each round is staged at most once and posted at
+most once: `staged.json` and `posted.json` in the round's directory are
+created with `wx` before the call and removed if it fails, and a review on
+the PR that already carries the round's marker is adopted (pending) or
+recorded (sent) instead of written again. A failed stage or post keeps its
+reason on the round and is not retried on its own. `lobstah reviews dismiss`
+and `redraft` delete the round's pending review first; a review already sent
+is never deleted.
 
 Round states: `requested`, `drafting`, `drafted`, `stale`, `failed`,
 `posted`, `dismissed`, `withdrawn`. The `review` attention item stands while

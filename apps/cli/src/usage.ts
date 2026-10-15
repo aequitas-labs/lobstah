@@ -76,9 +76,9 @@ export const COMMANDS: Record<string, CommandSpec> = {
   prs: { flags: {}, maxPositionals: 0 },
   reports: { flags: { '--json': {} } },
   reviews: {
-    subverbs: ['ls', 'redraft', 'post', 'edit', 'dismiss'],
-    flags: { '--json': {}, '--all': {}, '--stale': {}, '--body-file': { value: '<file>' }, '--comments-file': { value: '<file>' } },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--stale': ['post'], '--body-file': ['edit'], '--comments-file': ['edit'] },
+    subverbs: ['ls', 'redraft', 'post', 'dismiss'],
+    flags: { '--json': {}, '--all': {}, '--stale': {} },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--stale': ['post'] },
     positionals: '[<key>]',
   },
   todo: {
@@ -325,9 +325,9 @@ context at every session start. Reserved for the helm; a trap gets none.`,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,
   reviews: `PRs that ask for your review ([reviews]), newest round each; --all adds closed rounds.
-post posts the draft as a comment-only review, once per round (--stale for a stale one);
-edit replaces review.md or comments.json; dismiss drops it; redraft re-drafts a stale or
-failed round. lobstah never approves or requests changes.`,
+A draft is staged on the PR as your pending review: edit and send it in your review tool.
+post sends it as a comment-only review (--stale for a stale one); dismiss deletes the
+pending draft; redraft re-drafts a stale or failed round. lobstah never approves.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

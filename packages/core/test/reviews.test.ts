@@ -11,9 +11,7 @@ import {
   observeReviewRequest,
   parseReviews,
   dismissReview,
-  editReviewDraft,
   readReview,
-  readRoundDraft,
   redraftReview,
   reviewAttention,
   reviewBrief,
@@ -188,19 +186,7 @@ describe('drafts', () => {
   });
 });
 
-describe('edit and dismiss', () => {
-  it('edits a drafted round only, validating the comments', () => {
-    observeReviewRequest(seen(), T0);
-    expect(editReviewDraft('review:acme/web#7', { body: 'x' })).toContain('only a drafted or stale review can be edited');
-    const item = readReview('review:acme/web#7')!;
-    item.rounds[0]!.state = 'drafted';
-    writeReview(item);
-    expect(editReviewDraft('review:acme/web#7', { comments: [{ path: 'a.ts', body: 'no line' }] })).toContain('needs path, a positive line, and a body');
-    expect(editReviewDraft('review:acme/web#7', { body: '  ' })).toBe('the review body cannot be empty');
-    editReviewDraft('review:acme/web#7', { body: 'Shorter.', comments: [{ path: 'a.ts', line: 3, side: 'LEFT', body: 'gone?' }] });
-    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ body: 'Shorter.', comments: [{ path: 'a.ts', line: 3, side: 'LEFT', body: 'gone?' }] });
-  });
-
+describe('dismiss', () => {
   it('dismisses an open round, once', () => {
     observeReviewRequest(seen(), T0);
     dismissReview('review:acme/web#7', 'glass', T0);

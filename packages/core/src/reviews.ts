@@ -140,8 +140,14 @@ export interface ReviewRound {
   draftedAt?: string;
   postedAt?: string;
   postedReviewId?: string;
-  /** Who posted or dismissed it (`glass`, `cli`, `auto`). */
+  /** Who posted or dismissed it (`cli`, `auto`, `glass`, `review tool`). */
   by?: string;
+  /**
+   * The draft is staged on the PR as a pending GitHub review, which only
+   * the configured identity sees: the person opens the PR in their review
+   * tool, edits it, and sends it from there.
+   */
+  staged?: { reviewId: string; at: string };
   /** Why the round is where it is: a skip rule, the daily cap, a failure, a withdrawal. */
   reason?: string;
 }
@@ -387,7 +393,7 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   const r = item && latestRound(item);
   if (!item || !r) return `no review item ${key}`;
   if (r.state !== 'stale' && r.state !== 'failed') return `${key}: the newest round is ${r.state}; only a stale or failed round re-drafts`;
-  const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, ...rest } = r;
+  const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, ...rest } = r;
   item.rounds[item.rounds.length - 1] = { ...rest, state: 'requested', headSha: item.pr.headSha };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 }
@@ -397,26 +403,7 @@ export function reviewMarker(roundId: string): string {
   return `<!-- lobstah:review ${roundId} -->`;
 }
 
-/**
- * Edit the newest round's draft (drafted or stale): replace the summary,
- * the inline comments, or both. Returns the item, or why it cannot.
- */
-export function editReviewDraft(key: string, change: { body?: string; comments?: unknown }, now = Date.now()): ReviewItem | string {
-  const item = readReview(key);
-  const r = item && latestRound(item);
-  if (!item || !r) return `no review item ${key}`;
-  if (r.state !== 'drafted' && r.state !== 'stale') return `${key}: the newest round is ${r.state}; only a drafted or stale review can be edited`;
-  const dir = reviewRoundDir(key, r.id)!;
-  if (change.body !== undefined && !change.body.trim()) return 'the review body cannot be empty';
-  const comments = change.comments === undefined ? undefined : parseReviewComments(change.comments);
-  if (typeof comments === 'string') return comments;
-  fs.mkdirSync(dir, { recursive: true });
-  if (change.body !== undefined) fs.writeFileSync(path.join(dir, 'review.md'), change.body);
-  if (comments) fs.writeFileSync(path.join(dir, 'comments.json'), `${JSON.stringify(comments, null, 2)}\n`);
-  return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
-}
-
-/** Dismiss the newest round: nothing is posted, and it leaves attention. A drafting job is cancelled by the next pick cycle. */
+/** Dismiss the newest round: nothing is posted, and it leaves attention. A drafting job is cancelled by the next pick cycle; a staged pending review is the caller's to delete first (pick's dismissReviewRound). */
 export function dismissReview(key: string, by: string, now = Date.now()): ReviewItem | string {
   const item = readReview(key);
   const r = item && latestRound(item);
@@ -434,6 +421,7 @@ export function markReviewPosted(key: string, roundId: string, post: { reviewId:
   if (!item || !r) return undefined;
   Object.assign(r, { state: 'posted', postedAt: post.at, postedReviewId: post.reviewId, by: post.by });
   delete r.reason;
+  delete r.staged;
   return writeReview({ ...item, updatedAt: post.at });
 }
 

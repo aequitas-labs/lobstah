@@ -164,9 +164,6 @@ import {
   toonHelp,
   toonKV,
   toonTable,
-  redraftReview,
-  dismissReview,
-  editReviewDraft,
   VERBS,
   parsePrRef,
   prBadge,
@@ -194,7 +191,7 @@ import {
 import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, Watch, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
-import { postReview, runPickup } from '@lobstah/pick';
+import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
@@ -309,10 +306,8 @@ work (humans and agents):
   reviews [--all] [--json]        PRs that ask for your review, and each
                                   one's newest round
   reviews redraft <key>           draft a stale or failed review again
-  reviews post <key> [--stale]    post the draft as a comment-only review
-  reviews edit <key> [--body-file <f>] [--comments-file <f>]
-                                  replace the draft's summary or comments
-  reviews dismiss <key>           drop the review; nothing is posted
+  reviews post <key> [--stale]    send the staged draft as a comment-only review
+  reviews dismiss <key>           drop the review and its pending draft
   prs [sync]                      list known PRs, or refresh due PR watches
   cull [--older-than <days>] [--apply]
                                   sweep aged catch and lost gear — old done/
@@ -1812,36 +1807,17 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'reviews': {
-      if (pos[0] === 'redraft') {
-        const key = pos[1];
-        if (!key) throw new UsageError(`reviews redraft requires a review key\n\n${usageFor('reviews')!}`);
-        const out = redraftReview(key);
-        if (typeof out === 'string') throw new Error(out);
-        console.log(toonKV({ key, state: 'requested', next: 'the next lobstah pick cycle starts a draft job' }));
-        break;
-      }
-      if (pos[0] === 'post' || pos[0] === 'edit' || pos[0] === 'dismiss') {
+      if (pos[0] === 'redraft' || pos[0] === 'post' || pos[0] === 'dismiss') {
         const key = pos[1];
         if (!key) throw new UsageError(`reviews ${pos[0]} requires a review key\n\n${usageFor('reviews')!}`);
-        if (pos[0] === 'dismiss') {
-          const out = dismissReview(key, 'cli');
-          if (typeof out === 'string') throw new Error(out);
+        if (pos[0] === 'redraft') {
+          const why = await redraftReviewRound(key);
+          if (why) throw new Error(why);
+          console.log(toonKV({ key, state: 'requested', next: 'the next lobstah pick cycle starts a draft job' }));
+        } else if (pos[0] === 'dismiss') {
+          const why = await dismissReviewRound(key, 'cli');
+          if (why) throw new Error(why);
           console.log(toonKV({ key, state: 'dismissed' }));
-        } else if (pos[0] === 'edit') {
-          const bodyFile = opt('--body-file');
-          const commentsFile = opt('--comments-file');
-          if (!bodyFile && !commentsFile) throw new UsageError(`reviews edit needs --body-file, --comments-file, or both\n\n${usageFor('reviews')!}`);
-          let comments: unknown;
-          if (commentsFile) {
-            try {
-              comments = JSON.parse(fs.readFileSync(commentsFile, 'utf8'));
-            } catch (err) {
-              throw new Error(`${commentsFile}: ${err instanceof Error ? err.message : String(err)}`);
-            }
-          }
-          const out = editReviewDraft(key, { ...(bodyFile ? { body: fs.readFileSync(bodyFile, 'utf8') } : {}), ...(commentsFile ? { comments } : {}) });
-          if (typeof out === 'string') throw new Error(out);
-          console.log(toonKV({ key, edited: [bodyFile && 'review.md', commentsFile && 'comments.json'].filter(Boolean).join(', ') }));
         } else {
           const out = await postReview(key, { by: 'cli', stale: has('--stale') });
           if (!out.posted) throw new Error(out.why);

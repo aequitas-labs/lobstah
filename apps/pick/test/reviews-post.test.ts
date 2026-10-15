@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, latestRound, observeReviewRequest, readReview, reviewRoundDir, writeReview } from '@lobstah/core';
-import { postReview } from '../src/reviews-post.js';
+import { dismissReviewRound, postReview, redraftReviewRound } from '../src/reviews-post.js';
 import type { FetchLike } from '../src/reviews-post.js';
 import { reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
@@ -45,11 +45,21 @@ interface Call {
   body?: Record<string, unknown>;
 }
 
-/** A fake GitHub: the PR's existing reviews, and a POST that answers with id 99 (or fails with `postStatus`). */
-function github(calls: Call[], existing: Array<{ id: number; body: string }> = [], postStatus = 200): FetchLike {
+/**
+ * A fake GitHub for one PR's reviews: the reviews already there, a create
+ * that answers with id 99 (or fails with `postStatus`), a submit of a pending
+ * review, one review's state by id, and a delete.
+ */
+function github(calls: Call[], existing: Array<{ id: number; body: string; state?: string }> = [], postStatus = 200): FetchLike {
   return async (url, init) => {
     calls.push({ method: init.method, url, ...(init.body ? { body: JSON.parse(init.body) } : {}) });
+    const one = /\/reviews\/(\d+)$/.exec(url);
+    if (init.method === 'GET' && one) {
+      const r = existing.find((x) => x.id === Number(one[1]));
+      return r ? new Response(JSON.stringify(r), { status: 200 }) : new Response('Not Found', { status: 404 });
+    }
     if (init.method === 'GET') return new Response(JSON.stringify(existing), { status: 200 });
+    if (init.method === 'DELETE') return new Response(JSON.stringify({}), { status: 200 });
     // Let a second, concurrent caller run while this one waits on GitHub.
     await new Promise((r) => setTimeout(r, 5));
     return postStatus === 200 ? new Response(JSON.stringify({ id: 99 }), { status: 200 }) : new Response('Unprocessable: line not in diff', { status: postStatus });
@@ -83,7 +93,7 @@ describe('postReview', () => {
     drafted();
     const calls: Call[] = [];
     const f = github(calls);
-    const both = await Promise.all([postReview(KEY, { by: 'glass', token: tok, fetch: f }), postReview(KEY, { by: 'glass', token: tok, fetch: f })]);
+    const both = await Promise.all([postReview(KEY, { by: 'cli', token: tok, fetch: f }), postReview(KEY, { by: 'cli', token: tok, fetch: f })]);
     expect(posts(calls)).toHaveLength(1);
     expect(both.filter((o) => o.posted)).toHaveLength(1);
   });
@@ -100,7 +110,7 @@ describe('postReview', () => {
   it('a review already carrying the round marker is recorded, not posted again', async () => {
     drafted();
     const calls: Call[] = [];
-    const out = await postReview(KEY, { by: 'glass', token: tok, fetch: github(calls, [{ id: 41, body: `fine\n\n${MARKER}` }]) });
+    const out = await postReview(KEY, { by: 'cli', token: tok, fetch: github(calls, [{ id: 41, body: `fine\n\n${MARKER}` }]) });
     expect(out).toEqual({ posted: true, reviewId: '41', by: 'another boat' });
     expect(posts(calls)).toEqual([]);
     expect(latestRound(readReview(KEY)!)!.state).toBe('posted');
@@ -122,13 +132,20 @@ describe('posting from the reviews loop', () => {
   const config = (post: string) =>
     fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'work = "off"', `post = "${post}"`, '[repos.web]', 'path = "/w"', 'origin = "git@github.com:acme/web.git"'].join('\n'));
 
-  it('post = "draft" never posts, across cycles', async () => {
+  it('post = "draft" stages the draft as a pending review, once, and never posts it', async () => {
     config('draft');
     drafted();
     const calls: Call[] = [];
     for (let i = 0; i < 3; i++) await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
-    expect(calls).toEqual([]);
-    expect(latestRound(readReview(KEY)!)!.state).toBe('drafted');
+    expect(posts(calls)).toEqual([
+      {
+        method: 'POST',
+        url: 'https://api.github.com/repos/acme/web/pulls/7/reviews',
+        body: { commit_id: 'aaaaaaa1', body: `Looks right.\n\n${MARKER}`, comments: [{ path: 'src/a.ts', line: 12, side: 'RIGHT', body: 'Why not b()?' }] },
+      },
+    ]);
+    expect(posts(calls)[0]!.body).not.toHaveProperty('event');
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', staged: { reviewId: '99' } });
   });
 
   it('post = "auto" posts a fresh draft once, as COMMENT', async () => {
@@ -154,5 +171,66 @@ describe('posting from the reviews loop', () => {
     await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
     expect(posts(calls)).toHaveLength(1);
     expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', reason: expect.stringContaining('post failed') });
+  });
+});
+
+describe('staged reviews', () => {
+  function staged(state: 'drafted' | 'stale' = 'drafted'): void {
+    drafted(state);
+    const item = readReview(KEY)!;
+    item.rounds[0]!.staged = { reviewId: '77', at: '2026-10-15T10:00:00Z' };
+    writeReview(item);
+  }
+  const gone: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { search: { issueCount: 0, nodes: [] } } }) });
+  const config = () =>
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'work = "off"', '[repos.web]', 'path = "/w"', 'origin = "git@github.com:acme/web.git"'].join('\n'));
+
+  it('post sends the staged pending review as COMMENT', async () => {
+    staged();
+    const calls: Call[] = [];
+    expect(await postReview(KEY, { by: 'cli', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+    expect(posts(calls)).toEqual([{ method: 'POST', url: 'https://api.github.com/repos/acme/web/pulls/7/reviews/77/events', body: { event: 'COMMENT', body: `Looks right.\n\n${MARKER}` } }]);
+  });
+
+  it('when the request goes, a review sent from the tool reads posted; a still-pending one withdraws; a deleted one dismisses', async () => {
+    config();
+    staged();
+    await reviewsLoop('chris', tok, () => {}, { run: gone, fetch: github([], [{ id: 77, body: MARKER, state: 'APPROVED' }]) });
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'posted', by: 'review tool', postedReviewId: '77' });
+
+    fs.rmSync(path.join(home, 'reviews'), { recursive: true });
+    staged();
+    await reviewsLoop('chris', tok, () => {}, { run: gone, fetch: github([], [{ id: 77, body: MARKER, state: 'PENDING' }]) });
+    expect(latestRound(readReview(KEY)!)!.state).toBe('withdrawn');
+
+    fs.rmSync(path.join(home, 'reviews'), { recursive: true });
+    staged();
+    await reviewsLoop('chris', tok, () => {}, { run: gone, fetch: github([], []) });
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'dismissed', by: 'review tool' });
+  });
+
+  it('dismiss deletes the pending review; a review already sent is not deleted', async () => {
+    staged();
+    const calls: Call[] = [];
+    expect(await dismissReviewRound(KEY, 'glass', { token: tok, fetch: github(calls, [{ id: 77, body: MARKER, state: 'PENDING' }]) })).toBeUndefined();
+    expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual(['https://api.github.com/repos/acme/web/pulls/7/reviews/77']);
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'dismissed', by: 'glass' });
+    expect(latestRound(readReview(KEY)!)!.staged).toBeUndefined();
+
+    fs.rmSync(path.join(home, 'reviews'), { recursive: true });
+    staged();
+    const sent: Call[] = [];
+    expect(await dismissReviewRound(KEY, 'glass', { token: tok, fetch: github(sent, [{ id: 77, body: MARKER, state: 'COMMENTED' }]) })).toContain('already sent');
+    expect(sent.filter((c) => c.method === 'DELETE')).toEqual([]);
+    expect(latestRound(readReview(KEY)!)!.state).toBe('posted');
+  });
+
+  it('re-drafting a stale round deletes its pending review first', async () => {
+    staged('stale');
+    const calls: Call[] = [];
+    expect(await redraftReviewRound(KEY, { token: tok, fetch: github(calls, [{ id: 77, body: MARKER, state: 'PENDING' }]) })).toBeUndefined();
+    expect(calls.map((c) => c.method)).toEqual(['GET', 'DELETE']);
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'requested' });
+    expect(latestRound(readReview(KEY)!)!.staged).toBeUndefined();
   });
 });
