@@ -10,6 +10,7 @@ import { parseRoute, routeHash, TABS } from './route.js';
 import type { Item, Tab } from './route.js';
 import type { DispatchView, Snapshot } from './model.js';
 import { setDecisionBadge } from '../../../../apps/cli/glass/src/app-badge.js';
+import { LinkedText } from '../../../../apps/cli/glass/src/components/links.js';
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(),
@@ -184,7 +185,7 @@ export function App() {
       .filter((d) => d.kind === kind)
       .map(
         (d) =>
-          html`<button class=${'card' + (d.ack ? ' acked' : '')} onClick=${() => setModal({ kind, id: d.id })}><div class="top"><b>${d.title}</b><span class="badge">${kind === 'decision' ? (d.answer ? 'answered' : 'needs decision') : d.ack ? 'report · read' : 'report'}</span></div><div class="meta">${d.author} · ${when(d.at)}${acked(d.ack)}</div></button>`,
+          html`<button class=${'card' + (d.ack ? ' acked' : '')} onClick=${() => setModal({ kind, id: d.id })}><div class="top"><b>${LinkedText(d.title)}</b><span class="badge">${kind === 'decision' ? (d.answer ? 'answered' : 'needs decision') : d.ack ? 'report · read' : 'report'}</span></div><div class="meta">${d.author} · ${when(d.at)}${acked(d.ack)}</div></button>`,
       );
   return html`<div class="headerline"><h1>🦞✨ spyglass <span class="dim">wharf</span></h1>${!signedOut && html`<button class="btn" onClick=${signOut}>sign out</button>`}</div>
     <div class="chips"><span class="chip">helm ${snapshot && !error ? (snapshot.helmLive ? 'live' : 'unknown / no live lease') : 'unknown'}</span><span class="chip dim">polling · 15s · ${jobs.length} jobs</span></div>
@@ -194,11 +195,11 @@ export function App() {
         ? html`<button class="btn" onClick=${authenticate}>sign in with GitHub</button><div class="dim">Invite-only. Sign-in does not take a helm seat.</div>`
         : snapshot &&
           html`<nav class="tabs" aria-label="Spyglass views">${TABS.map((t) => html`<a href=${'#' + t} class=${tab === t ? 'on' : ''} onClick=${() => setTab(t)}>${t}</a>`)}</nav>
-      ${tab === 'deck' && html`<h2>Decisions</h2><div class="cards">${cards('decision')}</div><h2>Human requests</h2>${snapshot.requests.map((r) => html`<div class="msg"><b>${r.kind}</b> · ${r.dispatch ?? r.boat} · ${requestState(r)}<div>${r.text ?? r.repo}</div></div>`)}`}
-      ${tab === 'jobs' && html`<div class="cards">${jobs.map((j) => html`<button class=${'card' + (j.ack ? ' acked' : '')} onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${j.brief.split('\n')[0]}</b><span class="badge">${j.status?.verb ?? j.state}</span></div><div class="meta">${j.repo} · ${j.boatName ?? snapshot.boats.find((b) => b.id === j.claimedBoat)?.name ?? j.claimedBoat ?? 'unclaimed'}${acked(j.ack)}</div><div class="note">${j.status?.note ?? j.unservable?.note}</div></button>`)}</div>`}
-      ${tab === 'traps' && html`<div class="cards">${snapshot.workers.map((w) => html`<button class="card" onClick=${() => setModal({ kind: 'trap', id: w.id })}><div class="top"><b>${w.id}</b><span class="badge">${w.harness ?? 'unknown harness'}</span></div><div class="meta">${w.boatName} · ${when(w.lastCheckIn)}</div><div class="note">${w.current ? 'job ' + w.current : 'no current job'} · ${w.repoRemote}</div></button>`)}</div>`}
+      ${tab === 'deck' && html`<h2>Decisions</h2><div class="cards">${cards('decision')}</div><h2>Human requests</h2>${snapshot.requests.map((r) => html`<div class="msg"><b>${r.kind}</b> · ${r.dispatch ?? r.boat} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo)}</div></div>`)}`}
+      ${tab === 'jobs' && html`<div class="cards">${jobs.map((j) => html`<button class=${'card' + (j.ack ? ' acked' : '')} onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${LinkedText(j.brief.split('\n')[0])}</b><span class="badge">${j.status?.verb ?? j.state}</span></div><div class="meta">${j.repo} · ${j.boatName ?? snapshot.boats.find((b) => b.id === j.claimedBoat)?.name ?? j.claimedBoat ?? 'unclaimed'}${acked(j.ack)}</div><div class="note">${LinkedText(j.status?.note ?? j.unservable?.note)}</div></button>`)}</div>`}
+      ${tab === 'traps' && html`<div class="cards">${snapshot.workers.map((w) => html`<button class="card" onClick=${() => setModal({ kind: 'trap', id: w.id })}><div class="top"><b>${w.id}</b><span class="badge">${w.harness ?? 'unknown harness'}</span></div><div class="meta">${w.boatName} · ${when(w.lastCheckIn)}</div><div class="note">${w.current ? 'job ' + w.current : 'no current job'} · ${LinkedText(w.repoRemote)}</div></button>`)}</div>`}
       ${tab === 'boats' && html`<${Boats} boats=${snapshot.boats} action=${action} deleteAccount=${deleteAccount} />`}
-      ${tab === 'reports' && html`<div class="cards">${cards('report')}${jobs.filter((j) => j.status?.evidence?.files?.length).map((j) => html`<button class="card" onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${j.brief.split('\n')[0]}</b><span class="badge">catch files</span></div><div class="meta">${j.workerId ?? 'headless worker'} · ${when(j.status?.at)}</div></button>`)}</div>`}
+      ${tab === 'reports' && html`<div class="cards">${cards('report')}${jobs.filter((j) => j.status?.evidence?.files?.length).map((j) => html`<button class="card" onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${LinkedText(j.brief.split('\n')[0])}</b><span class="badge">catch files</span></div><div class="meta">${j.workerId ?? 'headless worker'} · ${when(j.status?.at)}</div></button>`)}</div>`}
       ${location.pathname === '/device' && html`<${DeviceApproval} notify=${notify} />`}`
     }
     ${
@@ -206,7 +207,7 @@ export function App() {
       snapshot &&
       html`<div id="overlay" class="open" onClick=${(e: Event) => {
         if (e.target === e.currentTarget) setModal(undefined);
-      }}><section class="modal" role="dialog" aria-modal="true" aria-label=${selectedDoc?.title ?? found?.id ?? 'details'} tabindex="-1" onKeyDown=${keydown}><button class="btn x" aria-label="close details" onClick=${() => setModal(undefined)}>×</button>${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}<h3>${selectedDoc?.title ?? found?.id ?? `${modal.kind} ${modal.id}`}</h3>${!found && html`<div class="dim">No ${modal.kind} with this id is listed on this wharf for your account. It may have been withdrawn or removed.</div>`}${selectedDoc && html`<${Document} key=${selectedDoc.id} doc=${selectedDoc} action=${action} />`}${selectedJob && html`<${Job} key=${selectedJob.id} job=${selectedJob} workers=${snapshot.workers} action=${action} />`}${selectedWorker && html`<div class="sub">${selectedWorker.harness ?? 'unknown harness'} · ${selectedWorker.repoRemote}</div><${Session} worker=${selectedWorker} />`}</section></div>`
+      }}><section class="modal" role="dialog" aria-modal="true" aria-label=${selectedDoc?.title ?? found?.id ?? 'details'} tabindex="-1" onKeyDown=${keydown}><button class="btn x" aria-label="close details" onClick=${() => setModal(undefined)}>×</button>${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}<h3>${LinkedText(selectedDoc?.title ?? found?.id ?? `${modal.kind} ${modal.id}`)}</h3>${!found && html`<div class="dim">No ${modal.kind} with this id is listed on this wharf for your account. It may have been withdrawn or removed.</div>`}${selectedDoc && html`<${Document} key=${selectedDoc.id} doc=${selectedDoc} action=${action} />`}${selectedJob && html`<${Job} key=${selectedJob.id} job=${selectedJob} workers=${snapshot.workers} action=${action} />`}${selectedWorker && html`<div class="sub">${selectedWorker.harness ?? 'unknown harness'} · ${LinkedText(selectedWorker.repoRemote)}</div><${Session} worker=${selectedWorker} />`}</section></div>`
     }
     <footer>🦞✨ lobstah · wharf · PR watches and repair run on your boats</footer>`;
 }

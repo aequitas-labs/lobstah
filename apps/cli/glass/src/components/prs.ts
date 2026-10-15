@@ -19,6 +19,7 @@ import {
   watchCell,
 } from './common.js';
 import type { OlderControl } from './common.js';
+import { LinkedText } from './links.js';
 
 /**
  * The PRs tab: PRs grouped by stack, then the watches that are not PR
@@ -47,7 +48,7 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
   };
   const rows = inp.watches.map(
     (w) =>
-      html`<tr key=${w.key}><td>${w.key}</td><td>${w.owner}</td><td title=${w.cursor}>${short(w.cursor)}</td><td>${w.lastCheckedAt && Age(w.lastCheckedAt)}</td><td>${w.lastError || ''}</td></tr>`,
+      html`<tr key=${w.key}><td>${w.key}</td><td>${w.owner}</td><td title=${w.cursor}>${short(w.cursor)}</td><td>${w.lastCheckedAt && Age(w.lastCheckedAt)}</td><td>${LinkedText(w.lastError)}</td></tr>`,
   );
   return [html`<h2>other watches</h2>`, Table(['key', 'owner', 'cursor', 'last check', 'error'], rows, 'no other watches')];
 }
@@ -57,7 +58,7 @@ function prTable(inp: PrsInputs, older: unknown) {
     html`<tr key=${'stack:' + s.id}><th colspan="8">${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}</th></tr>`,
     ...prs.map(
       (p) =>
-        html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${p.title || ''}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
+        html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
     ),
   ]);
   return [Table(['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'], rows, 'no PR evidence'), older, otherWatches(inp)];

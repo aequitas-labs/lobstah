@@ -53,6 +53,9 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * `<a class="lob" href="#decision/<key>">` folds back to the old
  * `<div class="lob">` (foldPrTitles), and the lobs are left out of the
  * computed-style check on both pages.
+ * The glass also links each bare http(s) URL in free text on purpose
+ * (glass-links.test.ts tests it): an `<a class="autolink">` folds back to
+ * its text (foldPrTitles).
  * The snapshot names each trap's catches by dispatch id; the old page read
  * full dispatch objects there, so the old page is served the ids expanded
  * back into those objects (legacyWire). Both pages render the same catches.
@@ -165,6 +168,7 @@ function foldPrTitles(el: Element): Node {
   for (const b of copy.querySelectorAll('.card .top > b')) b.textContent = (b.textContent ?? '').trimEnd();
   for (const n of copy.querySelectorAll('.claimedby')) n.remove();
   for (const n of copy.querySelectorAll('.trapname')) n.replaceWith(doc.createTextNode(n.textContent ?? ''));
+  for (const n of copy.querySelectorAll('a.autolink')) n.replaceWith(doc.createTextNode(n.textContent ?? ''));
   for (const a of copy.querySelectorAll('a.lob[href^="#decision/"]')) {
     const div = doc.createElement('div');
     for (const attr of a.attributes) if (attr.name !== 'href' && attr.name !== 'title') div.setAttribute(attr.name, attr.value);

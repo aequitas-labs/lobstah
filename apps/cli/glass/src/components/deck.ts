@@ -25,6 +25,7 @@ import {
 } from './common.js';
 import { reportMeta } from './reports.js';
 import { DeckDecisions } from './decisions.js';
+import { LinkedText } from './links.js';
 import type { DecisionDraft } from '../store.js';
 
 /**
@@ -140,14 +141,14 @@ function deckTodos(inp: DeckInputs, view: View) {
     const parts = grounds ? [t.grounds] : [];
     return {
       key: `todo:${t.grounds}:${t.id}`,
-      title: t.text,
+      title: LinkedText(t.text),
       ...(t.stale ? { badge: { text: 'stale', tone: 'warn' } } : {}),
       meta: [parts.length ? parts.join(' · ') + ' · ' : '', 'added ', Age(t.createdAt), ' ago'],
       metaText: [...parts, `added ${ageText(t.createdAt)} ago`].join(' · '),
     };
   });
   const lines = items.map((i) => deckItem(i, view));
-  return html`<section><h2>to-dos</h2>${inp.todoNote && html`<div class="dim">${inp.todoNote}</div>`}${view === 'cards' ? html`<div class="cards">${lines}</div>` : lines}</section>`;
+  return html`<section><h2>to-dos</h2>${inp.todoNote && html`<div class="dim">${LinkedText(inp.todoNote)}</div>`}${view === 'cards' ? html`<div class="cards">${lines}</div>` : lines}</section>`;
 }
 
 export function Deck({
@@ -211,7 +212,7 @@ export function Deck({
   }));
   return [
     shownGoals.length > 0 &&
-      html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map((g) => html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map((line) => html`<li>${line}</li>`)}</ol></section>`)}</div>`,
+      html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map((g) => html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map((line) => html`<li>${LinkedText(line)}</li>`)}</ol></section>`)}</div>`,
     html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckTodos(inp, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
   ];
 }
