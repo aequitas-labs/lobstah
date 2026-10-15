@@ -31,7 +31,7 @@ done
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/lobstah-pr-assets.XXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
-git clone --quiet --single-branch --branch pr-assets -- "$remote" "$scratch/repo"
+git clone --quiet --single-branch --branch pr-evidence -- "$remote" "$scratch/repo"
 # Honor identity configured in this checkout as well as global Git settings.
 for key in user.name user.email; do
   if value=$(git -C "$root" config --get "$key"); then
@@ -51,15 +51,15 @@ if ! git -C "$scratch/repo" diff --cached --quiet; then
   git -C "$scratch/repo" commit -m "PR #$pr evidence" >&2
   pushed=false
   for attempt in 1 2 3 4 5; do
-    if git -C "$scratch/repo" push origin HEAD:refs/heads/pr-assets >&2; then
+    if git -C "$scratch/repo" push origin HEAD:refs/heads/pr-evidence >&2; then
       pushed=true
       break
     fi
-    before=$(git -C "$scratch/repo" rev-parse origin/pr-assets)
-    git -C "$scratch/repo" fetch --quiet origin pr-assets
-    after=$(git -C "$scratch/repo" rev-parse origin/pr-assets)
+    before=$(git -C "$scratch/repo" rev-parse origin/pr-evidence)
+    git -C "$scratch/repo" fetch --quiet origin pr-evidence
+    after=$(git -C "$scratch/repo" rev-parse origin/pr-evidence)
     [[ $before != "$after" ]] || die 'Push failed without a concurrent update; check origin access and protection.'
-    git -C "$scratch/repo" rebase origin/pr-assets >&2 || die 'Concurrent upload changed the same file. Resolve by choosing a new filename and rerun.'
+    git -C "$scratch/repo" rebase origin/pr-evidence >&2 || die 'Concurrent upload changed the same file. Resolve by choosing a new filename and rerun.'
   done
   $pushed || die 'Too many concurrent uploads; rerun the command.'
 fi
