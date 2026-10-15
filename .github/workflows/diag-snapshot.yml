@@ -1,0 +1,24 @@
+# TEMPORARY diagnostic (removed before merge): cold Windows process snapshot timings.
+name: Diag snapshot
+
+on:
+  pull_request:
+
+jobs:
+  snapshot:
+    strategy:
+      fail-fast: false
+      matrix:
+        order: [addtype-first, emit-first]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: pnpm install --frozen-lockfile --filter @lobstah/runner...
+      - run: pnpm --filter @lobstah/runner... build
+      - run: node .github/diag-snapshot.mjs ${{ matrix.order }}
