@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, enqueue, ensureLayout, pendingIds, readDescriptor, slotUsage, statusPath } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, mergeEvidence, pendingIds, readDescriptor, signOnTrap, slotUsage, statusPath } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { PickupState } from '../src/state.js';
 import { dispatchLoop } from '../src/loops/dispatch.js';
@@ -10,7 +10,7 @@ import { reportLoop } from '../src/loops/report.js';
 import { reconcileLoop } from '../src/loops/reconcile.js';
 import { approvalDedupKey, mergeLoop, qualifiedApproval, qualifyingSet, rebaseBrief, staleApprovals } from '../src/loops/merge.js';
 import { DEFAULT_MERGE_POLICY, lobstahWrote } from '../src/types.js';
-import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../src/types.js';
+import type { MergeSource, PollContext, PrCandidate, Source, TrackedItem, WorkItem } from '../src/types.js';
 import { readMergeView } from '../src/merge-view.js';
 import { cycle } from '../src/run.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -39,7 +39,8 @@ class FakeSource implements Source {
   reports: Array<{ key: string; verb: Verb; uuid: string }> = [];
   inboundMsgs = new Map<string, string[]>();
 
-  async poll() { return this.items; }
+  lastCtx?: PollContext;
+  async poll(ctx?: PollContext) { this.lastCtx = ctx; return this.items; }
   async claim() { return this.claimable; }
   async report(key: string, verb: Verb, ev: Evidence & { uuid: string }) {
     this.reports.push({ key, verb, uuid: ev.uuid });
@@ -127,6 +128,66 @@ describe('dispatch loop', () => {
     const round2 = st.get('fake:pr2@e2')!.uuid;
     const desc = JSON.parse(fs.readFileSync(path.join(home, 'queue', `${round2}.json`), 'utf8'));
     expect(desc.followUp).toBe(round1); // the latest session in the chain, not the implementation
+  });
+
+  it('a held-only round is recorded, and the next poll sees every run on the PR', async () => {
+    const src = new FakeSource();
+    const impl = '11111111-1111-1111-1111-111111111111';
+    enqueue({ id: impl, repo: 'demo', brief: 'implement it', queuedAt: '2026-10-15T10:00:00.000Z' }, 'work');
+    appendStatus(impl, 'work', 'done', undefined, '2026-10-15T11:00:00.000Z');
+    const st = new PickupState();
+    src.items = [{ ...item('fake:pr4@e1', 'review', impl), subject: 'fake:pr4', heldOnly: true }];
+    await dispatchLoop(src, st);
+    const round = st.get('fake:pr4@e1')!;
+    expect(round.heldOnly).toBe(true);
+    await dispatchLoop(src, st);
+    expect(src.lastCtx!.runs('fake:pr4', impl)).toEqual([
+      { start: '2026-10-15T10:00:00.000Z', end: '2026-10-15T11:00:00.000Z' },
+      { start: round.createdAt, heldOnly: true }, // still running
+    ]);
+    expect(src.lastCtx!.runs('fake:other', impl)).toHaveLength(1);
+  });
+
+  it("a round goes to the PR's live trap, and to any worker once the trap wait expires", async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/tmp/demo"\n');
+    const worktree = path.join(home, 'wt');
+    fs.mkdirSync(worktree);
+    const res = signOnTrap({ worktree, cwd: worktree, repo: 'demo', harness: 'claude', sessionId: '33333333-3333-4333-8333-333333333333' });
+    if (!('ok' in res)) throw new Error('held');
+    const trap = `wt:${res.ok.trapId}`;
+    const impl = '11111111-1111-1111-1111-111111111111';
+    enqueue({ id: impl, repo: 'demo', brief: 'implement it' }, 'work');
+    appendStatus(impl, 'work', 'done');
+    mergeEvidence(impl, 'work', { deliveredTo: trap });
+    const src = new FakeSource();
+    src.items = [{ ...item('fake:pr5@e1', 'review', impl), subject: 'fake:pr5' }];
+    const st = new PickupState();
+    const logs: string[] = [];
+    await dispatchLoop(src, st, (m) => logs.push(m));
+    const uuid = st.get('fake:pr5@e1')!.uuid;
+    const queued = () => JSON.parse(fs.readFileSync(path.join(home, 'queue', `${uuid}.json`), 'utf8'));
+    expect(queued()).toMatchObject({ for: trap, followUp: impl });
+    expect(Date.parse(queued().systemRepair.trapWaitUntil)).toBeGreaterThan(Date.now() + 590_000);
+
+    fs.writeFileSync(path.join(home, 'queue', `${uuid}.json`), JSON.stringify({ ...queued(), systemRepair: { trapWaitUntil: '2026-01-01T00:00:00.000Z' } }));
+    src.items = [];
+    await dispatchLoop(src, st, (m) => logs.push(m));
+    expect(queued().for).toBeUndefined();
+    expect(queued().followUp).toBe(impl);
+    expect(logs.at(-1)).toContain('any worker may now');
+  });
+
+  it('a round whose trap is gone is not addressed', async () => {
+    const impl = '11111111-1111-1111-1111-111111111111';
+    enqueue({ id: impl, repo: 'demo', brief: 'implement it' }, 'work');
+    appendStatus(impl, 'work', 'done');
+    mergeEvidence(impl, 'work', { deliveredTo: 'wt:deadbeef' });
+    const src = new FakeSource();
+    src.items = [{ ...item('fake:pr6@e1', 'review', impl), subject: 'fake:pr6' }];
+    const st = new PickupState();
+    await dispatchLoop(src, st);
+    const desc = JSON.parse(fs.readFileSync(path.join(home, 'queue', `${st.get('fake:pr6@e1')!.uuid}.json`), 'utf8'));
+    expect(desc.for).toBeUndefined();
   });
 
   it('a review round whose chain was culled starts cold', async () => {

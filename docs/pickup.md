@@ -114,9 +114,19 @@ A dispatch reports `done` when its PR opens, so the reviewer's side of the
 conversation has to re-enter the queue as its own work. Feedback pickup
 covers all of it: a `CHANGES_REQUESTED` review on any sha (a review of a
 slightly stale head still asks for changes), a comment review with a body,
-an inline review-thread comment, or a conversation comment — always from
-someone other than the configured identity, never a comment lobstah wrote.
+an inline review-thread comment, or a conversation comment — from anyone,
+the configured identity included, but never a comment lobstah wrote.
 `APPROVED` reviews are the merge loop's signal, not feedback.
+
+The configured identity counts because lobstah's workers post as that
+account: Chris's own "also handle X" on a trap's PR differs from a worker's
+reply only by the marker. An **active-round guard** covers a worker that
+forgets the marker. An unmarked identity comment made while a lobstah run on
+the PR works (the implementation dispatch or a round) is held: it waits for
+the run to end, then opens a round. A round opened only by such held
+comments drops, rather than holds, the identity's unmarked comments made
+during its own run. A forgetful worker costs at most one extra round, never
+a loop. A comment Chris writes during that one round is dropped too.
 
 Everything lobstah writes carries a marker: status and live comments lead
 with `[lobstah:<uuid>]`; notes with no dispatch behind them (an orphan reset)
@@ -129,6 +139,11 @@ The PR maps back to a dispatch two ways: a `lobstah/<uuid>` branch names it
 directly, and any other branch — a soaked session's PR — resolves through
 the PR URL in its worker's evidence (`report --pr <url>`, or a trap's beat). A PR
 that maps to neither is not lobstah's to answer.
+
+A round goes to the trap that worked the PR (its claim, else its delivery
+receipt) while that trap is live, and waits `[watch].repairTrapWaitSecs` for
+it, as a repair chore does. Past the wait, any trap of the repo or the
+daemon may take it.
 
 Each feedback **round** is keyed by the newest feedback event, so a new
 comment after a round completes opens the next round, while the same standing

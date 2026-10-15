@@ -58,8 +58,9 @@ export interface Descriptor {
    * the PR's head branch.
    */
   pr?: DescriptorPr;
-  /** Daemon-created PR chore. Only these addressed dispatches may fall back
-   * to headless after the trap wait expires. */
+  /** Daemon-created PR chore, or a pickup feedback round addressed to its
+   * PR's trap. Only these addressed dispatches may fall back to another
+   * worker after the trap wait expires. */
   systemRepair?: { trapWaitUntil?: string };
   attachments?: Attachment[];
   /** Address this bait to a specific claimant (`session:<id>`). A live
