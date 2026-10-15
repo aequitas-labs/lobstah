@@ -8,6 +8,7 @@ import { appendStatus, claimNext, complete, enqueue, ensureLayout, loadConfig, s
 import { readCursor } from '../src/reported.js';
 import { landedCatches } from '../src/tend.js';
 import { liveWatcher } from '../src/watchers.js';
+import { DEFAULT_WAIT, IdleWait } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -52,6 +53,24 @@ describe('man haul arm mode', () => {
     enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
     registration(new Date().toISOString());
     expect(haul().stdout).toBe('');
+  });
+
+  it('accepts a helm or trap watcher at the four-hour backoff cap', () => {
+    enqueue({ id: dispatchId, repo: 'other', brief: 'b' });
+    const worktree = path.join(home, 'backed-off-trap'); fs.mkdirSync(worktree);
+    const signed = signOnTrap({ worktree, cwd: worktree, repo: 'web', harness: 'claude', sessionId: 'backed-off-trap', ttlMs: 60_000 });
+    if (!('ok' in signed)) throw new Error('unexpected hold');
+    for (const [sid, kind, trapId] of [[sessionId, 'man', undefined], ['backed-off-trap', 'trap', signed.ok.trapId]] as const) {
+      for (let i = 0; i < 7; i++) new IdleWait(sid, DEFAULT_WAIT, undefined, 0).timedOut(14_400_000);
+      expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(14400);
+      fs.writeFileSync(path.join(home, 'watchers', `${sid}.json`), JSON.stringify({ sessionId: sid, kind, trapId, pid: process.pid, heartbeatAt: new Date().toISOString() }));
+      const result = spawnSync(process.execPath, [cli, 'hook', 'stop'], {
+        encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home }, input: JSON.stringify({ session_id: sid }), timeout: 10_000,
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(14400);
+    }
   });
 
   it('blocks again when the registration heartbeat is stale', () => {

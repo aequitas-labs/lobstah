@@ -40,7 +40,7 @@
           {
             "type": "command",
             "command": "lobstah hook stop",
-            "timeout": 14400
+            "timeout": 14500
           }
         ]
       }
