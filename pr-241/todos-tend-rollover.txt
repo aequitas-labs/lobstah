@@ -1,0 +1,52 @@
+# throwaway LOBSTAH_HOME, [helm].timezone = "America/New_York". Todo 3 marked done today (2026-10-15); todo 4 done yesterday after 04:00; todo 5 dropped today.
+
+$ lobstah man tend
+goals — home · 2026-10-15
+- [x] Ship #241: green checks and done Todos staying until 04:00
+- Review the BAS-1196 share-code migration plan
+- Triage the Windows CI flakes
+grounds: home
+backend: local
+verdict: daemon-down
+daemon: down (last heartbeat never)
+queued: 0
+active: headless: 0 of 2; traps: 0
+chores: 0
+done24h: 0
+failed24h: 0
+1 todo older than 3 days: move to the issue tracker?
+
+repo-traps[1]{repo,traps}:
+  lobstah,0/unlimited traps
+
+todos[3]{id,state,text,added}:
+  1,open,"Merge #2268 once the API is in production — check the deploy dashboard first, then merge and watch the error rate for an hour",2026-10-10
+  2,open,Tag runner 1.4.1 after the release notes land,2026-10-15
+  3,done,Reply to Alyssa about the recurring-services rollout,2026-10-15
+
+$ lobstah man tend   # clock at 2026-10-16 04:00 America/New_York ([helm].timezone)
+grounds: home
+backend: local
+verdict: daemon-down
+daemon: down (last heartbeat never)
+queued: 0
+active: headless: 0 of 2; traps: 0
+chores: 0
+done24h: 0
+failed24h: 0
+1 todo older than 3 days: move to the issue tracker?
+
+repo-traps[1]{repo,traps}:
+  lobstah,0/unlimited traps
+
+todos[2]{id,text,added}:
+  1,"Merge #2268 once the API is in production — check the deploy dashboard first, then merge and watch the error rate for an hour",2026-10-10
+  2,Tag runner 1.4.1 after the release notes land,2026-10-15
+
+$ lobstah todo ls --all
+todos[5]{id,state,text,added,updated}:
+  1,open,"Merge #2268 once the API is in production — check the deploy dashboard first, then merge and watch the error rate for an hour",2026-10-10,2026-10-10
+  2,open,Tag runner 1.4.1 after the release notes land,2026-10-15,2026-10-15
+  3,done,Reply to Alyssa about the recurring-services rollout,2026-10-15,2026-10-15
+  4,done,Rotate the staging deploy token (done yesterday — gone after 04:00),2026-10-13,2026-10-14
+  5,dropped,Ask about the old dashboard (dropped today — gone at once),2026-10-15,2026-10-15
