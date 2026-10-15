@@ -81,7 +81,7 @@ describe('postReview', () => {
           commit_id: 'aaaaaaa1',
           event: 'COMMENT',
           body: `Looks right.\n\n${MARKER}`,
-          comments: [{ path: 'src/a.ts', line: 12, side: 'RIGHT', body: 'Why not b()?' }],
+          comments: [{ path: 'src/a.ts', line: 12, side: 'RIGHT', body: `Why not b()?\n\n${MARKER}` }],
         },
       },
     ]);
@@ -141,7 +141,7 @@ describe('posting from the reviews loop', () => {
       {
         method: 'POST',
         url: 'https://api.github.com/repos/acme/web/pulls/7/reviews',
-        body: { commit_id: 'aaaaaaa1', body: `Looks right.\n\n${MARKER}`, comments: [{ path: 'src/a.ts', line: 12, side: 'RIGHT', body: 'Why not b()?' }] },
+        body: { commit_id: 'aaaaaaa1', body: `Looks right.\n\n${MARKER}`, comments: [{ path: 'src/a.ts', line: 12, side: 'RIGHT', body: `Why not b()?\n\n${MARKER}` }] },
       },
     ]);
     expect(posts(calls)[0]!.body).not.toHaveProperty('event');

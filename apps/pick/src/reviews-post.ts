@@ -12,7 +12,7 @@ import {
   reviewRoundDir,
   writeReview,
 } from '@lobstah/core';
-import type { ReviewRound } from '@lobstah/core';
+import type { ReviewComment, ReviewRound } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 
 const API = 'https://api.github.com';
@@ -90,6 +90,11 @@ function receipt(key: string, roundId: string, name: string, by: string, at: str
   }
 }
 
+/** The draft's inline comments, each ending with the round's marker: lobstah wrote them, so feedback pickup never reads them as the owner's. */
+function inlineComments(comments: ReviewComment[], r: ReviewRound) {
+  return comments.map((x) => ({ path: x.path, line: x.line, side: x.side ?? 'RIGHT', body: `${x.body.trimEnd()}\n\n${reviewMarker(r.id)}` }));
+}
+
 function reviewBody(body: string, r: ReviewRound): string {
   const staleLine = r.state === 'stale' ? `\n\n_Drafted at ${r.headSha.slice(0, 7)}; the PR has moved since._` : '';
   return `${body.trimEnd()}${staleLine}\n\n${reviewMarker(r.id)}`;
@@ -125,7 +130,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
           await github<{ id: number }>(f, token(), 'POST', base, {
             commit_id: r.headSha,
             body: reviewBody(draft.body, r),
-            comments: draft.comments.map((x) => ({ path: x.path, line: x.line, side: x.side ?? 'RIGHT', body: x.body })),
+            comments: inlineComments(draft.comments, r),
           })
         ).id;
     fs.writeFileSync(lock, JSON.stringify({ reviewId: String(id), at }));
@@ -181,7 +186,7 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
           commit_id: r.headSha,
           event: EVENT,
           body: reviewBody(draft.body, r),
-          comments: draft.comments.map((x) => ({ path: x.path, line: x.line, side: x.side ?? 'RIGHT', body: x.body })),
+          comments: inlineComments(draft.comments, r),
         });
     fs.writeFileSync(lock, JSON.stringify({ reviewId: String(posted.id), by: opts.by, at }));
     markReviewPosted(key, r.id, { reviewId: String(posted.id), by: opts.by, at });
