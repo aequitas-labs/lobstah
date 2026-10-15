@@ -57,6 +57,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>|<trap-name>|wt:<trap>]' },
   stats: { flags: { '--json': {}, '--per-trap': {} }, maxPositionals: 0 },
+  goals: { flags: { '--grounds': { value: '<name>' }, '--session': { value: '<id>' }, '--file': { value: '<md>' } }, flagSubverbs: { '--file': ['recap'] }, positionals: '[<date>|set <line>...|recap-data [<date>]|recap <date> --file <md>]' },
   focus: { flags: {}, positionals: '<trap>' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {} }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
@@ -277,6 +278,10 @@ claimed helm this requires --session <helm-id>.`,
   report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note.
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
 --waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images.`,
+  goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
+set replaces today's lines; recap saves a markdown recap without changing the goals.
+recap-data prints retained dispatch, PR, card and optional closed to-do facts for yesterday (or <date>).
+Files: ~/.lobstah/goals/<grounds>/<date>.md; editable by hand. Writes are helm-gated.`,
   stats: `Catches: dispatches that finished done. catchesToday counts the local day;
 totalCatches counts all time. Both live in stats.json, which cull folds into
 before deleting, so they survive it; so does a per-local-day count (400 days),

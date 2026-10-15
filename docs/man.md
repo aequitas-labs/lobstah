@@ -68,6 +68,33 @@ the background, dispatch it with the `lobstah` CLI instead of doing it inline:
 That's the whole integration — the CLI is self-documenting (`lobstah help`)
 and its TOON output is built to be read by agents.
 
+## Daily goals
+
+`lobstah goals` shows today's goals; `lobstah goals set "<line>" [...]`
+replaces them, and `lobstah goals YYYY-MM-DD` reads a past day. Use
+`--grounds <name>` to choose grounds and `--session <id>` to identify the helm
+for writes. Files are editable Markdown at
+`~/.lobstah/goals/<grounds>/YYYY-MM-DD.md` (implicit `home` uses the permanent
+`fleet` storage name). Each day starts at 04:00 in the system timezone;
+`[helm].timezone` can choose an IANA timezone instead.
+
+The first user prompt of a new day adds a non-blocking reminder to the helm:
+handle that message, then put yesterday's recap and a draft of today's goals
+on one card. Existing goals, a `Goals for YYYY-MM-DD` card, or an already
+delivered reminder suppress another ask. The helm saves the answered goals
+with `goals set`; the first reminder leaves a comment in that same daily file.
+The helm uses them to order work and choose the next quiet step.
+
+`lobstah goals recap-data [YYYY-MM-DD]` prints retained dispatch results, PR
+open/merge times, answered cards and closed to-dos when their
+optional store exists. Its default is yesterday. First observation is not
+the forge's PR creation time (older records may have only that fallback);
+missing/expired records are not reconstructed.
+The helm matches those facts to the goals (done, moved, stuck, plus also done),
+then saves the Markdown with `lobstah goals recap YYYY-MM-DD --file <md>`.
+Today's lines are pinned above `man tend` and the glass; recaps stay in the
+daily files. Goals are local files, not wharf-synced state.
+
 ## Taking over a worker
 
 Every dispatch **is** a real harness session, running under the same CLI you

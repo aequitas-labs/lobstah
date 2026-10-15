@@ -66,6 +66,7 @@ import {
 import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
+import { visibleGoals } from './goals.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
@@ -648,6 +649,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const attention = attentionSnapshot();
   return {
     now: new Date().toISOString(),
+    goals: visibleGoals(cfg),
     version: lobstahVersion(),
     backends: backendViews(cfg),
     repoUrl: REPO_URL,

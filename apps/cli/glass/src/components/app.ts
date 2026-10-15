@@ -51,6 +51,11 @@ export function App({ state }: { state: GlassState }) {
   };
   return [
     html`<${Header} d=${d} inp=${inp} tab=${tab} st=${state.prefs} stale=${state.stale} unread=${unread.length} />`,
+    !!d?.goals?.length &&
+      html`<section id="daily-goals" aria-label="Today's goals">${d.goals.map(
+        (g) =>
+          html`<div key=${g.grounds}><h2>Goals · ${g.grounds} · ${g.date}</h2><ul>${g.lines.map((line) => html`<li>${line}</li>`)}</ul></div>`,
+      )}</section>`,
     GLASS_TABS.map(
       (t) =>
         html`<main key=${t} id=${'page-' + t} class=${d ? (t === tab ? 'tabpage on' : 'tabpage') : 'tabpage'}><div id=${t}>${page(t)}</div></main>`,

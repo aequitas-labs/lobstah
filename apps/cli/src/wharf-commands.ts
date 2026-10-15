@@ -28,10 +28,11 @@ export function commandScope(config: Config, grounds?: string, repo?: string): B
   return undefined;
 }
 type Options = { opt: (flag: string) => string | undefined; has: (flag: string) => boolean; values: (flag: string) => string[] };
-const GLOBAL = new Set(['version', 'daemon', 'glass', 'pet', 'doctor', 'telemetry', 'init', 'repos', 'pick', 'man:manual', '__runner', '__pool-warm']);
+const GLOBAL = new Set(['goals', 'version', 'daemon', 'glass', 'pet', 'doctor', 'telemetry', 'init', 'repos', 'pick', 'man:manual', '__runner', '__pool-warm']);
 const OVERVIEW = new Set(['ls', 'status', 'man:tend', 'man:report', 'prs', 'reports', 'stats', 'attention']);
 /** Resolve once per command; remote mutations can never enter local handlers. */
 export async function wharfCommand(cmd: string | undefined, pos: string[], opts: Options, config: Config): Promise<boolean> {
+  if (cmd === 'goals' && backendScopes(config).some((s) => readBrokerAgent(s.grounds))) throw new Error('a hosted trap cannot write helm goals');
   if (!cmd || GLOBAL.has(cmd)) return false;
   const grounds = opts.opt('--grounds') ?? process.env.LOBSTAH_GROUNDS;
   const agentScope = backendScopes(config).find((s) => s.kind === 'wharf' && readBrokerAgent(s.grounds));

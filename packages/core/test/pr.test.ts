@@ -70,9 +70,10 @@ describe('PR stack branch evidence', () => {
   });
 
   it('keeps forge update and merge times from that same view call', () => {
+    expect(PR_VIEW_FIELDS.split(',')).toContain('createdAt');
     expect(PR_VIEW_FIELDS.split(',')).toContain('updatedAt');
-    const pr = prEvidence(ref, { ...merged, updatedAt: '2026-09-23T04:00:00Z' }, '2026-09-23T05:00:00Z');
-    expect(pr).toMatchObject({ updatedAt: '2026-09-23T04:00:00Z', mergedAt: '2026-09-23T03:00:00Z' });
+    const pr = prEvidence(ref, { ...merged, createdAt: '2026-09-22T12:00:00Z', updatedAt: '2026-09-23T04:00:00Z' }, '2026-09-23T05:00:00Z');
+    expect(pr).toMatchObject({ openedAt: '2026-09-22T12:00:00Z', updatedAt: '2026-09-23T04:00:00Z', mergedAt: '2026-09-23T03:00:00Z' });
   });
 });
 

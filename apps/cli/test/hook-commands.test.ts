@@ -115,9 +115,11 @@ describe('lobstah hook user-prompt-submit', () => {
       for (const prompt of ['First turn', 'Another turn']) {
         const res = hook(['hook', 'user-prompt-submit'], { session_id: HELM, hook_event_name: 'UserPromptSubmit', prompt });
         expect(res.status, res.stderr).toBe(0);
-        expect(JSON.parse(res.stdout)).toEqual({
-          hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: HELM_REMINDER },
-        });
+        const context = JSON.parse(res.stdout).hookSpecificOutput;
+        expect(context.hookEventName).toBe('UserPromptSubmit');
+        expect(context.additionalContext).toContain(HELM_REMINDER);
+        expect(context.additionalContext.includes('First message of the day')).toBe(prompt === 'First turn');
+        expect(context.prompt).toBeUndefined();
       }
       for (const session of ['trap-session', NOBODY]) {
         const res = hook(['hook', 'user-prompt-submit'], { session_id: session, hook_event_name: 'UserPromptSubmit', prompt: 'A question?' });
