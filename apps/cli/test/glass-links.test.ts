@@ -126,7 +126,7 @@ function linkFleet(): GlassSnapshot {
   c.note = NOTE;
   c.log = [{ at: ago(60_000), verb: 'needs-decision', note: `see http://127.0.0.1:5173/review/abc, then (${PR})` }];
   d.notices[2]!.text = `#40 merged: https://github.com/acme/web/pull/40.`;
-  d.todos = [{ grounds: 'home', id: 1, text: 'read https://docs.example/a and https://docs.example/b', createdAt: ago(60_000), stale: false }];
+  d.todos = [{ grounds: 'home', id: 1, text: 'read https://docs.example/a and https://docs.example/b', createdAt: ago(60_000), done: false, stale: false }];
   d.goals = [{ grounds: 'home', date: '2026-09-24', lines: ['ship https://github.com/acme/web/pull/41'] }];
   return d;
 }
@@ -158,7 +158,7 @@ describe('glass links: the local glass', () => {
     expect(box.querySelector('script')).toBeNull();
   });
 
-  it('notices, to-dos, and goals link their URLs', async () => {
+  it('notices, Todos, and goals link their URLs', async () => {
     const g = await page(linkFleet(), { hash: '#notices' });
     expect(links(g.$('#notices'))).toEqual([ext('https://github.com/acme/web/pull/40')]);
     await g.go('#deck');

@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { goalDate } from './goals.js';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
 
 /**
@@ -21,14 +22,19 @@ export interface Todo {
   updatedAt: string;
 }
 
-/** One open todo as tend, `man report`, and the glass show it. */
+/**
+ * One todo as tend, `man report`, and the glass show it: an open one, or one
+ * done since the last day boundary (shown checked until the day rolls over).
+ */
 export interface TodoView {
   /** The grounds, as displayed. */
   grounds: string;
   id: number;
   text: string;
   createdAt: string;
-  /** Older than `[helm].todoStaleDays`. */
+  /** Marked done today; it drops off at the next 04:00-local boundary. */
+  done: boolean;
+  /** Open and older than `[helm].todoStaleDays`. */
   stale: boolean;
 }
 
@@ -108,8 +114,26 @@ export function closeTodo(grounds: string, id: number, state: Exclude<TodoState,
   return todo;
 }
 
-/** Every grounds with a todo file, with its open todos. */
-export function openTodosByGrounds(): Array<{ grounds: string; todos: Todo[] }> {
+/**
+ * Whether a todo is still on the shown list: open ones always; a done one
+ * until the next day boundary — 04:00 local, the one daily goals use
+ * (`timezone` is `[helm].timezone`, else the system zone). A dropped one
+ * never: it leaves the list at once.
+ */
+export function shownTodo(t: Todo, now = Date.now(), timezone?: string): boolean {
+  if (t.state === 'open') return true;
+  if (t.state !== 'done') return false;
+  const at = Date.parse(t.updatedAt);
+  return Number.isFinite(at) && goalDate(new Date(at), timezone) === goalDate(new Date(now), timezone);
+}
+
+/** Open todos plus those done today, oldest first. */
+export function shownTodos(grounds: string, now = Date.now(), timezone?: string): Todo[] {
+  return read(grounds).items.filter((t) => shownTodo(t, now, timezone));
+}
+
+/** Every grounds with a todo file, with its shown todos (open, or done today). */
+export function shownTodosByGrounds(now = Date.now(), timezone?: string): Array<{ grounds: string; todos: Todo[] }> {
   let files: string[];
   try {
     files = fs.readdirSync(todosRoot());
@@ -121,7 +145,7 @@ export function openTodosByGrounds(): Array<{ grounds: string; todos: Todo[] }> 
     .map((f) => f.slice(0, -'.json'.length))
     .filter((g) => GROUNDS_RE.test(g))
     .sort()
-    .map((grounds) => ({ grounds, todos: listTodos(grounds) }))
+    .map((grounds) => ({ grounds, todos: shownTodos(grounds, now, timezone) }))
     .filter((g) => g.todos.length > 0);
 }
 

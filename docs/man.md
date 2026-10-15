@@ -580,7 +580,12 @@ the helm files to keep.
   closed ones. They are stored per grounds in `todos/<grounds>.json` with
   created and updated times. `man tend`, `man report`, and the glass deck
   show the open ones, and `man brief` re-injects them beside the charter at
-  every session start and after compaction. Open todos older than
+  every session start and after compaction. A todo marked done stays in
+  `man tend` and the glass Todos checklist, with a green check and struck
+  through, until the next day boundary (04:00 local, `[helm].timezone` or
+  the system zone, as for daily goals); then it drops off. A dropped one
+  leaves at once. Closed todos stay 30 days for `todo ls --all` and the
+  recap either way. Open todos older than
   `[helm].todoStaleDays` (default 3) add one line to `man tend`, for
   example "3 todos older than 3 days: move to the issue tracker?". The helm
   decides whether to raise a card and files them with the user's tracker.
