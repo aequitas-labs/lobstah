@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { addGoal, claimGoalsPrompt, goalDate, goalsFile, loadConfig, readGoals, removeGoal, setGoals, setGoalsRecap } from '../src/index.js';
+import { addGoal, claimGoalsPrompt, goalDate, goalLine, goalsFile, loadConfig, readGoals, removeGoal, setGoalDone, setGoals, setGoalsRecap } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -47,6 +47,27 @@ it('reads hand-edited plain/bulleted lines and separates the recap', () => {
   const file = goalsFile('g', '2026-10-15'); fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, '# Today\n\nShip\n* Review\n\n## Recap\n\nAlso done: cleanup.\n');
   expect(readGoals('g', '2026-10-15')).toEqual({ grounds: 'g', date: '2026-10-15', lines: ['Ship', 'Review'], recap: 'Also done: cleanup.' });
+});
+
+it('checks and unchecks a numbered goal without losing it, its recap or completion through other edits', () => {
+  setGoals('g', '2026-10-15', ['One', 'Two']);
+  setGoalsRecap('g', '2026-10-15', 'Recap stays.');
+  expect(setGoalDone('g', '2026-10-15', 2, true).lines).toEqual(['One', '[x] Two']);
+  expect(setGoalDone('g', '2026-10-15', 2, true).lines).toEqual(['One', '[x] Two']);
+  expect(fs.readFileSync(goalsFile('g', '2026-10-15'), 'utf8')).toContain('- [x] Two');
+  addGoal('g', '2026-10-15', 'Three'); removeGoal('g', '2026-10-15', 1);
+  expect(readGoals('g', '2026-10-15').lines).toEqual(['[x] Two', 'Three']);
+  expect(setGoalDone('g', '2026-10-15', 1, false)).toMatchObject({ lines: ['[ ] Two', 'Three'], recap: 'Recap stays.' });
+  for (const n of [0, 3, 1.5, NaN]) expect(() => setGoalDone('g', '2026-10-15', n, true)).toThrow('goal number');
+});
+
+it('reads legacy unmarked lines as open and hand-edited Markdown tasks as checked or open', () => {
+  const file = goalsFile('g', '2026-10-15'); fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, '# Goals\n\nPlain\n- Legacy\n- [ ] Open\n* [x] Finished\n1. [X] Also finished\n');
+  expect(readGoals('g', '2026-10-15').lines.map(goalLine)).toEqual([
+    { text: 'Plain', done: false }, { text: 'Legacy', done: false }, { text: 'Open', done: false },
+    { text: 'Finished', done: true }, { text: 'Also finished', done: true },
+  ]);
 });
 
 it('adds and removes goals all day, preserves recap/history, and never repeats the first-chat card', () => {

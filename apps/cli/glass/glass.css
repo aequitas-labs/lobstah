@@ -202,6 +202,42 @@ h2 {
   margin: 0;
   padding-left: 1.6em;
 }
+.goal-check,
+.todo-check,
+.todo-check.card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  cursor: default;
+}
+.goal-check input,
+.todo-check input {
+  flex: 0 0 auto;
+  margin: 0.25em 0;
+  accent-color: var(--ok);
+}
+.goal-check > span,
+.todo-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.todo-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.todo-check:not(.card) {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
+}
+.todo-content {
+  min-width: 0;
+  flex: 1;
+}
+.todo-text {
+  display: block;
+}
 .deckgrid {
   display: flex;
   flex-direction: column;

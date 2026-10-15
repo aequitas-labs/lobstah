@@ -43,7 +43,7 @@ function displayName(): (g: string) => string {
   }
 }
 
-/** Open to-dos, every grounds or one, oldest first within each grounds. */
+/** Open todos, every grounds or one, oldest first within each grounds. */
 export function todoViews(now = Date.now(), grounds?: string): TodoView[] {
   const days = todoStaleDays();
   const display = displayName();
@@ -51,7 +51,7 @@ export function todoViews(now = Date.now(), grounds?: string): TodoView[] {
   return openTodosByGrounds().flatMap((g) => view(g.grounds, g.todos, days, now, display));
 }
 
-/** The tend note for stale to-dos, or undefined. */
+/** The tend note for stale todos, or undefined. */
 export function todoStaleLine(todos: TodoView[]): string | undefined {
   return staleTodoNote(todos.filter((t) => t.stale).length, todoStaleDays());
 }
@@ -66,7 +66,7 @@ export function todoTable(todos: TodoView[], withGrounds: boolean): string {
 }
 
 /**
- * The to-do block re-injected into the helm's context at session start and
+ * The todo block re-injected into the helm's context at session start and
  * after compaction, beside the charter. Empty when the grounds has none.
  */
 export function todoContext(grounds: string, now = Date.now()): string {
@@ -79,7 +79,7 @@ export function todoContext(grounds: string, now = Date.now()): string {
   if (todos.length === 0) return '';
   const note = staleTodoNote(staleTodos(todos, todoStaleDays(), now).length, todoStaleDays());
   return [
-    `Your to-dos (\`lobstah todo done <id>\` when finished, \`lobstah todo drop <id>\` when no longer needed):`,
+    `Your todos (\`lobstah todo done <id>\` when finished, \`lobstah todo drop <id>\` when no longer needed):`,
     ...todos.map(todoLine),
     ...(note ? [note] : []),
   ].join('\n');

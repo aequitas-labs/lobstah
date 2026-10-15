@@ -4,8 +4,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { askDecision, answerDecision, appendStatus, claimNext, complete, enqueue, ensureLayout, goalDate, goalsCardTitle, loadConfig,
-  parsePrRef, prEvidence, setGoals, statusPath, takeHelm, upsertPr, type GhPrView } from '@lobstah/core';
+import { addTodo, askDecision, answerDecision, appendStatus, claimNext, closeTodo, complete, enqueue, ensureLayout, goalDate, goalsCardTitle, loadConfig,
+  parsePrRef, prEvidence, setGoalDone, setGoals, statusPath, takeHelm, upsertPr, type GhPrView } from '@lobstah/core';
 import { dailyGoalsContext, goalsRecapData } from '../src/goals.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildGlassSnapshot } from '../src/glass.js';
@@ -33,6 +33,10 @@ it('CLI reads/writes goals and past recaps, and refuses a different session writ
   expect(command('set', 'Ship it', 'Review it').status).toBe(0);
   expect(command().stdout).toContain('1. Ship it\n2. Review it');
   expect(command('add', 'Later').stdout).toContain('3. Later');
+  expect(command('done', '2').stdout).toContain('2. [x] Review it');
+  expect(run('goals', 'undo', '2', '--grounds', 'day', '--session', 'other').status).toBe(1);
+  expect(command('undo', '2').stdout).toContain('2. [ ] Review it');
+  expect(command('done', '99').status).toBe(1);
   const removed = command('rm', '2');
   expect(removed.status, removed.stderr).toBe(0);
   expect(removed.stdout).toContain('1. Ship it\n2. Later');
@@ -78,26 +82,34 @@ it('recap facts include active/done dispatch results, opened/merged PRs, answere
   answerDecision({ key: meta.key, text: 'Yes', by: 'cli', now: new Date(at), maxBytes: 1024 });
   fs.mkdirSync(path.join(home, 'todos'));
   fs.writeFileSync(path.join(home, 'todos', 'day.json'), JSON.stringify({ items: [{ id: 1, text: 'Closed', state: 'done', updatedAt: at }, { id: 2, text: 'Open', state: 'open', updatedAt: at }, { id: 3, text: 'Dropped', state: 'dropped', updatedAt: at }] }));
+  setGoals('day', '2026-10-14', ['Ship it', 'Review it']); setGoalDone('day', '2026-10-14', 1, true);
   const data = goalsRecapData('day', '2026-10-14', loadConfig());
   expect(data.dispatches.map((d) => d.id).sort()).toEqual(['done', 'failed']);
   expect(data.prs).toHaveLength(1); expect(data.prs[0]?.openedAt).toBe(at); expect(data.prs[0]?.mergedAt).toBe(at);
   expect(data.cards[0]?.text).toBe('Yes'); expect(data.todos.map((t) => t.id)).toEqual([1, 3]);
+  expect(data.goals.lines).toEqual(['[x] Ship it', 'Review it']);
   const output = run('goals', 'recap-data', '2026-10-14', '--grounds', 'day');
   expect(output.status, output.stderr).toBe(0); expect(JSON.parse(output.stdout).dispatches).toHaveLength(2);
 });
 
-it('keeps tend unchanged and shows numbered goals only at the top of On deck', async () => {
+it.each(['table', 'cards'])('shows checked goals and full text in tend and the On deck %s callout', async (view) => {
   const date = goalDate(new Date(), loadConfig().helm.timezone);
-  setGoals('day', date, ['First priority <safe>']);
+  const long = 'Review every part of the handoff and preserve the full goal text rather than clipping the explanation. '.repeat(4);
+  setGoals('day', date, ['First priority <safe>', long.trim()]); setGoalDone('day', date, 1, true);
   setGoals('day', '2025-01-01', ['Old priority']);
   const report = buildTendReport();
-  expect(renderTend(report).startsWith(`goals — day · ${date}\n- First priority <safe>`)).toBe(true);
-  expect(buildGlassSnapshot().goals).toEqual([{ grounds: 'day', date, lines: ['First priority <safe>'] }]);
+  expect(renderTend(report).startsWith(`goals — day · ${date}\n- [x] First priority <safe>`)).toBe(true);
+  expect(renderTend(report)).toContain(long.trim());
+  expect(buildGlassSnapshot().goals).toEqual([{ grounds: 'day', date, lines: ['[x] First priority <safe>', long.trim()] }]);
   const snapshot = emptyFleet(); snapshot.goals = report.goals;
-  const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now() });
+  const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now(), prefs: { view } });
   try {
     expect(page.$('#deck > #daily-goals')?.textContent).toContain(date);
     expect(page.$('#daily-goals ol li')?.textContent).toBe('First priority <safe>');
+    const boxes = page.$$('#daily-goals input') as HTMLInputElement[];
+    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([[true, true], [false, true]]);
+    expect(page.$('#daily-goals s')?.textContent).toBe('First priority <safe>');
+    expect(page.$$('#daily-goals ol li')[1]?.textContent).toBe(long.trim());
     expect(page.$('#deck')?.firstElementChild?.id).toBe('daily-goals');
     expect(page.$('#daily-goals safe')).toBeNull();
     await page.go('#reports');
@@ -116,5 +128,23 @@ it('hides the callout when no goals are set and keeps tend unchanged', async () 
   const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now() });
   try {
     expect(page.$('#daily-goals')).toBeNull();
+  } finally { await page.close(); }
+});
+
+it.each(['table', 'cards'])('renders Todos as a read-only checklist with full safe text in %s view', async (view) => {
+  const long = 'Read the whole handoff, including the detailed evidence and the final verification notes, without cutting off this reminder. '.repeat(4) + '<safe>';
+  addTodo('day', long); const closed = addTodo('day', 'Already done'); closeTodo('day', closed.id, 'done');
+  const report = buildTendReport();
+  expect(renderTend(report)).toContain(long);
+  expect(renderTend(report)).not.toContain('to-dos');
+  const snapshot = emptyFleet(); snapshot.todos = buildGlassSnapshot().todos;
+  const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now(), prefs: { view } });
+  try {
+    expect(page.$('.todos h2')?.textContent).toBe('Todos');
+    expect(page.$('.todo-checklist .todo-text')?.textContent).toBe(long);
+    const boxes = page.$$('.todo-checklist input[type="checkbox"]') as HTMLInputElement[];
+    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([[false, true]]);
+    expect(page.$('.todo-checklist safe')).toBeNull();
+    expect(page.$('.todo-checklist')?.textContent).not.toContain('Already done');
   } finally { await page.close(); }
 });

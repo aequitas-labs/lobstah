@@ -16,7 +16,7 @@ afterEach(() => {
   removeTempDir(home);
 });
 
-describe('helm to-dos: storage per grounds', () => {
+describe('helm todos: storage per grounds', () => {
   it('adds free text with created and updated times; done and drop close and stamp updated', () => {
     const t0 = Date.parse('2026-10-01T10:00:00Z');
     const a = addTodo('fleet', 'merge #2268 once the API is in production (API first)', t0);
@@ -31,7 +31,7 @@ describe('helm to-dos: storage per grounds', () => {
     expect(listTodos('fleet')).toEqual([]);
     expect(listTodos('fleet', { all: true }).map((t) => t.state)).toEqual(['done', 'dropped']);
     expect(() => closeTodo('fleet', 1, 'dropped')).toThrow(TodoError);
-    expect(() => closeTodo('fleet', 9, 'done')).toThrow(/no to-do 9/);
+    expect(() => closeTodo('fleet', 9, 'done')).toThrow(/no todo 9/);
 
     // Ids are never reused, even after closing.
     expect(addTodo('fleet', 'next', t0 + DAY).id).toBe(3);
@@ -60,7 +60,7 @@ describe('helm to-dos: storage per grounds', () => {
   });
 });
 
-describe('helm to-dos: stale', () => {
+describe('helm todos: stale', () => {
   it('counts open items older than the configured days; 0 disables', () => {
     const now = Date.parse('2026-10-10T00:00:00Z');
     addTodo('fleet', 'four days', now - 4 * DAY);
@@ -69,8 +69,8 @@ describe('helm to-dos: stale', () => {
     expect(staleTodos(todos, 3, now).map((t) => t.text)).toEqual(['four days']);
     expect(staleTodos(todos, 1, now)).toHaveLength(2);
     expect(staleTodos(todos, 0, now)).toEqual([]);
-    expect(staleTodoNote(3, 3)).toBe('3 to-dos older than 3 days: move to the issue tracker?');
-    expect(staleTodoNote(1, 1)).toBe('1 to-do older than 1 day: move to the issue tracker?');
+    expect(staleTodoNote(3, 3)).toBe('3 todos older than 3 days: move to the issue tracker?');
+    expect(staleTodoNote(1, 1)).toBe('1 todo older than 1 day: move to the issue tracker?');
     expect(staleTodoNote(0, 3)).toBeUndefined();
   });
 });
