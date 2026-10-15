@@ -1,5 +1,5 @@
 import type { GlassPr, GlassSnapshot, GlassStack, WorkerMetadata } from '@lobstah/core';
-import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, catchCount, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
+import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, catchCount, goalLine, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -130,25 +130,20 @@ function deckPrs(inp: DeckInputs, view: View) {
 }
 
 /**
- * The helm's to-dos: a section only when there are some. Each line is the
- * to-do's text, then its age; a stale one carries a badge, and the stale
- * note heads the section. The helm closes them from its CLI.
+ * The helm's Todos: a section only when there are some. One compact
+ * checklist in every view — table and cards alike, never a card per Todo.
+ * Each row is a read-only checkbox, the full wrapped text, then its age; a
+ * stale one carries a badge, and the stale note heads the section. A Todo
+ * done today stays, checked green and struck through, until the 04:00 day
+ * boundary. The helm closes them from its CLI.
  */
-function deckTodos(inp: DeckInputs, view: View) {
+function deckTodos(inp: DeckInputs) {
   if (!inp.todos.length) return null;
   const grounds = new Set(inp.todos.map((t) => t.grounds)).size > 1;
-  const items = inp.todos.map((t): DeckItem => {
-    const parts = grounds ? [t.grounds] : [];
-    return {
-      key: `todo:${t.grounds}:${t.id}`,
-      title: LinkedText(t.text),
-      ...(t.stale ? { badge: { text: 'stale', tone: 'warn' } } : {}),
-      meta: [parts.length ? parts.join(' · ') + ' · ' : '', 'added ', Age(t.createdAt), ' ago'],
-      metaText: [...parts, `added ${ageText(t.createdAt)} ago`].join(' · '),
-    };
-  });
-  const lines = items.map((i) => deckItem(i, view));
-  return html`<section><h2>to-dos</h2>${inp.todoNote && html`<div class="dim">${LinkedText(inp.todoNote)}</div>`}${view === 'cards' ? html`<div class="cards">${lines}</div>` : lines}</section>`;
+  return html`<section class="todos"><h2>Todos</h2>${inp.todoNote && html`<div class="dim">${LinkedText(inp.todoNote)}</div>`}<ul class="todo-checklist">${inp.todos.map(
+    (t) =>
+      html`<li key=${`todo:${t.grounds}:${t.id}`} class=${t.done ? 'todo-check done' : 'todo-check'}><input type="checkbox" checked=${!!t.done} disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${t.done ? 'Done today; it drops off when the day rolls over (04:00)' : `Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${t.done ? html`<s>${LinkedText(t.text)}</s>` : LinkedText(t.text)}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${Age(t.createdAt)} ago</span>${!t.done && t.stale && html` <span class="badge warn">stale</span>`}</div></li>`,
+  )}</ul></section>`;
 }
 
 export function Deck({
@@ -212,7 +207,15 @@ export function Deck({
   }));
   return [
     shownGoals.length > 0 &&
-      html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map((g) => html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map((line) => html`<li>${LinkedText(line)}</li>`)}</ol></section>`)}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckTodos(inp, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+      html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map(
+        (g) =>
+          html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map(
+            (line, i) => {
+              const goal = goalLine(line);
+              return html`<li class=${goal.done ? 'done' : undefined}><label class="goal-check"><input type="checkbox" checked=${goal.done} disabled aria-label=${`Goal ${i + 1}: ${goal.text}`} title=${`Read-only; use lobstah goals ${goal.done ? 'undo' : 'done'} ${i + 1} --grounds ${g.grounds}`} /><span>${goal.done ? html`<s>${LinkedText(goal.text)}</s>` : LinkedText(goal.text)}</span></label></li>`;
+            },
+          )}</ol></section>`,
+      )}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckTodos(inp)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
   ];
 }

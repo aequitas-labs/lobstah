@@ -41,9 +41,9 @@ afterEach(() => {
   removeTempDir(home);
 });
 
-describe('helm to-dos: re-injected beside the charter', () => {
+describe('helm todos: re-injected beside the charter', () => {
   for (const source of ['startup', 'compact'] as const) {
-    it(`SessionStart (${source}) gives the helm its open to-dos`, () => {
+    it(`SessionStart (${source}) gives the helm its open todos`, () => {
       const grounds = helm();
       addTodo(grounds, 'merge #2268 once the API is in production, see https://github.com/o/r/pull/2268');
       addTodo(grounds, 'tag runner 1.4.1');
@@ -57,7 +57,7 @@ describe('helm to-dos: re-injected beside the charter', () => {
     });
   }
 
-  it('a closed to-do drops out; a session that is not the helm gets none', () => {
+  it('a closed todo drops out; a session that is not the helm gets none', () => {
     const grounds = helm();
     addTodo(grounds, 'tag runner 1.4.1');
     expect(run(['todo', 'done', '1', '--session', HELM]).status).toBe(0);
@@ -70,7 +70,7 @@ describe('helm to-dos: re-injected beside the charter', () => {
   });
 });
 
-describe('helm to-dos: helm only', () => {
+describe('helm todos: helm only', () => {
   it('a trap session is refused; with a claimed helm, another session cannot write', () => {
     helm();
     const worktree = path.join(home, 'wt');
@@ -81,23 +81,23 @@ describe('helm to-dos: helm only', () => {
     expect(trap.stdout + trap.stderr).toContain('a trap keeps none');
     expect(run(['todo', 'add', 'x', '--session', 'other-session']).status).not.toBe(0);
     expect(run(['todo', 'add', 'x', '--session', HELM]).status).toBe(0);
-    // The text is the whole to-do: no detail flags.
+    // The text is the whole todo: no detail flags.
     expect(run(['todo', 'add', 'x', '--why', 'y', '--session', HELM]).status).toBe(2);
   });
 });
 
-describe('helm to-dos: the stale note in tend', () => {
-  it('notes to-dos past the default 3 days, and lists them', () => {
+describe('helm todos: the stale note in tend', () => {
+  it('notes todos past the default 3 days, and lists them', () => {
     const grounds = helm();
     const now = Date.now();
     addTodo(grounds, 'old one', now - 4 * DAY);
     addTodo(grounds, 'older one', now - 5 * DAY);
     addTodo(grounds, 'fresh one', now - 1 * DAY);
     const r = buildTendReport(now);
-    expect(r.todoNote).toBe('2 to-dos older than 3 days: move to the issue tracker?');
+    expect(r.todoNote).toBe('2 todos older than 3 days: move to the issue tracker?');
     expect(r.todos?.map((t) => [t.text, t.stale])).toEqual([['old one', true], ['older one', true], ['fresh one', false]]);
     const text = renderTend(r);
-    expect(text).toContain('2 to-dos older than 3 days: move to the issue tracker?');
+    expect(text).toContain('2 todos older than 3 days: move to the issue tracker?');
     expect(text).toContain('fresh one');
   });
 
@@ -109,6 +109,6 @@ describe('helm to-dos: the stale note in tend', () => {
     expect(r.todoNote).toBeUndefined();
     expect(renderTend(r)).not.toContain('older than');
     fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\ntodoStaleDays = 1\n');
-    expect(buildTendReport().todoNote).toBe('1 to-do older than 1 day: move to the issue tracker?');
+    expect(buildTendReport().todoNote).toBe('1 todo older than 1 day: move to the issue tracker?');
   });
 });
