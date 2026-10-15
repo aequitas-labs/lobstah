@@ -99,7 +99,7 @@ function parsePools(raw: unknown, repos: Record<string, RepoConfig>): Record<str
 }
 
 /** The kinds of brief lobstah writes itself, and `all` for every one of them. */
-export const BRIEF_KINDS = ['conflict', 'checks', 'review', 'ciFix', 'rebase'] as const;
+export const BRIEF_KINDS = ['conflict', 'checks', 'review', 'ciFix', 'rebase', 'prReview'] as const;
 export type BriefKind = (typeof BRIEF_KINDS)[number];
 export type BriefHooks = Partial<Record<BriefKind | 'all', string>>;
 

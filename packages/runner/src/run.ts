@@ -38,7 +38,7 @@ import {
   worktreeProgress,
   workerMetadata,
 } from '@lobstah/core';
-import type { ChainPr, Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
+import type { ChainPr, Config, Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
 import { loadAdapter } from '@lobstah/adapters';
 import type { Adapter, AdapterRun } from '@lobstah/adapters';
 import { allocate, chooseWorktree, claimPoolSlot, collectEvidence, prepareReuse, recoverWorktree, resetPoolWorktree, worktreePath } from '@lobstah/worktree';
@@ -119,6 +119,20 @@ export function boundPr(descriptor: Descriptor, lane: Lane): ChainPr | undefined
     return { url: descriptor.pr.url, headRefName: descriptor.pr.headRefName ?? (chain?.url === descriptor.pr.url ? chain.headRefName : undefined) };
   }
   return descriptor.followUp ? chainPr(descriptor.followUp, lane) : undefined;
+}
+
+/** The repo's remote policies, or none for a read-only job (a PR review draft), which leaves the remote alone. */
+export function remotePolicyFor(
+  descriptor: Pick<Descriptor, 'readOnly'>,
+  repo: Pick<RepoConfig, 'pushEarly' | 'draftPr' | 'checkpointOnStop'>,
+  cfg: Pick<Config, 'limits'>,
+): { pushEarly: boolean; draftPr: boolean; checkpointOnStop: boolean } {
+  if (descriptor.readOnly) return { pushEarly: false, draftPr: false, checkpointOnStop: false };
+  return {
+    pushEarly: repo.pushEarly ?? cfg.limits.pushEarly,
+    draftPr: repo.draftPr ?? cfg.limits.draftPr,
+    checkpointOnStop: repo.checkpointOnStop ?? cfg.limits.checkpointOnStop,
+  };
 }
 
 /** The note a cold replacement session reads in place of the conversation. */
@@ -301,11 +315,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   const existingPr = boundPr(descriptor, lane);
   if (existingPr) mergeEvidence(id, lane, { prUrl: existingPr.url });
 
-  const remotePolicy = {
-    pushEarly: repo.pushEarly ?? cfg.limits.pushEarly,
-    draftPr: repo.draftPr ?? cfg.limits.draftPr,
-    checkpointOnStop: repo.checkpointOnStop ?? cfg.limits.checkpointOnStop,
-  };
+  const remotePolicy = remotePolicyFor(descriptor, repo, cfg);
   const remoteEnabled = Object.values(remotePolicy).some(Boolean);
   const remote = keepRemote({
     id, lane, cwd, trunk: repo.trunk,

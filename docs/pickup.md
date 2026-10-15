@@ -270,6 +270,22 @@ When the search stops returning a PR (the request was withdrawn, Chris
 reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
 truncated search (more than 50 results) withdraws nothing.
 
+**Drafting.** With `[reviews].work` other than `"off"`, a requested round in
+a configured repo gets a review job: a chore-lane dispatch with the
+`prReview` brief, `readOnly` (the runner pushes nothing, opens no PR, and
+checkpoints nothing), and the `[reviews]` cost bounds. With `work = "trap"`
+the job waits `trapWaitSecs` for a free trap of the repo, then pick hands it
+to the daemon. The job reads the PR with `gh`, makes any checkout it needs
+as a throwaway detached worktree at `pull/<n>/head`, and writes `review.md`
+(the summary) and `comments.json` (inline comments: `path`, `line`, `side`,
+`body`) into the round's directory, `rounds/<round id>/`. It never posts,
+approves, requests changes, comments, or pushes. When the job reports done,
+the round is `drafted`, or `stale` if the head moved meanwhile, or `failed`
+with the reason when the files are missing or malformed. A skip rule, a PR
+outside the configured repos, or `maxPerDay` jobs already started today
+(UTC) leave the round `requested` with the reason. `lobstah reviews redraft
+<key>` drafts a stale or failed round again at the current head.
+
 Round states: `requested`, `drafting`, `drafted`, `stale`, `failed`,
 `posted`, `dismissed`, `withdrawn`. The `review` attention item stands while
 the newest round is `drafted`, `stale`, `failed`, or `requested` with no job

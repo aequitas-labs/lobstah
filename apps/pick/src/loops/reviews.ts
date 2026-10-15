@@ -1,18 +1,34 @@
+import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
   classifyGhError,
+  enqueue,
   firstMeaningfulLine,
   githubBlockedUntil,
+  lastEventAt,
+  latestRound,
+  listReviews,
   loadConfig,
   observeReviewRequest,
+  queuedDescriptor,
+  readRoundDraft,
+  readStatusLog,
+  reconcile,
   recordGitHubRateLimit,
   recordGitHubResponse,
+  requestCancel,
+  reviewBrief,
+  reviewRoundDir,
   reviewSettings,
   splitGitHubResponse,
+  withBriefHooks,
   withdrawUnseenReviews,
+  writeReview,
 } from '@lobstah/core';
-import type { ReviewItem } from '@lobstah/core';
+import type { ReviewItem, ReviewRound } from '@lobstah/core';
 import { githubRepoFromOrigin } from '../config.js';
+import { dispatchLane } from './report.js';
 
 /**
  * One search per poll for open PRs whose review is requested from the
@@ -93,12 +109,16 @@ export async function reviewsLoop(
   log: (m: string) => void = () => {},
   opts: { run?: GhGraphql; now?: number } = {},
 ): Promise<void> {
-  const cfg = loadConfig();
-  const rc = cfg.reviews;
-  if (!rc.enabled) return;
+  if (!loadConfig().reviews.enabled) return;
   const now = opts.now ?? Date.now();
-  if (githubBlockedUntil(now)) return;
-  const res = (opts.run ?? runGraphql)({ query: REVIEW_SEARCH, variables: { q: reviewSearchQuery(identity) } }, token());
+  // The search needs the budget; drafting is local and runs either way.
+  if (!githubBlockedUntil(now)) searchReviews(identity, token, log, opts.run ?? runGraphql, now);
+  draftReviews(identity, log, now);
+}
+
+function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number): void {
+  const rc = loadConfig().reviews;
+  const res = run({ query: REVIEW_SEARCH, variables: { q: reviewSearchQuery(identity) } }, token());
   const { headers, body } = splitGitHubResponse(res.stdout);
   let answer: { data?: { rateLimit?: { cost?: number }; search?: { issueCount?: number; nodes?: SearchPr[] } }; errors?: Array<{ message: string }> } = {};
   try {
@@ -170,3 +190,128 @@ export async function reviewsLoop(
   for (const key of withdrawUnseenReviews(seen, scoped, now)) log(`${key}: review request gone; round withdrawn`);
 }
 
+// ── Drafting ────────────────────────────────────────────────────────────────
+
+function verbOf(id: string): { lane: 'work' | 'chore'; verb: string; note?: string; at?: string } | undefined {
+  const lane = dispatchLane(id);
+  if (!lane) return undefined;
+  const log = readStatusLog(id, lane);
+  return { lane, verb: reconcile({ log, lastEventAt: lastEventAt(id, lane) }), note: log.at(-1)?.note, at: log.at(-1)?.at };
+}
+
+/** Jobs started on the UTC day of `now`, across every item. */
+function startedToday(items: ReviewItem[], now: number): number {
+  const day = new Date(now).toISOString().slice(0, 10);
+  return items.reduce((n, i) => n + i.rounds.filter((r) => r.dispatchedAt?.slice(0, 10) === day).length, 0);
+}
+
+/** Why a requested round gets no job, or undefined when it gets one. */
+function noJob(item: ReviewItem, round: ReviewRound, started: number): string | undefined {
+  const rc = loadConfig().reviews;
+  if (round.reason?.startsWith('skipped:')) return round.reason;
+  if (reviewSettings(rc, item.pr.repoKey).work === 'off') return undefined; // Chris reviews it himself: no reason to show
+  if (!item.pr.repoKey) return 'no job: not a configured repo, so there is no checkout to review in';
+  if (started >= rc.maxPerDay) return `no job: the daily cap ([reviews].maxPerDay = ${rc.maxPerDay}) is reached`;
+  return undefined;
+}
+
+/**
+ * Drafting, local and request-free: start a job for each requested round
+ * that should have one, finish rounds whose job ended, hand a trap job to
+ * the daemon when its trap wait expires, and cancel the job of a round the
+ * request no longer stands for.
+ */
+export function draftReviews(identity: string, log: (m: string) => void = () => {}, now = Date.now()): void {
+  const cfg = loadConfig();
+  const items = listReviews();
+  let started = startedToday(items, now);
+  for (const item of items) {
+    const r = latestRound(item);
+    if (!r) continue;
+    const settings = reviewSettings(cfg.reviews, item.pr.repoKey);
+    const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+
+    if (r.state === 'requested' && !r.dispatch) {
+      const why = noJob(item, r, started);
+      if (settings.work === 'off' || why) {
+        if (why && r.reason !== why) {
+          r.reason = why;
+          save();
+        }
+        continue;
+      }
+      const outDir = reviewRoundDir(item.key, r.id);
+      if (!outDir) continue;
+      fs.mkdirSync(outDir, { recursive: true });
+      const id = randomUUID();
+      const trap = settings.work === 'trap' && settings.trapWaitSecs > 0;
+      enqueue(
+        {
+          id,
+          repo: item.pr.repoKey!,
+          brief: withBriefHooks(reviewBrief(item, r, { identity, id, outDir }), cfg.repos[item.pr.repoKey!], 'prReview'),
+          readOnly: true,
+          ...(settings.harness ? { harness: settings.harness } : {}),
+          ...(settings.model ? { model: settings.model } : {}),
+          ...(settings.effort ? { effort: settings.effort } : {}),
+          limits: settings.limits,
+          ...(trap ? { trapAny: true, systemRepair: { trapWaitUntil: new Date(now + settings.trapWaitSecs * 1000).toISOString() } } : {}),
+        },
+        'chore',
+      );
+      Object.assign(r, { state: 'drafting', dispatch: id, dispatchedAt: new Date(now).toISOString() });
+      delete r.reason;
+      save();
+      started++;
+      log(`${item.key}: drafting the review as ${id}${trap ? ' (a free trap first)' : ''}`);
+      continue;
+    }
+
+    if (!r.dispatch) continue;
+    const job = verbOf(r.dispatch);
+    const ended = job?.verb === 'done' || job?.verb === 'failed';
+    if (r.state === 'withdrawn') {
+      if (job && !ended) {
+        try {
+          requestCancel(r.dispatch, job.lane);
+          log(`${item.key}: request gone; cancelled the review job ${r.dispatch}`);
+        } catch {
+          // still queued or already gone
+        }
+      }
+      continue;
+    }
+    if (r.state !== 'drafting') continue;
+    if (!job) {
+      Object.assign(r, { state: 'failed', reason: 'the review job is gone (culled before it finished)' });
+      save();
+      continue;
+    }
+    if (!ended) {
+      const queued = queuedDescriptor(r.dispatch, 'chore');
+      const until = queued?.systemRepair?.trapWaitUntil;
+      if (queued?.trapAny && until && now >= Date.parse(until)) {
+        enqueue({ ...queued, trapAny: undefined, systemRepair: {} }, 'chore');
+        log(`${item.key}: no trap took the review job in time; the daemon runs it`);
+      }
+      continue;
+    }
+    if (job.verb === 'failed') {
+      Object.assign(r, { state: 'failed', reason: `the review job failed${job.note ? `: ${job.note}` : ''}` });
+      save();
+      log(`${item.key}: review job failed`);
+      continue;
+    }
+    const draft = readRoundDraft(item.key, r.id);
+    if ('error' in draft) {
+      Object.assign(r, { state: 'failed', reason: `the review job finished without a usable draft: ${draft.error}` });
+    } else {
+      Object.assign(r, { state: 'drafted', draftedAt: job.at ?? new Date(now).toISOString() });
+      delete r.reason;
+      // The head moved while the job ran: the draft reviews an older head.
+      if (r.headSha !== item.pr.headSha) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
+    }
+    save();
+    log(`${item.key}: review ${r.state}`);
+  }
+}

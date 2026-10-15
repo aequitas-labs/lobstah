@@ -57,6 +57,7 @@ appends it as written and does not read it.
 | `review` | A daemon repair of a PR with requested changes, and a pickup review-feedback round. |
 | `ciFix` | A CI-fix continuation a PR watch forks. |
 | `rebase` | A rebase chore from pickup's merge loop. |
+| `prReview` | A review-request draft job ([pickup.md](pickup.md), "Review requests"). |
 | `all` | Every kind above, after that kind's own text. |
 
 ```toml

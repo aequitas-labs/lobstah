@@ -60,8 +60,15 @@ export interface Descriptor {
   pr?: DescriptorPr;
   /** Daemon-created PR chore, or a pickup feedback round addressed to its
    * PR's trap. Only these addressed dispatches may fall back to another
-   * worker after the trap wait expires. */
+   * worker after the trap wait expires. A trapAny review job carries it
+   * too: past the wait, pick re-queues the job for the daemon. */
   systemRepair?: { trapWaitUntil?: string };
+  /**
+   * A job whose output is a file, not a change (a PR review draft): the
+   * runner pushes nothing, opens no PR, and checkpoints nothing, whatever
+   * the repo's remote policies say.
+   */
+  readOnly?: boolean;
   attachments?: Attachment[];
   /** Address this bait to a specific claimant (`session:<id>`). A live
    * soaking session claims it; once its registration is gone the daemon
