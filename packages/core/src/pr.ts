@@ -52,7 +52,7 @@ export function parsePrRef(s: string): PrRef | undefined {
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
-  'title,state,isDraft,isCrossRepository,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,closedAt,updatedAt,reviews';
+  'title,state,isDraft,isCrossRepository,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,createdAt,mergedAt,closedAt,updatedAt,reviews';
 
 /** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
 export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',')
@@ -88,6 +88,7 @@ export interface GhReview {
 }
 
 export interface GhPrView {
+  createdAt?: string;
   /** When GitHub was read, preserved when a batch snapshot is replayed. */
   fetchedAt?: string;
   isCrossRepository?: boolean;
@@ -242,6 +243,8 @@ export interface PrEvidence {
   /** Review state; comment bodies are never stored. */
   review?: PrReview;
   observedAt: string;
+  /** Forge creation time, when fetched; firstSeenAt is not an opened time. */
+  openedAt?: string;
   /** First observation at which each pr:* condition became true; pr:ready's settle starts here. */
   standingSince?: Partial<Record<PrStandingKind, string>>;
   /** Forge's last update, when the observation captured it. */
@@ -347,6 +350,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
       : {}),
     review: prReview(view),
     observedAt: view.fetchedAt ?? observedAt,
+    ...(view.createdAt ? { openedAt: view.createdAt } : {}),
     ...(view.updatedAt ? { updatedAt: view.updatedAt } : {}),
     ...(view.mergedAt ? { mergedAt: view.mergedAt } : {}),
     ...(view.closedAt ? { closedAt: view.closedAt } : {}),

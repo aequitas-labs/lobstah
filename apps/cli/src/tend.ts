@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { reviewTools } from './review-tools.js';
+import { visibleGoals } from './goals.js';
 import { trapRows, repoTrapRows } from './trap-list.js';
 import {
   workerLabel,
@@ -567,6 +568,7 @@ export function poolRows(pools: PoolView[]): Array<Record<string, string | numbe
 export const POOL_COLUMNS = ['pool', 'repo', 'size', 'free', 'overflow', 'claimed', 'out', 'warming'];
 
 export interface TendReport {
+  goals?: ReturnType<typeof visibleGoals>;
   backends?: ReturnType<typeof backendViews>;
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
   daemon: { up: boolean; lastHeartbeat?: string };
@@ -1014,6 +1016,7 @@ export function buildTendReport(now = Date.now()): TendReport {
 
   return {
     verdict,
+    goals: visibleGoals(cfg, new Date(now)),
     backends: backendViews(cfg),
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
     counts: {
@@ -1065,6 +1068,7 @@ export function buildTendReport(now = Date.now()): TendReport {
 
 export function renderTend(r: TendReport): string {
   const lines: string[] = [];
+  for (const g of r.goals ?? []) lines.push(`goals — ${g.grounds} · ${g.date}\n${g.lines.map((s) => `- ${s}`).join('\n')}`);
   for (const b of r.backends ?? []) lines.push(toonKV({ grounds: b.grounds, backend: b.wharf ?? 'local', ...(b.unavailable ? { state: 'unknown', note: b.unavailable } : {}) }));
   // Tables show each trap by name alone; `wt:<id>` only where no name is known.
   const names = trapNamer();

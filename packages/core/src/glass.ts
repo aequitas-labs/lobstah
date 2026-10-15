@@ -378,6 +378,7 @@ export interface GlassAnswerLimits {
 
 /** The /data payload: one disk pass, everything the page renders. */
 export interface GlassSnapshot {
+  goals?: Array<{ grounds: string; date: string; lines: string[] }>;
   backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;
   /** Per-server secret for the same-origin actions: focusing a trap and answering a decision. */
   focusToken?: string;

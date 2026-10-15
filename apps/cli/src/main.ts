@@ -8,6 +8,13 @@ import { fileURLToPath } from 'node:url';
 import {
   IdleWait,
   resetWaitBackoff,
+  goalDate,
+  addGoal,
+  removeGoal,
+  previousGoalDate,
+  readGoals,
+  setGoals,
+  setGoalsRecap,
   workerLabel,
   addTodo,
   closeTodo,
@@ -898,7 +905,10 @@ async function mainCli(): Promise<void> {
       if (hook?.session_id && (trap || helmOf(hook.session_id))) resetWaitBackoff(hook.session_id);
       if (trap) resumeTrapTurn(trap, true);
       if (hook?.session_id && !trapBySession(hook.session_id) && helmOf(hook.session_id)) {
-        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: HELM_REMINDER } }));
+        const { dailyGoalsContext } = await import('./goals.js');
+        const helm = helmOf(hook.session_id)!;
+        const daily = dailyGoalsContext(helm.grounds, loadConfig());
+        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [HELM_REMINDER, daily].filter(Boolean).join('\n') } }));
       }
     } catch { /* a reminder never breaks the user's turn */ }
     return;
@@ -1017,6 +1027,36 @@ async function mainCli(): Promise<void> {
   };
 
   switch (cmd) {
+    case 'goals': {
+      const cfg = loadConfig(), caller = callerSession(opt('--session'));
+      const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));
+      const key = storageGrounds(grounds.name, cfg), today = goalDate(new Date(), cfg.helm.timezone);
+      const action = pos[0];
+      if (action === 'set' || action === 'add' || action === 'rm' || action === 'recap') {
+        if (caller && trapBySession(caller.id)) throw new Error('only the helm writes daily goals');
+        gateHelm(caller, grounds.name);
+      }
+      if (action === 'recap-data') {
+        if (pos.length > 2) throw new UsageError(usageFor('goals')!);
+        const { goalsRecapData } = await import('./goals.js');
+        console.log(JSON.stringify(goalsRecapData(grounds.name, pos[1] ?? previousGoalDate(today), cfg), null, 2));
+        break;
+      }
+      const day = action === 'set' ? setGoals(key, today, pos.slice(1))
+        : action === 'add' || action === 'rm' ? (() => {
+          if (pos.length !== 2) throw new UsageError(usageFor('goals')!);
+          return action === 'add' ? addGoal(key, today, pos[1]!) : removeGoal(key, today, Number(pos[1]));
+        })()
+        : action === 'recap' ? (() => {
+          if (pos.length !== 2 || !opt('--file')) throw new UsageError(usageFor('goals')!);
+          return setGoalsRecap(key, pos[1]!, fs.readFileSync(opt('--file')!, 'utf8'));
+        })() : (() => {
+          if (pos.length > 1) throw new UsageError(usageFor('goals')!);
+          return readGoals(key, action ?? today);
+        })();
+      console.log(`# Goals for ${day.date} (${displayGrounds(grounds.name, cfg)})\n\n${day.lines.length ? day.lines.map((s, i) => `${i + 1}. ${s}`).join('\n') : 'No goals set.'}${day.recap ? `\n\n## Recap\n\n${day.recap}` : ''}`);
+      break;
+    }
     case 'stats': {
       const { readStats, statsOutput } = await import('./stats.js');
       console.log(statsOutput(readStats(), { json: has('--json'), perTrap: has('--per-trap') }));

@@ -205,6 +205,8 @@ export interface SoakConfig {
 }
 
 export interface HelmConfig {
+  /** IANA timezone for the 04:00-local daily goals boundary; absent uses the system zone. */
+  timezone?: string;
   /** Queued age before lack of a claim needs attention; 0 disables. */
   queuedNoticeSecs: number;
   /** Silence since both activity and note before stalled attention; 0 disables. */
@@ -400,6 +402,11 @@ export function loadConfig(): Config {
       throw new Error(`[wait].${key} must be a positive whole number in ${configPath()}`);
   }
   if (wait.maxTimeoutSecs < wait.baseTimeoutSecs) throw new Error(`[wait].maxTimeoutSecs must be at least baseTimeoutSecs in ${configPath()}`);
+  if (helm.timezone !== undefined) {
+    if (typeof helm.timezone !== 'string' || !helm.timezone.trim()) throw new Error('[helm].timezone must be an IANA timezone');
+    try { new Intl.DateTimeFormat('en', { timeZone: helm.timezone }); }
+    catch { throw new Error('[helm].timezone must be an IANA timezone'); }
+  }
   for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs', 'todoStaleDays'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isFinite(helm[key]) || helm[key] < 0) {
       throw new Error(`[helm].${key} must be a non-negative number in ${configPath()}`);

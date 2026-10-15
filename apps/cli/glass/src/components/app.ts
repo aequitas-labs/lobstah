@@ -38,7 +38,7 @@ export function App({ state }: { state: GlassState }) {
   const page = (t: GlassTab): Children => {
     if (!inp || t !== tab) return null;
     if (t === 'deck')
-      return html`<${Deck} inp=${inp.deck} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`;
+      return html`<${Deck} inp=${inp.deck} goals=${d?.goals} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`;
     if (t === 'dispatches') return html`<${Dispatches} inp=${inp.dispatches} more=${more('dispatches')} />`;
     if (t === 'traps') return html`<${Traps} inp=${inp.traps} />`;
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} more=${more('prs')} />`;

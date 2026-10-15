@@ -185,6 +185,23 @@ h2 {
 #settings-slot #gearbtn {
   margin-left: 0;
 }
+/* Card treatment and the helm-message accent, without decision/alert behavior. */
+.goals-callout {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--link);
+  border-radius: var(--card-radius);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  overflow-wrap: anywhere;
+}
+.goals-callout h2 {
+  margin: 0 0 var(--space-2);
+}
+.goals-callout ol {
+  margin: 0;
+  padding-left: 1.6em;
+}
 .deckgrid {
   display: flex;
   flex-direction: column;
