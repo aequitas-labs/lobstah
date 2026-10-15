@@ -989,9 +989,13 @@ export function serveGlass(
     if (req.url === '/manifest.webmanifest' && req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/manifest+json', 'cache-control': 'no-cache' });
       res.end(JSON.stringify({
-        id: '/', name: 'lobstah glass', short_name: 'lobstah', start_url: '/', scope: '/',
+        id: '/', name: 'lobstah glass', short_name: 'glass', start_url: '/', scope: '/',
         display: 'standalone', background_color: '#0e1116', theme_color: '#0e1116',
-        icons: [192, 512].map((size) => ({ src: `/app-icon-${size}.png`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any' })),
+        icons: [
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
       }));
     } else if (req.method === 'GET' && Object.hasOwn(GLASS_APP_ICONS, req.url ?? '')) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });

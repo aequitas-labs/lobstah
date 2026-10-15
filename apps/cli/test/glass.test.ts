@@ -183,12 +183,16 @@ describe('glass snapshot', () => {
     expect(html).not.toMatch(/<script[^>]* src=|<link[^>]*stylesheet/);
     expect(html).toContain('<title>spyglass</title>');
     expect(html).toContain('rel="manifest" href="/manifest.webmanifest"');
-    expect(html).toContain('rel="apple-touch-icon" href="/app-icon-512.png"');
+    expect(html).toContain('rel="icon" type="image/png" href="/icons/favicon.png"');
+    expect(html).toContain('rel="apple-touch-icon" href="/icons/apple-touch-icon.png"');
+    expect(html).not.toContain('serviceWorker');
     const manifestResponse = await fetch(`http://127.0.0.1:${port}/manifest.webmanifest`);
     expect(manifestResponse.headers.get('content-type')).toBe('application/manifest+json');
-    const manifest = await manifestResponse.json() as { icons: Array<{ src: string; sizes: string }> };
-    expect(manifest).toMatchObject({ id: '/', name: 'lobstah glass', start_url: '/', scope: '/', display: 'standalone' });
-    for (const icon of manifest.icons) {
+    const manifest = await manifestResponse.json() as { icons: Array<{ src: string; sizes: string; purpose: string }> };
+    expect(manifest).toMatchObject({ id: '/', name: 'lobstah glass', short_name: 'glass', start_url: '/', scope: '/', display: 'standalone',
+      background_color: '#0e1116', theme_color: '#0e1116' });
+    expect(manifest.icons.map((i) => `${i.sizes} ${i.purpose}`)).toEqual(['192x192 any', '512x512 any', '512x512 maskable']);
+    for (const icon of [...manifest.icons, { src: '/icons/apple-touch-icon.png', sizes: '180x180' }, { src: '/icons/favicon.png', sizes: '64x64' }]) {
       const response = await fetch(`http://127.0.0.1:${port}${icon.src}`);
       expect(response.headers.get('content-type')).toBe('image/png');
       const png = Buffer.from(await response.arrayBuffer());
@@ -196,7 +200,10 @@ describe('glass snapshot', () => {
       const size = Number(icon.sizes.split('x')[0]);
       expect(png.readUInt32BE(16)).toBe(size);
       expect(png.readUInt32BE(20)).toBe(size);
+      // Exact hosted art, not a new or separately maintained local mark.
+      expect(png).toEqual(fs.readFileSync(new URL(`../../../services/wharf/glass${icon.src}`, import.meta.url)));
     }
+    for (const size of [192, 512]) expect((await fetch(`http://127.0.0.1:${port}/app-icon-${size}.png`)).headers.get('content-type')).toBe('image/png');
     const data = (await (await fetch(`http://127.0.0.1:${port}/data`)).json()) as { version: string };
     expect(data.version).toBeTruthy();
     server.close();

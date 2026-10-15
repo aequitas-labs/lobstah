@@ -57,6 +57,8 @@ export interface GlassDom {
 
 export interface GlassDomOptions {
   now: number;
+  /** Optional installed-app API; absent in browsers that do not support it. */
+  badge?: (count: number) => Promise<void>;
   /** The page path, e.g. `/report/<key>`; the default is `/`. */
   path?: string;
   hash?: string;
@@ -197,6 +199,7 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
       await new Promise((r) => setTimeout(r, 0));
     }
   };
+  if (opts.badge) Object.defineProperty(window.navigator, 'setAppBadge', { value: opts.badge });
   window.document.write(page);
   await settle();
   const call = async (name: string, ...args: unknown[]) => {

@@ -9,6 +9,7 @@ import { glassWake } from './wake.js';
 import { parseRoute, routeHash, TABS } from './route.js';
 import type { Item, Tab } from './route.js';
 import type { DispatchView, Snapshot } from './model.js';
+import { setDecisionBadge } from '../../../../apps/cli/glass/src/app-badge.js';
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(),
@@ -17,6 +18,9 @@ export function App() {
   const [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [signedOut, setSignedOut] = useState(false);
+  useEffect(() => {
+    if (snapshot || signedOut) void setDecisionBadge(snapshot?.documents.filter((d) => d.kind === 'decision' && d.published && !d.withdrawn && !d.answer).length ?? 0);
+  }, [snapshot, signedOut]);
   // The open item comes from the URL (a link from the pet lands on it) and is written back to it.
   const [modal, setItem] = useState<Item | undefined>(() => parseRoute(location.hash).item);
   const setModal = (item?: Item) => {
