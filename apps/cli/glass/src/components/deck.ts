@@ -202,7 +202,10 @@ export function Deck({
     return {
       key: r.key,
       title: r.title,
-      badge: { text: reviewState(r), tone: r.state === 'failed' ? 'bad' : r.state === 'stale' ? 'warn' : 'ok' },
+      badge: {
+        text: reviewState(r),
+        tone: r.state === 'failed' ? 'bad' : r.state === 'stale' ? 'warn' : r.state === 'drafted' ? 'ok' : 'dim',
+      },
       meta: meta.nodes,
       metaText: meta.text,
       href: r.reviewUrl,
