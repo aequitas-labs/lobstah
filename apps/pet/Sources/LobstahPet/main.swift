@@ -491,7 +491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // No menu-bar presence by default: the pet IS the UI (right-click it
     // for spyglass/quit). LOBSTAH_PET_MENUBAR=1 restores the status item.
     if ProcessInfo.processInfo.environment["LOBSTAH_PET_MENUBAR"] != nil {
-      statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+      statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
       statusItem?.button?.title = "🦞"
       let menu = NSMenu()
       menu.addItem(NSMenuItem(title: "Preview pet", action: #selector(togglePreview), keyEquivalent: "p"))
@@ -550,7 +550,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A failed read is not an empty attention queue. Keep every current
         // window in place and try again on the next six-second poll.
         guard let fresh = snapshot else { return }
-        self.statusItem?.button?.title = AttentionItem.statusTitle(fresh)
         var items = self.clicked.walking(fresh)
         if items.isEmpty && self.preview {
           items = [AttentionItem(id: "preview", verb: "needs-decision", note: "the lobster preview — questions crawl in here")]

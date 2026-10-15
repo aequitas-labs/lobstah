@@ -1,106 +1,76 @@
 import { useState } from 'preact/hooks';
-import type { GlassReview, ReviewComment } from '@lobstah/core';
+import type { GlassReview } from '@lobstah/core';
 import type { SectionInputs } from '../../../src/glass-diff.js';
 import { reviewRequest } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
-import { Age } from './common.js';
-import { MarkdownElements } from './markdown.js';
+import { Age, Table, ageText } from './common.js';
 
 /**
- * The Reviews tab: one row per PR that asked for Chris's review, the ones
- * that ask for him first. A row opens to the draft (its summary and inline
- * comments) with Post, Edit, Dismiss, and, for a stale or failed round,
- * Re-draft. Post is always a comment-only review; nothing here approves or
- * requests changes.
+ * The Reviews tab: one row or card per PR that asked for Chris's review,
+ * the ones waiting on him first. A row opens the PR in its review tool
+ * ([repos.<key>].review), where the drafted review waits as his pending
+ * review, to edit and send. Here a review can only be dismissed or, when
+ * stale or failed, re-drafted.
  */
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
 const TONE: Record<string, string> = { drafted: 'ok', stale: 'warn', failed: 'bad', posted: 'dim', dismissed: 'dim', withdrawn: 'dim' };
 
-/** Draft markdown names no files: an image reference shows its alt text. */
-const noImage = (_name: string, alt: string) => alt;
+/** The state as a person reads it: a staged draft is waiting in the review tool. */
+export const reviewState = (r: Pick<GlassReview, 'state' | 'staged'>): string =>
+  r.state === 'drafted' && r.staged ? 'ready to send' : r.state;
 
-function Comments({ list }: { list: ReviewComment[] }) {
-  if (!list.length) return html`<div class="dim">no inline comments</div>`;
-  return html`<ul class="rv-comments">${list.map(
-    (c, i) =>
-      html`<li key=${i}><code>${c.path}:${c.line}${c.side === 'LEFT' ? ' (old)' : ''}</code><div class="mdpage"><${MarkdownElements} text=${c.body} image=${noImage} /></div></li>`,
-  )}</ul>`;
-}
+export const openReview = (r: Pick<GlassReview, 'reviewUrl'>) => () => {
+  window.open(r.reviewUrl, '_blank', 'noopener');
+};
 
-function Editor({ r, onDone }: { r: GlassReview; onDone: (error?: string) => void }) {
-  const [body, setBody] = useState(r.body ?? '');
-  const [comments, setComments] = useState<ReviewComment[]>(r.comments ?? []);
-  const [busy, setBusy] = useState(false);
-  const save = async () => {
-    setBusy(true);
-    const error = await reviewRequest('review-edit', { key: r.key, body, comments });
-    setBusy(false);
-    onDone(error);
+/** The meta line: who asked, when, and why the round is where it is. */
+export function reviewMeta(r: GlassReview): { nodes: unknown[]; text: string } {
+  const asked = r.requestedBy ? `asked by ${r.requestedBy}` : 'review requested';
+  return {
+    nodes: [r.repo, '#', String(r.number), ' · ', asked, ' · ', Age(r.requestedAt), ' ago', r.reason ? ` · ${r.reason}` : ''],
+    text: [`${r.repo}#${r.number}`, asked, `${ageText(r.requestedAt)} ago`, r.reason ?? ''].filter(Boolean).join(' · '),
   };
-  return html`<div class="rv-edit">
-    <label>Summary<textarea rows="8" value=${body} onInput=${(e: Event) => setBody((e.currentTarget as HTMLTextAreaElement).value)} /></label>
-    ${comments.map(
-      (c, i) => html`<div key=${c.path + ':' + c.line + ':' + i} class="rv-edit-comment">
-        <code>${c.path}:${c.line}</code>
-        <textarea rows="3" value=${c.body} onInput=${(e: Event) => setComments(comments.map((x, j) => (j === i ? { ...x, body: (e.currentTarget as HTMLTextAreaElement).value } : x)))} />
-        <button class="btn" title="remove this comment" onClick=${() => setComments(comments.filter((_, j) => j !== i))}>remove</button>
-      </div>`,
-    )}
-    <div class="rv-actions"><button class="btn" disabled=${busy} onClick=${save}>Save</button><button class="btn" disabled=${busy} onClick=${() => onDone()}>Cancel</button></div>
-  </div>`;
 }
 
-function Detail({ r }: { r: GlassReview }) {
-  const [editing, setEditing] = useState(false);
+function Actions({ r }: { r: GlassReview }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const act =
-    (kind: ReviewRequestKind, extra: Record<string, unknown> = {}) =>
-    async () => {
-      setBusy(true);
-      setError(await reviewRequest(kind, { key: r.key, ...extra }));
-      setBusy(false);
-    };
-  if (editing) return html`<${Editor} r=${r} onDone=${(e?: string) => (setError(e), setEditing(false))} />`;
-  const hasDraft = r.state === 'drafted' || r.state === 'stale';
-  return html`<div class="rv-detail">
-    ${r.reason && html`<div class="dim">${r.reason}</div>`}
-    ${r.state === 'stale' && html`<div class="warn">The draft reviews ${r.headSha.slice(0, 7)}; the PR is now at ${r.prHeadSha.slice(0, 7)}.</div>`}
-    ${hasDraft && r.body !== undefined && html`<div class="mdpage"><${MarkdownElements} text=${r.body} image=${noImage} /></div>`}
-    ${hasDraft && html`<${Comments} list=${r.comments ?? []} />`}
-    ${r.state === 'posted' && html`<div class="dim">posted ${r.by ? `by ${r.by} ` : ''}${Age(r.postedAt)} ago</div>`}
-    <div class="rv-actions">
-      ${r.state === 'drafted' && html`<button class="btn" disabled=${busy} title="post as a comment-only review" onClick=${act('review-post')}>Post</button>`}
-      ${r.state === 'stale' && html`<button class="btn" disabled=${busy} title="post the older draft as a comment-only review" onClick=${act('review-post', { stale: true })}>Post anyway</button>`}
-      ${(r.state === 'stale' || r.state === 'failed') && html`<button class="btn" disabled=${busy} onClick=${act('review-redraft')}>Re-draft</button>`}
-      ${hasDraft && html`<button class="btn" disabled=${busy} onClick=${() => setEditing(true)}>Edit</button>`}
-      ${OPEN.has(r.state) && html`<button class="btn" disabled=${busy} onClick=${act('review-dismiss')}>Dismiss</button>`}
-      <a class="btn" href=${r.url} target="_blank" rel="noopener">open PR</a>
-    </div>
-    ${error && html`<div class="bad" role="alert">${error}</div>`}
-  </div>`;
+  const act = (kind: ReviewRequestKind) => async (e: Event) => {
+    e.stopPropagation();
+    setBusy(true);
+    setError(await reviewRequest(kind, { key: r.key }));
+    setBusy(false);
+  };
+  return html`<span class="rv-actions">
+    ${(r.state === 'stale' || r.state === 'failed') && html`<button class="btn" disabled=${busy} onClick=${act('review-redraft')}>re-draft</button>`}
+    ${OPEN.has(r.state) && html`<button class="btn" disabled=${busy} title="drop it; a pending draft is deleted" onClick=${act('review-dismiss')}>dismiss</button>`}
+    ${error && html`<span class="bad" role="alert">${error}</span>`}
+  </span>`;
 }
 
-function Row({ r }: { r: GlassReview }) {
-  const [open, setOpen] = useState(false);
-  return [
-    html`<tr key=${r.key} class=${'rowhead' + (r.stands ? '' : ' acked')} onClick=${() => setOpen(!open)} aria-expanded=${open}>
-      <td>${r.repo}#${r.number}</td>
-      <td class="grow">${r.title}</td>
-      <td>${r.author}</td>
-      <td>${r.requestedBy ?? ''}</td>
-      <td>${Age(r.requestedAt)}</td>
-      <td><span class=${'badge ' + (TONE[r.state] ?? '')}>${r.state}</span></td>
-    </tr>`,
-    open && html`<tr key=${r.key + ':detail'} class="rv-row"><td colspan="6"><${Detail} r=${r} /></td></tr>`,
-  ];
+const badge = (r: GlassReview) => html`<span class=${'badge ' + (TONE[r.state] ?? '')}>${reviewState(r)}</span>`;
+
+function row(r: GlassReview) {
+  return html`<tr key=${r.key} class=${'rowhead' + (r.stands ? '' : ' acked')} onClick=${openReview(r)}>
+    <td><a href=${r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => e.stopPropagation()}>${r.repo}#${r.number}</a></td>
+    <td class="grow">${r.title}</td>
+    <td>${r.author}</td>
+    <td>${r.requestedBy ?? ''}</td>
+    <td>${Age(r.requestedAt)}</td>
+    <td>${badge(r)}</td>
+    <td><${Actions} r=${r} /></td>
+  </tr>`;
+}
+
+function card(r: GlassReview) {
+  const meta = reviewMeta(r);
+  return html`<div key=${r.key} class=${'card' + (r.stands ? '' : ' acked')} onClick=${openReview(r)}><div class="top"><b title=${r.title}>${r.title}</b>${badge(r)}</div><div class="meta" title=${meta.text}>${meta.nodes}</div><div class="foot"><span class="footact"><${Actions} r=${r} /></span></div></div>`;
 }
 
 export function Reviews({ inp }: { inp: SectionInputs['reviews'] }) {
   if (!inp.list.length) return html`<div class="empty">no review requests — turn them on with [reviews].enabled</div>`;
-  return html`<div class="wrap"><table><tbody><tr><th>PR</th><th>title</th><th>author</th><th>asked by</th><th>asked</th><th>state</th></tr>${inp.list.map(
-    (r) => html`<${Row} key=${r.key} r=${r} />`,
-  )}</tbody></table></div>`;
+  if (inp.view === 'cards') return html`<div class="cards">${inp.list.map(card)}</div>`;
+  return Table(['PR', 'title', 'author', 'asked by', 'asked', 'state', ''], inp.list.map(row), 'no review requests match');
 }

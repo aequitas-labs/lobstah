@@ -422,10 +422,10 @@ export async function requestTrap(repo: string, harness: string): Promise<string
   return undefined;
 }
 
-export type ReviewRequestKind = 'review-post' | 'review-edit' | 'review-dismiss' | 'review-redraft';
+export type ReviewRequestKind = 'review-dismiss' | 'review-redraft';
 
 /**
- * A Reviews-tab action (Post, Edit, Dismiss, Re-draft): one same-origin POST
+ * A Reviews-tab action (Dismiss, Re-draft): one same-origin POST
  * to /requests with the page's token. Resolves to an error reason, or
  * undefined on success; a fresh snapshot follows at once.
  */

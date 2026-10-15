@@ -62,9 +62,6 @@ import {
   ANSWER_FILES_MAX,
   ANSWER_TEXT_MAX,
   prStackTrunk,
-  dismissReview,
-  editReviewDraft,
-  redraftReview,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { reportAck, viewReport } from './report-file.js';
@@ -72,7 +69,7 @@ import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
-import { postReview, readMergeView } from '@lobstah/pick';
+import { dismissReviewRound, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { glassReviews } from './reviews.js';
 import { buildTendReport, landedCatches } from './tend.js';
 import { todoStaleLine, todoViews } from './todo.js';
@@ -128,10 +125,8 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
   ['decision-viewed', 1024],
   ['report-viewed', 1024],
-  ['review-post', 1024],
   ['review-dismiss', 1024],
   ['review-redraft', 1024],
-  ['review-edit', 512 * 1024],
 ]);
 
 const readJson = <T>(f: string): T | undefined => {
@@ -689,7 +684,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     stacks,
     ...attention,
     reports: reportRows(),
-    reviews: glassReviews(),
+    reviews: glassReviews(reviewTools(cfg)),
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
@@ -880,31 +875,17 @@ export function serveGlass(
               return reply(500, { ok: false, reason: 'The view could not be stored.' });
             }
           }
-          case 'review-post':
-          case 'review-edit':
           case 'review-dismiss':
           case 'review-redraft': {
-            // A click on the Reviews tab. Posting is comment-only (postReview takes no event).
-            const payload = (body.payload ?? {}) as { key?: unknown; stale?: unknown; body?: unknown; comments?: unknown };
-            const key = payload.key;
+            // A click on the Reviews tab. Sending happens in the review tool; these only drop or re-draft.
+            const key = (body.payload as { key?: unknown } | undefined)?.key;
             if (typeof key !== 'string' || !key.startsWith('review:') || key.length > 200) return reply(400, { ok: false, reason: 'A review key is required.' });
-            const done = (out: unknown) =>
-              typeof out === 'string' ? reply(409, { ok: false, reason: out }) : reply(200, { ok: true, key });
-            try {
-              if (body.kind === 'review-dismiss') return done(dismissReview(key, 'glass'));
-              if (body.kind === 'review-redraft') return done(redraftReview(key));
-              if (body.kind === 'review-edit') {
-                if (payload.body !== undefined && typeof payload.body !== 'string') return reply(400, { ok: false, reason: 'The review body must be text.' });
-                return done(editReviewDraft(key, { ...(payload.body !== undefined ? { body: payload.body as string } : {}), ...(payload.comments !== undefined ? { comments: payload.comments } : {}) }));
-              }
-              void postReview(key, { by: 'glass', stale: payload.stale === true }).then(
-                (out) => (out.posted ? reply(200, { ok: true, key, reviewId: out.reviewId }) : reply(409, { ok: false, reason: out.why })),
-                () => reply(500, { ok: false, reason: 'The review could not be posted.' }),
-              );
-              return;
-            } catch {
-              return reply(500, { ok: false, reason: 'The review could not be changed.' });
-            }
+            const act = body.kind === 'review-dismiss' ? dismissReviewRound(key, 'glass') : redraftReviewRound(key);
+            void act.then(
+              (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),
+              () => reply(500, { ok: false, reason: 'The review could not be changed.' }),
+            );
+            return;
           }
           case 'trap-request': {
             const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));

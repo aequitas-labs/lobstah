@@ -1,5 +1,5 @@
 import type { GlassPr, GlassSnapshot, GlassStack, WorkerMetadata } from '@lobstah/core';
-import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, catchCount, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
+import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, REVIEWS_MAX, catchCount, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -24,11 +24,12 @@ import {
   windowAction,
 } from './common.js';
 import { reportMeta } from './reports.js';
+import { reviewMeta, reviewState } from './reviews.js';
 import { DeckDecisions } from './decisions.js';
 import type { DecisionDraft } from '../store.js';
 
 /**
- * On deck: decisions (full-row cards), in flight, landed in the last 24h, reports, traps,
+ * On deck: decisions (full-row cards), in flight, landed in the last 24h, reviews waiting on you (only when some are), reports, traps,
  * and open PR stacks. The dispatch, trap, and landed items follow the site-wide view;
  * decisions are always full-row cards; PRs have their own stack presentation.
  */
@@ -195,6 +196,18 @@ export function Deck({
     const meta = reportMeta(r);
     return { key: r.key, title: r.title, meta: meta.nodes, metaText: meta.text, href: reportPageUrl(r.key), acked: !!r.acked };
   });
+  // A review opens the PR in its review tool, where the draft waits to be sent.
+  const reviews = inp.reviews.map((r): DeckItem => {
+    const meta = reviewMeta(r);
+    return {
+      key: r.key,
+      title: r.title,
+      badge: { text: reviewState(r), tone: r.state === 'failed' ? 'bad' : r.state === 'stale' ? 'warn' : 'ok' },
+      meta: meta.nodes,
+      metaText: meta.text,
+      href: r.reviewUrl,
+    };
+  });
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
     title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
@@ -212,6 +225,6 @@ export function Deck({
   return [
     shownGoals.length > 0 &&
       html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map((g) => html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map((line) => html`<li>${line}</li>`)}</ol></section>`)}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckTodos(inp, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${reviews.length > 0 && deckBlock('reviews', reviews, 'reviews', REVIEWS_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckTodos(inp, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
   ];
 }

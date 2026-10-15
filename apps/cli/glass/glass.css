@@ -957,59 +957,11 @@ a.lob {
   background: var(--bad);
   color: var(--on-fill);
 }
-/* The Reviews tab: its count of reviews waiting on you, and a row's draft. */
-.tcount {
-  display: inline-block;
-  margin-left: 6px;
-  min-width: 1.6em;
-  text-align: center;
-  border-radius: 999px;
-  padding: 0 6px;
-  font-size: 11px;
-  border: 1px solid var(--line);
-  color: var(--dim);
-}
-.rv-detail,
-.rv-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 6px 2px 10px;
-}
-.rv-comments {
-  margin: 0;
-  padding-left: 18px;
-}
-.rv-comments li {
-  margin-bottom: 6px;
-}
+/* The Reviews tab: a row's actions. */
 .rv-actions {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-.rv-edit textarea {
-  width: 100%;
-  box-sizing: border-box;
-  font: inherit;
-  background: var(--card);
-  color: inherit;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-}
-.rv-edit label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.rv-edit-comment {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 8px;
-  align-items: start;
-}
-.rv-edit-comment code {
-  grid-column: 1 / -1;
 }
 /* The decision modal, above any other modal and below the image overlay. */
 #doverlay {

@@ -1,4 +1,4 @@
-import { latestRound, listReviews, readRoundDraft, reviewStands } from '@lobstah/core';
+import { latestRound, listReviews, prReviewUrl, reviewStands } from '@lobstah/core';
 import type { GlassReview } from '@lobstah/core';
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
@@ -23,16 +23,16 @@ export function reviewRows(all = false): Array<Record<string, string>> {
   return rows;
 }
 
-/** The glass's review rows: every item's newest round, with the draft of a drafted or stale one. */
-export function glassReviews(): GlassReview[] {
+/** The glass's review rows: every item's newest round, and where the PR opens in its review tool. */
+export function glassReviews(tools: Readonly<Record<string, string>> = {}): GlassReview[] {
   const out: GlassReview[] = [];
   for (const item of listReviews()) {
     const r = latestRound(item);
     if (!r) continue;
-    const draft = r.state === 'drafted' || r.state === 'stale' ? readRoundDraft(item.key, r.id) : undefined;
     out.push({
       key: item.key,
       url: item.pr.url,
+      reviewUrl: prReviewUrl(item.pr.url, tools),
       repo: `${item.pr.owner}/${item.pr.repo}`,
       number: item.pr.number,
       title: item.pr.title,
@@ -48,7 +48,7 @@ export function glassReviews(): GlassReview[] {
       ...(r.draftedAt ? { draftedAt: r.draftedAt } : {}),
       ...(r.postedAt ? { postedAt: r.postedAt } : {}),
       ...(r.by ? { by: r.by } : {}),
-      ...(draft && !('error' in draft) ? { body: draft.body, comments: draft.comments } : {}),
+      ...(r.staged ? { staged: true } : {}),
     });
   }
   return out;

@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, latestRound, observeReviewRequest, readReview, writeReview } from '@lobstah/core';
+import { ensureLayout, latestRound, observeReviewRequest, readReview } from '@lobstah/core';
 import type { GlassReview } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass } from '../src/glass.js';
@@ -35,6 +35,7 @@ function review(n: number, over: Partial<GlassReview> = {}): GlassReview {
   return {
     key: `review:acme/web#${n}`,
     url: `https://github.com/acme/web/pull/${n}`,
+    reviewUrl: `https://app.graphite.com/github/pr/acme/web/${n}`,
     repo: 'acme/web',
     number: n,
     title: `pr ${n}`,
@@ -50,40 +51,61 @@ function review(n: number, over: Partial<GlassReview> = {}): GlassReview {
   };
 }
 
+const fleet = () => ({
+  ...emptyFleet(),
+  focusToken: 'tok',
+  reviews: [review(7, { state: 'drafted', staged: true }), review(8, { requestedAt: ago(60) }), review(9, { state: 'stale', reason: 'the head moved' }), review(10, { state: 'posted', stands: false })],
+});
+
 describe('the Reviews tab', () => {
-  it('one row per item, the waiting count on the tab, and Post, Edit, Dismiss on a drafted round', async () => {
-    const d = {
-      ...emptyFleet(),
-      focusToken: 'tok',
-      reviews: [
-        review(7, { state: 'drafted', body: 'Looks **right**.', comments: [{ path: 'src/a.ts', line: 12, body: 'Why not b()?' }] }),
-        review(8, { requestedAt: ago(60) }),
-        review(9, { state: 'posted', stands: false }),
-      ],
-    };
-    const g = await loadGlass(GLASS_PAGE, d, { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
+  it('rows open the PR in its review tool; only dismiss and re-draft act here; no count on the tab', async () => {
+    const g = await loadGlass(GLASS_PAGE, fleet(), { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g);
     await g.go('#reviews');
-    expect(g.$('#tabs a[data-tab="reviews"] .tcount')?.textContent).toBe('2');
+    expect(g.$('#tabs a[data-tab="reviews"]')?.textContent).toBe('Reviews');
     const rows = g.$$('#reviews tr.rowhead');
-    expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining('acme/web#8'), expect.stringContaining('acme/web#7'), expect.stringContaining('acme/web#9')]);
+    expect(rows.map((r) => r.querySelector('td')?.textContent)).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
+    expect(rows[1]!.textContent).toContain('ready to send');
+    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['dismiss']);
+    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['re-draft', 'dismiss']);
+    expect(rows[3]!.querySelectorAll('button')).toHaveLength(0);
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
-    const detail = g.$('#reviews .rv-detail')!;
-    expect(detail.textContent).toContain('Looks right.');
-    expect(detail.textContent).toContain('src/a.ts:12');
-    const buttons = [...detail.querySelectorAll('button')].map((b) => b.textContent);
-    expect(buttons).toEqual(['Post', 'Edit', 'Dismiss']);
-    (detail.querySelector('button') as unknown as HTMLElement).click();
+    expect(g.opened().at(-1)?.[0]).toBe('https://app.graphite.com/github/pr/acme/web/7');
+    (rows[2]!.querySelector('button') as unknown as HTMLElement).click();
     await g.settle();
-    const posted = g.posts().find((p) => p.url === '/requests')!;
-    expect(posted.headers['x-lobstah-token']).toBe('tok');
-    expect(JSON.parse(posted.body)).toEqual({ kind: 'review-post', payload: { key: 'review:acme/web#7' } });
+    const sent = g.posts().find((p) => p.url === '/requests')!;
+    expect(sent.headers['x-lobstah-token']).toBe('tok');
+    expect(JSON.parse(sent.body)).toEqual({ kind: 'review-redraft', payload: { key: 'review:acme/web#9' } });
   });
 
-  it('a review lob opens the Reviews tab', () => {
-    const [lob] = lobItems([{ kind: 'review', key: 'review:acme/web#7', stateHash: 'h', id: 'review:acme/web#7', lane: 'chore', verb: 'drafted', ageSecs: 1, note: 'acme/web#7 pr 7' }], { lobs: true });
-    expect(lob).toMatchObject({ key: 'review:review:acme/web#7', label: 'review request', hash: '#reviews' });
+  it('card mode shows the same reviews as cards, and On Deck lists the ones waiting on you', async () => {
+    const g = await loadGlass(GLASS_PAGE, fleet(), { now: NOW, prefs: { view: 'cards' } });
+    open.push(g);
+    await g.go('#reviews');
+    expect(g.$$('#reviews .card b').map((b) => b.textContent)).toEqual(['pr 8', 'pr 7', 'pr 9', 'pr 10']);
+    await g.go('#deck');
+    const deck = g.$$('#deck section').find((s) => s.querySelector('h2')?.textContent?.startsWith('reviews'))!;
+    expect(deck).toBeTruthy();
+    expect([...deck.querySelectorAll('a.card')].map((a) => a.getAttribute('href'))).toEqual([
+      'https://app.graphite.com/github/pr/acme/web/8',
+      'https://app.graphite.com/github/pr/acme/web/7',
+      'https://app.graphite.com/github/pr/acme/web/9',
+    ]);
+  });
+
+  it('On Deck has no reviews block when none waits', async () => {
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviews: [review(10, { state: 'posted', stands: false })] }, { now: NOW });
+    open.push(g);
+    expect(g.$$('#deck section h2').map((h) => h.textContent)).not.toContain('reviews →');
+  });
+
+  it('a review lob opens the PR in its review tool', () => {
+    const [lob] = lobItems(
+      [{ kind: 'review', key: 'review:acme/web#7', stateHash: 'h', id: 'review:acme/web#7', lane: 'chore', verb: 'drafted', note: 'acme/web#7 pr 7', prUrl: 'https://github.com/acme/web/pull/7', reviewUrl: 'https://app.graphite.com/github/pr/acme/web/7' }],
+      { lobs: true },
+    );
+    expect(lob).toMatchObject({ key: 'review:review:acme/web#7', label: 'review request', href: 'https://app.graphite.com/github/pr/acme/web/7' });
   });
 });
 
@@ -98,29 +120,23 @@ describe('review requests on /requests', () => {
   const send = (base: string, token: string, kind: string, payload: unknown) =>
     fetch(`${base}/requests`, { method: 'POST', headers: { Origin: base, 'content-type': 'application/json', 'x-lobstah-token': token }, body: JSON.stringify({ kind, payload }) });
 
-  it('refuses every review kind without the page token', async () => {
-    const { base } = await start();
-    for (const kind of ['review-post', 'review-edit', 'review-dismiss', 'review-redraft']) {
-      expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
-    }
+  it('refuses the review kinds without the page token, and has no post or edit', async () => {
+    const { base, token } = await start();
+    for (const kind of ['review-dismiss', 'review-redraft']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
+    for (const kind of ['review-post', 'review-edit']) expect((await send(base, token, kind, { key: 'review:acme/web#7' })).status).toBe(400);
   });
 
-  it('dismisses, edits and refuses what the round cannot do', async () => {
+  it('dismisses an unstaged round, and refuses what the round cannot do', async () => {
     observeReviewRequest({
       pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' },
       round: { id: 'RRE_7', requestedAt: ago(60) },
     });
     const { base, token } = await start();
-    const edit = await send(base, token, 'review-edit', { key: 'review:acme/web#7', body: 'x' });
-    expect(edit.status).toBe(409);
-    expect(((await edit.json()) as { reason: string }).reason).toContain('only a drafted or stale review can be edited');
-    const item = readReview('review:acme/web#7')!;
-    item.rounds[0]!.state = 'drafted';
-    writeReview(item);
-    expect((await send(base, token, 'review-edit', { key: 'review:acme/web#7', body: 'Edited.', comments: [] })).status).toBe(200);
+    const redraft = await send(base, token, 'review-redraft', { key: 'review:acme/web#7' });
+    expect(redraft.status).toBe(409);
+    expect(((await redraft.json()) as { reason: string }).reason).toContain('only a stale or failed round re-drafts');
     expect((await send(base, token, 'review-dismiss', { key: 'review:acme/web#7' })).status).toBe(200);
     expect(latestRound(readReview('review:acme/web#7')!)).toMatchObject({ state: 'dismissed', by: 'glass' });
-    expect((await send(base, token, 'review-post', { key: 'review:acme/web#7' })).status).toBe(409);
-    expect((await send(base, token, 'review-post', { key: 'not-a-review' })).status).toBe(400);
+    expect((await send(base, token, 'review-dismiss', { key: 'not-a-review' })).status).toBe(400);
   });
 });

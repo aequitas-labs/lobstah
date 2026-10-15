@@ -37,6 +37,8 @@ export const LANDED_MAX = 8;
 export const LANDED_WINDOW_MS = 86400000;
 // On deck's traps section: at most DECK_TRAPS_MAX traps, then "+N more".
 export const DECK_TRAPS_MAX = 8;
+// On deck's reviews section: at most REVIEWS_MAX, then "+N more".
+export const REVIEWS_MAX = 5;
 // On deck's reports section: at most REPORTS_MAX, unacked first, then "+N more".
 export const REPORTS_MAX = 8;
 export const STALE_DAEMON_MS = 90000;
@@ -277,9 +279,6 @@ export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>)
 export const reviewOrder = (a: GlassReview, b: GlassReview): number =>
   Number(b.stands) - Number(a.stands) || b.requestedAt.localeCompare(a.requestedAt);
 
-/** How many reviews ask for Chris: the Reviews tab's count. */
-export const standingReviews = (d: Pick<GlassSnapshot, 'reviews'>): number => (d.reviews || []).filter((r) => r.stands).length;
-
 /** Reports in list order: unacked first, then newest first. */
 export const reportOrder = (a: GlassReport, b: GlassReport): number =>
   Number(!!a.acked) - Number(!!b.acked) || b.filedAt.localeCompare(a.filedAt);
@@ -456,6 +455,8 @@ export interface DeckInputs {
   landed: LandedCatch[];
   /** Unacked first, then newest first; the deck shows REPORTS_MAX. */
   reports: GlassReport[];
+  /** Reviews that ask for Chris, newest request first; the deck shows REVIEWS_MAX. */
+  reviews: GlassReview[];
   inflight: GlassDispatchSummary[];
   traps: Seat<GlassTrapView>[];
   stacks: GlassStack[];
@@ -508,6 +509,9 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   const inRepo = (x: { repo?: string; dispatch?: string; lane?: string }) => matchesRepo(linkedRepo(x, repos), st);
   const traps = orderedTraps.filter((t) => inRepo(t) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness));
   const reports = (d.reports || []).filter((r) => inRepo(r) && hasQuery(r.title, r.author, r.dispatch, linkedRepo(r, repos))).sort(reportOrder);
+  const reviews = (d.reviews || [])
+    .filter((r) => matchesRepo(r.repoKey, st, true) && hasQuery(r.repo, r.number, r.title, r.author, r.requestedBy, r.state))
+    .sort(reviewOrder);
   const stacks = (d.stacks || []).filter(inRepo);
   const prs = (d.prs || []).filter(inRepo);
   const deckTraps = traps.filter((t) =>
@@ -527,6 +531,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, LANDED_MAX),
       reports,
+      reviews: reviews.filter((r) => r.stands),
       inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', verb: '' })),
       traps: deckTraps.map((t) => seat(trapView(d, t))),
       stacks: stacks.filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
@@ -552,9 +557,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     },
     reviews: {
       view: st.view,
-      list: (d.reviews || [])
-        .filter((r) => matchesRepo(r.repoKey, st, true) && hasQuery(r.repo, r.number, r.title, r.author, r.requestedBy, r.state))
-        .sort(reviewOrder),
+      list: reviews,
     },
     notices: {
       list: (d.notices || []).filter(

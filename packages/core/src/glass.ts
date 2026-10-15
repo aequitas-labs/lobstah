@@ -1,4 +1,4 @@
-import type { ReviewComment, ReviewRoundState } from './reviews.js';
+import type { ReviewRoundState } from './reviews.js';
 import type { AttentionKind } from './config.js';
 import type { HelmRegistration } from './helm.js';
 import type { Notice } from './notices.js';
@@ -289,10 +289,12 @@ export interface GlassHelm extends HelmRegistration {
  * page from /report/<key>/md when a modal opens, and its images from
  * /report/<key>/files/<name>.
  */
-/** A review item as the glass shows it (reviews.ts): the PR, its newest round, and that round's draft. */
+/** A review item as the glass shows it (reviews.ts): the PR and its newest round. */
 export interface GlassReview {
   key: string;
   url: string;
+  /** The PR in the repo's review tool ([repos.<key>].review), where the staged draft is edited and sent. */
+  reviewUrl: string;
   /** `owner/repo`. */
   repo: string;
   number: number;
@@ -312,9 +314,8 @@ export interface GlassReview {
   draftedAt?: string;
   postedAt?: string;
   by?: string;
-  /** The draft (drafted and stale rounds). */
-  body?: string;
-  comments?: ReviewComment[];
+  /** The draft is staged on the PR as the identity's pending review. */
+  staged?: boolean;
 }
 
 export interface GlassReport {
