@@ -1,0 +1,4 @@
+# Goals for 2026-10-15 (demo)
+
+1. [x] Review the goals and Todos checklist evidence
+2. Keep the full goal description visible during the release review: inspect both glass views, verify completion survives the daily recap, and preserve enough context that the next person can understand the work without opening another page.
