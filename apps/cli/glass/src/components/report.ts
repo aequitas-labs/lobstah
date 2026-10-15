@@ -4,6 +4,7 @@ import { reportFileUrl, reportFrom } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 import { Age, ImageThumb, attachmentRows, cmdRow } from './common.js';
+import { LinkedText } from './links.js';
 
 type FileUrl = (name: string) => string;
 const markdown = (text: string, fileUrl: FileUrl) =>
@@ -42,7 +43,7 @@ export function ReportSection({
   heading?: boolean;
 }) {
   return [
-    heading && html`<div class="sec">report · ${r.title}</div>`,
+    heading && html`<div class="sec">report · ${LinkedText(r.title)}</div>`,
     html`<div class="sub">${reportByline(r)}</div>`,
     html`<${ReportPage} r=${r} text=${text} />`,
     r.attachments.length > 0 && [
