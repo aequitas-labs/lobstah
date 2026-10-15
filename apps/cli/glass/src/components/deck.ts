@@ -25,6 +25,7 @@ import {
 } from './common.js';
 import { reportMeta } from './reports.js';
 import { DeckDecisions } from './decisions.js';
+import { LinkedText } from './links.js';
 import type { DecisionDraft } from '../store.js';
 
 /**
@@ -138,7 +139,7 @@ function deckPrs(inp: DeckInputs, view: View) {
 function deckTodos(inp: DeckInputs) {
   if (!inp.todos.length) return null;
   const grounds = new Set(inp.todos.map((t) => t.grounds)).size > 1;
-  return html`<section class="todos"><h2>Todos</h2>${inp.todoNote && html`<div class="dim">${inp.todoNote}</div>`}<ul class="todo-checklist">${inp.todos.map((t) => html`<li key=${`todo:${t.grounds}:${t.id}`} class="todo-check"><input type="checkbox" disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${`Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${t.text}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${Age(t.createdAt)} ago</span>${t.stale && html` <span class="badge warn">stale</span>`}</div></li>`)}</ul></section>`;
+  return html`<section class="todos"><h2>Todos</h2>${inp.todoNote && html`<div class="dim">${LinkedText(inp.todoNote)}</div>`}<ul class="todo-checklist">${inp.todos.map((t) => html`<li key=${`todo:${t.grounds}:${t.id}`} class="todo-check"><input type="checkbox" disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${`Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${LinkedText(t.text)}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${Age(t.createdAt)} ago</span>${t.stale && html` <span class="badge warn">stale</span>`}</div></li>`)}</ul></section>`;
 }
 
 export function Deck({
@@ -207,7 +208,7 @@ export function Deck({
           html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map(
             (line, i) => {
               const goal = goalLine(line);
-              return html`<li><label class="goal-check"><input type="checkbox" checked=${goal.done} disabled aria-label=${`Goal ${i + 1}: ${goal.text}`} title=${`Read-only; use lobstah goals ${goal.done ? 'undo' : 'done'} ${i + 1} --grounds ${g.grounds}`} /><span>${goal.done ? html`<s>${goal.text}</s>` : goal.text}</span></label></li>`;
+              return html`<li><label class="goal-check"><input type="checkbox" checked=${goal.done} disabled aria-label=${`Goal ${i + 1}: ${goal.text}`} title=${`Read-only; use lobstah goals ${goal.done ? 'undo' : 'done'} ${i + 1} --grounds ${g.grounds}`} /><span>${goal.done ? html`<s>${LinkedText(goal.text)}</s>` : LinkedText(goal.text)}</span></label></li>`;
             },
           )}</ol></section>`,
       )}</div>`,
