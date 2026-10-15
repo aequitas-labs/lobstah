@@ -86,7 +86,7 @@ it('recap facts include active/done dispatch results, opened/merged PRs, answere
   expect(output.status, output.stderr).toBe(0); expect(JSON.parse(output.stdout).dispatches).toHaveLength(2);
 });
 
-it('pins today, not yesterday, above tend and on every glass tab using existing markup', async () => {
+it('keeps tend unchanged and shows numbered goals only at the top of On deck', async () => {
   const date = goalDate(new Date(), loadConfig().helm.timezone);
   setGoals('day', date, ['First priority <safe>']);
   setGoals('day', '2025-01-01', ['Old priority']);
@@ -96,9 +96,25 @@ it('pins today, not yesterday, above tend and on every glass tab using existing 
   const snapshot = emptyFleet(); snapshot.goals = report.goals;
   const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now() });
   try {
-    expect(page.$('#daily-goals')?.textContent).toContain('First priority <safe>');
-    await page.go('#reports');
-    expect(page.$('#daily-goals')?.textContent).toContain('First priority <safe>');
+    expect(page.$('#deck > #daily-goals')?.textContent).toContain(date);
+    expect(page.$('#daily-goals ol li')?.textContent).toBe('First priority <safe>');
+    expect(page.$('#deck')?.firstElementChild?.id).toBe('daily-goals');
     expect(page.$('#daily-goals safe')).toBeNull();
+    await page.go('#reports');
+    expect(page.$('#daily-goals')).toBeNull();
+    await page.go('#deck');
+    expect(page.$('#daily-goals ol li')?.textContent).toBe('First priority <safe>');
+  } finally { await page.close(); }
+});
+
+it('hides the callout when no goals are set and keeps tend unchanged', async () => {
+  const date = goalDate(new Date(), loadConfig().helm.timezone);
+  expect(buildTendReport().goals).toEqual([]);
+  expect(renderTend(buildTendReport())).not.toContain('goals —');
+  expect(buildGlassSnapshot().goals).toEqual([]);
+  const snapshot = emptyFleet(); snapshot.goals = [{ grounds: 'day', date, lines: [] }];
+  const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now() });
+  try {
+    expect(page.$('#daily-goals')).toBeNull();
   } finally { await page.close(); }
 });

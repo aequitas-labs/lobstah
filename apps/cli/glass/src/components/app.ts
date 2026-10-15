@@ -38,7 +38,7 @@ export function App({ state }: { state: GlassState }) {
   const page = (t: GlassTab): Children => {
     if (!inp || t !== tab) return null;
     if (t === 'deck')
-      return html`<${Deck} inp=${inp.deck} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`;
+      return html`<${Deck} inp=${inp.deck} goals=${d?.goals} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`;
     if (t === 'dispatches') return html`<${Dispatches} inp=${inp.dispatches} more=${more('dispatches')} />`;
     if (t === 'traps') return html`<${Traps} inp=${inp.traps} />`;
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} more=${more('prs')} />`;
@@ -51,11 +51,6 @@ export function App({ state }: { state: GlassState }) {
   };
   return [
     html`<${Header} d=${d} inp=${inp} tab=${tab} st=${state.prefs} stale=${state.stale} unread=${unread.length} />`,
-    !!d?.goals?.length &&
-      html`<section id="daily-goals" aria-label="Today's goals">${d.goals.map(
-        (g) =>
-          html`<div key=${g.grounds}><h2>Goals · ${g.grounds} · ${g.date}</h2><ul>${g.lines.map((line) => html`<li>${line}</li>`)}</ul></div>`,
-      )}</section>`,
     GLASS_TABS.map(
       (t) =>
         html`<main key=${t} id=${'page-' + t} class=${d ? (t === tab ? 'tabpage on' : 'tabpage') : 'tabpage'}><div id=${t}>${page(t)}</div></main>`,
