@@ -72,7 +72,8 @@ describe('the ledger', () => {
     expect(g).toMatchObject({ command: 'npm publish', match: 'exact', mode: 'always', harness: 'any', by: 'local:chris', uses: 0 });
     expect(g.expiresAt).toBeUndefined();
     expect(listGrants().grants.map((x) => x.id)).toEqual([g.id]);
-    expect(fs.statSync(path.join(grantsDir(), 'ledger.jsonl')).mode & 0o777).toBe(0o600);
+    // Readable by its owner only, where the platform has POSIX modes.
+    if (process.platform !== 'win32') expect(fs.statSync(path.join(grantsDir(), 'ledger.jsonl')).mode & 0o777).toBe(0o600);
   });
 
   it('spends a once-grant on its first use', () => {
