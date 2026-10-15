@@ -1,0 +1,26 @@
+$ lobstah man tend
+
+goals — demo · 2026-10-14
+- Finish the daily-goals review
+- Prepare screenshots for review
+grounds: demo
+backend: local
+verdict: daemon-down
+daemon: down (last heartbeat never)
+queued: 1
+active: headless: 0 of 2; traps: 0
+chores: 0
+done24h: 0
+failed24h: 0
+queued work waits: trap wt:demo-trap not listening
+
+work[1]{key,dispatches,pr,gate,watch,activity,progress}:
+  (direct),"demo-cat:queued (addressed to trap wt:demo-trap, which is not signed on)",,,,,
+
+repo-traps[1]{repo,traps}:
+  demo,0/unlimited traps
+
+awaiting-trap (sticky — never claimed headless)[1]{id,for,waitingMins}:
+  demo-cat,wt:demo-trap,0
+
+helm: demo=fixture helm [demo-hel] claude · unknown model (1s ago)

@@ -1,0 +1,8 @@
+$ lobstah goals add "Prepare screenshots for review" --grounds demo
+$ lobstah goals --grounds demo
+
+# Goals for 2026-10-14 (demo)
+
+1. Finish the daily-goals review
+2. Check the demo catch
+3. Prepare screenshots for review

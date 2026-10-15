@@ -1,0 +1,72 @@
+{
+  "browser": "154.0.8037.0",
+  "url": "http://127.0.0.1:54124/",
+  "installability": {
+    "installabilityErrors": []
+  },
+  "manifest": {
+    "url": "http://127.0.0.1:54124/manifest.webmanifest",
+    "errors": [],
+    "data": {
+      "id": "/",
+      "name": "lobstah glass",
+      "short_name": "glass",
+      "start_url": "/",
+      "scope": "/",
+      "display": "standalone",
+      "background_color": "#0e1116",
+      "theme_color": "#0e1116",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/icons/icon-512.png",
+          "sizes": "512x512",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/icons/icon-maskable-512.png",
+          "sizes": "512x512",
+          "type": "image/png",
+          "purpose": "maskable"
+        }
+      ]
+    },
+    "parsed": {
+      "scope": "http://127.0.0.1:54124/"
+    },
+    "manifest": {
+      "backgroundColor": "rgba(14,17,22,1)",
+      "display": "kStandalone",
+      "icons": [
+        {
+          "url": "http://127.0.0.1:54124/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        },
+        {
+          "url": "http://127.0.0.1:54124/icons/icon-512.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        },
+        {
+          "url": "http://127.0.0.1:54124/icons/icon-maskable-512.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        }
+      ],
+      "id": "http://127.0.0.1:54124/",
+      "name": "lobstah glass",
+      "orientation": "DEFAULT",
+      "preferRelatedApplications": false,
+      "scope": "http://127.0.0.1:54124/",
+      "startUrl": "http://127.0.0.1:54124/",
+      "themeColor": "rgba(14,17,22,1)"
+    }
+  }
+}
