@@ -29,6 +29,8 @@ import {
 import type { ReviewItem, ReviewRound } from '@lobstah/core';
 import { githubRepoFromOrigin } from '../config.js';
 import { dispatchLane } from './report.js';
+import { postReview } from '../reviews-post.js';
+import type { FetchLike } from '../reviews-post.js';
 
 /**
  * One search per poll for open PRs whose review is requested from the
@@ -107,13 +109,29 @@ export async function reviewsLoop(
   identity: string,
   token: () => string,
   log: (m: string) => void = () => {},
-  opts: { run?: GhGraphql; now?: number } = {},
+  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number } = {},
 ): Promise<void> {
   if (!loadConfig().reviews.enabled) return;
   const now = opts.now ?? Date.now();
   // The search needs the budget; drafting is local and runs either way.
   if (!githubBlockedUntil(now)) searchReviews(identity, token, log, opts.run ?? runGraphql, now);
   draftReviews(identity, log, now);
+  if (!githubBlockedUntil(now)) await autoPost(token, log, opts.fetch, now);
+}
+
+/**
+ * `[reviews].post = "auto"`: post each fresh draft as a comment-only
+ * review. A stale draft never auto-posts, and a failed post is not retried
+ * on its own (it keeps its reason; Chris posts it).
+ */
+async function autoPost(token: () => string, log: (m: string) => void, f: FetchLike | undefined, now: number): Promise<void> {
+  const rc = loadConfig().reviews;
+  for (const item of listReviews()) {
+    const r = latestRound(item);
+    if (r?.state !== 'drafted' || r.reason?.startsWith('post failed') || reviewSettings(rc, item.pr.repoKey).post !== 'auto') continue;
+    const out = await postReview(item.key, { by: 'auto', token, ...(f ? { fetch: f } : {}), now });
+    log(out.posted ? `${item.key}: review posted (${out.reviewId})` : `${item.key}: auto-post failed: ${out.why}`);
+  }
 }
 
 function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number): void {
@@ -270,11 +288,11 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if (!r.dispatch) continue;
     const job = verbOf(r.dispatch);
     const ended = job?.verb === 'done' || job?.verb === 'failed';
-    if (r.state === 'withdrawn') {
+    if (r.state === 'withdrawn' || r.state === 'dismissed') {
       if (job && !ended) {
         try {
           requestCancel(r.dispatch, job.lane);
-          log(`${item.key}: request gone; cancelled the review job ${r.dispatch}`);
+          log(`${item.key}: round ${r.state}; cancelled the review job ${r.dispatch}`);
         } catch {
           // still queued or already gone
         }

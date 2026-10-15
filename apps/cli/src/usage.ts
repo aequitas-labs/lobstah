@@ -76,10 +76,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
   prs: { flags: {}, maxPositionals: 0 },
   reports: { flags: { '--json': {} } },
   reviews: {
-    subverbs: ['ls', 'redraft'],
-    flags: { '--json': {}, '--all': {} },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''] },
-    positionals: '[ls | redraft <key>]',
+    subverbs: ['ls', 'redraft', 'post', 'edit', 'dismiss'],
+    flags: { '--json': {}, '--all': {}, '--stale': {}, '--body-file': { value: '<file>' }, '--comments-file': { value: '<file>' } },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--stale': ['post'], '--body-file': ['edit'], '--comments-file': ['edit'] },
+    positionals: '[<key>]',
   },
   todo: {
     subverbs: ['add', 'done', 'drop', 'ls'],
@@ -324,11 +324,10 @@ context at every session start. Reserved for the helm; a trap gets none.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,
-  reviews: `PRs on which someone asked for your review ([reviews], found by lobstah pick):
-key, PR, title, author, who asked, the newest round's state, and why it is there.
-Bare lists the open ones (requested, drafting, drafted, stale, failed); --all
-adds posted, dismissed and withdrawn. redraft <key> starts a new draft of a stale
-or failed round at the PR's current head.`,
+  reviews: `PRs that ask for your review ([reviews]), newest round each; --all adds closed rounds.
+post posts the draft as a comment-only review, once per round (--stale for a stale one);
+edit replaces review.md or comments.json; dismiss drops it; redraft re-drafts a stale or
+failed round. lobstah never approves or requests changes.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

@@ -289,6 +289,22 @@ outside the configured repos, or `maxPerDay` jobs already started today
 (UTC) leave the round `requested` with the reason. `lobstah reviews redraft
 <key>` drafts a stale or failed round again at the current head.
 
+**Posting.** `postReview` is the one path to GitHub:
+`POST /repos/{o}/{r}/pulls/{n}/reviews` with the event fixed to `COMMENT`
+(it takes no event argument, so nothing ever approves or requests changes),
+`commit_id` set to the head the draft reviewed, the inline comments, and a
+body ending with `<!-- lobstah:review <round id> -->`. It runs only on a
+human action (`lobstah reviews post <key>`, the glass's Post) or, with
+`[reviews].post = "auto"`, on a fresh draft. A stale draft never auto-posts,
+and posts by hand only with `--stale`, which adds a line saying the PR has
+moved. Each round posts at most once: `posted.json` in the round's directory
+is created with `wx` before the call and removed if the call fails, and a
+review on the PR that already carries the round's marker (another boat
+posted it) is recorded instead of posted again. A failed post keeps its
+reason on the round and is not retried on its own. `lobstah reviews edit`
+replaces the draft's `review.md` or `comments.json`; `lobstah reviews
+dismiss` drops the round without posting.
+
 Round states: `requested`, `drafting`, `drafted`, `stale`, `failed`,
 `posted`, `dismissed`, `withdrawn`. The `review` attention item stands while
 the newest round is `drafted`, `stale`, `failed`, or `requested` with no job

@@ -321,7 +321,8 @@ export function reviewRoundDir(key: string, roundId: string): string | undefined
   return dir && /^[A-Za-z0-9_-]+$/.test(roundId) ? path.join(dir, 'rounds', roundId) : undefined;
 }
 
-function parseComments(raw: unknown): ReviewComment[] | string {
+/** Inline comments from JSON, or why they are malformed. */
+export function parseReviewComments(raw: unknown): ReviewComment[] | string {
   if (!Array.isArray(raw)) return 'comments.json is not a JSON array';
   const out: ReviewComment[] = [];
   for (const [i, c] of raw.entries()) {
@@ -350,7 +351,7 @@ export function readRoundDraft(key: string, roundId: string): { body: string; co
   const file = path.join(dir, 'comments.json');
   if (fs.existsSync(file)) {
     try {
-      comments = parseComments(JSON.parse(fs.readFileSync(file, 'utf8')));
+      comments = parseReviewComments(JSON.parse(fs.readFileSync(file, 'utf8')));
     } catch {
       comments = 'comments.json is not valid JSON';
     }
@@ -389,6 +390,51 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, ...rest } = r;
   item.rounds[item.rounds.length - 1] = { ...rest, state: 'requested', headSha: item.pr.headSha };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+}
+
+/** The hidden marker a posted review ends with: one per round, so a second post of it can be found. */
+export function reviewMarker(roundId: string): string {
+  return `<!-- lobstah:review ${roundId} -->`;
+}
+
+/**
+ * Edit the newest round's draft (drafted or stale): replace the summary,
+ * the inline comments, or both. Returns the item, or why it cannot.
+ */
+export function editReviewDraft(key: string, change: { body?: string; comments?: unknown }, now = Date.now()): ReviewItem | string {
+  const item = readReview(key);
+  const r = item && latestRound(item);
+  if (!item || !r) return `no review item ${key}`;
+  if (r.state !== 'drafted' && r.state !== 'stale') return `${key}: the newest round is ${r.state}; only a drafted or stale review can be edited`;
+  const dir = reviewRoundDir(key, r.id)!;
+  if (change.body !== undefined && !change.body.trim()) return 'the review body cannot be empty';
+  const comments = change.comments === undefined ? undefined : parseReviewComments(change.comments);
+  if (typeof comments === 'string') return comments;
+  fs.mkdirSync(dir, { recursive: true });
+  if (change.body !== undefined) fs.writeFileSync(path.join(dir, 'review.md'), change.body);
+  if (comments) fs.writeFileSync(path.join(dir, 'comments.json'), `${JSON.stringify(comments, null, 2)}\n`);
+  return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+}
+
+/** Dismiss the newest round: nothing is posted, and it leaves attention. A drafting job is cancelled by the next pick cycle. */
+export function dismissReview(key: string, by: string, now = Date.now()): ReviewItem | string {
+  const item = readReview(key);
+  const r = item && latestRound(item);
+  if (!item || !r) return `no review item ${key}`;
+  if (!OPEN_STATES.includes(r.state)) return `${key}: the newest round is already ${r.state}`;
+  Object.assign(r, { state: 'dismissed', by });
+  delete r.reason;
+  return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+}
+
+/** Record a posted round (`posted.json` is the post's write-once receipt; this is the item's view). */
+export function markReviewPosted(key: string, roundId: string, post: { reviewId: string; by: string; at: string }): ReviewItem | undefined {
+  const item = readReview(key);
+  const r = item?.rounds.find((x) => x.id === roundId);
+  if (!item || !r) return undefined;
+  Object.assign(r, { state: 'posted', postedAt: post.at, postedReviewId: post.reviewId, by: post.by });
+  delete r.reason;
+  return writeReview({ ...item, updatedAt: post.at });
 }
 
 // ── Attention ──────────────────────────────────────────────────────────────

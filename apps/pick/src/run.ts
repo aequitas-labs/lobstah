@@ -17,6 +17,8 @@ import type { MergePolicy, MergeSource, Source } from './types.js';
 export { readMergeView, readPickupMap } from './merge-view.js';
 export type { MergeView, MergeViewPr } from './merge-view.js';
 export { githubRepoFromOrigin, loadPickupConfig } from './config.js';
+export { postReview } from './reviews-post.js';
+export type { PostBy, PostResult } from './reviews-post.js';
 export type { PickupConfig } from './config.js';
 
 /**
