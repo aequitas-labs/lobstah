@@ -9,6 +9,7 @@ import type {
   GlassOlderPage,
   GlassPr,
   GlassReport,
+  GlassReview,
   GlassSnapshot,
   GlassStack,
   GlassTrap,
@@ -142,7 +143,7 @@ export function prBadgeClass(b: Partial<PrBadge> | undefined | null): string {
   return state === 'open' && b.tone && b.tone !== 'ok' ? b.tone : 'pr-' + state;
 }
 
-export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'prs', 'reports', 'notices', 'stats'] as const;
+export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'prs', 'reviews', 'reports', 'notices', 'stats'] as const;
 export type GlassTab = (typeof GLASS_TABS)[number];
 
 export function tabFromHash(hash: string | undefined | null): GlassTab {
@@ -271,6 +272,13 @@ export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>)
   if (r.author === 'headless') return r.dispatch ? r.dispatch.slice(0, 8) : '';
   return r.author;
 }
+
+/** Reviews in list order: the ones that ask for Chris first, then the newest request first. */
+export const reviewOrder = (a: GlassReview, b: GlassReview): number =>
+  Number(b.stands) - Number(a.stands) || b.requestedAt.localeCompare(a.requestedAt);
+
+/** How many reviews ask for Chris: the Reviews tab's count. */
+export const standingReviews = (d: Pick<GlassSnapshot, 'reviews'>): number => (d.reviews || []).filter((r) => r.stands).length;
 
 /** Reports in list order: unacked first, then newest first. */
 export const reportOrder = (a: GlassReport, b: GlassReport): number =>
@@ -472,6 +480,7 @@ export interface SectionInputs {
   traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[] };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
+  reviews: { view: GlassPrefs['view'] | undefined; list: GlassReview[] };
   notices: { list: Notice[] };
   foot: { version: string; repoUrl: string };
   modal: { modal: ModalRef | null; item: Seat<ModalItem> | null; prefs: { view: GlassPrefs['view'] | undefined; lobs: boolean | undefined } | undefined };
@@ -540,6 +549,12 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     reports: {
       view: st.view,
       list: reports,
+    },
+    reviews: {
+      view: st.view,
+      list: (d.reviews || [])
+        .filter((r) => matchesRepo(r.repoKey, st, true) && hasQuery(r.repo, r.number, r.title, r.author, r.requestedBy, r.state))
+        .sort(reviewOrder),
     },
     notices: {
       list: (d.notices || []).filter(

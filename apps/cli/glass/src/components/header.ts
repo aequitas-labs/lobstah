@@ -1,5 +1,5 @@
 import type { GlassSnapshot } from '@lobstah/core';
-import { GLASS_TABS } from '../../../src/glass-diff.js';
+import { GLASS_TABS, standingReviews } from '../../../src/glass-diff.js';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../../src/glass-diff.js';
 import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
@@ -12,6 +12,7 @@ const TAB_LABEL: Record<GlassTab, string> = {
   dispatches: 'Dispatches',
   traps: 'Traps',
   prs: 'PRs',
+  reviews: 'Reviews',
   reports: 'Reports',
   notices: 'Notices',
   stats: 'Stats',
@@ -119,7 +120,7 @@ export function Header({
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
     html`<nav class="tabs" id="tabs" aria-label="Spyglass views">${GLASS_TABS.map(
       (t) =>
-        html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined}>${TAB_LABEL[t]}${t === 'deck' && unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new decision${unread === 1 ? '' : 's'}`}>${unread}</span>`}</a>`,
+        html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined}>${TAB_LABEL[t]}${t === 'deck' && unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new decision${unread === 1 ? '' : 's'}`}>${unread}</span>`}${t === 'reviews' && d && standingReviews(d) > 0 && html`<span class="tcount" aria-label=${`${standingReviews(d)} review${standingReviews(d) === 1 ? '' : 's'} waiting`}>${standingReviews(d)}</span>`}</a>`,
     )}</nav>`,
     controls(d, tab, st),
   ];

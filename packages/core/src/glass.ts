@@ -1,3 +1,4 @@
+import type { ReviewComment, ReviewRoundState } from './reviews.js';
 import type { AttentionKind } from './config.js';
 import type { HelmRegistration } from './helm.js';
 import type { Notice } from './notices.js';
@@ -288,6 +289,34 @@ export interface GlassHelm extends HelmRegistration {
  * page from /report/<key>/md when a modal opens, and its images from
  * /report/<key>/files/<name>.
  */
+/** A review item as the glass shows it (reviews.ts): the PR, its newest round, and that round's draft. */
+export interface GlassReview {
+  key: string;
+  url: string;
+  /** `owner/repo`. */
+  repo: string;
+  number: number;
+  title: string;
+  author: string;
+  /** The configured repo key, when the PR is in one. */
+  repoKey?: string;
+  requestedBy?: string;
+  requestedAt: string;
+  state: ReviewRoundState;
+  /** The newest round asks for Chris (it is in the review attention kind's standing set). */
+  stands: boolean;
+  reason?: string;
+  /** The head the round reviews, and the PR's head now. */
+  headSha: string;
+  prHeadSha: string;
+  draftedAt?: string;
+  postedAt?: string;
+  by?: string;
+  /** The draft (drafted and stale rounds). */
+  body?: string;
+  comments?: ReviewComment[];
+}
+
 export interface GlassReport {
   key: string;
   title: string;
@@ -423,6 +452,8 @@ export interface GlassSnapshot {
   landed: LandedCatch[];
   /** Every filed report, newest first. */
   reports: GlassReport[];
+  /** Review requests ([reviews]); absent on a hosted grounds. */
+  reviews?: GlassReview[];
   /** The helms' open to-dos, every grounds; the deck lists them. */
   todos?: TodoView[];
   /** A short note when to-dos sit past `[helm].todoStaleDays`. */

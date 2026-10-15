@@ -80,6 +80,8 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
       if (x.kind === 'decision' && x.key) return { key: 'decision:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
       if ((x.kind ?? 'question') === 'question' && x.key)
         return { key: 'question:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
+      // A review request opens the Reviews tab.
+      if (x.kind === 'review' && x.key) return { key: 'review:' + x.key, text: x.note || x.verb, label, hash: '#reviews', ...hide };
       // A report opens its own page in a new tab.
       if (x.kind === 'report' && x.key) return { key: 'report:' + x.key, text: x.note || x.verb, label, href: reportPageUrl(x.key), ...hide };
       return typeof x.kind === 'string' && (x.kind.startsWith('pr:') || x.kind === 'stack-ready') && x.prUrl
