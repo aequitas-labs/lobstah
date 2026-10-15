@@ -104,6 +104,17 @@ describe('lobstah hook grant-check (the Claude Code mod)', () => {
   });
 });
 
+describe('the Claude Code mod', () => {
+  it('uses only the mods API: a hooks module may import nothing but its own files and claude-code', () => {
+    const source = fs.readFileSync(fileURLToPath(new URL('../../../plugins/claude-code/hooks/grants.mjs', import.meta.url)), 'utf8');
+    expect(source).not.toMatch(/^\s*import\b/m);
+    expect(source).not.toMatch(/\brequire\(/);
+    expect(source).toContain("$.process.run(['lobstah', 'hook', 'grant-check']");
+    const hooks = JSON.parse(fs.readFileSync(fileURLToPath(new URL('../../../plugins/claude-code/hooks/hooks.json', import.meta.url)), 'utf8'));
+    expect(hooks.modules).toEqual(['./grants.mjs']);
+  });
+});
+
 describe('the calls a grant is checked against', () => {
   it('reads the files of an apply_patch, and refuses a patch unless every file is covered', () => {
     const patch = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** Add File: .temp/b.txt\n+z\n*** End Patch';
