@@ -183,6 +183,7 @@ describe('glass snapshot', () => {
     expect(html).not.toMatch(/<script[^>]* src=|<link[^>]*stylesheet/);
     expect(html).toContain('<title>spyglass</title>');
     expect(html).toContain('rel="manifest" href="/manifest.webmanifest"');
+    expect(html).toContain('rel="icon" type="image/png" href="/icons/favicon.png"');
     expect(html).toContain('rel="apple-touch-icon" href="/icons/apple-touch-icon.png"');
     expect(html).not.toContain('serviceWorker');
     const manifestResponse = await fetch(`http://127.0.0.1:${port}/manifest.webmanifest`);
