@@ -33,6 +33,8 @@ export interface ReviewSettings {
   /** Requests on PRs by these authors, or with these labels, file an item but start no job. */
   skipAuthors: string[];
   skipLabels: string[];
+  /** The person's own review rules (markdown), added to every review brief; a repo's own rules files are read too. */
+  rules?: string;
 }
 
 export interface ReviewsConfig extends ReviewSettings {
@@ -85,6 +87,10 @@ function parseSettings(raw: Record<string, unknown>, where: string): Partial<Rev
   if (raw.trapWaitSecs !== undefined) out.trapWaitSecs = nonNegative(raw.trapWaitSecs, `${where}.trapWaitSecs`);
   if (raw.skipAuthors !== undefined) out.skipAuthors = strings(raw.skipAuthors, `${where}.skipAuthors`);
   if (raw.skipLabels !== undefined) out.skipLabels = strings(raw.skipLabels, `${where}.skipLabels`);
+  if (raw.rules !== undefined) {
+    if (typeof raw.rules !== 'string' || raw.rules.length > 20000) throw new Error(`${where}.rules must be text of at most 20000 characters`);
+    if (raw.rules.trim()) out.rules = raw.rules.trim();
+  }
   return out;
 }
 

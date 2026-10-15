@@ -66,6 +66,9 @@ describe('[reviews] config', () => {
     expect(reviewSettings(cfg, 'web')).toMatchObject({ work: 'off', limits: { wallClockSecs: 300, maxTurns: 40, maxBudgetUsd: 2 } });
     expect(reviewSettings(cfg, 'other')).toMatchObject({ work: 'headless', limits: { wallClockSecs: 900 } });
     expect(() => parseReviews({ post: 'approve' })).toThrow('[reviews].post must be "draft", "auto"');
+    expect(reviewSettings(parseReviews({ rules: '  Flag missing tests.  ' }, { web: { reviews: { rules: 'Check the migration order.' } } }), 'web').rules).toBe('Check the migration order.');
+    expect(reviewSettings(parseReviews({ rules: 'Flag missing tests.' }), 'other').rules).toBe('Flag missing tests.');
+    expect(() => parseReviews({ rules: 3 })).toThrow('[reviews].rules must be text');
     expect(() => parseReviews({}, { web: { reviews: { work: 'always' } } })).toThrow('[repos.web.reviews].work');
   });
 

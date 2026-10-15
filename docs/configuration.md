@@ -350,6 +350,7 @@ as that identity, with its token. Any key except `enabled`, `repos` and
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
 | `maxPerDay` | `20` | Review jobs started per day. Past it, items file with no job. |
 | `skipAuthors`, `skipLabels` | `[]` | Requests on PRs by these authors or with these labels file an item but start no job. |
+| `rules` | — | Your own review rules, as markdown, added to every review brief (a repo's `[repos.<key>.reviews].rules` replaces it there). The brief also tells the job to follow the repo's own rules files, and `[repos.<key>.briefHooks].prReview` appends repo text. |
 
 The `review` attention kind is not in the default `attentionKinds`; add it to
 let review items walk in `man tend`, the glass, and the pet.
