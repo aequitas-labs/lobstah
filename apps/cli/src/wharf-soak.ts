@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { brokerRequest, forgetBrokerAgent, readBrokerAgent, saveBrokerAgent, type BackendScope, type BrokerAgent, type BrokerPoll } from '@lobstah/core';
+import { IdleWait, loadConfig, brokerRequest, forgetBrokerAgent, readBrokerAgent, saveBrokerAgent, type BackendScope, type BrokerAgent, type BrokerPoll } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
 import { wharfSessionPid } from './wharf-session-pid.js';
 import { detectHarness } from './harness-detect.js';
@@ -13,13 +13,15 @@ export async function endBrokerAgent(a: BrokerAgent) {
     if (a.origin) forgetBrokerAgent(a.grounds, a.origin);
   }
 }
-export async function waitBrokerAgent(a: BrokerAgent, seconds: number): Promise<BrokerPoll> {
-  const deadline = seconds ? Date.now() + seconds * 1000 : Infinity;
+export async function waitBrokerAgent(a: BrokerAgent, seconds?: number): Promise<BrokerPoll> {
+  const idle = new IdleWait(a.session, loadConfig().wait, seconds === undefined ? undefined : String(seconds));
   do {
     const p = await brokerRequest<BrokerPoll>('poll', brokerBody(a));
-    if (p.claim || p.messages?.length || Date.now() >= deadline) return p;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(5000, Math.max(0, deadline - Date.now()))));
-  } while (Date.now() < deadline);
+    if (p.claim || p.messages?.length) { idle.woke(); return p; }
+    if (!idle.probe && idle.expired()) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(5000, idle.probe ? 5000 : idle.remainingMs())));
+  } while (idle.probe || !idle.expired());
+  idle.timedOut();
   return { claim: null };
 }
 /** Every live hosted trap signs on and gets work through the boat daemon. */
@@ -31,8 +33,8 @@ export async function wharfSoak(scope: Scope, opts: Options): Promise<void> {
   const repo = opts.opt('--repo') ?? process.env.LOBSTAH_WHARF_REPO ?? a?.repo;
   if (!repo) throw new Error('wharf soak requires --repo <configured-repo>');
   if (a && a.repo !== repo) throw new Error('the signed-on trap belongs to a different repo');
-  const seconds = opts.has('--wait') ? Number(opts.opt('--timeout') ?? 600) : 0;
-  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('timeout must be nonnegative seconds');
+  const seconds = opts.opt('--timeout') === undefined ? undefined : Number(opts.opt('--timeout'));
+  if (seconds !== undefined && (!Number.isFinite(seconds) || seconds < 0)) throw new Error('timeout must be nonnegative seconds');
   if (!a) {
     const harness = detectHarness({ flag: opts.opt('--harness'), sessionId: session });
     if (!harness.harness) throw new Error(`${harness.reason}; use --harness claude|codex`);

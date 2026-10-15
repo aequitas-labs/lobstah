@@ -1,0 +1,70 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
+import type { WaitConfig } from './config.js';
+
+const fileFor = (key: string) => path.join(lobstahHome(), 'wait-backoff', `${key}.json`);
+const sessionKey = (session: string) => `history-${encodeURIComponent(session)}`;
+const resetKey = (session: string) => `reset-${encodeURIComponent(session)}`;
+function read<T>(key: string): T | undefined {
+  try { return JSON.parse(fs.readFileSync(fileFor(key), 'utf8')) as T; }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT' || e instanceof SyntaxError) return undefined; throw e; }
+}
+function write(key: string, value: unknown): void {
+  const file = fileFor(key);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = uniqueTempPath(file);
+  fs.writeFileSync(tmp, JSON.stringify(value));
+  atomicRenameSync(tmp, file);
+}
+
+/** A prompt/event resets its session; a dispatch/send resets all local waiters. */
+export function resetWaitBackoff(session?: string): void {
+  write(session ? resetKey(session) : 'activity', randomUUID());
+}
+function generation(session?: string): string {
+  return JSON.stringify([read<string>('activity'), session ? read<string>(resetKey(session)) : undefined]);
+}
+
+/** Empty counts 0, 1, 2 use the base; count 3 doubles it with the defaults. */
+export function waitTimeoutSecs(emptyTimeouts: number, config: WaitConfig): number {
+  const exponent = Math.max(0, emptyTimeouts - config.baseRepeats + 1);
+  return Math.min(config.maxTimeoutSecs, config.baseTimeoutSecs * 2 ** Math.min(exponent, 52));
+}
+
+type History = { generation: string; emptyTimeouts: number };
+
+/** Poll this deadline as usual: backoff never changes the event polling cadence. */
+export class IdleWait {
+  private epoch: string;
+  private started: number;
+  private emptyTimeouts = 0;
+  private config: WaitConfig;
+  readonly probe: boolean;
+  constructor(private session: string | undefined, config: WaitConfig, timeout?: string, now = Date.now()) {
+    const base = timeout === undefined ? config.baseTimeoutSecs : Number(timeout);
+    if (!Number.isFinite(base) || base < 0) throw new Error('timeout must be nonnegative seconds');
+    this.probe = base === 0;
+    this.config = { ...config, baseTimeoutSecs: base, maxTimeoutSecs: Math.max(base, config.maxTimeoutSecs) };
+    this.epoch = generation(session);
+    this.started = now;
+    const history = session ? read<History>(sessionKey(session)) : undefined;
+    if (history?.generation === this.epoch && Number.isSafeInteger(history.emptyTimeouts) && history.emptyTimeouts >= 0)
+      this.emptyTimeouts = history.emptyTimeouts;
+  }
+  get timeoutSecs(): number { return this.probe ? 0 : waitTimeoutSecs(this.emptyTimeouts, this.config); }
+  /** A reset while armed shortens a backed-off wait to a fresh base wait. */
+  remainingMs(now = Date.now()): number {
+    const epoch = generation(this.session);
+    if (epoch !== this.epoch) { this.epoch = epoch; this.emptyTimeouts = 0; this.started = now; }
+    return Math.max(0, this.started + this.timeoutSecs * 1000 - now);
+  }
+  expired(now = Date.now()): boolean { return this.remainingMs(now) === 0; }
+  timedOut(now = Date.now()): void {
+    // Probes and a waiter overtaken by a reset cannot advance the history.
+    if (!this.session || this.probe || generation(this.session) !== this.epoch || !this.expired(now)) return;
+    write(sessionKey(this.session), { generation: this.epoch, emptyTimeouts: this.emptyTimeouts + 1 } satisfies History);
+  }
+  woke(): void { if (this.session) resetWaitBackoff(this.session); }
+}

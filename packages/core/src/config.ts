@@ -221,6 +221,12 @@ export interface HelmConfig {
   armGraceSecs: number;
 }
 
+export interface WaitConfig {
+  baseTimeoutSecs: number;
+  baseRepeats: number;
+  maxTimeoutSecs: number;
+}
+
 export interface WatchConfig {
   /**
    * The most CI-fix (continuation) dispatches one watch cycle may fork.
@@ -275,6 +281,7 @@ export interface Config {
   limits: LimitsConfig;
   soak: SoakConfig;
   helm: HelmConfig;
+  wait: WaitConfig;
   glass: GlassConfig;
   pet: PetConfig;
   watch: WatchConfig;
@@ -346,6 +353,7 @@ export const DEFAULT_HELM: HelmConfig = {
 };
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
+export const DEFAULT_WAIT: WaitConfig = { baseTimeoutSecs: 900, baseRepeats: 3, maxTimeoutSecs: 14400 };
 
 export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, maxRepairsWithoutProgress: 2, repairSettleSecs: 600, repairCooldownSecs: 0, repairTrapWaitSecs: 600 };
 
@@ -383,6 +391,12 @@ export function loadConfig(): Config {
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
+  const wait = { ...DEFAULT_WAIT, ...((raw.wait as Partial<WaitConfig>) ?? {}) };
+  for (const key of ['baseTimeoutSecs', 'baseRepeats', 'maxTimeoutSecs'] as const) {
+    if (typeof wait[key] !== 'number' || !Number.isSafeInteger(wait[key]) || wait[key] <= 0)
+      throw new Error(`[wait].${key} must be a positive whole number in ${configPath()}`);
+  }
+  if (wait.maxTimeoutSecs < wait.baseTimeoutSecs) throw new Error(`[wait].maxTimeoutSecs must be at least baseTimeoutSecs in ${configPath()}`);
   for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isFinite(helm[key]) || helm[key] < 0) {
       throw new Error(`[helm].${key} must be a non-negative number in ${configPath()}`);
@@ -438,6 +452,7 @@ export function loadConfig(): Config {
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
     soak: parseSoak(raw.soak),
     helm,
+    wait,
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
     pet: { open: petOpen },
     watch,

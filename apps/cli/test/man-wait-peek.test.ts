@@ -16,6 +16,9 @@ import {
   listNotices,
   postNotice,
   writeRequest,
+  DEFAULT_WAIT,
+  IdleWait,
+  takeHelm,
 } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -45,6 +48,20 @@ function lobstah(...args: string[]) {
 }
 
 describe('man wait --peek — a check, never a park', () => {
+  it('a peek preserves capped history; actual event delivery resets it', () => {
+    const sid = 'backed-off-helm';
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.r]\npath = "."\n');
+    takeHelm({ sessionId: sid, grounds: { name: 'home', repos: ['r'] }, ttlMs: 60_000 });
+    enqueue({ id: 'question', repo: 'r', brief: 'b' }); claimNext('work');
+    appendStatus('question', 'work', 'needs-decision', 'which one?');
+    for (let i = 0; i < 7; i++) new IdleWait(sid, DEFAULT_WAIT, undefined, 0).timedOut(14_400_000);
+    expect(lobstah('man', 'wait', '--session', sid, '--peek').status).toBe(0);
+    expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(14400);
+    const woke = lobstah('man', 'wait', '--session', sid);
+    expect(woke.status, woke.stderr).toBe(0);
+    expect(woke.stdout).toContain('which one?');
+    expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(900);
+  });
   it('a pause wakes once with its waiting kind, link and full note, then stays quiet', () => {
     const id = 'pause';
     enqueue({ id, repo: 'r', brief: 'b' }); claimNext('work');
