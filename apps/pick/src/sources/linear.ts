@@ -1,5 +1,5 @@
 import type { Evidence, Verb } from '@lobstah/core';
-import { MARKER, marker } from '../types.js';
+import { MARKER, lobstahWrote, marker } from '../types.js';
 import type { Source, TrackedItem, WorkItem } from '../types.js';
 
 export interface LinearConfig {
@@ -200,7 +200,7 @@ export class LinearSource implements Source {
       { id: identifier },
     );
     return data.issue.comments.nodes
-      .filter((c) => !c.user?.isMe && !MARKER.test(c.body))
+      .filter((c) => !c.user?.isMe && !lobstahWrote(c.body))
       .filter((c) => !since || c.createdAt > since)
       .map((c) => c.body);
   }

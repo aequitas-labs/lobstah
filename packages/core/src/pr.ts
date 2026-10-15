@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { AttentionKind } from './config.js';
 import { firstMeaningfulLine } from './gh-errors.js';
+import { markRepliesRule } from './marker.js';
 import { cachedPrView } from './pr-poll.js';
 
 /**
@@ -660,7 +661,7 @@ export function prFixBrief(ref: PrRef): string {
 
 For a failed check: read its log (the details URL above, or \`gh run view\`), reproduce locally, fix it, and push to the PR's existing branch at the head sha named above — do not open a new PR.
 If a failed check cannot pass until a person approves the change, do not try to fix it: name it with \`--human-gate "<check name>"\` on your report, once per check.
-For a review decision: read the review with \`gh pr view ${ref.number} --repo ${ref.owner}/${ref.repo} --comments\`, address it, and push to the same branch.
+For a review decision: read the review with \`gh pr view ${ref.number} --repo ${ref.owner}/${ref.repo} --comments\`, address it, and push to the same branch. ${markRepliesRule()}
 Then report done with the same PR: \`lobstah report <id> done "<note>" --pr ${ref.url}\`.
 
 Raw events:

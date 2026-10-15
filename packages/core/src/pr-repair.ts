@@ -1,5 +1,6 @@
 import { loadConfig } from './config.js';
 import { readEvidence } from './evidence.js';
+import { markRepliesRule } from './marker.js';
 import { readPr, withPrLock, writePr } from './prs.js';
 import type { PrRecord } from './prs.js';
 import type { Lane } from './types.js';
@@ -226,5 +227,5 @@ export function repairBrief(
       `If a check cannot pass until a person approves the change, it is a human gate: do not change code for it, and name it on your report with --human-gate "<check name>", once per check. ${finish('rebase', 'merge')}`
     );
   }
-  return `${intro}\n${resolution} Read the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${finish('rebase', 'merge')}`;
+  return `${intro}\n${resolution} Read the requested review changes and comments with gh pr view --comments. Address the feedback. If a comment needs a person's decision, report needs-decision instead of guessing. ${markRepliesRule(opts.id)} ${finish('rebase', 'merge')}`;
 }

@@ -1,6 +1,6 @@
 import type { Evidence, Verb } from '@lobstah/core';
-import { loadConfig, withBriefHooks } from '@lobstah/core';
-import { MARKER, marker } from '../types.js';
+import { loadConfig, markRepliesRule, withBriefHooks } from '@lobstah/core';
+import { MARKER, lobstahWrote, marker } from '../types.js';
 import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../types.js';
 import { prEvidenceIndex, prUrlKey } from '../pr-evidence.js';
 
@@ -130,7 +130,7 @@ export class GithubSource implements Source, MergeSource {
         title: pr.title,
         followUp: uuid,
         brief: withBriefHooks(
-          `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. When the feedback is addressed, report status done.`,
+          `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. ${markRepliesRule(uuid)} When the feedback is addressed, report status done.`,
           loadConfig().repos[this.cfg.key],
           'review',
         ),
@@ -146,23 +146,24 @@ export class GithubSource implements Source, MergeSource {
    * CHANGES_REQUESTED review on any sha (a review of a slightly stale head
    * still asks for changes), a COMMENTED review with a body, or any comment
    * — always by someone other than the configured identity, and never a
-   * marker comment. APPROVED reviews are the merge loop's signal, not
-   * feedback. Returns undefined when no human has spoken.
+   * comment or review lobstah wrote (either marker). APPROVED reviews are
+   * the merge loop's signal, not feedback. Returns undefined when no human
+   * has spoken.
    */
   private async latestFeedback(n: number): Promise<string | undefined> {
     const events: Array<{ at: string; tag: string }> = [];
     const human = (login: string): boolean => login !== this.cfg.identity;
     const reviews = await this.paged<GhReview>(`/repos/${this.cfg.repo}/pulls/${n}/reviews`);
     for (const r of reviews) {
-      if (!human(r.user.login)) continue;
+      if (!human(r.user.login) || lobstahWrote(r.body)) continue;
       const actionable = r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && (r.body ?? '').trim() !== '');
       if (actionable) events.push({ at: r.submitted_at, tag: `rv${r.id}` });
     }
     for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/pulls/${n}/comments`)) {
-      if (human(c.user.login)) events.push({ at: c.created_at, tag: `rc${c.id}` });
+      if (human(c.user.login) && !lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `rc${c.id}` });
     }
     for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/issues/${n}/comments`)) {
-      if (human(c.user.login) && !MARKER.test(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}` });
+      if (human(c.user.login) && !lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}` });
     }
     events.sort((a, b) => (a.at === b.at ? a.tag.localeCompare(b.tag) : a.at.localeCompare(b.at)));
     return events.at(-1)?.tag;
@@ -211,7 +212,7 @@ export class GithubSource implements Source, MergeSource {
     const n = this.numberOf(key);
     const url = `/repos/${this.cfg.repo}/issues/${n}/comments${since ? `?since=${encodeURIComponent(since)}` : ''}`;
     const comments = await this.api<Array<{ body: string; user: { login: string } }>>('GET', url);
-    return comments.filter((c) => c.user.login !== this.cfg.identity && !MARKER.test(c.body)).map((c) => c.body);
+    return comments.filter((c) => c.user.login !== this.cfg.identity && !lobstahWrote(c.body)).map((c) => c.body);
   }
 
   async inProgress(): Promise<TrackedItem[]> {

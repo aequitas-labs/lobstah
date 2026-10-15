@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { conflictUpdate, enqueue, laneDirs, loadConfig, pushRule, readStatusLog, standalonePr, storedDescriptor, withBriefHooks } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { markedNote } from '../types.js';
 import type { MergePolicy, MergeSource, PrCandidate } from '../types.js';
 import type { PickupState } from '../state.js';
 import { recordMergeView } from '../merge-view.js';
@@ -143,7 +144,7 @@ export async function mergeLoop(
         continue;
       }
       if (verdict.state === 'failed') {
-        await ms.comment(candidate.number, `Automated rebase failed (dispatch ${rebase.uuid}) — needs a human.`);
+        await ms.comment(candidate.number, markedNote(`Automated rebase failed (dispatch ${rebase.uuid}) — needs a human.`, rebase.uuid));
         await ms.addLabel(candidate.number, 'needs-human');
         state.failRebase(prKey);
         log(`${prKey}: rebase chore failed, flagged for a human`);

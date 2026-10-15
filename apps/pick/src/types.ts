@@ -1,3 +1,4 @@
+import { HIDDEN_MARKER, hiddenMarker } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 
 export interface WorkItem {
@@ -104,4 +105,14 @@ export const DEFAULT_MERGE_POLICY: MergePolicy = {
 export const MARKER = /\[lobstah:([0-9a-f-]{36})\]/;
 export function marker(uuid: string): string {
   return `[lobstah:${uuid}]`;
+}
+
+/** Whether lobstah wrote this comment: it carries either marker. */
+export function lobstahWrote(body: string | null | undefined): boolean {
+  return !!body && (MARKER.test(body) || HIDDEN_MARKER.test(body));
+}
+
+/** A note lobstah posts, marked: led by the dispatch marker when one backs it, else ending with the hidden one. */
+export function markedNote(text: string, uuid?: string): string {
+  return uuid ? `${marker(uuid)} ${text}` : `${text}\n\n${hiddenMarker()}`;
 }
