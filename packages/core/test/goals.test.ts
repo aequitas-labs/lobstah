@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { claimGoalsPrompt, goalDate, goalsFile, loadConfig, readGoals, setGoals, setGoalsRecap } from '../src/index.js';
+import { addGoal, claimGoalsPrompt, goalDate, goalsFile, loadConfig, readGoals, removeGoal, setGoals, setGoalsRecap } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -47,6 +47,23 @@ it('reads hand-edited plain/bulleted lines and separates the recap', () => {
   const file = goalsFile('g', '2026-10-15'); fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, '# Today\n\nShip\n* Review\n\n## Recap\n\nAlso done: cleanup.\n');
   expect(readGoals('g', '2026-10-15')).toEqual({ grounds: 'g', date: '2026-10-15', lines: ['Ship', 'Review'], recap: 'Also done: cleanup.' });
+});
+
+it('adds and removes goals all day, preserves recap/history, and never repeats the first-chat card', () => {
+  expect(claimGoalsPrompt('g', '2026-10-15')).toBe(true);
+  setGoals('g', '2026-10-14', ['Yesterday']);
+  setGoals('g', '2026-10-15', ['One', 'Two']);
+  setGoalsRecap('g', '2026-10-15', 'Progress so far.');
+  expect(addGoal('g', '2026-10-15', 'Three').lines).toEqual(['One', 'Two', 'Three']);
+  expect(removeGoal('g', '2026-10-15', 2).lines).toEqual(['One', 'Three']);
+  removeGoal('g', '2026-10-15', 1); removeGoal('g', '2026-10-15', 1);
+  expect(readGoals('g', '2026-10-15')).toMatchObject({ lines: [], recap: 'Progress so far.' });
+  expect(claimGoalsPrompt('g', '2026-10-15')).toBe(false);
+  expect(addGoal('g', '2026-10-15', 'Later').lines).toEqual(['Later']);
+  expect(readGoals('g', '2026-10-14').lines).toEqual(['Yesterday']);
+  expect(() => removeGoal('g', '2026-10-15', 2)).toThrow('goal number');
+  expect(() => removeGoal('g', '2026-10-15', 0)).toThrow('goal number');
+  expect(() => removeGoal('g', '2026-10-15', 1.5)).toThrow('goal number');
 });
 
 it('claims the reminder once per day across sessions; goals or an existing card suppress it', () => {

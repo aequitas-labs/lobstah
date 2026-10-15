@@ -72,6 +72,9 @@ and its TOON output is built to be read by agents.
 
 `lobstah goals` shows today's goals; `lobstah goals set "<line>" [...]`
 replaces them, and `lobstah goals YYYY-MM-DD` reads a past day. Use
+`lobstah goals add "<text>"` to append a goal at any time and
+`lobstah goals rm <n>` to remove the numbered line shown by `lobstah goals`.
+These edit today's file without repeating the first-chat card. Use
 `--grounds <name>` to choose grounds and `--session <id>` to identify the helm
 for writes. Files are editable Markdown at
 `~/.lobstah/goals/<grounds>/YYYY-MM-DD.md` (implicit `home` uses the permanent

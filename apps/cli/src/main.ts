@@ -9,6 +9,8 @@ import {
   IdleWait,
   resetWaitBackoff,
   goalDate,
+  addGoal,
+  removeGoal,
   previousGoalDate,
   readGoals,
   setGoals,
@@ -1020,7 +1022,7 @@ async function mainCli(): Promise<void> {
       const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));
       const key = storageGrounds(grounds.name, cfg), today = goalDate(new Date(), cfg.helm.timezone);
       const action = pos[0];
-      if (action === 'set' || action === 'recap') {
+      if (action === 'set' || action === 'add' || action === 'rm' || action === 'recap') {
         if (caller && trapBySession(caller.id)) throw new Error('only the helm writes daily goals');
         gateHelm(caller, grounds.name);
       }
@@ -1031,6 +1033,10 @@ async function mainCli(): Promise<void> {
         break;
       }
       const day = action === 'set' ? setGoals(key, today, pos.slice(1))
+        : action === 'add' || action === 'rm' ? (() => {
+          if (pos.length !== 2) throw new UsageError(usageFor('goals')!);
+          return action === 'add' ? addGoal(key, today, pos[1]!) : removeGoal(key, today, Number(pos[1]));
+        })()
         : action === 'recap' ? (() => {
           if (pos.length !== 2 || !opt('--file')) throw new UsageError(usageFor('goals')!);
           return setGoalsRecap(key, pos[1]!, fs.readFileSync(opt('--file')!, 'utf8'));
@@ -1038,7 +1044,7 @@ async function mainCli(): Promise<void> {
           if (pos.length > 1) throw new UsageError(usageFor('goals')!);
           return readGoals(key, action ?? today);
         })();
-      console.log(`# Goals for ${day.date} (${displayGrounds(grounds.name, cfg)})\n\n${day.lines.length ? day.lines.map((s) => `- ${s}`).join('\n') : 'No goals set.'}${day.recap ? `\n\n## Recap\n\n${day.recap}` : ''}`);
+      console.log(`# Goals for ${day.date} (${displayGrounds(grounds.name, cfg)})\n\n${day.lines.length ? day.lines.map((s, i) => `${i + 1}. ${s}`).join('\n') : 'No goals set.'}${day.recap ? `\n\n## Recap\n\n${day.recap}` : ''}`);
       break;
     }
     case 'stats': {

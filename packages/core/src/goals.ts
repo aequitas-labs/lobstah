@@ -27,7 +27,7 @@ export function readGoals(grounds: string, date: string): DailyGoals {
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   const [goals, ...recap] = text.split(/^## Recap\s*$/m);
-  const lines = (goals ?? '').split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('<!--')).map((s) => s.replace(/^[-*]\s+/, ''));
+  const lines = (goals ?? '').split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('<!--')).map((s) => s.replace(/^(?:[-*]|\d+\.)\s+/, ''));
   return { grounds, date, lines, recap: recap.join('## Recap').trim() };
 }
 function writeGoals(day: DailyGoals): void {
@@ -46,6 +46,15 @@ export function setGoalsRecap(grounds: string, date: string, recap: string): Dai
   recap = recap.trim().replace(/^## Recap(?:\r?\n|$)\s*/, '');
   if (!recap.trim()) throw new Error('recap file is empty');
   const day = { ...readGoals(grounds, date), recap: recap.trim() };
+  writeGoals(day); return day;
+}
+export function addGoal(grounds: string, date: string, line: string): DailyGoals {
+  return setGoals(grounds, date, [...readGoals(grounds, date).lines, line]);
+}
+export function removeGoal(grounds: string, date: string, number: number): DailyGoals {
+  const day = readGoals(grounds, date);
+  if (!Number.isSafeInteger(number) || number < 1 || number > day.lines.length) throw new Error('goal number must be a line shown by lobstah goals');
+  day.lines.splice(number - 1, 1);
   writeGoals(day); return day;
 }
 export const goalsCardTitle = (date: string) => `Goals for ${validGoalDate(date)}`;
