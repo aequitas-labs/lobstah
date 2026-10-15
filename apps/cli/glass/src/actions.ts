@@ -14,6 +14,7 @@ import { saveLobHidden, savePrefs } from './prefs.js';
 import { getState, setState, viewOf } from './store.js';
 import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
+import { setDecisionBadge } from './app-badge.js';
 
 /** Everything the page can do: each action updates the store (and localStorage for preferences). */
 
@@ -33,6 +34,7 @@ export function receive(snapshot: GlassSnapshot): void {
   const { modal, drafts, older, detail, decisionModal } = getState();
   // A card that left the snapshot (answered, withdrawn) takes its draft with it.
   const cards = decisionCards(snapshot.attention || [], snapshot.decisions || []);
+  void setDecisionBadge(cards.length);
   const live = new Set(cards.map((c) => c.key));
   const kept = Object.fromEntries(Object.entries(drafts).filter(([key]) => live.has(key)));
   setState({

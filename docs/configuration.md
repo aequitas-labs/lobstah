@@ -123,10 +123,12 @@ send a continuation.
 |---|---|---|
 | `ttlSecs` | `1800` | Heartbeat age past which a helm registration is stale: the next `man helm` claims it without `--take`. The park and `man brief` heartbeat it. |
 | `reportSecs` | `900` | Minimum seconds between park-delivered digests for a helm session. The digest is also change-gated — quiet grounds deliver nothing regardless of cadence. |
+| `timezone` | system timezone | IANA timezone (e.g. `America/New_York`) for daily goals. A goals day starts at 04:00 local. |
 | `queuedNoticeSecs` | `180` | Queued age before a dispatch-progress notice wakes the helm with its queue reason and remedy. `0` disables. Reminders back off at 15, 45, 105… minutes after the threshold; claim clears the condition. |
 | `stalledNoticeSecs` | `1200` | Silence since both a claimed dispatch's last activity and note before dispatch-progress attention. The same reminder backoff applies; activity or a note clears it. Paused, needs-decision and blocked workers use their existing paths. `0` disables. |
 | `idleWorkingNoticeSecs` | `60` | Explicitly idle trap whose last report is working: wake the helm with its full note. A live session-owned background wait exempts it. Tool activity or a new report clears it; reminders use the same backoff. `0` disables. |
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
+| `todoStaleDays` | `3` | Open helm to-dos (`lobstah todo`) older than this many days add one note to `man tend`. `0` disables. |
 
 ## `[wait]` — quiet helm and trap waiters
 

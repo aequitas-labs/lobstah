@@ -57,6 +57,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   ls: { flags: { '--all': {} } },
   status: { flags: {}, positionals: '[<uuid>|<trap-name>|wt:<trap>]' },
   stats: { flags: { '--json': {}, '--per-trap': {} }, maxPositionals: 0 },
+  goals: { flags: { '--grounds': { value: '<name>' }, '--session': { value: '<id>' }, '--file': { value: '<md>' } }, flagSubverbs: { '--file': ['recap'] }, positionals: '[<date>|set <line>...|add <text>|rm <n>|recap-data [<date>]|recap <date> --file <md>]' },
   focus: { flags: {}, positionals: '<trap>' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {} }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
@@ -74,6 +75,12 @@ export const COMMANDS: Record<string, CommandSpec> = {
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { flags: {}, maxPositionals: 0 },
   reports: { flags: { '--json': {} } },
+  todo: {
+    subverbs: ['add', 'done', 'drop', 'ls'],
+    flags: { '--all': {}, '--json': {}, '--session': { value: '<id>' } },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''] },
+    positionals: '["<text>"|<id>]',
+  },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
@@ -293,12 +300,21 @@ claimed helm this requires --session <helm-id>.`,
   report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note.
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
 --waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No.`,
+  goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
+set replaces today's lines; add appends one; rm removes the displayed line number. Edits are allowed all day.
+recap saves a markdown recap without changing the goals.
+recap-data prints retained dispatch, PR, card and optional closed to-do facts for yesterday (or <date>).
+Files: ~/.lobstah/goals/<grounds>/<date>.md; editable by hand. Writes are helm-gated.`,
   stats: `Catches: dispatches that finished done. catchesToday counts the local day;
 totalCatches counts all time. Both live in stats.json, which cull folds into
 before deleting, so they survive it; so does a per-local-day count (400 days),
 which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
+  todo: `The helm's own to-do list, kept per grounds so it survives restarts and compaction.
+add "<text>" records one in free text; done <id> and drop <id> close it; ls (or bare) lists open
+ones (--all adds closed). Open to-dos show in man tend, man report, the glass, and the helm's
+context at every session start. Reserved for the helm; a trap gets none.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,

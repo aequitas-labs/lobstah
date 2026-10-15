@@ -5,7 +5,7 @@ import { snapshot, jobs, detail, markdown } from './fixtures/wharf-glass.js';
 import { parseRoute, routeHash } from '../../../services/wharf/glass/src/route.js';
 let windows: Window[] = [];
 afterEach(async () => { await Promise.all(windows.map((w) => w.happyDOM.close())); windows = []; });
-async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs } = {}) {
+async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs; badge?: (count: number) => Promise<void> } = {}) {
   const window = new Window({ url: 'https://glass.test' + path, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
   windows.push(window); const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] = [], reads: string[] = [], copied: string[] = [], intervals: (() => void)[] = [];
@@ -33,6 +33,7 @@ async function page(path = '/', signedOut = false, data: { snapshot?: typeof sna
   };
   w.TextDecoder = TextDecoder;
   Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async (s: string) => copied.push(s) } });
+  if (data.badge) Object.defineProperty(window.navigator, 'setAppBadge', { value: data.badge });
   const settle = async () => { for (let i = 0; i < 4; i++) { await window.happyDOM.waitUntilComplete(); await new Promise((r) => setTimeout(r, 0)); } };
   window.document.write(`<!doctype html><html><head><style>${GLASS_CSS}</style></head><body><script>${GLASS_SCRIPT}</script></body></html>`); await settle();
   const button = (text: string) => Array.from(window.document.querySelectorAll('button')).find((b) => b.textContent?.includes(text))!;
@@ -41,6 +42,23 @@ async function page(path = '/', signedOut = false, data: { snapshot?: typeof sna
   const input = (label: string, text: string) => { const node = window.document.querySelector(`[aria-label='${label}']`)! as unknown as HTMLInputElement; node.value = text; node.dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event); };
   return { window, doc: window.document, writes, reads, copied, sockets, settle, click, tab, input, poll: async () => { intervals.forEach((f) => f()); await settle(); }, unauthenticated: () => { unauthenticated = true; } };
 }
+it('badges only open account decisions, updates on existing polls, and clears on sign-out', async () => {
+  const badges: number[] = [];
+  const s = structuredClone(snapshot), card = s.documents[0]!;
+  s.documents.push({ ...card, id: 'second' }, { ...card, id: 'answered', answer: { at: card.at, by: 'person', text: 'Yes' } }, { ...card, id: 'withdrawn', withdrawn: true });
+  const data = { snapshot: s, badge: async (n: number) => { badges.push(n); } };
+  const g = await page('/', false, data); expect(badges.at(-1)).toBe(2);
+  const reads = g.reads.length;
+  s.documents = s.documents.filter((d) => d.id !== 'second'); await g.poll(); expect(badges.at(-1)).toBe(1);
+  expect(g.reads.slice(reads)).toEqual(['/api/glass', '/api/glass/dispatches']);
+  s.documents = []; await g.poll(); expect(badges.at(-1)).toBe(0);
+  s.documents = [card]; await g.poll(); expect(badges.at(-1)).toBe(1);
+  await g.click('sign out'); expect(badges.at(-1)).toBe(0);
+});
+it('keeps the hosted glass usable when the OS denies app badges', async () => {
+  const g = await page('/', false, { badge: async () => { throw new Error('not allowed'); } });
+  await g.poll(); expect(g.doc.body.textContent).toContain('Choose the next catch');
+});
 it('uses a cookie-only wake hint, retains polling on a drop and closes hints on sign-out', async () => {
   const g = await page(); expect(g.sockets).toHaveLength(1); expect(String(g.sockets[0].url)).toBe('wss://glass.test/api/glass/wake');
   const reads = g.reads.length; g.sockets[0].onmessage?.({ data: '{"type":"wake"}' }); await g.settle();

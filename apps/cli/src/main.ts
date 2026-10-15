@@ -8,7 +8,18 @@ import { fileURLToPath } from 'node:url';
 import {
   IdleWait,
   resetWaitBackoff,
+  goalDate,
+  addGoal,
+  removeGoal,
+  previousGoalDate,
+  readGoals,
+  setGoals,
+  setGoalsRecap,
   workerLabel,
+  addTodo,
+  closeTodo,
+  listTodos,
+  TodoError,
   acknowledge,
   isParked,
   isVerb,
@@ -235,6 +246,7 @@ import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows } from './report-file.js';
+import { todoTable, todoViews } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
@@ -377,6 +389,11 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man file <file.md> [--attach <file> ...] [--title <text>]
                                   file the helm's own report under its
                                   grounds; the glass renders it on the deck.
+  todo add "<text>"
+  todo done <id> | todo drop <id> | todo ls [--all]
+                                  the helm's own to-dos, per grounds; shown in
+                                  man tend, man report, and the glass, and
+                                  re-injected at session start and compaction.
   man ask [<dispatch-id>] --title <q> [--detail <f.md>] [--option <label> ...] [--attach <file> ...] [--replace <key>]
                                   put a decision to the human: a card in the
                                   glass until answered or withdrawn
@@ -888,7 +905,10 @@ async function mainCli(): Promise<void> {
       if (hook?.session_id && (trap || helmOf(hook.session_id))) resetWaitBackoff(hook.session_id);
       if (trap) resumeTrapTurn(trap, true);
       if (hook?.session_id && !trapBySession(hook.session_id) && helmOf(hook.session_id)) {
-        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: HELM_REMINDER } }));
+        const { dailyGoalsContext } = await import('./goals.js');
+        const helm = helmOf(hook.session_id)!;
+        const daily = dailyGoalsContext(helm.grounds, loadConfig());
+        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [HELM_REMINDER, daily].filter(Boolean).join('\n') } }));
       }
     } catch { /* a reminder never breaks the user's turn */ }
     return;
@@ -1018,6 +1038,36 @@ async function mainCli(): Promise<void> {
   };
 
   switch (cmd) {
+    case 'goals': {
+      const cfg = loadConfig(), caller = callerSession(opt('--session'));
+      const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));
+      const key = storageGrounds(grounds.name, cfg), today = goalDate(new Date(), cfg.helm.timezone);
+      const action = pos[0];
+      if (action === 'set' || action === 'add' || action === 'rm' || action === 'recap') {
+        if (caller && trapBySession(caller.id)) throw new Error('only the helm writes daily goals');
+        gateHelm(caller, grounds.name);
+      }
+      if (action === 'recap-data') {
+        if (pos.length > 2) throw new UsageError(usageFor('goals')!);
+        const { goalsRecapData } = await import('./goals.js');
+        console.log(JSON.stringify(goalsRecapData(grounds.name, pos[1] ?? previousGoalDate(today), cfg), null, 2));
+        break;
+      }
+      const day = action === 'set' ? setGoals(key, today, pos.slice(1))
+        : action === 'add' || action === 'rm' ? (() => {
+          if (pos.length !== 2) throw new UsageError(usageFor('goals')!);
+          return action === 'add' ? addGoal(key, today, pos[1]!) : removeGoal(key, today, Number(pos[1]));
+        })()
+        : action === 'recap' ? (() => {
+          if (pos.length !== 2 || !opt('--file')) throw new UsageError(usageFor('goals')!);
+          return setGoalsRecap(key, pos[1]!, fs.readFileSync(opt('--file')!, 'utf8'));
+        })() : (() => {
+          if (pos.length > 1) throw new UsageError(usageFor('goals')!);
+          return readGoals(key, action ?? today);
+        })();
+      console.log(`# Goals for ${day.date} (${displayGrounds(grounds.name, cfg)})\n\n${day.lines.length ? day.lines.map((s, i) => `${i + 1}. ${s}`).join('\n') : 'No goals set.'}${day.recap ? `\n\n## Recap\n\n${day.recap}` : ''}`);
+      break;
+    }
     case 'stats': {
       const { readStats, statsOutput } = await import('./stats.js');
       console.log(statsOutput(readStats(), { json: has('--json'), perTrap: has('--per-trap') }));
@@ -1750,6 +1800,45 @@ async function mainCli(): Promise<void> {
       console.log(has('--json') ? JSON.stringify({ reports: rows }) : toonTable('reports', rows, ['key', 'title', 'author', 'from', 'filedAt', 'acked']));
       break;
     }
+    case 'todo': {
+      // The helm's own to-do list, per grounds. A trap gets none; with a
+      // claimed helm, only that helm writes it.
+      const verb = pos[0] ?? 'ls';
+      const caller = callerSession(opt('--session'));
+      if (caller?.id !== undefined && trapBySession(caller.id)) throw new Error('to-dos are the helm\'s alone — a trap keeps none. Report to the helm instead.');
+      let groundsName = opt('--grounds');
+      if (verb !== 'ls') gateHelm(caller, groundsName);
+      if (groundsName === undefined && caller?.id !== undefined) groundsName = helmOf(caller.id)?.grounds;
+      const cfgTodo = loadConfig();
+      const grounds = resolveGrounds(cfgTodo, groundsName).name;
+      const shown = displayGrounds(grounds, cfgTodo);
+      try {
+        if (verb === 'add') {
+          const text = pos.slice(1).join(' ');
+          if (!text.trim()) throw new UsageError(`todo add requires its text\n\n${usageFor('todo')!}`);
+          const t = addTodo(grounds, text);
+          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text }));
+          console.log(toonHelp([`lobstah todo done ${t.id}   (when finished)`, `lobstah todo drop ${t.id}   (when no longer needed)`]));
+        } else if (verb === 'done' || verb === 'drop') {
+          const id = Number(pos[1]);
+          if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo ${verb} requires a to-do id\n\n${usageFor('todo')!}`);
+          const t = closeTodo(grounds, id, verb === 'done' ? 'done' : 'dropped');
+          console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text }));
+        } else if (has('--all')) {
+          const all = listTodos(grounds, { all: true });
+          if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: all }));
+          else console.log(toonTable('todos', all.map((t) => ({ id: t.id, state: t.state, text: t.text, added: t.createdAt.slice(0, 10), updated: t.updatedAt.slice(0, 10) })), ['id', 'state', 'text', 'added', 'updated']));
+        } else {
+          const open = todoViews(Date.now(), grounds);
+          if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: open }));
+          else console.log(open.length > 0 ? todoTable(open, false) : toonKV({ todos: 'none', grounds: shown }));
+        }
+      } catch (err) {
+        if (err instanceof TodoError) throw new UsageError(err.message);
+        throw err;
+      }
+      break;
+    }
     case 'man:file': {
       const file = pos[0];
       if (!file) throw new UsageError(`man file requires a markdown file\n\n${usageFor('man:file')!}`);
@@ -2171,9 +2260,12 @@ async function mainCli(): Promise<void> {
       const grounds = groundsName !== undefined ? resolveGrounds(cfgReport, groundsName) : undefined;
       const cursor = storageGrounds(opt('--cursor') ?? grounds?.name ?? 'fleet', cfgReport);
       const digest = buildDigest({ cursor, repos: grounds ? new Set(grounds.repos) : undefined });
-      if (has('--json')) console.log(JSON.stringify(digest, null, 2));
+      // Open to-dos are standing, not news: they show with or without a change.
+      const todos = todoViews(Date.now(), grounds?.name);
+      if (has('--json')) console.log(JSON.stringify({ ...digest, todos }, null, 2));
       else if (digest.changed) console.log(renderDigest(digest));
       else console.log(toonKV({ digest: 'no change', since: digest.since, fleet: digest.verdict }));
+      if (!has('--json') && todos.length > 0) console.log(todoTable(todos, grounds === undefined && new Set(todos.map((t) => t.grounds)).size > 1));
       if (digest.changed && !has('--peek')) advanceCursor(cursor, digest.now);
       break;
     }

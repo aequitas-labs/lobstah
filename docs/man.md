@@ -68,6 +68,36 @@ the background, dispatch it with the `lobstah` CLI instead of doing it inline:
 That's the whole integration — the CLI is self-documenting (`lobstah help`)
 and its TOON output is built to be read by agents.
 
+## Daily goals
+
+`lobstah goals` shows today's goals; `lobstah goals set "<line>" [...]`
+replaces them, and `lobstah goals YYYY-MM-DD` reads a past day. Use
+`lobstah goals add "<text>"` to append a goal at any time and
+`lobstah goals rm <n>` to remove the numbered line shown by `lobstah goals`.
+These edit today's file without repeating the first-chat card. Use
+`--grounds <name>` to choose grounds and `--session <id>` to identify the helm
+for writes. Files are editable Markdown at
+`~/.lobstah/goals/<grounds>/YYYY-MM-DD.md` (implicit `home` uses the permanent
+`fleet` storage name). Each day starts at 04:00 in the system timezone;
+`[helm].timezone` can choose an IANA timezone instead.
+
+The first user prompt of a new day adds a non-blocking reminder to the helm:
+handle that message, then put yesterday's recap and a draft of today's goals
+on one card. Existing goals, a `Goals for YYYY-MM-DD` card, or an already
+delivered reminder suppress another ask. The helm saves the answered goals
+with `goals set`; the first reminder leaves a comment in that same daily file.
+The helm uses them to order work and choose the next quiet step.
+
+`lobstah goals recap-data [YYYY-MM-DD]` prints retained dispatch results, PR
+open/merge times, answered cards and closed to-dos when their
+optional store exists. Its default is yesterday. First observation is not
+the forge's PR creation time (older records may have only that fallback);
+missing/expired records are not reconstructed.
+The helm matches those facts to the goals (done, moved, stuck, plus also done),
+then saves the Markdown with `lobstah goals recap YYYY-MM-DD --file <md>`.
+Today's lines are pinned above `man tend` and the glass; recaps stay in the
+daily files. Goals are local files, not wharf-synced state.
+
 ## Taking over a worker
 
 Every dispatch **is** a real harness session, running under the same CLI you
@@ -538,6 +568,20 @@ the helm files to keep.
 - **Filing a helm report.** `lobstah man file <file.md> [--attach <file> ...]
   [--title <text>]`. It is stored under the helm's grounds,
   `reports/<grounds>/<rid>/`, with the same layout, and the author is `helm`.
+- **The helm's to-dos.** Reminders the helm keeps for itself ("merge #2268
+  once the API is in production") go in `lobstah todo add "<text>"`, not
+  only in the conversation. The text is free: any detail, link, or PR goes
+  in it.
+  `lobstah todo done <id>` and `lobstah todo drop <id>` close one;
+  `lobstah todo ls` (or bare `todo`) lists the open ones, and `--all` adds
+  closed ones. They are stored per grounds in `todos/<grounds>.json` with
+  created and updated times. `man tend`, `man report`, and the glass deck
+  show the open ones, and `man brief` re-injects them beside the charter at
+  every session start and after compaction. Open to-dos older than
+  `[helm].todoStaleDays` (default 3) add one line to `man tend`, for
+  example "3 to-dos older than 3 days: move to the issue tracker?". The helm
+  decides whether to raise a card and files them with the user's tracker.
+  A trap keeps no to-dos; with a claimed helm, only the helm writes them.
 - **Title and author.** The title is `--title`, else the page's first `#`
   heading, else the dispatch's brief title. The author is the trap name, or
   `headless`, or `helm`. A file larger than `[limits].attachmentMaxBytes` is

@@ -66,10 +66,12 @@ import {
 import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
+import { visibleGoals } from './goals.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
 import { readMergeView } from '@lobstah/pick';
 import { buildTendReport, landedCatches } from './tend.js';
+import { todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
@@ -514,6 +516,17 @@ export function serveAttachment(url: string, res: http.ServerResponse): boolean 
   return true;
 }
 
+/** The helms' open to-dos and their stale note; an unreadable file never fails /data. */
+function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
+  try {
+    const todos = todoViews();
+    const todoNote = todoStaleLine(todos);
+    return { ...(todos.length > 0 ? { todos } : {}), ...(todoNote ? { todoNote } : {}) };
+  } catch {
+    return {};
+  }
+}
+
 /** One disk pass, everything the page renders. Pure read. */
 /**
  * `local`: the snapshot goes to this machine's own glass page (a same-host
@@ -648,6 +661,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const attention = attentionSnapshot();
   return {
     now: new Date().toISOString(),
+    goals: visibleGoals(cfg),
     version: lobstahVersion(),
     backends: backendViews(cfg),
     repoUrl: REPO_URL,
@@ -667,6 +681,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     stacks,
     ...attention,
     reports: reportRows(),
+    ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
     answerLimits: {
@@ -974,9 +989,13 @@ export function serveGlass(
     if (req.url === '/manifest.webmanifest' && req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/manifest+json', 'cache-control': 'no-cache' });
       res.end(JSON.stringify({
-        id: '/', name: 'lobstah glass', short_name: 'lobstah', start_url: '/', scope: '/',
+        id: '/', name: 'lobstah glass', short_name: 'glass', start_url: '/', scope: '/',
         display: 'standalone', background_color: '#0e1116', theme_color: '#0e1116',
-        icons: [192, 512].map((size) => ({ src: `/app-icon-${size}.png`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any' })),
+        icons: [
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
       }));
     } else if (req.method === 'GET' && Object.hasOwn(GLASS_APP_ICONS, req.url ?? '')) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });

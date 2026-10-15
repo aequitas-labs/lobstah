@@ -79,6 +79,21 @@ async function mutations(g: GlassDom, fn: () => Promise<void>): Promise<Mutation
 }
 
 describe('glass page: tabs and hash routing', () => {
+  it('badges open cards from the unfiltered snapshot and clears at zero', async () => {
+    const d = emptyFleet();
+    d.attention = [1, 2].map((n) => ({ kind: 'question', key: `work:q${n}`, id: `q${n}`, lane: 'work', verb: 'needs-decision', note: 'Choose', ageSecs: 0, stateHash: String(n) }));
+    const badges: number[] = [];
+    const g = await page(d, { badge: async (n) => { badges.push(n); }, prefs: { repo: 'another-repo' } });
+    expect(badges).toEqual([2]);
+    g.serve(emptyFleet()); await g.poll();
+    expect(badges.at(-1)).toBe(0);
+  });
+  it('keeps updating when the browser refuses an app badge', async () => {
+    const g = await page(emptyFleet(), { badge: async () => { throw new Error('not allowed'); } });
+    await g.poll();
+    expect(g.$('#deck')).toBeTruthy();
+    expect(g.fetches()).toBeGreaterThan(1);
+  });
   it('shows working, idle, and parked traps on deck and tab, with a dispatch link', async () => {
     const d = acceptanceFleet();
     const working = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;

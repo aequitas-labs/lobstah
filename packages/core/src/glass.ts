@@ -8,6 +8,7 @@ import type { WorkerMetadata } from './worker-metadata.js';
 import type { WaitingView } from './status.js';
 import type { Watch } from './watch.js';
 import type { ActivityView } from './activity.js';
+import type { TodoView } from './todos.js';
 
 /**
  * The spyglass's data contract: the JSON `lobstah glass` serves at /data.
@@ -377,6 +378,7 @@ export interface GlassAnswerLimits {
 
 /** The /data payload: one disk pass, everything the page renders. */
 export interface GlassSnapshot {
+  goals?: Array<{ grounds: string; date: string; lines: string[] }>;
   backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;
   /** Per-server secret for the same-origin actions: focusing a trap and answering a decision. */
   focusToken?: string;
@@ -421,6 +423,10 @@ export interface GlassSnapshot {
   landed: LandedCatch[];
   /** Every filed report, newest first. */
   reports: GlassReport[];
+  /** The helms' open to-dos, every grounds; the deck lists them. */
+  todos?: TodoView[];
+  /** A short note when to-dos sit past `[helm].todoStaleDays`. */
+  todoNote?: string;
   attentionKinds: string[];
   /** A config error, surfaced on the page instead of failing /data. */
   attentionError?: string;

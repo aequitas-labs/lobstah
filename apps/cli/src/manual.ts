@@ -5,6 +5,11 @@ reads buoys (status), and hauls when something needs you. The boat (daemon)
 does the supervision — you never watch a trap work.
 
 your working set:
+  lobstah goals [<date>]                       today's goals, or a past day
+  lobstah goals set "<line>" [...]             replace today's goals
+  lobstah goals add "<text>" / goals rm <n>    edit today's numbered goals
+  lobstah goals recap-data [<date>]            facts for the day's recap
+  lobstah goals recap <date> --file <md>        save its recap
   lobstah set --repo <key> --bait <brief.md>    set a trap (alias of dispatch)
   lobstah set --pool <name> --bait <brief.md>   set it in a warm pool worktree
                                                 ([pools.<name>]): fresh session
@@ -80,6 +85,10 @@ getting woken instead of asking:
                             your grounds; --attach images it names, --title.
                             \`lobstah reports\` lists every report;
                             \`lobstah attention ack <key>\` acks one
+  lobstah todo add "<text>" keep your own reminder, in free text, under your
+                            grounds; \`todo done <id>\`, \`todo drop <id>\`,
+                            \`todo ls\`. Re-injected at every session start;
+                            tend notes the stale ones
   lobstah man ask           put a question the helm cannot decide to the human:
                             [<dispatch-id>] --title, --detail <f.md>,
                             --option (0-6), --attach. The glass shows it as a
