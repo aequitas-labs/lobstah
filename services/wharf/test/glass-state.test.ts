@@ -309,3 +309,54 @@ it('the boat’s client acks through both routes and reads the acks back in its 
   await expect(boat.ackDispatch('job', '2020-01-01T00:00:00.000Z', 'client-stale')).rejects.toMatchObject({ status: 409 });
   await expect(new WharfBackend(location, agent, { fetch: (input, init) => SELF.fetch(input as string, init) }).ackDispatch('job', asked, 'client-agent')).rejects.toMatchObject({ status: 403 });
 });
+
+/** A boat issued with these permissions: its token and id. */
+async function reviewBoat(name: string, permissions: string[]): Promise<{ token: string; id: string }> {
+  const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name, permissions }, key: `issue-${++sequence}` })));
+  expect(result.status).toBe(201); return result.value as { token: string; id: string };
+}
+
+it('a boat with work publishes and republishes its own review with no helm; no one else may touch it, and boats never list it', async () => {
+  const finder = await reviewBoat('finder-boat', ['work', 'read']), other = await reviewBoat('other-boat', ['work', 'read']), reader = await reviewBoat('read-boat', ['read']);
+  const review = { pr: 'https://github.com/acme/web/pull/7', round: 'RRE_7', state: 'drafted', requestedBy: 'dana', stands: true };
+  const before = await sql('SELECT count(*) AS n FROM events');
+  expect((await call('documents', { id: 'rv-1', kind: 'review', title: 'acme/web#7 Add the thing', review }, reader.token, '')).status).toBe(403);
+  expect((await call('documents', { id: 'rv-1', kind: 'review', title: 'acme/web#7 Add the thing', review: { ...review, pr: 'https://evil.example/x' } }, finder.token, '')).status).toBe(400);
+  expect((await call('documents', { id: 'rv-1', kind: 'review', title: 'acme/web#7 Add the thing', review }, finder.token, '')).status).toBe(200);
+  // A second boat that found the same round collapses onto the first document.
+  expect((await call('documents', { id: 'rv-1', kind: 'review', title: 'acme/web#7 Add the thing', review }, other.token, '')).status).toBe(409);
+  const md = await upload('rv-1', 'review.md', 'Looks right.', finder.token, '');
+  expect((await call('documents/rv-1/publish', {}, finder.token, '')).status).toBe(400); // a review needs its markdown
+  expect((await call('documents/rv-1/publish', { markdown: md }, other.token, '')).status).toBe(403);
+  expect((await call('documents/rv-1/publish', { markdown: md }, finder.token, '')).status).toBe(200);
+  const md2 = await upload('rv-1', 'review.md', 'Edited.', finder.token, '');
+  const republished = await call('documents/rv-1/publish', { markdown: md2, review: { ...review, state: 'posted', stands: false } }, finder.token, '');
+  expect(republished.status).toBe(200);
+  expect(await republished.json()).toMatchObject({ markdown: { id: md2 }, review: { state: 'posted', stands: false }, author: `boat:${finder.id}` });
+  // Decisions and reports stay the helm's.
+  expect((await call('documents', { id: 'rep-1', kind: 'report', title: 'x' }, finder.token, '')).status).toBe(403);
+  expect(((await (await call('documents', undefined, reader.token)).json()) as WharfDocument[]).map((d) => d.id)).toEqual([]);
+  expect(((await (await call('glass')).json()) as { documents: WharfDocument[] }).documents.map((d) => d.id)).toEqual(['rv-1']);
+  expect(await sql('SELECT count(*) AS n FROM events')).toEqual(before); // no event, not even for its uploads: a review wakes no helm
+});
+
+it("a person's Dismiss on a review goes straight to the boat that published it, and only that boat finishes it", async () => {
+  const finder = await reviewBoat('finder-boat', ['work', 'read']), other = await reviewBoat('other-boat', ['work', 'read']);
+  const review = { pr: 'https://github.com/acme/web/pull/7', round: 'RRE_7', state: 'drafted', open: 'https://app.graphite.com/github/pr/acme/web/7' };
+  expect((await call('documents', { id: 'rv-2', kind: 'review', title: 'acme/web#7', review: { ...review, open: 'javascript:alert(1)' } }, finder.token, '')).status).toBe(400);
+  expect((await call('documents', { id: 'rv-2', kind: 'review', title: 'acme/web#7', review }, finder.token, '')).status).toBe(200);
+  expect((await call('requests', { id: 'early', kind: 'review-dismiss', document: 'rv-2' })).status).toBe(409); // not published yet
+  const md = await upload('rv-2', 'review.md', 'Waiting in the review tool.', finder.token, '');
+  expect((await call('documents/rv-2/publish', { markdown: md }, finder.token, '')).status).toBe(200);
+  for (const kind of ['review-post', 'review-edit']) expect((await call('requests', { id: kind, kind, document: 'rv-2' })).status).toBe(400); // sending happens in the review tool
+  expect((await call('requests', { id: 'by-boat', kind: 'review-dismiss', document: 'rv-2' }, finder.token, '')).status).toBe(403);
+  const dismissed = await call('requests', { id: 'dismiss-1', kind: 'review-dismiss', document: 'rv-2' });
+  expect(dismissed.status).toBe(200);
+  expect(await dismissed.json()).toMatchObject({ kind: 'review-dismiss', state: 'authorized', boat: finder.id, document: 'rv-2' });
+  expect(((await (await call('requests/reviews', undefined, finder.token, '')).json()) as WharfHumanRequest[]).map((r) => r.id)).toEqual(['dismiss-1']);
+  expect(await (await call('requests/reviews', undefined, other.token, '')).json()).toEqual([]);
+  expect((await call('requests/reviews')).status).toBe(403); // boats only
+  expect((await call('requests/dismiss-1/start', {}, other.token, '')).status).toBe(403);
+  expect(await (await call('requests/dismiss-1/start', {}, finder.token, '')).json()).toMatchObject({ state: 'fulfilled', outcome: 'done by the boat' });
+  expect(await (await call('requests/reviews', undefined, finder.token, '')).json()).toEqual([]);
+});

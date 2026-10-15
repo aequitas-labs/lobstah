@@ -105,3 +105,19 @@ export function Job({ job, workers, action }: { job: DispatchView; workers: Work
     ${worker && html`<${Session} worker=${worker} />`}
   `;
 }
+/**
+ * A review's page: who asked, where the round is, the link that opens the
+ * PR in the repo's review tool (the draft waits there as the person's
+ * pending review, to edit and send), and Dismiss, which the boat that
+ * drafted it carries out.
+ */
+export function ReviewActions({ doc, action }: { doc: WharfDocument; action: Action }) {
+  const state = doc.review?.state ?? '';
+  const open = ['requested', 'drafting', 'drafted', 'stale', 'failed'].includes(state);
+  const link = safeHref(doc.review?.open ?? doc.review?.pr ?? '');
+  return html`<div class="sub">${doc.review?.requestedBy ? `asked by ${doc.review.requestedBy} · ` : ''}${state}${doc.review?.reason ? ` · ${doc.review.reason}` : ''}</div>
+    <div class="doptions">
+      ${link && html`<a class="btn" href=${link} target="_blank" rel="noopener">open in review tool</a>`}
+      ${open && html`<button class="btn" onClick=${() => action('requests', { id: crypto.randomUUID(), kind: 'review-dismiss', document: doc.id })}>dismiss</button>`}
+    </div>`;
+}

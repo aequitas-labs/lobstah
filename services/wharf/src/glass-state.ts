@@ -1,4 +1,5 @@
-import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest } from '../../../packages/core/src/backend-model.js';
+import { WHARF_REVIEW_REQUEST_KINDS } from '../../../packages/core/src/backend-model.js';
+import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, repoIdentity, requireThat, text } from './protocol.js';
 import type { Actor, Command } from './account.js';
 
@@ -10,7 +11,7 @@ export const glassSchema = `
 `;
 export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks'];
 type Result = { status: number; value: unknown };
-type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
+type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
 /** Pure synchronous SQL operations inside the account's auth/idempotency transaction. */
 export class GlassState {
   constructor(private sql: SqlStorage, private hooks: Hooks) {}
@@ -24,6 +25,36 @@ export class GlassState {
     const d = this.get<WharfDocument>('documents', identifier(id)); requireThat(d, 404, 'document not found'); return d;
   }
   private person(actor: Actor) { requireThat(actor.kind === 'person', 403, 'signed-in person required'); }
+  /**
+   * Who may author a document. A decision or report is the helm's: it needs
+   * the leased seat. A review is the boat's that found the request: a boat
+   * with work writes its own reviews with no helm, and no one else's.
+   */
+  private author(c: Command, actor: Actor, now: number, kind: unknown, d?: WharfDocument) {
+    if (kind !== 'review') return this.hooks.helm(c, actor, now);
+    this.hooks.work(actor);
+    requireThat(!d || d.author === `${actor.kind}:${actor.id}`, 403, 'only the boat that published a review may change it');
+  }
+  private reviewMeta(value: unknown): WharfReviewMeta {
+    const m = object(value), pr = text(m.pr, 300);
+    requireThat(/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+$/.test(pr), 400, 'review needs its pull request URL');
+    const state = text(m.state, 20);
+    requireThat(['requested', 'drafting', 'drafted', 'stale', 'failed', 'posted', 'dismissed', 'withdrawn'].includes(state), 400, 'invalid review state');
+    return { pr, round: identifier(m.round), state,
+      ...(m.requestedBy !== undefined ? { requestedBy: text(m.requestedBy, 100) } : {}),
+      ...(m.headSha !== undefined ? { headSha: text(m.headSha, 64) } : {}),
+      ...(m.stands !== undefined ? { stands: m.stands === true } : {}),
+      ...(m.reason !== undefined ? { reason: text(m.reason, 500) } : {}),
+      ...(m.open !== undefined ? { open: this.reviewLink(m.open) } : {}) };
+  }
+  /** Where a review opens: an HTTPS link the boat built from the repo's review tool. */
+  private reviewLink(value: unknown): string {
+    const link = text(value, 500);
+    let url: URL | undefined;
+    try { url = new URL(link); } catch { url = undefined; }
+    requireThat(url?.protocol === 'https:' && !url.username && !url.password, 400, 'review link must be an https URL');
+    return link;
+  }
   /** Who an ack is by: the boat under its current name, or the signed-in person. Never a dispatch token. */
   private acker(actor: Actor): string {
     this.hooks.read(actor);
@@ -38,7 +69,7 @@ export class GlassState {
   expire(now: number) {
     for (const row of this.sql.exec<{ id: string; data: string }>("SELECT * FROM human_requests WHERE json_extract(data,'$.state') IN ('queued','received','authorized') AND json_extract(data,'$.expiresAt')<=?", new Date(now).toISOString()).toArray()) {
       const r = JSON.parse(row.data) as WharfHumanRequest; r.state = 'expired'; this.put('human_requests', row.id, r);
-      this.hooks.event('human-request-expired', r.dispatch, r.id);
+      if (!r.kind.startsWith('review-')) this.hooks.event('human-request-expired', r.dispatch, r.id);
     }
   }
   worker(id: string, body: Record<string, unknown>) {
@@ -66,11 +97,16 @@ export class GlassState {
       requireThat(file, 400, 'file does not belong to this document'); return file;
     });
   }
+  /** A review document's file scope: its uploads raise no event, since every event wakes a helm. */
+  isReviewScope(scope: string): boolean {
+    return scope.startsWith('document:') && this.get<WharfDocument>('documents', scope.slice('document:'.length))?.kind === 'review';
+  }
   /** File uploads are authoring, never a new direct person operational action. */
   uploadScope(c: Command, actor: Actor, now: number): string {
-    this.hooks.helm(c, actor, now);
     const d = this.document(c.path.split('/')[1]!);
-    requireThat(!d.published && !d.withdrawn, 409, 'document is already published or withdrawn');
+    this.author(c, actor, now, d.kind, d);
+    // A review is republished as its draft and state change; other documents publish once.
+    requireThat((d.kind === 'review' || !d.published) && !d.withdrawn, 409, 'document is already published or withdrawn');
     return `document:${d.id}`;
   }
   execute(c: Command, actor: Actor, now: number): Result | undefined {
@@ -93,35 +129,40 @@ export class GlassState {
       this.put('dispatch_acks', id, ack); return ok(ack);
     }
     if (parts[0] === 'documents') {
-      if (parts.length === 1 && c.method === 'GET') return ok(this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn));
+      // Boats list decisions and reports; reviews are the hosted glass's (an older boat would refuse the kind).
+      if (parts.length === 1 && c.method === 'GET') return ok(this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn && d.kind !== 'review'));
       if (parts.length === 1 && c.method === 'POST') {
-        this.hooks.helm(c, actor, now);
+        this.author(c, actor, now, b.kind);
         const id = identifier(b.id), title = text(b.title, 200).trim();
-        requireThat(title && ['decision', 'report'].includes(String(b.kind)), 400, 'document needs a title and kind');
+        requireThat(title && ['decision', 'report', 'review'].includes(String(b.kind)), 400, 'document needs a title and kind');
         requireThat(!this.get('documents', id), 409, 'document already exists');
         const options = b.options ?? [];
         requireThat(Array.isArray(options) && options.length <= 6 && options.every((o) => typeof o === 'string' && o.trim() === o && o.length > 0 && o.length <= 80) && new Set(options).size === options.length, 400, 'invalid decision options');
         requireThat(b.kind === 'decision' || options.length === 0, 400, 'reports have no options');
         const d: WharfDocument = { id, title, kind: b.kind as WharfDocumentInput['kind'], options, attachments: [], published: false, at: new Date(now).toISOString(), author: `${actor.kind}:${actor.id}` };
+        if (d.kind === 'review') d.review = this.reviewMeta(b.review);
         if (b.dispatch !== undefined) { d.dispatch = identifier(b.dispatch); requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', d.dispatch).toArray().length, 404, 'dispatch not found'); }
         this.put('documents', id, d); return ok(d);
       }
       const d = this.document(parts[1]!);
       if (parts.length === 2 && c.method === 'GET') return ok(d);
       if (parts.length === 3 && parts[2] === 'publish' && c.method === 'POST') {
-        this.hooks.helm(c, actor, now); requireThat(!d.published && !d.withdrawn, 409, 'document already published or withdrawn');
+        this.author(c, actor, now, d.kind, d);
+        requireThat((d.kind === 'review' || !d.published) && !d.withdrawn, 409, 'document already published or withdrawn');
+        if (d.kind === 'review' && b.review !== undefined) d.review = this.reviewMeta(b.review);
         if (b.markdown !== undefined) {
           const [markdown] = this.files(d.id, [b.markdown]);
           requireThat(markdown!.size <= 65536 && /\.md$/i.test(markdown!.name), 400, 'markdown must be a .md file of at most 64 KiB'); d.markdown = markdown;
         }
-        requireThat(d.kind !== 'report' || d.markdown, 400, 'report needs a markdown file');
+        requireThat((d.kind !== 'report' && d.kind !== 'review') || d.markdown, 400, `${d.kind} needs a markdown file`);
         d.attachments = this.files(d.id, b.attachments ?? []);
         requireThat(!d.attachments.some((f) => f.id === d.markdown?.id) && new Set(d.attachments.map((f) => f.name)).size === d.attachments.length, 400, 'document attachment names must differ');
         if (b.replace !== undefined) {
           const previous = this.document(identifier(b.replace)); requireThat(previous.kind === 'decision' && !previous.withdrawn && !previous.answer, 409, 'no standing decision to replace');
           previous.withdrawn = true; this.put('documents', previous.id, previous);
         }
-        d.published = true; this.put('documents', d.id, d); this.hooks.event(d.kind, d.dispatch, d.id); return ok(d);
+        // A review raises no event: every event wakes a helm's wait, and a review is the person's queue, not the fleet's.
+        d.published = true; this.put('documents', d.id, d); if (d.kind !== 'review') this.hooks.event(d.kind, d.dispatch, d.id); return ok(d);
       }
       if (parts.length === 3 && parts[2] === 'withdraw' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(d.kind === 'decision' && !d.answer && !d.withdrawn, 409, 'no standing decision to withdraw');
@@ -150,11 +191,23 @@ export class GlassState {
         requireThat(actor.kind === 'boat', 403, 'boat scope required');
         return ok(this.list<WharfHumanRequest>('human_requests').filter((r) => r.kind === 'trap-request' && r.state === 'authorized' && r.boat === actor.id));
       }
+      if (parts[1] === 'reviews' && parts.length === 2 && c.method === 'GET') {
+        // What people asked of this boat's reviews: Post, Edit, Dismiss. The boat carries them out.
+        requireThat(actor.kind === 'boat', 403, 'boat scope required');
+        return ok(this.list<WharfHumanRequest>('human_requests').filter((r) => r.kind.startsWith('review-') && r.state === 'authorized' && r.boat === actor.id && Date.parse(r.expiresAt) > now));
+      }
       if (parts.length === 1 && c.method === 'GET') return ok(this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })));
       if (parts.length === 1 && c.method === 'POST') {
         this.person(actor); const id = identifier(b.id); requireThat(!this.get('human_requests', id), 409, 'request already exists');
-        requireThat(['message', 'trap-request'].includes(String(b.kind)), 400, 'invalid human request kind');
+        requireThat(['message', 'trap-request', ...WHARF_REVIEW_REQUEST_KINDS].includes(String(b.kind)), 400, 'invalid human request kind');
         const r: WharfHumanRequest = { id, kind: b.kind as WharfHumanRequest['kind'], by: actor.id, at: new Date(now).toISOString(), expiresAt: new Date(now + 600_000).toISOString(), state: 'queued' };
+        if (r.kind.startsWith('review-')) {
+          // Dismiss, addressed to the boat that published the review and authorized at once: a person's click on their own review needs no helm.
+          const doc = this.document(identifier(b.document));
+          requireThat(doc.kind === 'review' && doc.published && !doc.withdrawn && doc.author.startsWith('boat:'), 409, 'no published review to act on');
+          r.document = doc.id; r.boat = doc.author.slice('boat:'.length); r.state = 'authorized';
+          this.put('human_requests', id, r); return ok(r); // no event: the boat polls requests/reviews, and no helm should wake
+        }
         if (r.kind === 'message') { r.dispatch = identifier(b.dispatch); r.text = text(b.text, 16000); requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', r.dispatch).toArray().length, 404, 'dispatch not found'); }
         else { r.boat = identifier(b.boat); r.repo = repoIdentity(b.repo); requireThat(this.sql.exec('SELECT id FROM boats WHERE id=? AND revoked=0', r.boat).toArray().length, 404, 'boat not found'); }
         this.put('human_requests', id, r); this.hooks.event('human-request', r.dispatch, id); return ok({ ...r, waitingForHelm: !this.hooks.helmLive(now) });
@@ -162,9 +215,10 @@ export class GlassState {
       const r = this.get<WharfHumanRequest>('human_requests', identifier(parts[1])); requireThat(r, 404, 'request not found');
       if (parts.length === 3 && parts[2] === 'start' && c.method === 'POST') {
         requireThat(actor.kind === 'boat' && r.boat === actor.id, 403, 'addressed boat required');
-        requireThat(r.kind === 'trap-request' && r.state === 'authorized' && Date.parse(r.expiresAt) > now, 409, 'start request is not authorized or expired');
-        r.state = 'fulfilled'; r.outcome = b.refused === undefined ? 'accepted by boat for launch' : text(b.refused, 200);
-        this.put('human_requests', r.id, r); this.hooks.event('trap-start-accepted', undefined, r.id); return ok(r);
+        requireThat((r.kind === 'trap-request' || r.kind.startsWith('review-')) && r.state === 'authorized' && Date.parse(r.expiresAt) > now, 409, 'start request is not authorized or expired');
+        const review = r.kind.startsWith('review-');
+        r.state = 'fulfilled'; r.outcome = b.refused === undefined ? (review ? 'done by the boat' : 'accepted by boat for launch') : text(b.refused, 500);
+        this.put('human_requests', r.id, r); if (!review) this.hooks.event('trap-start-accepted', undefined, r.id); return ok(r);
       }
       if (parts.length === 2 && c.method === 'GET') return ok({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) });
       if (parts.length === 3 && parts[2] === 'receipt' && c.method === 'POST') {

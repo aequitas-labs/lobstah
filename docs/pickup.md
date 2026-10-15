@@ -314,6 +314,17 @@ reason on the round and is not retried on its own. `lobstah reviews dismiss`
 and `redraft` delete the round's pending review first; a review already sent
 is never deleted.
 
+**On wharf grounds.** A review item whose repo belongs to a grounds with a
+wharf is that boat's to publish: before drafting, pick creates the round's
+`review` document, with an id derived from the item and the round, so a
+second boat that found the same round gets a 409, drafts nothing, and stages
+nothing. The boat publishes every state change with the link that opens the
+PR in the repo's review tool (no helm seat, and no wharf event, so no helm
+wakes). The hosted glass has a Reviews tab whose cards open that link; its
+one request is Dismiss, addressed to the publishing boat, which deletes the
+pending draft with its own token and marks the request done or refused. The
+wharf never calls GitHub.
+
 Round states: `requested`, `drafting`, `drafted`, `stale`, `failed`,
 `posted`, `dismissed`, `withdrawn`. The `review` attention item stands while
 the newest round is `drafted`, `stale`, `failed`, or `requested` with no job

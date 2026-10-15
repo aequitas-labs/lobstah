@@ -182,3 +182,24 @@ it('shows what the wharf records as seen and answered: acked reports, decisions 
   // Unseen items carry no such mark.
   const fresh = await page(); expect(fresh.doc.querySelector('.cards')!.textContent).not.toContain('acked by'); expect(fresh.doc.querySelector('button.card.acked')).toBeNull();
 });
+it('lists reviews in their own tab, waiting ones first; a card opens the review tool, and the page only dismisses', async () => {
+  const s = structuredClone(snapshot), card = s.documents[0]!;
+  const review = (id: string, state: string, stands: boolean, at: string) =>
+    ({ ...card, id, kind: 'review' as const, title: `acme/web#${id} Add the thing`, options: [], at, author: 'boat:boat-1', ack: undefined, answer: undefined,
+      review: { pr: `https://github.com/acme/web/pull/${id}`, round: 'RRE', state, stands, requestedBy: 'dana', open: `https://app.graphite.com/github/pr/acme/web/${id}` } });
+  s.documents.push(review('8', 'posted', false, '2026-10-15T12:00:00.000Z'), review('7', 'drafted', true, '2026-10-15T10:00:00.000Z'));
+  const g = await page('/#reviews', false, { snapshot: s });
+  const cards = Array.from(g.doc.querySelectorAll('.cards a.card'));
+  expect(cards.map((c) => c.querySelector('b')?.textContent)).toEqual(['acme/web#7 Add the thing', 'acme/web#8 Add the thing']);
+  expect(cards.map((c) => c.getAttribute('href'))).toEqual(['https://app.graphite.com/github/pr/acme/web/7', 'https://app.graphite.com/github/pr/acme/web/8']);
+  const h = await page('/#review/7', false, { snapshot: s });
+  const dialog = h.doc.querySelector('[role=dialog]')!;
+  expect(dialog.textContent).toContain('asked by dana · drafted');
+  expect(dialog.querySelector('a.btn')?.getAttribute('href')).toBe('https://app.graphite.com/github/pr/acme/web/7');
+  expect(Array.from(dialog.querySelectorAll('button')).map((b) => b.textContent?.trim())).toEqual(['×', 'dismiss']);
+  (Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'dismiss') as unknown as HTMLElement).click();
+  await h.settle();
+  expect(h.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-dismiss', document: '7' } });
+  expect(h.doc.body.textContent).toContain('sent to the boat that drafted it');
+  expect(parseRoute('#review/7')).toEqual({ tab: 'reviews', item: { kind: 'review', id: '7' } });
+});

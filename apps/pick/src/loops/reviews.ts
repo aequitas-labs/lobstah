@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
   classifyGhError,
+  backendScopes,
   enqueue,
   firstMeaningfulLine,
   githubBlockedUntil,
@@ -29,7 +30,9 @@ import {
 import type { ReviewItem, ReviewRound } from '@lobstah/core';
 import { githubRepoFromOrigin } from '../config.js';
 import { dispatchLane } from './report.js';
-import { postReview, settleStagedReview, stageReview } from '../reviews-post.js';
+import { dismissReviewRound, postReview, settleStagedReview, stageReview } from '../reviews-post.js';
+import { claimReviewDocs, publishReviewDocs, reviewScope, runReviewRequests } from '../reviews-wharf.js';
+import type { ReviewWharfOptions } from '../reviews-wharf.js';
 import type { FetchLike } from '../reviews-post.js';
 
 /**
@@ -109,18 +112,27 @@ export async function reviewsLoop(
   identity: string,
   token: () => string,
   log: (m: string) => void = () => {},
-  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number } = {},
+  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number; wharf?: ReviewWharfOptions } = {},
 ): Promise<void> {
-  if (!loadConfig().reviews.enabled) return;
+  const cfg = loadConfig();
+  if (!cfg.reviews.enabled) return;
   const now = opts.now ?? Date.now();
   const gh = { token, ...(opts.fetch ? { fetch: opts.fetch } : {}), now };
+  const wharf = Object.values(cfg.grounds).some((g) => g.wharf);
+  const w = { ...opts.wharf, now };
   // The search needs the budget; drafting is local and runs either way.
   if (!githubBlockedUntil(now)) {
     const found = searchReviews(identity, token, log, opts.run ?? runGraphql, now);
     if (found) await settleGone(found, gh, log);
   }
+  // On wharf grounds, a round is claimed (its document created) before it is drafted.
+  if (wharf) await claimReviewDocs(log, w);
   draftReviews(identity, log, now);
   if (!githubBlockedUntil(now)) await postOrStage(gh, log);
+  if (wharf) {
+    await runReviewRequests(log, { ...w, dismiss: (key) => dismissReviewRound(key, 'hosted', gh) });
+    await publishReviewDocs(log, w);
+  }
 }
 
 /**
@@ -269,6 +281,7 @@ function noJob(item: ReviewItem, round: ReviewRound, started: number): string | 
 export function draftReviews(identity: string, log: (m: string) => void = () => {}, now = Date.now()): void {
   const cfg = loadConfig();
   const items = listReviews();
+  const scopes = backendScopes(cfg);
   let started = startedToday(items, now);
   for (const item of items) {
     const r = latestRound(item);
@@ -277,6 +290,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
     if (r.state === 'requested' && !r.dispatch) {
+      // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.
+      if (reviewScope(item, scopes) && !r.wharf?.mine) continue;
       const why = noJob(item, r, started);
       if (settings.work === 'off' || why) {
         if (why && r.reason !== why) {

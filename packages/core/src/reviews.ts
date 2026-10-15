@@ -150,6 +150,12 @@ export interface ReviewRound {
   staged?: { reviewId: string; at: string };
   /** Why the round is where it is: a skip rule, the daily cap, a failure, a withdrawal. */
   reason?: string;
+  /**
+   * On wharf grounds: the round's review document. `mine` is false when
+   * another boat created it first (that boat drafts and posts the round);
+   * `published` is the fingerprint last published.
+   */
+  wharf?: { doc: string; mine: boolean; published?: string };
 }
 
 export interface ReviewPr {
@@ -427,9 +433,11 @@ export function markReviewPosted(key: string, roundId: string, post: { reviewId:
 
 // ── Attention ──────────────────────────────────────────────────────────────
 
-/** Whether a round asks for Chris: drafted, stale, failed, or requested with no job to draft it. */
+/** Whether a round asks for Chris: drafted, stale, failed, or requested with no job to draft it; never a round another boat on the wharf has. */
 export function reviewStands(round: ReviewRound | undefined): boolean {
   if (!round) return false;
+  // Another boat on the wharf has this round: it asks for Chris there, not here.
+  if (round.wharf && !round.wharf.mine) return false;
   if (round.state === 'requested') return round.dispatch === undefined;
   return round.state === 'drafted' || round.state === 'stale' || round.state === 'failed';
 }
