@@ -219,6 +219,8 @@ export interface HelmConfig {
   park?: 'arm' | 'block';
   /** Arm mode: seconds the Stop hook polls for a watcher that is still starting before it blocks. */
   armGraceSecs: number;
+  /** Open helm to-dos older than this many days earn a short note in `man tend`; 0 disables. */
+  todoStaleDays: number;
 }
 
 export interface WatchConfig {
@@ -343,6 +345,7 @@ export const DEFAULT_HELM: HelmConfig = {
   ttlSecs: 1800,
   reportSecs: 900,
   armGraceSecs: 5,
+  todoStaleDays: 3,
 };
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
@@ -383,7 +386,7 @@ export function loadConfig(): Config {
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
-  for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs'] as const) {
+  for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs', 'todoStaleDays'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isFinite(helm[key]) || helm[key] < 0) {
       throw new Error(`[helm].${key} must be a non-negative number in ${configPath()}`);
     }

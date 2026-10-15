@@ -7,6 +7,7 @@ export * from './hosted-cache.js';
 export * from './stats.js';
 export * from './attachments.js';
 export * from './reports.js';
+export * from './todos.js';
 export * from './decisions.js';
 export * from './question-hold.js';
 export * from './paths.js';

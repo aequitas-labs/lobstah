@@ -538,6 +538,19 @@ the helm files to keep.
 - **Filing a helm report.** `lobstah man file <file.md> [--attach <file> ...]
   [--title <text>]`. It is stored under the helm's grounds,
   `reports/<grounds>/<rid>/`, with the same layout, and the author is `helm`.
+- **The helm's to-dos.** Reminders the helm keeps for itself ("merge #2268
+  once the API is in production") go in `lobstah todo add "<text>" [--why
+  "<text>"] [--ref <url|pr|dispatch>]`, not only in the conversation.
+  `lobstah todo done <id>` and `lobstah todo drop <id>` close one;
+  `lobstah todo ls` (or bare `todo`) lists the open ones, and `--all` adds
+  closed ones. They are stored per grounds in `todos/<grounds>.json` with
+  created and updated times. `man tend`, `man report`, and the glass deck
+  show the open ones, and `man brief` re-injects them beside the charter at
+  every session start and after compaction. Open to-dos older than
+  `[helm].todoStaleDays` (default 3) add one line to `man tend`, for
+  example "3 to-dos older than 3 days: move to the issue tracker?". The helm
+  decides whether to raise a card and files them with the user's tracker.
+  A trap keeps no to-dos; with a claimed helm, only the helm writes them.
 - **Title and author.** The title is `--title`, else the page's first `#`
   heading, else the dispatch's brief title. The author is the trap name, or
   `headless`, or `helm`. A file larger than `[limits].attachmentMaxBytes` is

@@ -74,6 +74,12 @@ export const COMMANDS: Record<string, CommandSpec> = {
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { flags: {}, maxPositionals: 0 },
   reports: { flags: { '--json': {} } },
+  todo: {
+    subverbs: ['add', 'done', 'drop', 'ls'],
+    flags: { '--why': { value: '<text>' }, '--ref': { value: '<url|pr|dispatch>' }, '--all': {}, '--json': {}, '--session': { value: '<id>' } },
+    flagSubverbs: { '--why': ['add'], '--ref': ['add'], '--all': ['ls', ''], '--json': ['ls', ''] },
+    positionals: '["<text>"|<id>]',
+  },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
   cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
@@ -283,6 +289,10 @@ before deleting, so they survive it; so does a per-local-day count (400 days),
 which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
+  todo: `The helm's own to-do list, kept per grounds so it survives restarts and compaction.
+add "<text>" [--why] [--ref] records one; done <id> and drop <id> close it; ls (or bare) lists open
+ones (--all adds closed). Open to-dos show in man tend, man report, the glass, and the helm's
+context at every session start. Reserved for the helm; a trap gets none.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,

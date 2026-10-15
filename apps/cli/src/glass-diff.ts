@@ -16,6 +16,7 @@ import type {
   Notice,
   PrBadge,
   TendAttention,
+  TodoView,
   Watch,
 } from '@lobstah/core';
 
@@ -451,6 +452,9 @@ export interface DeckInputs {
   traps: Seat<GlassTrapView>[];
   stacks: GlassStack[];
   prs: GlassPr[];
+  /** The helms' open to-dos, oldest first within each grounds. */
+  todos: TodoView[];
+  todoNote: string | undefined;
   error: string | undefined;
 }
 
@@ -518,6 +522,8 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       traps: deckTraps.map((t) => seat(trapView(d, t))),
       stacks: stacks.filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
       prs: prs.filter((p) => p.state === 'OPEN'),
+      todos: (d.todos || []).filter((t) => hasQuery(t.grounds, t.id, t.text, t.why, t.ref)),
+      todoNote: d.todoNote,
       error: d.attentionError,
     },
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },

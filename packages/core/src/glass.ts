@@ -8,6 +8,7 @@ import type { WorkerMetadata } from './worker-metadata.js';
 import type { WaitingView } from './status.js';
 import type { Watch } from './watch.js';
 import type { ActivityView } from './activity.js';
+import type { TodoView } from './todos.js';
 
 /**
  * The spyglass's data contract: the JSON `lobstah glass` serves at /data.
@@ -421,6 +422,10 @@ export interface GlassSnapshot {
   landed: LandedCatch[];
   /** Every filed report, newest first. */
   reports: GlassReport[];
+  /** The helms' open to-dos, every grounds; the deck lists them. */
+  todos?: TodoView[];
+  /** A short note when to-dos sit past `[helm].todoStaleDays`. */
+  todoNote?: string;
   attentionKinds: string[];
   /** A config error, surfaced on the page instead of failing /data. */
   attentionError?: string;
