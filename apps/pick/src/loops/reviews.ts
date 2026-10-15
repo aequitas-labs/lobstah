@@ -249,7 +249,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
         {
           id,
           repo: item.pr.repoKey!,
-          brief: withBriefHooks(reviewBrief(item, r, { identity, id, outDir }), cfg.repos[item.pr.repoKey!], 'prReview'),
+          brief: withBriefHooks(reviewBrief(item, r, { identity, id, outDir, ...(settings.rules ? { rules: settings.rules } : {}) }), cfg.repos[item.pr.repoKey!], 'prReview'),
           readOnly: true,
           ...(settings.harness ? { harness: settings.harness } : {}),
           ...(settings.model ? { model: settings.model } : {}),

@@ -166,6 +166,10 @@ describe('drafts', () => {
     expect(brief).toContain('Write two files in /x/rounds/RRE_1');
     expect(brief).toContain('Do not post, approve, request changes, comment on, push to, or edit the PR.');
     expect(brief).toContain('lobstah report d1 done');
+    expect(brief).toContain("Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md");
+    expect(brief).not.toContain('Review rules from');
+    const ruled = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x', rules: 'Flag missing tests.' });
+    expect(ruled.endsWith('Review rules from chris:\n\nFlag missing tests.')).toBe(true);
   });
 
   it('a stale or failed round re-drafts at the current head; others refuse', () => {

@@ -278,7 +278,10 @@ the job waits `trapWaitSecs` for a free trap of the repo, then pick hands it
 to the daemon. The job reads the PR with `gh`, makes any checkout it needs
 as a throwaway detached worktree at `pull/<n>/head`, and writes `review.md`
 (the summary) and `comments.json` (inline comments: `path`, `line`, `side`,
-`body`) into the round's directory, `rounds/<round id>/`. It never posts,
+`body`) into the round's directory, `rounds/<round id>/`. It follows the repo's own review guidance at the PR head (REVIEW.md,
+CONTRIBUTING.md, AGENTS.md, CLAUDE.md, the PR template), then your
+`[reviews].rules` (per repo under `[repos.<key>.reviews]`), then any
+`[repos.<key>.briefHooks].prReview` text. It never posts,
 approves, requests changes, comments, or pushes. When the job reports done,
 the round is `drafted`, or `stale` if the head moved meanwhile, or `failed`
 with the reason when the files are missing or malformed. A skip rule, a PR
