@@ -6,6 +6,8 @@ import { parseBackendLocation } from './backend.js';
 import type { Descriptor, DispatchLimits } from './types.js';
 import { lobstahHome } from './paths.js';
 import { validReviewTool } from './pr-review.js';
+import { parseReviews } from './reviews.js';
+import type { ReviewsConfig } from './reviews.js';
 
 export interface HarnessDefaults {
   default?: string;
@@ -303,6 +305,8 @@ export interface Config {
   readySettleSecs: number;
   /** Which attention kinds tend (and so the pet and the glass) walk. Default DEFAULT_ATTENTION_KINDS. */
   attentionKinds: AttentionKind[];
+  /** Review requests (`[reviews]`, with `[repos.<key>.reviews]` overrides). Off by default. */
+  reviews: ReviewsConfig;
 }
 
 /**
@@ -310,9 +314,9 @@ export interface Config {
  * Level-triggered: each stands until its clear condition, unlike notifyVerbs,
  * which fire once per transition.
  */
-export const ATTENTION_KINDS = ['question', 'decision', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready', 'report', 'stack-ready'] as const;
+export const ATTENTION_KINDS = ['question', 'decision', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready', 'report', 'stack-ready', 'review'] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
-/** Human-actionable conditions; drafts and landed catches are opt-in. */
+/** Human-actionable conditions; drafts, landed catches and review requests are opt-in. */
 export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'decision', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks'];
 
 function parseAttentionKinds(raw: unknown): AttentionKind[] {
@@ -380,6 +384,15 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   reuseWorktree: true,
   releaseOnMerge: false,
 };
+
+/** A parse error, named with the config file it came from. */
+function withConfigPath<T>(parse: () => T): T {
+  try {
+    return parse();
+  } catch (err) {
+    throw new Error(`${err instanceof Error ? err.message : String(err)} in ${configPath()}`);
+  }
+}
 
 export function configPath(): string {
   return path.join(lobstahHome(), 'config.toml');
@@ -474,6 +487,7 @@ export function loadConfig(): Config {
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
     readySettleSecs,
     attentionKinds: parseAttentionKinds(raw.attentionKinds),
+    reviews: withConfigPath(() => parseReviews(raw.reviews, reposRaw)),
   };
 }
 

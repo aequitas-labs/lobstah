@@ -44,6 +44,7 @@ export * from './chain-pr.js';
 export * from './pushes.js';
 export * from './pr-repair.js';
 export * from './marker.js';
+export * from './reviews.js';
 export * from './resume.js';
 export * from './glass.js';
 export * from './models.js';

@@ -69,6 +69,7 @@ import {
   repoKey as forgeRepoKey,
   poolViews,
   poolWaits,
+  reviewAttention,
 } from '@lobstah/core';
 import type {
   AttentionKind,
@@ -942,6 +943,8 @@ export function buildTendReport(now = Date.now()): TendReport {
     { readySettleSecs: cfg.readySettleSecs, now, trunk: (r) => prStackTrunk(cfg, r) },
   ).stacks.filter((s) => s.open);
   attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now), ...hostedAttention(cfg, now));
+  // Review items stay on disk when [reviews] is turned off; they stop standing.
+  if (cfg.reviews.enabled) attention.push(...reviewAttention(now));
   attention.push(...dispatchProgress(now, cfg).map((p): TendAttention => ({
     kind: 'dispatch-progress', key: `progress:${p.lane}:${p.id}`, stateHash: p.stateHash,
     id: p.id, lane: p.lane, verb: p.state, ageSecs: p.ageSecs, at: p.since,

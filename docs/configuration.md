@@ -14,7 +14,7 @@ keys of that section.
 |---|---|---|
 | `notifyCommand` | — | Exec'd by the daemon on wake-worthy status transitions with `LOBSTAH_ID`, `LOBSTAH_LANE`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_AT` in the environment. Fire-and-forget; point it at ntfy, a Slack helper, anything. |
 | `notifyVerbs` | `["needs-decision", "blocked", "done", "failed"]` | Which verbs fire `notifyCommand`. |
-| `attentionKinds` | `["question", "decision", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` | Which kinds `man tend`, the glass, and the desktop pet show. `decision` is a question the helm put to the human with `lobstah man ask`; the glass shows it as a card to answer, and it hides the raw `question` it frames. Without `decision`, framed decisions do not show and raw questions do. `pr:draft`, `landed`, and `report` are valid opt-in kinds. An explicit list is used unchanged. Unknown kinds are errors. See the [attention contract](vocabulary.md#attention-contract). |
+| `attentionKinds` | `["question", "decision", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` | Which kinds `man tend`, the glass, and the desktop pet show. `decision` is a question the helm put to the human with `lobstah man ask`; the glass shows it as a card to answer, and it hides the raw `question` it frames. Without `decision`, framed decisions do not show and raw questions do. `pr:draft`, `landed`, `report`, and `review` are valid opt-in kinds. An explicit list is used unchanged. Unknown kinds are errors. See the [attention contract](vocabulary.md#attention-contract). |
 | `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
 | `readySettleSecs` | `600` | `pr:ready` stands after continuously meeting the ready conditions on the same head for this many seconds. Any not-ready observation or new head resets the timer. Each attention read re-evaluates expiry from the persisted start, even without a new forge event. `0` restores immediate ready attention; other `pr:*` kinds are unchanged. |
 
@@ -331,6 +331,28 @@ key reused as the routing key. Opt-in is per repo, never implied.
 | `scope` | `own` | Merge only PRs authored by `identity`. |
 
 See [pickup.md](pickup.md) for the loop semantics these keys drive.
+
+## `[reviews]` — review requests (`lobstah pick`), off by default
+
+When someone asks `[pickup.github].identity` for a review, `lobstah pick`
+files a review item ([pickup.md](pickup.md), "Review requests"). It searches
+as that identity, with its token. Any key except `enabled`, `repos` and
+`maxPerDay` can be overridden per repo under `[repos.<key>.reviews]`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Opt-in. Off means no search call at all. |
+| `repos` | `"configured"` | `"configured"`: only PRs in a `[repos.*]` origin. `"any"`: every repo the token can see. |
+| `work` | `"trap"` | Who drafts the review: `"off"`, `"trap"` (a free trap of that repo, then headless after `trapWaitSecs`), or `"headless"`. |
+| `post` | `"draft"` | `"draft"`: Chris posts from the glass. `"auto"`: post the draft as a comment-only review once drafted. Never approve, never request changes. |
+| `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
+| `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
+| `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
+| `maxPerDay` | `20` | Review jobs started per day. Past it, items file with no job. |
+| `skipAuthors`, `skipLabels` | `[]` | Requests on PRs by these authors or with these labels file an item but start no job. |
+
+The `review` attention kind is not in the default `attentionKinds`; add it to
+let review items walk in `man tend`, the glass, and the pet.
 
 ## Environment
 

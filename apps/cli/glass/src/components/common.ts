@@ -367,6 +367,7 @@ export const KIND_LABEL: Record<string, string> = {
   'pr:conflict': 'conflicts',
   'pr:ready': 'ready',
   'stack-ready': 'stack ready',
+  review: 'review request',
   landed: 'landed',
   watch: 'watch',
 };

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { ensureLayout, listWatches, readWatch } from '@lobstah/core';
+import { ensureLayout, listWatches, loadConfig, readWatch } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 import { PickupState } from './state.js';
 import { GithubSource } from './sources/github.js';
@@ -10,6 +10,7 @@ import { reportLoop } from './loops/report.js';
 import type { ReportNotification } from './loops/report.js';
 import { reconcileLoop } from './loops/reconcile.js';
 import { mergeLoop } from './loops/merge.js';
+import { reviewsLoop } from './loops/reviews.js';
 import { handleStreamLine, watchLoop } from './loops/watch.js';
 import type { MergePolicy, MergeSource, Source } from './types.js';
 
@@ -113,6 +114,8 @@ export async function cycle(
   notify: (n: ReportNotification) => void,
   liveComment = true,
   pools: string[] = [],
+  /** The review-request search (`[reviews]`), when [pickup.github] gives it an identity. */
+  reviews?: () => Promise<void>,
 ): Promise<void> {
   for (const source of sources) {
     // A guard per loop: reconcile is the safety net for a report that never
@@ -134,6 +137,13 @@ export async function cycle(
       await mergeLoop(source, policy, state, log);
     } catch (err) {
       log(`${source.name} merge: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (reviews) {
+    try {
+      await reviews();
+    } catch (err) {
+      log(`reviews: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   try {
@@ -166,8 +176,12 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
   }
 
   const notify = makeNotifier(cfg.notifyCommand, log);
+  // Review requests search as [pickup.github]'s identity, with its token.
+  const gh = cfg.github[0];
+  const reviews = gh ? () => reviewsLoop(gh.identity, gh.token, log) : undefined;
+  if (!gh && loadConfig().reviews.enabled) log('reviews: [reviews].enabled needs [pickup.github] for its identity and token — not searching');
   if (mode === 'once') {
-    await cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools);
+    await cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, reviews);
     return;
   }
   log(`polling every ${cfg.pollSecs}s — no webhooks, no inbound surface`);
@@ -176,7 +190,7 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
   const flight = new SingleFlight();
   const streamChildren = new Map<string, ChildProcess>();
   while (true) {
-    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools));
+    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, reviews));
     syncStreams(streamChildren, flight, log, notify);
     await new Promise((r) => setTimeout(r, cfg.pollSecs * 1000));
   }
