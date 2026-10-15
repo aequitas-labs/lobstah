@@ -9,6 +9,7 @@ export * from './attachments.js';
 export * from './reports.js';
 export * from './todos.js';
 export * from './decisions.js';
+export * from './grants.js';
 export * from './question-hold.js';
 export * from './paths.js';
 export * from './queue.js';

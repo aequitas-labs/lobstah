@@ -1,6 +1,7 @@
-import { DecisionError, answerDecision, askDecision, decisionDir, loadConfig, markDecisionViewed, markQuestionViewed, readDecision } from '@lobstah/core';
+import { DecisionError, GrantError, answerDecision, askDecision, decisionDir, loadConfig, markDecisionViewed, markQuestionViewed, readDecision } from '@lobstah/core';
 import type { DecisionAnswer, DecisionMeta, DecisionUpload, Lane } from '@lobstah/core';
 import * as fs from 'node:fs';
+import { applyPermissionAnswer, permissionAnswerAllowed } from './grants-cli.js';
 import { buildTendReport } from './tend.js';
 
 /**
@@ -27,8 +28,20 @@ function standingQuestion(key: string) {
 export function answerKey(key: string, req: AnswerRequest): { decision: DecisionMeta; answer: DecisionAnswer } {
   const maxBytes = loadConfig().limits.attachmentMaxBytes;
   if (key.startsWith('decision:')) {
+    // A permission card: only the glass may allow. An allow writes the grant and tells the trap.
+    const asked = readDecision(key);
+    if (asked?.permission) {
+      try {
+        permissionAnswerAllowed(asked, req.option, req.by);
+      } catch (err) {
+        if (err instanceof GrantError) throw new DecisionError(err.message, 403);
+        throw err;
+      }
+    }
     const answer = answerDecision({ key, ...req, maxBytes });
-    return { decision: readDecision(key)!, answer };
+    const decision = readDecision(key)!;
+    if (decision.permission) applyPermissionAnswer(decision, answer);
+    return { decision, answer };
   }
   const q = /^(work|chore):[A-Za-z0-9-]+$/.test(key) ? standingQuestion(key) : undefined;
   if (!q) throw new DecisionError(`no standing decision or question ${key}`, 404);

@@ -1,0 +1,352 @@
+import {
+  GrantError,
+  PERMISSION_OPTIONS,
+  addGrant,
+  askDecision,
+  grantCovers,
+  listGrants,
+  loadConfig,
+  parseUntil,
+  revokeGrant,
+  rosterByAddress,
+  setRosterProfile,
+  sendMessage,
+  trapBySession,
+  toonKV,
+  toonTable,
+  useGrant,
+} from '@lobstah/core';
+import type { DecisionAnswer, DecisionMeta, Grant, GrantHarness, GrantMode, GrantRequest, Lane, PermissionAsk } from '@lobstah/core';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+
+/**
+ * Grants from the command line and the hooks: a person grants, revokes and
+ * lists; the Claude Code mod and the Codex PermissionRequest hook ask the
+ * ledger whether a trap's call is covered; a trap files a permission card;
+ * a glass answer to that card writes the grant and tells the trap.
+ */
+
+/** Environment variables a harness sets in the shells its agent runs. */
+const AGENT_ENV = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CODEX_THREAD_ID', 'CODEX_SANDBOX', 'CODEX_MANAGED_BY_NPM_SESSION'];
+
+/**
+ * A grant is a person's act. Refuse when the command runs without a terminal
+ * (an agent's tool call has none) or inside an agent's shell. This keeps an
+ * agent from granting itself; the harness checks, which see the agent run
+ * the command, are the other half.
+ */
+export function personOnly(action: string, env: NodeJS.ProcessEnv = process.env, tty = !!process.stdin.isTTY && !!process.stdout.isTTY): void {
+  const agent = AGENT_ENV.find((k) => env[k] !== undefined);
+  if (agent) throw new GrantError(`${action} is for a person, not an agent session (${agent} is set). Grant in the glass, or run it in your own terminal.`);
+  if (!tty) throw new GrantError(`${action} needs a terminal: a person grants, at a terminal or in the glass.`);
+}
+
+/** Ask the person to confirm at the terminal. */
+function confirm(question: string): boolean {
+  process.stdout.write(`${question} [y/N] `);
+  const buf = Buffer.alloc(256);
+  let n = 0;
+  try {
+    n = fs.readSync(0, buf, 0, buf.length, null);
+  } catch {
+    return false;
+  }
+  return /^\s*y(es)?\s*$/i.test(buf.subarray(0, n).toString('utf8'));
+}
+
+const localPerson = (): string => `local:${os.userInfo().username}`;
+
+function harnessOf(v: string | undefined): GrantHarness {
+  if (v === undefined) return 'any';
+  if (v !== 'claude' && v !== 'codex' && v !== 'any') throw new GrantError('--harness takes claude, codex or any');
+  return v;
+}
+
+function what(g: Pick<Grant, 'command' | 'match' | 'path'>): string {
+  if (g.path !== undefined) return `write ${g.path}`;
+  return g.match === 'prefix' ? `${g.command} …` : g.command!;
+}
+
+/** `lobstah grant <command> [--prefix] [--once] [--harness] [--expires] [--path <p>] [--trap <name>]`. */
+export function grantCommand(opts: {
+  command?: string;
+  path?: string;
+  prefix: boolean;
+  once: boolean;
+  harness?: string;
+  expires?: string;
+  trap?: string;
+}): void {
+  personOnly('lobstah grant');
+  const mode: GrantMode = opts.once ? 'once' : 'always';
+  const harness = harnessOf(opts.harness);
+  const expiresAt = opts.expires !== undefined ? parseUntil(opts.expires) : undefined;
+  const shown = opts.path !== undefined ? `writes to ${opts.path}` : `\`${opts.command}\`${opts.prefix ? ' and the same command with more arguments' : ''}`;
+  const warn = mode === 'always' ? 'every trap may run it without asking, until you revoke it' : 'one trap may run it once';
+  if (!confirm(`Allow ${shown} (${harness === 'any' ? 'Claude Code and Codex' : harness}); ${warn}?`)) {
+    console.log('not granted');
+    return;
+  }
+  const g = addGrant({
+    ...(opts.path !== undefined ? { path: opts.path } : { command: opts.command, match: opts.prefix ? 'prefix' : 'exact' }),
+    mode,
+    harness,
+    by: localPerson(),
+    ...(opts.trap ? { trap: opts.trap } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  });
+  console.log(toonKV({ granted: g.id, what: what(g), mode: g.mode, harness: g.harness, ...(g.trap ? { trap: g.trap } : {}), ...(g.expiresAt ? { expires: g.expiresAt } : {}), by: g.by }));
+}
+
+/** `lobstah grants [--all] [--json]`: what a person has granted, with who, when and how often used. */
+export function grantsCommand(opts: { all: boolean; json: boolean }): void {
+  const { grants, intact, problem } = listGrants({ all: opts.all });
+  if (opts.json) {
+    console.log(JSON.stringify({ intact, ...(problem ? { problem } : {}), grants }, null, 2));
+    return;
+  }
+  if (!intact) console.log(toonKV({ warning: `the grants ledger is damaged (${problem}): no grant is honoured until it is repaired` }));
+  console.log(
+    toonTable(
+      'grants',
+      grants.map((g) => ({
+        id: g.id,
+        what: what(g),
+        mode: g.mode,
+        harness: g.harness,
+        trap: g.trap ?? '',
+        by: g.by,
+        at: g.at,
+        uses: g.uses,
+        expires: g.expiresAt ?? '',
+        ...(opts.all ? { revoked: g.revokedAt ?? '' } : {}),
+      })),
+      ['id', 'what', 'mode', 'harness', 'trap', 'by', 'at', 'uses', 'expires', ...(opts.all ? ['revoked'] : [])],
+    ),
+  );
+}
+
+/** `lobstah revoke <id>`: anyone may take a permission away. */
+export function revokeCommand(id: string): void {
+  const g = revokeGrant(id, AGENT_ENV.some((k) => process.env[k] !== undefined) ? 'agent' : localPerson());
+  console.log(toonKV({ revoked: g.id, what: what(g), at: g.revokedAt! }));
+}
+
+/** A call as a harness hook or mod hands it over: the tool and its arguments. */
+interface CallInput {
+  harness: 'claude' | 'codex';
+  tool: string;
+  input: Record<string, unknown>;
+  session?: string;
+}
+
+/** The files an `apply_patch` call touches, from its patch text. */
+export function patchPaths(patch: string): string[] {
+  const paths: string[] = [];
+  for (const m of patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)) paths.push((m[1] ?? m[2]!).trim());
+  return paths;
+}
+
+/**
+ * The grant requests one call makes: one for a shell command, one per file
+ * for a write. A call is covered only when every request is.
+ */
+export function callRequests(call: CallInput, trap: string | undefined, cwd: string): GrantRequest[] {
+  const base = { harness: call.harness, tool: call.tool, ...(trap ? { trap } : {}) };
+  const raw = call.input.command;
+  if (call.tool === 'Bash' || call.tool === 'shell' || call.tool === 'exec_command') {
+    const command = Array.isArray(raw) ? raw.map(String).join(' ') : typeof raw === 'string' ? raw : undefined;
+    return command ? [{ ...base, command }] : [];
+  }
+  if (call.tool === 'apply_patch') {
+    const patch = typeof raw === 'string' ? raw : typeof call.input.patch === 'string' ? (call.input.patch as string) : '';
+    return patchPaths(patch).map((p) => ({ ...base, path: p.startsWith('/') ? p : `${cwd}/${p}` }));
+  }
+  const file = call.input.file_path ?? call.input.notebook_path;
+  if (typeof file === 'string') return [{ ...base, path: file.startsWith('/') ? file : `${cwd}/${file}` }];
+  return [];
+}
+
+/**
+ * Is this call covered by grants? Only a signed-on trap's calls are: a
+ * grant is for traps, never for the helm or a person's own session. Every
+ * request the call makes must be covered; each covering grant's use is
+ * recorded. Returns the grant ids that covered it, or nothing.
+ */
+export function checkCall(call: CallInput, cwd: string): string[] | undefined {
+  const trap = call.session ? trapBySession(call.session) : undefined;
+  if (!trap) return undefined;
+  // The trap's own harness, as it signed on: the hook entry is shared by both plugins.
+  const harness = trap.harness === 'codex' ? 'codex' : trap.harness === 'claude' ? 'claude' : call.harness;
+  const requests = callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd);
+  if (requests.length === 0) return undefined;
+  // Check every request before spending any: a once-grant is not spent on a call that is refused anyway.
+  const { grants, intact } = listGrants();
+  if (!intact || !requests.every((req) => grants.some((g) => grantCovers(g, req)))) return undefined;
+  const ids: string[] = [];
+  for (const req of requests) {
+    const g = useGrant(req, { session: call.session });
+    if (!g) return undefined;
+    ids.push(g.id);
+  }
+  return ids;
+}
+
+/** Read a hook's JSON from stdin; undefined when there is none. */
+function readStdinJson(): Record<string, unknown> | undefined {
+  try {
+    const text = fs.readFileSync(0, 'utf8');
+    return text.trim() ? (JSON.parse(text) as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `lobstah hook grant-check`: the Claude Code mod's question. Input:
+ * `{ tool, input, session, cwd }`. Prints `{"grants":[...]}` when grants
+ * cover the call, `{}` otherwise. Never fails: an error means no grant.
+ */
+export function grantCheckHook(): void {
+  try {
+    const q = readStdinJson();
+    if (!q || typeof q.tool !== 'string' || typeof q.input !== 'object' || q.input === null) return void console.log('{}');
+    const ids = checkCall(
+      { harness: 'claude', tool: q.tool, input: q.input as Record<string, unknown>, ...(typeof q.session === 'string' ? { session: q.session } : {}) },
+      typeof q.cwd === 'string' ? q.cwd : process.cwd(),
+    );
+    console.log(JSON.stringify(ids ? { grants: ids } : {}));
+  } catch {
+    console.log('{}');
+  }
+}
+
+/**
+ * `lobstah hook permission-request`: the PermissionRequest hook of both
+ * plugins. With a grant that covers a trap's call it allows it: in Codex
+ * before the approval reviewer, in Claude Code where a permission prompt
+ * would show (the mod covers auto mode). Otherwise it prints nothing, and
+ * the normal approval flow goes on.
+ */
+export function permissionRequestHook(): void {
+  try {
+    const h = readStdinJson();
+    if (!h || typeof h.tool_name !== 'string' || typeof h.tool_input !== 'object' || h.tool_input === null) return;
+    const ids = checkCall(
+      { harness: 'codex', tool: h.tool_name, input: h.tool_input as Record<string, unknown>, ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}) },
+      typeof h.cwd === 'string' ? h.cwd : process.cwd(),
+    );
+    if (ids) console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } }));
+  } catch {
+    /* no decision: the normal approval flow */
+  }
+}
+
+/** File a trap's permission request as a card with Allow once, Allow always and No. */
+export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string }): DecisionMeta {
+  const target = opts.ask.command !== undefined ? opts.ask.command : opts.ask.path!;
+  const kind = opts.ask.command !== undefined ? 'run' : 'write to';
+  const title = `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
+  const detail = [
+    opts.note ? `${opts.note}\n` : '',
+    `The trap asks to ${kind} exactly this${opts.ask.harness === 'any' ? '' : ` (${opts.ask.harness === 'claude' ? 'Claude Code' : 'Codex'})`}:`,
+    '',
+    '```',
+    target,
+    '```',
+    '',
+    `- **Allow once**: this trap may ${kind} it once, within the hour.`,
+    `- **Allow always**: any trap may ${kind} it without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
+    '- **No**: the trap is told not to.',
+  ].join('\n');
+  return askDecision({
+    title: title.length > 200 ? `${title.slice(0, 199)}…` : title,
+    detailText: detail,
+    options: [...PERMISSION_OPTIONS],
+    dispatch: opts.dispatch,
+    lane: opts.lane,
+    ...(opts.repo ? { repo: opts.repo } : {}),
+    askedBy: 'worker',
+    permission: opts.ask,
+    maxBytes: loadConfig().limits.attachmentMaxBytes,
+  }).meta;
+}
+
+/**
+ * Before a permission card is answered: only the glass may allow. An answer
+ * from the command line (`man answer`, which the helm runs) may say No but
+ * never grants.
+ */
+export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: 'glass' | 'cli'): void {
+  if (!decision.permission || by === 'glass') return;
+  if (option === 'Allow once' || option === 'Allow always') {
+    throw new GrantError('a permission is granted in the glass, or by a person with `lobstah grant` at a terminal; `man answer` can only say No');
+  }
+}
+
+/**
+ * After a permission card is answered in the glass: write the grant and tell
+ * the trap. "Allow once" is good for the asking trap alone; "Allow always"
+ * for every trap.
+ */
+export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAnswer): Grant | undefined {
+  const ask = decision.permission;
+  if (!ask || !decision.dispatch) return undefined;
+  const lane: Lane = decision.lane ?? 'work';
+  const target = ask.command !== undefined ? `\`${ask.command}\`` : `writes to ${ask.path}`;
+  if (answer.by !== 'glass' || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
+    if (answer.option === 'No') sendMessage(decision.dispatch, lane, `Chris answered No to ${target}. Do not run it. Carry on without it, or report what you need instead.`, 'glass');
+    return undefined;
+  }
+  const once = answer.option === 'Allow once';
+  const g = addGrant({
+    ...(ask.command !== undefined ? { command: ask.command, match: 'exact' as const } : { path: ask.path! }),
+    mode: once ? 'once' : 'always',
+    harness: ask.harness,
+    by: 'glass',
+    dispatch: decision.dispatch,
+    ...(once && ask.trap ? { trap: ask.trap } : {}),
+  });
+  sendMessage(
+    decision.dispatch,
+    lane,
+    `Chris allowed ${target} ${once ? 'once' : 'always'} in the glass: grant ${g.id}. ` +
+      '`lobstah grants` shows it. ' +
+      (ask.command !== undefined ? `Run the command again exactly as shown, with nothing added before or after it: ${ask.command}` : `Make the write to ${ask.path} again.`),
+    'glass',
+  );
+  return g;
+}
+
+/** The warning a bypass trap carries, in one line. */
+export const BYPASS_WARNING =
+  'A bypass trap acts as your account with no permission checks: it runs any command and writes any file without asking. Meant for isolated machines.';
+
+/**
+ * `lobstah trap bypass <trap> on|off`: from its next start, the trap runs with
+ * no permission checks (Claude Code bypassPermissions; Codex
+ * --dangerously-bypass-approvals-and-sandbox). A person's choice, at a
+ * terminal: an agent cannot turn it on for itself.
+ */
+export function bypassCommand(address: string, on: boolean): void {
+  if (on) personOnly('lobstah trap bypass');
+  const entry = rosterByAddress(address);
+  if (!entry) throw new GrantError(`no roster record for ${address}: a trap joins the roster when it signs on`);
+  if (on) {
+    console.log(`warning: ${BYPASS_WARNING}`);
+    if (!confirm(`Start ${entry.name} with no permission checks from its next start?`)) {
+      console.log('unchanged');
+      return;
+    }
+  }
+  setRosterProfile(entry.trapId, { config: { bypass: on ? 'true' : null } });
+  console.log(
+    toonKV({
+      trap: entry.name,
+      bypass: on,
+      next: on ? `lobstah man throw ${entry.name} starts it with no permission checks; a session running now keeps its mode` : 'its next start runs with the normal permission checks',
+    }),
+  );
+}
+
