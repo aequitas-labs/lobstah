@@ -203,12 +203,16 @@ h2 {
   padding-left: 1.6em;
 }
 .goal-check,
-.todo-check,
-.todo-check.card {
+.todo-check {
   display: flex;
   align-items: flex-start;
   gap: 0.6em;
   cursor: default;
+}
+/* Todos are one compact list row each, in table and card views alike. */
+.todo-check {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
 }
 .goal-check input,
 .todo-check input {
@@ -226,10 +230,6 @@ h2 {
   list-style: none;
   padding: 0;
   margin: 0;
-}
-.todo-check:not(.card) {
-  padding: var(--space-2) 0;
-  border-top: 1px solid var(--line);
 }
 .todo-content {
   min-width: 0;

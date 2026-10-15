@@ -129,14 +129,16 @@ function deckPrs(inp: DeckInputs, view: View) {
 }
 
 /**
- * The helm's to-dos: a section only when there are some. Each line is the
- * to-do's text, then its age; a stale one carries a badge, and the stale
- * note heads the section. The helm closes them from its CLI.
+ * The helm's Todos: a section only when there are some. One compact
+ * checklist in every view — table and cards alike, never a card per Todo.
+ * Each row is a read-only checkbox, the full wrapped text, then its age; a
+ * stale one carries a badge, and the stale note heads the section. The helm
+ * closes them from its CLI.
  */
-function deckTodos(inp: DeckInputs, view: View) {
+function deckTodos(inp: DeckInputs) {
   if (!inp.todos.length) return null;
   const grounds = new Set(inp.todos.map((t) => t.grounds)).size > 1;
-  return html`<section class="todos"><h2>Todos</h2>${inp.todoNote && html`<div class="dim">${inp.todoNote}</div>`}<ul class=${'todo-checklist' + (view === 'cards' ? ' cards' : '')}>${inp.todos.map((t) => html`<li key=${`todo:${t.grounds}:${t.id}`} class=${'todo-check' + (view === 'cards' ? ' card' : '')}><input type="checkbox" disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${`Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${t.text}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${Age(t.createdAt)} ago</span>${t.stale && html` <span class="badge warn">stale</span>`}</div></li>`)}</ul></section>`;
+  return html`<section class="todos"><h2>Todos</h2>${inp.todoNote && html`<div class="dim">${inp.todoNote}</div>`}<ul class="todo-checklist">${inp.todos.map((t) => html`<li key=${`todo:${t.grounds}:${t.id}`} class="todo-check"><input type="checkbox" disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${`Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${t.text}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${Age(t.createdAt)} ago</span>${t.stale && html` <span class="badge warn">stale</span>`}</div></li>`)}</ul></section>`;
 }
 
 export function Deck({
@@ -209,6 +211,6 @@ export function Deck({
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckTodos(inp, view)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckTodos(inp)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
   ];
 }

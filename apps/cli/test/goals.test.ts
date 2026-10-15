@@ -131,9 +131,9 @@ it('hides the callout when no goals are set and keeps tend unchanged', async () 
   } finally { await page.close(); }
 });
 
-it.each(['table', 'cards'])('renders Todos as a read-only checklist with full safe text in %s view', async (view) => {
+it.each(['table', 'cards'])('renders Todos as one compact read-only checklist with full safe text in %s view', async (view) => {
   const long = 'Read the whole handoff, including the detailed evidence and the final verification notes, without cutting off this reminder. '.repeat(4) + '<safe>';
-  addTodo('day', long); const closed = addTodo('day', 'Already done'); closeTodo('day', closed.id, 'done');
+  addTodo('day', long); addTodo('day', 'Second'); const closed = addTodo('day', 'Already done'); closeTodo('day', closed.id, 'done');
   const report = buildTendReport();
   expect(renderTend(report)).toContain(long);
   expect(renderTend(report)).not.toContain('to-dos');
@@ -141,9 +141,14 @@ it.each(['table', 'cards'])('renders Todos as a read-only checklist with full sa
   const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now(), prefs: { view } });
   try {
     expect(page.$('.todos h2')?.textContent).toBe('Todos');
-    expect(page.$('.todo-checklist .todo-text')?.textContent).toBe(long);
+    // One list, one row per Todo — never a card per Todo, in any view.
+    expect(page.$$('.todos ul.todo-checklist')).toHaveLength(1);
+    expect(page.$$('.todos .card, .todos .cards')).toHaveLength(0);
+    const rows = page.$$('.todo-checklist > li.todo-check');
+    expect(rows.map((r) => r.querySelector('.todo-text')?.textContent)).toEqual([long, 'Second']);
+    for (const row of rows) expect(row.textContent).toMatch(/added .+ ago/);
     const boxes = page.$$('.todo-checklist input[type="checkbox"]') as HTMLInputElement[];
-    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([[false, true]]);
+    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([[false, true], [false, true]]);
     expect(page.$('.todo-checklist safe')).toBeNull();
     expect(page.$('.todo-checklist')?.textContent).not.toContain('Already done');
   } finally { await page.close(); }
