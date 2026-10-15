@@ -14,10 +14,8 @@ export type TodoState = 'open' | 'done' | 'dropped';
 export interface Todo {
   /** Short and sequential per grounds: `todo done 3`. Never reused. */
   id: number;
+  /** Free text: the helm writes whatever detail it wants. */
   text: string;
-  why?: string;
-  /** A URL, a PR (`#123`, `owner/repo#123`), or a dispatch id. */
-  ref?: string;
   state: TodoState;
   createdAt: string;
   updatedAt: string;
@@ -29,8 +27,6 @@ export interface TodoView {
   grounds: string;
   id: number;
   text: string;
-  why?: string;
-  ref?: string;
   createdAt: string;
   /** Older than `[helm].todoStaleDays`. */
   stale: boolean;
@@ -82,16 +78,14 @@ export function listTodos(grounds: string, opts: { all?: boolean } = {}): Todo[]
   return read(grounds).items.filter((t) => opts.all || t.state === 'open');
 }
 
-export function addTodo(grounds: string, input: { text: string; why?: string; ref?: string }, now = Date.now()): Todo {
-  const text = input.text.trim();
+export function addTodo(grounds: string, text: string, now = Date.now()): Todo {
+  text = text.trim();
   if (!text) throw new TodoError('a to-do needs text');
   const data = read(grounds);
   const at = new Date(now).toISOString();
   const todo: Todo = {
     id: data.nextId,
     text,
-    ...(input.why?.trim() ? { why: input.why.trim() } : {}),
-    ...(input.ref?.trim() ? { ref: input.ref.trim() } : {}),
     state: 'open',
     createdAt: at,
     updatedAt: at,
@@ -146,5 +140,5 @@ export function staleTodoNote(count: number, days: number): string | undefined {
 
 /** One line per to-do, for the helm's context and plain text views. */
 export function todoLine(t: Todo): string {
-  return `- [${t.id}] ${t.text}${t.why ? ` (why: ${t.why})` : ''}${t.ref ? ` (ref: ${t.ref})` : ''} — added ${t.createdAt.slice(0, 10)}`;
+  return `- [${t.id}] ${t.text} — added ${t.createdAt.slice(0, 10)}`;
 }

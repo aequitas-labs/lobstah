@@ -17,11 +17,11 @@ afterEach(() => {
 });
 
 describe('helm to-dos: storage per grounds', () => {
-  it('adds with text, why, ref, and created and updated times; done and drop close and stamp updated', () => {
+  it('adds free text with created and updated times; done and drop close and stamp updated', () => {
     const t0 = Date.parse('2026-10-01T10:00:00Z');
-    const a = addTodo('fleet', { text: 'merge #2268 once the API is in production', why: 'API first', ref: '#2268' }, t0);
-    const b = addTodo('fleet', { text: 'tag runner 1.4.1' }, t0 + 1000);
-    expect(a).toMatchObject({ id: 1, why: 'API first', ref: '#2268', state: 'open', createdAt: '2026-10-01T10:00:00.000Z', updatedAt: '2026-10-01T10:00:00.000Z' });
+    const a = addTodo('fleet', 'merge #2268 once the API is in production (API first)', t0);
+    const b = addTodo('fleet', 'tag runner 1.4.1', t0 + 1000);
+    expect(a).toMatchObject({ id: 1, text: 'merge #2268 once the API is in production (API first)', state: 'open', createdAt: '2026-10-01T10:00:00.000Z', updatedAt: '2026-10-01T10:00:00.000Z' });
     expect(b.id).toBe(2);
     expect(listTodos('fleet').map((t) => t.id)).toEqual([1, 2]);
 
@@ -34,12 +34,12 @@ describe('helm to-dos: storage per grounds', () => {
     expect(() => closeTodo('fleet', 9, 'done')).toThrow(/no to-do 9/);
 
     // Ids are never reused, even after closing.
-    expect(addTodo('fleet', { text: 'next' }, t0 + DAY).id).toBe(3);
+    expect(addTodo('fleet', 'next', t0 + DAY).id).toBe(3);
   });
 
   it('keeps each grounds apart, and survives a fresh read from disk', () => {
-    addTodo('fleet', { text: 'home item' });
-    addTodo('web', { text: 'web item' });
+    addTodo('fleet', 'home item');
+    addTodo('web', 'web item');
     expect(listTodos('web').map((t) => t.text)).toEqual(['web item']);
     expect(openTodosByGrounds().map((g) => [g.grounds, g.todos.length])).toEqual([['fleet', 1], ['web', 1]]);
     expect(fs.existsSync(path.join(home, 'todos', 'web.json'))).toBe(true);
@@ -47,24 +47,24 @@ describe('helm to-dos: storage per grounds', () => {
 
   it('prunes closed items a month after they closed; open ones stay', () => {
     const t0 = Date.parse('2026-08-01T00:00:00Z');
-    addTodo('fleet', { text: 'old open' }, t0);
-    addTodo('fleet', { text: 'old done' }, t0);
+    addTodo('fleet', 'old open', t0);
+    addTodo('fleet', 'old done', t0);
     closeTodo('fleet', 2, 'done', t0);
-    addTodo('fleet', { text: 'new' }, t0 + 40 * DAY);
+    addTodo('fleet', 'new', t0 + 40 * DAY);
     expect(listTodos('fleet', { all: true }).map((t) => t.text)).toEqual(['old open', 'new']);
   });
 
   it('refuses empty text and a grounds name that is a path', () => {
-    expect(() => addTodo('fleet', { text: '  ' })).toThrow(TodoError);
-    expect(() => addTodo('../x', { text: 'a' })).toThrow(TodoError);
+    expect(() => addTodo('fleet', '  ')).toThrow(TodoError);
+    expect(() => addTodo('../x', 'a')).toThrow(TodoError);
   });
 });
 
 describe('helm to-dos: stale', () => {
   it('counts open items older than the configured days; 0 disables', () => {
     const now = Date.parse('2026-10-10T00:00:00Z');
-    addTodo('fleet', { text: 'four days' }, now - 4 * DAY);
-    addTodo('fleet', { text: 'two days' }, now - 2 * DAY);
+    addTodo('fleet', 'four days', now - 4 * DAY);
+    addTodo('fleet', 'two days', now - 2 * DAY);
     const todos = listTodos('fleet');
     expect(staleTodos(todos, 3, now).map((t) => t.text)).toEqual(['four days']);
     expect(staleTodos(todos, 1, now)).toHaveLength(2);

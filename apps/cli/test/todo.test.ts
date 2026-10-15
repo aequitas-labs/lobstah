@@ -45,13 +45,13 @@ describe('helm to-dos: re-injected beside the charter', () => {
   for (const source of ['startup', 'compact'] as const) {
     it(`SessionStart (${source}) gives the helm its open to-dos`, () => {
       const grounds = helm();
-      addTodo(grounds, { text: 'merge #2268 once the API is in production', ref: '#2268' });
-      addTodo(grounds, { text: 'tag runner 1.4.1' });
+      addTodo(grounds, 'merge #2268 once the API is in production, see https://github.com/o/r/pull/2268');
+      addTodo(grounds, 'tag runner 1.4.1');
       const out = run(['hook', 'session-start'], { session_id: HELM, source });
       expect(out.status).toBe(0);
       const ctx = JSON.parse(out.stdout).hookSpecificOutput.additionalContext as string;
       expect(ctx).toContain('the helm charter');
-      expect(ctx).toContain('[1] merge #2268 once the API is in production (ref: #2268)');
+      expect(ctx).toContain('[1] merge #2268 once the API is in production, see https://github.com/o/r/pull/2268 — added');
       expect(ctx).toContain('[2] tag runner 1.4.1');
       expect(ctx.indexOf('the helm charter')).toBeLessThan(ctx.indexOf('[1] merge'));
     });
@@ -59,9 +59,9 @@ describe('helm to-dos: re-injected beside the charter', () => {
 
   it('a closed to-do drops out; a session that is not the helm gets none', () => {
     const grounds = helm();
-    addTodo(grounds, { text: 'tag runner 1.4.1' });
+    addTodo(grounds, 'tag runner 1.4.1');
     expect(run(['todo', 'done', '1', '--session', HELM]).status).toBe(0);
-    addTodo(grounds, { text: 'still open' });
+    addTodo(grounds, 'still open');
     const ctx = JSON.parse(run(['hook', 'session-start'], { session_id: HELM, source: 'compact' }).stdout).hookSpecificOutput.additionalContext as string;
     expect(ctx).not.toContain('tag runner');
     expect(ctx).toContain('[2] still open');
@@ -81,6 +81,8 @@ describe('helm to-dos: helm only', () => {
     expect(trap.stdout + trap.stderr).toContain('a trap keeps none');
     expect(run(['todo', 'add', 'x', '--session', 'other-session']).status).not.toBe(0);
     expect(run(['todo', 'add', 'x', '--session', HELM]).status).toBe(0);
+    // The text is the whole to-do: no detail flags.
+    expect(run(['todo', 'add', 'x', '--why', 'y', '--session', HELM]).status).toBe(2);
   });
 });
 
@@ -88,9 +90,9 @@ describe('helm to-dos: the stale note in tend', () => {
   it('notes to-dos past the default 3 days, and lists them', () => {
     const grounds = helm();
     const now = Date.now();
-    addTodo(grounds, { text: 'old one' }, now - 4 * DAY);
-    addTodo(grounds, { text: 'older one' }, now - 5 * DAY);
-    addTodo(grounds, { text: 'fresh one' }, now - 1 * DAY);
+    addTodo(grounds, 'old one', now - 4 * DAY);
+    addTodo(grounds, 'older one', now - 5 * DAY);
+    addTodo(grounds, 'fresh one', now - 1 * DAY);
     const r = buildTendReport(now);
     expect(r.todoNote).toBe('2 to-dos older than 3 days: move to the issue tracker?');
     expect(r.todos?.map((t) => [t.text, t.stale])).toEqual([['old one', true], ['older one', true], ['fresh one', false]]);
@@ -102,7 +104,7 @@ describe('helm to-dos: the stale note in tend', () => {
   it('follows [helm].todoStaleDays; none stale, no note', () => {
     fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\ntodoStaleDays = 7\n');
     const grounds = helm();
-    addTodo(grounds, { text: 'four days' }, Date.now() - 4 * DAY);
+    addTodo(grounds, 'four days', Date.now() - 4 * DAY);
     const r = buildTendReport();
     expect(r.todoNote).toBeUndefined();
     expect(renderTend(r)).not.toContain('older than');

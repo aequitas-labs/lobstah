@@ -29,8 +29,6 @@ function view(grounds: string, todos: Todo[], days: number, now: number, display
     grounds: display(grounds),
     id: t.id,
     text: t.text,
-    ...(t.why ? { why: t.why } : {}),
-    ...(t.ref ? { ref: t.ref } : {}),
     createdAt: t.createdAt,
     stale: stale.has(t.id),
   }));
@@ -59,10 +57,10 @@ export function todoStaleLine(todos: TodoView[]): string | undefined {
 }
 
 export function todoTable(todos: TodoView[], withGrounds: boolean): string {
-  const cols = [...(withGrounds ? ['grounds'] : []), 'id', 'text', 'why', 'ref', 'added'];
+  const cols = [...(withGrounds ? ['grounds'] : []), 'id', 'text', 'added'];
   return toonTable(
     'todos',
-    todos.map((t) => ({ grounds: t.grounds, id: t.id, text: t.text, why: t.why ?? '', ref: t.ref ?? '', added: t.createdAt.slice(0, 10) })),
+    todos.map((t) => ({ grounds: t.grounds, id: t.id, text: t.text, added: t.createdAt.slice(0, 10) })),
     cols,
   );
 }

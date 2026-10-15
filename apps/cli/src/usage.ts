@@ -76,8 +76,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   reports: { flags: { '--json': {} } },
   todo: {
     subverbs: ['add', 'done', 'drop', 'ls'],
-    flags: { '--why': { value: '<text>' }, '--ref': { value: '<url|pr|dispatch>' }, '--all': {}, '--json': {}, '--session': { value: '<id>' } },
-    flagSubverbs: { '--why': ['add'], '--ref': ['add'], '--all': ['ls', ''], '--json': ['ls', ''] },
+    flags: { '--all': {}, '--json': {}, '--session': { value: '<id>' } },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''] },
     positionals: '["<text>"|<id>]',
   },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
@@ -290,7 +290,7 @@ which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
   todo: `The helm's own to-do list, kept per grounds so it survives restarts and compaction.
-add "<text>" [--why] [--ref] records one; done <id> and drop <id> close it; ls (or bare) lists open
+add "<text>" records one in free text; done <id> and drop <id> close it; ls (or bare) lists open
 ones (--all adds closed). Open to-dos show in man tend, man report, the glass, and the helm's
 context at every session start. Reserved for the helm; a trap gets none.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,

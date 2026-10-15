@@ -130,14 +130,14 @@ function deckPrs(inp: DeckInputs, view: View) {
 
 /**
  * The helm's to-dos: a section only when there are some. Each line is the
- * to-do, then why, ref, and age; a stale one carries a badge, and the stale
+ * to-do's text, then its age; a stale one carries a badge, and the stale
  * note heads the section. The helm closes them from its CLI.
  */
 function deckTodos(inp: DeckInputs, view: View) {
   if (!inp.todos.length) return null;
   const grounds = new Set(inp.todos.map((t) => t.grounds)).size > 1;
   const items = inp.todos.map((t): DeckItem => {
-    const parts = [t.why, t.ref, grounds ? t.grounds : ''].filter(Boolean) as string[];
+    const parts = grounds ? [t.grounds] : [];
     return {
       key: `todo:${t.grounds}:${t.id}`,
       title: t.text,

@@ -380,7 +380,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man file <file.md> [--attach <file> ...] [--title <text>]
                                   file the helm's own report under its
                                   grounds; the glass renders it on the deck.
-  todo add "<text>" [--why <text>] [--ref <url|pr|dispatch>]
+  todo add "<text>"
   todo done <id> | todo drop <id> | todo ls [--all]
                                   the helm's own to-dos, per grounds; shown in
                                   man tend, man report, and the glass, and
@@ -1702,8 +1702,8 @@ async function mainCli(): Promise<void> {
         if (verb === 'add') {
           const text = pos.slice(1).join(' ');
           if (!text.trim()) throw new UsageError(`todo add requires its text\n\n${usageFor('todo')!}`);
-          const t = addTodo(grounds, { text, why: opt('--why'), ref: opt('--ref') });
-          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text, ...(t.why ? { why: t.why } : {}), ...(t.ref ? { ref: t.ref } : {}) }));
+          const t = addTodo(grounds, text);
+          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text }));
           console.log(toonHelp([`lobstah todo done ${t.id}   (when finished)`, `lobstah todo drop ${t.id}   (when no longer needed)`]));
         } else if (verb === 'done' || verb === 'drop') {
           const id = Number(pos[1]);
@@ -1713,7 +1713,7 @@ async function mainCli(): Promise<void> {
         } else if (has('--all')) {
           const all = listTodos(grounds, { all: true });
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: all }));
-          else console.log(toonTable('todos', all.map((t) => ({ id: t.id, state: t.state, text: t.text, why: t.why ?? '', ref: t.ref ?? '', added: t.createdAt.slice(0, 10), updated: t.updatedAt.slice(0, 10) })), ['id', 'state', 'text', 'why', 'ref', 'added', 'updated']));
+          else console.log(toonTable('todos', all.map((t) => ({ id: t.id, state: t.state, text: t.text, added: t.createdAt.slice(0, 10), updated: t.updatedAt.slice(0, 10) })), ['id', 'state', 'text', 'added', 'updated']));
         } else {
           const open = todoViews(Date.now(), grounds);
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: open }));

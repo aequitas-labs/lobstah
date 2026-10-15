@@ -539,8 +539,9 @@ the helm files to keep.
   [--title <text>]`. It is stored under the helm's grounds,
   `reports/<grounds>/<rid>/`, with the same layout, and the author is `helm`.
 - **The helm's to-dos.** Reminders the helm keeps for itself ("merge #2268
-  once the API is in production") go in `lobstah todo add "<text>" [--why
-  "<text>"] [--ref <url|pr|dispatch>]`, not only in the conversation.
+  once the API is in production") go in `lobstah todo add "<text>"`, not
+  only in the conversation. The text is free: any detail, link, or PR goes
+  in it.
   `lobstah todo done <id>` and `lobstah todo drop <id>` close one;
   `lobstah todo ls` (or bare `todo`) lists the open ones, and `--all` adds
   closed ones. They are stored per grounds in `todos/<grounds>.json` with

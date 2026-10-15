@@ -522,7 +522,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       traps: deckTraps.map((t) => seat(trapView(d, t))),
       stacks: stacks.filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
       prs: prs.filter((p) => p.state === 'OPEN'),
-      todos: (d.todos || []).filter((t) => hasQuery(t.grounds, t.id, t.text, t.why, t.ref)),
+      todos: (d.todos || []).filter((t) => hasQuery(t.grounds, t.id, t.text)),
       todoNote: d.todoNote,
       error: d.attentionError,
     },
