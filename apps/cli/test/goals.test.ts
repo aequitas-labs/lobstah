@@ -133,10 +133,21 @@ it('hides the callout when no goals are set and keeps tend unchanged', async () 
 
 it.each(['table', 'cards'])('renders Todos as one compact read-only checklist with full safe text in %s view', async (view) => {
   const long = 'Read the whole handoff, including the detailed evidence and the final verification notes, without cutting off this reminder. '.repeat(4) + '<safe>';
-  addTodo('day', long); addTodo('day', 'Second'); const closed = addTodo('day', 'Already done'); closeTodo('day', closed.id, 'done');
+  addTodo('day', long); addTodo('day', 'Second');
+  // NOW is 08:00 in New York: today's goals day began at 04:00 local (08:00Z).
+  const today = addTodo('day', 'Done today', NOW - 3600_000); closeTodo('day', today.id, 'done', NOW - 60_000);
+  const yesterday = addTodo('day', 'Done yesterday', NOW - 2 * 86400_000); closeTodo('day', yesterday.id, 'done', NOW - 86400_000);
+  const dropped = addTodo('day', 'Dropped today', NOW - 3600_000); closeTodo('day', dropped.id, 'dropped', NOW - 60_000);
   const report = buildTendReport();
-  expect(renderTend(report)).toContain(long);
-  expect(renderTend(report)).not.toContain('to-dos');
+  const tend = renderTend(report);
+  expect(tend).toContain(long);
+  expect(tend).not.toContain('to-dos');
+  // man tend keeps the done-today Todo, marked done, until the day rolls over.
+  expect(report.todos?.map((t) => [t.text, t.done])).toEqual([[long, false], ['Second', false], ['Done today', true]]);
+  expect(tend).toMatch(/todos\[3\]\{id,state,text,added\}:/);
+  expect(tend).toContain(`${today.id},done,Done today`);
+  expect(tend).not.toContain('Done yesterday');
+  expect(tend).not.toContain('Dropped today');
   const snapshot = emptyFleet(); snapshot.todos = buildGlassSnapshot().todos;
   const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now(), prefs: { view } });
   try {
@@ -145,11 +156,30 @@ it.each(['table', 'cards'])('renders Todos as one compact read-only checklist wi
     expect(page.$$('.todos ul.todo-checklist')).toHaveLength(1);
     expect(page.$$('.todos .card, .todos .cards')).toHaveLength(0);
     const rows = page.$$('.todo-checklist > li.todo-check');
-    expect(rows.map((r) => r.querySelector('.todo-text')?.textContent)).toEqual([long, 'Second']);
+    expect(rows.map((r) => r.querySelector('.todo-text')?.textContent)).toEqual([long, 'Second', 'Done today']);
     for (const row of rows) expect(row.textContent).toMatch(/added .+ ago/);
     const boxes = page.$$('.todo-checklist input[type="checkbox"]') as HTMLInputElement[];
-    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([[false, true], [false, true]]);
+    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([[false, true], [false, true], [true, true]]);
+    // Done today: checked (green, by CSS) and struck through; the open ones are not struck.
+    expect(rows[2]?.classList.contains('done')).toBe(true);
+    expect(page.$$('.todo-checklist s').map((s) => s.textContent)).toEqual(['Done today']);
     expect(page.$('.todo-checklist safe')).toBeNull();
-    expect(page.$('.todo-checklist')?.textContent).not.toContain('Already done');
+    expect(page.$('.todo-checklist')?.textContent).not.toContain('Done yesterday');
+    expect(page.$('.todo-checklist')?.textContent).not.toContain('Dropped today');
   } finally { await page.close(); }
+});
+
+it('drops a done Todo from tend and the glass once the day rolls over at 04:00 local', () => {
+  const t = addTodo('day', 'Ship it', NOW - 3600_000); closeTodo('day', t.id, 'done', NOW);
+  expect(buildTendReport().todos?.map((x) => [x.text, x.done])).toEqual([['Ship it', true]]);
+  expect(buildGlassSnapshot().todos?.map((x) => x.text)).toEqual(['Ship it']);
+  // 03:59 New York the next morning: still the same goals day.
+  vi.setSystemTime(Date.parse('2026-10-16T07:59:00Z'));
+  expect(buildTendReport().todos?.map((x) => x.text)).toEqual(['Ship it']);
+  // 04:00 local: a new day, so it is gone from tend and the glass, but kept for --all.
+  vi.setSystemTime(Date.parse('2026-10-16T08:00:00Z'));
+  expect(buildTendReport().todos).toBeUndefined();
+  expect(renderTend(buildTendReport())).not.toContain('Ship it');
+  expect(buildGlassSnapshot().todos ?? []).toEqual([]);
+  expect(run('todo', 'ls', '--all', '--grounds', 'day').stdout).toContain('Ship it');
 });

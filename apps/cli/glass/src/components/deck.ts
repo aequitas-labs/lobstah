@@ -132,13 +132,17 @@ function deckPrs(inp: DeckInputs, view: View) {
  * The helm's Todos: a section only when there are some. One compact
  * checklist in every view — table and cards alike, never a card per Todo.
  * Each row is a read-only checkbox, the full wrapped text, then its age; a
- * stale one carries a badge, and the stale note heads the section. The helm
- * closes them from its CLI.
+ * stale one carries a badge, and the stale note heads the section. A Todo
+ * done today stays, checked green and struck through, until the 04:00 day
+ * boundary. The helm closes them from its CLI.
  */
 function deckTodos(inp: DeckInputs) {
   if (!inp.todos.length) return null;
   const grounds = new Set(inp.todos.map((t) => t.grounds)).size > 1;
-  return html`<section class="todos"><h2>Todos</h2>${inp.todoNote && html`<div class="dim">${inp.todoNote}</div>`}<ul class="todo-checklist">${inp.todos.map((t) => html`<li key=${`todo:${t.grounds}:${t.id}`} class="todo-check"><input type="checkbox" disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${`Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${t.text}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${Age(t.createdAt)} ago</span>${t.stale && html` <span class="badge warn">stale</span>`}</div></li>`)}</ul></section>`;
+  return html`<section class="todos"><h2>Todos</h2>${inp.todoNote && html`<div class="dim">${inp.todoNote}</div>`}<ul class="todo-checklist">${inp.todos.map(
+    (t) =>
+      html`<li key=${`todo:${t.grounds}:${t.id}`} class=${t.done ? 'todo-check done' : 'todo-check'}><input type="checkbox" checked=${!!t.done} disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${t.done ? 'Done today; it drops off when the day rolls over (04:00)' : `Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${t.done ? html`<s>${t.text}</s>` : t.text}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${Age(t.createdAt)} ago</span>${!t.done && t.stale && html` <span class="badge warn">stale</span>`}</div></li>`,
+  )}</ul></section>`;
 }
 
 export function Deck({
@@ -207,7 +211,7 @@ export function Deck({
           html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map(
             (line, i) => {
               const goal = goalLine(line);
-              return html`<li><label class="goal-check"><input type="checkbox" checked=${goal.done} disabled aria-label=${`Goal ${i + 1}: ${goal.text}`} title=${`Read-only; use lobstah goals ${goal.done ? 'undo' : 'done'} ${i + 1} --grounds ${g.grounds}`} /><span>${goal.done ? html`<s>${goal.text}</s>` : goal.text}</span></label></li>`;
+              return html`<li class=${goal.done ? 'done' : undefined}><label class="goal-check"><input type="checkbox" checked=${goal.done} disabled aria-label=${`Goal ${i + 1}: ${goal.text}`} title=${`Read-only; use lobstah goals ${goal.done ? 'undo' : 'done'} ${i + 1} --grounds ${g.grounds}`} /><span>${goal.done ? html`<s>${goal.text}</s>` : goal.text}</span></label></li>`;
             },
           )}</ol></section>`,
       )}</div>`,

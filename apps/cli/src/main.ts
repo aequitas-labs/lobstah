@@ -1830,7 +1830,7 @@ async function mainCli(): Promise<void> {
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: all }));
           else console.log(toonTable('todos', all.map((t) => ({ id: t.id, state: t.state, text: t.text, added: t.createdAt.slice(0, 10), updated: t.updatedAt.slice(0, 10) })), ['id', 'state', 'text', 'added', 'updated']));
         } else {
-          const open = todoViews(Date.now(), grounds);
+          const open = todoViews(Date.now(), grounds, { openOnly: true });
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: open }));
           else console.log(open.length > 0 ? todoTable(open, false) : toonKV({ todos: 'none', grounds: shown }));
         }
