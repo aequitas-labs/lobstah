@@ -1,5 +1,14 @@
 import type { GlassPr, GlassSnapshot, GlassStack, WorkerMetadata } from '@lobstah/core';
-import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, REVIEWS_MAX, catchCount, goalLine, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
+import {
+  DECK_TRAPS_MAX,
+  LANDED_MAX,
+  REPORTS_MAX,
+  REVIEWS_MAX,
+  catchCount,
+  goalLine,
+  prBadgeClass,
+  reportPageUrl,
+} from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
