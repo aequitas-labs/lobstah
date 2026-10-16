@@ -276,9 +276,13 @@ a configured repo gets a review job: a chore-lane dispatch with the
 checkpoints nothing), and the `[reviews]` cost bounds. With `work = "trap"`
 the job waits `trapWaitSecs` for a free trap of the repo, then pick hands it
 to the daemon. The job reads the PR with `gh`, makes any checkout it needs
-as a throwaway detached worktree at `pull/<n>/head`, and writes `review.md`
-(the summary) and `comments.json` (inline comments: `path`, `line`, `side`,
-`body`) into the round's directory, `rounds/<round id>/`. It follows the repo's own review guidance at the PR head (REVIEW.md,
+as a detached worktree of `pull/<n>/head` at the fixed path
+`rounds/<round id>/checkout`, and writes `review.md` (the summary) and
+`comments.json` (inline comments: `path`, `line`, `side`, `body`) into the
+round's directory, `rounds/<round id>/`. Whenever the round's job ends
+(drafted, stale, failed, or withdrawn and its job cancelled, a re-request
+included), pick removes that checkout: `git worktree remove --force`, then
+`git worktree prune`; nothing happens when the path is absent. It follows the repo's own review guidance at the PR head (REVIEW.md,
 CONTRIBUTING.md, AGENTS.md, CLAUDE.md, the PR template), then your
 `[reviews].rules` (per repo under `[repos.<key>.reviews]`), then any
 `[repos.<key>.briefHooks].prReview` text. It never posts,

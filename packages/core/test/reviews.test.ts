@@ -159,16 +159,18 @@ describe('drafts', () => {
   it('the brief drafts into the round directory and forbids every write to the PR', () => {
     observeReviewRequest(seen(), T0);
     const item = readReview('review:acme/web#7')!;
-    const brief = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x/rounds/RRE_1' });
+    const brief = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x/rounds/RRE_1', checkout: '/x/rounds/RRE_1/checkout' });
     expect(brief).toContain('dana asked chris for this review. You write the draft; you do not post it.');
     expect(brief).toContain('gh pr diff 7 --repo acme/web');
-    expect(brief).toContain('git worktree add --detach <tmpdir> FETCH_HEAD');
+    expect(brief).toContain('git worktree add --detach /x/rounds/RRE_1/checkout FETCH_HEAD');
+    expect(brief).toContain('Use no other path; lobstah removes it when the job ends.');
+    expect(brief).not.toContain('<tmpdir>');
     expect(brief).toContain('Write two files in /x/rounds/RRE_1');
     expect(brief).toContain('Do not post, approve, request changes, comment on, push to, or edit the PR.');
     expect(brief).toContain('lobstah report d1 done');
     expect(brief).toContain("Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md");
     expect(brief).not.toContain('Review rules from');
-    const ruled = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x', rules: 'Flag missing tests.' });
+    const ruled = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x', checkout: '/x/checkout', rules: 'Flag missing tests.' });
     expect(ruled.endsWith('Review rules from chris:\n\nFlag missing tests.')).toBe(true);
   });
 
