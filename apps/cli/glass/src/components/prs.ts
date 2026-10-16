@@ -97,7 +97,7 @@ export function PrAckAll({ items }: { items: DeckAttention[] }) {
       setBusy(false);
     }
   };
-  return html`<div class="tabhead"><button class="btn" disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : 'Ack all'}</button>${error && html`<span class="bad" role="alert">${error}</span>`}</div>`;
+  return html`<div class="tabhead pr-ack-all"><button class="btn" disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : 'Ack all'}</button>${error && html`<span class="bad" role="alert">${error}</span>`}</div>`;
 }
 
 export function PRs({ inp, more }: { inp: PrsInputs; more?: OlderControl }) {
