@@ -14,6 +14,7 @@ import {
   previousGoalDate,
   readGoals,
   setGoals,
+  setGoalDone,
   setGoalsRecap,
   workerLabel,
   addTodo,
@@ -394,7 +395,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   grounds; the glass renders it on the deck.
   todo add "<text>"
   todo done <id> | todo drop <id> | todo ls [--all]
-                                  the helm's own to-dos, per grounds; shown in
+                                  the helm's own todos, per grounds; shown in
                                   man tend, man report, and the glass, and
                                   re-injected at session start and compaction.
   man ask [<dispatch-id>] --title <q> [--detail <f.md>] [--option <label> ...] [--attach <file> ...] [--replace <key>]
@@ -1046,7 +1047,7 @@ async function mainCli(): Promise<void> {
       const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));
       const key = storageGrounds(grounds.name, cfg), today = goalDate(new Date(), cfg.helm.timezone);
       const action = pos[0];
-      if (action === 'set' || action === 'add' || action === 'rm' || action === 'recap') {
+      if (action === 'set' || action === 'add' || action === 'rm' || action === 'done' || action === 'undo' || action === 'recap') {
         if (caller && trapBySession(caller.id)) throw new Error('only the helm writes daily goals');
         gateHelm(caller, grounds.name);
       }
@@ -1057,9 +1058,9 @@ async function mainCli(): Promise<void> {
         break;
       }
       const day = action === 'set' ? setGoals(key, today, pos.slice(1))
-        : action === 'add' || action === 'rm' ? (() => {
+        : action === 'add' || action === 'rm' || action === 'done' || action === 'undo' ? (() => {
           if (pos.length !== 2) throw new UsageError(usageFor('goals')!);
-          return action === 'add' ? addGoal(key, today, pos[1]!) : removeGoal(key, today, Number(pos[1]));
+          return action === 'add' ? addGoal(key, today, pos[1]!) : action === 'rm' ? removeGoal(key, today, Number(pos[1])) : setGoalDone(key, today, Number(pos[1]), action === 'done');
         })()
         : action === 'recap' ? (() => {
           if (pos.length !== 2 || !opt('--file')) throw new UsageError(usageFor('goals')!);
@@ -1809,11 +1810,11 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'todo': {
-      // The helm's own to-do list, per grounds. A trap gets none; with a
+      // The helm's own todo list, per grounds. A trap gets none; with a
       // claimed helm, only that helm writes it.
       const verb = pos[0] ?? 'ls';
       const caller = callerSession(opt('--session'));
-      if (caller?.id !== undefined && trapBySession(caller.id)) throw new Error('to-dos are the helm\'s alone — a trap keeps none. Report to the helm instead.');
+      if (caller?.id !== undefined && trapBySession(caller.id)) throw new Error('todos are the helm\'s alone — a trap keeps none. Report to the helm instead.');
       let groundsName = opt('--grounds');
       if (verb !== 'ls') gateHelm(caller, groundsName);
       if (groundsName === undefined && caller?.id !== undefined) groundsName = helmOf(caller.id)?.grounds;
@@ -1829,7 +1830,7 @@ async function mainCli(): Promise<void> {
           console.log(toonHelp([`lobstah todo done ${t.id}   (when finished)`, `lobstah todo drop ${t.id}   (when no longer needed)`]));
         } else if (verb === 'done' || verb === 'drop') {
           const id = Number(pos[1]);
-          if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo ${verb} requires a to-do id\n\n${usageFor('todo')!}`);
+          if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo ${verb} requires a todo id\n\n${usageFor('todo')!}`);
           const t = closeTodo(grounds, id, verb === 'done' ? 'done' : 'dropped');
           console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text }));
         } else if (has('--all')) {
@@ -1837,7 +1838,7 @@ async function mainCli(): Promise<void> {
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: all }));
           else console.log(toonTable('todos', all.map((t) => ({ id: t.id, state: t.state, text: t.text, added: t.createdAt.slice(0, 10), updated: t.updatedAt.slice(0, 10) })), ['id', 'state', 'text', 'added', 'updated']));
         } else {
-          const open = todoViews(Date.now(), grounds);
+          const open = todoViews(Date.now(), grounds, { openOnly: true });
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: open }));
           else console.log(open.length > 0 ? todoTable(open, false) : toonKV({ todos: 'none', grounds: shown }));
         }
@@ -2268,7 +2269,7 @@ async function mainCli(): Promise<void> {
       const grounds = groundsName !== undefined ? resolveGrounds(cfgReport, groundsName) : undefined;
       const cursor = storageGrounds(opt('--cursor') ?? grounds?.name ?? 'fleet', cfgReport);
       const digest = buildDigest({ cursor, repos: grounds ? new Set(grounds.repos) : undefined });
-      // Open to-dos are standing, not news: they show with or without a change.
+      // Open todos are standing, not news: they show with or without a change.
       const todos = todoViews(Date.now(), grounds?.name);
       if (has('--json')) console.log(JSON.stringify({ ...digest, todos }, null, 2));
       else if (digest.changed) console.log(renderDigest(digest));

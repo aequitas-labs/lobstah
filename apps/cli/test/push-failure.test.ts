@@ -48,6 +48,13 @@ function queued(): Descriptor[] {
     .map((f) => JSON.parse(fs.readFileSync(path.join(laneDirs('chore').queue, f), 'utf8')) as Descriptor);
 }
 
+/**
+ * One repair cycle. A head no dispatch committed sends the repair to GitHub
+ * for the PR's commits; here they cannot be read, as when gh is signed out,
+ * and the machine's own gh is never started.
+ */
+const deliver = () => deliverPrRepairs(() => {}, 3, { readCommits: () => undefined });
+
 /** A dispatch-owned PR with one conflict repair queued: the repair's descriptor. */
 function queuedRepair(): Descriptor {
   const done = path.join(laneDirs('work').done, OWNER);
@@ -58,7 +65,7 @@ function queuedRepair(): Descriptor {
   addWatch(KEY, 'echo {}', { owner: `dispatch:${OWNER}` });
   upsertPr(pr(), OWNER);
   upsertPr(pr(), OWNER);
-  expect(deliverPrRepairs(() => {}, 3)).toBe(1);
+  expect(deliver()).toBe(1);
   return queued()[0]!;
 }
 
@@ -84,10 +91,10 @@ describe('a repair that cannot push', () => {
     expect(readPr(KEY)?.repair?.reason).toContain('non-fast-forward');
     expect(listNotices().filter((n) => n.kind === 'push-failed').map((n) => n.refId)).toEqual([repair.id]);
 
-    expect(deliverPrRepairs(() => {}, 3)).toBe(0); // the head it started from
+    expect(deliver()).toBe(0); // the head it started from
     upsertPr(pr({ headSha: MOVED }), OWNER);
     upsertPr(pr({ headSha: MOVED }), OWNER);
-    expect(deliverPrRepairs(() => {}, 3)).toBe(0); // the moved head, once observed
+    expect(deliver()).toBe(0); // the moved head, once observed
     expect(queued().map((d) => d.id)).toEqual([repair.id]);
   });
 
