@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { GrantError, ONCE_TTL_MS, addGrant, grantActive, grantCovers, grantsDir, listGrants, readLedger, revokeGrant, useGrant } from '../src/index.js';
-import type { Grant, GrantRequest } from '../src/index.js';
+import { spawnSync } from 'node:child_process';
+import { GrantError, ONCE_TTL_MS, addGrant, checkoutRoots, grantActive, grantCovers, grantsDir, listGrants, normaliseCommand, readLedger, revokeGrant, useGrant } from '../src/index.js';
+import type { CheckoutRoot, Grant, GrantRequest } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -132,5 +133,134 @@ describe('the ledger', () => {
   it('does not create a ledger just to find nothing', () => {
     expect(useGrant(bash('x'))).toBeUndefined();
     expect(fs.existsSync(path.join(grantsDir(), 'ledger.jsonl'))).toBe(false);
+  });
+});
+
+describe('always-grants follow the repo, not one worktree', () => {
+  let main: string;
+  let wtA: string;
+  let wtB: string;
+  let other: string;
+  let roots: CheckoutRoot[];
+  const git = (cwd: string, ...args: string[]) => {
+    const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(r.stderr);
+  };
+  const write = (p: string, extra: Partial<GrantRequest> = {}): GrantRequest => ({ harness: 'claude', tool: 'Write', path: p, ...extra });
+
+  beforeEach(() => {
+    // Real paths: git records worktrees by their resolved path (macOS's /var is /private/var; Windows' long names, not RUNNER~1).
+    const base = fs.realpathSync.native(home);
+    main = path.join(base, 'homebase');
+    other = path.join(base, 'other');
+    wtA = path.join(base, 'worktrees', 'soak-a');
+    wtB = path.join(base, 'worktrees', 'soak-b');
+    for (const dir of [main, other]) {
+      fs.mkdirSync(dir, { recursive: true });
+      git(dir, 'init', '-q', '-b', 'main');
+      git(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+    }
+    git(main, 'worktree', 'add', '-q', '-b', 'a', wtA);
+    git(main, 'worktree', 'add', '-q', '-b', 'b', wtB);
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.homebase]\npath = ${JSON.stringify(main)}\n\n[repos.other]\npath = ${JSON.stringify(other)}\n`);
+    roots = checkoutRoots();
+  });
+
+  it('knows every checkout of each configured repo', () => {
+    expect(roots.filter((r) => r.repo === 'homebase').map((r) => r.root).sort()).toEqual([main, wtA, wtB].sort());
+  });
+
+  it('stores an always path grant relative to the repo root, and allows it in any worktree or the main checkout', () => {
+    const g = addGrant({ path: path.join(wtA, 'apps/deploy/apply.sh'), mode: 'always', by: 'glass' }, new Date(), roots);
+    expect(g).toMatchObject({ path: 'apps/deploy/apply.sh', repo: 'homebase' });
+    for (const root of [wtA, wtB, main]) expect(grantCovers(g, write(path.join(root, 'apps/deploy/apply.sh')), roots), root).toBe(true);
+    expect(grantCovers(g, write(path.join(wtB, 'apps/deploy/other.sh')), roots)).toBe(false);
+    // The same relative path in another repo is not covered.
+    expect(grantCovers(g, write(path.join(other, 'apps/deploy/apply.sh')), roots)).toBe(false);
+    expect(useGrant(write(path.join(wtB, 'apps/deploy/apply.sh')))?.id).toBe(g.id);
+  });
+
+  it('keeps a directory grant to that directory in each worktree', () => {
+    const g = addGrant({ path: `${wtA}/.temp/`, mode: 'always', by: 'glass' }, new Date(), roots);
+    expect(g).toMatchObject({ path: '.temp/', repo: 'homebase' });
+    expect(grantCovers(g, write(path.join(wtB, '.temp/a/b.txt')), roots)).toBe(true);
+    expect(grantCovers(g, write(path.join(wtB, '.temporary/x')), roots)).toBe(false);
+    expect(grantCovers(g, write(path.join(wtB, '.temp/../secrets.txt')), roots)).toBe(false);
+  });
+
+  it('does not widen a path outside every repo', () => {
+    const outside = path.join(fs.realpathSync.native(home), 'scratch', 'x.sh');
+    const g = addGrant({ path: outside, mode: 'always', by: 'glass' }, new Date(), roots);
+    expect(g.path).toBe(outside);
+    expect(g.repo).toBeUndefined();
+    expect(grantCovers(g, write(outside), roots)).toBe(true);
+    expect(grantCovers(g, write(path.join(wtA, 'scratch', 'x.sh')), roots)).toBe(false);
+  });
+
+  it('does not follow a symlink out of a worktree', () => {
+    const g = addGrant({ path: path.join(wtA, 'out/x.sh'), mode: 'always', by: 'glass' }, new Date(), roots);
+    fs.mkdirSync(path.join(fs.realpathSync.native(home), 'elsewhere'));
+    fs.symlinkSync(path.join(fs.realpathSync.native(home), 'elsewhere'), path.join(wtB, 'out'));
+    expect(grantCovers(g, write(path.join(wtB, 'out/x.sh')), roots)).toBe(false);
+  });
+
+  it('keeps a once grant exact and to its trap', () => {
+    const file = path.join(wtA, 'apps/deploy/apply.sh');
+    const g = addGrant({ path: file, mode: 'once', by: 'glass', trap: 'amber-gull' }, new Date(), roots);
+    expect(g.path).toBe(file);
+    expect(g.repo).toBeUndefined();
+    expect(grantCovers(g, write(file, { trap: 'amber-gull' }), roots)).toBe(true);
+    expect(grantCovers(g, write(path.join(wtB, 'apps/deploy/apply.sh'), { trap: 'amber-gull' }), roots)).toBe(false);
+    expect(grantCovers(g, write(file, { trap: 'early-pebble' }), roots)).toBe(false);
+    const cmd = addGrant({ command: `bash ${wtA}/run.sh`, mode: 'once', by: 'glass' }, new Date(), roots);
+    expect(cmd.command).toBe(`bash ${wtA}/run.sh`);
+    expect(grantCovers(cmd, bash(`bash ${wtB}/run.sh`), roots)).toBe(false);
+  });
+
+  it('normalises checkout roots in a command, as whole paths only', () => {
+    expect(normaliseCommand(`cd ${wtA}/bao/ios && bundle exec fastlane`, roots)).toBe('cd {repo:homebase}/bao/ios && bundle exec fastlane');
+    expect(normaliseCommand(`bash "${main}/x.sh" ${other}`, roots)).toBe('bash "{repo:homebase}/x.sh" {repo:other}');
+    expect(normaliseCommand(`ls ${main}-old /x${main}`, roots)).toBe(`ls ${main}-old /x${main}`);
+  });
+
+  it('stores an always command normalised and allows it from any worktree', () => {
+    const g = addGrant({ command: `cd ${wtA}/bao/ios && bundle exec fastlane ios signing`, mode: 'always', by: 'glass' }, new Date(), roots);
+    expect(g.command).toBe('cd {repo:homebase}/bao/ios && bundle exec fastlane ios signing');
+    expect(grantCovers(g, bash(`cd ${wtB}/bao/ios && bundle exec fastlane ios signing`), roots)).toBe(true);
+    expect(grantCovers(g, bash(`cd ${main}/bao/ios && bundle exec fastlane ios signing`), roots)).toBe(true);
+    expect(grantCovers(g, bash(`cd ${other}/bao/ios && bundle exec fastlane ios signing`), roots)).toBe(false);
+    expect(grantCovers(g, bash(`cd ${wtB}/bao/ios && bundle exec fastlane ios signing --force`), roots)).toBe(false);
+    // Spelling out the placeholder is not the granted command.
+    expect(grantCovers(g, bash('cd {repo:homebase}/bao/ios && bundle exec fastlane ios signing'), roots)).toBe(false);
+  });
+
+  it('keeps prefix matching on the normalised command', () => {
+    const g = addGrant({ command: `${wtA}/bin/deploy`, match: 'prefix', mode: 'always', by: 'glass' }, new Date(), roots);
+    expect(g.command).toBe('{repo:homebase}/bin/deploy');
+    expect(grantCovers(g, bash(`${wtB}/bin/deploy --env prod --config ${wtB}/deploy.toml`), roots)).toBe(true);
+    expect(grantCovers(g, bash(`${wtB}/bin/deploy; rm -rf ~`), roots)).toBe(false);
+  });
+
+  it('reads legacy absolute always-grants as repo-relative', () => {
+    const legacy = grant({ path: path.join(wtA, 'apps/deploy/apply.sh') });
+    expect(grantCovers(legacy, write(path.join(wtB, 'apps/deploy/apply.sh')), roots)).toBe(true);
+    expect(grantCovers(legacy, write(path.join(main, 'apps/deploy/apply.sh')), roots)).toBe(true);
+    const legacyMain = grant({ path: path.join(main, '.temp/exterior-prod/apply.sh') });
+    expect(grantCovers(legacyMain, write(path.join(wtB, '.temp/exterior-prod/apply.sh')), roots)).toBe(true);
+    const legacyCmd = grant({ command: `cd ${wtA}/bao/ios && fastlane`, match: 'exact' });
+    expect(grantCovers(legacyCmd, bash(`cd ${wtB}/bao/ios && fastlane`), roots)).toBe(true);
+    // A legacy once-grant stays exact; one outside every repo too.
+    expect(grantCovers({ ...legacy, mode: 'once' }, write(path.join(wtB, 'apps/deploy/apply.sh')), roots)).toBe(false);
+    const gone = grant({ path: path.join(fs.realpathSync.native(home), 'worktrees', 'soak-gone', 'apps/x.sh') });
+    expect(grantCovers(gone, write(path.join(wtB, 'apps/x.sh')), roots)).toBe(false);
+  });
+
+  it('leaves the ledger chain as it was', () => {
+    addGrant({ path: path.join(wtA, 'a.sh'), mode: 'always', by: 'glass' }, new Date(), roots);
+    const before = fs.readFileSync(path.join(grantsDir(), 'ledger.jsonl'), 'utf8');
+    useGrant(write(path.join(wtB, 'a.sh')));
+    const after = fs.readFileSync(path.join(grantsDir(), 'ledger.jsonl'), 'utf8');
+    expect(after.startsWith(before)).toBe(true);
+    expect(readLedger().intact).toBe(true);
   });
 });

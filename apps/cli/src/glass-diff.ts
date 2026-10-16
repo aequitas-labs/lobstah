@@ -190,6 +190,7 @@ export type DecisionCard =
       title: string;
       detail: string;
       options: string[];
+      optionNotes?: Record<string, string>;
       attachments: Attachment[];
       dispatch?: string;
       lane?: string;
@@ -224,6 +225,7 @@ export function decisionCards(
         title: d.title,
         detail: d.detail,
         options: d.options,
+        ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
         attachments: d.attachments,
         ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),
         ...(repo ? { repo } : {}),

@@ -52,6 +52,7 @@ export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()):
     title: d.title,
     detail: readDecisionDetail(d.key) ?? '',
     options: d.options,
+    ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
     attachments: d.attachments,
     ...(d.dispatch ? { dispatch: d.dispatch } : {}),
     ...(d.lane ? { lane: d.lane } : {}),

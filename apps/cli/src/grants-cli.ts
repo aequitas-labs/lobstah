@@ -2,7 +2,9 @@ import {
   GrantError,
   PERMISSION_OPTIONS,
   addGrant,
+  alwaysScope,
   askDecision,
+  checkoutRoots,
   grantCovers,
   listGrants,
   loadConfig,
@@ -16,7 +18,7 @@ import {
   toonTable,
   useGrant,
 } from '@lobstah/core';
-import type { DecisionAnswer, DecisionMeta, Grant, GrantHarness, GrantMode, GrantRequest, Lane, PermissionAsk } from '@lobstah/core';
+import type { CheckoutRoot, DecisionAnswer, DecisionMeta, Grant, GrantHarness, GrantMode, GrantRequest, Lane, PermissionAsk } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 
@@ -63,9 +65,36 @@ function harnessOf(v: string | undefined): GrantHarness {
   return v;
 }
 
-function what(g: Pick<Grant, 'command' | 'match' | 'path'>): string {
-  if (g.path !== undefined) return `write ${g.path}`;
+function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo'>): string {
+  if (g.path !== undefined) return g.repo !== undefined ? `write ${g.path} in any ${g.repo} checkout` : `write ${g.path}`;
   return g.match === 'prefix' ? `${g.command} …` : g.command!;
+}
+
+/** A long repo-relative path with its middle folded: `apps/…/apply-exterior.sh`. */
+function shortPath(rel: string): string {
+  const parts = rel.replace(/\/$/, '').split('/');
+  const short = parts.length > 3 ? `${parts[0]}/…/${parts[parts.length - 1]}` : parts.join('/');
+  return rel.endsWith('/') ? `${short}/` : short;
+}
+
+/**
+ * What "Allow always" grants, as the card says it: the repo-relative path in
+ * any checkout of its repo, the command from any of its repos' checkouts, or
+ * the exact thing where no repo holds it.
+ */
+export function alwaysScopeText(ask: Pick<PermissionAsk, 'command' | 'path'>, roots: readonly CheckoutRoot[] = checkoutRoots()): { short: string; long: string } {
+  if (ask.command !== undefined) {
+    const { command, repos } = alwaysScope({ command: ask.command }, roots) as { command: string; repos: string[] };
+    if (repos.length === 0) return { short: 'this exact command, from any trap', long: 'this exact command, from any trap' };
+    const where = repos.join(' or ');
+    return {
+      short: `this command in any ${where} worktree`,
+      long: `\`${command.replace(/\s+/g, ' ')}\`, with any ${where} worktree or checkout in place of \`{repo:…}\`,`,
+    };
+  }
+  const scoped = alwaysScope({ path: ask.path! }, roots) as { path: string; repo?: string };
+  if (scoped.repo === undefined) return { short: 'this exact path', long: `exactly \`${scoped.path}\`` };
+  return { short: `${shortPath(scoped.path)} in any ${scoped.repo} worktree`, long: `\`${scoped.path}\` in any ${scoped.repo} worktree or checkout` };
 }
 
 /** `lobstah grant <command> [--prefix] [--once] [--harness] [--expires] [--path <p>] [--trap <name>]`. */
@@ -83,7 +112,8 @@ export function grantCommand(opts: {
   const harness = harnessOf(opts.harness);
   const expiresAt = opts.expires !== undefined ? parseUntil(opts.expires) : undefined;
   const shown = opts.path !== undefined ? `writes to ${opts.path}` : `\`${opts.command}\`${opts.prefix ? ' and the same command with more arguments' : ''}`;
-  const warn = mode === 'always' ? 'every trap may run it without asking, until you revoke it' : 'one trap may run it once';
+  const scope = mode === 'always' ? alwaysScopeText(opts.path !== undefined ? { path: opts.path } : { command: opts.command }).short : '';
+  const warn = mode === 'always' ? `every trap may run it without asking (${scope}), until you revoke it` : 'one trap may run it once';
   if (!confirm(`Allow ${shown} (${harness === 'any' ? 'Claude Code and Codex' : harness}); ${warn}?`)) {
     console.log('not granted');
     return;
@@ -183,7 +213,8 @@ export function checkCall(call: CallInput, cwd: string): string[] | undefined {
   if (requests.length === 0) return undefined;
   // Check every request before spending any: a once-grant is not spent on a call that is refused anyway.
   const { grants, intact } = listGrants();
-  if (!intact || !requests.every((req) => grants.some((g) => grantCovers(g, req)))) return undefined;
+  const roots = checkoutRoots();
+  if (!intact || !requests.every((req) => grants.some((g) => grantCovers(g, req, roots)))) return undefined;
   const ids: string[] = [];
   for (const req of requests) {
     const g = useGrant(req, { session: call.session });
@@ -247,6 +278,7 @@ export function permissionRequestHook(): void {
 export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string }): DecisionMeta {
   const target = opts.ask.command !== undefined ? opts.ask.command : opts.ask.path!;
   const kind = opts.ask.command !== undefined ? 'run' : 'write to';
+  const scope = alwaysScopeText(opts.ask);
   const title = `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
   const detail = [
     opts.note ? `${opts.note}\n` : '',
@@ -257,13 +289,14 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
     '```',
     '',
     `- **Allow once**: this trap may ${kind} it once, within the hour.`,
-    `- **Allow always**: any trap may ${kind} it without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
+    `- **Allow always**: any trap may ${kind} ${scope.long} without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
     '- **No**: the trap is told not to.',
   ].join('\n');
   return askDecision({
     title: title.length > 200 ? `${title.slice(0, 199)}…` : title,
     detailText: detail,
     options: [...PERMISSION_OPTIONS],
+    optionNotes: { 'Allow always': scope.short },
     dispatch: opts.dispatch,
     lane: opts.lane,
     ...(opts.repo ? { repo: opts.repo } : {}),
@@ -311,7 +344,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
   sendMessage(
     decision.dispatch,
     lane,
-    `Chris allowed ${target} ${once ? 'once' : 'always'} in the glass: grant ${g.id}. ` +
+    `Chris allowed ${target} ${once ? 'once' : `always (${what(g)})`} in the glass: grant ${g.id}. ` +
       '`lobstah grants` shows it. ' +
       (ask.command !== undefined ? `Run the command again exactly as shown, with nothing added before or after it: ${ask.command}` : `Make the write to ${ask.path} again.`),
     'glass',

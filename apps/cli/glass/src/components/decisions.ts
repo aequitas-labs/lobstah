@@ -53,6 +53,7 @@ function attachments(key: string, list: Attachment[]) {
 function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: string) {
   const key = c.key;
   const options = c.kind === 'decision' ? c.options : [];
+  const notes = (c.kind === 'decision' && c.optionNotes) || {};
   const text = draft?.text ?? '';
   const files = draft?.files ?? [];
   const sending = !!draft?.sending;
@@ -63,7 +64,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
     options.length > 0 &&
       html`<div class="doptions">${options.map((o, i) => {
         const k = hotkey(i);
-        return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => toggleOption(key, o)}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dlabel">${LinkedText(o)}</span></button>`;
+        return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => toggleOption(key, o)}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</button>`;
       })}</div>`,
     html`<div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
       class="danswer"

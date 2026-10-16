@@ -51,6 +51,8 @@ export interface DecisionMeta {
   title: string;
   /** Option labels, 0 to MAX_DECISION_OPTIONS. */
   options: string[];
+  /** A short note the glass shows on an option, by label: what a permission card's "Allow always" covers. */
+  optionNotes?: Record<string, string>;
   /** The helm's attachments. Detail images named by bare filename resolve here. */
   attachments: Attachment[];
   /** Attached basename → stored name, where a name was already taken. */
@@ -314,6 +316,7 @@ export interface AskOptions {
   /** Markdown text as the detail page (the glass's framing of a raw question). */
   detailText?: string;
   options?: string[];
+  optionNotes?: Record<string, string>;
   attach?: string[];
   dispatch?: string;
   lane?: Lane;
@@ -395,6 +398,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     key,
     title,
     options,
+    ...(opts.optionNotes ? { optionNotes: Object.fromEntries(Object.entries(opts.optionNotes).filter(([o]) => options.includes(o))) } : {}),
     attachments: attached,
     ...(Object.keys(renamed).length ? { renamed } : {}),
     detailBytes: Buffer.byteLength(detail),

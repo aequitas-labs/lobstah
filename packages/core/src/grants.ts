@@ -2,6 +2,8 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { lobstahHome } from './paths.js';
+import { REPO_PLACEHOLDER_OPEN, alwaysScope, checkoutRoots, locateInRepo, normaliseCommand } from './grant-scope.js';
+import type { CheckoutRoot } from './grant-scope.js';
 
 /**
  * Grants: approvals a person makes once, centrally, that a trap's harness
@@ -18,6 +20,12 @@ import { lobstahHome } from './paths.js';
  * harnesses' own checks stand between an agent and these files. Grants are written only by a person: a
  * glass answer, or `lobstah grant` at a terminal. The harness hooks read it
  * and record each use.
+ *
+ * An always-grant follows the repo, not one worktree (see grant-scope.ts):
+ * its path is stored relative to the repo root with the repo's key, and the
+ * checkout roots in its command as `{repo:<key>}`. Older always-grants,
+ * stored absolute, are read the same way when they sit inside a checkout.
+ * A once-grant stays exact.
  */
 
 export type GrantHarness = 'claude' | 'codex' | 'any';
@@ -41,6 +49,8 @@ export interface Grant {
   match?: 'exact' | 'prefix';
   /** A file grant: a path for the write tools; a trailing slash covers everything under it. */
   path?: string;
+  /** Set on an always path grant inside a repo: `path` is relative to that repo's root, in any of its checkouts. */
+  repo?: string;
   /** Only this trap may use it, when set. */
   trap?: string;
   /** The dispatch whose request it answered, when it came from a card. */
@@ -197,6 +207,11 @@ function normalisePath(p: string): string {
   return p.endsWith('/') || p.endsWith(path.sep) ? `${resolved}${path.sep}` : resolved;
 }
 
+/** A file path against a wanted one: the same file, or under it when the wanted one ends in a slash. */
+function pathCovers(want: string, have: string, sep: string): boolean {
+  return want.endsWith(sep) ? have.startsWith(want) : have === want;
+}
+
 /**
  * Does the grant cover the request? A command grant matches the command
  * exactly, or, as a prefix, the command or the command followed by more
@@ -204,23 +219,42 @@ function normalisePath(p: string): string {
  * (`;`, `&&`, `|`, a redirect, a subshell), so `wrangler deploy` does not
  * cover `wrangler deploy; curl …`. A path grant covers the write tools on
  * that file, or on anything under it when it ends in a slash.
+ *
+ * An always-grant reads both sides with checkout roots made repo-relative,
+ * so it covers the same command or file in any checkout of the repo.
  */
-export function grantCovers(g: Grant, req: GrantRequest): boolean {
+export function grantCovers(g: Grant, req: GrantRequest, roots: readonly CheckoutRoot[] = checkoutRoots()): boolean {
   if (g.harness !== 'any' && g.harness !== req.harness) return false;
   if (g.trap && g.trap !== req.trap) return false;
+  const widen = g.mode === 'always';
   if (g.command !== undefined) {
-    const cmd = req.command?.trim();
+    let cmd = req.command?.trim();
     if (!cmd) return false;
-    const want = g.command.trim();
+    let want = g.command.trim();
+    if (widen) {
+      // The placeholder is the grant's own notation; a command that spells it out is not the granted one.
+      if (cmd.includes(REPO_PLACEHOLDER_OPEN)) return false;
+      cmd = normaliseCommand(cmd, roots);
+      want = normaliseCommand(want, roots);
+    }
     if (cmd === want) return true;
     if (g.match !== 'prefix' || !cmd.startsWith(`${want} `)) return false;
     return !SHELL_JOINERS.test(cmd.slice(want.length));
   }
   if (g.path !== undefined) {
     if (!(WRITE_TOOLS as readonly string[]).includes(req.tool) || !req.path) return false;
-    const want = normalisePath(g.path);
-    const have = normalisePath(req.path);
-    return want.endsWith(path.sep) ? have.startsWith(want) : have === want;
+    if (widen) {
+      const dir = g.path.endsWith('/') || g.path.endsWith(path.sep);
+      // A legacy always-grant names an absolute path: read it as repo-relative when it sits in a checkout.
+      const scope = g.repo !== undefined ? { repo: g.repo, rel: g.path.replace(/\/$/, '') } : path.isAbsolute(g.path) ? locateInRepo(g.path, roots) : undefined;
+      if (scope && scope.rel !== '') {
+        const at = locateInRepo(req.path, roots);
+        if (!at || at.repo !== scope.repo) return false;
+        return pathCovers(scope.rel + (dir ? '/' : ''), at.rel, '/');
+      }
+      if (g.repo !== undefined) return false;
+    }
+    return pathCovers(normalisePath(g.path), normalisePath(req.path), path.sep);
   }
   return false;
 }
@@ -232,8 +266,12 @@ export function listGrants(opts: { all?: boolean; now?: number } = {}): { grants
   return { grants, intact: ledger.intact, ...(ledger.problem ? { problem: ledger.problem } : {}) };
 }
 
-/** Record a grant a person made. */
-export function addGrant(input: GrantInput, now = new Date()): Grant {
+/**
+ * Record a grant a person made. An always-grant is stored repo-relative
+ * where it can be: a path inside a checkout as the path from its root plus
+ * the repo's key, checkout roots in a command as `{repo:<key>}`.
+ */
+export function addGrant(input: GrantInput, now = new Date(), roots: readonly CheckoutRoot[] = checkoutRoots()): Grant {
   const command = input.command?.trim();
   const target = input.path?.trim();
   if (!command === !target) throw new GrantError('a grant names one command or one path');
@@ -242,13 +280,23 @@ export function addGrant(input: GrantInput, now = new Date()): Grant {
   }
   if (input.expiresAt !== undefined && Number.isNaN(Date.parse(input.expiresAt))) throw new GrantError(`invalid expiry ${input.expiresAt}`);
   const expiresAt = input.expiresAt ?? (input.mode === 'once' ? new Date(now.getTime() + ONCE_TTL_MS).toISOString() : undefined);
+  const exactPath = target ? path.resolve(target) + (target.endsWith('/') ? '/' : '') : undefined;
+  let what: Pick<Grant, 'command' | 'match' | 'path' | 'repo'>;
+  if (command) {
+    what = { command: input.mode === 'always' ? normaliseCommand(command, roots) : command, match: input.match ?? 'exact' };
+  } else if (input.mode === 'always') {
+    const scoped = alwaysScope({ path: target! }, roots) as { path: string; repo?: string };
+    what = { path: scoped.path, ...(scoped.repo ? { repo: scoped.repo } : {}) };
+  } else {
+    what = { path: exactPath! };
+  }
   const grant: Grant = {
     id: `g-${crypto.randomBytes(4).toString('hex')}`,
     at: now.toISOString(),
     by: input.by,
     harness: input.harness ?? 'any',
     mode: input.mode,
-    ...(command ? { command, match: input.match ?? 'exact' } : { path: path.resolve(target!) + (target!.endsWith('/') ? '/' : '') }),
+    ...what,
     ...(input.trap ? { trap: input.trap } : {}),
     ...(input.dispatch ? { dispatch: input.dispatch } : {}),
     ...(expiresAt ? { expiresAt } : {}),
@@ -284,12 +332,13 @@ export function revokeGrant(id: string, by: string, now = new Date()): Grant {
 export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date } = {}): Grant | undefined {
   const now = opts.now ?? new Date();
   if (!fs.existsSync(ledgerPath())) return undefined;
+  const roots = checkoutRoots();
   return withLock(() => {
     const ledger = readLedger();
     if (!ledger.intact) return undefined;
     // Prefer an always-grant, so a once-grant is not spent where an always-grant would do.
     const covering = ledger.grants
-      .filter((g) => grantActive(g, now.getTime()) && grantCovers(g, req))
+      .filter((g) => grantActive(g, now.getTime()) && grantCovers(g, req, roots))
       .sort((a, b) => (a.mode === b.mode ? 0 : a.mode === 'always' ? -1 : 1));
     const g = covering[0];
     if (!g) return undefined;
