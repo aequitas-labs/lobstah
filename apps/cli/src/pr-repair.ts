@@ -142,7 +142,23 @@ function chainState(owner: string): { latest: string; busy: boolean } {
   return { latest, busy };
 }
 
-function repairOwnership(pr: PrRecord, w: Watch, latest: string): { safe: boolean; reason?: string } {
+/** A PR's commits as GitHub's API lists them (JSON), or undefined when gh cannot read them. */
+export function ghPrCommits(pr: PrRecord): string | undefined {
+  const ref = parsePrRef(pr.key);
+  if (!ref) return undefined;
+  const result = spawnSync('gh', ['api', `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/commits?per_page=100`], {
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  return result.error || result.status !== 0 ? undefined : result.stdout;
+}
+
+function repairOwnership(
+  pr: PrRecord,
+  w: Watch,
+  latest: string,
+  readCommits: (pr: PrRecord) => string | undefined,
+): { safe: boolean; reason?: string } {
   const ids = new Set([...pr.dispatches, w.owner.slice('dispatch:'.length), latest, ...(w.lastFollowUpId ? [w.lastFollowUpId] : [])]);
   const knownShas = new Set<string>();
   for (const id of ids) {
@@ -152,13 +168,10 @@ function repairOwnership(pr: PrRecord, w: Watch, latest: string): { safe: boolea
   if ([...knownShas].some((sha) => pr.headSha.startsWith(sha.split(' ')[0]!))) return { safe: true };
   const ref = /^pr:([^/]+)\/([^#]+)#(\d+)$/.exec(pr.key);
   if (!ref) return { safe: false, reason: 'commit ownership unknown: invalid PR key' };
-  const result = spawnSync('gh', ['api', `repos/${ref[1]}/${ref[2]}/pulls/${ref[3]}/commits?per_page=100`], {
-    encoding: 'utf8',
-    timeout: 60_000,
-  });
-  if (result.error || result.status !== 0) return { safe: false, reason: 'commit ownership unknown: GitHub commits could not be read' };
+  const listed = readCommits(pr);
+  if (listed === undefined) return { safe: false, reason: 'commit ownership unknown: GitHub commits could not be read' };
   try {
-    const commits = JSON.parse(result.stdout) as PrCommit[];
+    const commits = JSON.parse(listed) as PrCommit[];
     if (!Array.isArray(commits) || commits.length >= 100 || commits.at(-1)?.sha !== pr.headSha) {
       return { safe: false, reason: 'commit ownership unknown: incomplete PR commit list' };
     }
@@ -221,6 +234,8 @@ export interface RepairOptions {
   now?: number;
   /** Read the latest check runs of a PR before a checks repair (default: gh). */
   readChecks?: (pr: PrRecord) => LatestChecks | undefined;
+  /** Read a PR's commits before a repair of a head no dispatch committed (default: gh). */
+  readCommits?: (pr: PrRecord) => string | undefined;
   /** Live workers and what they hold (default: read from disk and git). */
   workerHolds?: () => WorkerHold[];
 }
@@ -459,7 +474,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         const why = checksStillFailing(pr, (opts.readChecks ?? ghLatestChecks)(pr), repairable.length > 0 ? fresh : undefined);
         if (why) return wait({ heldBy: 'checks', reason: why });
       }
-      const ownership = repairOwnership(pr, watch, chain.latest);
+      const ownership = repairOwnership(pr, watch, chain.latest, opts.readCommits ?? ghPrCommits);
       if (!ownership.safe) {
         writePr({
           ...pr,

@@ -74,6 +74,9 @@ and its TOON output is built to be read by agents.
 replaces them, and `lobstah goals YYYY-MM-DD` reads a past day. Use
 `lobstah goals add "<text>"` to append a goal at any time and
 `lobstah goals rm <n>` to remove the numbered line shown by `lobstah goals`.
+`lobstah goals done <n>` checks one off without removing it; `goals undo <n>`
+unchecks it. Completion is stored as Markdown `- [x]` / `- [ ]` in the same
+daily file and is retained in recap data. Old unmarked lines are not done.
 These edit today's file without repeating the first-chat card. Use
 `--grounds <name>` to choose grounds and `--session <id>` to identify the helm
 for writes. Files are editable Markdown at
@@ -89,7 +92,7 @@ with `goals set`; the first reminder leaves a comment in that same daily file.
 The helm uses them to order work and choose the next quiet step.
 
 `lobstah goals recap-data [YYYY-MM-DD]` prints retained dispatch results, PR
-open/merge times, answered cards and closed to-dos when their
+open/merge times, answered cards and closed todos when their
 optional store exists. Its default is yesterday. First observation is not
 the forge's PR creation time (older records may have only that fallback);
 missing/expired records are not reconstructed.
@@ -568,7 +571,7 @@ the helm files to keep.
 - **Filing a helm report.** `lobstah man file <file.md> [--attach <file> ...]
   [--title <text>]`. It is stored under the helm's grounds,
   `reports/<grounds>/<rid>/`, with the same layout, and the author is `helm`.
-- **The helm's to-dos.** Reminders the helm keeps for itself ("merge #2268
+- **The helm's todos.** Reminders the helm keeps for itself ("merge #2268
   once the API is in production") go in `lobstah todo add "<text>"`, not
   only in the conversation. The text is free: any detail, link, or PR goes
   in it.
@@ -577,11 +580,16 @@ the helm files to keep.
   closed ones. They are stored per grounds in `todos/<grounds>.json` with
   created and updated times. `man tend`, `man report`, and the glass deck
   show the open ones, and `man brief` re-injects them beside the charter at
-  every session start and after compaction. Open to-dos older than
+  every session start and after compaction. A todo marked done stays in
+  `man tend` and the glass Todos checklist, with a green check and struck
+  through, until the next day boundary (04:00 local, `[helm].timezone` or
+  the system zone, as for daily goals); then it drops off. A dropped one
+  leaves at once. Closed todos stay 30 days for `todo ls --all` and the
+  recap either way. Open todos older than
   `[helm].todoStaleDays` (default 3) add one line to `man tend`, for
-  example "3 to-dos older than 3 days: move to the issue tracker?". The helm
+  example "3 todos older than 3 days: move to the issue tracker?". The helm
   decides whether to raise a card and files them with the user's tracker.
-  A trap keeps no to-dos; with a claimed helm, only the helm writes them.
+  A trap keeps no todos; with a claimed helm, only the helm writes them.
 - **Title and author.** The title is `--title`, else the page's first `#`
   heading, else the dispatch's brief title. The author is the trap name, or
   `headless`, or `helm`. A file larger than `[limits].attachmentMaxBytes` is
