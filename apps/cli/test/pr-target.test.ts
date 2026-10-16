@@ -66,7 +66,9 @@ describe('dispatch --pr', () => {
     const r = lobstah('dispatch', '--repo', 'web', '--brief-text', '# Fix the repair loop\n\nPush the fix to #241.', '--pr', '241');
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain('pr: https://github.com/acme/web/pull/241');
-    expect(queued()).toEqual([expect.objectContaining({ pr: { url: 'https://github.com/acme/web/pull/241', headRefName: 'fix-loop' } })]);
+    // The fake gh is a .cmd on Windows, which spawnSync cannot run without a shell (the real gh.exe can): there the URL alone is recorded.
+    const pr = process.platform === 'win32' ? { url: 'https://github.com/acme/web/pull/241' } : { url: 'https://github.com/acme/web/pull/241', headRefName: 'fix-loop' };
+    expect(queued()).toEqual([expect.objectContaining({ pr })]);
   });
 
   it('warns when the brief names a PR of the repo but --pr is not given', () => {
