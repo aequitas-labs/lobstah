@@ -19,6 +19,7 @@ import {
   recordGitHubResponse,
   requestCancel,
   reviewBrief,
+  reviewCheckoutDir,
   reviewRoundDir,
   reviewSettings,
   splitGitHubResponse,
@@ -294,7 +295,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
         {
           id,
           repo: item.pr.repoKey!,
-          brief: withBriefHooks(reviewBrief(item, r, { identity, id, outDir, ...(settings.rules ? { rules: settings.rules } : {}) }), cfg.repos[item.pr.repoKey!], 'prReview'),
+          brief: withBriefHooks(reviewBrief(item, r, { identity, id, outDir, checkout: reviewCheckoutDir(item.key, r.id)!, ...(settings.rules ? { rules: settings.rules } : {}) }), cfg.repos[item.pr.repoKey!], 'prReview'),
           readOnly: true,
           ...(settings.harness ? { harness: settings.harness } : {}),
           ...(settings.model ? { model: settings.model } : {}),
@@ -312,24 +313,26 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       continue;
     }
 
-    if (!r.dispatch) continue;
-    const job = verbOf(r.dispatch);
-    const ended = job?.verb === 'done' || job?.verb === 'failed';
-    if (r.state === 'withdrawn' || r.state === 'dismissed') {
-      if (job && !ended) {
+    // A withdrawn or dismissed round (the request went, a re-request superseded it, or Chris dropped it) has its job cancelled, then its checkout removed once the job ends.
+    for (const old of item.rounds) {
+      if ((old.state !== 'withdrawn' && old.state !== 'dismissed') || !old.dispatch) continue;
+      const oldJob = verbOf(old.dispatch);
+      if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
         try {
-          requestCancel(r.dispatch, job.lane);
-          log(`${item.key}: round ${r.state}; cancelled the review job ${r.dispatch}`);
+          requestCancel(old.dispatch, oldJob.lane);
+          log(`${item.key}: round ${old.state}; cancelled the review job ${old.dispatch}`);
         } catch {
           // still queued or already gone
         }
-      }
-      continue;
+      } else removeReviewCheckout(item, old, log);
     }
-    if (r.state !== 'drafting') continue;
+    if (!r.dispatch || r.state !== 'drafting') continue;
+    const job = verbOf(r.dispatch);
+    const ended = job?.verb === 'done' || job?.verb === 'failed';
     if (!job) {
       Object.assign(r, { state: 'failed', reason: 'the review job is gone (culled before it finished)' });
       save();
+      removeReviewCheckout(item, r, log);
       continue;
     }
     if (!ended) {
@@ -344,6 +347,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if (job.verb === 'failed') {
       Object.assign(r, { state: 'failed', reason: `the review job failed${job.note ? `: ${job.note}` : ''}` });
       save();
+      removeReviewCheckout(item, r, log);
       log(`${item.key}: review job failed`);
       continue;
     }
@@ -357,6 +361,24 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       if (r.headSha !== item.pr.headSha) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
     }
     save();
+    removeReviewCheckout(item, r, log);
     log(`${item.key}: review ${r.state}`);
   }
+}
+
+/**
+ * Remove a round's throwaway checkout of the PR head, once its job has
+ * ended: `git worktree remove --force`, then `git worktree prune`, in the
+ * repo the job ran against. A no-op when the path is absent. A directory git
+ * no longer knows as a worktree is deleted outright.
+ */
+export function removeReviewCheckout(item: ReviewItem, round: ReviewRound, log: (m: string) => void = () => {}): void {
+  const dir = reviewCheckoutDir(item.key, round.id);
+  if (!dir || !fs.existsSync(dir)) return;
+  const repo = item.pr.repoKey ? loadConfig().repos[item.pr.repoKey]?.path : undefined;
+  const git = (...args: string[]) => (repo ? spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8', timeout: 60_000, windowsHide: true }) : undefined);
+  git('worktree', 'remove', '--force', dir);
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  git('worktree', 'prune');
+  log(`${item.key}: removed the review checkout of round ${round.id}`);
 }
