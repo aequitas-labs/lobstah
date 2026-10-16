@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, laneDirs } from '@lobstah/core';
 import { GithubSource } from '../src/sources/github.js';
-import { marker } from '../src/types.js';
+import { lobstahWrote, markedNote, marker } from '../src/types.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -142,6 +142,28 @@ describe('post-PR feedback pickup', () => {
     expect(items.map((i) => i.key)).toEqual(['gh:o/r#pr7@ic50']);
   });
 
+  it('a review, inline comment or comment carrying the hidden marker is not feedback', async () => {
+    stubApi([
+      {
+        number: 12,
+        branch: `lobstah/${UUID}`,
+        reviews: [{ id: 95, login: 'chris', state: 'COMMENTED', body: 'looks fine\n\n<!-- lobstah:round-1 -->', at: '2026-09-21T12:00:00Z' }],
+        reviewComments: [
+          { id: 42, login: 'chris', body: 'rename this', at: '2026-09-21T09:00:00Z' },
+          { id: 43, login: 'chris', body: `renamed\n\n<!-- lobstah:${UUID} -->`, at: '2026-09-21T11:00:00Z' },
+        ],
+        issueComments: [{ id: 52, login: 'chris', body: markedNote('reset'), at: '2026-09-21T13:00:00Z' }],
+      },
+    ]);
+    expect((await source().poll()).map((i) => i.key)).toEqual(['gh:o/r#pr12@rc42']);
+  });
+
+  it('the review-feedback brief tells the worker to mark its replies', async () => {
+    stubApi([{ number: 5, branch: `lobstah/${UUID}`, issueComments: [{ id: 53, login: 'chris', body: 'fix it', at: '2026-09-21T10:00:00Z' }] }]);
+    const [item] = await source().poll();
+    expect(item!.brief).toContain(`End every comment or reply you post on the PR with \`<!-- lobstah:${UUID} -->\``);
+  });
+
   it('a newer human event re-keys the round', async () => {
     const pr: PrFixture = {
       number: 8,
@@ -189,6 +211,15 @@ describe('post-PR feedback pickup', () => {
       },
     ]);
     expect(await source().poll()).toEqual([]);
+  });
+});
+
+describe('markers', () => {
+  it('a marked note carries the dispatch marker when one backs it, else the hidden one', () => {
+    expect(markedNote('rebase failed', UUID)).toBe(`[lobstah:${UUID}] rebase failed`);
+    expect(markedNote('reset')).toBe('reset\n\n<!-- lobstah -->');
+    for (const body of [markedNote('x', UUID), markedNote('x'), 'ok <!-- lobstah:review r1 -->']) expect(lobstahWrote(body)).toBe(true);
+    for (const body of ['plain', '[lobstah:short]', '<!-- lobstahx -->', null, undefined]) expect(lobstahWrote(body)).toBe(false);
   });
 });
 

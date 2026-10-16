@@ -46,6 +46,11 @@ describe('a conflict repair brings the PR up to date by the PR kind', () => {
     }
   });
 
+  it('a review repair tells the worker to mark what it posts', () => {
+    const brief = repairBrief(pr('main'), 'review', { id: 'r1', trunk: 'main' });
+    expect(brief).toContain('End every comment or reply you post on the PR with `<!-- lobstah:r1 -->`');
+  });
+
   it('standalone means based on the trunk, and needs both known', () => {
     expect(standalonePr('main', 'main')).toBe(true);
     expect(standalonePr('feature/base', 'main')).toBe(false);

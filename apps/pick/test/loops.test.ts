@@ -9,7 +9,7 @@ import { dispatchLoop } from '../src/loops/dispatch.js';
 import { reportLoop } from '../src/loops/report.js';
 import { reconcileLoop } from '../src/loops/reconcile.js';
 import { approvalDedupKey, mergeLoop, qualifiedApproval, qualifyingSet, rebaseBrief, staleApprovals } from '../src/loops/merge.js';
-import { DEFAULT_MERGE_POLICY } from '../src/types.js';
+import { DEFAULT_MERGE_POLICY, lobstahWrote } from '../src/types.js';
 import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../src/types.js';
 import { readMergeView } from '../src/merge-view.js';
 import { cycle } from '../src/run.js';
@@ -35,6 +35,7 @@ class FakeSource implements Source {
   tracked: TrackedItem[] = [];
   recoverable = new Map<string, string>();
   resets: string[] = [];
+  resetNotes: string[] = [];
   reports: Array<{ key: string; verb: Verb; uuid: string }> = [];
   inboundMsgs = new Map<string, string[]>();
 
@@ -50,7 +51,7 @@ class FakeSource implements Source {
   }
   async inProgress() { return this.tracked; }
   async recoverUuid(key: string) { return this.recoverable.get(key); }
-  async reset(key: string) { this.resets.push(key); }
+  async reset(key: string, note: string) { this.resets.push(key); this.resetNotes.push(note); }
 }
 
 const item = (key: string, kind: 'issue' | 'review' = 'issue', followUp?: string): WorkItem => ({
@@ -381,6 +382,8 @@ describe('reconcile loop', () => {
     const st = new PickupState();
     await reconcileLoop(src, st);
     expect(src.resets).toEqual(['fake:7']);
+    expect(src.resetNotes).toEqual(['no dispatch backs this item — resetting to the start state\n\n<!-- lobstah -->']);
+    expect(lobstahWrote(src.resetNotes[0])).toBe(true);
   });
 
   it('cancels an orphaned dispatch when its item closes', async () => {
@@ -731,7 +734,7 @@ describe('merge loop', () => {
     await mergeLoop(ms, policy, st);
     await mergeLoop(ms, policy, st);
     expect(ms.labels).toEqual([{ n: 1, label: 'needs-human' }]);
-    expect(ms.comments).toEqual([{ n: 1, text: `Automated rebase failed (dispatch ${id}) — needs a human.` }]);
+    expect(ms.comments).toEqual([{ n: 1, text: `[lobstah:${id}] Automated rebase failed (dispatch ${id}) — needs a human.` }]);
     expect(pendingIds('chore')).toHaveLength(0);
     expect(readMergeView()!.open[0]?.gate).toBe('rebase-failed');
     expect(ms.merged).toEqual([]);

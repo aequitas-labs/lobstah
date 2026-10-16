@@ -115,8 +115,15 @@ conversation has to re-enter the queue as its own work. Feedback pickup
 covers all of it: a `CHANGES_REQUESTED` review on any sha (a review of a
 slightly stale head still asks for changes), a comment review with a body,
 an inline review-thread comment, or a conversation comment — always from
-someone other than the configured identity, never a lobstah marker comment.
+someone other than the configured identity, never a comment lobstah wrote.
 `APPROVED` reviews are the merge loop's signal, not feedback.
+
+Everything lobstah writes carries a marker: status and live comments lead
+with `[lobstah:<uuid>]`; notes with no dispatch behind them (an orphan reset)
+end with the hidden `<!-- lobstah -->`; and the feedback and review-repair
+briefs tell the worker to end every reply it posts with
+`<!-- lobstah:<id> -->`. A review, inline comment, or conversation comment
+carrying either marker is never feedback.
 
 The PR maps back to a dispatch two ways: a `lobstah/<uuid>` branch names it
 directly, and any other branch — a soaked session's PR — resolves through

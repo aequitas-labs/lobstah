@@ -2,6 +2,7 @@ import { cancelRequested, laneDirs, requestCancel } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Lane } from '@lobstah/core';
+import { markedNote } from '../types.js';
 import type { Source } from '../types.js';
 import type { PickupState } from '../state.js';
 import { dispatchLane } from './report.js';
@@ -39,7 +40,7 @@ export async function reconcileLoop(
     }
     if (!entry) {
       if (open) {
-        await source.reset(key, 'no dispatch backs this item — resetting to the start state');
+        await source.reset(key, markedNote('no dispatch backs this item — resetting to the start state'));
         log(`${key}: orphaned item, reset`);
       }
       continue;
