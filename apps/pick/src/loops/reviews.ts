@@ -232,6 +232,20 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     const settings = reviewSettings(cfg.reviews, item.pr.repoKey);
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
+    // A withdrawn round (the request went, or a re-request superseded it) has its job cancelled, then its checkout removed once the job ends.
+    for (const old of item.rounds) {
+      if (old.state !== 'withdrawn' || !old.dispatch) continue;
+      const oldJob = verbOf(old.dispatch);
+      if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
+        try {
+          requestCancel(old.dispatch, oldJob.lane);
+          log(`${item.key}: request gone; cancelled the review job ${old.dispatch}`);
+        } catch {
+          // still queued or already gone
+        }
+      } else removeReviewCheckout(item, old, log);
+    }
+
     if (r.state === 'requested' && !r.dispatch) {
       const why = noJob(item, r, started);
       if (settings.work === 'off' || why) {
@@ -268,19 +282,6 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       continue;
     }
 
-    // A withdrawn round (the request went, or a re-request superseded it) has its job cancelled, then its checkout removed once the job ends.
-    for (const old of item.rounds) {
-      if (old.state !== 'withdrawn' || !old.dispatch) continue;
-      const oldJob = verbOf(old.dispatch);
-      if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
-        try {
-          requestCancel(old.dispatch, oldJob.lane);
-          log(`${item.key}: request gone; cancelled the review job ${old.dispatch}`);
-        } catch {
-          // still queued or already gone
-        }
-      } else removeReviewCheckout(item, old, log);
-    }
     if (!r.dispatch || r.state !== 'drafting') continue;
     const job = verbOf(r.dispatch);
     const ended = job?.verb === 'done' || job?.verb === 'failed';
