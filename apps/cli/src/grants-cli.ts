@@ -319,13 +319,32 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
   return g;
 }
 
+/**
+ * `man roster set --config key=value ...` as a profile patch (`key=` clears
+ * the key). Saving bypass (`permissionMode=bypass`, `bypassPermissions`, or
+ * `bypass=true`) is a person's choice at a terminal, as for `trap bypass`:
+ * it refuses in an agent session, the helm's too. Clearing it is anyone's.
+ */
+export function rosterConfigPatch(pairs: string[], env: NodeJS.ProcessEnv = process.env, tty?: boolean): { config: Record<string, string | null>; bypass: boolean } {
+  const config: Record<string, string | null> = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) throw new GrantError(`--config takes key=value (key= clears the key): ${pair}`);
+    config[pair.slice(0, eq)] = pair.slice(eq + 1) || null;
+  }
+  if (config.permissionMode === 'bypass') config.permissionMode = 'bypassPermissions';
+  const bypass = config.permissionMode === 'bypassPermissions' || (config.bypass !== undefined && config.bypass !== null && config.bypass !== 'false');
+  if (bypass) personOnly('man roster set --config permissionMode=bypass', env, tty);
+  return { config, bypass };
+}
+
 /** The warning a bypass trap carries, in one line. */
 export const BYPASS_WARNING =
   'A bypass trap acts as your account with no permission checks: it runs any command and writes any file without asking. Meant for isolated machines.';
 
 /**
  * `lobstah trap bypass <trap> on|off`: from its next start, the trap runs with
- * no permission checks (Claude Code bypassPermissions; Codex
+ * no permission checks (Claude Code --dangerously-skip-permissions; Codex
  * --dangerously-bypass-approvals-and-sandbox). A person's choice, at a
  * terminal: an agent cannot turn it on for itself.
  */

@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DecisionError, addGrant, ensureLayout, listGrants, readDecision, signOnTrap, unhandled } from '@lobstah/core';
-import { askPermission, callRequests, patchPaths, personOnly } from '../src/grants-cli.js';
+import { askPermission, callRequests, patchPaths, personOnly, rosterConfigPatch } from '../src/grants-cli.js';
 import { answerKey } from '../src/decision-answer.js';
 import { harnessCommand } from '../src/throw.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -196,21 +196,35 @@ describe('bypass is a person\'s choice', () => {
     expect(plan.stdout).toContain('bypassPermissions');
   });
 
-  it('man roster set refuses to save bypass', () => {
+  it('man roster set saves bypass only for a person: refused from an agent session or without a terminal', () => {
     const { name } = trap('11111111-2222-4333-8444-555555555555', 'codex');
-    for (const pair of ['bypass=true', 'permissionMode=bypassPermissions']) {
-      const res = run(['man', 'roster', 'set', name, '--config', pair], undefined);
-      expect(res.status).toBe(2);
-      expect(res.stdout + res.stderr).toContain('man roster set cannot choose bypass');
+    for (const [pair, env] of [
+      ['permissionMode=bypass', { CLAUDECODE: '1' }],
+      ['permissionMode=bypassPermissions', { CODEX_THREAD_ID: 't' }],
+      ['bypass=true', {}],
+    ] as const) {
+      const res = run(['man', 'roster', 'set', name, '--config', pair], undefined, env);
+      expect(res.status, pair).toBe(2);
+      expect(res.stdout + res.stderr).toMatch(/man roster set --config permissionMode=bypass (is for a person|needs a terminal)/);
     }
     expect(run(['man', 'roster', 'set', name, '--config', 'permissionMode=default'], undefined).status).toBe(0);
+    expect(run(['man', 'roster', 'set', name, '--config', 'permissionMode='], undefined).status).toBe(0);
+  });
+
+  it('a person at a terminal saves bypass in the roster; clearing it is anyone\'s', () => {
+    expect(rosterConfigPatch(['permissionMode=bypass', 'effort=high'], {}, true)).toEqual({ config: { permissionMode: 'bypassPermissions', effort: 'high' }, bypass: true });
+    expect(rosterConfigPatch(['bypass=true'], {}, true).bypass).toBe(true);
+    expect(() => rosterConfigPatch(['permissionMode=bypass'], { CLAUDECODE: '1' }, true)).toThrow(/not an agent session/);
+    expect(() => rosterConfigPatch(['permissionMode=bypassPermissions'], {}, false)).toThrow(/needs a terminal/);
+    expect(rosterConfigPatch(['permissionMode=', 'bypass='], { CLAUDECODE: '1' }, false)).toEqual({ config: { permissionMode: null, bypass: null }, bypass: false });
+    expect(rosterConfigPatch(['permissionMode=auto'], { CLAUDECODE: '1' }, false).bypass).toBe(false);
   });
 });
 
 describe('a bypass trap', () => {
   it('starts with no permission checks in either harness', () => {
     const claude = harnessCommand({ harness: 'claude', cwd: home, ticket: 't', config: { bypass: 'true', permissionMode: 'auto' } });
-    expect(claude.argv).toEqual(['claude', '--permission-mode', 'bypassPermissions', '/lobstah:trap soak --ticket t']);
+    expect(claude.argv).toEqual(['claude', '--dangerously-skip-permissions', '/lobstah:trap soak --ticket t']);
     expect(claude.unapplied).toEqual([]);
     const codex = harnessCommand({ harness: 'codex', cwd: home, ticket: 't', config: { bypass: 'true' } });
     expect(codex.argv).toEqual(['codex', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket t']);

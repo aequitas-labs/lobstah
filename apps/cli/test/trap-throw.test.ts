@@ -19,11 +19,12 @@ import {
   readTrapAnchor,
   setRosterProfile,
   TrapStartingError,
+  type Config,
   type RosterEntry,
   type ThrowPlanRow,
   type TrapRegistration,
 } from '@lobstah/core';
-import { harnessCommand, launchShellText, startCommand, startMode, throwTrap, trapForRepo, throwNew, trapWritableDirs, ThrowTimeoutError, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
+import { freshProfile, harnessCommand, launchShellText, nextStartMode, startCommand, startMode, throwTrap, trapForRepo, throwNew, trapWritableDirs, ThrowTimeoutError, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { trapRows } from '../src/trap-list.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -138,6 +139,20 @@ describe('man throw <name>', () => {
     stow(result.registration);
     expect(readRoster(result.registration.trapId)?.creationReason).toBe('isolated second workload');
   });
+  processTest('a configured bypass starts the throw with no permission checks, and the roster and trap list say so', async () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), `\n[harness]\npermissionMode = "bypass"\n`);
+    const seen: TerminalLaunch[] = [];
+    const result = await throwNew({ cfg: loadConfig(), repo: 'r', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(result.mode).toBe('bypassPermissions');
+    expect(seen[0]!.argv).toContain('--dangerously-skip-permissions');
+    expect(seen[0]!.argv).not.toContain('--permission-mode');
+    expect(readRoster(result.registration.trapId)?.startMode).toBe('bypassPermissions');
+    expect(trapRows().find((r) => r.trap === `wt:${result.registration.trapId}`)?.worker).toMatch(/ · bypassPermissions$/);
+    expect(lobstah(primary, 'man', 'roster').stdout).toMatch(/,claude,,bypassPermissions,/);
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = '${primary}'\ntrunk = 'main'\n[repos.r.harness]\npermissionMode = "sometimes"\n`);
+    expect(() => loadConfig()).toThrow(/\[repos\.r\.harness\]\.permissionMode must be one of auto, bypass/);
+  });
+
   processTest('resumes from the transcript directory, returns under the same id and name, and takes --for work', async () => {
     const reg = stowedTrap();
     stow(reg, true);
@@ -275,9 +290,12 @@ describe('the start command', () => {
     });
     // `man throw --bypass`, over any profile.
     expect(harnessCommand({ ...base, harness: 'claude', config: { permissionMode: 'plan' }, bypass: true })).toMatchObject({
-      argv: ['claude', '--permission-mode', 'bypassPermissions', '/lobstah:trap soak --ticket T'],
+      argv: ['claude', '--dangerously-skip-permissions', '/lobstah:trap soak --ticket T'],
       mode: 'bypassPermissions',
     });
+    // `bypass` is a mode a profile or the config can name.
+    expect(harnessCommand({ ...base, harness: 'claude', config: { permissionMode: 'bypass' } }).argv).toEqual(['claude', '--dangerously-skip-permissions', '/lobstah:trap soak --ticket T']);
+    expect(harnessCommand({ ...base, harness: 'codex', config: { permissionMode: 'bypassPermissions' } }).argv).toEqual(['codex', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
     expect(harnessCommand({ ...base, harness: 'codex', bypass: true, writableDirs: ['/x'] }).argv).toEqual(['codex', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
     expect([startMode(), startMode({ permissionMode: 'plan' }), startMode({ permissionMode: 'plan', bypass: 'true' }), startMode({}, true)]).toEqual([
       'auto',
@@ -285,6 +303,18 @@ describe('the start command', () => {
       'bypassPermissions',
       'bypassPermissions',
     ]);
+  });
+
+  it('takes the configured mode: the roster profile, then the repo, then [harness], then auto', () => {
+    const cfg = (global?: string, repo?: string) =>
+      ({ harness: global ? { permissionMode: global } : {}, repos: { r: { path: '/r', trunk: 'main', ...(repo ? { harness: { permissionMode: repo } } : {}) } } }) as unknown as Config;
+    expect(nextStartMode(cfg(), { repo: 'r' })).toBe('auto');
+    expect(nextStartMode(cfg('bypass'), { repo: 'r' })).toBe('bypassPermissions');
+    expect(nextStartMode(cfg('bypass', 'auto'), { repo: 'r' })).toBe('auto');
+    expect(nextStartMode(cfg('bypass', 'auto'), { repo: 'other' })).toBe('bypassPermissions');
+    expect(nextStartMode(cfg('bypass'), { repo: 'r', profile: { config: { permissionMode: 'plan' } } })).toBe('plan');
+    expect(freshProfile(cfg('bypass'), 'r')).toMatchObject({ config: { permissionMode: 'bypassPermissions' } });
+    expect(freshProfile(cfg(), 'r').config).toBeUndefined();
   });
 
   it('gives a Codex trap lobstah home and the repo git directory to write', () => {

@@ -36,7 +36,23 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 | `humanGateChecks` | no | Check names that fail until a person approves the change (e.g. `["owner approval"]`). `*` matches any run of characters. On a PR of a dispatch in this repo, a failed human gate never starts a PR repair or a CI-fix continuation. A PR whose only failing checks are human gates shows `repair.status: waiting` with `heldBy: human-gate`. A worker adds gates for one PR with `lobstah report --human-gate <check>`. |
 
 `[repos.<key>.harness]` — per-repo harness defaults: `default` (`claude` \|
-`codex`), `model`, `effort`.
+`codex`), `model`, `effort`, `permissionMode`.
+
+`permissionMode` is the mode a thrown trap of the repo starts in, cold,
+resumed, or fresh: `auto` (the default when unset), `bypass` (also
+`bypassPermissions`), or another Claude Code mode (`default`, `acceptEdits`,
+`plan`, `dontAsk`). Auto is Claude Code `--permission-mode auto` and Codex
+`--approve-for-me`; bypass is Claude Code `--dangerously-skip-permissions` and
+Codex `--dangerously-bypass-approvals-and-sandbox`. A trap's roster profile
+and `man throw --bypass` come first. Any other value is a config error.
+
+```toml
+[harness]
+permissionMode = "bypass"   # every repo's traps start with no permission checks
+
+[repos.web.harness]
+permissionMode = "auto"     # except web's
+```
 
 `effort` reaches both harnesses: Claude as its effort level (`low`, `medium`,
 `high`, `xhigh`, `max`), Codex as `model_reasoning_effort`. Set it for Claude
@@ -105,7 +121,7 @@ Call out migrations that are not reversible.
 
 ## `[harness]` — global harness defaults
 
-Same three keys as the per-repo block. Precedence for every harness setting:
+Same four keys as the per-repo block. Precedence for every harness setting:
 **descriptor > repo > global > adapter default.**
 
 ## `[limits]`

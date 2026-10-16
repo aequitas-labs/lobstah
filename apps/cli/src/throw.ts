@@ -12,6 +12,8 @@ import {
   readTrapAnchor,
   reserveTrap,
   lobstahHome,
+  configPermissionMode,
+  normalizePermissionMode,
   rosterByAddress,
   shellQuote,
   terminalAppName,
@@ -103,13 +105,20 @@ export interface StartCommand extends TerminalLaunch {
 }
 
 /**
- * The permission mode a throw starts a trap in. Bypass is a person's choice
- * (`trap bypass on`, or `man throw --bypass` at a terminal); a roster
- * `permissionMode` comes next; otherwise auto.
+ * The permission mode a throw starts a trap in: `man throw --bypass`, then
+ * the config it starts with (a roster profile over `[harness].permissionMode`
+ * of the repo, then of the config; see planThrow and freshProfile),
+ * otherwise auto. `bypass` is `bypassPermissions`.
  */
 export function startMode(config?: Record<string, string>, bypass?: boolean): string {
   if (bypass || config?.bypass === 'true') return 'bypassPermissions';
-  return config?.permissionMode || 'auto';
+  return normalizePermissionMode(config?.permissionMode) ?? 'auto';
+}
+
+/** The mode a rostered trap's next throw starts in, without --bypass. */
+export function nextStartMode(cfg: Pick<Config, 'repos' | 'harness'>, entry: Pick<RosterEntry, 'repo' | 'profile'>): string {
+  const configured = configPermissionMode(cfg, entry.repo);
+  return startMode({ ...(configured ? { permissionMode: configured } : {}), ...entry.profile?.config });
 }
 
 /**
@@ -142,7 +151,9 @@ export function harnessCommand(opts: {
     const argv = ['claude'];
     if (opts.resume) argv.push('--resume', opts.resume);
     if (opts.model) argv.push('--model', opts.model);
-    argv.push('--permission-mode', mode);
+    // No permission checks: a person's bypass.
+    if (mode === 'bypassPermissions') argv.push('--dangerously-skip-permissions');
+    else argv.push('--permission-mode', mode);
     for (const [key, value] of Object.entries(opts.config ?? {})) {
       if (key === 'effort') argv.push('--effort', value);
       else if (key !== 'permissionMode' && key !== 'bypass') unapplied.push(key);
@@ -375,13 +386,15 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
   });
 }
 
-/** The harness, model, and effort a fresh trap starts with: the repo's harness defaults, else the global ones. */
+/** The harness, model, effort, and permission mode a fresh trap starts with: the repo's harness defaults, else the global ones. */
 export function freshProfile(cfg: Config, repoKey: string, harnessFlag?: string): { harness: string; model?: string; config?: Record<string, string> } {
   const repo = cfg.repos[repoKey]?.harness ?? {};
   const harness = harnessFlag ?? repo.default ?? cfg.harness.default ?? 'claude';
   const { model } = modelForHarness(harness, repo.model ?? cfg.harness.model);
   const effort = repo.effort ?? cfg.harness.effort;
-  return { harness, ...(model ? { model } : {}), ...(effort ? { config: { effort } } : {}) };
+  const permissionMode = configPermissionMode(cfg, repoKey);
+  const config = { ...(effort ? { effort } : {}), ...(permissionMode ? { permissionMode } : {}) };
+  return { harness, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}) };
 }
 
 /**

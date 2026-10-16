@@ -1324,20 +1324,30 @@ fresh or rostered:
   and, with `--add-dir`, lobstah's home and the repo's git directory: a trap
   pushes, opens PRs, commits from a linked worktree, and reports.
 
-A roster profile's `permissionMode` (`man roster set <trap> --config
-permissionMode=<mode>`) overrides auto. For Codex, `default` starts it in
-Codex's own default; another mode has no Codex flag and is named as not
-applied. The mode a trap was last seen in is not carried to its next start.
-Bypass is never a saved setting the helm writes: `man roster set` refuses
-`bypass` and `permissionMode=bypassPermissions`. Only a person chooses it,
-at a terminal:
+The mode is set, first match wins, by:
 
-- `lobstah trap bypass <trap> on|off` (every start from now on).
-- `lobstah man throw <trap> --bypass` (this throw only). Like `trap bypass`,
-  it refuses inside an agent session or without a terminal, and it prints
-  the bypass warning.
+1. `lobstah man throw <trap> --bypass`: this throw only.
+2. The trap's roster profile: `man roster set <trap> --config
+   permissionMode=<mode>`, or `lobstah trap bypass <trap> on|off`.
+3. `permissionMode` under `[repos.<key>.harness]`, then under `[harness]`,
+   in `config.toml`, for every throw of that repo's traps, rostered or
+   fresh (`--new`), and for every restart.
+4. `auto`.
 
-Bypass is Claude Code `--permission-mode bypassPermissions` and Codex
+A mode is `auto`, `bypass` (also spelled `bypassPermissions`), or another
+Claude Code mode (`default`, `acceptEdits`, `plan`, `dontAsk`). For Codex,
+`default` starts Codex in its own default; another mode has no Codex flag
+and is named as not applied. The mode a trap was last seen in is not carried
+to its next start.
+
+Bypass is a person's choice, made at a terminal. `man throw --bypass`,
+`trap bypass on`, and `man roster set --config permissionMode=bypass` (or
+`bypass=true`) each refuse inside an agent session (the helm's too) or
+without a terminal, and each prints the bypass warning. The config file is a
+person's to edit. A `--dry-run` with `--bypass` launches nothing, so it is
+allowed.
+
+Bypass is Claude Code `--dangerously-skip-permissions` and Codex
 `--dangerously-bypass-approvals-and-sandbox`. The throw prints the mode it
 started with, and `--dry-run` shows it in a `mode` column. `man roster` shows
 the mode each trap's next throw starts in. `man tend` and `lobstah traps`

@@ -1,5 +1,14 @@
-import { listRoster, listTraps, listReservations, readRoster, repoTrapCount, trapAvailability, trapLabel, workerLabel, toonTable, type Config, type TrapRegistration, type WorkerConfig } from '@lobstah/core';
-import { startMode } from './throw.js';
+import { listRoster, listTraps, listReservations, loadConfig, readRoster, repoTrapCount, trapAvailability, trapLabel, workerLabel, toonTable, type Config, type TrapRegistration, type WorkerConfig } from '@lobstah/core';
+import { nextStartMode } from './throw.js';
+
+/** The config, or none when it cannot be read: a trap list never fails on it. */
+function safeConfig(): Pick<Config, 'repos' | 'harness'> {
+  try {
+    return loadConfig();
+  } catch {
+    return { repos: {}, harness: {} };
+  }
+}
 
 /**
  * A live trap's worker label with the mode it runs in. Claude Code reports
@@ -15,7 +24,7 @@ function liveWorker(r: TrapRegistration): string {
 }
 
 /** One shared CLI/Stop summary; stowed/ghosted roster entries never masquerade as live traps. */
-export function trapRows(now = Date.now(), repos?: readonly string[]) {
+export function trapRows(now = Date.now(), repos?: readonly string[], cfg: Pick<Config, 'repos' | 'harness'> = safeConfig()) {
   const live = listTraps();
   const reservations = listReservations();
   const rows = live.map((r) => {
@@ -42,7 +51,7 @@ export function trapRows(now = Date.now(), repos?: readonly string[]) {
     const state = r.state === 'ghosted' ? 'ghosted' : 'stowed';
     rows.push({ trap: `wt:${r.trapId}`, name: r.name, label: trapLabel(r), session: r.sessionId.slice(0, 8),
       // A stowed trap shows the mode its next throw starts it in.
-      worker: workerLabel({ harness: r.profile?.harness ?? r.harness, model: r.profile?.model ?? r.model, config: { ...(r.profile?.config ?? r.config), permissionMode: startMode(r.profile?.config) as WorkerConfig['permissionMode'] } }),
+      worker: workerLabel({ harness: r.profile?.harness ?? r.harness, model: r.profile?.model ?? r.model, config: { ...(r.profile?.config ?? r.config), permissionMode: nextStartMode(cfg, r) as WorkerConfig['permissionMode'] } }),
       repo: r.repo ?? '(addressed only)', worktree: r.worktree, claimed: undefined, availability: state, listening: state, state });
   }
   return rows.filter((r) => !repos || repos.includes(r.repo)).sort((a, b) => a.label.localeCompare(b.label));
@@ -53,7 +62,7 @@ export function repoTrapRows(cfg: Config, repos: readonly string[] = Object.keys
 }
 
 export function trapSummary(cfg: Config, repos?: readonly string[], now = Date.now()): string {
-  const rows = trapRows(now, repos);
+  const rows = trapRows(now, repos, cfg);
   return [
     toonTable('repo-traps', repoTrapRows(cfg, repos), ['repo', 'traps']),
     ...(rows.length ? [toonTable('traps', rows, ['name', 'trap', 'worker', 'repo', 'availability', 'listening'])] : []),

@@ -240,7 +240,7 @@ import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReporte
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
-import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, startMode, throwBatch, throwTrap, trapForRepo } from './throw.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, startMode, throwBatch, throwTrap, trapForRepo } from './throw.js';
 import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
@@ -2262,15 +2262,15 @@ async function mainCli(): Promise<void> {
         if (harness && harness !== 'claude' && harness !== 'codex') throw new UsageError('--harness takes claude, codex, or default');
         const terminal = clear(opt('--terminal'));
         if (terminal && !isTerminalApp(terminal)) throw new UsageError('--terminal takes terminal, iterm, or default');
-        const config: Record<string, string | null> = {};
-        for (const pair of values('--config')) {
-          const eq = pair.indexOf('=');
-          if (eq <= 0) throw new UsageError(`--config takes key=value (key= clears the key): ${pair}`);
-          config[pair.slice(0, eq)] = pair.slice(eq + 1) || null;
+        let config: Record<string, string | null>;
+        const { rosterConfigPatch, BYPASS_WARNING } = await import('./grants-cli.js');
+        try {
+          const parsed = rosterConfigPatch(values('--config'));
+          config = parsed.config;
+          if (parsed.bypass) console.log(`warning: ${BYPASS_WARNING}`);
+        } catch (err) {
+          throw new UsageError(err instanceof Error ? err.message : String(err));
         }
-        // Bypass is a person's choice (`trap bypass`, `man throw --bypass`), never a saved profile the helm writes.
-        if ((config.bypass ?? null) !== null || config.permissionMode === 'bypassPermissions')
-          throw new UsageError('man roster set cannot choose bypass: a person runs `lobstah trap bypass <trap> on` or `lobstah man throw <trap> --bypass` at a terminal');
         const patch = { harness, model: clear(opt('--model')), terminal: terminal as 'terminal' | 'iterm' | null | undefined, ...(Object.keys(config).length ? { config } : {}) };
         if (Object.values(patch).every((v) => v === undefined)) {
           throw new UsageError(`man roster set needs --harness, --model, --terminal, or --config\n\n${usageFor('man:roster')!}`);
@@ -2293,7 +2293,7 @@ async function mainCli(): Promise<void> {
               state: live ? trapAvailability(live).text : e.state,
               harness: e.harness,
               model: e.model ?? '',
-              mode: startMode(e.profile?.config),
+              mode: nextStartMode(loadConfig(), e),
               session: e.sessionId.slice(0, 8),
               revision: e.head ? `${e.head.slice(0, 12)}${e.branch ? ` (${e.branch})` : ''}` : '',
               left: e.leftAt ? `${e.leftAt} (${e.leftReason ?? ''})` : '',

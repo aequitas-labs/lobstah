@@ -342,7 +342,7 @@ Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
 --wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
 \`trap bypass <trap> on|off\` (a person, at a terminal): the trap's next start runs with no permission checks
-(Claude Code bypassPermissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.
+(Claude Code --dangerously-skip-permissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.
 \`trap grant|grants|revoke\` = \`grant|grants|revoke\`.`,
   grant: `Allow traps to run one command (or, with --prefix, the command with more arguments; never
 anything joined on with ;, &&, | or a redirect), or with --path to write one file (a trailing
