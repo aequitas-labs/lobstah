@@ -64,6 +64,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
     landed: 'landed',
     watch: 'watch',
     report: 'report',
+    review: 'review request',
   };
   const hidden = opts.hidden ?? {};
   let items: LobItem[] = att

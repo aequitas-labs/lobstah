@@ -247,6 +247,7 @@ import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows } from './report-file.js';
+import { reviewRows } from './reviews.js';
 import { todoTable, todoViews } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
@@ -303,6 +304,8 @@ work (humans and agents):
   catch <uuid>                    the evidence: branch, commits, PR, session
   reports [--json]                every filed report, newest first: key,
                                   title, author, source, acked
+  reviews [--all] [--json]        PRs that ask for your review, and each
+                                  one's newest round
   prs [sync]                      list known PRs, or refresh due PR watches
   cull [--older-than <days>] [--apply]
                                   sweep aged catch and lost gear — old done/
@@ -1799,6 +1802,11 @@ async function mainCli(): Promise<void> {
     case 'reports': {
       const rows = reportRows();
       console.log(has('--json') ? JSON.stringify({ reports: rows }) : toonTable('reports', rows, ['key', 'title', 'author', 'from', 'filedAt', 'acked']));
+      break;
+    }
+    case 'reviews': {
+      const rows = reviewRows(has('--all'));
+      console.log(has('--json') ? JSON.stringify({ reviews: rows }) : toonTable('reviews', rows, ['key', 'title', 'author', 'requestedBy', 'state', 'requestedAt', 'reason']));
       break;
     }
     case 'todo': {

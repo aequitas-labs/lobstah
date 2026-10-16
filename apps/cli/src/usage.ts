@@ -75,6 +75,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { flags: {}, maxPositionals: 0 },
   reports: { flags: { '--json': {} } },
+  reviews: { flags: { '--json': {}, '--all': {} }, maxPositionals: 0 },
   todo: {
     subverbs: ['add', 'done', 'drop', 'ls'],
     flags: { '--all': {}, '--json': {}, '--session': { value: '<id>' } },
@@ -319,6 +320,10 @@ context at every session start; a done one stays in tend and the glass, checked,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,
+  reviews: `PRs on which someone asked for your review ([reviews], found by lobstah pick):
+key, PR, title, author, who asked, the newest round's state, and why it is there.
+Bare lists the open ones (requested, drafting, drafted, stale, failed); --all
+adds posted, dismissed and withdrawn.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

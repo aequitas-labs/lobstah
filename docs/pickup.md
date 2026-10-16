@@ -251,6 +251,30 @@ directories, so a continuation enqueued by a stream event is claimed in
 milliseconds too — end to end, an external event reaches a spawning session
 in roughly harness start-up time.
 
+## Review requests
+
+Opt-in with `[reviews].enabled` ([configuration.md](configuration.md)). Each
+cycle spends one GitHub request: a GraphQL search for open PRs with
+`user-review-requested:<identity>`, through `gh api graphql` on the shared
+GitHub budget. A blocked budget skips the cycle. `user-review-requested`
+matches requests that name the identity; a request made only to a team the
+identity is on files nothing.
+
+Each PR is one review item, `review:<owner>/<repo>#<n>`, in
+`~/.lobstah/reviews/<owner>-<repo>-<n>/review.json`. An item holds rounds,
+one per `ReviewRequestedEvent`: the same standing request never opens a
+second round, and a re-request opens a new one (an open earlier round is
+withdrawn as superseded). A new push with no new request moves a requested
+round's head; a drafted round becomes `stale` and starts nothing on its own.
+When the search stops returning a PR (the request was withdrawn, Chris
+reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
+truncated search (more than 50 results) withdraws nothing.
+
+Round states: `requested`, `drafting`, `drafted`, `stale`, `failed`,
+`posted`, `dismissed`, `withdrawn`. The `review` attention item stands while
+the newest round is `drafted`, `stale`, `failed`, or `requested` with no job
+to draft it. `lobstah reviews` lists open items; `--all` adds the rest.
+
 ## Merge loop
 
 Opt-in, per repo, off by default. Merging is policy, not mechanics, so it ships
