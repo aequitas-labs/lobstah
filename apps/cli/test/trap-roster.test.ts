@@ -271,6 +271,6 @@ describe('man throw --plan', () => {
     const res = lobstah(primary, 'man', 'throw', '--plan', '--all');
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toContain('plan: dry run — launches nothing');
-    expect(res.stdout).toMatch(/^throw\[1\]\{trap,repo,action,harness,model,config,terminal,checkout,revision,held,why\}:$/m);
+    expect(res.stdout).toMatch(/^throw\[1\]\{trap,repo,action,harness,model,config,mode,terminal,checkout,revision,held,why\}:$/m);
   });
 });

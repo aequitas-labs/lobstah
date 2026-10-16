@@ -146,7 +146,7 @@ function planEntry(entry: RosterEntry, cfg: Config, opts: ThrowPlanOptions): Thr
     why: '',
     ...(harness ? { harness, harnessFrom: entry.profile?.harness ? 'profile' : 'last sign-on' } : {}),
     ...((entry.profile?.model ?? entry.model) ? { model: entry.profile?.model ?? entry.model } : {}),
-    ...(entry.config || entry.profile?.config ? { config: { ...entry.config, ...entry.profile?.config } } : {}),
+    ...startConfig(entry),
     ...terminalFor(entry, cfg),
     worktree: entry.worktree,
     ...(entry.branch ? { branch: entry.branch } : {}),
@@ -236,6 +236,18 @@ function unrecordedAnchors(known: Set<string>): ThrowPlanRow[] {
       ...(anchor.sessionId ? { sessionId: anchor.sessionId } : {}),
     }];
   });
+}
+
+/**
+ * The config a throw starts the trap with: what it last signed on with, then
+ * its saved profile. The permission mode it was last seen in is left out: a
+ * throw starts in auto unless the profile names a mode or a person chose
+ * bypass.
+ */
+function startConfig(entry: RosterEntry): { config?: Record<string, string> } {
+  const { permissionMode: _seen, ...last } = entry.config ?? {};
+  const config = { ...last, ...entry.profile?.config };
+  return Object.keys(config).length ? { config } : {};
 }
 
 /** The plan for a selection. Read-only. */

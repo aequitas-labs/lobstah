@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   dropReservation,
@@ -11,6 +11,7 @@ import {
   readTrap,
   readTrapAnchor,
   reserveTrap,
+  lobstahHome,
   rosterByAddress,
   shellQuote,
   terminalAppName,
@@ -97,13 +98,31 @@ export function macTerminalAdapter(app: TerminalApp): TerminalAdapter {
 export interface StartCommand extends TerminalLaunch {
   /** Profile config keys this harness has no flag for. */
   unapplied: string[];
+  /** The permission mode it starts in: `auto`, `bypassPermissions`, or a roster `permissionMode`. */
+  mode: string;
+}
+
+/**
+ * The permission mode a throw starts a trap in. Bypass is a person's choice
+ * (`trap bypass on`, or `man throw --bypass` at a terminal); a roster
+ * `permissionMode` comes next; otherwise auto.
+ */
+export function startMode(config?: Record<string, string>, bypass?: boolean): string {
+  if (bypass || config?.bypass === 'true') return 'bypassPermissions';
+  return config?.permissionMode || 'auto';
 }
 
 /**
  * A harness command line whose first prompt redeems `ticket`. `resume`
  * reopens a saved session; without it the session is new. Model and config
  * become the harness's own flags; a config key with no flag is returned as
- * unapplied.
+ * unapplied. Every start names its permission mode (see startMode).
+ *
+ * Codex auto is `--approve-for-me`: approvals on request, routed to Codex's
+ * automatic reviewer, in the workspace-write sandbox, which is the nearest
+ * thing to Claude Code's auto mode. A trap pushes, opens PRs and reports,
+ * so the sandbox gets the network and `writableDirs` (lobstah's home, the
+ * repo's git directory) besides the worktree.
  */
 export function harnessCommand(opts: {
   harness: string;
@@ -112,36 +131,56 @@ export function harnessCommand(opts: {
   resume?: string;
   model?: string;
   config?: Record<string, string>;
+  /** `man throw --bypass`: this start runs with no permission checks. */
+  bypass?: boolean;
+  /** Codex auto: directories outside the worktree the sandbox may write. */
+  writableDirs?: string[];
 }): StartCommand {
   const unapplied: string[] = [];
+  const mode = startMode(opts.config, opts.bypass);
   if (opts.harness === 'claude') {
     const argv = ['claude'];
     if (opts.resume) argv.push('--resume', opts.resume);
     if (opts.model) argv.push('--model', opts.model);
+    argv.push('--permission-mode', mode);
     for (const [key, value] of Object.entries(opts.config ?? {})) {
       if (key === 'effort') argv.push('--effort', value);
-      else if (key === 'permissionMode' && opts.config?.bypass !== 'true') argv.push('--permission-mode', value);
-      // A person's `trap bypass on`: no permission checks.
-      else if (key === 'bypass' && value === 'true') argv.push('--permission-mode', 'bypassPermissions');
-      else if (key !== 'permissionMode') unapplied.push(key);
+      else if (key !== 'permissionMode' && key !== 'bypass') unapplied.push(key);
     }
     argv.push(`/lobstah:trap soak --ticket ${opts.ticket}`);
-    return { cwd: opts.cwd, env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }, argv, unapplied };
+    return { cwd: opts.cwd, env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }, argv, unapplied, mode };
   }
   if (opts.harness === 'codex') {
     const argv = ['codex'];
     if (opts.model) argv.push('-m', opts.model);
+    // No approvals and no sandbox: a person's bypass.
+    if (mode === 'bypassPermissions') argv.push('--dangerously-bypass-approvals-and-sandbox');
+    else if (mode === 'auto') {
+      argv.push('--approve-for-me', '-c', 'sandbox_workspace_write.network_access=true');
+      for (const dir of opts.writableDirs ?? []) argv.push('--add-dir', dir);
+    } else if (mode !== 'default') unapplied.push(`permissionMode=${mode}`);
     for (const [key, value] of Object.entries(opts.config ?? {})) {
       if (key === 'effort') argv.push('-c', `model_reasoning_effort=${JSON.stringify(value)}`);
-      // A person's `trap bypass on`: no approvals and no sandbox.
-      else if (key === 'bypass' && value === 'true') argv.push('--dangerously-bypass-approvals-and-sandbox');
-      else unapplied.push(key);
+      else if (key !== 'permissionMode' && key !== 'bypass') unapplied.push(key);
     }
     if (opts.resume) argv.push('resume', opts.resume);
     argv.push(`$lobstah:trap soak --ticket ${opts.ticket}`);
-    return { cwd: opts.cwd, env: {}, argv, unapplied };
+    return { cwd: opts.cwd, env: {}, argv, unapplied, mode };
   }
   throw new Error(`no start command for harness ${opts.harness}`);
+}
+
+/**
+ * Directories a Codex trap in `cwd` writes outside its worktree: lobstah's
+ * home (every report and park) and the repo's git common directory (a
+ * linked worktree commits there).
+ */
+export function trapWritableDirs(cwd: string): string[] {
+  const dirs = [lobstahHome()];
+  const git = spawnSync('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+  const common = git.status === 0 ? git.stdout.trim() : '';
+  if (common) dirs.push(common);
+  return dirs;
 }
 
 /**
@@ -150,12 +189,15 @@ export function harnessCommand(opts: {
  * session in the trap's worktree. Either way the first prompt redeems the
  * ticket, so the session signs on under the trap's own id and name.
  */
-export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: string): StartCommand {
+export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: string, bypass?: boolean): StartCommand {
   const resume = row.action === 'resume';
+  const cwd = resume ? (row.resumeFrom ?? entry.worktree) : entry.worktree;
   return harnessCommand({
     harness: row.harness ?? entry.harness,
-    cwd: resume ? (row.resumeFrom ?? entry.worktree) : entry.worktree,
+    cwd,
     ticket,
+    ...(bypass ? { bypass } : {}),
+    writableDirs: trapWritableDirs(cwd),
     ...(resume ? { resume: entry.sessionId } : {}),
     ...(row.model ? { model: row.model } : {}),
     ...(row.config ? { config: row.config } : {}),
@@ -172,12 +214,14 @@ export interface ThrowResult {
   harness: string;
   command: string;
   unapplied: string[];
+  /** The permission mode it started in. */
+  mode: string;
   /** The registration once the trap parked. */
   registration: TrapRegistration;
   seconds: number;
 }
 
-type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'terminal' | 'command'>;
+type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'terminal' | 'command' | 'mode'>;
 
 /** What every throw takes. */
 export interface ThrowOptions {
@@ -190,6 +234,8 @@ export interface ThrowOptions {
   batch?: string;
   onLaunch?: (launched: Launched) => void;
   reason?: string;
+  /** `man throw --bypass`, a person's choice: start with no permission checks. */
+  bypass?: boolean;
 }
 
 /** A throw that launched but did not come back in time. */
@@ -223,7 +269,7 @@ function giveUp(trapId: string, label: string, repo: string | undefined, retry: 
 /** Open the command, then wait until the trap signed on after `started` and parked. */
 async function launchAndWait(
   opts: ThrowOptions,
-  w: { trapId: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command'> },
+  w: { trapId: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode'> },
 ): Promise<ThrowResult> {
   const timeoutSecs = opts.timeoutSecs ?? DEFAULT_TRAP_START_SECS;
   try {
@@ -233,7 +279,7 @@ async function launchAndWait(
     throw err;
   }
   const command = launchShellText({ ...w.command, argv: w.command.argv.map((a) => a.replace(w.ticket, '<ticket>')) });
-  opts.onLaunch?.({ ...w.launched, command });
+  opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode });
   const deadline = w.started + timeoutSecs * 1000;
   for (;;) {
     const reg = readTrap(w.trapId);
@@ -242,6 +288,7 @@ async function launchAndWait(
       return {
         ...w.launched,
         command,
+        mode: w.command.mode,
         harness: reg.harness,
         unapplied: w.command.unapplied,
         registration: reg,
@@ -287,6 +334,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
     startSecs: opts.timeoutSecs ?? DEFAULT_TRAP_START_SECS,
     by: opts.by,
     returning: { trapId: entry.trapId, worktree: entry.worktree },
+    startMode: startMode(row.config, opts.bypass),
     ...(opts.batch ? { batch: opts.batch } : {}),
   });
 
@@ -309,7 +357,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
       // Kept as it is: branch and HEAD stay; setup reruns only when a lockfile changed.
       await prepareReuse(repo, entry.worktree);
     }
-    command = startCommand(row, entry, ticket);
+    command = startCommand(row, entry, ticket, opts.bypass);
   } catch (err) {
     giveUp(entry.trapId, label, entry.repo, retry, started, err instanceof Error ? err.message : String(err));
     throw err;
@@ -357,10 +405,19 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     ...(opts.request ? { request: opts.request } : {}),
     creationReason: opts.reason?.trim() || `no free live or stowed ${opts.repo} trap existed at creation`,
     maxTraps: repo.traps,
+    startMode: startMode(profile.config, opts.bypass),
     ...(opts.batch ? { batch: opts.batch } : {}),
   });
   const label = trapLabel(reservation);
-  const command = harnessCommand({ harness: profile.harness, cwd: repo.path, ticket, ...(profile.model ? { model: profile.model } : {}), ...(profile.config ? { config: profile.config } : {}) });
+  const command = harnessCommand({
+    harness: profile.harness,
+    cwd: repo.path,
+    ticket,
+    ...(profile.model ? { model: profile.model } : {}),
+    ...(profile.config ? { config: profile.config } : {}),
+    ...(opts.bypass ? { bypass: true } : {}),
+    writableDirs: trapWritableDirs(repo.path),
+  });
   return launchAndWait(opts, {
     trapId: reservation.trapId,
     label,
@@ -462,6 +519,7 @@ export function launchedText(launched: Launched, timeoutSecs = DEFAULT_TRAP_STAR
     why: launched.why,
     checkout: launched.checkout,
     terminal: terminalAppName(launched.terminal),
+    mode: launched.mode,
     command: launched.command,
     waiting: `for sign-on and first park (up to ${timeoutSecs}s)`,
   });
@@ -475,6 +533,7 @@ export function backText(result: ThrowResult): string {
       back: `${result.trap} is listening (${result.seconds}s)`,
       session: result.registration.sessionId,
       harness: result.harness,
+      mode: result.mode,
       ...(result.unapplied.length ? { unapplied: `profile config ${result.unapplied.join(', ')} has no ${result.harness} flag; not applied` } : {}),
     }),
     toonHelp([`lobstah dispatch --repo <key> --for ${address} --brief <file.md>   (address work to it)`]),

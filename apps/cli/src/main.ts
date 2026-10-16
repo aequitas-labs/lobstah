@@ -240,7 +240,7 @@ import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReporte
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
-import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, throwBatch, throwTrap, trapForRepo } from './throw.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, startMode, throwBatch, throwTrap, trapForRepo } from './throw.js';
 import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
@@ -2055,7 +2055,18 @@ async function mainCli(): Promise<void> {
       const json = has('--json');
       const reason = opt('--reason')?.trim();
       if (has('--reason') && !reason) throw new UsageError('--reason must explain why a new trap is needed');
-      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason };
+      // Bypass is a person's choice at a terminal, like `trap bypass`: an agent cannot start a trap in it.
+      const bypass = has('--bypass');
+      if (bypass && !dry) {
+        const { personOnly, BYPASS_WARNING } = await import('./grants-cli.js');
+        try {
+          personOnly('lobstah man throw --bypass');
+        } catch (err) {
+          throw new UsageError(err instanceof Error ? err.message : String(err));
+        }
+        console.log(`warning: ${BYPASS_WARNING}`);
+      }
+      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}) };
       if (has('--new')) {
         // Fresh traps: --count of them, for --repo (or a glass request's repo, or the grounds' only repo).
         if (pos.length > 0 || has('--all')) throw new UsageError(`--new starts fresh traps: no names, no --all\n\n${usageFor('man:throw')!}`);
@@ -2085,7 +2096,7 @@ async function mainCli(): Promise<void> {
         guardNewTraps(cfgThrow, repoKey, count, reason);
         if (dry) {
           const profile = freshProfile(cfgThrow, repoKey, harness);
-          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>' });
+          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>', ...(bypass ? { bypass } : {}) });
           console.log(toonKV({ plan: 'dry run — launches nothing', new: `${count} fresh ${repoKey} trap(s)`, reason }));
           console.log(
             toonTable(
@@ -2097,10 +2108,11 @@ async function mainCli(): Promise<void> {
                 harness: profile.harness,
                 model: profile.model ?? '',
                 config: Object.entries(profile.config ?? {}).map(([k, v]) => `${k}=${v}`).join(' '),
+                mode: command.mode,
                 terminal: terminalAppName(cfgThrow.soak.terminal ?? 'terminal'),
                 command: launchShellText(command),
               })),
-              ['trap', 'repo', 'action', 'harness', 'model', 'config', 'terminal', 'command'],
+              ['trap', 'repo', 'action', 'harness', 'model', 'config', 'mode', 'terminal', 'command'],
             ),
           );
           break;
@@ -2188,13 +2200,14 @@ async function mainCli(): Promise<void> {
             harness: r.harness ? `${r.harness} (${r.harnessFrom})` : '',
             model: r.model ?? '',
             config: Object.entries(r.config ?? {}).map(([k, v]) => `${k}=${v}`).join(' '),
+            mode: startMode(r.config, bypass),
             terminal: throwTerminalText(r) ?? '',
             checkout: r.checkout ?? '',
             revision: r.revision ? `${r.revision.slice(0, 12)}${r.branch ? ` (${r.branch})` : ''}` : '',
             held: r.held ?? '',
             why: r.why,
           })),
-          ['trap', 'repo', 'action', 'harness', 'model', 'config', 'terminal', 'checkout', 'revision', 'held', 'why'],
+          ['trap', 'repo', 'action', 'harness', 'model', 'config', 'mode', 'terminal', 'checkout', 'revision', 'held', 'why'],
         ),
       );
       console.log(
@@ -2255,6 +2268,9 @@ async function mainCli(): Promise<void> {
           if (eq <= 0) throw new UsageError(`--config takes key=value (key= clears the key): ${pair}`);
           config[pair.slice(0, eq)] = pair.slice(eq + 1) || null;
         }
+        // Bypass is a person's choice (`trap bypass`, `man throw --bypass`), never a saved profile the helm writes.
+        if ((config.bypass ?? null) !== null || config.permissionMode === 'bypassPermissions')
+          throw new UsageError('man roster set cannot choose bypass: a person runs `lobstah trap bypass <trap> on` or `lobstah man throw <trap> --bypass` at a terminal');
         const patch = { harness, model: clear(opt('--model')), terminal: terminal as 'terminal' | 'iterm' | null | undefined, ...(Object.keys(config).length ? { config } : {}) };
         if (Object.values(patch).every((v) => v === undefined)) {
           throw new UsageError(`man roster set needs --harness, --model, --terminal, or --config\n\n${usageFor('man:roster')!}`);
@@ -2277,6 +2293,7 @@ async function mainCli(): Promise<void> {
               state: live ? trapAvailability(live).text : e.state,
               harness: e.harness,
               model: e.model ?? '',
+              mode: startMode(e.profile?.config),
               session: e.sessionId.slice(0, 8),
               revision: e.head ? `${e.head.slice(0, 12)}${e.branch ? ` (${e.branch})` : ''}` : '',
               left: e.leftAt ? `${e.leftAt} (${e.leftReason ?? ''})` : '',
@@ -2284,7 +2301,7 @@ async function mainCli(): Promise<void> {
               creationReason: e.creationReason ?? '',
             };
           }),
-          ['trap', 'repo', 'state', 'harness', 'model', 'session', 'revision', 'left', 'profile', 'creationReason'],
+          ['trap', 'repo', 'state', 'harness', 'model', 'mode', 'session', 'revision', 'left', 'profile', 'creationReason'],
         ),
       );
       console.log(toonHelp(['lobstah man throw --plan --all   (what a throw would do for every eligible trap)']));
@@ -3092,6 +3109,7 @@ async function mainCli(): Promise<void> {
           ...(reservation ? { trapId: reservation.trapId } : {}),
           ...(reservation?.batch ? { batch: reservation.batch } : {}),
           ...(reservation?.creationReason ? { creationReason: reservation.creationReason } : {}),
+          ...(reservation?.startMode ? { startMode: reservation.startMode } : {}),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
       } catch (err) {

@@ -293,6 +293,8 @@ export function signOnTrap(opts: {
   batch?: string;
   ttlMs: number;
   creationReason?: string;
+  /** The permission mode a throw started this session in. */
+  startMode?: string;
   now?: number;
 }): SignOnResult {
   if (opts.link !== undefined && !validSessionLink(opts.link)) {
@@ -346,7 +348,7 @@ export function signOnTrap(opts: {
     ...(sameSession && prior.titlePending ? { titlePending: prior.titlePending } : {}),
   };
   atomicWrite(regPath(trapId), JSON.stringify(reg, null, 2));
-  recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: protectTrapRevision(opts.worktree, trapId, now), creationReason: opts.creationReason, now });
+  recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: protectTrapRevision(opts.worktree, trapId, now), creationReason: opts.creationReason, startMode: opts.startMode, now });
   // Back within the grace: held messages deliver at the next park.
   releaseSignedOff(trapId);
   if (!prior) {

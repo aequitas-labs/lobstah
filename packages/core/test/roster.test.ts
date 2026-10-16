@@ -83,6 +83,24 @@ describe('roster records', () => {
 });
 
 describe('planThrow', () => {
+  it('starts with the profile and last sign-on config, but not the mode the trap was last seen in', () => {
+    const reg = signOn('amber-gull');
+    recordRosterSignOn({ ...reg, config: { effort: 'high', permissionMode: 'default' } });
+    stowTrap(reg.trapId);
+    expect(planThrow(loadConfig(), { names: ['amber-gull'] })[0]!.config).toEqual({ effort: 'high' });
+    setRosterProfile(reg.trapId, { config: { permissionMode: 'plan' } });
+    expect(planThrow(loadConfig(), { names: ['amber-gull'] })[0]!.config).toEqual({ effort: 'high', permissionMode: 'plan' });
+  });
+
+  it('keeps the mode a throw started a session in while that session soaks again, and drops it for another', () => {
+    const reg = signOn('amber-gull');
+    recordRosterSignOn(reg, { startMode: 'auto' });
+    recordRosterSignOn(reg);
+    expect(readRoster(reg.trapId)?.startMode).toBe('auto');
+    recordRosterSignOn({ ...reg, sessionId: '22222222-2222-4333-8444-555555555555' });
+    expect(readRoster(reg.trapId)?.startMode).toBeUndefined();
+  });
+
   it('an app session starts cold, and says which app', () => {
     const reg = signOn('amber-gull', { link: 'vscode://anthropic.claude-code/open?session=abc' });
     stowTrap(reg.trapId);

@@ -179,6 +179,34 @@ describe('a grant is a person\'s act', () => {
   });
 });
 
+describe('bypass is a person\'s choice', () => {
+  it('man throw --bypass refuses inside an agent session and without a terminal', () => {
+    const { name } = trap('11111111-2222-4333-8444-555555555555', 'claude');
+    for (const env of [{ CLAUDECODE: '1' }, { CODEX_THREAD_ID: 't' }]) {
+      const res = run(['man', 'throw', name, '--bypass'], undefined, env);
+      expect(res.status).toBe(2);
+      expect(res.stdout + res.stderr).toMatch(/lobstah man throw --bypass is for a person, not an agent session/);
+    }
+    const piped = run(['man', 'throw', name, '--bypass'], undefined);
+    expect(piped.status).toBe(2);
+    expect(piped.stdout + piped.stderr).toMatch(/needs a terminal/);
+    // A dry run launches nothing, so it may show what bypass would start.
+    const plan = run(['man', 'throw', '--dry-run', name, '--bypass'], undefined, { CLAUDECODE: '1' });
+    expect(plan.status, plan.stderr).toBe(0);
+    expect(plan.stdout).toContain('bypassPermissions');
+  });
+
+  it('man roster set refuses to save bypass', () => {
+    const { name } = trap('11111111-2222-4333-8444-555555555555', 'codex');
+    for (const pair of ['bypass=true', 'permissionMode=bypassPermissions']) {
+      const res = run(['man', 'roster', 'set', name, '--config', pair], undefined);
+      expect(res.status).toBe(2);
+      expect(res.stdout + res.stderr).toContain('man roster set cannot choose bypass');
+    }
+    expect(run(['man', 'roster', 'set', name, '--config', 'permissionMode=default'], undefined).status).toBe(0);
+  });
+});
+
 describe('a bypass trap', () => {
   it('starts with no permission checks in either harness', () => {
     const claude = harnessCommand({ harness: 'claude', cwd: home, ticket: 't', config: { bypass: 'true', permissionMode: 'auto' } });
@@ -186,7 +214,7 @@ describe('a bypass trap', () => {
     expect(claude.unapplied).toEqual([]);
     const codex = harnessCommand({ harness: 'codex', cwd: home, ticket: 't', config: { bypass: 'true' } });
     expect(codex.argv).toEqual(['codex', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket t']);
-    // Without it, a trap starts as it always has.
+    // Without it, a trap starts in its roster mode, else auto.
     expect(harnessCommand({ harness: 'claude', cwd: home, ticket: 't', config: { permissionMode: 'auto' } }).argv).toEqual([
       'claude',
       '--permission-mode',

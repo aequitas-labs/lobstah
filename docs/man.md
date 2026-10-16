@@ -1256,6 +1256,7 @@ lobstah man roster                                  # every trap the roster keep
 lobstah man roster set <trap> --harness codex --model <m> --terminal iterm --config effort=high
                                                     # save how a throw starts it; `default` or `key=` clears
 lobstah man throw <trap> [--timeout <secs>]         # bring one trap back; wait until it listens
+lobstah man throw <trap> --bypass                   # a person, at a terminal: this start skips permission checks
 lobstah man throw --all                             # every eligible trap in your grounds, at once
 lobstah man throw --repo <key>                      # every eligible trap of one repo
 lobstah man throw --new --repo <key> --count N      # N fresh traps (see "Starting a new trap")
@@ -1306,10 +1307,44 @@ launched twice. Otherwise:
    `--effort`, `--permission-mode` for Claude; `-m`, `model_reasoning_effort`
    for Codex); a setting with no flag is named as not applied. The first
    prompt redeems the ticket, so the session signs on as the same trap.
+   Every start names its permission mode (see **Permission mode** below).
 4. It returns when the trap has signed on and parked, and prints whether it
    resumed or started cold, and why. Past `--timeout` (default 180 seconds)
    it withdraws the reservation, so a late session cannot take the trap,
    posts `trap-start-failed`, and leaves the roster unchanged.
+
+**Permission mode.** A thrown trap starts in auto mode, cold or resumed,
+fresh or rostered:
+
+- Claude Code: `--permission-mode auto`.
+- Codex: `--approve-for-me`, which asks for approval on request and routes
+  each request to Codex's automatic reviewer, inside the workspace-write
+  sandbox. This is the nearest Codex has to Claude Code's auto mode. The
+  sandbox also gets the network (`-c sandbox_workspace_write.network_access=true`)
+  and, with `--add-dir`, lobstah's home and the repo's git directory: a trap
+  pushes, opens PRs, commits from a linked worktree, and reports.
+
+A roster profile's `permissionMode` (`man roster set <trap> --config
+permissionMode=<mode>`) overrides auto. For Codex, `default` starts it in
+Codex's own default; another mode has no Codex flag and is named as not
+applied. The mode a trap was last seen in is not carried to its next start.
+Bypass is never a saved setting the helm writes: `man roster set` refuses
+`bypass` and `permissionMode=bypassPermissions`. Only a person chooses it,
+at a terminal:
+
+- `lobstah trap bypass <trap> on|off` (every start from now on).
+- `lobstah man throw <trap> --bypass` (this throw only). Like `trap bypass`,
+  it refuses inside an agent session or without a terminal, and it prints
+  the bypass warning.
+
+Bypass is Claude Code `--permission-mode bypassPermissions` and Codex
+`--dangerously-bypass-approvals-and-sandbox`. The throw prints the mode it
+started with, and `--dry-run` shows it in a `mode` column. `man roster` shows
+the mode each trap's next throw starts in. `man tend` and `lobstah traps`
+show it in the worker column, for example `codex · gpt-6.1-sol · auto`. For a
+live Claude trap, that is the mode its hooks last reported, since a person
+can change it mid-session. Codex reports `default` whatever its approvals,
+so a live Codex trap shows the mode its throw started it in.
 
 **Batches.** `man throw --all` throws every eligible trap in the grounds
 (`--grounds`, else the caller's helm grounds, else every repo); `--repo`

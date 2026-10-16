@@ -1,4 +1,18 @@
-import { listRoster, listTraps, listReservations, repoTrapCount, trapAvailability, trapLabel, workerLabel, toonTable, type Config } from '@lobstah/core';
+import { listRoster, listTraps, listReservations, readRoster, repoTrapCount, trapAvailability, trapLabel, workerLabel, toonTable, type Config, type TrapRegistration, type WorkerConfig } from '@lobstah/core';
+import { startMode } from './throw.js';
+
+/**
+ * A live trap's worker label with the mode it runs in. Claude Code reports
+ * its mode to hooks, and a person can change it mid-session, so what was
+ * seen wins. Codex reports `default` whatever its approvals, so the mode
+ * its throw started it in wins there.
+ */
+function liveWorker(r: TrapRegistration): string {
+  const started = readRoster(r.trapId)?.startMode as WorkerConfig['permissionMode'] | undefined;
+  const seen = r.config?.permissionMode ?? undefined;
+  const permissionMode = (r.harness === 'codex' ? (started ?? seen) : (seen ?? started)) ?? null;
+  return workerLabel({ ...r, config: { ...r.config, permissionMode } });
+}
 
 /** One shared CLI/Stop summary; stowed/ghosted roster entries never masquerade as live traps. */
 export function trapRows(now = Date.now(), repos?: readonly string[]) {
@@ -9,7 +23,7 @@ export function trapRows(now = Date.now(), repos?: readonly string[]) {
     const hbAgeSecs = Math.max(0, Math.round((now - Date.parse(r.heartbeatAt)) / 1000));
     return {
       trap: `wt:${r.trapId}`, name: r.name, label: trapLabel(r), session: r.sessionId.slice(0, 8),
-      worker: workerLabel(r), repo: r.repo ?? '(addressed only)', worktree: r.worktree,
+      worker: liveWorker(r), repo: r.repo ?? '(addressed only)', worktree: r.worktree,
       claimed: availability.dispatch, availability: availability.text,
       listening: r.firstParkedAt === undefined ? 'never' : hbAgeSecs <= 10 ? 'now' : `${hbAgeSecs}s ago`,
       state: undefined as 'starting' | 'start-failed' | 'stowed' | 'ghosted' | undefined,
@@ -27,7 +41,8 @@ export function trapRows(now = Date.now(), repos?: readonly string[]) {
     if (present.has(`wt:${r.trapId}`)) continue;
     const state = r.state === 'ghosted' ? 'ghosted' : 'stowed';
     rows.push({ trap: `wt:${r.trapId}`, name: r.name, label: trapLabel(r), session: r.sessionId.slice(0, 8),
-      worker: workerLabel({ harness: r.profile?.harness ?? r.harness, model: r.profile?.model ?? r.model, config: r.profile?.config ?? r.config }),
+      // A stowed trap shows the mode its next throw starts it in.
+      worker: workerLabel({ harness: r.profile?.harness ?? r.harness, model: r.profile?.model ?? r.model, config: { ...(r.profile?.config ?? r.config), permissionMode: startMode(r.profile?.config) as WorkerConfig['permissionMode'] } }),
       repo: r.repo ?? '(addressed only)', worktree: r.worktree, claimed: undefined, availability: state, listening: state, state });
   }
   return rows.filter((r) => !repos || repos.includes(r.repo)).sort((a, b) => a.label.localeCompare(b.label));
