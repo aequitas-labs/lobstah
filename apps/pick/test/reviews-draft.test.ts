@@ -212,7 +212,7 @@ describe('the review checkout', () => {
     expect(fs.existsSync(checkout())).toBe(true);
     return id;
   }
-  const queuedOrActiveBrief = (id: string) => fs.readFileSync(path.join(laneDirs('chore').active, id, 'descriptor.json'), 'utf8');
+  const queuedOrActiveBrief = (id: string): string => JSON.parse(fs.readFileSync(path.join(laneDirs('chore').active, id, 'descriptor.json'), 'utf8')).brief;
   const gone = () => {
     expect(fs.existsSync(checkout())).toBe(false);
     expect(git('worktree', 'list', '--porcelain').stdout).not.toContain(checkout());
