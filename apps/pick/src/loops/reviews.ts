@@ -290,6 +290,20 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     const settings = reviewSettings(cfg.reviews, item.pr.repoKey);
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
+    // A withdrawn or dismissed round (the request went, a re-request superseded it, or Chris dropped it) has its job cancelled, then its checkout removed once the job ends.
+    for (const old of item.rounds) {
+      if ((old.state !== 'withdrawn' && old.state !== 'dismissed') || !old.dispatch) continue;
+      const oldJob = verbOf(old.dispatch);
+      if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
+        try {
+          requestCancel(old.dispatch, oldJob.lane);
+          log(`${item.key}: round ${old.state}; cancelled the review job ${old.dispatch}`);
+        } catch {
+          // still queued or already gone
+        }
+      } else removeReviewCheckout(item, old, log);
+    }
+
     if (r.state === 'requested' && !r.dispatch) {
       // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.
       if (reviewScope(item, scopes) && !r.wharf?.mine) continue;
@@ -328,19 +342,6 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       continue;
     }
 
-    // A withdrawn or dismissed round (the request went, a re-request superseded it, or Chris dropped it) has its job cancelled, then its checkout removed once the job ends.
-    for (const old of item.rounds) {
-      if ((old.state !== 'withdrawn' && old.state !== 'dismissed') || !old.dispatch) continue;
-      const oldJob = verbOf(old.dispatch);
-      if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
-        try {
-          requestCancel(old.dispatch, oldJob.lane);
-          log(`${item.key}: round ${old.state}; cancelled the review job ${old.dispatch}`);
-        } catch {
-          // still queued or already gone
-        }
-      } else removeReviewCheckout(item, old, log);
-    }
     if (!r.dispatch || r.state !== 'drafting') continue;
     const job = verbOf(r.dispatch);
     const ended = job?.verb === 'done' || job?.verb === 'failed';
