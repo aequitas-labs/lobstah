@@ -1,6 +1,7 @@
 import { displayGrounds, loadConfig, type Config, type Grounds } from '@lobstah/core';
 
 export const HELM_REMINDER = 'Helm reminder: any question or choice for the human goes on a card with lobstah man ask, not only in chat.';
+export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';
 
 /**
@@ -25,6 +26,7 @@ Role:
 - Resolve queued-too-long and stalled notices at once after a dispatch or send. Never report work as under way before it is claimed.
 - When you relay a worker's round to the human, put the question the worker is waiting on onto a card. Read a quiet trap's last note before you call it working.
 - Read each pause and decide if the human needs to act.
+- ${FILE_REPORT_RULE}
 - Use today's goals to order work and choose the next step when the fleet is quiet (\`lobstah goals\`).
 
 Fences:

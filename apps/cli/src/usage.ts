@@ -101,6 +101,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--human-gate': { value: '<check>', repeatable: true },
       '--report': { value: '<file.md>' },
       '--attach': { value: '<file>', repeatable: true },
+      '--attach-dir': { value: '<dir>', repeatable: true },
       '--session': { value: '<id>' },
       '--ask': { value: '<command>' },
       '--ask-path': { value: '<file>' },
@@ -229,7 +230,13 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:brief': { flags: {} },
   hook: { flags: {}, subverbs: ['session-start', 'user-prompt-submit', 'stop', 'post-tool-use', 'session-end', 'permission-request', 'grant-check'], maxPositionals: 1 },
   'man:file': {
-    flags: { '--attach': { value: '<file>', repeatable: true }, '--title': { value: '<text>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } },
+    flags: {
+      '--attach': { value: '<file>', repeatable: true },
+      '--attach-dir': { value: '<dir>', repeatable: true },
+      '--title': { value: '<text>' },
+      '--grounds': { value: '<name>' },
+      '--session': { value: '<id>' },
+    },
     positionals: '<file.md>',
   },
   'man:ask': {
@@ -306,7 +313,7 @@ unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note.
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
---waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No.`,
+--waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No.`,
   goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
 set replaces today's lines; add appends one; rm removes the displayed line number. Edits are allowed all day.
 done <n> checks off a goal without removing it; undo <n> unchecks it. recap saves a markdown recap, retaining task markers.
@@ -420,7 +427,9 @@ blocks: it shows standing events unconsumed, else \`standing: none\`, exit 0
 work in flight requires a live watcher or the hook blocks with the arm command.
 --park or [helm].park = "block" waits in the hook instead.`,
   'man:file': `File a markdown page as the helm's own report, under its grounds (reports/<grounds>/<rid>/).
---attach copies images the page names by bare filename; --title overrides its first # heading.
+--attach copies an image the page links by bare filename or by a path under the page's directory
+(shots/01.png); --attach-dir <dir> copies every image in a folder under it. The filed copy links each
+by its stored name. A path out of the page's directory is refused. --title overrides its first # heading.
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
   'man:ask': `Put a decision to the human: a card in the glass (decisions/<rid>/) until
 answered or withdrawn. Asks stand side by side; --replace <key> replaces one. The answer

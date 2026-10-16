@@ -246,7 +246,7 @@ import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
-import { fileDispatchReport, fileHelmReport, reportRows } from './report-file.js';
+import { fileDispatchReport, fileHelmReport, reportRows, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { todoTable, todoViews } from './todo.js';
@@ -398,9 +398,12 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   landed, attention arisen, still-waiting, and
                                   the fleet verdict; advances the reported-
                                   through cursor. "no change" when quiet.
-  man file <file.md> [--attach <file> ...] [--title <text>]
+  man file <file.md> [--attach <file> ...] [--attach-dir <dir> ...] [--title <text>]
                                   file the helm's own report under its
                                   grounds; the glass renders it on the deck.
+                                  Images it links by bare name or by a path
+                                  under its directory are attached; the copy
+                                  links them by stored name.
   todo add "<text>"
   todo done <id> | todo drop <id> | todo ls [--all]
                                   the helm's own todos, per grounds; shown in
@@ -446,7 +449,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   man wait (lobstah man).
 
 workers (dispatched agents; injected into every brief):
-  report <uuid> <verb> [--pr <url> ...] [--no-watch] [--report <file.md> [--attach <file> ...]] [--session <id>] [--] [note]
+  report <uuid> <verb> [--pr <url> ...] [--no-watch] [--report <file.md> [--attach <file> ...] [--attach-dir <dir> ...]] [--session <id>] [--] [note]
                                   the validated status write path
                                   (${VERBS.join(' | ')}). --pr on any
                                   verb but failed records the PR and
@@ -456,7 +459,8 @@ workers (dispatched agents; injected into every brief):
                                   dispatch's branches, adds the stack's
                                   other PRs. --no-watch opts out. done|failed
                                   --report files a markdown page as the
-                                  dispatch's report, images --attach'ed.
+                                  dispatch's report, images --attach'ed
+                                  (or --attach-dir, a folder under it).
 
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--ticket <t>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
@@ -1485,14 +1489,15 @@ async function mainCli(): Promise<void> {
       // A report page files before the status: a refused file changes nothing.
       const reportFile = opt('--report');
       const attachFiles = values('--attach');
+      const attachDirs = values('--attach-dir');
       if (reportFile !== undefined && verb !== 'done' && verb !== 'failed')
         throw new UsageError(`--report goes with done or failed\n\n${usageFor('report')!}`);
-      if (attachFiles.length > 0 && reportFile === undefined)
-        throw new UsageError(`--attach goes with --report\n\n${usageFor('report')!}`);
+      if ((attachFiles.length > 0 || attachDirs.length > 0) && reportFile === undefined)
+        throw new UsageError(`--attach and --attach-dir go with --report\n\n${usageFor('report')!}`);
       let filed: ReportMeta | undefined;
       if (reportFile !== undefined) {
         try {
-          filed = fileDispatchReport(id, lane, reportFile, attachFiles);
+          filed = fileDispatchReport(id, lane, reportFile, attachFiles, attachDirs);
         } catch (err) {
           if (err instanceof ReportError) throw new UsageError(err.message);
           throw err;
@@ -1556,7 +1561,7 @@ async function mainCli(): Promise<void> {
           : verb === 'paused' && !noWatch
             ? registerWaitWatches(id, lane, entry)
             : [];
-      const warning = waitWarning(id, lane, entry);
+      const warnings = [waitWarning(id, lane, entry), filed && unattachedWarning(filed)].filter((w): w is string => !!w);
       let permissionCard: string | undefined;
       if (permCommand !== undefined || permPath !== undefined) {
         const { askPermission } = await import('./grants-cli.js');
@@ -1588,7 +1593,7 @@ async function mainCli(): Promise<void> {
           ...(prUrl ? { prUrl } : {}),
           ...(reportPrs.length > 1 ? { prs: reportPrs.join(', ') } : {}),
           ...(prWatches.length ? { watch: prWatches.map((w) => w.key).join(', ') } : {}),
-          ...(warning ? { warning } : {}),
+          ...(warnings.length ? { warning: warnings.join('; ') } : {}),
           ...(gatesNamed.length ? { humanGates: gatesNamed.join(', ') } : {}),
           ...(filed ? { report: reportMarkdownPath(filed.key), reportKey: filed.key, reportTitle: filed.title } : {}),
         }),
@@ -1895,12 +1900,23 @@ async function mainCli(): Promise<void> {
       const grounds = resolveGrounds(loadConfig(), groundsName).name;
       let filed: ReportMeta;
       try {
-        filed = fileHelmReport(grounds, file, values('--attach'), opt('--title'));
+        filed = fileHelmReport(grounds, file, values('--attach'), opt('--title'), values('--attach-dir'));
       } catch (err) {
         if (err instanceof ReportError) throw new UsageError(err.message);
         throw err;
       }
-      console.log(toonKV({ key: filed.key, title: filed.title, author: filed.author, grounds: displayGrounds(grounds, loadConfig()), report: reportMarkdownPath(filed.key), attachments: filed.attachments.length }));
+      const unshown = unattachedWarning(filed);
+      console.log(
+        toonKV({
+          key: filed.key,
+          title: filed.title,
+          author: filed.author,
+          grounds: displayGrounds(grounds, loadConfig()),
+          report: reportMarkdownPath(filed.key),
+          attachments: filed.attachments.length,
+          ...(unshown ? { warning: unshown } : {}),
+        }),
+      );
       console.log(toonHelp([`lobstah attention ack ${filed.key}   (when the human has read it)`]));
       break;
     }

@@ -67,10 +67,14 @@ lobstah man tend                                  # whole fleet: verdict, questi
                                                   # chains, PRs, live traps
 lobstah man report                                # the delta since your last report
 lobstah man wait --peek                           # standing events, not consumed
+lobstah man file <file.md> [--attach <img>] [--title <t>]
+                                                  # publish your own report, plan or step list to the glass deck
 ```
 
 Repo keys: `~/.lobstah/config.toml` (`lobstah repos`). All output is TOON.
 Hand a worker a file with repeatable `lobstah dispatch --attach <file>`.
+File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.
+Images it links under its folder (`shots/01.png`) go with `--attach` or `--attach-dir shots`.
 
 ## Rules
 

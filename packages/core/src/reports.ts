@@ -14,6 +14,8 @@ import type { Attachment, Lane } from './types.js';
  * `reports/<grounds>/<rid>/`, with the same layout. `report.json` beside
  * each holds the metadata. An image the markdown names by bare filename
  * resolves to that report's own attachments directory, never elsewhere.
+ * An image it links by a path under its own directory (`shots/01.png`) is
+ * attached like any other; the filed copy links it by its stored name.
  */
 
 export interface ReportMeta {
@@ -84,8 +86,14 @@ export interface FileReportOptions {
   key: string;
   /** The markdown file to copy. */
   file: string;
-  /** Files to attach; images the markdown names by bare filename resolve here. */
+  /**
+   * Files to attach: a path from the working directory, else from the
+   * markdown file's directory. Images the markdown names by bare filename,
+   * or by a path under its directory, resolve to these.
+   */
   attach?: string[];
+  /** Directories under the markdown file's directory: every image directly in each is attached. */
+  attachDirs?: string[];
   /** An explicit title; else the markdown's first `#` heading; else `fallbackTitle`. */
   title?: string;
   fallbackTitle: string;
@@ -116,21 +124,32 @@ export function fileReport(opts: FileReportOptions): ReportMeta {
   }
   if (!stat.isFile()) throw new ReportError(`report file is not a regular file: ${opts.file}`);
   if (stat.size > opts.maxBytes) throw new ReportError(`report file exceeds ${opts.maxBytes} bytes: ${opts.file}`);
-  const markdown = fs.readFileSync(opts.file, 'utf8');
+  const pageDir = path.dirname(path.resolve(opts.file));
+  const sources = attachSources(pageDir, opts.attach ?? [], opts.attachDirs ?? []);
   fs.mkdirSync(dir, { recursive: true });
   let attached: Attachment[];
   try {
-    attached = copyAttachments(opts.attach ?? [], path.join(dir, 'attachments'), opts.maxBytes);
+    attached = copyAttachments(sources, path.join(dir, 'attachments'), opts.maxBytes);
   } catch (err) {
     if (err instanceof AttachmentError) throw new ReportError(err.message);
     throw err;
   }
+  const stored = new Map<string, string>();
+  sources.forEach((file, i) => attached[i] && stored.set(realOrResolved(file), attached[i]!.name));
+  const linked = new Set<string>();
+  const markdown = rewriteImageLinks(fs.readFileSync(opts.file, 'utf8'), (target) => {
+    const name = underDir(pageDir, target) && stored.get(realOrResolved(path.resolve(pageDir, target)));
+    if (name) linked.add(name);
+    return name || undefined;
+  });
   const previous = readReportAt(dir);
   const renamed: Record<string, string> = { ...previous?.renamed };
-  (opts.attach ?? []).forEach((file, i) => {
+  sources.forEach((file, i) => {
     const base = path.basename(file);
     if (attached[i] && attached[i]!.name !== base) renamed[base] = attached[i]!.name;
   });
+  // A link rewritten to a stored name must reach that file, not a rename of it.
+  for (const name of linked) delete renamed[name];
   const filedAt = (opts.now ?? new Date()).toISOString();
   const meta: ReportMeta = {
     key: opts.key,
@@ -156,6 +175,118 @@ export function fileReport(opts: FileReportOptions): ReportMeta {
   write(REPORT_MD, markdown);
   write(REPORT_JSON, `${JSON.stringify(meta, null, 2)}\n`);
   return meta;
+}
+
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+
+/** Whether `p`, resolved from `dir`, stays inside `dir`'s tree. */
+function underDir(dir: string, p: string): boolean {
+  const rel = path.relative(dir, path.resolve(dir, p));
+  return rel === '' || (rel.split(/[\\/]/)[0] !== '..' && !path.isAbsolute(rel));
+}
+
+function realOrResolved(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+function existsAs(p: string, kind: 'file' | 'dir'): boolean {
+  try {
+    const st = fs.statSync(p);
+    return kind === 'file' ? st.isFile() : st.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The files `--attach` and `--attach-dir` name. A path is read from the
+ * working directory when something is there, else from the page's
+ * directory, and then it must stay inside that directory's tree: no `..`
+ * out of it, no absolute path elsewhere. A directory must be inside the
+ * page's tree either way, so its images keep paths the page can link.
+ */
+function attachSources(pageDir: string, attach: string[], dirs: string[]): string[] {
+  const realPage = realOrResolved(pageDir);
+  const fromPage = (flag: string, p: string): string => {
+    if (!underDir(pageDir, p)) throw new ReportError(`${flag} ${p}: not under the page's directory ${pageDir}`);
+    return path.resolve(pageDir, p);
+  };
+  const files = attach.map((p) => (path.isAbsolute(p) || existsAs(p, 'file') ? p : existsAs(path.resolve(pageDir, p), 'file') ? fromPage('--attach', p) : p));
+  for (const d of dirs) {
+    const dir = existsAs(d, 'dir') ? path.resolve(d) : fromPage('--attach-dir', d);
+    if (!existsAs(dir, 'dir')) throw new ReportError(`--attach-dir ${d}: no such directory`);
+    if (!underDir(realPage, realOrResolved(dir))) throw new ReportError(`--attach-dir ${d}: not under the page's directory ${pageDir}`);
+    const images = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && IMAGE_EXTS.has(path.extname(e.name).toLowerCase()))
+      .map((e) => path.join(dir, e.name))
+      .sort();
+    if (images.length === 0) throw new ReportError(`--attach-dir ${d}: no images (${[...IMAGE_EXTS].join(' ')}) in it`);
+    files.push(...images);
+  }
+  return files;
+}
+
+/** A link target that is a URL or a data URI: never a file of the report. */
+const URL_RE = /^[a-z][a-z0-9+.-]+:/i;
+
+/**
+ * Each image link `![alt](target)` outside code, with `map` choosing its new
+ * target (undefined keeps it). A target may be written `<...>` or
+ * percent-encoded; a new one with spaces or parentheses is written `<...>`.
+ */
+export function rewriteImageLinks(markdown: string, map: (target: string) => string | undefined): string {
+  let fenced = false;
+  return markdown
+    .split(/(?<=\n)/)
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        fenced = !fenced;
+        return line;
+      }
+      if (fenced) return line;
+      return line
+        .split(/(`+[^`]*`+)/)
+        .map((part, i) =>
+          i % 2 === 1
+            ? part
+            : part.replace(/(!\[(?:[^\]\\]|\\.)*\]\(\s*)(<[^>\n]*>|[^\s)]+)((?:\s+"[^"]*")?\s*\))/g, (all, open: string, raw: string, close: string) => {
+                const target = raw.startsWith('<') ? raw.slice(1, -1) : raw;
+                let decoded = target;
+                try {
+                  decoded = decodeURI(target);
+                } catch {
+                  // keep it as written
+                }
+                const next = map(decoded);
+                if (next === undefined) return all;
+                return `${open}${/[\s()]/.test(next) ? `<${next}>` : next}${close}`;
+              }),
+        )
+        .join('');
+    })
+    .join('');
+}
+
+/**
+ * Images the filed page links that the glass cannot show: a path, or a
+ * bare name that is not one of the report's attachments. URLs and data
+ * URIs are left out.
+ */
+export function unattachedImages(markdown: string, meta: Pick<ReportMeta, 'attachments' | 'renamed'>): string[] {
+  const missing = new Set<string>();
+  rewriteImageLinks(markdown, (target) => {
+    if (URL_RE.test(target)) return undefined;
+    const bare = target === path.basename(target) && target === path.win32.basename(target);
+    const name = meta.renamed?.[target] ?? target;
+    if (!bare || !meta.attachments.some((a) => a.name === name)) missing.add(target);
+    return undefined;
+  });
+  return [...missing];
 }
 
 /** A new helm report key under a grounds. */

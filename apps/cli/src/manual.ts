@@ -83,7 +83,8 @@ getting woken instead of asking:
                             it too, so a wait loop doubles as the periodic
                             fleet report
   lobstah man file <f.md>   file your own report (findings worth keeping) under
-                            your grounds; --attach images it names, --title.
+                            your grounds; --attach images it names (bare or
+                            shots/x.png), --attach-dir a folder, --title.
                             \`lobstah reports\` lists every report;
                             \`lobstah attention ack <key>\` acks one
   lobstah todo add "<text>" keep your own reminder, in free text, under your
