@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
   appendStatus,
   claimNext,
@@ -12,6 +13,7 @@ import {
   pendingIds,
   queuedDescriptor,
   readReview,
+  reviewCheckoutDir,
   reviewRoundDir,
   writeReview,
 } from '@lobstah/core';
@@ -182,5 +184,105 @@ describe('finishing a review job', () => {
     writeReview(item);
     draftReviews('chris', () => {}, NOW);
     expect(fs.existsSync(path.join(laneDirs('chore').active, id, 'cancel'))).toBe(true);
+  });
+});
+
+describe('the review checkout', () => {
+  let repo: string;
+  const git = (...args: string[]) => spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+  const checkout = () => reviewCheckoutDir(KEY, 'RRE_7')!;
+  const listed = () => git('worktree', 'list', '--porcelain').stdout.includes(path.basename(path.dirname(checkout())));
+
+  beforeEach(() => {
+    repo = path.join(home, 'web');
+    fs.mkdirSync(repo);
+    git('init', '-q', '-b', 'main');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'one');
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'work = "headless"', '[repos.web]', `path = '${repo.replaceAll('\\', '/')}'`].join('\n'));
+  });
+
+  /** A drafting round whose job made its checkout where the brief said, the way `git worktree add --detach` does. */
+  function drafting(): string {
+    request();
+    draftReviews('chris', () => {}, NOW);
+    const id = round().dispatch!;
+    claimNext('chore');
+    expect(queuedOrActiveBrief(id)).toContain(`git worktree add --detach ${checkout()} FETCH_HEAD`);
+    git('worktree', 'add', '-q', '--detach', checkout(), 'HEAD');
+    expect(fs.existsSync(checkout())).toBe(true);
+    return id;
+  }
+  const queuedOrActiveBrief = (id: string) => fs.readFileSync(path.join(laneDirs('chore').active, id, 'descriptor.json'), 'utf8');
+  const gone = () => {
+    expect(fs.existsSync(checkout())).toBe(false);
+    expect(git('worktree', 'list', '--porcelain').stdout).not.toContain(checkout());
+  };
+
+  it('is removed when the round is drafted', () => {
+    const id = drafting();
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'review.md'), 'Fine.');
+    appendStatus(id, 'chore', 'done', 'drafted');
+    draftReviews('chris', () => {}, NOW);
+    expect(round().state).toBe('drafted');
+    gone();
+  });
+
+  it('is removed when the draft is stale', () => {
+    const id = drafting();
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'review.md'), 'Fine.');
+    request({ head: 'bbbbbbb2' });
+    appendStatus(id, 'chore', 'done', 'drafted');
+    draftReviews('chris', () => {}, NOW);
+    expect(round().state).toBe('stale');
+    gone();
+  });
+
+  it('is removed when the job fails', () => {
+    const id = drafting();
+    appendStatus(id, 'chore', 'failed', 'wall clock');
+    draftReviews('chris', () => {}, NOW);
+    expect(round().state).toBe('failed');
+    gone();
+  });
+
+  it('is removed once a withdrawn round's job ends, not while it still runs', () => {
+    const id = drafting();
+    const item = readReview(KEY)!;
+    item.rounds[0]!.state = 'withdrawn';
+    writeReview(item);
+    draftReviews('chris', () => {}, NOW);
+    expect(fs.existsSync(path.join(laneDirs('chore').active, id, 'cancel'))).toBe(true);
+    expect(fs.existsSync(checkout())).toBe(true); // the job may still be in it
+    appendStatus(id, 'chore', 'failed', 'cancelled by request');
+    draftReviews('chris', () => {}, NOW);
+    gone();
+  });
+
+  it('is removed for a round a re-request superseded, once its cancelled job ends', () => {
+    const id = drafting();
+    observeReviewRequest(
+      {
+        pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'aaaaaaa1', repoKey: 'web' },
+        round: { id: 'RRE_7b', requestedAt: '2026-10-15T11:30:00Z', requestedBy: 'dana' },
+      },
+      NOW,
+    );
+    expect(readReview(KEY)!.rounds[0]).toMatchObject({ state: 'withdrawn', reason: 'superseded by a new request' });
+    draftReviews('chris', () => {}, NOW);
+    expect(fs.existsSync(path.join(laneDirs('chore').active, id, 'cancel'))).toBe(true);
+    appendStatus(id, 'chore', 'failed', 'cancelled by request');
+    draftReviews('chris', () => {}, NOW);
+    gone();
+  });
+
+  it('is a no-op when the path is absent', () => {
+    const id = drafting();
+    git('worktree', 'remove', '--force', checkout());
+    appendStatus(id, 'chore', 'failed', 'wall clock');
+    const logs: string[] = [];
+    draftReviews('chris', (m) => logs.push(m), NOW);
+    expect(round().state).toBe('failed');
+    expect(logs.some((m) => m.includes('removed the review checkout'))).toBe(false);
+    expect(listed()).toBe(false);
   });
 });
