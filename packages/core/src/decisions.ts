@@ -19,8 +19,8 @@ import type { Attachment, Lane } from './types.js';
  * An answer is a glass request of kind `decision-answer` (requests.ts):
  * `requests/<id>.json`, with the human's files in `requests/<id>/`. Writing
  * it posts a `decision-answer` notice, which wakes the helm's `man wait`.
- * `answer.json` in the decision's directory marks it answered and names
- * the request.
+ * `answer.json` in the decision's directory marks it answered, names the
+ * request, and holds the answer: the option, the text, and the files.
  *
  * `viewed.json` records when the human first saw the decision in the
  * glass's decision modal (`viewedAt`): state only, never a wake. A raw
@@ -85,10 +85,18 @@ export interface DecisionAnswer {
   by: 'glass' | 'cli';
 }
 
-/** `answer.json`: the decision is answered, by this request. */
+/**
+ * `answer.json`: the decision is answered, by this request, and with what.
+ * It holds the answer itself, so a reader of the decision's directory needs
+ * nothing else. One written before it held the answer has no `attachments`:
+ * its option and text are only in the request.
+ */
 interface AnswerMarker {
   key: string;
   request: string;
+  option?: string;
+  text?: string;
+  attachments?: Attachment[];
   answeredAt: string;
   by: 'glass' | 'cli';
 }
@@ -206,6 +214,17 @@ export function readDecisionAnswer(key: string): DecisionAnswer | undefined {
   const dir = decisionDir(key);
   const marker = dir ? readJsonFile<AnswerMarker>(path.join(dir, ANSWER_JSON)) : undefined;
   if (marker?.key !== key) return undefined;
+  if (Array.isArray(marker.attachments)) {
+    return {
+      key,
+      request: marker.request,
+      ...(marker.option !== undefined ? { option: marker.option } : {}),
+      ...(marker.text !== undefined ? { text: marker.text } : {}),
+      attachments: marker.attachments,
+      answeredAt: marker.answeredAt,
+      by: marker.by,
+    };
+  }
   const p = readRequest(marker.request)?.payload as DecisionAnswerPayload | undefined;
   return {
     key,
@@ -488,27 +507,36 @@ export function answerDecision(input: AnswerInput): DecisionAnswer {
   const dir = decisionDir(input.key)!;
   const answeredAt = (input.now ?? new Date()).toISOString();
   const request = newRequestId();
+  const filesDir = requestFilesDir(request);
+  // Where each file will be stored: two files of one name get -2, -3, ...
+  const stored: Attachment[] = [];
+  for (const c of contents) {
+    const ext = path.extname(c.name);
+    const stem = c.name.slice(0, c.name.length - ext.length);
+    let name = c.name;
+    let n = 2;
+    while (stored.some((s) => s.name === name)) name = `${stem}-${n++}${ext}`;
+    stored.push({ name, path: path.join(filesDir, name), bytes: c.data.length, type: c.type });
+  }
+  const answer: DecisionAnswer = {
+    key: input.key,
+    request,
+    ...(option !== undefined ? { option } : {}),
+    ...(text !== undefined ? { text } : {}),
+    attachments: stored,
+    answeredAt,
+    by: input.by,
+  };
   // The marker is the claim: of two answers racing, the first one written stands.
   try {
-    fs.writeFileSync(path.join(dir, ANSWER_JSON), `${JSON.stringify({ key: input.key, request, answeredAt, by: input.by }, null, 2)}\n`, { flag: 'wx' });
+    fs.writeFileSync(path.join(dir, ANSWER_JSON), `${JSON.stringify(answer satisfies AnswerMarker, null, 2)}\n`, { flag: 'wx' });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new DecisionError(`decision ${input.key} was already answered`, 409);
     throw err;
   }
-  const filesDir = requestFilesDir(request);
-  const stored: Attachment[] = [];
   try {
     if (contents.length) fs.mkdirSync(filesDir, { recursive: true });
-    for (const c of contents) {
-      const ext = path.extname(c.name);
-      const stem = c.name.slice(0, c.name.length - ext.length);
-      let name = c.name;
-      let n = 2;
-      while (stored.some((s) => s.name === name)) name = `${stem}-${n++}${ext}`;
-      const file = path.join(filesDir, name);
-      fs.writeFileSync(file, c.data, { flag: 'wx' });
-      stored.push({ name, path: file, bytes: c.data.length, type: c.type });
-    }
+    contents.forEach((c, i) => fs.writeFileSync(stored[i]!.path, c.data, { flag: 'wx' }));
     const payload: DecisionAnswerPayload = {
       key: input.key,
       title: meta.title,
@@ -525,15 +553,7 @@ export function answerDecision(input: AnswerInput): DecisionAnswer {
     fs.rmSync(path.join(dir, ANSWER_JSON), { force: true });
     throw err;
   }
-  return {
-    key: input.key,
-    request,
-    ...(option !== undefined ? { option } : {}),
-    ...(text !== undefined ? { text } : {}),
-    attachments: stored,
-    answeredAt,
-    by: input.by,
-  };
+  return answer;
 }
 
 /**

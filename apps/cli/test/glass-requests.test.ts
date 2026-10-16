@@ -86,6 +86,43 @@ describe('glass /requests', () => {
     expect(listNotices(50).map((n) => [n.kind, n.refId])).toEqual(expect.arrayContaining([['decision-answer', answerId], ['trap-request', trapId]]));
   });
 
+  it("keeps every answer's option, text and pasted files in answer.json, which the answer read returns", async () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+    const cases = [
+      { payload: { text: '9378307785' }, want: { text: '9378307785' } },
+      { payload: { option: 'v2', text: 'and pin the version' }, want: { option: 'v2', text: 'and pin the version' } },
+      { payload: { option: 'v1' }, want: { option: 'v1' } },
+      { payload: { text: 'see the screenshot', files: [{ name: 'shot.png', data: png.toString('base64') }] }, want: { text: 'see the screenshot' } },
+    ];
+    for (const { payload, want } of cases) {
+      const { meta } = askDecision({ title: 'Which version?', options: ['v1', 'v2'], dispatch: 'd-1', lane: 'work', askedBy: 'worker', maxBytes: 1024 * 1024 });
+      const res = await post({ kind: 'decision-answer', payload: { key: meta.key, files: [], ...payload } });
+      expect(res.status).toBe(201);
+      const marker = JSON.parse(fs.readFileSync(path.join(home, 'decisions', meta.key.slice('decision:'.length), 'answer.json'), 'utf8'));
+      expect(marker).toMatchObject({ key: meta.key, by: 'glass', ...want });
+      const files = payload.files?.length ?? 0;
+      expect(marker.attachments).toHaveLength(files);
+      // The answer stands on answer.json alone, without the request that carried it.
+      fs.rmSync(path.join(home, 'requests', `${marker.request}.json`));
+      const read = readDecisionAnswer(meta.key)!;
+      expect(read).toMatchObject(want);
+      expect(read.option).toBe(want.option);
+      expect(read.text).toBe(want.text);
+      if (files) expect(fs.readFileSync(read.attachments[0]!.path)).toEqual(png);
+    }
+  });
+
+  it('still reads an answer.json written before it held the answer, from its request', async () => {
+    const { meta } = askDecision({ title: 'Port?', askedBy: 'worker', maxBytes: 1024 });
+    const res = await post({ kind: 'decision-answer', payload: { key: meta.key, text: '8080', files: [] } });
+    const { id } = (await res.json()) as { id: string };
+    const file = path.join(home, 'decisions', meta.key.slice('decision:'.length), 'answer.json');
+    const { key, request, answeredAt, by } = JSON.parse(fs.readFileSync(file, 'utf8'));
+    fs.writeFileSync(file, JSON.stringify({ key, request, answeredAt, by }));
+    expect(request).toBe(id);
+    expect(readDecisionAnswer(meta.key)).toMatchObject({ text: '8080', attachments: [] });
+  });
+
   it('refuses a missing or wrong token, a foreign origin or host, and GET, writing nothing', async () => {
     const good = trapRequest({ repo: 'web', harness: 'claude' });
     expect((await post(good, { 'x-lobstah-token': '' })).status).toBe(403);
