@@ -76,10 +76,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
   prs: { flags: {}, maxPositionals: 0 },
   reports: { flags: { '--json': {} } },
   reviews: {
-    subverbs: ['ls', 'redraft'],
-    flags: { '--json': {}, '--all': {} },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''] },
-    positionals: '[ls | redraft <key>]',
+    subverbs: ['ls', 'redraft', 'post', 'dismiss'],
+    flags: { '--json': {}, '--all': {}, '--stale': {} },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--stale': ['post'] },
+    positionals: '[<key>]',
   },
   todo: {
     subverbs: ['add', 'done', 'drop', 'ls'],
@@ -325,11 +325,10 @@ context at every session start; a done one stays in tend and the glass, checked,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,
-  reviews: `PRs on which someone asked for your review ([reviews], found by lobstah pick):
-key, PR, title, author, who asked, the newest round's state, and why it is there.
-Bare lists the open ones (requested, drafting, drafted, stale, failed); --all
-adds posted, dismissed and withdrawn. redraft <key> starts a new draft of a stale
-or failed round at the PR's current head.`,
+  reviews: `PRs that ask for your review ([reviews]), newest round each; --all adds closed rounds.
+A draft is staged on the PR as your pending review: edit and send it in your review tool.
+post sends it as a comment-only review (--stale for a stale one); dismiss deletes the
+pending draft; redraft re-drafts a stale or failed round. lobstah never approves.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

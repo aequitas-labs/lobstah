@@ -30,6 +30,8 @@ import {
 import type { ReviewItem, ReviewRound } from '@lobstah/core';
 import { githubRepoFromOrigin } from '../config.js';
 import { dispatchLane } from './report.js';
+import { postReview, settleStagedReview, stageReview } from '../reviews-post.js';
+import type { FetchLike } from '../reviews-post.js';
 
 /**
  * One search per poll for open PRs whose review is requested from the
@@ -108,16 +110,60 @@ export async function reviewsLoop(
   identity: string,
   token: () => string,
   log: (m: string) => void = () => {},
-  opts: { run?: GhGraphql; now?: number } = {},
+  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number } = {},
 ): Promise<void> {
   if (!loadConfig().reviews.enabled) return;
   const now = opts.now ?? Date.now();
+  const gh = { token, ...(opts.fetch ? { fetch: opts.fetch } : {}), now };
   // The search needs the budget; drafting is local and runs either way.
-  if (!githubBlockedUntil(now)) searchReviews(identity, token, log, opts.run ?? runGraphql, now);
+  if (!githubBlockedUntil(now)) {
+    const found = searchReviews(identity, token, log, opts.run ?? runGraphql, now);
+    if (found) await settleGone(found, gh, log);
+  }
   draftReviews(identity, log, now);
+  if (!githubBlockedUntil(now)) await postOrStage(gh, log);
 }
 
-function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number): void {
+/**
+ * The search stopped returning these items. A staged round may be gone
+ * because the person sent the review from their tool (that removes the
+ * request): check it first, so it reads posted, not withdrawn. Then
+ * withdraw the open rounds left.
+ */
+async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem) => boolean }, gh: { token: () => string; fetch?: FetchLike; now: number }, log: (m: string) => void): Promise<void> {
+  for (const item of listReviews()) {
+    const r = latestRound(item);
+    if (found.seen.has(item.key) || !r?.staged || (r.state !== 'drafted' && r.state !== 'stale') || !found.inScope(item)) continue;
+    const out = await settleStagedReview(item.key, gh);
+    if (out === 'posted') log(`${item.key}: review sent from the review tool`);
+    if (out === 'deleted') log(`${item.key}: pending review deleted in the review tool; round dismissed`);
+  }
+  for (const key of withdrawUnseenReviews(found.seen, found.inScope, gh.now)) log(`${key}: review request gone; round withdrawn`);
+}
+
+/**
+ * A fresh draft goes to GitHub one of two ways. `[reviews].post = "draft"`
+ * (the default) stages it as the person's pending review, to edit and send
+ * from their review tool. `"auto"` posts it as a comment-only review. A
+ * stale draft is never staged or posted on its own, and a failed attempt
+ * is not retried on its own (the round keeps the reason).
+ */
+async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: number }, log: (m: string) => void): Promise<void> {
+  const rc = loadConfig().reviews;
+  for (const item of listReviews()) {
+    const r = latestRound(item);
+    if (r?.state !== 'drafted' || r.staged || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
+    if (reviewSettings(rc, item.pr.repoKey).post === 'auto') {
+      const out = await postReview(item.key, { by: 'auto', ...gh });
+      log(out.posted ? `${item.key}: review posted (${out.reviewId})` : `${item.key}: auto-post failed: ${out.why}`);
+    } else {
+      const out = await stageReview(item.key, gh);
+      log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${out.why}`);
+    }
+  }
+}
+
+function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number): { seen: Set<string>; inScope: (item: ReviewItem) => boolean } | undefined {
   const rc = loadConfig().reviews;
   const res = run({ query: REVIEW_SEARCH, variables: { q: reviewSearchQuery(identity) } }, token());
   const { headers, body } = splitGitHubResponse(res.stdout);
@@ -136,11 +182,11 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
     const retry = Number(headers['retry-after']);
     recordGitHubRateLimit(now, Number.isFinite(retry) && retry > 0 ? now + retry * 1000 : undefined);
     log('reviews: GitHub rate limit reached; the search waits for the budget');
-    return;
+    return undefined;
   }
   if (res.status !== 0 || !search) {
     log(`reviews: search failed: ${reason}`);
-    return;
+    return undefined;
   }
 
   const repos = configuredRepos();
@@ -186,9 +232,8 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
     if (opened) log(`${item.key}: review requested${request.actor?.login ? ` by ${request.actor.login}` : ''}${skip ? ` (${skip})` : ''}`);
   }
   // A truncated search cannot say a request is gone.
-  if ((search.issueCount ?? nodes.length) > nodes.length) return;
-  const scoped = (item: ReviewItem): boolean => inScope(`${item.pr.owner}/${item.pr.repo}`);
-  for (const key of withdrawUnseenReviews(seen, scoped, now)) log(`${key}: review request gone; round withdrawn`);
+  if ((search.issueCount ?? nodes.length) > nodes.length) return undefined;
+  return { seen, inScope: (item: ReviewItem): boolean => inScope(`${item.pr.owner}/${item.pr.repo}`) };
 }
 
 // ── Drafting ────────────────────────────────────────────────────────────────
@@ -232,14 +277,14 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     const settings = reviewSettings(cfg.reviews, item.pr.repoKey);
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
-    // A withdrawn round (the request went, or a re-request superseded it) has its job cancelled, then its checkout removed once the job ends.
+    // A withdrawn or dismissed round (the request went, a re-request superseded it, or Chris dropped it) has its job cancelled, then its checkout removed once the job ends.
     for (const old of item.rounds) {
-      if (old.state !== 'withdrawn' || !old.dispatch) continue;
+      if ((old.state !== 'withdrawn' && old.state !== 'dismissed') || !old.dispatch) continue;
       const oldJob = verbOf(old.dispatch);
       if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
         try {
           requestCancel(old.dispatch, oldJob.lane);
-          log(`${item.key}: request gone; cancelled the review job ${old.dispatch}`);
+          log(`${item.key}: round ${old.state}; cancelled the review job ${old.dispatch}`);
         } catch {
           // still queued or already gone
         }

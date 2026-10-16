@@ -10,6 +10,7 @@ import {
   loadConfig,
   observeReviewRequest,
   parseReviews,
+  dismissReview,
   readReview,
   redraftReview,
   reviewAttention,
@@ -184,5 +185,15 @@ describe('drafts', () => {
     redraftReview('review:acme/web#7', T0);
     expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested' });
     expect(redraftReview('review:acme/web#9')).toBe('no review item review:acme/web#9');
+  });
+});
+
+describe('dismiss', () => {
+  it('dismisses an open round, once', () => {
+    observeReviewRequest(seen(), T0);
+    dismissReview('review:acme/web#7', 'glass', T0);
+    expect(latestRound(readReview('review:acme/web#7')!)).toMatchObject({ state: 'dismissed', by: 'glass' });
+    expect(dismissReview('review:acme/web#7', 'cli')).toContain('already dismissed');
+    expect(reviewAttention(T0)).toEqual([]);
   });
 });

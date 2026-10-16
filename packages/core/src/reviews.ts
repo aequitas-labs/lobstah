@@ -140,8 +140,14 @@ export interface ReviewRound {
   draftedAt?: string;
   postedAt?: string;
   postedReviewId?: string;
-  /** Who posted or dismissed it (`glass`, `cli`, `auto`). */
+  /** Who posted or dismissed it (`cli`, `auto`, `glass`, `review tool`). */
   by?: string;
+  /**
+   * The draft is staged on the PR as a pending GitHub review, which only
+   * the configured identity sees: the person opens the PR in their review
+   * tool, edits it, and sends it from there.
+   */
+  staged?: { reviewId: string; at: string };
   /** Why the round is where it is: a skip rule, the daily cap, a failure, a withdrawal. */
   reason?: string;
 }
@@ -322,7 +328,8 @@ export function reviewRoundDir(key: string, roundId: string): string | undefined
   return dir && /^[A-Za-z0-9_-]+$/.test(roundId) ? path.join(dir, 'rounds', roundId) : undefined;
 }
 
-function parseComments(raw: unknown): ReviewComment[] | string {
+/** Inline comments from JSON, or why they are malformed. */
+export function parseReviewComments(raw: unknown): ReviewComment[] | string {
   if (!Array.isArray(raw)) return 'comments.json is not a JSON array';
   const out: ReviewComment[] = [];
   for (const [i, c] of raw.entries()) {
@@ -360,7 +367,7 @@ export function readRoundDraft(key: string, roundId: string): { body: string; co
   const file = path.join(dir, 'comments.json');
   if (fs.existsSync(file)) {
     try {
-      comments = parseComments(JSON.parse(fs.readFileSync(file, 'utf8')));
+      comments = parseReviewComments(JSON.parse(fs.readFileSync(file, 'utf8')));
     } catch {
       comments = 'comments.json is not valid JSON';
     }
@@ -396,9 +403,36 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   const r = item && latestRound(item);
   if (!item || !r) return `no review item ${key}`;
   if (r.state !== 'stale' && r.state !== 'failed') return `${key}: the newest round is ${r.state}; only a stale or failed round re-drafts`;
-  const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, ...rest } = r;
+  const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, ...rest } = r;
   item.rounds[item.rounds.length - 1] = { ...rest, state: 'requested', headSha: item.pr.headSha };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+}
+
+/** The hidden marker a posted review ends with: one per round, so a second post of it can be found. */
+export function reviewMarker(roundId: string): string {
+  return `<!-- lobstah:review ${roundId} -->`;
+}
+
+/** Dismiss the newest round: nothing is posted, and it leaves attention. A drafting job is cancelled by the next pick cycle; a staged pending review is the caller's to delete first (pick's dismissReviewRound). */
+export function dismissReview(key: string, by: string, now = Date.now()): ReviewItem | string {
+  const item = readReview(key);
+  const r = item && latestRound(item);
+  if (!item || !r) return `no review item ${key}`;
+  if (!OPEN_STATES.includes(r.state)) return `${key}: the newest round is already ${r.state}`;
+  Object.assign(r, { state: 'dismissed', by });
+  delete r.reason;
+  return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+}
+
+/** Record a posted round (`posted.json` is the post's write-once receipt; this is the item's view). */
+export function markReviewPosted(key: string, roundId: string, post: { reviewId: string; by: string; at: string }): ReviewItem | undefined {
+  const item = readReview(key);
+  const r = item?.rounds.find((x) => x.id === roundId);
+  if (!item || !r) return undefined;
+  Object.assign(r, { state: 'posted', postedAt: post.at, postedReviewId: post.reviewId, by: post.by });
+  delete r.reason;
+  delete r.staged;
+  return writeReview({ ...item, updatedAt: post.at });
 }
 
 // ── Attention ──────────────────────────────────────────────────────────────

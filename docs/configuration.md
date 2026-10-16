@@ -345,7 +345,7 @@ as that identity, with its token. Any key except `enabled`, `repos` and
 | `enabled` | `false` | Opt-in. Off means no search call at all. |
 | `repos` | `"configured"` | `"configured"`: only PRs in a `[repos.*]` origin. `"any"`: every repo the token can see. |
 | `work` | `"trap"` | Who drafts the review: `"off"`, `"trap"` (a free trap of that repo, then headless after `trapWaitSecs`), or `"headless"`. |
-| `post` | `"draft"` | `"draft"`: Chris posts from the glass. `"auto"`: post the draft as a comment-only review once drafted. Never approve, never request changes. |
+| `post` | `"draft"` | `"draft"`: stage the draft as Chris's pending review on the PR, to edit and send from his review tool. `"auto"`: post the draft as a comment-only review once drafted. lobstah never approves or requests changes. |
 | `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
