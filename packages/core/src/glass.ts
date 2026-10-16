@@ -385,6 +385,8 @@ export interface GlassDecision {
   /** The detail markdown; images it names by bare filename load from the decision's attachments. */
   detail: string;
   options: string[];
+  /** A short note shown on an option, by label. */
+  optionNotes?: Record<string, string>;
   attachments: Attachment[];
   dispatch?: string;
   lane?: Lane;

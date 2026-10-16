@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { DecisionError, addGrant, ensureLayout, listGrants, readDecision, signOnTrap, unhandled } from '@lobstah/core';
+import { DecisionError, addGrant, ensureLayout, listGrants, readDecision, readDecisionDetail, signOnTrap, unhandled } from '@lobstah/core';
 import { askPermission, callRequests, patchPaths, personOnly, rosterConfigPatch } from '../src/grants-cli.js';
 import { answerKey } from '../src/decision-answer.js';
 import { harnessCommand } from '../src/throw.js';
@@ -154,6 +154,28 @@ describe('a permission card', () => {
     answerKey(c.key, { option: 'Allow always', by: 'glass' });
     expect(listGrants().grants[0]).toMatchObject({ mode: 'always' });
     expect(listGrants().grants[0]!.trap).toBeUndefined();
+  });
+
+  it('says what Allow always covers: the repo-relative path in any worktree, or the exact thing outside every repo', () => {
+    const base = fs.realpathSync(home);
+    const main = path.join(base, 'homebase');
+    const wt = path.join(base, 'worktrees', 'soak-a');
+    fs.mkdirSync(main);
+    const git = (...args: string[]) => expect(spawnSync('git', ['-C', main, ...args], { encoding: 'utf8' }).status).toBe(0);
+    git('init', '-q', '-b', 'main');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+    git('worktree', 'add', '-q', '-b', 'a', wt);
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.homebase]\npath = ${JSON.stringify(main)}\n`);
+    const file = path.join(wt, 'apps/exterior-model-gen/ops/deploy/apply-exterior.sh');
+    const c = askPermission({ dispatch: 'd-1', lane: 'work', ask: { path: file, harness: 'claude' } });
+    expect(c.optionNotes).toEqual({ 'Allow always': 'apps/…/apply-exterior.sh in any homebase worktree' });
+    expect(readDecisionDetail(c.key)).toContain('`apps/exterior-model-gen/ops/deploy/apply-exterior.sh` in any homebase worktree');
+    answerKey(c.key, { option: 'Allow always', by: 'glass' });
+    expect(listGrants().grants[0]).toMatchObject({ path: 'apps/exterior-model-gen/ops/deploy/apply-exterior.sh', repo: 'homebase', mode: 'always' });
+    const cmd = askPermission({ dispatch: 'd-1', lane: 'work', ask: { command: `cd ${wt}/bao && fastlane`, harness: 'claude' } });
+    expect(cmd.optionNotes).toEqual({ 'Allow always': 'this command in any homebase worktree' });
+    expect(askPermission({ dispatch: 'd-1', lane: 'work', ask: { path: '/etc/hosts', harness: 'claude' } }).optionNotes).toEqual({ 'Allow always': 'this exact path' });
+    expect(card().optionNotes).toEqual({ 'Allow always': 'this exact command, from any trap' });
   });
 
   it('cannot be allowed from the command line, which the helm uses; No can be said anywhere', () => {

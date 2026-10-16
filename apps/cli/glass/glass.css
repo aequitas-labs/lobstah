@@ -1187,6 +1187,11 @@ a.lob {
   background: var(--seg-on);
   border-color: var(--link);
 }
+/* What an option covers, as a permission card's "Allow always" says it. */
+.btn.dopt .dnote {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
 .danswer {
   display: block;
   width: 100%;
