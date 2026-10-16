@@ -41,6 +41,13 @@ const view = (asked: number[]) => (ref: PrRef): GhPrView => {
   };
 };
 
+/**
+ * Each open PR is checked for stacked PRs GitHub knows and lobstah does not.
+ * This stack is all of them: GitHub has nothing more, and the machine's own
+ * gh is never asked (on Windows CI those reads took tens of seconds).
+ */
+const noMoreLinks = () => [];
+
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-observe-all-'));
   process.env.LOBSTAH_HOME = home;
@@ -62,18 +69,18 @@ afterEach(() => {
 describe('a dispatch with a six-PR stack', () => {
   it('the daemon observes every PR, not only the one its evidence names', () => {
     const asked: number[] = [];
-    observeDispatchPrWatches(45, Date.now(), view(asked));
+    observeDispatchPrWatches(45, Date.now(), view(asked), noMoreLinks);
     // #140 was just observed; each other PR is read once, though the dispatch's evidence is fresh.
     expect(asked.sort()).toEqual(STACK.filter((n) => n !== 140).sort());
     for (const n of STACK) expect(readPr(`pr:acme/web#${n}`)?.state).toBe('OPEN');
     // Within the poll interval nothing is read again.
     const again: number[] = [];
-    observeDispatchPrWatches(45, Date.now(), view(again));
+    observeDispatchPrWatches(45, Date.now(), view(again), noMoreLinks);
     expect(again).toEqual([]);
   });
 
   it('the glass stack and the dispatch list every PR in stack order with its state', () => {
-    observeDispatchPrWatches(45, Date.now(), view([]));
+    observeDispatchPrWatches(45, Date.now(), view([]), noMoreLinks);
     const { prs, stacks } = deriveGlassPrs([], [], readPrs());
     expect(stacks).toHaveLength(1);
     expect(stacks[0]!.numbers).toEqual(STACK);
