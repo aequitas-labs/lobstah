@@ -75,22 +75,22 @@ const click = async (g: GlassDom, el: Element | null) => {
 const reportsSection = (g: GlassDom) => g.$$('#deck .deckgrid > section').find((s) => text(s.querySelector('h2')) === 'reports →')!;
 
 describe('glass: the deck reports block', () => {
-  it('lists reports after Landed, unacked first then newest: title, then who filed it, the age, and acked; no badge', async () => {
+  it('lists reports after Landed, newest first regardless of acknowledgment: title, then who filed it, the age, and acked; no badge', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
       const headings = g.$$('#deck .deckgrid > section').map((s) => text(s.querySelector('h2')));
       expect(headings.indexOf('reports →')).toBe(headings.indexOf('Landed · 24h →') + 1);
       const rows = [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
-      expect(rows.map((r) => text(r.querySelector('b')))).toEqual(['Fleet notes', 'Tray findings', 'Build timings', 'Old fleet notes']);
+      expect(rows.map((r) => text(r.querySelector('b')))).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
       expect(reportsSection(g).querySelectorAll('.badge')).toHaveLength(0);
       const metas = rows.map((r) => text(view === 'cards' ? r.querySelector('.meta') : r.querySelector('.dim')));
       expect(metas).toEqual([
+        (view === 'cards' ? '' : '· ') + '60s ago · acked',
         view === 'cards' ? '5m ago' : '· 5m ago',
         (view === 'cards' ? '' : '· ') + 'kind-crab · 20m ago',
         (view === 'cards' ? '' : '· ') + 'aaaaaaaa · 40m ago',
-        (view === 'cards' ? '' : '· ') + '60s ago · acked',
       ]);
-      expect(rows[3]!.className).toContain('acked');
+      expect(rows[0]!.className).toContain('acked');
     }
   });
 
@@ -109,6 +109,21 @@ describe('glass: the deck reports block', () => {
     const g = await page(emptyFleet());
     expect(text(reportsSection(g).querySelector('.empty'))).toBe('none');
   });
+});
+
+it('acknowledging a report styles it without moving it in the Reports list or deck', async () => {
+  for (const hash of ['#deck', '#reports']) for (const view of ['cards', 'table']) {
+    const d = everyAttentionFleet(), g = await page(d, { hash, prefs: { view } });
+    const rows = () => hash === '#deck'
+      ? [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')]
+      : g.$$(view === 'cards' ? '#reports .card' : '#reports tr.rowhead');
+    const before = rows();
+    d.reports = d.reports.map((r) => r.key === HELM_KEY ? { ...r, acked: { at: ago(0), by: 'glass' } } : r);
+    g.serve(d); await g.poll();
+    expect(rows()).toEqual(before);
+    expect(rows()[1]!.className).toContain('acked');
+    expect(text(rows()[1])).toContain('Fleet notes');
+  }
 });
 
 describe('glass: a report page', () => {
@@ -225,19 +240,19 @@ describe('glass: a report page', () => {
 });
 
 describe('glass: the Reports tab', () => {
-  it('lists every report, unacked first then newest, in the table and cards; no author badge', async () => {
+  it('lists every report, newest first regardless of acknowledgment, in the table and cards; no author badge', async () => {
     const g = await page(everyAttentionFleet(), { hash: '#reports' });
     const rows = g.$$('#reports tr.rowhead');
     expect(g.$$('#reports th').map(text)).toEqual(['title', 'from', 'filed', 'acked']);
     expect(rows.map((r) => [...r.querySelectorAll('td')].map(text))).toEqual([
+      ['Old fleet notes', '', '60s', 'acked'],
       ['Fleet notes', '', '5m', ''],
       ['Tray findings', 'kind-crab', '20m', ''],
       ['Build timings', 'aaaaaaaa', '40m', ''],
-      ['Old fleet notes', '', '60s', 'acked'],
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
-    expect(cards.$$('#reports .card b').map(text)).toEqual(['Fleet notes', 'Tray findings', 'Build timings', 'Old fleet notes']);
-    expect(cards.$$('#reports .card .meta').map(text)).toEqual(['5m ago', 'kind-crab · 20m ago', 'aaaaaaaa · 40m ago', '60s ago · acked']);
+    expect(cards.$$('#reports .card b').map(text)).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
+    expect(cards.$$('#reports .card .meta').map(text)).toEqual(['60s ago · acked', '5m ago', 'kind-crab · 20m ago', 'aaaaaaaa · 40m ago']);
     expect(cards.$$('#reports .badge')).toHaveLength(0);
   });
 
@@ -446,7 +461,7 @@ describe('glass: the report page route', () => {
       req.end();
     });
 
-  it('serves the page and the row to its own host only, refuses a rebound name, and never acks', async () => {
+  it('serves only its own host, refuses a rebound name, and the loaded page acks through the guarded POST', async () => {
     ensureLayout();
     const src = path.join(home, 'src');
     fs.mkdirSync(src);
@@ -474,10 +489,24 @@ describe('glass: the report page route', () => {
     expect((await get(base, `/report/${encodeURIComponent('report:helm:fleet:ffffffff')}`)).status).toBe(404);
     expect((await get(base, `/report/${encodeURIComponent('report:helm:fleet:ffffffff')}/meta`)).status).toBe(404);
 
-    // Opening the page, its row, and its markdown acks nothing.
+    // Fetching assets alone does not ack. The loaded page posts its view with the own-host token.
     expect(listReports().find((r) => r.key === key)).toBeDefined();
     expect(JSON.parse((await get(base, `/report/${k}/meta`)).body).acked).toBeUndefined();
     expect(fs.existsSync(path.join(home, 'acks')) ? fs.readdirSync(path.join(home, 'acks')) : []).toEqual([]);
+    const metaResponse = await fetch(`${base}/report/${k}/meta`);
+    const g = await loadGlass(pageRes.body, emptyFleet(), {
+      now: NOW, path: `/report/${k}`,
+      files: { [`/report/${k}/meta`]: metaRes.body, [`/report/${k}/md`]: '# Findings\n\n> quoted\n' },
+      reportToken: metaResponse.headers.get('x-lobstah-token')!,
+      post: async (url, request) => {
+        const response = await fetch(base + url, { method: 'POST', headers: { ...request.headers, Origin: base }, body: request.body });
+        return { status: response.status, body: await response.json() };
+      },
+    });
+    open.push(g);
+    expect(g.posts()).toHaveLength(1);
+    expect(JSON.parse((await get(base, `/report/${k}/meta`)).body).acked).toMatchObject({ by: 'glass' });
+    expect(listReports().find((r) => r.key === key)).toBeDefined();
   });
 });
 

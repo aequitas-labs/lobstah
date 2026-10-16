@@ -4,6 +4,7 @@ import {
   LANDED_MAX,
   REPORTS_MAX,
   REVIEWS_MAX,
+  shownPrAttention,
   catchCount,
   goalLine,
   prBadgeClass,
@@ -34,6 +35,7 @@ import {
 } from './common.js';
 import { reportMeta } from './reports.js';
 import { reviewMeta, reviewState } from './reviews.js';
+import { PrAckAll } from './prs.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
 import type { DecisionDraft } from '../store.js';
@@ -136,7 +138,12 @@ function deckPrs(inp: DeckInputs, view: View) {
         ),
       )
     : html`<div class="empty">none</div>`;
-  return html`<section><h2><a href="#prs">PRs →</a></h2>${body}${more(inp.stacks.length - shown.length, 'prs')}</section>`;
+  const attention = shownPrAttention(
+    inp.prAttention,
+    inp.prs.filter((p) => shown.some((s) => s.id === p.stackId)),
+    shown,
+  );
+  return html`<section><h2><a href="#prs">PRs →</a></h2><${PrAckAll} items=${attention} />${body}${more(inp.stacks.length - shown.length, 'prs')}</section>`;
 }
 
 /**

@@ -236,7 +236,11 @@ man` prints the lobstah man's manual. `man wait` blocks until a dispatch needs
 attention, and unanswered questions re-fire until answered. `man helm`
 signs one session on as the orchestrator for its grounds, and `man report`
 prints the delta since the last acknowledged report. `lobstah glass` serves
-it all as a live localhost page — the spyglass. `man init`
+it all as a live localhost page — the spyglass. Opening a decision or report
+acknowledges it and stops the pet walking for that state; decisions stay open
+until answered. The PR section’s **Ack all** acknowledges its visible PR and
+stack attention. A changed state stands again. Reports stay newest first
+when acknowledged. `man init`
 installs a Claude Code Stop hook that parks the session on the fleet and
 continues the turn the moment something needs it.
 

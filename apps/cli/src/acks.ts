@@ -17,7 +17,8 @@ import { hostedItemExists, isHostedKey } from './hosted-view.js';
  * entry, head, failed check, or thread count re-stands the item and the
  * stale ack is pruned. A ready ack survives not-ready flaps on the same head,
  * without hiding other PR kinds. The write path is `lobstah attention ack|unack`
- * (plus pruning in `man tend` and `cull`); nothing else writes acks/.
+ * and the glass’s guarded view/ack requests, plus pruning in `man tend`
+ * and `cull`.
  */
 
 export interface Ack {

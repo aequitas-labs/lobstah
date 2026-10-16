@@ -149,11 +149,11 @@ export function App() {
     selectedDoc = snapshot?.documents.find((d) => d.kind === modal?.kind && d.id === modal.id),
     selectedWorker = modal?.kind === 'trap' ? snapshot?.workers.find((w) => w.id === modal.id) : undefined;
   const found = selectedJob ?? selectedDoc ?? selectedWorker;
-  // Opening a report is reading it: the wharf records that once, as the local glass does for its own.
-  // State only. A failed ack leaves the report unread; the next load of the page tries again.
+  // Opening a decision or report is reading it: the wharf records that once, as the local glass does for its own.
+  // State only. A failed ack leaves the document unread; the next load of the page tries again.
   const acking = useRef(new Set<string>());
   useEffect(() => {
-    if (selectedDoc?.kind !== 'report' || selectedDoc.ack || acking.current.has(selectedDoc.id)) return;
+    if (!selectedDoc || selectedDoc.ack || acking.current.has(selectedDoc.id)) return;
     acking.current.add(selectedDoc.id);
     json(`/api/glass/documents/${selectedDoc.id}/ack`, {}).then(() => refresh(), () => {});
   }, [selectedDoc?.id, selectedDoc?.kind, !!selectedDoc?.ack]);

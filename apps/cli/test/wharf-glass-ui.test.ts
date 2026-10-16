@@ -157,7 +157,7 @@ it('reads a view or one item from the hash and nothing else', () => {
   for (const hash of ['', '#', '#job/', '#job/a/b', '#job/a?b', '#job/' + 'a'.repeat(129), '#account/x', '#decision/<script>', '#Deck']) expect(parseRoute(hash), hash).toEqual({ tab: 'deck' });
   for (const hash of ['#deck', '#reports', '#decision/card', '#report/r1']) expect(routeHash(parseRoute(hash))).toBe(hash);
 });
-it('opening a report acks it once with the page’s cookie; a decision or a job is not acked by looking', async () => {
+it('opening a report acks it once with the page’s cookie; a decision is acked too, while a job is not', async () => {
   const g = await page(); await g.tab('reports'); await g.click('Wharf progress');
   const acks = () => g.writes.filter((w) => w.path.endsWith('/ack'));
   expect(acks()).toEqual([expect.objectContaining({ path: '/api/glass/documents/report/ack', body: {}, credentials: 'same-origin' })]);
@@ -165,7 +165,8 @@ it('opening a report acks it once with the page’s cookie; a decision or a job 
   // Still open across polls, closed and opened again: one ack.
   await g.poll(); await g.click('×'); await g.click('Wharf progress'); await g.poll(); expect(acks()).toHaveLength(1);
   await g.click('×'); await g.tab('deck'); await g.click('Choose the next catch'); await g.click('×'); await g.tab('jobs'); await g.click('Build the hosted spyglass');
-  expect(acks()).toHaveLength(1);
+  expect(acks()).toHaveLength(2);
+  expect(acks()[1]!.path).toBe('/api/glass/documents/card/ack');
 });
 it('shows what the wharf records as seen and answered: acked reports, decisions and jobs, by whom', async () => {
   const ack = { at: '2026-10-10T17:05:00Z', by: 'boat:chris-macbook' };

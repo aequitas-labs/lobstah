@@ -1,3 +1,6 @@
+import { useState } from 'preact/hooks';
+import { ackPrAttention } from '../actions.js';
+import type { DeckAttention } from '../../../src/glass-diff.js';
 import { Fragment } from 'preact';
 import type { GlassPr, GlassStack } from '@lobstah/core';
 import { prBadgeClass } from '../../../src/glass-diff.js';
@@ -77,7 +80,27 @@ function prCards(inp: PrsInputs, older: unknown) {
   return [body, older, otherWatches(inp)];
 }
 
+export function PrAckAll({ items }: { items: DeckAttention[] }) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const pending = items.filter((a) => !a.acked);
+  if (!pending.length) return null;
+  const ack = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await ackPrAttention(pending);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not acknowledge PRs.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<div class="tabhead"><button class="btn" disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : 'Ack all'}</button>${error && html`<span class="bad" role="alert">${error}</span>`}</div>`;
+}
+
 export function PRs({ inp, more }: { inp: PrsInputs; more?: OlderControl }) {
   const older = more && html`<${ShowOlder} kind="prs" more=${more} />`;
-  return inp.view === 'cards' ? prCards(inp, older) : prTable(inp, older);
+  return [html`<${PrAckAll} items=${inp.prAttention} />`, inp.view === 'cards' ? prCards(inp, older) : prTable(inp, older)];
 }

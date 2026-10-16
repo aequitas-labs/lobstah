@@ -5,13 +5,13 @@ import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
 
 /**
- * The Reports tab: every report, unacked first, then newest first. A card or
+ * The Reports tab: every report, newest first regardless of acknowledgment. A card or
  * row says who filed it (a trap's name, a headless dispatch's id, nothing for
  * the helm), then its age, then `acked`. Each opens the report's own page in
  * a new tab.
  */
 
-/** Open a report's own page in a new tab. Opening it does not ack it. */
+/** Open a report's own page in a new tab. Its page acknowledges it once the report text loads. */
 export const openReport = (r: GlassReport) => () => {
   window.open(reportPageUrl(r.key), '_blank', 'noopener');
 };

@@ -208,7 +208,7 @@ export function DecisionModal({
   const key = open?.key ?? null;
   useEffect(() => {
     if (key) void markViewed(key);
-  }, [key]);
+  }, [key, order.find((c) => c.key === key)?.at]);
   if (!open) return null;
   const trap = (e: KeyboardEvent) => {
     if (e.key !== 'Tab' || !box.current) return;

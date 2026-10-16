@@ -66,6 +66,19 @@ final class ReadAttentionTests: XCTestCase {
     XCTAssertEqual(read.items?.first?.kind, "question")
   }
 
+  func testGlassAndPetAcknowledgmentsBothStopWalking() {
+    for by in ["glass", "pet"] {
+      let payload = narrow.replacingOccurrences(of: "\"by\":\"pet\"", with: "\"by\":\"\(by)\"")
+      for fallback in [false, true] {
+        let read = readAttention { args in
+          if fallback && args == ["attention", "--json"] { return .exited(status: 2, stdout: Data()) }
+          return .exited(status: 0, stdout: Data(payload.utf8))
+        }
+        XCTAssertEqual(read.items?.map(\.id), ["a"], by)
+      }
+    }
+  }
+
   func testOlderCliFallsBackToManTend() {
     let read = readAttention { args in
       args == ["attention", "--json"] ? .exited(status: 2, stdout: Data()) : .exited(status: 0, stdout: Data(self.tend.utf8))

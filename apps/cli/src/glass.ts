@@ -64,6 +64,7 @@ import {
   prStackTrunk,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
+import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
@@ -127,6 +128,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['report-viewed', 1024],
   ['review-dismiss', 1024],
   ['review-redraft', 1024],
+  ['pr-ack', 256 * 1024],
 ]);
 
 const readJson = <T>(f: string): T | undefined => {
@@ -886,6 +888,28 @@ export function serveGlass(
               () => reply(500, { ok: false, reason: 'The review could not be changed.' }),
             );
             return;
+          }
+          case 'pr-ack': {
+            // Ack only the PR/stack states this page showed, never a newer state.
+            const items = (body.payload as { items?: unknown } | undefined)?.items;
+            if (!Array.isArray(items) || items.length > 1000 || items.some((i) =>
+              !i || typeof i.key !== 'string' || !/^(pr:|stack:)/.test(i.key) || i.key.length > 300 ||
+              typeof i.stateHash !== 'string' || i.stateHash.length > 100))
+              return reply(400, { ok: false, reason: 'PR or stack attention states are required.' });
+            try {
+              const standing = buildTendReport().attention;
+              const acked = [];
+              for (const item of items) {
+                const a = standing.find((a) => a.key === item.key && a.stateHash === item.stateHash && (a.kind.startsWith('pr:') || a.kind === 'stack-ready'));
+                if (!a) continue;
+                const ack = currentAck(a.key, a.stateHash) ?? { key: a.key, kind: a.kind, stateHash: a.stateHash, at: new Date().toISOString(), by: 'glass' };
+                writeAck(ack);
+                acked.push(ack);
+              }
+              return reply(200, { ok: true, acked });
+            } catch {
+              return reply(500, { ok: false, reason: 'The acknowledgments could not be stored.' });
+            }
           }
           case 'trap-request': {
             const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));

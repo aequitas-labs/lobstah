@@ -39,6 +39,12 @@ export function receive(snapshot: GlassSnapshot): void {
   const kept = Object.fromEntries(Object.entries(drafts).filter(([key]) => live.has(key)));
   setState({
     snapshot,
+    viewedHere: Object.fromEntries(
+      Object.entries(getState().viewedHere).filter(
+        ([key]) =>
+          snapshot.attention.find((a) => a.key === key)?.stateHash === getState().snapshot?.attention.find((a) => a.key === key)?.stateHash,
+      ),
+    ),
     stale: false,
     modal: modal && modalLives({ snapshot, older, detail }, modal) ? modal : null,
     ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
@@ -152,7 +158,6 @@ export async function markViewed(key: string): Promise<void> {
   const state = getState();
   if (state.viewedHere[key]) return;
   setState({ viewedHere: { ...state.viewedHere, [key]: true } });
-  if (currentCards().find((c) => c.key === key)?.viewedAt) return;
   const token = state.snapshot?.focusToken;
   if (!token) return;
   try {
@@ -478,4 +483,32 @@ export async function copyText(text: string): Promise<boolean> {
   } catch (e) {
     return false;
   }
+}
+
+/** Acknowledge the PR/stack states shown in a section, using the guarded request path. */
+export async function ackPrAttention(items: Array<{ key: string; stateHash: string }>): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) throw new Error('Reload the glass before acknowledging.');
+  const response = await fetch('/requests', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
+    body: JSON.stringify({ kind: 'pr-ack', payload: { items: items.map(({ key, stateHash }) => ({ key, stateHash })) } }),
+  });
+  const result = (await response.json()) as {
+    ok: boolean;
+    reason?: string;
+    acked?: Array<{ key: string; stateHash: string; at: string; by: string }>;
+  };
+  if (!response.ok || !result.ok) throw new Error(result.reason ?? 'Could not acknowledge PRs.');
+  const snapshot = getState().snapshot;
+  if (snapshot)
+    setState({
+      snapshot: {
+        ...snapshot,
+        attention: snapshot.attention.map((a) => {
+          const ack = result.acked?.find((i) => i.key === a.key && i.stateHash === a.stateHash);
+          return ack ? { ...a, acked: { at: ack.at, by: ack.by } } : a;
+        }),
+      },
+    });
 }

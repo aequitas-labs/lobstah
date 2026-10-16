@@ -16,9 +16,13 @@ import {
   reserveTrap,
   shellQuote,
   signOnTrap,
+  upsertPr,
+  syncStackReadiness,
 } from '@lobstah/core';
 import type { GlassSnapshot } from '@lobstah/core';
 import { REQUEST_KIND_MAX_BYTES, buildGlassSnapshot, requestBodyCap, serveGlass } from '../src/glass.js';
+import { buildTendReport } from '../src/tend.js';
+import { listAcks } from '../src/acks.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -243,4 +247,56 @@ describe('glass /requests', () => {
     // Never logged: no notice carries it.
     expect(listNotices(50).some((n) => n.text.includes(ticket))).toBe(false);
   });
+});
+
+/** A failing standalone PR alongside a two-member ready stack. */
+function prAttentionFixture() {
+  const pr = (n: number, headSha = `sha-${n}`) => ({
+    url: `https://github.com/acme/web/pull/${n}`, number: n, state: 'OPEN', draft: false,
+    reviewDecision: '', mergeStateStatus: 'CLEAN', headSha, headRefName: `b${n}`,
+    baseRefName: n === 103 ? 'b102' : 'main',
+    checks: n === 101 ? { total: 1, failed: 1, passed: 0, pending: 0 } : { total: 1, failed: 0, passed: 1, pending: 0 },
+    review: { unresolvedThreads: 0, changesRequested: false }, observedAt: new Date().toISOString(),
+  });
+  [101, 102, 103].forEach((n) => upsertPr(pr(n)));
+  syncStackReadiness();
+  return pr;
+}
+
+it('Ack all acknowledges every shown PR and stack, leaves other attention alone, and new states stand again', async () => {
+  const pr = prAttentionFixture();
+  const { meta } = askDecision({ title: 'Still needs an answer', askedBy: 'test', maxBytes: 1024 });
+  const states = () => buildTendReport().attention.filter((a) => a.key.startsWith('pr:') || a.key.startsWith('stack:'));
+  const items = states().map(({ key, stateHash }) => ({ key, stateHash }));
+  expect(states().map((a) => a.kind)).toEqual(expect.arrayContaining(['pr:checks', 'stack-ready']));
+  const body = { kind: 'pr-ack', payload: { items } };
+  expect((await post(body, { 'x-lobstah-token': '' })).status).toBe(403);
+  expect(listAcks()).toEqual([]);
+  expect((await post(body)).status).toBe(200);
+  expect(states().every((a) => a.acked?.by === 'glass')).toBe(true);
+  expect(new Set(listAcks().map((a) => a.key))).toEqual(new Set(items.map((a) => a.key)));
+  expect(buildTendReport().attention.find((a) => a.key === meta.key)?.acked).toBeUndefined();
+  expect(buildGlassSnapshot().prs).toHaveLength(3);
+  expect((await post({ kind: 'pr-ack', payload: { items: [{ key: meta.key, stateHash: 'anything' }] } })).status).toBe(400);
+  expect((await post({ kind: 'pr-ack', payload: { items: [null] } })).status).toBe(400);
+  expect((await post({ kind: 'pr-ack', payload: {} })).status).toBe(400);
+  // A new head re-stands just that PR and its stack; a stale page cannot ack the new state.
+  upsertPr(pr(101, 'next-101'));
+  upsertPr(pr(103, 'next-103'));
+  syncStackReadiness();
+  expect(states().every((a) => !a.acked)).toBe(true);
+  expect((await post(body)).status).toBe(200);
+  expect(states().every((a) => !a.acked)).toBe(true);
+});
+
+it('Ack all is scoped to the submitted visible PRs, including an already acknowledged state', async () => {
+  prAttentionFixture();
+  const items = buildTendReport().attention.filter((a) => a.key.startsWith('pr:')).map(({ key, stateHash }) => ({ key, stateHash }));
+  expect(items).toHaveLength(1);
+  const body = { kind: 'pr-ack', payload: { items } };
+  await post(body);
+  const first = listAcks();
+  await post(body);
+  expect(listAcks()).toEqual(first);
+  expect(buildTendReport().attention.find((a) => a.key.startsWith('stack:'))?.acked).toBeUndefined();
 });
