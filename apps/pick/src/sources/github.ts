@@ -1,7 +1,7 @@
 import type { Evidence, Verb } from '@lobstah/core';
 import { loadConfig, markRepliesRule, withBriefHooks } from '@lobstah/core';
 import { MARKER, lobstahWrote, marker } from '../types.js';
-import type { MergeSource, PrCandidate, Source, TrackedItem, WorkItem } from '../types.js';
+import type { MergeSource, PollContext, PrCandidate, PrRun, Source, TrackedItem, WorkItem } from '../types.js';
 import { prEvidenceIndex, prUrlKey } from '../pr-evidence.js';
 
 export interface GithubConfig {
@@ -89,7 +89,7 @@ export class GithubSource implements Source, MergeSource {
     return Number(key.split('#').pop());
   }
 
-  async poll(): Promise<WorkItem[]> {
+  async poll(ctx?: PollContext): Promise<WorkItem[]> {
     const items: WorkItem[] = [];
     const issues = await this.api<GhIssue[]>(
       'GET',
@@ -119,16 +119,17 @@ export class GithubSource implements Source, MergeSource {
       const m = /^lobstah\/([0-9a-f-]{36})$/.exec(pr.head.ref);
       const uuid = m?.[1] ?? evidence.get(prUrlKey(pr.html_url));
       if (!uuid) continue;
-      const feedback = await this.latestFeedback(pr.number);
-      if (!feedback) continue;
       const subject = `gh:${this.cfg.repo}#pr${pr.number}`;
+      const feedback = await this.latestFeedback(pr.number, ctx?.runs(subject, uuid) ?? []);
+      if (!feedback) continue;
       items.push({
-        key: `${subject}@${feedback}`,
+        key: `${subject}@${feedback.tag}`,
         subject,
         kind: 'review',
         repoKey: this.cfg.key,
         title: pr.title,
         followUp: uuid,
+        ...(feedback.heldOnly ? { heldOnly: true } : {}),
         brief: withBriefHooks(
           `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. ${markRepliesRule(uuid)} When the feedback is addressed, report status done.`,
           loadConfig().repos[this.cfg.key],
@@ -147,26 +148,33 @@ export class GithubSource implements Source, MergeSource {
    * still asks for changes), a COMMENTED review with a body, or any comment
    * — always by someone other than the configured identity, and never a
    * comment or review lobstah wrote (either marker). APPROVED reviews are
-   * the merge loop's signal, not feedback. Returns undefined when no human
+   * the merge loop's signal, not feedback. Returns undefined when no one
    * has spoken.
+   *
+   * The configured identity's own unmarked comments count too: lobstah's
+   * workers post as that account, so Chris's "also handle X" on a trap PR
+   * looks like theirs except for the marker. The active-round guard covers
+   * a worker that forgets it: an identity comment made while a lobstah run
+   * on the PR works is held (rounds on a subject serialize, so it waits) and
+   * counts once the run ends, unless that run was itself opened only by
+   * held comments, in which case it is dropped.
    */
-  private async latestFeedback(n: number): Promise<string | undefined> {
-    const events: Array<{ at: string; tag: string }> = [];
-    const human = (login: string): boolean => login !== this.cfg.identity;
+  private async latestFeedback(n: number, runs: readonly PrRun[]): Promise<{ tag: string; heldOnly: boolean } | undefined> {
+    const events: Array<{ at: string; tag: string; own: boolean }> = [];
+    const own = (login: string): boolean => login === this.cfg.identity;
     const reviews = await this.paged<GhReview>(`/repos/${this.cfg.repo}/pulls/${n}/reviews`);
     for (const r of reviews) {
-      if (!human(r.user.login) || lobstahWrote(r.body)) continue;
+      if (lobstahWrote(r.body)) continue;
       const actionable = r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && (r.body ?? '').trim() !== '');
-      if (actionable) events.push({ at: r.submitted_at, tag: `rv${r.id}` });
+      if (actionable) events.push({ at: r.submitted_at, tag: `rv${r.id}`, own: own(r.user.login) });
     }
     for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/pulls/${n}/comments`)) {
-      if (human(c.user.login) && !lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `rc${c.id}` });
+      if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `rc${c.id}`, own: own(c.user.login) });
     }
     for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/issues/${n}/comments`)) {
-      if (human(c.user.login) && !lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}` });
+      if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}`, own: own(c.user.login) });
     }
-    events.sort((a, b) => (a.at === b.at ? a.tag.localeCompare(b.tag) : a.at.localeCompare(b.at)));
-    return events.at(-1)?.tag;
+    return guardFeedback(events, runs);
   }
 
   private async paged<T>(url: string): Promise<T[]> {
@@ -315,4 +323,31 @@ export class GithubSource implements Source, MergeSource {
   repoKey(): string {
     return this.cfg.key;
   }
+}
+
+const ms = (iso: string): number => Date.parse(iso) || 0;
+
+/**
+ * The active-round guard over a PR's feedback events (see latestFeedback):
+ * the newest event that counts, and whether every event since the latest
+ * run started is a held identity comment.
+ */
+export function guardFeedback(
+  events: ReadonlyArray<{ at: string; tag: string; own: boolean }>,
+  runs: readonly PrRun[],
+): { tag: string; heldOnly: boolean } | undefined {
+  const runAt = (at: string): PrRun | undefined =>
+    runs.find((r) => ms(r.start) <= ms(at) && (r.end === undefined || ms(at) <= ms(r.end)));
+  const counted: Array<{ at: string; tag: string; held: boolean }> = [];
+  for (const e of events) {
+    const run = e.own ? runAt(e.at) : undefined;
+    if (run?.heldOnly) continue;
+    counted.push({ at: e.at, tag: e.tag, held: run !== undefined });
+  }
+  counted.sort((a, b) => (a.at === b.at ? a.tag.localeCompare(b.tag) : ms(a.at) - ms(b.at)));
+  const newest = counted.at(-1);
+  if (!newest) return undefined;
+  const since = Math.max(0, ...runs.map((r) => ms(r.start)));
+  const opening = counted.filter((e) => ms(e.at) > since);
+  return { tag: newest.tag, heldOnly: opening.length > 0 && opening.every((e) => e.held) };
 }

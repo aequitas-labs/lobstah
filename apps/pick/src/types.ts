@@ -18,6 +18,28 @@ export interface WorkItem {
   brief: string;
   /** For review items: the implementation dispatch to fork (from the branch name or reported evidence). */
   followUp?: string;
+  /**
+   * For review items: every event that opened this round is the configured
+   * identity's own comment, held while an earlier lobstah run on the PR
+   * worked. The round drops the identity's unmarked comments made during its
+   * own run, so a worker that forgets the marker costs one round, not a loop.
+   */
+  heldOnly?: boolean;
+}
+
+/** A lobstah run on a PR (the implementation dispatch or a feedback round) and when it worked. */
+export interface PrRun {
+  start: string;
+  /** When it finished; absent while it still runs. */
+  end?: string;
+  /** The round was opened only by held identity comments. */
+  heldOnly?: boolean;
+}
+
+/** What the dispatch loop tells a poll about the runs already on a PR. */
+export interface PollContext {
+  /** The runs on a review subject: its implementation dispatch, then its rounds. */
+  runs(subject: string, followUp: string): PrRun[];
 }
 
 export interface TrackedItem {
@@ -33,7 +55,7 @@ export interface Source {
    * ledger, so a loop that walks it must skip the keys another source wrote.
    */
   owns(key: string): boolean;
-  poll(): Promise<WorkItem[]>;
+  poll(ctx?: PollContext): Promise<WorkItem[]>;
   /** Tracker-side state transition — the cross-machine mutex. */
   claim(item: WorkItem): Promise<boolean>;
   /** Report embeds the dispatch UUID in the tracker trail, making the mapping reconstructible. */

@@ -7,6 +7,8 @@ export interface MapEntry {
   uuid: string;
   kind: 'issue' | 'review';
   createdAt: string;
+  /** A review round opened only by held identity comments (the active-round guard). */
+  heldOnly?: boolean;
   lastReported?: Verb;
   lastInboundAt?: string;
   recovered?: boolean;

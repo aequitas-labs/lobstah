@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, laneDirs } from '@lobstah/core';
-import { GithubSource } from '../src/sources/github.js';
+import { GithubSource, guardFeedback } from '../src/sources/github.js';
 import { lobstahWrote, markedNote, marker } from '../src/types.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -123,7 +123,7 @@ describe('post-PR feedback pickup', () => {
     expect(items.map((i) => i.key)).toEqual(['gh:o/r#pr6@rv91']);
   });
 
-  it('conversation and review-thread comments are feedback; identity and marker comments are not', async () => {
+  it('conversation and review-thread comments are feedback; marker comments are not', async () => {
     stubApi([
       {
         number: 7,
@@ -162,6 +162,37 @@ describe('post-PR feedback pickup', () => {
     stubApi([{ number: 5, branch: `lobstah/${UUID}`, issueComments: [{ id: 53, login: 'chris', body: 'fix it', at: '2026-09-21T10:00:00Z' }] }]);
     const [item] = await source().poll();
     expect(item!.brief).toContain(`End every comment or reply you post on the PR with \`<!-- lobstah:${UUID} -->\``);
+  });
+
+  it("the identity's own unmarked comment on its PR is feedback", async () => {
+    stubApi([
+      {
+        number: 13,
+        branch: `lobstah/${UUID}`,
+        issueComments: [
+          { id: 54, login: IDENTITY, body: 'also handle the empty case', at: '2026-09-21T10:00:00Z' },
+          { id: 55, login: IDENTITY, body: `${marker(UUID)} **done**`, at: '2026-09-21T11:00:00Z' },
+        ],
+      },
+    ]);
+    expect(await source().poll()).toMatchObject([{ key: 'gh:o/r#pr13@ic54', followUp: UUID }]);
+  });
+
+  it('the guard holds an identity comment made during a run, and a held-only round drops its own', async () => {
+    const pr: PrFixture = {
+      number: 14,
+      branch: `lobstah/${UUID}`,
+      reviewComments: [{ id: 44, login: IDENTITY, body: 'fixed, see abc123', at: '2026-09-21T10:30:00Z' }],
+    };
+    stubApi([pr]);
+    const runs = [{ start: '2026-09-21T10:00:00Z', end: '2026-09-21T11:00:00Z' }];
+    const [held] = await source().poll({ runs: () => runs });
+    expect(held).toMatchObject({ key: 'gh:o/r#pr14@rc44', heldOnly: true });
+
+    runs.push({ start: '2026-09-21T11:05:00Z', end: '2026-09-21T11:30:00Z', heldOnly: true } as (typeof runs)[number]);
+    pr.issueComments = [{ id: 56, login: IDENTITY, body: 'nothing to change', at: '2026-09-21T11:10:00Z' }];
+    stubApi([pr]);
+    expect((await source().poll({ runs: () => runs }))[0]).toMatchObject({ key: 'gh:o/r#pr14@rc44' });
   });
 
   it('a newer human event re-keys the round', async () => {
@@ -211,6 +242,35 @@ describe('post-PR feedback pickup', () => {
       },
     ]);
     expect(await source().poll()).toEqual([]);
+  });
+});
+
+describe('the active-round guard', () => {
+  const ev = (tag: string, at: string, own = true) => ({ tag, at: `2026-10-15T${at}:00Z`, own });
+  const run = (start: string, end?: string, heldOnly?: boolean) => ({
+    start: `2026-10-15T${start}:00Z`,
+    ...(end ? { end: `2026-10-15T${end}:00Z` } : {}),
+    ...(heldOnly ? { heldOnly } : {}),
+  });
+
+  it('an identity comment outside every run counts at once', () => {
+    expect(guardFeedback([ev('ic1', '09:00')], [run('08:00', '08:30')])).toEqual({ tag: 'ic1', heldOnly: false });
+  });
+
+  it('an identity comment inside a run is held: it opens a held-only round', () => {
+    expect(guardFeedback([ev('ic1', '08:10')], [run('08:00')])).toEqual({ tag: 'ic1', heldOnly: true });
+    expect(guardFeedback([ev('ic1', '08:10')], [run('08:00', '08:30')])).toEqual({ tag: 'ic1', heldOnly: true });
+  });
+
+  it("a held-only round drops the identity's comments made during it, never anyone else's", () => {
+    const runs = [run('08:00', '08:30'), run('08:40', '09:00', true)];
+    expect(guardFeedback([ev('ic1', '08:10'), ev('ic2', '08:50')], runs)).toEqual({ tag: 'ic1', heldOnly: false }); // ic1 already opened the held-only round
+    expect(guardFeedback([ev('ic1', '08:10'), ev('ic3', '08:55', false)], runs)).toEqual({ tag: 'ic3', heldOnly: false });
+  });
+
+  it('a round is held-only only when every event since the latest run started is held', () => {
+    expect(guardFeedback([ev('ic1', '08:10'), ev('rv2', '08:20', false)], [run('08:00')])).toEqual({ tag: 'rv2', heldOnly: false });
+    expect(guardFeedback([], [run('08:00')])).toBeUndefined();
   });
 });
 

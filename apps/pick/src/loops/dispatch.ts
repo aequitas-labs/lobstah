@@ -1,6 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { enqueue, lastEventAt, loadConfig, readStatusLog, reconcile } from '@lobstah/core';
-import type { Source, WorkItem } from '../types.js';
+import {
+  enqueue,
+  lastEventAt,
+  loadConfig,
+  queuedDescriptor,
+  readEvidence,
+  readSessionClaim,
+  readStatusLog,
+  readTrap,
+  reconcile,
+  storedDescriptor,
+  trapLastSeen,
+} from '@lobstah/core';
+import type { Descriptor } from '@lobstah/core';
+import type { PollContext, PrRun, Source, WorkItem } from '../types.js';
 import type { MapEntry, PickupState } from '../state.js';
 import { dispatchLane } from './report.js';
 import { pickupPool } from '../config.js';
@@ -10,6 +23,55 @@ function terminal(uuid: string): boolean {
   if (!lane) return true; // culled — nothing to collide with
   const verb = reconcile({ log: readStatusLog(uuid, lane), lastEventAt: lastEventAt(uuid, lane) });
   return verb === 'done' || verb === 'failed';
+}
+
+/** When a dispatch worked: from `start` until it finished, or open while it runs. A culled one spans no time. */
+function runOf(uuid: string, start: string, heldOnly?: boolean): PrRun {
+  const lane = dispatchLane(uuid);
+  const end = !lane ? start : terminal(uuid) ? (readStatusLog(uuid, lane).at(-1)?.at ?? start) : undefined;
+  return { start, ...(end !== undefined ? { end } : {}), ...(heldOnly ? { heldOnly } : {}) };
+}
+
+/** The runs on a review subject, for the active-round guard. */
+function pollContext(state: PickupState): PollContext {
+  return {
+    runs(subject, followUp) {
+      const runs: PrRun[] = [];
+      const lane = dispatchLane(followUp);
+      // Descriptors from before `queuedAt` start at their first status entry.
+      const start = lane ? (storedDescriptor(followUp, lane)?.queuedAt ?? readStatusLog(followUp, lane)[0]?.at) : undefined;
+      if (start) runs.push(runOf(followUp, start));
+      for (const [key, e] of state.entries()) if (key.startsWith(`${subject}@`)) runs.push(runOf(e.uuid, e.createdAt, e.heldOnly));
+      return runs;
+    },
+  };
+}
+
+/** The trap (`wt:<id>`) that worked a dispatch, when it is still live: its claim, else its delivery receipt. */
+function liveTrapOf(uuid: string | undefined, ttlSecs: number, now: number): string | undefined {
+  const lane = uuid ? dispatchLane(uuid) : undefined;
+  if (!uuid || !lane) return undefined;
+  const claimed = readSessionClaim(uuid, lane)?.by;
+  const delivered = readEvidence(uuid, lane).deliveredTo;
+  const address = claimed?.startsWith('wt:') ? claimed : delivered?.startsWith('wt:') ? delivered : undefined;
+  const trap = address ? readTrap(address.slice('wt:'.length)) : undefined;
+  return trap && now - trapLastSeen(trap) <= ttlSecs * 1000 ? address : undefined;
+}
+
+/**
+ * A round addressed to its PR's trap waits `[watch].repairTrapWaitSecs` for
+ * it, like a repair chore. Past that, it goes back to the general queue: any
+ * trap of the repo, or the daemon.
+ */
+function releaseExpiredRounds(state: PickupState, now: number, log: (m: string) => void): void {
+  for (const [key, e] of state.entries()) {
+    if (e.kind !== 'review') continue;
+    const queued: Descriptor | undefined = queuedDescriptor(e.uuid, 'work');
+    const until = queued?.systemRepair?.trapWaitUntil;
+    if (!queued?.for || !until || now < Date.parse(until)) continue;
+    enqueue({ ...queued, for: undefined, systemRepair: {} }, 'work');
+    log(`${key}: ${queued.for} did not take the round in time; any worker may now`);
+  }
 }
 
 /**
@@ -49,8 +111,11 @@ export async function dispatchLoop(
   /** `[pickup].pools`: an issue dispatch runs in the first one serving its repo. */
   pools: string[] = [],
 ): Promise<void> {
-  const items: WorkItem[] = await source.poll();
-  const maxAttempts = 1 + loadConfig().limits.maxRestartAttempts;
+  const cfg = loadConfig();
+  const now = Date.now();
+  releaseExpiredRounds(state, now, log);
+  const items: WorkItem[] = await source.poll(pollContext(state));
+  const maxAttempts = 1 + cfg.limits.maxRestartAttempts;
   for (const item of items) {
     const previous = state.get(item.key);
     if (previous) {
@@ -71,6 +136,9 @@ export async function dispatchLoop(
     }
     const id = randomUUID();
     const pool = pickupPool(pools, item.repoKey);
+    // A review round goes to the trap that owns the PR while it is live.
+    const waitSecs = Math.max(0, Number.isFinite(cfg.watch.repairTrapWaitSecs) ? cfg.watch.repairTrapWaitSecs : 600);
+    const trap = item.kind === 'review' && waitSecs > 0 ? liveTrapOf(plan.followUp ?? item.followUp, cfg.soak.ttlSecs, now) : undefined;
     enqueue(
       {
         id,
@@ -80,6 +148,7 @@ export async function dispatchLoop(
         ...(plan.followUp ? { followUp: plan.followUp } : {}),
         // An issue starts fresh in a warm pool worktree when a pool serves its repo.
         ...(item.kind === 'issue' && pool ? { pool } : {}),
+        ...(trap ? { for: trap, systemRepair: { trapWaitUntil: new Date(now + waitSecs * 1000).toISOString() } } : {}),
       },
       'work',
     );
@@ -88,7 +157,8 @@ export async function dispatchLoop(
       kind: item.kind,
       createdAt: new Date().toISOString(),
       ...(item.kind === 'issue' ? { attempts: previous ? (previous.attempts ?? 1) + 1 : 1 } : {}),
+      ...(item.heldOnly ? { heldOnly: true } : {}),
     });
-    log(`${item.key}: dispatched as ${id}`);
+    log(`${item.key}: dispatched as ${id}${trap ? ` for ${trap}` : ''}`);
   }
 }
