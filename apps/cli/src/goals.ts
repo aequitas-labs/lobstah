@@ -17,7 +17,7 @@ export function dailyGoalsContext(grounds: string, cfg: Config, now = new Date()
   return `First message of the day (${date}, day starts at 04:00 local). After handling this message, put one card up with yesterday's recap and a draft of today's goals: ` +
     `read \`lobstah goals recap-data ${yesterday} --grounds ${grounds}\`, match the facts to yesterday's goals (done, moved, stuck, plus also done), ` +
     `save with \`lobstah goals recap ${yesterday} --file <md> --grounds ${grounds}\`, then use \`lobstah man ask --title "${goalsCardTitle(date)}" --detail <md> --grounds ${grounds}\`. ` +
-    `Propose a draft from open cards, PRs and to-dos. After the answer, save it with \`lobstah goals set "<line>" [...] --grounds ${grounds}\`.`;
+    `Propose a draft from open cards, PRs and todos. After the answer, save it with \`lobstah goals set "<line>" [...] --grounds ${grounds}\`.`;
 }
 
 /** Facts only. The helm, not a heuristic, matches work to the day's goals. */
@@ -49,7 +49,7 @@ export function goalsRecapData(grounds: string, date: string, cfg: Config) {
     const answer = readDecisionAnswer(d.key);
     return answer && inDay(answer.answeredAt) ? [{ key: d.key, title: d.title, answeredAt: answer.answeredAt, option: answer.option, text: answer.text }] : [];
   });
-  // Optional #232 store: no import, command or dependency on the to-do PR.
+  // Optional #232 store: no import, command or dependency on the todo PR.
   let todos: Array<{ id: number; text: string; state: string; updatedAt: string }> = [];
   try { todos = JSON.parse(fs.readFileSync(path.join(lobstahHome(), 'todos', `${key}.json`), 'utf8')).items ?? []; }
   catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }

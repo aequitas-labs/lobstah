@@ -202,6 +202,62 @@ h2 {
   margin: 0;
   padding-left: 1.6em;
 }
+.goal-check,
+.todo-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  cursor: default;
+}
+/* Todos are one compact list row each, in table and card views alike. */
+.todo-check {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
+}
+/* Read-only boxes drawn by hand: a done goal or Todo shows a green check,
+   not the browser's greyed-out disabled checkbox. */
+.goal-check input,
+.todo-check input {
+  flex: 0 0 auto;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.1em;
+  height: 1.1em;
+  margin: 0.2em 0;
+  border: 1.5px solid var(--dim);
+  border-radius: 3px;
+  background: transparent center / 85% no-repeat;
+  opacity: 1;
+  cursor: default;
+}
+.goal-check input:checked,
+.todo-check input:checked {
+  border-color: var(--ok);
+  background-color: var(--ok);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%230e1116' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.goals-callout li.done s,
+.todo-check.done s {
+  color: var(--dim);
+}
+.goal-check > span,
+.todo-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.todo-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.todo-content {
+  min-width: 0;
+  flex: 1;
+}
+.todo-text {
+  display: block;
+}
 .deckgrid {
   display: flex;
   flex-direction: column;
