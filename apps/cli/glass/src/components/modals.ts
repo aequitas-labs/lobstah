@@ -13,6 +13,7 @@ import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } 
 import { closeModal, setLobs, setView, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
+import { LinkedText } from './links.js';
 import {
   Age,
   WorkerDetails,
@@ -104,16 +105,16 @@ function prModal(d: GlassSnapshot, key: string) {
   const watch = w
     ? [
         html`<div>${w.key} · owner ${w.owner || '?'} · ${w.lastCheckedAt ? ['checked ', Age(w.lastCheckedAt), ' ago'] : 'never checked'}</div>`,
-        w.lastError && html`<div class="bad">${w.lastError}</div>`,
+        w.lastError && html`<div class="bad">${LinkedText(w.lastError)}</div>`,
         html`<div class="dim" style="font-size:11px;margin-top:4px">cursor</div>`,
         cmdRow(w.cursor),
       ]
     : html`<div class="dim">no watch — <code>lobstah watch add ${p.url}</code> registers one</div>`;
   return [
     close,
-    html`<h3>${prLink(p)} ${p.title || ''} <span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>${p.draft && p.badge.text !== 'draft' && [' ', html`<span class="badge pr-draft">draft</span>`]}</h3>`,
+    html`<h3>${prLink(p)} ${LinkedText(p.title)} <span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>${p.draft && p.badge.text !== 'draft' && [' ', html`<span class="badge pr-draft">draft</span>`]}</h3>`,
     html`<div class="sub">${p.repo} · ${p.state} · observed ${Age(p.observedAt)} ago${p.gate && ' · gate ' + p.gate}</div>`,
-    html`<div class="sec">checks</div><div>${prChecks(p)}</div><div class="sec">review</div><div>${review || html`<span class="dim">no review yet</span>`}</div><div class="sec">merge</div><div>${prMerge(p)}</div>${p.repairWait && html`<div class="sec">repair waits</div><div>${p.repairWait.heldBy}: ${p.repairWait.reason}${p.repairWait.until ? ' · until ' + p.repairWait.until : ''}</div>`}<div class="sec">refs</div><div>${p.headRefName || '?'} → ${p.baseRefName || '?'}</div><div class="sec">stack</div><div>${s ? stackLine(p, s) : html`<span class="dim">not stacked</span>`}</div><div class="sec">dispatch chain</div><div>${chain}</div><div class="sec">watch</div>`,
+    html`<div class="sec">checks</div><div>${prChecks(p)}</div><div class="sec">review</div><div>${review || html`<span class="dim">no review yet</span>`}</div><div class="sec">merge</div><div>${prMerge(p)}</div>${p.repairWait && html`<div class="sec">repair waits</div><div>${p.repairWait.heldBy}: ${LinkedText(p.repairWait.reason)}${p.repairWait.until ? ' · until ' + p.repairWait.until : ''}</div>`}<div class="sec">refs</div><div>${p.headRefName || '?'} → ${p.baseRefName || '?'}</div><div class="sec">stack</div><div>${s ? stackLine(p, s) : html`<span class="dim">not stacked</span>`}</div><div class="sec">dispatch chain</div><div>${chain}</div><div class="sec">watch</div>`,
     watch,
   ];
 }
@@ -132,7 +133,7 @@ function helmModal(h: GlassHelm) {
 /** A dispatch's report, in its modal: the title and byline, and a link to the report's own page. */
 function reportLink(r: GlassReport) {
   return [
-    html`<div class="sec">report · ${r.title}</div>`,
+    html`<div class="sec">report · ${LinkedText(r.title)}</div>`,
     html`<div class="sub">${reportByline(r)} · <a href=${reportPageUrl(r.key)} target="_blank" rel="noopener">open the report ↗</a></div>`,
   ];
 }
@@ -182,7 +183,7 @@ function trapModal(t: GlassTrap) {
             ' · reserved ',
             Age(t.starting.reservedAt),
             ' ago · start failed: ',
-            t.starting.reason ?? '',
+            LinkedText(t.starting.reason),
             '. Its addressed work stays queued; a session can still redeem the ticket, or `lobstah stow --wt ',
             t.name ?? t.trapId,
             '` withdraws it.',
@@ -209,12 +210,12 @@ function trapModal(t: GlassTrap) {
           ]
         : 'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.';
   const lifecycle = t.notices.length
-    ? t.notices.map((n) => html`<div key=${n.seq} class="loglines">${Age(n.at)} ago · <b>${n.kind}</b> — ${n.text}</div>`)
+    ? t.notices.map((n) => html`<div key=${n.seq} class="loglines">${Age(n.at)} ago · <b>${n.kind}</b> — ${LinkedText(n.text)}</div>`)
     : html`<div class="empty">none recorded</div>`;
   const messages = t.messages.length
     ? t.messages.map(
         (m) =>
-          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${m.text}${m.attachments?.length ? attachmentRows(m.attachments, (name) => trapFileUrl(t.trapId, name)) : ''}</div>`,
+          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${LinkedText(m.text)}${m.attachments?.length ? attachmentRows(m.attachments, (name) => trapFileUrl(t.trapId, name)) : ''}</div>`,
       )
     : html`<div class="empty">none</div>`;
   // Each catch's last note; its modal has the whole log.

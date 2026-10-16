@@ -20,6 +20,7 @@ import { html } from '../html.js';
 import type { DecisionDraft } from '../store.js';
 import { Age, ImageThumb, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
+import { LinkedText } from './links.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -62,7 +63,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
     options.length > 0 &&
       html`<div class="doptions">${options.map((o, i) => {
         const k = hotkey(i);
-        return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => toggleOption(key, o)}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dlabel">${o}</span></button>`;
+        return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => toggleOption(key, o)}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dlabel">${LinkedText(o)}</span></button>`;
       })}</div>`,
     html`<div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
       class="danswer"
@@ -99,7 +100,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
 }
 
 /** A decision's title: the helm's, or the worker's note for a raw question. */
-const titleOf = (c: DecisionCard) => (c.kind === 'decision' ? c.title : NamedText(c.note));
+const titleOf = (c: DecisionCard) => (c.kind === 'decision' ? LinkedText(c.title) : NamedText(c.note));
 
 /** Unread, read, or answered (from this page, until the snapshot drops it). */
 function stateOf(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean): 'unread' | 'read' | 'answered' {
