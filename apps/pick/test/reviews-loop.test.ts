@@ -19,7 +19,8 @@ afterEach(() => {
 });
 
 const ME = 'chris';
-const CONFIG = ['[reviews]', 'enabled = true', '[repos.web]', 'path = "/w"', 'origin = "git@github.com:acme/web.git"'];
+// work = "off": these tests are about the search; drafting has its own (reviews-draft.test.ts).
+const CONFIG = ['[reviews]', 'enabled = true', 'work = "off"', '[repos.web]', 'path = "/w"', 'origin = "git@github.com:acme/web.git"'];
 
 interface Pr {
   number: number;
@@ -114,13 +115,13 @@ describe('the reviews loop', () => {
   });
 
   it('keeps to configured repos unless repos = "any"; skip rules file with a reason', async () => {
-    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'skipLabels = ["deps"]', ...CONFIG.slice(2)].join('\n'));
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'skipLabels = ["deps"]', ...CONFIG.slice(3)].join('\n'));
     const prs = [{ number: 5, repo: 'other/lib' }, { number: 6, labels: ['deps'] }];
     await reviewsLoop(ME, tok, () => {}, { run: gh(prs, []) });
     expect(listReviews().map((r) => r.key)).toEqual(['review:acme/web#6']);
     expect(latestRound(readReview('review:acme/web#6')!)!.reason).toBe('skipped: label deps is in skipLabels');
 
-    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'repos = "any"', ...CONFIG.slice(2)].join('\n'));
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'repos = "any"', ...CONFIG.slice(3)].join('\n'));
     await reviewsLoop(ME, tok, () => {}, { run: gh(prs, []) });
     expect(readReview('review:other/lib#5')!.pr.repoKey).toBeUndefined();
   });

@@ -75,7 +75,12 @@ export const COMMANDS: Record<string, CommandSpec> = {
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { flags: {}, maxPositionals: 0 },
   reports: { flags: { '--json': {} } },
-  reviews: { flags: { '--json': {}, '--all': {} }, maxPositionals: 0 },
+  reviews: {
+    subverbs: ['ls', 'redraft'],
+    flags: { '--json': {}, '--all': {} },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''] },
+    positionals: '[ls | redraft <key>]',
+  },
   todo: {
     subverbs: ['add', 'done', 'drop', 'ls'],
     flags: { '--all': {}, '--json': {}, '--session': { value: '<id>' } },
@@ -323,7 +328,8 @@ acked. \`lobstah attention ack <key>\` acks one.`,
   reviews: `PRs on which someone asked for your review ([reviews], found by lobstah pick):
 key, PR, title, author, who asked, the newest round's state, and why it is there.
 Bare lists the open ones (requested, drafting, drafted, stale, failed); --all
-adds posted, dismissed and withdrawn.`,
+adds posted, dismissed and withdrawn. redraft <key> starts a new draft of a stale
+or failed round at the PR's current head.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

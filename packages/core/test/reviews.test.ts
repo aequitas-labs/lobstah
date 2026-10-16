@@ -11,7 +11,9 @@ import {
   observeReviewRequest,
   parseReviews,
   readReview,
+  redraftReview,
   reviewAttention,
+  reviewBrief,
   reviewSettings,
   withdrawUnseenReviews,
   writeReview,
@@ -150,5 +152,37 @@ describe('review attention', () => {
     expect(a).toMatchObject({ kind: 'review', key: 'review:acme/web#7', verb: 'requested', ageSecs: 3660, prUrl: 'https://github.com/acme/web/pull/7', repo: 'web' });
     observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0);
     expect(reviewAttention(T0)[0]!.stateHash).not.toBe(a!.stateHash);
+  });
+});
+
+describe('drafts', () => {
+  it('the brief drafts into the round directory and forbids every write to the PR', () => {
+    observeReviewRequest(seen(), T0);
+    const item = readReview('review:acme/web#7')!;
+    const brief = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x/rounds/RRE_1', checkout: '/x/rounds/RRE_1/checkout' });
+    expect(brief).toContain('dana asked chris for this review. You write the draft; you do not post it.');
+    expect(brief).toContain('gh pr diff 7 --repo acme/web');
+    expect(brief).toContain('git worktree add --detach /x/rounds/RRE_1/checkout FETCH_HEAD');
+    expect(brief).toContain('Use no other path; lobstah removes it when the job ends.');
+    expect(brief).not.toContain('<tmpdir>');
+    expect(brief).toContain('Write two files in /x/rounds/RRE_1');
+    expect(brief).toContain('Do not post, approve, request changes, comment on, push to, or edit the PR.');
+    expect(brief).toContain('lobstah report d1 done');
+    expect(brief).toContain("Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md");
+    expect(brief).not.toContain('Review rules from');
+    const ruled = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x', checkout: '/x/checkout', rules: 'Flag missing tests.' });
+    expect(ruled.endsWith('Review rules from chris:\n\nFlag missing tests.')).toBe(true);
+  });
+
+  it('a stale or failed round re-drafts at the current head; others refuse', () => {
+    observeReviewRequest(seen(), T0);
+    expect(redraftReview('review:acme/web#7')).toContain('only a stale or failed round re-drafts');
+    const item = readReview('review:acme/web#7')!;
+    Object.assign(item.rounds[0]!, { state: 'stale', dispatch: 'd1', dispatchedAt: 'x', draftedAt: 'y', reason: 'moved' });
+    item.pr.headSha = 'bbbbbbb2';
+    writeReview(item);
+    redraftReview('review:acme/web#7', T0);
+    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested' });
+    expect(redraftReview('review:acme/web#9')).toBe('no review item review:acme/web#9');
   });
 });

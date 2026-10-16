@@ -165,6 +165,7 @@ import {
   toonHelp,
   toonKV,
   toonTable,
+  redraftReview,
   VERBS,
   parsePrRef,
   prBadge,
@@ -306,6 +307,7 @@ work (humans and agents):
                                   title, author, source, acked
   reviews [--all] [--json]        PRs that ask for your review, and each
                                   one's newest round
+  reviews redraft <key>           draft a stale or failed review again
   prs [sync]                      list known PRs, or refresh due PR watches
   cull [--older-than <days>] [--apply]
                                   sweep aged catch and lost gear — old done/
@@ -1805,6 +1807,14 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'reviews': {
+      if (pos[0] === 'redraft') {
+        const key = pos[1];
+        if (!key) throw new UsageError(`reviews redraft requires a review key\n\n${usageFor('reviews')!}`);
+        const out = redraftReview(key);
+        if (typeof out === 'string') throw new Error(out);
+        console.log(toonKV({ key, state: 'requested', next: 'the next lobstah pick cycle starts a draft job' }));
+        break;
+      }
       const rows = reviewRows(has('--all'));
       console.log(has('--json') ? JSON.stringify({ reviews: rows }) : toonTable('reviews', rows, ['key', 'title', 'author', 'requestedBy', 'state', 'requestedAt', 'reason']));
       break;

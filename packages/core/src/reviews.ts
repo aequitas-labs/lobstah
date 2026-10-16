@@ -134,8 +134,9 @@ export interface ReviewRound {
   /** The head the round reviews. */
   headSha: string;
   state: ReviewRoundState;
-  /** The review job's dispatch id. */
+  /** The review job's dispatch id, and when it started (the daily cap counts these). */
   dispatch?: string;
+  dispatchedAt?: string;
   draftedAt?: string;
   postedAt?: string;
   postedReviewId?: string;
@@ -267,8 +268,9 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     if (changed) writeReview({ ...item, updatedAt: at });
     return { item: changed ? { ...item, updatedAt: at } : prior!, opened: false };
   }
+  // A drafting round is superseded too: pick cancels its job, then removes its checkout.
   for (const r of item.rounds) {
-    if (OPEN_STATES.includes(r.state) && r.state !== 'drafting') {
+    if (OPEN_STATES.includes(r.state)) {
       r.state = 'withdrawn';
       r.reason = 'superseded by a new request';
     }
@@ -302,6 +304,101 @@ export function withdrawUnseenReviews(seen: ReadonlySet<string>, inScope: (item:
     out.push(item.key);
   }
   return out;
+}
+
+// ── Drafts ─────────────────────────────────────────────────────────────────
+
+/** One inline comment: a line of the PR head's version of a file. */
+export interface ReviewComment {
+  path: string;
+  line: number;
+  side?: 'LEFT' | 'RIGHT';
+  body: string;
+}
+
+/** Where a round's draft lives: `review.md` (the summary body) and `comments.json` (inline comments). */
+export function reviewRoundDir(key: string, roundId: string): string | undefined {
+  const dir = reviewDir(key);
+  return dir && /^[A-Za-z0-9_-]+$/.test(roundId) ? path.join(dir, 'rounds', roundId) : undefined;
+}
+
+function parseComments(raw: unknown): ReviewComment[] | string {
+  if (!Array.isArray(raw)) return 'comments.json is not a JSON array';
+  const out: ReviewComment[] = [];
+  for (const [i, c] of raw.entries()) {
+    const x = c as Record<string, unknown>;
+    if (typeof x?.path !== 'string' || !x.path || !Number.isSafeInteger(x.line) || (x.line as number) < 1 || typeof x.body !== 'string' || !x.body.trim()) {
+      return `comments.json entry ${i} needs path, a positive line, and a body`;
+    }
+    if (x.side !== undefined && x.side !== 'LEFT' && x.side !== 'RIGHT') return `comments.json entry ${i}: side must be LEFT or RIGHT`;
+    out.push({ path: x.path, line: x.line as number, ...(x.side ? { side: x.side as 'LEFT' | 'RIGHT' } : {}), body: x.body });
+  }
+  return out;
+}
+
+/**
+ * Where a round's job makes its throwaway checkout of the PR head: a fixed
+ * path in the round's directory, so pick can remove it when the job ends.
+ */
+export function reviewCheckoutDir(key: string, roundId: string): string | undefined {
+  const dir = reviewRoundDir(key, roundId);
+  return dir && path.join(dir, 'checkout');
+}
+
+/** A round's draft as its job wrote it, or why it cannot be read. A missing comments.json is no inline comments. */
+export function readRoundDraft(key: string, roundId: string): { body: string; comments: ReviewComment[] } | { error: string } {
+  const dir = reviewRoundDir(key, roundId);
+  if (!dir) return { error: 'malformed review key or round id' };
+  let body: string;
+  try {
+    body = fs.readFileSync(path.join(dir, 'review.md'), 'utf8');
+  } catch {
+    return { error: `no review.md in ${dir}` };
+  }
+  if (!body.trim()) return { error: 'review.md is empty' };
+  let comments: ReviewComment[] | string = [];
+  const file = path.join(dir, 'comments.json');
+  if (fs.existsSync(file)) {
+    try {
+      comments = parseComments(JSON.parse(fs.readFileSync(file, 'utf8')));
+    } catch {
+      comments = 'comments.json is not valid JSON';
+    }
+  }
+  return typeof comments === 'string' ? { error: comments } : { body, comments };
+}
+
+/** The `prReview` brief: draft, never post. */
+export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identity: string; id: string; outDir: string; checkout: string; rules?: string }): string {
+  const { owner, repo, number, url, title, author } = item.pr;
+  const ref = `${number} --repo ${owner}/${repo}`;
+  return [
+    `Draft a review of ${url} ("${title}" by ${author}) at head ${round.headSha}. ${round.requestedBy ?? 'Someone'} asked ${opts.identity} for this review. You write the draft; you do not post it.`,
+    '',
+    `1. Read the PR: \`gh pr view ${ref} --comments\` and \`gh pr diff ${ref}\`.`,
+    `2. For context beyond the diff, make a throwaway checkout of the PR head at exactly ${opts.checkout}: \`git fetch origin pull/${number}/head\`, then \`git worktree add --detach ${opts.checkout} FETCH_HEAD\`. Use no other path; lobstah removes it when the job ends. Never switch, commit to, or push this checkout's own branch.`,
+    "3. Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md, .github/pull_request_template.md) and hold the change to it.",
+    `4. Review it the way the reviewer would: correctness first, then risk, then clarity. No style nits unless they hide a bug.${opts.rules ? ' Follow the review rules below too.' : ''}`,
+    `5. Write two files in ${opts.outDir}: \`review.md\`, the review's summary body in markdown; and \`comments.json\`, the inline comments as a JSON array of \`{"path": "<file>", "line": <line in the PR head's version>, "side": "RIGHT", "body": "<markdown>"}\` (\`[]\` when there are none).`,
+    '6. Do not post, approve, request changes, comment on, push to, or edit the PR. If you cannot review it (too large, missing context), say so in review.md.',
+    `7. Report done: \`lobstah report ${opts.id} done "<one line>"\`.`,
+    ...(opts.rules ? ['', `Review rules from ${opts.identity}:`, '', opts.rules] : []),
+  ].join('\n');
+}
+
+/**
+ * Re-draft a stale or failed round: it becomes requested again at the PR's
+ * current head, and the next pick cycle starts a job for it. Returns the
+ * item, or why it cannot.
+ */
+export function redraftReview(key: string, now = Date.now()): ReviewItem | string {
+  const item = readReview(key);
+  const r = item && latestRound(item);
+  if (!item || !r) return `no review item ${key}`;
+  if (r.state !== 'stale' && r.state !== 'failed') return `${key}: the newest round is ${r.state}; only a stale or failed round re-drafts`;
+  const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, ...rest } = r;
+  item.rounds[item.rounds.length - 1] = { ...rest, state: 'requested', headSha: item.pr.headSha };
+  return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 }
 
 // ── Attention ──────────────────────────────────────────────────────────────
