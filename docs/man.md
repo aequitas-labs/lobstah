@@ -693,7 +693,8 @@ the same rule.
   files in `~/.lobstah/requests/<id>/`. The payload is the decision `key`,
   `title`, `dispatch`, `lane`, `repo`, the `option`, the `text`, and the
   stored `attachments`. `answer.json` in the decision's directory marks it
-  answered and names the request.
+  answered, names the request, and holds the answer too: the `option`, the
+  `text` (also when no option was chosen), and the stored `attachments`.
 - **The POST.** Send is a same-origin POST to `/requests` with the page's
   token (header `x-lobstah-token`), the guard the **↗ open** button uses.
   The body is `{ "kind": "decision-answer", "payload": { "key", "option",
