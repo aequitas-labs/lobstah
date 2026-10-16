@@ -647,12 +647,13 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
 
   noticeDispatchProgress(now, cfg);
 
-  if (cfg.notifyCommand) {
-    const verbs = cfg.notifyVerbs ?? DEFAULT_NOTIFY_VERBS;
+  const notify = cfg.hooks.notify;
+  if (notify) {
+    const verbs = notify.verbs ?? DEFAULT_NOTIFY_VERBS;
     for (const lane of ['work', 'chore'] as Lane[]) {
       for (const id of notifiableIds(lane)) {
         for (const ev of pendingNotifications(id, lane, verbs, daemonStartedAt)) {
-          execNotify(cfg.notifyCommand, ev, log);
+          execNotify(notify.command, ev, log);
           log(`${id}: notified ${ev.entry.verb}`);
         }
       }

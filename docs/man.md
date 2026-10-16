@@ -487,7 +487,7 @@ A question is held while a helm is signed on for its grounds and has not
 ended a turn since the question was filed. A held question is in `man tend`,
 `man wait`, the park, and reminders, and `lobstah attention` and `man tend`
 mark it `held`. It is not in `attention --json` (the pet), the glass, or
-notifyCommand. The question walks when the helm ends a turn (`man haul`)
+`[hooks.notify]`. The question walks when the helm ends a turn (`man haul`)
 without answering it; the release is recorded in `releases/<key>.json`. With
 no helm signed on, or a helm relieved or stale past `[helm].ttlSecs`, a
 question walks at once.
@@ -513,7 +513,7 @@ then newest first, and the repo filter and the search box (title, author,
 dispatch id, repo) apply to it. The Reviews tab lists the PRs that ask
 for your review ([pickup.md](pickup.md), "Review requests"), the ones
 waiting on you first, as a table or as cards. A row opens the PR in the
-repo's review tool (`[repos.<key>].review`), where the drafted review waits
+repo's review tool (`[repos.<key>].reviewTool`), where the drafted review waits
 as your pending review, to edit and send there. The tab only dismisses a
 review (deleting its pending draft) or re-drafts a stale or failed one,
 through the page-token-guarded `/requests` endpoint as `review-dismiss` or

@@ -545,7 +545,8 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
             above: stackedAbove(pr, (records ??= readPrs()), workers ?? []),
             ...(kind === 'checks' && fresh.length > 0 ? { checks: fresh } : {}),
           }),
-          config.repos[target.repo],
+          config,
+          target.repo,
           kind,
         );
         enqueue({

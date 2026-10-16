@@ -118,13 +118,13 @@ describe('lobstah init', () => {
     return res.stdout;
   };
 
-  it('a bare init writes no repo, and its notifyCommand example parses once uncommented', () => {
+  it('a bare init writes no repo, and its [hooks.notify] example parses once uncommented', () => {
     const home = path.join(dir, 'home');
     run(home);
     const raw = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
     expect((parse(raw) as { repos?: unknown }).repos).toBeUndefined();
-    const enabled = raw.replace(/^# (notifyCommand = .*)$/m, '$1');
-    expect((parse(enabled) as { notifyCommand: string }).notifyCommand).toBe('ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"');
+    const enabled = raw.replace(/^# (\[hooks\.notify\])$/m, '$1').replace(/^# (command = .*)$/m, '$1');
+    expect((parse(enabled) as { hooks: { notify: { command: string } } }).hooks.notify.command).toBe('ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"');
   });
 
   it('names a repo it skips because another repo has its key, and stays quiet on a rescan', () => {

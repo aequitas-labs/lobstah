@@ -47,7 +47,7 @@ function queuedDescriptors(): Descriptor[] {
 
 describe('watchLoop', () => {
   it("a PR watch's continuation ends with the repo's ciFix hook; another watch's does not", async () => {
-    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nautoRepair = false\n[repos.myrepo]\npath = "/m"\n[repos.myrepo.briefHooks]\nciFix = "Run the CI refresh."\n');
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nautoRepair = false\n[repos.myrepo]\npath = "/m"\n[repos.myrepo.hooks.brief]\nciFix = "Run the CI refresh."\n');
     const pr = '22222222-2222-4222-8222-222222222222';
     makeOwnerDispatch(pr);
     appendStatus(pr, 'work', 'done', 'PR sent');

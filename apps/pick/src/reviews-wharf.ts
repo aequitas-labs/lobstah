@@ -68,9 +68,9 @@ export async function claimReviewDocs(log: (m: string) => void = () => {}, opts:
 
 const title = (item: ReviewItem) => `${item.pr.owner}/${item.pr.repo}#${item.pr.number} ${item.pr.title}`.slice(0, 200);
 
-/** The PR in the repo's review tool ([repos.<key>].review): where the hosted glass sends a person. */
+/** The PR in the repo's review tool ([repos.<key>].reviewTool): where the hosted glass sends a person. */
 function reviewLink(item: ReviewItem): string {
-  const tool = item.pr.repoKey ? loadConfig().repos[item.pr.repoKey]?.review : undefined;
+  const tool = item.pr.repoKey ? loadConfig().repos[item.pr.repoKey]?.reviewTool : undefined;
   return tool ? prReviewUrl(item.pr.url, { [`${item.pr.owner}/${item.pr.repo}`.toLowerCase()]: tool }) : item.pr.url;
 }
 

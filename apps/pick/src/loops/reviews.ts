@@ -267,7 +267,7 @@ function startedToday(items: ReviewItem[], now: number): number {
 function noJob(item: ReviewItem, round: ReviewRound, started: number): string | undefined {
   const rc = loadConfig().reviews;
   if (round.reason?.startsWith('skipped:')) return round.reason;
-  if (reviewSettings(rc, item.pr.repoKey).work === 'off') return undefined; // Chris reviews it himself: no reason to show
+  if (reviewSettings(rc, item.pr.repoKey).work === 'off') return undefined; // the person reviews it themselves: no reason to show
   if (!item.pr.repoKey) return 'no job: not a configured repo, so there is no checkout to review in';
   if (started >= rc.maxPerDay) return `no job: the daily cap ([reviews].maxPerDay = ${rc.maxPerDay}) is reached`;
   return undefined;
@@ -290,7 +290,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     const settings = reviewSettings(cfg.reviews, item.pr.repoKey);
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
-    // A withdrawn or dismissed round (the request went, a re-request superseded it, or Chris dropped it) has its job cancelled, then its checkout removed once the job ends.
+    // A withdrawn or dismissed round (the request went, a re-request superseded it, or the person dropped it) has its job cancelled, then its checkout removed once the job ends.
     for (const old of item.rounds) {
       if ((old.state !== 'withdrawn' && old.state !== 'dismissed') || !old.dispatch) continue;
       const oldJob = verbOf(old.dispatch);
@@ -324,7 +324,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
         {
           id,
           repo: item.pr.repoKey!,
-          brief: withBriefHooks(reviewBrief(item, r, { identity, id, outDir, checkout: reviewCheckoutDir(item.key, r.id)!, ...(settings.rules ? { rules: settings.rules } : {}) }), cfg.repos[item.pr.repoKey!], 'prReview'),
+          brief: withBriefHooks(reviewBrief(item, r, { identity, id, outDir, checkout: reviewCheckoutDir(item.key, r.id)! }), cfg, item.pr.repoKey, 'prReview'),
           readOnly: true,
           ...(settings.harness ? { harness: settings.harness } : {}),
           ...(settings.model ? { model: settings.model } : {}),

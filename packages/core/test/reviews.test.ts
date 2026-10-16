@@ -69,9 +69,6 @@ describe('[reviews] config', () => {
     expect(reviewSettings(cfg, 'web')).toMatchObject({ work: 'off', limits: { wallClockSecs: 300, maxTurns: 40, maxBudgetUsd: 2 } });
     expect(reviewSettings(cfg, 'other')).toMatchObject({ work: 'headless', limits: { wallClockSecs: 900 } });
     expect(() => parseReviews({ post: 'approve' })).toThrow('[reviews].post must be "draft", "auto"');
-    expect(reviewSettings(parseReviews({ rules: '  Flag missing tests.  ' }, { web: { reviews: { rules: 'Check the migration order.' } } }), 'web').rules).toBe('Check the migration order.');
-    expect(reviewSettings(parseReviews({ rules: 'Flag missing tests.' }), 'other').rules).toBe('Flag missing tests.');
-    expect(() => parseReviews({ rules: 3 })).toThrow('[reviews].rules must be text');
     expect(() => parseReviews({}, { web: { reviews: { work: 'always' } } })).toThrow('[repos.web.reviews].work');
   });
 
@@ -170,9 +167,7 @@ describe('drafts', () => {
     expect(brief).toContain('Do not post, approve, request changes, comment on, push to, or edit the PR.');
     expect(brief).toContain('lobstah report d1 done');
     expect(brief).toContain("Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md");
-    expect(brief).not.toContain('Review rules from');
-    const ruled = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x', checkout: '/x/checkout', rules: 'Flag missing tests.' });
-    expect(ruled.endsWith('Review rules from chris:\n\nFlag missing tests.')).toBe(true);
+    expect(brief).toContain('Follow any review rules appended below this brief too.');
   });
 
   it('a stale or failed round re-drafts at the current head; others refuse', () => {

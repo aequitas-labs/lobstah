@@ -840,7 +840,7 @@ describe('merge loop', () => {
   });
 
   it("a rebase chore ends with the repo's rebase hook, then its all hook", async () => {
-    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/d"\n[repos.demo.briefHooks]\nrebase = "Run the rebase refresh."\nall = "Run /pr-refresh."\nchecks = "not this one"\n');
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/d"\n[repos.demo.hooks.brief]\nrebase = "Run the rebase refresh."\nall = "Run /pr-refresh."\nchecks = "not this one"\n');
     const ms = new FakeMergeSource();
     ms.candidates = [pr({ mergeableState: 'dirty' })];
     await mergeLoop(ms, policy, new PickupState());

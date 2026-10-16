@@ -94,7 +94,7 @@ describe('review documents on wharf grounds', () => {
 
   it('publishes the state and the review-tool link, and again only when they change', async () => {
     fs.appendFileSync(path.join(home, 'config.toml'), '');
-    fs.writeFileSync(path.join(home, 'config.toml'), fs.readFileSync(path.join(home, 'config.toml'), 'utf8').replace('origin = "git@github.com:acme/web.git"', 'origin = "git@github.com:acme/web.git"\nreview = "graphite"'));
+    fs.writeFileSync(path.join(home, 'config.toml'), fs.readFileSync(path.join(home, 'config.toml'), 'utf8').replace('origin = "git@github.com:acme/web.git"', 'origin = "git@github.com:acme/web.git"\nreviewTool = "graphite"'));
     request();
     const item = readReview(KEY)!;
     Object.assign(item.rounds[0]!, { state: 'drafted', dispatch: 'd1', staged: { reviewId: '77', at: 'x' }, wharf: { doc: DOC, mine: true } });
