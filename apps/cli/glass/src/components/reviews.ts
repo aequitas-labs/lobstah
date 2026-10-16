@@ -7,9 +7,9 @@ import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
 
 /**
- * The Reviews tab: one row or card per PR that asked for Chris's review,
+ * The Reviews tab: one row or card per PR that asked for your review,
  * the ones waiting on him first. A row opens the PR in its review tool
- * ([repos.<key>].review), where the drafted review waits as his pending
+ * ([repos.<key>].reviewTool), where the drafted review waits as the identity's pending
  * review, to edit and send. Here a review can only be dismissed or, when
  * stale or failed, re-drafted.
  */

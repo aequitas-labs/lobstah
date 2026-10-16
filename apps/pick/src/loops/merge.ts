@@ -197,7 +197,7 @@ export async function mergeLoop(
           {
             id: uuid,
             repo: ms.repoKey(),
-            brief: withBriefHooks(rebaseBrief(pr, uuid, loadConfig().repos[ms.repoKey()]?.trunk), loadConfig().repos[ms.repoKey()], 'rebase'),
+            brief: withBriefHooks(rebaseBrief(pr, uuid, loadConfig().repos[ms.repoKey()]?.trunk), loadConfig(), ms.repoKey(), 'rebase'),
             // The chore works on this PR: the runner pushes no other branch and opens no PR.
             pr: { url: pr.url, headRefName: pr.headRef, headSha: pr.headSha },
           },

@@ -64,16 +64,17 @@ lobstah doctor               # binaries, config, repos, harnesses, heartbeat
 ```
 
 ```toml
-notifyCommand = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
-
 [repos.myapp]
 path  = "~/src/myapp"
 trunk = "main"
 setup = ["pnpm install"]     # runs in each fresh worktree
+
+[hooks.notify]
+command = "ntfy pub my-topic \"$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE\""
 ```
 
-`notifyCommand` is how the router reaches you: the daemon runs it on
-`needs-decision`, `blocked`, `done`, and `failed`, with no model in the loop.
+`[hooks.notify]` is how the router reaches you: the daemon runs its `command`
+on `needs-decision`, `blocked`, `paused`, `done`, and `failed`, with no model in the loop.
 Every key, with defaults: [docs/configuration.md](docs/configuration.md).
 The GitHub App permissions lobstah needs (Checks read, Pull requests and
 Contents read and write): [docs/github.md](docs/github.md).
@@ -228,8 +229,8 @@ instances, use more homes. One daemon per home, enforced.
 
 ## When something needs you 🛎️
 
-Set one config line — `notifyCommand = "ntfy pub my-topic ..."` — and the
-daemon pings you on `needs-decision`, `blocked`, `done`, and `failed`. No
+Set one config table — `[hooks.notify]` with `command = "ntfy pub my-topic ..."` — and the
+daemon pings you on `needs-decision`, `blocked`, `paused`, `done`, and `failed`. No
 model in the loop. Driving lobstah from an agent session instead? `lobstah
 man` prints the lobstah man's manual. `man wait` blocks until a dispatch needs
 attention, and unanswered questions re-fire until answered. `man helm`

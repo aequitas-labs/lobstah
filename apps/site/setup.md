@@ -117,7 +117,7 @@ person:
    workers should be Codex sessions, change it to `default = "codex"`.
    Installing the Codex plugin does not change this.
 
-In this file, keys that stand alone (such as `notifyCommand`) must come before
+In this file, keys that stand alone (such as `attentionKinds`) must come before
 the first `[section]`. A key written under a `[repos.<key>]` block belongs to
 that repo.
 
@@ -134,8 +134,8 @@ key left out keeps its default. Keys at the top level go above the first
 | Which worker CLI: Claude Code or Codex? Does any repo need the other one?         | `default` under `[harness]`, and under `[repos.<key>.harness]` for a repo | `"claude"`                                                                      |
 | Which model and effort should workers use?                                        | `model` and `effort`, in the same two blocks                              | the harness's own                                                               |
 | What should stand as attention for the helm, in the glass and on the desktop pet? | `attentionKinds` (top level)                                              | `["question", "decision", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` |
-| Should the computer notify you? With what command, and for which reports?         | `notifyCommand` and `notifyVerbs` (top level)                             | no command; verbs `["needs-decision", "blocked", "paused", "done", "failed"]`   |
-| Which app should open a pull request for review?                                  | `review` in `[repos.<key>]`                                               | `"github"`                                                                      |
+| Should the computer notify you? With what command, and for which reports?         | `command` and `verbs` under `[hooks.notify]`                              | no command; verbs `["needs-decision", "blocked", "paused", "done", "failed"]`   |
+| Which app should open a pull request for review?                                  | `reviewTool` in `[repos.<key>]`                                           | `"github"`                                                                      |
 | What must run in a fresh worktree before work starts?                             | `setup` in `[repos.<key>]`                                                | what the scan found from the lockfile                                           |
 
 Notes on the answers:
@@ -149,18 +149,19 @@ Notes on the answers:
 - `attentionKinds` also takes `pr:draft`, `landed`, `report` and
   `stack-ready`. A list replaces the default: copy the default in and add to
   it. An unknown kind makes the config fail to load.
-- `notifyCommand` runs in a shell with `LOBSTAH_ID`, `LOBSTAH_VERB` and
+- `[hooks.notify]` `command` runs in a shell with `LOBSTAH_ID`, `LOBSTAH_VERB` and
   `LOBSTAH_NOTE` set. Write it in single quotes, or in three single quotes
   when the command holds a single quote. A desktop notice on macOS:
 
   ```toml
-  notifyCommand = '''osascript -e 'display notification (system attribute "LOBSTAH_NOTE") with title "lobstah" subtitle (system attribute "LOBSTAH_VERB")' '''
+  [hooks.notify]
+  command = '''osascript -e 'display notification (system attribute "LOBSTAH_NOTE") with title "lobstah" subtitle (system attribute "LOBSTAH_VERB")' '''
   ```
 
   Or a phone, through ntfy:
-  `notifyCommand = 'ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"'`.
+  `command = 'ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"'` under `[hooks.notify]`.
 
-- `review` is `github`, `graphite`, `linear`, `linear-app` (the Linear desktop
+- `reviewTool` is `github`, `graphite`, `linear`, `linear-app` (the Linear desktop
   app), or an `https://` address with `{owner}`, `{repo}` and `{number}` in it.
 
 None of these needs a restart. The daemon reads the file again every few

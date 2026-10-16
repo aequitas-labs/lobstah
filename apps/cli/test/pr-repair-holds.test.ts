@@ -413,7 +413,7 @@ describe('repairing the bottom of a stack updates the PRs above it', () => {
 
 describe('brief hooks', () => {
   it("a conflict repair's brief ends with the repo's conflict hook, then its all hook", () => {
-    fs.writeFileSync(path.join(dir, 'config.toml'), '[repos.web]\npath = "/w"\n[repos.web.briefHooks]\nconflict = "Run the conflict refresh."\nall = "Run /pr-refresh."\nchecks = "not this one"\n');
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[repos.web]\npath = "/w"\n[repos.web.hooks.brief]\nconflict = "Run the conflict refresh."\nall = "Run /pr-refresh."\nchecks = "not this one"\n');
     stand(STACK[0]!);
     expect(repair()).toBe(1);
     const [chore] = queued();
