@@ -47,6 +47,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--model': { value: '<m>' },
       '--effort': { value: '<e>' },
       '--follow-up': { value: '<uuid>' },
+      '--pr': { value: '<url|number>' },
       '--attach': { value: '<file>', repeatable: true },
       '--for': { value: '<name>|wt:<trap>' },
       '--session': { value: '<id>' },
@@ -60,7 +61,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   goals: { flags: { '--grounds': { value: '<name>' }, '--session': { value: '<id>' }, '--file': { value: '<md>' } }, flagSubverbs: { '--file': ['recap'] }, positionals: '[<date>|set <line>...|add <text>|rm <n>|done <n>|undo <n>|recap-data [<date>]|recap <date> --file <md>]' },
   focus: { flags: {}, positionals: '<trap>' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {} }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
+  send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -264,9 +265,9 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
-  dispatch: `Queue work; prints id. --for <name>, wt:<name>, wt:<id> is sticky; session:<id> resolves to its trap.
+  dispatch: `Queue work; prints id. Claimed helm: --session <helm-id>. --attach copies files. --for <name>, wt:<name>, wt:<id> is sticky; session:<id> resolves to its trap.
 --trap-any: free live → return stowed → new below the repo's traps cap; at capacity waits, never headless.
---pool: warm headless worktree; exclusive with --for and --trap-any. Claimed helm: --session <helm-id>. --attach copies files. Alias: set --bait.`,
+--pool: warm headless worktree, exclusive with --for/--trap-any. --pr: push to that open PR, open none. Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster record. Alias: buoy.`,
@@ -280,7 +281,7 @@ focus requires macOS.`,
 as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
 choose the follow-up's worker, harness, or model, use dispatch --follow-up with
 --for, --harness, or --model. --attach copies files. A claimed helm requires
---session <helm-id>. Trap-name messages arrive at its next park.`,
+--session <helm-id>. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,

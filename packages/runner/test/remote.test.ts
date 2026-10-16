@@ -5,7 +5,8 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { claimNext, enqueue, ensureLayout, laneDirs, readEvidence, readWatch } from '@lobstah/core';
 import { checkpointAllowed, keepRemote } from '../src/remote.js';
-import { main } from '../src/run.js';
+import { boundPr, draftPrTitle, main } from '../src/run.js';
+import type { Descriptor } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let root: string;
@@ -67,11 +68,14 @@ describe('headless remote preservation', () => {
     fs.writeFileSync(path.join(dir, 'README.md'), 'changed\n');
     fs.writeFileSync(path.join(dir, 'new.ts'), 'export const x = 1;\n');
     fs.writeFileSync(path.join(dir, '.env.local'), 'TOKEN=secret\n');
-    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: 'Test dispatch',
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: draftPrTitle(id),
       policy: { pushEarly: true, draftPr: true, checkpointOnStop: true }, intervalMs: 1000 });
     const saved = await remote.saveBeforeStop();
     expect(saved).toContain('checkpoint committed');
     expect(saved).toContain('draft PR https://github.com/example/repo/pull/7');
+    // A new chain still gets its draft PR, with a neutral title.
+    const create = fs.readFileSync(calls, 'utf8').split('\n').find((line) => line.includes('pr create'))!;
+    expect(create).toContain('--title lobstah 33333333');
     expect(readEvidence(id, 'work').prUrl).toBe('https://github.com/example/repo/pull/7');
     expect(fs.readFileSync(calls, 'utf8').split('\n').filter((line) => line.includes('pr create'))).toHaveLength(1);
     const files = git(dir, 'show', '--pretty=', '--name-only', 'HEAD').split('\n');
@@ -107,6 +111,39 @@ describe('headless remote preservation', () => {
     expect(fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '').not.toContain('pr create');
     await remote.stop();
     expect(git(bare, 'branch', '--list', 'lobstah/test')).toBe('');
+  });
+
+  it('a dispatch whose descriptor names a PR (dispatch --pr) pushes no lobstah/<id> branch and opens no PR', async () => {
+    const { dir, bare } = repo();
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    const calls = path.join(root, 'gh-calls');
+    const gh = path.join(bin, process.platform === 'win32' ? 'gh.cmd' : 'gh');
+    if (process.platform === 'win32') fs.writeFileSync(gh, `@echo off\r\necho %* >> "${calls}"\r\nexit /b 1\r\n`);
+    else {
+      fs.writeFileSync(gh, `#!/bin/sh\necho "$*" >> ${JSON.stringify(calls)}\nexit 1\n`);
+      fs.chmodSync(gh, 0o755);
+    }
+    process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ''}`;
+    // The brief names the PR only as a heading and prose; the descriptor names it, as dispatch --pr writes it.
+    const descriptor = { id, repo: 'r', brief: '# Fix the repair loop\n\nPush the fix to the branch of #241.', pr: { url: 'https://github.com/example/repo/pull/241', headRefName: 'fix-loop' } } as Descriptor;
+    const bound = boundPr(descriptor, 'work');
+    expect(bound).toEqual({ url: 'https://github.com/example/repo/pull/241', headRefName: 'fix-loop' });
+    fs.writeFileSync(path.join(dir, 'fix.ts'), 'export const fixed = true;\n');
+    git(dir, 'add', 'fix.ts');
+    git(dir, 'commit', '-m', 'fix');
+    const remote = keepRemote({ id, lane: 'work', cwd: dir, trunk: 'main', title: draftPrTitle(id), existingPrUrl: bound!.url,
+      policy: { pushEarly: true, draftPr: true, checkpointOnStop: true }, intervalMs: 1000 });
+    await remote.saveBeforeStop();
+    await remote.stop();
+    expect(git(bare, 'branch', '--list', 'lobstah/test')).toBe('');
+    expect(fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '').not.toContain('pr create');
+    expect(readEvidence(id, 'work').prUrl).toBe('https://github.com/example/repo/pull/241');
+  });
+
+  it('a draft PR title never comes from the brief', () => {
+    expect(draftPrTitle(id)).toBe('lobstah 33333333');
+    expect(draftPrTitle(id)).not.toContain('#');
   });
 
   it('does not retry or force-push a rebased follow-up over a non-fast-forward PR branch', async () => {
