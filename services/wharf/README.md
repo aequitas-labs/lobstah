@@ -155,13 +155,16 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Helm | GET events?after=:cursor | Up to 100 wharf-ordered events; returned opaque cursor |
 | Read | GET glass, workers, dispatches/:id/detail | Boat/trap metadata, jobs, status history, messages and file metadata |
 | Leased helm | POST documents; POST documents/:id/files, publish, withdraw | Author decisions and Markdown reports with scoped uploads |
-| Read | GET documents, documents/:id, documents/:id/files/:file | Published documents and their own uploaded bytes |
+| Work boat | POST documents (kind `review`); POST documents/:id/files, publish of its own review | Publish and republish the review requests it found: round state and the link that opens the PR in the repo's review tool (where the draft waits as the person's pending review). No helm seat, and no event (every event wakes a helm wait). Another boat's create of the same round's id is a 409 |
+| Read | GET documents, documents/:id, documents/:id/files/:file | Published documents and their own uploaded bytes. `GET documents` leaves reviews out (older boats know no such kind); `GET glass` lists them |
 | Signed-in person | POST documents/:id/answer | Record one card answer and ordered event; no helm-seat change |
 | Read boat / signed-in person | POST documents/:id/ack | Mark a published document seen: `ack { at, by }`, the first one stands; no event, no helm seat |
 | Read boat / signed-in person | POST dispatches/:id/ack | Mark the job's current status seen (`{ "at": <that status's time> }`); a newer report stands unacknowledged; no event |
 | Signed-in person | POST requests | Queue a bounded message or trap-start request for the helm |
 | Read / leased helm | GET requests; POST requests/:id/receipt, execute | Explicit receipt then execute a live message request |
 | Addressed work boat | GET requests/starts; POST requests/:id/start | Read only its helm-authorized trap starts; consume once or record repo refusal before expiry |
+| Signed-in person | POST requests (kind `review-dismiss`) | Ask the boat that published a review to dismiss it (deleting the pending draft); authorized at once and addressed to that boat, no helm and no event. Sending a review happens in the review tool |
+| Addressed work boat | GET requests/reviews; POST requests/:id/start | Read the review requests addressed to it; mark each done or refused before expiry. The boat acts on GitHub with its own token |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; approve another login to receive a new
@@ -191,7 +194,7 @@ hint connection on that cadence. Workers never connect. Losing a hint loses no
 work. Native tests evict the DO with a connected socket, prove its transient state
 is gone and its socket survives, then fetch events missed after disconnecting.
 Report evidence is data, not hosted executable HTML. No GitHub polling or worker
-execution is moved into this service.
+execution is moved into this service; a review is staged and dismissed by the boat that published it and sent from the review tool, never by the wharf.
 
 Files are immutable by idempotency key and dispatch- or document-scoped, including report
 Markdown and images. Downloads force octet-stream, attachment disposition,

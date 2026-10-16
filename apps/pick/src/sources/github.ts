@@ -132,7 +132,8 @@ export class GithubSource implements Source, MergeSource {
         ...(feedback.heldOnly ? { heldOnly: true } : {}),
         brief: withBriefHooks(
           `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. ${markRepliesRule(uuid)} When the feedback is addressed, report status done.`,
-          loadConfig().repos[this.cfg.key],
+          loadConfig(),
+          this.cfg.key,
           'review',
         ),
       });
@@ -152,7 +153,7 @@ export class GithubSource implements Source, MergeSource {
    * has spoken.
    *
    * The configured identity's own unmarked comments count too: lobstah's
-   * workers post as that account, so Chris's "also handle X" on a trap PR
+   * workers post as that account, so the owner's own "also handle X" on a trap PR
    * looks like theirs except for the marker. The active-round guard covers
    * a worker that forgets it: an identity comment made while a lobstah run
    * on the PR works is held (rounds on a subject serialize, so it waits) and

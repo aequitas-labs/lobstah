@@ -98,7 +98,7 @@ describe('post-PR feedback pickup', () => {
   });
 
   it("a review-feedback brief ends with the repo's review hook", async () => {
-    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/d"\n[repos.demo.briefHooks]\nreview = "Run the review refresh."\n');
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.demo]\npath = "/d"\n[repos.demo.hooks.brief]\nreview = "Run the review refresh."\n');
     stubApi([
       {
         number: 5,

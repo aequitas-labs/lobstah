@@ -62,7 +62,8 @@ const round = (key = KEY) => latestRound(readReview(key)!)!;
 
 describe('starting a review job', () => {
   it('work = trap: a read-only chore for a free trap of the repo, with the cost bounds and the trap wait', () => {
-    config('maxBudgetUsd = 3', 'rules = "Flag missing tests."');
+    config('maxBudgetUsd = 3');
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[hooks.brief]\nprReview = "Flag missing tests."\n[repos.web.hooks.brief]\nprReview = "Check the migration order."\n');
     request();
     draftReviews('chris', () => {}, NOW);
     const r = round();
@@ -77,7 +78,7 @@ describe('starting a review job', () => {
     });
     expect(d.brief).toContain(reviewRoundDir(KEY, 'RRE_7')!);
     expect(d.brief).toContain('Do not post, approve, request changes, comment on, push to, or edit the PR.');
-    expect(d.brief).toContain('Review rules from chris:\n\nFlag missing tests.');
+    expect(d.brief.endsWith('\n\nFlag missing tests.\n\nCheck the migration order.')).toBe(true); // [hooks.brief], then the repo's
     expect(fs.existsSync(reviewRoundDir(KEY, 'RRE_7')!)).toBe(true);
     draftReviews('chris', () => {}, NOW); // one job per round
     expect(pendingIds('chore')).toHaveLength(1);

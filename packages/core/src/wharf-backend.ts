@@ -122,7 +122,9 @@ export class WharfBackend implements CoordinationBackend {
     const value = await this.request('documents'); if (!Array.isArray(value)) throw new BackendError(502, 'invalid document list');
     return value.flatMap((v): WharfDocumentSummary[] => {
       const r = record(v); const id = string(r.id);
-      if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || (r.kind !== 'decision' && r.kind !== 'report')) throw new BackendError(502, 'invalid document');
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new BackendError(502, 'invalid document');
+      // A kind this boat does not show as attention (a review) is not one of its documents.
+      if (r.kind !== 'decision' && r.kind !== 'report') return [];
       if (r.published !== true || r.withdrawn) return [];
       return [{ id, kind: r.kind, title: string(r.title).slice(0, 200), at: string(r.at),
         ...(r.dispatch !== undefined ? { dispatch: string(r.dispatch) } : {}), ...(r.answer ? { answered: true as const } : {}),

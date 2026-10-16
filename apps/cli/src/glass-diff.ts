@@ -276,7 +276,7 @@ export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>)
   return r.author;
 }
 
-/** Reviews in list order: the ones that ask for Chris first, then the newest request first. */
+/** Reviews in list order: the ones waiting on the person first, then the newest request first. */
 export const reviewOrder = (a: GlassReview, b: GlassReview): number =>
   Number(b.stands) - Number(a.stands) || b.requestedAt.localeCompare(a.requestedAt);
 
@@ -456,7 +456,7 @@ export interface DeckInputs {
   landed: LandedCatch[];
   /** Unacked first, then newest first; the deck shows REPORTS_MAX. */
   reports: GlassReport[];
-  /** Reviews that ask for Chris, newest request first; the deck shows REVIEWS_MAX. */
+  /** Reviews waiting on the person, newest request first; the deck shows REVIEWS_MAX. */
   reviews: GlassReview[];
   inflight: GlassDispatchSummary[];
   traps: Seat<GlassTrapView>[];

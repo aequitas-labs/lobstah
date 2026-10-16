@@ -19,8 +19,8 @@ export interface RepoConfig {
   path: string;
   /** Maximum rostered traps for this repo (live, stowed and ghosted); absent means unlimited. */
   traps?: number;
-  /** PR click destination: a preset or HTTPS template. */
-  review?: string;
+  /** PR click destination (`reviewTool`): a preset or HTTPS template. */
+  reviewTool?: string;
   origin?: string;
   trunk: string;
   setup?: string[];
@@ -42,12 +42,8 @@ export interface RepoConfig {
    * repair or a CI-fix continuation. `*` matches any run of characters.
    */
   humanGateChecks?: string[];
-  /**
-   * Markdown appended to the briefs lobstah writes for this repo, per kind
-   * (`[repos.<key>.briefHooks]`). The text is the repo's own; lobstah does
-   * not read it.
-   */
-  briefHooks?: BriefHooks;
+  /** This repo's hooks (`[repos.<key>.hooks]`). */
+  hooks?: RepoHooks;
   /**
    * Extra gitignore-style patterns a pool reset keeps (`[repos.<key>].poolKeep`),
    * on top of DEFAULT_POOL_KEEP. Untracked files that match no pattern are
@@ -114,12 +110,71 @@ function parseBriefHooks(raw: unknown): BriefHooks | undefined {
 }
 
 /**
- * A generated brief with the repo's hooks for its kind appended: that
- * kind's text, then `all`. The brief is unchanged when the repo has none.
+ * A repo's hooks: markdown appended to the briefs lobstah writes for it, per
+ * kind (`[repos.<key>.hooks.brief]`). The text is the repo's own; lobstah
+ * does not read it.
  */
-export function withBriefHooks(brief: string, repo: Pick<RepoConfig, 'briefHooks'> | undefined, kind: BriefKind): string {
-  const hooks = [repo?.briefHooks?.[kind], repo?.briefHooks?.all].filter((t): t is string => !!t);
+export interface RepoHooks {
+  brief?: BriefHooks;
+}
+
+/** The global hooks (`[hooks]`): what lobstah runs or appends for every repo. */
+export interface HooksConfig {
+  /** `[hooks.notify]`: exec'd by the daemon on wake-worthy status transitions with LOBSTAH_* env vars. */
+  notify?: { command: string; verbs?: string[] };
+  /** `[hooks.pickupNotify]`: exec'd by pick on tracker-report transitions with LOBSTAH_* env vars. */
+  pickupNotify?: { command: string };
+  /** `[hooks.brief]`: markdown appended to every brief of a kind, before the repo's own. */
+  brief: BriefHooks;
+}
+
+/**
+ * A generated brief with its hooks appended: the global `[hooks.brief]`
+ * text for its kind, then the global `all`, then the repo's
+ * `[repos.<key>.hooks.brief]` kind and `all`. Unchanged when there are none.
+ */
+export function withBriefHooks(brief: string, cfg: Pick<Config, 'hooks' | 'repos'>, repoKey: string | undefined, kind: BriefKind): string {
+  const repo = repoKey ? cfg.repos[repoKey]?.hooks?.brief : undefined;
+  const hooks = [cfg.hooks.brief[kind], cfg.hooks.brief.all, repo?.[kind], repo?.all].filter((t): t is string => !!t);
   return hooks.length ? `${brief}\n\n${hooks.join('\n\n')}` : brief;
+}
+
+/** Keys that moved: the loader refuses each, naming its new place. No aliases, no fallback. */
+function refuseMoved(raw: Record<string, unknown>, reposRaw: Record<string, Record<string, unknown>>): void {
+  const moved: Array<[boolean, string]> = [
+    [raw.notifyCommand !== undefined, 'notifyCommand moved to [hooks.notify].command'],
+    [raw.notifyVerbs !== undefined, 'notifyVerbs moved to [hooks.notify].verbs'],
+    [(raw.pickup as Record<string, unknown> | undefined)?.notifyCommand !== undefined, '[pickup].notifyCommand moved to [hooks.pickupNotify].command'],
+    [(raw.reviews as Record<string, unknown> | undefined)?.rules !== undefined, '[reviews].rules moved to [hooks.brief].prReview'],
+  ];
+  for (const [key, r] of Object.entries(reposRaw)) {
+    moved.push(
+      [r.briefHooks !== undefined, `[repos.${key}.briefHooks] moved to [repos.${key}.hooks.brief]`],
+      [r.review !== undefined, `[repos.${key}].review moved to [repos.${key}].reviewTool`],
+      [(r.reviews as Record<string, unknown> | undefined)?.rules !== undefined, `[repos.${key}.reviews].rules moved to [repos.${key}.hooks.brief].prReview`],
+    );
+  }
+  const found = moved.filter(([hit]) => hit).map(([, why]) => why);
+  if (found.length) throw new Error(`${found.join('; ')} (in ${configPath()})`);
+}
+
+function parseHooks(raw: unknown): HooksConfig {
+  if (raw === undefined) return { brief: {} };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`[hooks] must be a table in ${configPath()}`);
+  const h = raw as Record<string, unknown>;
+  const command = (table: unknown, where: string): string => {
+    const t = table as Record<string, unknown>;
+    if (!t || typeof t !== 'object' || typeof t.command !== 'string' || !t.command.trim()) throw new Error(`${where}.command must be a command line in ${configPath()}`);
+    return t.command;
+  };
+  const out: HooksConfig = { brief: parseBriefHooks(h.brief) ?? {} };
+  if (h.notify !== undefined) {
+    const verbs = (h.notify as Record<string, unknown>).verbs;
+    if (verbs !== undefined && (!Array.isArray(verbs) || !verbs.every((v) => typeof v === 'string'))) throw new Error(`[hooks.notify].verbs must be an array of verbs in ${configPath()}`);
+    out.notify = { command: command(h.notify, '[hooks.notify]'), ...(verbs ? { verbs: verbs as string[] } : {}) };
+  }
+  if (h.pickupNotify !== undefined) out.pickupNotify = { command: command(h.pickupNotify, '[hooks.pickupNotify]') };
+  return out;
 }
 
 export interface LimitsConfig {
@@ -295,10 +350,8 @@ export interface Config {
   wharves?: Record<string, import('./backend-model.js').BackendLocation>;
   /** Worktree pools for headless dispatches (`[pools.<name>]`). */
   pools: Record<string, PoolConfig>;
-  /** Exec'd on wake-worthy status transitions with LOBSTAH_* env vars. */
-  notifyCommand?: string;
-  /** Verbs that fire notifyCommand. Default: needs-decision, blocked, paused, done, failed. */
-  notifyVerbs?: string[];
+  /** `[hooks]`: the notify commands and the global brief hooks. */
+  hooks: HooksConfig;
   /** Re-fire an unanswered attention state every this many seconds (0 disables). Default 900. */
   remindSecs?: number;
   /** Continuous-ready seconds before pr:ready stands; 0 disables settling. Default 600. */
@@ -311,7 +364,7 @@ export interface Config {
 
 /**
  * The configurable attention kinds (docs/vocabulary.md, "Attention contract").
- * Level-triggered: each stands until its clear condition, unlike notifyVerbs,
+ * Level-triggered: each stands until its clear condition, unlike [hooks.notify].verbs,
  * which fire once per transition.
  */
 export const ATTENTION_KINDS = ['question', 'decision', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready', 'report', 'stack-ready', 'review'] as const;
@@ -433,16 +486,17 @@ export function loadConfig(): Config {
     throw new Error(`readySettleSecs must be a non-negative number in ${configPath()}`);
   }
   const reposRaw = (raw.repos ?? {}) as Record<string, Record<string, unknown>>;
+  refuseMoved(raw, reposRaw);
   const repos: Record<string, RepoConfig> = {};
   for (const [key, r] of Object.entries(reposRaw)) {
     if (r.traps !== undefined && (typeof r.traps !== 'number' || !Number.isSafeInteger(r.traps) || r.traps < 0)) {
       throw new Error(`[repos.${key}].traps must be a non-negative whole number`);
     }
-    if (r.review !== undefined && !validReviewTool(r.review)) throw new Error(`[repos.${key}].review must be github, graphite, linear, linear-app, or an HTTPS template with {owner}, {repo}, {number}`);
+    if (r.reviewTool !== undefined && !validReviewTool(r.reviewTool)) throw new Error(`[repos.${key}].reviewTool must be github, graphite, linear, linear-app, or an HTTPS template with {owner}, {repo}, {number}`);
     repos[key] = {
       path: expandHome(String(r.path ?? '')),
       ...(r.traps !== undefined ? { traps: r.traps as number } : {}),
-      ...(r.review !== undefined ? { review: r.review as string } : {}),
+      ...(r.reviewTool !== undefined ? { reviewTool: r.reviewTool as string } : {}),
       origin: r.origin ? String(r.origin) : undefined,
       trunk: String(r.trunk ?? 'main'),
       setup: Array.isArray(r.setup) ? r.setup.map(String) : undefined,
@@ -454,7 +508,7 @@ export function loadConfig(): Config {
       draftPr: r.draftPr === undefined ? undefined : Boolean(r.draftPr),
       checkpointOnStop: r.checkpointOnStop === undefined ? undefined : Boolean(r.checkpointOnStop),
       humanGateChecks: Array.isArray(r.humanGateChecks) ? r.humanGateChecks.map(String).filter(Boolean) : undefined,
-      briefHooks: parseBriefHooks(r.briefHooks),
+      ...(parseBriefHooks((r.hooks as Record<string, unknown> | undefined)?.brief) ? { hooks: { brief: parseBriefHooks((r.hooks as Record<string, unknown>).brief) } } : {}),
       poolKeep: Array.isArray(r.poolKeep) ? r.poolKeep.map(String).filter(Boolean) : undefined,
     };
   }
@@ -482,8 +536,7 @@ export function loadConfig(): Config {
     grounds,
     wharves,
     pools: parsePools(raw.pools, repos),
-    notifyCommand: raw.notifyCommand ? String(raw.notifyCommand) : undefined,
-    notifyVerbs: Array.isArray(raw.notifyVerbs) ? raw.notifyVerbs.map(String) : undefined,
+    hooks: parseHooks(raw.hooks),
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
     readySettleSecs,
     attentionKinds: parseAttentionKinds(raw.attentionKinds),

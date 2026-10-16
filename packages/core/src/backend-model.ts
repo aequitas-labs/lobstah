@@ -31,8 +31,16 @@ export interface BackendEvent { cursor: string; kind: string; dispatchId?: strin
 export interface EventBatch { events: BackendEvent[]; cursor: string }
 /** Hosted glass records contain IDs and uploaded file metadata, never local paths. */
 export interface WharfFile { id: string; name: string; size: number }
+/** A review document's PR and round state, kept by the boat that publishes it. */
+export interface WharfReviewMeta {
+  pr: string; round: string; state: string; requestedBy?: string; headSha?: string; stands?: boolean; reason?: string;
+  /** The PR in the repo's review tool, where the staged draft is sent. */
+  open?: string;
+}
 export interface WharfDocumentInput {
-  id: string; kind: 'decision' | 'report'; title: string; options?: string[]; dispatch?: string;
+  id: string; kind: 'decision' | 'report' | 'review'; title: string; options?: string[]; dispatch?: string;
+  /** kind review only. */
+  review?: WharfReviewMeta;
 }
 export interface WharfDocument extends WharfDocumentInput {
   at: string; author: string; published: boolean; withdrawn?: boolean;
@@ -48,8 +56,12 @@ export interface WharfDocumentSummary {
   answered?: true;
   ack?: WharfAck;
 }
+/** What a person asks of a review document; the boat that published it carries it out. Sending happens in the review tool. */
+export const WHARF_REVIEW_REQUEST_KINDS = ['review-dismiss'] as const;
 export interface WharfHumanRequest {
-  id: string; kind: 'message' | 'trap-request'; dispatch?: string; text?: string; boat?: string; repo?: string;
+  id: string; kind: 'message' | 'trap-request' | (typeof WHARF_REVIEW_REQUEST_KINDS)[number]; dispatch?: string; text?: string; boat?: string; repo?: string;
+  /** Review requests: the review document. */
+  document?: string;
   at: string; expiresAt: string; state: 'queued' | 'received' | 'authorized' | 'fulfilled' | 'expired'; by: string;
   outcome?: string;
   waitingForHelm?: boolean;

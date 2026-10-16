@@ -23,7 +23,7 @@ export type ReviewPost = (typeof REVIEW_POST)[number];
 export interface ReviewSettings {
   /** Who drafts: no one, a free trap of the repo (then headless after trapWaitSecs), or headless. */
   work: ReviewWork;
-  /** `draft`: Chris posts from the glass. `auto`: post the draft as a comment-only review once drafted. */
+  /** `draft`: stage the draft as the identity's pending review, sent from the review tool. `auto`: post it as a comment-only review once drafted. */
   post: ReviewPost;
   harness?: string;
   model?: string;
@@ -33,8 +33,6 @@ export interface ReviewSettings {
   /** Requests on PRs by these authors, or with these labels, file an item but start no job. */
   skipAuthors: string[];
   skipLabels: string[];
-  /** The person's own review rules (markdown), added to every review brief; a repo's own rules files are read too. */
-  rules?: string;
 }
 
 export interface ReviewsConfig extends ReviewSettings {
@@ -87,10 +85,6 @@ function parseSettings(raw: Record<string, unknown>, where: string): Partial<Rev
   if (raw.trapWaitSecs !== undefined) out.trapWaitSecs = nonNegative(raw.trapWaitSecs, `${where}.trapWaitSecs`);
   if (raw.skipAuthors !== undefined) out.skipAuthors = strings(raw.skipAuthors, `${where}.skipAuthors`);
   if (raw.skipLabels !== undefined) out.skipLabels = strings(raw.skipLabels, `${where}.skipLabels`);
-  if (raw.rules !== undefined) {
-    if (typeof raw.rules !== 'string' || raw.rules.length > 20000) throw new Error(`${where}.rules must be text of at most 20000 characters`);
-    if (raw.rules.trim()) out.rules = raw.rules.trim();
-  }
   return out;
 }
 
@@ -150,6 +144,12 @@ export interface ReviewRound {
   staged?: { reviewId: string; at: string };
   /** Why the round is where it is: a skip rule, the daily cap, a failure, a withdrawal. */
   reason?: string;
+  /**
+   * On wharf grounds: the round's review document. `mine` is false when
+   * another boat created it first (that boat drafts and posts the round);
+   * `published` is the fingerprint last published.
+   */
+  wharf?: { doc: string; mine: boolean; published?: string };
 }
 
 export interface ReviewPr {
@@ -294,7 +294,7 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
 
 /**
  * The search no longer returns these items (the request was withdrawn, the
- * PR closed or merged, or Chris reviewed it on GitHub): their open newest
+ * PR closed or merged, or the person reviewed it on GitHub): their open newest
  * round is withdrawn. A drafted review is kept for reading, never posted.
  * `inScope` limits it to items the search could have returned.
  */
@@ -376,7 +376,7 @@ export function readRoundDraft(key: string, roundId: string): { body: string; co
 }
 
 /** The `prReview` brief: draft, never post. */
-export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identity: string; id: string; outDir: string; checkout: string; rules?: string }): string {
+export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identity: string; id: string; outDir: string; checkout: string }): string {
   const { owner, repo, number, url, title, author } = item.pr;
   const ref = `${number} --repo ${owner}/${repo}`;
   return [
@@ -385,11 +385,10 @@ export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identi
     `1. Read the PR: \`gh pr view ${ref} --comments\` and \`gh pr diff ${ref}\`.`,
     `2. For context beyond the diff, make a throwaway checkout of the PR head at exactly ${opts.checkout}: \`git fetch origin pull/${number}/head\`, then \`git worktree add --detach ${opts.checkout} FETCH_HEAD\`. Use no other path; lobstah removes it when the job ends. Never switch, commit to, or push this checkout's own branch.`,
     "3. Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md, .github/pull_request_template.md) and hold the change to it.",
-    `4. Review it the way the reviewer would: correctness first, then risk, then clarity. No style nits unless they hide a bug.${opts.rules ? ' Follow the review rules below too.' : ''}`,
+    '4. Review it the way the reviewer would: correctness first, then risk, then clarity. No style nits unless they hide a bug. Follow any review rules appended below this brief too.',
     `5. Write two files in ${opts.outDir}: \`review.md\`, the review's summary body in markdown; and \`comments.json\`, the inline comments as a JSON array of \`{"path": "<file>", "line": <line in the PR head's version>, "side": "RIGHT", "body": "<markdown>"}\` (\`[]\` when there are none).`,
     '6. Do not post, approve, request changes, comment on, push to, or edit the PR. If you cannot review it (too large, missing context), say so in review.md.',
     `7. Report done: \`lobstah report ${opts.id} done "<one line>"\`.`,
-    ...(opts.rules ? ['', `Review rules from ${opts.identity}:`, '', opts.rules] : []),
   ].join('\n');
 }
 
@@ -437,9 +436,11 @@ export function markReviewPosted(key: string, roundId: string, post: { reviewId:
 
 // ── Attention ──────────────────────────────────────────────────────────────
 
-/** Whether a round asks for Chris: drafted, stale, failed, or requested with no job to draft it. */
+/** Whether a round waits on the person: drafted, stale, failed, or requested with no job to draft it; never a round another boat on the wharf has. */
 export function reviewStands(round: ReviewRound | undefined): boolean {
   if (!round) return false;
+  // Another boat on the wharf has this round: it waits on the person there, not here.
+  if (round.wharf && !round.wharf.mine) return false;
   if (round.state === 'requested') return round.dispatch === undefined;
   return round.state === 'drafted' || round.state === 'stale' || round.state === 'failed';
 }

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { acked, html, Session, when } from './common.js';
 import { Boats } from './boats.js';
-import { Document, Job } from './details.js';
+import { Document, Job, ReviewActions } from './details.js';
+import { safeHref } from '../../../../apps/cli/src/glass-markdown.js';
 import { DeviceApproval } from './device.js';
 import { json } from './api.js';
 import { requestState } from './model.js';
@@ -90,7 +91,8 @@ export function App() {
     setNotice('');
     try {
       await json('/api/glass/' + path, body);
-      notify(path === 'requests' ? 'queued for helm; expires in 10 minutes' : 'saved');
+      const review = path === 'requests' && String((body as { kind?: unknown }).kind ?? '').startsWith('review-');
+      notify(review ? 'sent to the boat that drafted it' : path === 'requests' ? 'queued for helm; expires in 10 minutes' : 'saved');
       await refresh();
       return true;
     } catch (e) {
@@ -180,6 +182,16 @@ export function App() {
       }
     }
   };
+  // Reviews that ask for you first (the boat publishes `stands`), then the newest.
+  const reviewCards = () =>
+    (snapshot?.documents ?? [])
+      .filter((d) => d.kind === 'review')
+      .sort((a, b) => Number(!!b.review?.stands) - Number(!!a.review?.stands) || b.at.localeCompare(a.at))
+      .map(
+        (d) =>
+          // A review opens the PR in its review tool, where the draft waits as the person's pending review.
+          html`<a class=${'card' + (d.review?.stands ? '' : ' acked')} href=${safeHref(d.review?.open ?? d.review?.pr ?? '') || '#review/' + d.id} target="_blank" rel="noopener"><div class="top"><b>${d.title}</b><span class="badge">${d.review?.state ?? 'review'}</span></div><div class="meta">${d.review?.requestedBy ? 'asked by ' + d.review.requestedBy + ' · ' : ''}${snapshot?.boats.find((b) => 'boat:' + b.id === d.author)?.name ?? d.author} · ${when(d.at)}</div>${d.review?.reason && html`<div class="note">${d.review.reason}</div>`}</a>`,
+      );
   const cards = (kind: 'decision' | 'report') =>
     snapshot?.documents
       .filter((d) => d.kind === kind)
@@ -195,10 +207,11 @@ export function App() {
         ? html`<button class="btn" onClick=${authenticate}>sign in with GitHub</button><div class="dim">Invite-only. Sign-in does not take a helm seat.</div>`
         : snapshot &&
           html`<nav class="tabs" aria-label="Spyglass views">${TABS.map((t) => html`<a href=${'#' + t} class=${tab === t ? 'on' : ''} onClick=${() => setTab(t)}>${t}</a>`)}</nav>
-      ${tab === 'deck' && html`<h2>Decisions</h2><div class="cards">${cards('decision')}</div><h2>Human requests</h2>${snapshot.requests.map((r) => html`<div class="msg"><b>${r.kind}</b> · ${r.dispatch ?? r.boat} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo)}</div></div>`)}`}
+      ${tab === 'deck' && html`<h2>Decisions</h2><div class="cards">${cards('decision')}</div><h2>Human requests</h2>${snapshot.requests.map((r) => html`<div class="msg"><b>${r.kind}</b> · ${r.dispatch ?? r.boat} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`)}`}
       ${tab === 'jobs' && html`<div class="cards">${jobs.map((j) => html`<button class=${'card' + (j.ack ? ' acked' : '')} onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${LinkedText(j.brief.split('\n')[0])}</b><span class="badge">${j.status?.verb ?? j.state}</span></div><div class="meta">${j.repo} · ${j.boatName ?? snapshot.boats.find((b) => b.id === j.claimedBoat)?.name ?? j.claimedBoat ?? 'unclaimed'}${acked(j.ack)}</div><div class="note">${LinkedText(j.status?.note ?? j.unservable?.note)}</div></button>`)}</div>`}
       ${tab === 'traps' && html`<div class="cards">${snapshot.workers.map((w) => html`<button class="card" onClick=${() => setModal({ kind: 'trap', id: w.id })}><div class="top"><b>${w.id}</b><span class="badge">${w.harness ?? 'unknown harness'}</span></div><div class="meta">${w.boatName} · ${when(w.lastCheckIn)}</div><div class="note">${w.current ? 'job ' + w.current : 'no current job'} · ${LinkedText(w.repoRemote)}</div></button>`)}</div>`}
       ${tab === 'boats' && html`<${Boats} boats=${snapshot.boats} action=${action} deleteAccount=${deleteAccount} />`}
+      ${tab === 'reviews' && html`<div class="cards">${reviewCards()}</div>${!reviewCards().length && html`<div class="dim">No review requests. A boat with [reviews].enabled publishes them here.</div>`}`}
       ${tab === 'reports' && html`<div class="cards">${cards('report')}${jobs.filter((j) => j.status?.evidence?.files?.length).map((j) => html`<button class="card" onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${LinkedText(j.brief.split('\n')[0])}</b><span class="badge">catch files</span></div><div class="meta">${j.workerId ?? 'headless worker'} · ${when(j.status?.at)}</div></button>`)}</div>`}
       ${location.pathname === '/device' && html`<${DeviceApproval} notify=${notify} />`}`
     }
@@ -207,7 +220,7 @@ export function App() {
       snapshot &&
       html`<div id="overlay" class="open" onClick=${(e: Event) => {
         if (e.target === e.currentTarget) setModal(undefined);
-      }}><section class="modal" role="dialog" aria-modal="true" aria-label=${selectedDoc?.title ?? found?.id ?? 'details'} tabindex="-1" onKeyDown=${keydown}><button class="btn x" aria-label="close details" onClick=${() => setModal(undefined)}>×</button>${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}<h3>${LinkedText(selectedDoc?.title ?? found?.id ?? `${modal.kind} ${modal.id}`)}</h3>${!found && html`<div class="dim">No ${modal.kind} with this id is listed on this wharf for your account. It may have been withdrawn or removed.</div>`}${selectedDoc && html`<${Document} key=${selectedDoc.id} doc=${selectedDoc} action=${action} />`}${selectedJob && html`<${Job} key=${selectedJob.id} job=${selectedJob} workers=${snapshot.workers} action=${action} />`}${selectedWorker && html`<div class="sub">${selectedWorker.harness ?? 'unknown harness'} · ${LinkedText(selectedWorker.repoRemote)}</div><${Session} worker=${selectedWorker} />`}</section></div>`
+      }}><section class="modal" role="dialog" aria-modal="true" aria-label=${selectedDoc?.title ?? found?.id ?? 'details'} tabindex="-1" onKeyDown=${keydown}><button class="btn x" aria-label="close details" onClick=${() => setModal(undefined)}>×</button>${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}<h3>${LinkedText(selectedDoc?.title ?? found?.id ?? `${modal.kind} ${modal.id}`)}</h3>${!found && html`<div class="dim">No ${modal.kind} with this id is listed on this wharf for your account. It may have been withdrawn or removed.</div>`}${selectedDoc && selectedDoc.kind !== 'review' && html`<${Document} key=${selectedDoc.id} doc=${selectedDoc} action=${action} />`}${selectedDoc?.kind === 'review' && html`<${ReviewActions} key=${selectedDoc.id + ':' + (selectedDoc.review?.state ?? '')} doc=${selectedDoc} action=${action} />`}${selectedJob && html`<${Job} key=${selectedJob.id} job=${selectedJob} workers=${snapshot.workers} action=${action} />`}${selectedWorker && html`<div class="sub">${selectedWorker.harness ?? 'unknown harness'} · ${LinkedText(selectedWorker.repoRemote)}</div><${Session} worker=${selectedWorker} />`}</section></div>`
     }
     <footer>🦞✨ lobstah · wharf · PR watches and repair run on your boats</footer>`;
 }

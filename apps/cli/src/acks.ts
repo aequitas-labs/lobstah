@@ -8,7 +8,7 @@ import { hostedItemExists, isHostedKey } from './hosted-view.js';
 /**
  * Attention acks: a human has seen an item. Display-only — an ack hides the
  * item from the desktop pet and the glass lobs, never from `man tend
- * --json`, `man wait`, the park, reminders, or notifyCommand: acknowledging
+ * --json`, `man wait`, the park, reminders, or [hooks.notify]: acknowledging
  * that a human looked must never hide a question from the orchestrator
  * that has to answer it.
  *

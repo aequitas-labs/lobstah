@@ -111,7 +111,7 @@ export class Account extends DurableObject<Env> {
       ${glassSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
-    this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), event: (k, d, note) => this.event(k, d, note),
+    this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now) });
   }
   private get(key: string): string | undefined {
@@ -499,7 +499,8 @@ export class Account extends DurableObject<Env> {
           await this.env.FILES.put(`${c.account}/${file}`, bytes, { sha256: hash, httpMetadata: { contentType: 'application/octet-stream', contentDisposition: 'attachment' } });
           // SQL tombstones cannot race deletion: deleteAccount uses this same
           // R2 serial queue, and all metadata remains durable across eviction.
-          this.ctx.storage.sql.exec('UPDATE files SET ready=1 WHERE id=?', file); this.event('file-uploaded', row.dispatch);
+          this.ctx.storage.sql.exec('UPDATE files SET ready=1 WHERE id=?', file);
+          if (!this.glass.isReviewScope(row.dispatch)) this.event('file-uploaded', row.dispatch);
         }
         return JSON.stringify({ status: 200, value: { id: file, bytes: row.size } });
       } catch (e) {

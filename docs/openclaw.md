@@ -54,7 +54,7 @@ The division of labor that falls out:
 - **Fleet agents** keep the judgment work: triage, escalation policy,
   answering humans — and reach lobstah through the plugin tools when a request
   becomes a dispatch.
-- **Notifications** ride `notifyCommand` — point it at your existing Slack
+- **Notifications** ride `[hooks.notify]` — point its `command` at your existing Slack
   helper; lobstah stays vendor-free.
 
 Token minting for GitHub Apps fits the `tokenCommand` source directly

@@ -4,7 +4,7 @@ One file: `$LOBSTAH_HOME/config.toml` (default `~/.lobstah/config.toml`),
 created with commented examples by `lobstah init`. Pickup reads its own
 `[pickup.*]` sections from the same file.
 
-**The one TOML gotcha:** top-level keys (`notifyCommand`, `remindSecs`, …)
+**The one TOML gotcha:** top-level keys (`attentionKinds`, `remindSecs`, …)
 must appear **before** the first `[section]` header, or they silently become
 keys of that section.
 
@@ -12,8 +12,6 @@ keys of that section.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `notifyCommand` | — | Exec'd by the daemon on wake-worthy status transitions with `LOBSTAH_ID`, `LOBSTAH_LANE`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_AT` in the environment. Fire-and-forget; point it at ntfy, a Slack helper, anything. |
-| `notifyVerbs` | `["needs-decision", "blocked", "done", "failed"]` | Which verbs fire `notifyCommand`. |
 | `attentionKinds` | `["question", "decision", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` | Which kinds `man tend`, the glass, and the desktop pet show. `decision` is a question the helm put to the human with `lobstah man ask`; the glass shows it as a card to answer, and it hides the raw `question` it frames. Without `decision`, framed decisions do not show and raw questions do. `pr:draft`, `landed`, `report`, and `review` are valid opt-in kinds. An explicit list is used unchanged. Unknown kinds are errors. See the [attention contract](vocabulary.md#attention-contract). |
 | `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
 | `readySettleSecs` | `600` | `pr:ready` stands after continuously meeting the ready conditions on the same head for this many seconds. Any not-ready observation or new head resets the timer. Each attention read re-evaluates expiry from the persisted start, even without a new forge event. `0` restores immediate ready attention; other `pr:*` kinds are unchanged. |
@@ -27,7 +25,7 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 | `path` | yes | The git clone worktrees are allocated from (`~/` expands). |
 | `trunk` | yes (default `main`) | Branch dispatches start from (`origin/<trunk>`). |
 | `origin` | no | Enables clone-on-first-use when `path` doesn't exist. |
-| `review` | no (`"github"`) | Destination for PR links in the glass and PR pet clicks, independent of `[pet].open`: `github`, `graphite`, `linear` (browser: `https://linear.review/{owner}/{repo}/pull/{number}`), `linear-app` (Linear desktop app: `linear://review/{owner}/{repo}/pull/{number}`), or an HTTPS template containing `{owner}`, `{repo}`, and `{number}`. Example: `"https://review.example/{owner}/{repo}/{number}"`. The configured `origin` (else the checkout's git origin) identifies the repo; canonical GitHub URLs remain the watch identity. Linear reviews require its GitHub integration; `linear-app` also requires the installed app. Custom templates remain HTTPS-only. |
+| `reviewTool` | no (`"github"`) | Destination for PR links in the glass and PR pet clicks, independent of `[pet].open`: `github`, `graphite`, `linear` (browser: `https://linear.review/{owner}/{repo}/pull/{number}`), `linear-app` (Linear desktop app: `linear://review/{owner}/{repo}/pull/{number}`), or an HTTPS template containing `{owner}`, `{repo}`, and `{number}`. Example: `"https://review.example/{owner}/{repo}/{number}"`. The configured `origin` (else the checkout's git origin) identifies the repo; canonical GitHub URLs remain the watch identity. Linear reviews require its GitHub integration; `linear-app` also requires the installed app. Custom templates remain HTTPS-only. |
 | `setup` | no | Commands run in each fresh worktree, in order (e.g. `["pnpm install"]`). A follow-up that reuses its origin's worktree does not run them again unless a lockfile at the worktree root (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Cargo.lock`, `go.sum`, and others) or the commands changed since they last ran there. |
 | `scratch` | no | Repo-relative paths (e.g. `["tmp", ".cache"]`) whose untracked files do not count as uncommitted changes when a follow-up decides whether to reuse its origin's worktree. Tracked changes anywhere, and untracked files elsewhere, still do. |
 | `env` | no | Environment merged into every dispatch for this repo. |
@@ -46,9 +44,43 @@ rather than relying on the default — left unset, a Claude session takes
 `effortLevel` from the host's settings files, including the user's own
 `~/.claude/settings.json`.
 
-`[repos.<key>.briefHooks]` — markdown appended to the briefs lobstah
-writes for this repo, one key per kind. Each value is a string; lobstah
-appends it as written and does not read it.
+`[repos.<key>.hooks.brief]` — this repo's brief hooks: markdown appended
+after the global [`[hooks.brief]`](#hooks--notify-commands-and-brief-hooks)
+text, with the same keys.
+
+```toml
+[repos.web.hooks.brief]
+all = "Before you report done, run the repo's PR refresh (`/pr-refresh`)."
+checks = "Run `pnpm test:ci` before you push."
+prReview = "Check that every migration is reversible."
+```
+
+`lobstah repos add <path> [--pickup]` detects and appends a block (origin,
+default branch from `origin/HEAD`, setup from the lockfile); `lobstah init
+--scan <dir>...` does the same for every git repo found under the given
+roots. Both append text — hand-written comments survive.
+
+## `[hooks]` — notify commands and brief hooks
+
+What lobstah runs, and what it appends to the briefs it writes. No old key
+is read: each refuses to load and names its new place (see the CHANGELOG).
+
+`[hooks.notify]` — the daemon's notifier.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `command` | — | Exec'd by the daemon on wake-worthy status transitions with `LOBSTAH_ID`, `LOBSTAH_LANE`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_AT` in the environment. Fire-and-forget; point it at ntfy, a Slack helper, anything. |
+| `verbs` | `["needs-decision", "blocked", "paused", "done", "failed"]` | Which verbs fire `command`. |
+
+`[hooks.pickupNotify]` — pick's notifier: `command`, exec'd on
+tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`,
+`LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`.
+
+`[hooks.brief]` — markdown appended to every brief lobstah writes, per kind,
+for every repo. A repo's `[repos.<key>.hooks.brief]` text comes after it.
+Each value is a string; lobstah appends it as written and does not read it.
+In each brief: the global kind's text, the global `all`, then the repo's
+kind and `all`.
 
 | Key | Appended to |
 |---|---|
@@ -57,19 +89,19 @@ appends it as written and does not read it.
 | `review` | A daemon repair of a PR with requested changes, and a pickup review-feedback round. |
 | `ciFix` | A CI-fix continuation a PR watch forks. |
 | `rebase` | A rebase chore from pickup's merge loop. |
-| `prReview` | A review-request draft job ([pickup.md](pickup.md), "Review requests"). |
+| `prReview` | A review-request draft job ([pickup.md](pickup.md), "Review requests"): your own review rules go here. |
 | `all` | Every kind above, after that kind's own text. |
 
 ```toml
-[repos.web.briefHooks]
-all = "Before you report done, run the repo's PR refresh (`/pr-refresh`)."
-checks = "Run `pnpm test:ci` before you push."
-```
+[hooks.notify]
+command = 'ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"'
 
-`lobstah repos add <path> [--pickup]` detects and appends a block (origin,
-default branch from `origin/HEAD`, setup from the lockfile); `lobstah init
---scan <dir>...` does the same for every git repo found under the given
-roots. Both append text — hand-written comments survive.
+[hooks.brief]
+prReview = """
+Flag any change without a test.
+Call out migrations that are not reversible.
+"""
+```
 
 ## `[harness]` — global harness defaults
 
@@ -276,7 +308,6 @@ outside `~/.lobstah/worktrees`: `lobstah cull`, the retention cull,
 |---|---|---|
 | `pollSecs` | `45` | Poll cadence. Outbound only — no webhooks, ever. |
 | `liveComment` | `true` | Keep one editable, marked status comment per dispatch. Routine edits are capped at once per minute; human-needed and terminal transitions still post a fresh notification comment. Falls back to transition comments if editing is unavailable. |
-| `notifyCommand` | — | Pickup's own hook, fired on tracker-report transitions with `LOBSTAH_KEY`, `LOBSTAH_UUID`, `LOBSTAH_VERB`, `LOBSTAH_NOTE`, `LOBSTAH_PR_URL`. |
 | `pools` | `[]` | Pool names (`["codeclaw"]`). An issue dispatch for repo R runs in the first listed `[pools.<name>]` whose `repo` is R. Review rounds are follow-ups and keep their chain's worktree rule. |
 
 ### Token sources (both trackers)
@@ -345,13 +376,12 @@ as that identity, with its token. Any key except `enabled`, `repos` and
 | `enabled` | `false` | Opt-in. Off means no search call at all. |
 | `repos` | `"configured"` | `"configured"`: only PRs in a `[repos.*]` origin. `"any"`: every repo the token can see. |
 | `work` | `"trap"` | Who drafts the review: `"off"`, `"trap"` (a free trap of that repo, then headless after `trapWaitSecs`), or `"headless"`. |
-| `post` | `"draft"` | `"draft"`: stage the draft as Chris's pending review on the PR, to edit and send from his review tool. `"auto"`: post the draft as a comment-only review once drafted. lobstah never approves or requests changes. |
+| `post` | `"draft"` | `"draft"`: stage the draft as the identity's pending review on the PR, to edit and send from the review tool. `"auto"`: post the draft as a comment-only review once drafted. lobstah never approves or requests changes. |
 | `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
 | `maxPerDay` | `20` | Review jobs started per day. Past it, items file with no job. |
 | `skipAuthors`, `skipLabels` | `[]` | Requests on PRs by these authors or with these labels file an item but start no job. |
-| `rules` | — | Your own review rules, as markdown, added to every review brief (a repo's `[repos.<key>.reviews].rules` replaces it there). The brief also tells the job to follow the repo's own rules files, and `[repos.<key>.briefHooks].prReview` appends repo text. |
 
 The `review` attention kind is not in the default `attentionKinds`; add it to
 let review items walk in `man tend`, the glass, and the pet.

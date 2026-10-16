@@ -47,7 +47,7 @@ watches needs `Checks: read`, `Pull requests: read and write`,
 pickup — `Issues: read and write`. [github.md](github.md) says what each one
 is used for and what fails without it; `lobstah doctor` probes them.
 
-**Notifications are a hook, not a vendor.** `notifyCommand` under `[pickup]`
+**Notifications are a hook, not a vendor.** `[hooks.pickupNotify].command`
 is exec'd on every verb transition with `LOBSTAH_KEY`, `LOBSTAH_UUID`,
 `LOBSTAH_VERB`, `LOBSTAH_NOTE`, and `LOBSTAH_PR_URL` in the environment —
 fire-and-forget, never blocking the loop. Point it at whatever the host
@@ -119,14 +119,14 @@ the configured identity included, but never a comment lobstah wrote.
 `APPROVED` reviews are the merge loop's signal, not feedback.
 
 The configured identity counts because lobstah's workers post as that
-account: Chris's own "also handle X" on a trap's PR differs from a worker's
+account: the owner's own "also handle X" on a trap's PR differs from a worker's
 reply only by the marker. An **active-round guard** covers a worker that
 forgets the marker. An unmarked identity comment made while a lobstah run on
 the PR works (the implementation dispatch or a round) is held: it waits for
 the run to end, then opens a round. A round opened only by such held
 comments drops, rather than holds, the identity's unmarked comments made
 during its own run. A forgetful worker costs at most one extra round, never
-a loop. A comment Chris writes during that one round is dropped too.
+a loop. A comment the owner writes during that one round is dropped too.
 
 Everything lobstah writes carries a marker: status and live comments lead
 with `[lobstah:<uuid>]`; notes with no dispatch behind them (an orphan reset)
@@ -230,7 +230,7 @@ lobstah watch add ume:9f2c --check '...' --for <dispatch-uuid>
 
 Each cycle: run due checks (cadence = `[pickup].pollSecs`, or `--every` per
 watch), append events, deliver by owner. Man-owned events surface through
-`man wait`/`man haul` and fire `notifyCommand` with verb `watch`;
+`man wait`/`man haul` and fire `[hooks.pickupNotify]` with verb `watch`;
 dispatch-owned events enqueue a continuation that forks the latest session
 in the owning chain — one in flight per watch, later rounds buffer. With no
 tracker sources configured, `lobstah pick` still runs in watch-only mode.
@@ -266,8 +266,8 @@ one per `ReviewRequestedEvent`: the same standing request never opens a
 second round, and a re-request opens a new one (an open earlier round is
 withdrawn as superseded). A new push with no new request moves a requested
 round's head; a drafted round becomes `stale` and starts nothing on its own.
-When the search stops returning a PR (the request was withdrawn, Chris
-reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
+When the search stops returning a PR (the request was withdrawn, the
+person reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
 truncated search (more than 50 results) withdraws nothing.
 
 **Drafting.** With `[reviews].work` other than `"off"`, a requested round in
@@ -283,9 +283,9 @@ round's directory, `rounds/<round id>/`. Whenever the round's job ends
 (drafted, stale, failed, or withdrawn and its job cancelled, a re-request
 included), pick removes that checkout: `git worktree remove --force`, then
 `git worktree prune`; nothing happens when the path is absent. It follows the repo's own review guidance at the PR head (REVIEW.md,
-CONTRIBUTING.md, AGENTS.md, CLAUDE.md, the PR template), then your
-`[reviews].rules` (per repo under `[repos.<key>.reviews]`), then any
-`[repos.<key>.briefHooks].prReview` text. It never posts,
+CONTRIBUTING.md, AGENTS.md, CLAUDE.md, the PR template), then the
+review rules in `[hooks.brief].prReview`, then any
+`[repos.<key>.hooks.brief].prReview` text. It never posts,
 approves, requests changes, comments, or pushes. When the job reports done,
 the round is `drafted`, or `stale` if the head moved meanwhile, or `failed`
 with the reason when the files are missing or malformed. A skip rule, a PR
@@ -298,9 +298,9 @@ fresh draft is staged on the PR as the identity's **pending review**:
 `POST /repos/{o}/{r}/pulls/{n}/reviews` with no event, `commit_id` set to the
 head the draft reviewed, the inline comments, and a body ending with
 `<!-- lobstah:review <round id> -->`. GitHub shows a pending review only to
-its author, so nothing is visible on the PR until Chris opens it in his
-review tool (`[repos.<key>].review`), edits the draft there, and sends it,
-with whatever event he chooses. When the request then disappears from the
+its author, so nothing is visible on the PR until the person opens it in
+their review tool (`[repos.<key>].reviewTool`), edits the draft there, and
+sends it, with whatever event they choose. When the request then disappears from the
 search, pick reads that review once: submitted marks the round `posted` (by
 `review tool`), deleted dismisses it, still pending withdraws it.
 
@@ -317,6 +317,17 @@ recorded (sent) instead of written again. A failed stage or post keeps its
 reason on the round and is not retried on its own. `lobstah reviews dismiss`
 and `redraft` delete the round's pending review first; a review already sent
 is never deleted.
+
+**On wharf grounds.** A review item whose repo belongs to a grounds with a
+wharf is that boat's to publish: before drafting, pick creates the round's
+`review` document, with an id derived from the item and the round, so a
+second boat that found the same round gets a 409, drafts nothing, and stages
+nothing. The boat publishes every state change with the link that opens the
+PR in the repo's review tool (no helm seat, and no wharf event, so no helm
+wakes). The hosted glass has a Reviews tab whose cards open that link; its
+one request is Dismiss, addressed to the publishing boat, which deletes the
+pending draft with its own token and marks the request done or refused. The
+wharf never calls GitHub.
 
 Round states: `requested`, `drafting`, `drafted`, `stale`, `failed`,
 `posted`, `dismissed`, `withdrawn`. The `review` attention item stands while

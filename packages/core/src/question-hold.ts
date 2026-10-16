@@ -14,7 +14,7 @@ import type { Lane, StatusEntry } from './types.js';
  * The helm's turn on a question. While a helm is signed on for a question's
  * grounds, the question is held: it stays in the helm's own views (`man
  * tend --json`, `man wait`, the park, reminders) but not in the human's (the
- * pet's `attention --json`, the glass, notifyCommand). The first `man haul`
+ * pet's `attention --json`, the glass, [hooks.notify]). The first `man haul`
  * of that helm that finds the question still unanswered releases it: the
  * helm ended a turn without answering. With no live helm for the grounds
  * (none signed on, relieved, or its registration stale past

@@ -107,7 +107,7 @@ function spawnContinuation(
     .replaceAll('{summaries}', pending.map((e) => `- ${e.summary ?? `event ${String(e.seq)}`}`).join('\n'))
     .replaceAll('{events}', JSON.stringify(pending, null, 2));
   // A PR watch's continuation is a CI fix: the repo's hooks for it apply.
-  const brief = w.key.startsWith('pr:') ? withBriefHooks(filled, loadConfig().repos[descriptor.repo], 'ciFix') : filled;
+  const brief = w.key.startsWith('pr:') ? withBriefHooks(filled, loadConfig(), descriptor.repo, 'ciFix') : filled;
   // A chain worked by a live trap gets its continuation addressed there —
   // the trap picks it up at its next park instead of a headless fork
   // running beside it. Addressed bait is sticky: if the trap ghosts, the

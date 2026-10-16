@@ -65,7 +65,7 @@ describe('attention --json', () => {
     ['linear', 'https://linear.review/acme/web/pull/9'],
     ['linear-app', 'linear://review/acme/web/pull/9'],
   ])('feeds the pet the %s destination while keeping the canonical PR identity', (tool, reviewUrl) => {
-    fs.appendFileSync(path.join(home, 'config.toml'), `\n[repos.web]\npath = "/missing"\norigin = "git@github.com:acme/web.git"\nreview = "${tool}"\n`);
+    fs.appendFileSync(path.join(home, 'config.toml'), `\n[repos.web]\npath = "/missing"\norigin = "git@github.com:acme/web.git"\nreviewTool = "${tool}"\n`);
     standingItems();
     const result = lobstah('attention', '--json');
     expect(result.status).toBe(0);

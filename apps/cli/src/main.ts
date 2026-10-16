@@ -349,7 +349,7 @@ work (humans and agents):
 
 host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
-                                  restart ladder, notifyCommand. One per home.
+                                  restart ladder, [hooks.notify]. One per home.
   pick [once]                     tracker loops: poll Linear/GitHub, dispatch
                                   assigned work, report back, reconcile, merge
   daemon install|uninstall        write + load the launchd agent / systemd user
@@ -3655,8 +3655,6 @@ async function mainCli(): Promise<void> {
           configPath(),
           `# lobstah workspace definitions — the descriptor's repo key resolves here.
 # Top-level keys must come before any [section].
-# notifyCommand = 'ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"'
-# notifyVerbs   = ["needs-decision", "blocked", "paused", "done", "failed"]   # the default
 
 ${exampleRepo}[harness]
 default = "claude"
@@ -3668,6 +3666,10 @@ choreConcurrent    = 1
 wedgeThresholdSecs = 600
 maxRestartAttempts = 2
 wallClockSecs      = 3600
+
+# [hooks.notify]
+# command = 'ntfy pub my-topic "$LOBSTAH_VERB $LOBSTAH_ID: $LOBSTAH_NOTE"'
+# verbs   = ["needs-decision", "blocked", "paused", "done", "failed"]   # the default
 `,
         );
       }

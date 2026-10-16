@@ -34,7 +34,7 @@ export interface TendAttention {
   viewedAt?: string;
   /**
    * question: held on the helm's turn (question-hold.ts). `man tend` lists it;
-   * the pet, the glass, and notifyCommand do not, until the helm ends a turn
+   * the pet, the glass, and [hooks.notify] do not, until the helm ends a turn
    * without answering it.
    */
   held?: boolean;
@@ -293,7 +293,7 @@ export interface GlassHelm extends HelmRegistration {
 export interface GlassReview {
   key: string;
   url: string;
-  /** The PR in the repo's review tool ([repos.<key>].review), where the staged draft is edited and sent. */
+  /** The PR in the repo's review tool ([repos.<key>].reviewTool), where the staged draft is edited and sent. */
   reviewUrl: string;
   /** `owner/repo`. */
   repo: string;
@@ -305,7 +305,7 @@ export interface GlassReview {
   requestedBy?: string;
   requestedAt: string;
   state: ReviewRoundState;
-  /** The newest round asks for Chris (it is in the review attention kind's standing set). */
+  /** The newest round waits on the person (it is in the review attention kind's standing set). */
   stands: boolean;
   reason?: string;
   /** The head the round reviews, and the PR's head now. */
