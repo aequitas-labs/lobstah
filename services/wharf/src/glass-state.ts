@@ -170,7 +170,7 @@ export class GlassState {
       }
       if (parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
         // Seen, by a boat with read or the person. The first ack stands. No event and no helm seat.
-        const by = this.acker(actor); requireThat(d.published && !d.withdrawn, 409, 'document is not published or was withdrawn');
+        const acker = this.acker(actor), by = actor.kind === 'person' && c.token.startsWith('browser:') ? 'glass' : acker; requireThat(d.published && !d.withdrawn, 409, 'document is not published or was withdrawn');
         if (!d.ack) { d.ack = { at: new Date(now).toISOString(), by }; this.put('documents', d.id, d); }
         return ok(d);
       }

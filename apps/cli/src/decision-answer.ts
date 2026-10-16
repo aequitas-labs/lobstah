@@ -3,6 +3,7 @@ import type { DecisionAnswer, DecisionMeta, DecisionUpload, Lane } from '@lobsta
 import * as fs from 'node:fs';
 import { applyPermissionAnswer, permissionAnswerAllowed } from './grants-cli.js';
 import { buildTendReport } from './tend.js';
+import { currentAck, writeAck } from './acks.js';
 
 /**
  * Answering, from the glass's `/requests` POST or `man answer`. A decision key answers
@@ -68,12 +69,17 @@ export function answerKey(key: string, req: AnswerRequest): { decision: Decision
 
 /**
  * The human opened a decision (or a raw question) in the glass's decision
- * modal: record its first view. State only: it answers nothing and wakes
+ * modal: record its first view and acknowledge its current attention. State only: it answers nothing and wakes
  * no one. A raw question's view is scoped to when it was asked.
  */
 export function viewKey(key: string, now = new Date()): { key: string; viewedAt: string; first: boolean } {
-  if (key.startsWith('decision:')) return { key, ...markDecisionViewed(key, now) };
-  const q = /^(work|chore):[A-Za-z0-9-]+$/.test(key) ? standingQuestion(key) : undefined;
-  if (!q?.at) throw new DecisionError(`no standing decision or question ${key}`, 404);
-  return { key, ...markQuestionViewed(key, q.at, now) };
+  const item = buildTendReport().attention.find((a) => a.key === key && (a.kind === 'decision' || a.kind === 'question'));
+  let viewed: { viewedAt: string; first: boolean };
+  if (key.startsWith('decision:')) viewed = markDecisionViewed(key, now);
+  else {
+    if (!/^(work|chore):[A-Za-z0-9-]+$/.test(key) || !item?.at) throw new DecisionError(`no standing decision or question ${key}`, 404);
+    viewed = markQuestionViewed(key, item.at, now);
+  }
+  if (item && !currentAck(key, item.stateHash)) writeAck({ key, kind: item.kind, stateHash: item.stateHash, at: now.toISOString(), by: 'glass' });
+  return { key, ...viewed };
 }

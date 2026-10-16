@@ -149,6 +149,29 @@ describe('glass: the decisions list', () => {
 });
 
 describe('glass: the decision modal', () => {
+  it('opening an already-read card still sends a guarded view so it can stop the pet', async () => {
+    const d = fleet();
+    d.decisions[0]!.viewedAt = ago(60_000);
+    const g = await page(d, { post: ok });
+    await show(g, KEY);
+    expect(views(g)).toEqual([KEY]);
+    expect(g.posts()[0]!.headers['x-lobstah-token']).toBe('tok');
+    expect(card(g, KEY)).toBeTruthy();
+    expect(answers(g)).toEqual([]);
+  });
+
+  it('a new question state in the open modal is viewed again', async () => {
+    const d = fleet();
+    const g = await page(d, { post: ok });
+    await show(g, Q);
+    expect(views(g)).toEqual([Q]);
+    d.attention = d.attention.map((a) => a.key === Q ? { ...a, stateHash: 'new-state', at: ago(1000), note: 'which port now?' } : a);
+    g.serve(d);
+    await g.poll();
+    expect(views(g)).toEqual([Q, Q]);
+    expect(card(g, Q)!.textContent).toContain('which port now?');
+  });
+
   it('a row opens the full decision: detail, files, options, text, attach, Send, its position; viewing records it once and answers nothing', async () => {
     const g = await page(fleet(), { post: ok });
     await show(g, KEY);

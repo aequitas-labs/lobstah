@@ -154,8 +154,8 @@ it('the signed-in page acks a document or a job with its cookie and origin only'
   expect((await browser('documents/card/ack', {}, 'POST', { Origin: 'https://evil.test' })).status).toBe(403);
   expect((await SELF.fetch('https://glass.test/api/glass/documents/card/ack', { method: 'POST', headers: { Origin: 'https://glass.test', 'Idempotency-Key': 'no-cookie' }, body: '{}' })).status).toBe(401);
   const acked = await browser('documents/card/ack', {}); expect(acked.status).toBe(200);
-  expect(await acked.json()).toMatchObject({ id: 'card', ack: { by: 'person' } });
-  expect((await (await browser('')).json<{ documents: { id: string; ack?: { by: string } }[] }>()).documents[0]).toMatchObject({ id: 'card', ack: { by: 'person' } });
+  expect(await acked.json()).toMatchObject({ id: 'card', ack: { by: 'glass' } });
+  expect((await (await browser('')).json<{ documents: { id: string; ack?: { by: string } }[] }>()).documents[0]).toMatchObject({ id: 'card', ack: { by: 'glass' } });
   // The job route is open to the page too; this job has reported nothing to have seen.
   expect((await browser('dispatches/job/ack', { at: new Date().toISOString() })).status).toBe(409);
   expect((await browser('dispatches/job/ack/extra', {})).status).toBe(404);

@@ -46,6 +46,12 @@ async function page(d: GlassSnapshot, opts: Partial<GlassDomOptions> = {}): Prom
   return g;
 }
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** A stack heading without its Ack stack control (glass-pr-ack.test.ts tests that). */
+const heading = (el: Element): Element => {
+  const copy = el.cloneNode(true) as Element;
+  for (const n of copy.querySelectorAll('.prack')) n.remove();
+  return copy;
+};
 const shown = (g: GlassDom, id: string) => (g.$('#' + id) as HTMLElement).style.display !== 'none';
 const click = async (g: GlassDom, el: Element | null) => {
   expect(el).toBeTruthy();
@@ -567,8 +573,8 @@ describe('glass page: PRs', () => {
       '#61': 'badge pr-behind',
       '#30': 'badge pr-merged',
     });
-    expect(g.$$('#prs h2').map(text)).toContain('#41 → #42 → #43 · floor main');
-    expect(g.$$('#prs h2').map(text)).toContain('#30 · floor main · history');
+    expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#41 → #42 → #43 · floor main');
+    expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#30 · floor main · history');
   });
 
   it('a poll with new observation times keeps every PR row node in its place and the open modal', async () => {
@@ -603,7 +609,7 @@ describe('glass page: PRs', () => {
 
   it('the PRs table groups by stack and never shows a watch cursor', async () => {
     const g = await page(acceptanceFleet(), { hash: '#prs' });
-    expect(g.$$('#prs th[colspan]').map(text)).toEqual(['#41 → #42 → #43 · floor main · open']);
+    expect(g.$$('#prs th[colspan]').map((h) => text(heading(h)))).toEqual(['#41 → #42 → #43 · floor main · open']);
     const rows = g.$$('#prs tr.rowhead').map((tr) => [...tr.querySelectorAll('td')].map(text));
     expect(rows.map((r) => r[0])).toEqual(['#41', '#42', '#43']);
     expect(rows[0]![5]).toBe('CLEAN · next mergeable');
@@ -647,7 +653,7 @@ describe('glass page: PRs', () => {
       ['#43', null],
     ];
     const cards = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
-    const head = cards.$$('#prs h2').find((h) => text(h).startsWith('#41'))!;
+    const head = heading(cards.$$('#prs h2').find((h) => text(h).startsWith('#41'))!);
     expect(text(head)).toBe('#41 → #42 → #43 · floor main');
     expect(titled([...head.querySelectorAll('span')])).toEqual(want);
     const deck = await page(everyAttentionFleet());

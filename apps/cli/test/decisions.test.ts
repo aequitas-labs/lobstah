@@ -350,10 +350,14 @@ describe('the glass answer POST', () => {
     expect(unseenNotices(false)).toEqual([]);
     // The API and tend carry it.
     expect(buildGlassSnapshot().decisions!.find((d) => d.key === key)?.viewedAt).toBe(body.viewedAt);
-    expect(buildTendReport().attention.find((a) => a.key === key)?.viewedAt).toBe(body.viewedAt);
+    expect(buildTendReport().attention.find((a) => a.key === key)).toMatchObject({ viewedAt: body.viewedAt, acked: { by: 'glass' } });
+    // Seeing keeps the card open; answering removes its attention.
+    expect(buildGlassSnapshot().attention.some((a) => a.key === key)).toBe(true);
     expect(renderTend(buildTendReport())).toContain(`,yes ${body.viewedAt},Cut 0.6.0?`);
     expect((await view('decision:00000000')).status).toBe(404);
     expect((await send({ kind: 'decision-viewed', payload: {} })).status).toBe(400);
+    expect((await post(key, { option: 'yes' })).status).toBe(201);
+    expect(buildGlassSnapshot().attention.some((a) => a.key === key)).toBe(false);
   });
 
   it('a replaced decision starts unread; a raw question is viewed by its key until it is asked again', async () => {
@@ -369,12 +373,14 @@ describe('the glass answer POST', () => {
     const q = `work:${A}`;
     expect(buildTendReport().attention.find((a) => a.key === q)?.viewedAt).toBeUndefined();
     expect((await send({ kind: 'decision-viewed', payload: { key: q } })).status).toBe(200);
+    expect(buildTendReport().attention.find((a) => a.key === q)?.acked?.by).toBe('glass');
     const seen = buildTendReport().attention.find((a) => a.key === q)?.viewedAt;
     expect(seen).toBeDefined();
     expect(buildGlassSnapshot().attention!.find((a) => a.key === q)?.viewedAt).toBe(seen);
     // The worker asks again: a new question, unread.
     appendStatus(A, 'work', 'needs-decision', 'which port, really?', new Date(Date.now() + 1000).toISOString());
     expect(buildTendReport().attention.find((a) => a.key === q)?.viewedAt).toBeUndefined();
+    expect(buildTendReport().attention.find((a) => a.key === q)?.acked).toBeUndefined();
     expect(answerRequests()).toEqual([]);
   });
 

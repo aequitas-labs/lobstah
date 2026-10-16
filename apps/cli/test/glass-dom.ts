@@ -73,7 +73,7 @@ export interface GlassDomOptions {
   /** Serve /data whole, without an ETag, as the server did before it slimmed the poll: the legacy page reads whole dispatches. */
   whole?: boolean;
   /** Answers a POST the page makes (an answer to a decision); the default is a 404. */
-  post?: (url: string, init: { headers: Record<string, string>; body: string }) => { status: number; body: unknown };
+  post?: (url: string, init: { headers: Record<string, string>; body: string }) => { status: number; body: unknown } | Promise<{ status: number; body: unknown }>;
 }
 
 export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts: GlassDomOptions): Promise<GlassDom> {
@@ -115,7 +115,7 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
     if (init?.method === 'POST') {
       const req = { url, headers: init.headers ?? {}, body: init.body ?? '' };
       posted.push(req);
-      const res = opts.post ? opts.post(url, req) : { status: 404, body: { reason: 'not found' } };
+      const res = opts.post ? await opts.post(url, req) : { status: 404, body: { reason: 'not found' } };
       return { ok: res.status >= 200 && res.status < 300, status: res.status, json: async () => res.body };
     }
     if (typeof url === 'string' && url.startsWith('/report/')) {

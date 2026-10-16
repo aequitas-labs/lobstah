@@ -40,7 +40,7 @@ export const LANDED_WINDOW_MS = 86400000;
 export const DECK_TRAPS_MAX = 8;
 // On deck's reviews section: at most REVIEWS_MAX, then "+N more".
 export const REVIEWS_MAX = 5;
-// On deck's reports section: at most REPORTS_MAX, unacked first, then "+N more".
+// On deck's reports section: at most REPORTS_MAX, newest first, then "+N more".
 export const REPORTS_MAX = 8;
 export const STALE_DAEMON_MS = 90000;
 export const STALE_SEAT_MS = 1800000;
@@ -280,9 +280,8 @@ export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>)
 export const reviewOrder = (a: GlassReview, b: GlassReview): number =>
   Number(b.stands) - Number(a.stands) || b.requestedAt.localeCompare(a.requestedAt);
 
-/** Reports in list order: unacked first, then newest first. */
-export const reportOrder = (a: GlassReport, b: GlassReport): number =>
-  Number(!!a.acked) - Number(!!b.acked) || b.filedAt.localeCompare(a.filedAt);
+/** Reports in list order: newest first, regardless of acknowledgment. */
+export const reportOrder = (a: GlassReport, b: GlassReport): number => b.filedAt.localeCompare(a.filedAt);
 
 /** A report's own page on the glass: it opens in a new tab and renders once. */
 export const reportPageUrl = (key: string): string => `/report/${encodeURIComponent(key)}`;
@@ -454,7 +453,7 @@ export interface DeckInputs {
   decisions: DecisionCard[];
   prAttention: DeckAttention[];
   landed: LandedCatch[];
-  /** Unacked first, then newest first; the deck shows REPORTS_MAX. */
+  /** Newest first, regardless of acknowledgment; the deck shows REPORTS_MAX. */
   reports: GlassReport[];
   /** Reviews waiting on the person, newest request first; the deck shows REVIEWS_MAX. */
   reviews: GlassReview[];
@@ -473,6 +472,15 @@ export interface PrsInputs {
   stacks: GlassStack[];
   prs: GlassPr[];
   watches: Watch[];
+  prAttention: DeckAttention[];
+}
+
+/** Attention belonging to PRs/stacks actually visible in this section. */
+export function shownPrAttention(attention: readonly DeckAttention[], prs: readonly GlassPr[], stacks: readonly GlassStack[]): DeckAttention[] {
+  const keys = new Set(prs.map((p) => p.key));
+  const stackIds = new Set(prs.map((p) => p.stackId));
+  for (const s of stacks) if (stackIds.has(s.id)) keys.add('stack:' + s.id);
+  return attention.filter((a) => keys.has(a.key) && (a.kind.startsWith('pr:') || a.kind === 'stack-ready'));
 }
 
 export interface SectionInputs {
@@ -524,9 +532,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     deck: {
       view: st.view,
       decisions: filteredDecisionCards(d, st),
-      prAttention: (d.attention || []).filter((a) =>
-        a.kind && a.kind.startsWith('pr:') && inRepo({ ...a, repo: a.repo ?? (d.prs || []).find((p) => p.key === a.key)?.repo, dispatch: a.id }),
-      ).map(noAge),
+      prAttention: shownPrAttention((d.attention || []).map(noAge), prs, stacks),
       landed: (d.landed || [])
         .filter((a) => inRepo({ ...a, dispatch: a.id }) && recent(a.at, LANDED_WINDOW_MS) && hasQuery(a.repo, a.note, a.id))
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
@@ -550,6 +556,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       view: st.view,
       stacks,
       prs: prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)),
+      prAttention: shownPrAttention((d.attention || []).map(noAge), prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)), stacks),
       watches: (d.watches || []).filter((w) => !String(w.key).startsWith('pr:')),
     },
     reports: {
