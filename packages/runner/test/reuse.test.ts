@@ -135,7 +135,11 @@ function harness(work: (cwd: string) => void = () => {}, gate?: Promise<void>, l
       return { events, send: () => {}, end: finish, kill: finish, done };
     },
   });
-  return { seen, prompts, deps: { loadAdapter: adapter } };
+  // A repair asks gh whether its PR is still open before it starts. Core
+  // runs a bare `gh`, which on Windows finds only gh.exe, never the stub's
+  // gh.cmd: the machine's own gh would answer, over the network, for tens of
+  // seconds. The PR here is open by fiat.
+  return { seen, prompts, deps: { loadAdapter: adapter, prState: () => 'OPEN' } };
 }
 
 const commit = (msg: string, file = 'work.txt', body = msg) => (cwd: string) => {

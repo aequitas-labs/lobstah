@@ -7,6 +7,10 @@ import * as path from 'node:path';
  * (signed in or not), and its first start on a Windows CI runner has taken
  * tens of seconds. The stub appends each call's arguments to `calls`.
  * `restore` puts PATH back.
+ *
+ * On Windows the stub is gh.cmd, which only a caller that resolves PATHEXT
+ * (`resolveOnPath`, or a shell) finds. A bare `spawnSync('gh')` finds only
+ * gh.exe and starts the machine's gh anyway: give such a call its own seam.
  */
 export function stubGh(dir: string): { calls: string; restore: () => void } {
   fs.mkdirSync(dir, { recursive: true });

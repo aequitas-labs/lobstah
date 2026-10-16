@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
+import { goalLine } from './goal-line.js';
 
 export interface DailyGoals { grounds: string; date: string; lines: string[]; recap: string }
 
@@ -55,6 +56,12 @@ export function removeGoal(grounds: string, date: string, number: number): Daily
   const day = readGoals(grounds, date);
   if (!Number.isSafeInteger(number) || number < 1 || number > day.lines.length) throw new Error('goal number must be a line shown by lobstah goals');
   day.lines.splice(number - 1, 1);
+  writeGoals(day); return day;
+}
+export function setGoalDone(grounds: string, date: string, number: number, done: boolean): DailyGoals {
+  const day = readGoals(grounds, date);
+  if (!Number.isSafeInteger(number) || number < 1 || number > day.lines.length) throw new Error('goal number must be a line shown by lobstah goals');
+  day.lines[number - 1] = `[${done ? 'x' : ' '}] ${goalLine(day.lines[number - 1]!).text}`;
   writeGoals(day); return day;
 }
 export const goalsCardTitle = (date: string) => `Goals for ${validGoalDate(date)}`;
