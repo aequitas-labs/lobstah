@@ -3,9 +3,13 @@
  * of plain objects; the page turns the tree into elements, never into an
  * HTML string, so raw HTML in the markdown is text and no script can run.
  * It reads headings, paragraphs, fenced code, pipe tables, lists, block
- * quotes, rules, and inline code, links, images, bold, and italics. Keep
- * this module free of Node imports: it is bundled into the page.
+ * quotes, rules, and inline code, links, images, bold, and italics. A bare
+ * http(s) URL in text is a link too (glass-links.ts decides where it ends);
+ * one in a code span or a link's own text stays text. Keep this module free
+ * of Node imports: it is bundled into the page.
  */
+
+import { urlAt } from './glass-links.js';
 
 export type MdInline =
   | { t: 'text'; v: string }
@@ -68,7 +72,8 @@ function bracketed(s: string, i: number): { text: string; target: string; end: n
   return { text: s.slice(i + 1, close), target, end: paren + 1 };
 }
 
-export function parseInline(s: string): MdInline[] {
+/** Inline marks; `autolink` false inside a link's own text, so links never nest. */
+export function parseInline(s: string, autolink = true): MdInline[] {
   const out: MdInline[] = [];
   let text = '';
   const flush = () => {
@@ -105,8 +110,17 @@ export function parseInline(s: string): MdInline[] {
       const b = bracketed(s, i);
       if (b) {
         flush();
-        out.push({ t: 'a', href: b.target, c: parseInline(b.text) });
+        out.push({ t: 'a', href: b.target, c: parseInline(b.text, false) });
         i = b.end;
+        continue;
+      }
+    }
+    if (autolink && (ch === 'h' || ch === 'H')) {
+      const url = urlAt(s, i);
+      if (url) {
+        flush();
+        out.push({ t: 'a', href: url, c: [{ t: 'text', v: url }] });
+        i += url.length;
         continue;
       }
     }
@@ -114,7 +128,7 @@ export function parseInline(s: string): MdInline[] {
       const end = s.indexOf(ch + ch, i + 2);
       if (end > i + 2) {
         flush();
-        out.push({ t: 'b', c: parseInline(s.slice(i + 2, end)) });
+        out.push({ t: 'b', c: parseInline(s.slice(i + 2, end), autolink) });
         i = end + 2;
         continue;
       }
@@ -124,7 +138,7 @@ export function parseInline(s: string): MdInline[] {
       while ((end = s.indexOf(ch, end)) > 0 && (s[end + 1] === ch || (ch === '_' && /\w/.test(s[end + 1] ?? '')))) end += 2;
       if (end > i + 1 && s[i + 1] !== ' ') {
         flush();
-        out.push({ t: 'i', c: parseInline(s.slice(i + 1, end)) });
+        out.push({ t: 'i', c: parseInline(s.slice(i + 1, end), autolink) });
         i = end + 1;
         continue;
       }
@@ -261,7 +275,7 @@ export function parseMarkdown(markdown: string): MdBlock[] {
         const row = cells(lines[i++]!);
         rows.push(head.map((_, k) => parseInline(row[k] ?? '')));
       }
-      out.push({ t: 'table', align: head.map((_, k) => align[k] ?? ''), head: head.map(parseInline), rows });
+      out.push({ t: 'table', align: head.map((_, k) => align[k] ?? ''), head: head.map((c) => parseInline(c)), rows });
       continue;
     }
     const para: string[] = [];

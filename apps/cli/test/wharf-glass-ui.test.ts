@@ -5,7 +5,7 @@ import { snapshot, jobs, detail, markdown } from './fixtures/wharf-glass.js';
 import { parseRoute, routeHash } from '../../../services/wharf/glass/src/route.js';
 let windows: Window[] = [];
 afterEach(async () => { await Promise.all(windows.map((w) => w.happyDOM.close())); windows = []; });
-async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs; badge?: (count: number) => Promise<void> } = {}) {
+async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void> } = {}) {
   const window = new Window({ url: 'https://glass.test' + path, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
   windows.push(window); const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] = [], reads: string[] = [], copied: string[] = [], intervals: (() => void)[] = [];
@@ -25,7 +25,7 @@ async function page(path = '/', signedOut = false, data: { snapshot?: typeof sna
     if (init.method && init.method !== 'GET') { writes.push({ path, body: JSON.parse(String(init.body)), headers: init.headers as Record<string, string>, credentials: init.credentials }); return Response.json({ success: true }); }
     if (path === '/api/glass') return Response.json(data.snapshot ?? snapshot);
     if (path === '/api/glass/dispatches') return Response.json(data.jobs ?? jobs);
-    if (path === '/api/glass/dispatches/job/detail') return Response.json(detail);
+    if (path === '/api/glass/dispatches/job/detail') return Response.json(data.detail ?? detail);
     if (path.endsWith('/image') || path.endsWith('/worker-image')) return new Response(new Uint8Array([137, 80, 78, 71]));
     if (path.includes('/files/')) return new Response(markdown);
     if (path.startsWith('/api/auth/device?')) return Response.json({ boatName: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], description: 'Work and steer the helm.' });
@@ -202,4 +202,25 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
   expect(h.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-dismiss', document: '7' } });
   expect(h.doc.body.textContent).toContain('sent to the boat that drafted it');
   expect(parseRoute('#review/7')).toEqual({ tab: 'reviews', item: { kind: 'review', id: '7' } });
+});
+it('links bare http(s) URLs in cards, notes, briefs, messages and options as text, never markup', async () => {
+  const PR = 'https://github.com/aequitas-labs/lobstah/pull/205', LOCAL = 'http://127.0.0.1:5173/review/abc';
+  const s = structuredClone(snapshot), j = structuredClone(jobs), d = structuredClone(detail);
+  s.documents[0]!.options = [`Ship it (${PR})`, 'Wait'];
+  j[0]!.brief = `Build the hosted spyglass\nSee ${LOCAL}, and <b>keep</b> \`https://code.example\` as code.`;
+  j[0]!.status!.note = `<script>alert(1)</script> review ${PR}. javascript:alert(2)`;
+  d.reports[0]!.note = `progress at ${LOCAL}.`; d.messages[0]!.text = `see ${PR}`;
+  const links = (el: Element | null | undefined) => Array.from(el?.querySelectorAll('a.autolink') ?? []).map((a) => [a.getAttribute('href'), a.textContent, a.getAttribute('target'), a.getAttribute('rel')]);
+  const ext = (u: string) => [u, u, '_blank', 'noopener noreferrer'];
+  const g = await page('/', false, { snapshot: s, jobs: j, detail: d });
+  await g.click('Choose the next catch');
+  const option = g.doc.querySelector('.dopt')!; expect(links(option)).toEqual([ext(PR)]);
+  (option.querySelector('a') as unknown as HTMLElement).click(); await g.settle(); expect(g.doc.querySelector('.dopt')!.getAttribute('aria-pressed')).toBe('false');
+  await g.click('×'); await g.tab('jobs');
+  const card = Array.from(g.doc.querySelectorAll('.card')).find((c) => c.textContent?.includes('Build the hosted spyglass'))!;
+  expect(links(card)).toEqual([ext(PR)]); expect(card.querySelector('script')).toBeNull(); expect(card.textContent).toContain('<script>alert(1)</script> review ');
+  await g.click('Build the hosted spyglass');
+  const modal = g.doc.querySelector('[role=dialog]')!;
+  expect(links(modal.querySelector('pre'))).toEqual([ext(LOCAL)]); expect(modal.querySelector('pre')!.textContent).toContain('<b>keep</b> `https://code.example` as code.');
+  expect(links(modal).map((l) => l[0])).toEqual(expect.arrayContaining([LOCAL, PR])); expect(modal.querySelector("a[href^='javascript:']")).toBeNull();
 });

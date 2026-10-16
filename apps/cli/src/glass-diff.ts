@@ -1,3 +1,4 @@
+export { goalLine } from '@lobstah/core/dist/goal-line.js';
 import type {
   Attachment,
   GlassBeats,

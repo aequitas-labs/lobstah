@@ -2,12 +2,13 @@ import { useState } from 'preact/hooks';
 import { html, value, when } from './common.js';
 import type { Action } from './common.js';
 import type { Boat } from './model.js';
+import { LinkedText } from '../../../../apps/cli/glass/src/components/links.js';
 export function Boats({ boats, action, deleteAccount }: { boats: Boat[]; action: Action; deleteAccount: () => Promise<void> }) {
   const [confirmation, setConfirmation] = useState(''),
     [repo, setRepo] = useState('');
   return html`<div class="sub">Enroll or change a boat's name/access with <code>lobstah wharf login</code> on that boat, then approve here. No browser edit or grants.</div><div class="cards">${boats.map(
     (b) =>
-      html`<div class="card"><div class="top"><b>${b.name}</b><span class="badge">${b.revoked ? 'revoked' : b.permissions.join(' + ')}</span></div><div class="meta">last check-in ${when(b.lastCheckIn)}</div><div class="note">${b.repos.join(' · ') || 'no repos checked in'}</div>${
+      html`<div class="card"><div class="top"><b>${b.name}</b><span class="badge">${b.revoked ? 'revoked' : b.permissions.join(' + ')}</span></div><div class="meta">last check-in ${when(b.lastCheckIn)}</div><div class="note">${b.repos.join('') ? LinkedText(b.repos.join(' · ')) : 'no repos checked in'}</div>${
         !b.revoked &&
         html`<div class="foot">${
           confirmation === b.id

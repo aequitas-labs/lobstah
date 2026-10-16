@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { spawn } from 'node:child_process';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { listProcesses, reapStarted, startedBy } from '../src/reap.js';
+import { WINDOWS_PROCESS_SNAPSHOT } from '../src/windows-processes.js';
 
 describe('startedBy — the processes a root started', () => {
   it('lists every descendant, never the root or unrelated processes', () => {
@@ -108,6 +109,24 @@ async function tree(orphan: boolean): Promise<{ root: number; child: number; gra
 }
 
 describe('reapStarted — stops what the runner started', () => {
+  // On Windows a snapshot is a PowerShell process. The first PowerShell a CI
+  // job starts loads .NET from a cold disk: 3 to 10 seconds on an idle
+  // runner, and past the snapshot's 30-second limit under the suite's load.
+  // A warm one takes about 0.3 seconds. That start is the machine's, not
+  // reaping's: take one snapshot here, untimed, so the cases time their own.
+  beforeAll(() => {
+    if (process.platform !== 'win32') return;
+    try {
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PROCESS_SNAPSHOT], {
+        stdio: 'ignore',
+        windowsHide: true,
+        timeout: 120_000,
+      });
+    } catch {
+      // The cases below say so, if a snapshot really cannot be taken.
+    }
+  }, 130_000);
+
   it('stops the child and the grandchild, and leaves the root alive', async () => {
     const t = await tree(false);
     // tree() has already received the child's grandchild PID. Its OS process

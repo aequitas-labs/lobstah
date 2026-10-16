@@ -11,15 +11,29 @@ let root: string;
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, stdio: 'pipe' }).toString().trim();
 
+/** Allocations started in this case, settled or not. */
+const pending: Promise<unknown>[] = [];
+
+/** `allocate`, remembered so teardown can wait for it. */
+function alloc(...args: Parameters<typeof allocate>): ReturnType<typeof allocate> {
+  const started = allocate(...args);
+  pending.push(started.catch(() => {}));
+  return started;
+}
+
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-wt-'));
   process.env.LOBSTAH_HOME = path.join(root, 'home');
   fs.mkdirSync(process.env.LOBSTAH_HOME);
 });
-afterEach(() => {
+afterEach(async () => {
+  // A case that timed out leaves its allocations running git in this
+  // case's repo: wait for them, so none holds the directory open (EBUSY)
+  // or runs on into the next case.
+  await Promise.all(pending.splice(0));
   removeTempDir(root);
   delete process.env.LOBSTAH_HOME;
-});
+}, 120_000);
 
 /** A repo whose origin/main is one commit behind origin, so every fetch must update the ref. */
 function repoBehindOrigin(): RepoConfig {
@@ -73,8 +87,12 @@ function expectOneAtATime(spans: Array<[number, number]>): void {
   for (let i = 1; i < spans.length; i++) expect(spans[i][0]).toBeGreaterThanOrEqual(spans[i - 1][1]);
 }
 
-// Allocations in one repo take turns, and each git step takes about 0.4s on
-// Windows CI, so these tests get more than the default 5s.
+// Allocations in one repo take turns, so each case runs its 14 to 33 git
+// processes mostly one after another. A git process costs about 0.03 s on
+// Linux CI, and on Windows CI 0.1 s, up to 0.6 s under the suite's load:
+// 33 of them have taken 17 s there, and 20 s once the load peaked.
+const BUDGET = process.platform === 'win32' ? 60_000 : 20_000;
+
 describe('allocate', () => {
   it('concurrent dispatches all get a worktree on the fetched trunk, from one fetch', async () => {
     // Several dispatches claimed in one poll allocate in the same repo at
@@ -86,7 +104,7 @@ describe('allocate', () => {
     const repo = repoBehindOrigin();
     const tip = git(path.join(root, 'origin.git'), 'rev-parse', 'main');
     const ids = Array.from({ length: 6 }, (_, i) => `00000000-0000-4000-8000-00000000000${i}`);
-    const results = await traced(() => Promise.allSettled(ids.map((id) => allocate(repo, id))));
+    const results = await traced(() => Promise.allSettled(ids.map((id) => alloc(repo, id))));
     const failures = results.value.flatMap((r) => (r.status === 'rejected' ? [String(r.reason)] : []));
     expect(failures).toEqual([]);
     for (const r of results.value) {
@@ -94,28 +112,28 @@ describe('allocate', () => {
     }
     expect(results.runs('fetch')).toHaveLength(1);
     expectOneAtATime(results.runs('worktree'));
-  }, 20_000);
+  }, BUDGET);
 
   it('fetches of different refs in one repo run one at a time', async () => {
     const repo = repoBehindOrigin();
     const seed = path.join(root, 'seed');
     git(seed, 'push', '-q', 'origin', 'main:side');
     const ids = Array.from({ length: 6 }, (_, i) => `00000000-0000-4000-8000-00000000003${i}`);
-    const results = await traced(() => Promise.all(ids.map((id, i) => allocate(repo, id, i % 2 ? 'side' : 'main'))));
+    const results = await traced(() => Promise.all(ids.map((id, i) => alloc(repo, id, i % 2 ? 'side' : 'main'))));
     expect(results.value).toHaveLength(6);
     expect(results.runs('fetch').length).toBeGreaterThanOrEqual(2);
     expectOneAtATime(results.runs('fetch'));
-  }, 20_000);
+  }, BUDGET);
 
   it('fetches again for a dispatch that asks after the last fetch started', async () => {
     const repo = repoBehindOrigin();
-    await allocate(repo, '00000000-0000-4000-8000-000000000010');
+    await alloc(repo, '00000000-0000-4000-8000-000000000010');
     git(path.join(root, 'seed'), 'commit', '-q', '--allow-empty', '-m', 'three');
     git(path.join(root, 'seed'), 'push', '-q', 'origin', 'main');
     const tip = git(path.join(root, 'origin.git'), 'rev-parse', 'main');
-    const dir = await allocate(repo, '00000000-0000-4000-8000-000000000011');
+    const dir = await alloc(repo, '00000000-0000-4000-8000-000000000011');
     expect(git(dir, 'rev-parse', 'HEAD')).toBe(tip);
-  }, 20_000);
+  }, BUDGET);
 
   it('waits while another live process holds the repo lock, and takes over a dead one', async () => {
     const repo = repoBehindOrigin();
@@ -125,7 +143,7 @@ describe('allocate', () => {
     try {
       fs.writeFileSync(lock, JSON.stringify({ pid: holder.pid, at: new Date().toISOString() }));
       let done = false;
-      const first = allocate(repo, '00000000-0000-4000-8000-000000000020').finally(() => {
+      const first = alloc(repo, '00000000-0000-4000-8000-000000000020').finally(() => {
         done = true;
       });
       await new Promise((r) => setTimeout(r, 1000));
@@ -138,9 +156,9 @@ describe('allocate', () => {
     await exited;
     // The holder is gone now: its lock is stale and the next fetch takes it.
     fs.writeFileSync(lock, JSON.stringify({ pid: holder.pid, at: new Date().toISOString() }));
-    await allocate(repo, '00000000-0000-4000-8000-000000000021');
+    await alloc(repo, '00000000-0000-4000-8000-000000000021');
     expect(fs.existsSync(lock)).toBe(false);
-  }, 20_000);
+  }, BUDGET);
 
   it('retries only lock contention, not real failures', () => {
     const contention = (stderr: string) => Object.assign(new Error(`Command failed: git fetch\n${stderr}`), { stderr });
@@ -184,7 +202,7 @@ describe('allocate', () => {
     // bounded retry gives up and the failure must say why.
     const repo = repoBehindOrigin();
     fs.writeFileSync(path.join(repo.path, '.git', 'refs', 'remotes', 'origin', 'main.lock'), '');
-    const err = await allocate(repo, '00000000-0000-4000-8000-0000000000ff').then(
+    const err = await alloc(repo, '00000000-0000-4000-8000-0000000000ff').then(
       () => undefined,
       (e: unknown) => e as Error,
     );
@@ -192,5 +210,5 @@ describe('allocate', () => {
     // git's own words follow: "Unable to create '...main.lock': File exists"
     // before 2.51, "fetching ref ... failed: reference already exists" after.
     expect(err?.message).toMatch(/main\.lock': File exists|fetching ref refs\/remotes\/origin\/main failed/);
-  }, 20_000);
+  }, BUDGET);
 });

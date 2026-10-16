@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { MarkdownElements } from '../../../../apps/cli/glass/src/components/markdown.js';
 import { safeHref } from '../../../../apps/cli/src/glass-markdown.js';
+import { LinkedText } from '../../../../apps/cli/glass/src/components/links.js';
 import { fileText, fileUrl, json } from './api.js';
 import { acked, Files, html, OwnedImage, Session, value, when } from './common.js';
 import type { Action } from './common.js';
@@ -47,7 +48,7 @@ export function Document({ doc, action, kind = 'documents' }: { doc: WharfDocume
       }</div>`
     }
     <${Files} files=${doc.attachments} kind=${kind} id=${doc.id} />
-    ${doc.kind === 'decision' && (doc.answer ? html`<div class="ok">answered: ${doc.answer.option} ${doc.answer.text}</div>` : html`<form onSubmit=${submit}><div class="doptions">${doc.options?.map((o) => html`<button type="button" class=${'btn dopt' + (option === o ? ' on' : '')} aria-pressed=${option === o} onClick=${() => setOption(o)}>${o}</button>`)}</div><textarea class="danswer" aria-label="answer" maxLength="20000" value=${answer} onInput=${(e: Event) => setAnswer(value(e))}></textarea><button class="btn" disabled=${!option && !answer.trim()}>answer card</button></form>`)}
+    ${doc.kind === 'decision' && (doc.answer ? html`<div class="ok">answered: ${LinkedText(doc.answer.option)} ${LinkedText(doc.answer.text)}</div>` : html`<form onSubmit=${submit}><div class="doptions">${doc.options?.map((o) => html`<button type="button" class=${'btn dopt' + (option === o ? ' on' : '')} aria-pressed=${option === o} onClick=${() => setOption(o)}>${LinkedText(o)}</button>`)}</div><textarea class="danswer" aria-label="answer" maxLength="20000" value=${answer} onInput=${(e: Event) => setAnswer(value(e))}></textarea><button class="btn" disabled=${!option && !answer.trim()}>answer card</button></form>`)}
   `;
 }
 export function Job({ job, workers, action }: { job: DispatchView; workers: Worker[]; action: Action }) {
@@ -90,9 +91,9 @@ export function Job({ job, workers, action }: { job: DispatchView; workers: Work
         : [];
     }) ?? [];
   return html`<div class="sub">${job.id} · ${job.repo} · ${job.status?.verb ?? job.state} · ${job.boatName ?? worker?.boatName ?? 'boat unknown'}${acked(job.ack)}</div>
-    <div class="sec">brief</div><pre>${job.brief}</pre>
-    <div class="sec">status notes / catches</div>${error && html`<div class="bad">${error}</div>`}${detail?.reports.map((s) => html`<div class="catch"><div class="hdr"><b>${s.verb}</b><span class="dim">${when(s.at)}</span></div><pre>${s.note}</pre>${s.waitingOn && html`<div class="waiting">waiting on ${s.waitingOn}${s.until ? ' until ' + s.until : ''}</div>`}${s.evidence?.prUrls?.map((url) => safeHref(url) && html`<div><a href=${safeHref(url)} target="_blank" rel="noopener noreferrer">${url}</a></div>`)}</div>`)}
-    <div class="sec">messages</div>${detail?.messages.map((m) => html`<div class="msg"><div class="hdr">${m.received ? 'received' : 'unread'}</div>${m.text}</div>`)}
+    <div class="sec">brief</div><pre>${LinkedText(job.brief)}</pre>
+    <div class="sec">status notes / catches</div>${error && html`<div class="bad">${error}</div>`}${detail?.reports.map((s) => html`<div class="catch"><div class="hdr"><b>${s.verb}</b><span class="dim">${when(s.at)}</span></div><pre>${LinkedText(s.note)}</pre>${s.waitingOn && html`<div class="waiting">waiting on ${LinkedText(s.waitingOn)}${s.until ? ' until ' + s.until : ''}</div>`}${s.evidence?.prUrls?.map((url) => safeHref(url) && html`<div><a href=${safeHref(url)} target="_blank" rel="noopener noreferrer">${url}</a></div>`)}</div>`)}
+    <div class="sec">messages</div>${detail?.messages.map((m) => html`<div class="msg"><div class="hdr">${m.received ? 'received' : 'unread'}</div>${LinkedText(m.text)}</div>`)}
     <${Files} files=${detail?.files ?? []} kind="dispatches" id=${job.id} />
     ${reports.map((r) => html`<div class="sec">worker report</div><${Document} key=${r.markdown.id} doc=${r} action=${action} kind="dispatches" />`)}
     ${
