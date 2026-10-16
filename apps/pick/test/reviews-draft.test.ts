@@ -245,7 +245,7 @@ describe('the review checkout', () => {
     gone();
   });
 
-  it('is removed once a withdrawn round's job ends, not while it still runs', () => {
+  it("is removed once a withdrawn round's job ends, not while it still runs", () => {
     const id = drafting();
     const item = readReview(KEY)!;
     item.rounds[0]!.state = 'withdrawn';
