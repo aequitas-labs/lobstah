@@ -4,6 +4,7 @@ import { html } from '../html.js';
 import type { Lightbox } from '../store.js';
 import { LightboxView } from './lightbox.js';
 import { ReportSection } from './report.js';
+import { LinkedText } from './links.js';
 
 /**
  * A report on its own page (`/report/<key>`): fetched once and rendered
@@ -21,7 +22,7 @@ export function ReportView({ view }: { view: ReportViewState }) {
   if (view.state === 'error') return html`<main class="reportview"><div class="bad">${view.error}</div></main>`;
   const r = view.report;
   return html`<main class="reportview">
-    <h1>${r.title}</h1>
+    <h1>${LinkedText(r.title)}</h1>
     <${ReportSection} r=${r} text=${view.text !== undefined ? { text: view.text } : { error: view.error }} />
   </main>`;
 }

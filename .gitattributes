@@ -3,3 +3,4 @@
 apps/cli/glass/** text eol=lf
 apps/cli/glass/assets/*.png binary -eol
 apps/cli/test/fixtures/*.html text eol=lf
+scripts/*.sh text eol=lf

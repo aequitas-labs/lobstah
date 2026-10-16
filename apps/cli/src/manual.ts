@@ -8,6 +8,7 @@ your working set:
   lobstah goals [<date>]                       today's goals, or a past day
   lobstah goals set "<line>" [...]             replace today's goals
   lobstah goals add "<text>" / goals rm <n>    edit today's numbered goals
+  lobstah goals done <n> / goals undo <n>       check or uncheck a goal; keep it for recap
   lobstah goals recap-data [<date>]            facts for the day's recap
   lobstah goals recap <date> --file <md>        save its recap
   lobstah set --repo <key> --bait <brief.md>    set a trap (alias of dispatch)
