@@ -9,6 +9,8 @@ import { getState } from '../store.js';
 import { prReviewUrl } from '../../../../../packages/core/src/pr-review.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
+import { linkParts } from '../../../src/glass-links.js';
+import { LinkedText, UrlLink } from './links.js';
 import { workerMetadata } from '../../../../../packages/core/src/worker-metadata.js';
 import type { WorkerMetadata, WorkerConfig } from '@lobstah/core';
 
@@ -65,7 +67,7 @@ export function WorkerDetails({ worker, headless = false }: { worker: WorkerInfo
 /** The activity line under a dispatch's verb and note: what it is doing now, and how long ago. Stale shows dim. */
 export const ActivityLine = (x: Pick<GlassDispatchSummary, 'activity'>) =>
   x.activity &&
-  html`<div class=${'activity' + (x.activity.stale ? ' stale' : '')} title=${x.activity.stale ? 'no activity past the wedge threshold' : x.activity.kind}>${x.activity.stale ? 'stale · ' : ''}${x.activity.summary} · ${Age(x.activity.at)} ago</div>`;
+  html`<div class=${'activity' + (x.activity.stale ? ' stale' : '')} title=${x.activity.stale ? 'no activity past the wedge threshold' : x.activity.kind}>${x.activity.stale ? 'stale · ' : ''}${LinkedText(x.activity.summary)} · ${Age(x.activity.at)} ago</div>`;
 
 /** An http(s) link, or undefined: the page never renders any other scheme as a link. */
 const safeHref = (u: string | undefined): string | undefined => (u && /^https?:\/\//i.test(u) ? u : undefined);
@@ -242,26 +244,35 @@ export const WorkerAddress = (address: string): Children => {
 };
 
 /**
- * Free text with each `wt:<id>` shown as TrapName. Past `max` shown
- * characters it is cut with an ellipsis, counting names as shown.
+ * Free text with each `wt:<id>` shown as TrapName and each bare http(s) URL
+ * as a link (LinkedText's rules). Past `max` shown characters it is cut with
+ * an ellipsis, counting names as shown; a cut URL still links to all of it.
  */
 export function NamedText(text: string, max = Infinity): Children[] {
-  const parts: Array<{ text: string; trapId?: string }> = [];
-  let last = 0;
-  for (const m of text.matchAll(TRAP_ADDRESS)) {
-    if (m.index! > last) parts.push({ text: text.slice(last, m.index) });
-    const name = knownTrapName(m[1]!);
-    parts.push(name && labelled(text, m.index!, m[0].length, name) ? { text: m[0] } : { text: name ?? m[0], trapId: m[1] });
-    last = m.index! + m[0].length;
+  const parts: Array<{ text: string; trapId?: string; url?: string }> = [];
+  for (const seg of linkParts(text)) {
+    if (typeof seg !== 'string') {
+      parts.push({ text: seg.url, url: seg.url });
+      continue;
+    }
+    let last = 0;
+    for (const m of seg.matchAll(TRAP_ADDRESS)) {
+      if (m.index! > last) parts.push({ text: seg.slice(last, m.index) });
+      const name = knownTrapName(m[1]!);
+      parts.push(name && labelled(seg, m.index!, m[0].length, name) ? { text: m[0] } : { text: name ?? m[0], trapId: m[1] });
+      last = m.index! + m[0].length;
+    }
+    if (last < seg.length) parts.push({ text: seg.slice(last) });
   }
-  if (last < text.length) parts.push({ text: text.slice(last) });
   const total = parts.reduce((n, p) => n + p.text.length, 0);
   let budget = total > max ? max - 1 : Infinity;
   const out: Children[] = [];
   for (const p of parts) {
     if (budget <= 0) break;
-    if (p.text.length <= budget) out.push(p.trapId ? TrapName(p.trapId) : p.text);
-    else out.push(p.text.slice(0, budget));
+    const whole = p.text.length <= budget;
+    const shown = whole ? p.text : p.text.slice(0, budget);
+    if (p.url) out.push(UrlLink(p.url, shown));
+    else out.push(whole && p.trapId ? TrapName(p.trapId) : shown);
     budget -= p.text.length;
   }
   if (total > max) out.push('…');
@@ -287,7 +298,7 @@ export function detailBody(x: GlassDispatchSummary | GlassDispatch, detail?: Dis
   ]
     .filter(Boolean)
     .join('\n');
-  const head = html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}${progress && [html`<div class="sec">progress</div>`, html`<pre>${progress}</pre>`]}`;
+  const head = html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}${progress && [html`<div class="sec">progress</div>`, html`<pre>${LinkedText(progress)}</pre>`]}`;
   // The brief, log, inbox, and evidence come with the detail, fetched when the modal opens.
   // Worker fields have a single labeled section above; don't repeat them in
   // the raw evidence dump. Leave all other evidence intact.
@@ -298,9 +309,9 @@ export function detailBody(x: GlassDispatchSummary | GlassDispatch, detail?: Dis
   }
   if (!hasDetail(x))
     return html`${head}<div class="sec">brief</div><div class=${detail?.error ? 'bad' : 'dim'}>${detail?.error ?? 'loading…'}</div>${
-      x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${x.followUp}</pre>`]
+      x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${LinkedText(x.followUp)}</pre>`]
     }${x.note && [html`<div class="sec">last note</div>`, html`<div class="loglines">${NamedText(x.note)}</div>`]}`;
-  return html`${head}<div class="sec">brief</div><pre>${x.brief}</pre>${
+  return html`${head}<div class="sec">brief</div><pre>${LinkedText(x.brief)}</pre>${
     x.attachments.length > 0 && [
       html`<div class="sec">attachments (${x.attachments.length})</div>`,
       attachmentRows(x.attachments, (name) => dispatchFileUrl(x.lane, x.id, name)),
@@ -310,14 +321,14 @@ export function detailBody(x: GlassDispatchSummary | GlassDispatch, detail?: Dis
       html`<div class="sec">message attachments (${x.messageAttachments.length})</div>`,
       attachmentRows(x.messageAttachments, (name) => dispatchFileUrl(x.lane, x.id, name)),
     ]
-  }${x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${x.followUp}</pre>`]}<div class="sec">log</div><div class="loglines">${
+  }${x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${LinkedText(x.followUp)}</pre>`]}<div class="sec">log</div><div class="loglines">${
     x.log.length ? LogLines(x) : 'no entries yet'
-  }</div>${x.inbox.length > 0 && [html`<div class="sec">inbox</div>`, html`<div class="loglines">${x.inbox.join('\n---\n')}</div>`]}${
+  }</div>${x.inbox.length > 0 && [html`<div class="sec">inbox</div>`, html`<div class="loglines">${LinkedText(x.inbox.join('\n---\n'))}</div>`]}${
     x.awaitingReply && [
       html`<div class="sec">awaiting reply</div>`,
-      html`<div>${x.awaitingReply.line} · from ${x.awaitingReply.from} · ${Age(x.awaitingReply.sentAt)} ago</div>`,
+      html`<div>${LinkedText(x.awaitingReply.line)} · from ${x.awaitingReply.from} · ${Age(x.awaitingReply.sentAt)} ago</div>`,
     ]
-  }${evidence && [html`<div class="sec">evidence</div>`, html`<div class="loglines">${JSON.stringify(evidence)}</div>`]}`;
+  }${evidence && [html`<div class="sec">evidence</div>`, html`<div class="loglines">${LinkedText(JSON.stringify(evidence))}</div>`]}`;
 }
 
 export function addrCell(x: GlassDispatchSummary) {
@@ -398,7 +409,7 @@ export const reviewLink = (url: string) => prReviewUrl(url, getState().snapshot?
 
 /** A PR card's name: the number bold, then the title; the number alone when there is no title. One line, cut with an ellipsis. */
 export const prName = (p: Pick<GlassPr, 'number' | 'title'>) =>
-  html`<span class="prname" title=${p.title || undefined}><b>#${p.number}</b>${p.title && [' ', p.title]}</span>`;
+  html`<span class="prname" title=${p.title || undefined}><b>#${p.number}</b>${p.title && [' ', LinkedText(p.title)]}</span>`;
 
 /** A stack's numbers, `#98 → #101`, each carrying its PR's title as a title attribute. `bold` marks one number. */
 export function stackNumbers(numbers: number[], titles: Map<number, string | undefined>, bold?: number) {
@@ -519,11 +530,11 @@ export function trapNow(t: GlassTrap): Children {
   const dot = html`<span class=${'dot trapdot ' + trapDotTone(t)}></span>`;
   if (s.kind === 'requested') return [dot, html`<span class="dim">${requestedText(t, s.helmOn)}</span>`];
   if (s.kind === 'starting') return [dot, 'starting · waiting for its session to sign on'];
-  if (s.kind === 'start failed') return [dot, html`<span class="bad">start failed</span>`, ' · ', s.reason];
+  if (s.kind === 'start failed') return [dot, html`<span class="bad">start failed</span>`, ' · ', LinkedText(s.reason)];
   if (s.kind === 'signed off') return [dot, html`<span class="dim">signed off</span>`];
   if (s.kind === 'idle') return [dot, 'idle · ', s.listening ? 'listening' : 'not listening'];
   const current = s.current;
-  if (s.kind === 'parked') return [dot, 'parked · ', parkedText(current)];
+  if (s.kind === 'parked') return [dot, 'parked · ', NamedText(parkedText(current))];
   const openDispatch = (event: MouseEvent) => {
     event.preventDefault();
     stop(event);
@@ -534,8 +545,8 @@ export function trapNow(t: GlassTrap): Children {
     'working · ',
     html`<a href="#dispatches" onClick=${openDispatch}>${current.id.slice(0, 8)}</a>`,
     ' · ',
-    workTitle(current),
-    current.activity && [' · ', current.activity.summary, ' ', Age(current.activity.at), ' ago'],
+    current.title ? LinkedText(current.title, 40) : workTitle(current),
+    current.activity && [' · ', LinkedText(current.activity.summary), ' ', Age(current.activity.at), ' ago'],
   ];
 }
 
