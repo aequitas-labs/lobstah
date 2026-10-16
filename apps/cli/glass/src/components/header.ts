@@ -12,6 +12,7 @@ const TAB_LABEL: Record<GlassTab, string> = {
   dispatches: 'Dispatches',
   traps: 'Traps',
   prs: 'PRs',
+  reviews: 'Reviews',
   reports: 'Reports',
   notices: 'Notices',
   stats: 'Stats',

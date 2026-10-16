@@ -30,9 +30,9 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  *   left a closed modal's markup behind the hidden overlay;
  * - reports are not in the compared snapshots: the old page had no reports
  *   (glass-page.test.ts covers the reports block and the report modals);
- * - the Reports tab (its nav link and its page) is removed before comparing,
+ * - the Reports and Reviews tabs (their nav links and pages) are removed before comparing,
  *   and `title` attributes (hover text for clamped card text) are dropped:
- *   glass-reports.test.ts covers both;
+ *   glass-reports.test.ts and glass-reviews.test.ts cover them;
  * - the card overflow rules (badge truncation, two-line meta, the card's own
  *   overflow) changed on purpose, so the computed-style check compares the
  *   table views only; glass-reports.test.ts checks the card rules.
@@ -71,7 +71,7 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
-  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
+  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
 }
 const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
 /** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */

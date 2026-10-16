@@ -45,8 +45,8 @@ public struct AttentionItem: Decodable, Equatable {
   /** The identity stays fixed when labels, order, or acknowledgements change. */
   public var identity: String { "\(kind ?? "question"):\(key ?? id)" }
 
-  /** pr:* pets click through to the PR; question, landed, and watch go to the helm. */
-  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready") ? (reviewUrl ?? prUrl).flatMap(URL.init(string:)) : nil }
+  /** pr:* and review pets click through to the PR (in its review tool, where a staged review draft is sent); question, landed, and watch go to the helm. */
+  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready" || kind == "review") ? (reviewUrl ?? prUrl).flatMap(URL.init(string:)) : nil }
 
   /**
    * The glass this item belongs to: the one place that picks between the
@@ -97,6 +97,7 @@ public struct AttentionItem: Decodable, Equatable {
     return nil
   }
 
+
   /** The CLI acknowledgement for a pet click or its Acknowledge menu entry. */
   public var ackArguments: [String]? {
     key.map { ["attention", "ack", $0, "--by", "pet"] }
@@ -114,6 +115,7 @@ public struct AttentionItem: Decodable, Equatable {
     case "landed": return "landed"
     case "watch": return "watch"
     case "report": return "report"
+    case "review": return "review request"
     default: return nil
     }
   }

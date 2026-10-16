@@ -506,11 +506,20 @@ dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
 and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
-PRs, Reports, Notices, and Stats. The Stats tab shows catches per day as a
+PRs, Reviews, Reports, Notices, and Stats. The Stats tab shows catches per day as a
 53-week heatmap, with today, this week, the total, and the top traps; it
 reads `stats.json` from `GET /data/stats` and sends nothing. The Reports tab lists every report, unacked first,
 then newest first, and the repo filter and the search box (title, author,
-dispatch id, repo) apply to it. Reading the glass consumes no cursor. Each
+dispatch id, repo) apply to it. The Reviews tab lists the PRs that ask
+for your review ([pickup.md](pickup.md), "Review requests"), the ones
+waiting on you first, as a table or as cards. A row opens the PR in the
+repo's review tool (`[repos.<key>].review`), where the drafted review waits
+as your pending review, to edit and send there. The tab only dismisses a
+review (deleting its pending draft) or re-drafts a stale or failed one,
+through the page-token-guarded `/requests` endpoint as `review-dismiss` or
+`review-redraft`. On Deck lists the reviews waiting on you when there are
+any. A `review` lob and the pet's review lobster ("review request") open the
+PR in the review tool too. Nothing counts reviews with a badge. Reading the glass consumes no cursor. Each
 live trap has a **↗ open** button at the end of its foot line. It asks the local server to focus
 that trap's reported session link, iTerm2 session, Terminal tab, editor
 worktree, or recorded app, in that order. The result names the step that

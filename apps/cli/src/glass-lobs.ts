@@ -14,6 +14,8 @@ export interface LobAttention {
   /** tend's attention kind; a `pr:*` item walks as a link to its PR. */
   kind?: string;
   prUrl?: string;
+  /** The PR in its review tool ([repos.<key>].review); a review lob links there. */
+  reviewUrl?: string;
   /** tend's stable item key and the hash of the state it stands on. */
   key?: string;
   stateHash?: string;
@@ -80,6 +82,8 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
       if (x.kind === 'decision' && x.key) return { key: 'decision:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
       if ((x.kind ?? 'question') === 'question' && x.key)
         return { key: 'question:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
+      // A review request opens the PR in its review tool, where the staged draft is sent.
+      if (x.kind === 'review' && x.key && x.prUrl) return { key: 'review:' + x.key, text: x.note || x.verb, label, href: x.reviewUrl ?? x.prUrl, ...hide };
       // A report opens its own page in a new tab.
       if (x.kind === 'report' && x.key) return { key: 'report:' + x.key, text: x.note || x.verb, label, href: reportPageUrl(x.key), ...hide };
       return typeof x.kind === 'string' && (x.kind.startsWith('pr:') || x.kind === 'stack-ready') && x.prUrl

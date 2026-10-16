@@ -1013,6 +1013,12 @@ a.lob {
   background: var(--bad);
   color: var(--on-fill);
 }
+/* The Reviews tab: a row's actions. */
+.rv-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 /* The decision modal, above any other modal and below the image overlay. */
 #doverlay {
   position: fixed;
