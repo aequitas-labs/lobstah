@@ -157,7 +157,7 @@ describe('a permission card', () => {
   });
 
   it('says what Allow always covers: the repo-relative path in any worktree, or the exact thing outside every repo', () => {
-    const base = fs.realpathSync(home);
+    const base = fs.realpathSync.native(home);
     const main = path.join(base, 'homebase');
     const wt = path.join(base, 'worktrees', 'soak-a');
     fs.mkdirSync(main);

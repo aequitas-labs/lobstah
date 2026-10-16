@@ -149,8 +149,8 @@ describe('always-grants follow the repo, not one worktree', () => {
   const write = (p: string, extra: Partial<GrantRequest> = {}): GrantRequest => ({ harness: 'claude', tool: 'Write', path: p, ...extra });
 
   beforeEach(() => {
-    // Real paths: git records worktrees by their resolved path (macOS's /var is /private/var).
-    const base = fs.realpathSync(home);
+    // Real paths: git records worktrees by their resolved path (macOS's /var is /private/var; Windows' long names, not RUNNER~1).
+    const base = fs.realpathSync.native(home);
     main = path.join(base, 'homebase');
     other = path.join(base, 'other');
     wtA = path.join(base, 'worktrees', 'soak-a');
@@ -189,7 +189,7 @@ describe('always-grants follow the repo, not one worktree', () => {
   });
 
   it('does not widen a path outside every repo', () => {
-    const outside = path.join(fs.realpathSync(home), 'scratch', 'x.sh');
+    const outside = path.join(fs.realpathSync.native(home), 'scratch', 'x.sh');
     const g = addGrant({ path: outside, mode: 'always', by: 'glass' }, new Date(), roots);
     expect(g.path).toBe(outside);
     expect(g.repo).toBeUndefined();
@@ -199,8 +199,8 @@ describe('always-grants follow the repo, not one worktree', () => {
 
   it('does not follow a symlink out of a worktree', () => {
     const g = addGrant({ path: path.join(wtA, 'out/x.sh'), mode: 'always', by: 'glass' }, new Date(), roots);
-    fs.mkdirSync(path.join(fs.realpathSync(home), 'elsewhere'));
-    fs.symlinkSync(path.join(fs.realpathSync(home), 'elsewhere'), path.join(wtB, 'out'));
+    fs.mkdirSync(path.join(fs.realpathSync.native(home), 'elsewhere'));
+    fs.symlinkSync(path.join(fs.realpathSync.native(home), 'elsewhere'), path.join(wtB, 'out'));
     expect(grantCovers(g, write(path.join(wtB, 'out/x.sh')), roots)).toBe(false);
   });
 
@@ -251,7 +251,7 @@ describe('always-grants follow the repo, not one worktree', () => {
     expect(grantCovers(legacyCmd, bash(`cd ${wtB}/bao/ios && fastlane`), roots)).toBe(true);
     // A legacy once-grant stays exact; one outside every repo too.
     expect(grantCovers({ ...legacy, mode: 'once' }, write(path.join(wtB, 'apps/deploy/apply.sh')), roots)).toBe(false);
-    const gone = grant({ path: path.join(fs.realpathSync(home), 'worktrees', 'soak-gone', 'apps/x.sh') });
+    const gone = grant({ path: path.join(fs.realpathSync.native(home), 'worktrees', 'soak-gone', 'apps/x.sh') });
     expect(grantCovers(gone, write(path.join(wtB, 'apps/x.sh')), roots)).toBe(false);
   });
 
