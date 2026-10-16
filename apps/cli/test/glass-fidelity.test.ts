@@ -41,7 +41,7 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * - an attachment image grew a thumb that opens the in-page image overlay
  *   (`button.thumb`); it is dropped before comparing, and
  *   glass-decisions.test.ts covers it.
- * The PR Ack all control is removed before comparing against the frozen
+ * The PR Ack stack control is removed before comparing against the frozen
  * page; glass-pr-ack.test.ts covers its visibility, scope and behavior.
  * The glass also grew PR titles on purpose (glass-page.test.ts tests them):
  * a card's `<span class="prname"><b>#n</b> title</span>` folds back to the
@@ -133,7 +133,7 @@ const STACK_NUMBER = /^#\d+$/;
 function foldPrTitles(el: Element): Node {
   const copy = el.cloneNode(true) as Element;
   const doc = el.ownerDocument;
-  for (const n of copy.querySelectorAll('.pr-ack-all')) n.remove();
+  for (const n of copy.querySelectorAll('.prack')) n.remove();
   // Intentional worker UI additions have functional coverage separately.
   // Keep comparing the unrelated UI against the frozen pre-metadata page.
   for (const n of copy.querySelectorAll('.worker-details')) {
@@ -361,7 +361,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
-          .filter((el) => !el.matches('.pr-ack-all, .pr-ack-all *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *'))
+          .filter((el) => !el.matches('.prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);

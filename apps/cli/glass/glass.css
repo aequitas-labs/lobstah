@@ -1433,6 +1433,16 @@ a.lob {
   min-width: 12ch;
 }
 
+/* Ack stack (or Ack, for a lone PR): beside each stack group's heading, on the PR tab and the deck. */
+.prack {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 8px;
+  font-weight: normal;
+  vertical-align: middle;
+}
+
 /* New trap: a button on the Traps tab and the deck's traps heading, opening a small form. */
 .tabhead {
   margin: 0 0 8px;

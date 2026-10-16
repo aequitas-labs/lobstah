@@ -3,7 +3,7 @@ import { ackPrAttention } from '../actions.js';
 import type { DeckAttention } from '../../../src/glass-diff.js';
 import { Fragment } from 'preact';
 import type { GlassPr, GlassStack } from '@lobstah/core';
-import { prBadgeClass } from '../../../src/glass-diff.js';
+import { prBadgeClass, shownPrAttention } from '../../../src/glass-diff.js';
 import type { PrsInputs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import {
@@ -58,7 +58,7 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
 
 function prTable(inp: PrsInputs, older: unknown) {
   const rows = prGroups(inp).flatMap(({ s, prs }) => [
-    html`<tr key=${'stack:' + s.id}><th colspan="8">${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}</th></tr>`,
+    html`<tr key=${'stack:' + s.id}><th colspan="8">${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}</th></tr>`,
     ...prs.map(
       (p) =>
         html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
@@ -74,33 +74,41 @@ function prCards(inp: PrsInputs, older: unknown) {
   const body = groups.length
     ? groups.map(
         ({ s, prs }) =>
-          html`<${Fragment} key=${'stack:' + s.id}><h2>${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}</h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}<div class="cards">${prs.map(card)}</div><//>`,
+          html`<${Fragment} key=${'stack:' + s.id}><h2>${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} /></h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}<div class="cards">${prs.map(card)}</div><//>`,
       )
     : html`<div class="empty">no PR evidence</div>`;
   return [body, older, otherWatches(inp)];
 }
 
-export function PrAckAll({ items }: { items: DeckAttention[] }) {
+/**
+ * Ack one stack group's unacknowledged PR and stack attention, as shown: a
+ * stack of several PRs says "Ack stack"; a lone PR says "Ack" and acks only
+ * itself. Each item carries the state hash this page showed, so a stale
+ * page never acks a newer state. Nothing pending, nothing shown.
+ */
+export function PrAck({ stack, prs, attention }: { stack: GlassStack; prs: GlassPr[]; attention: readonly DeckAttention[] }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
-  const pending = items.filter((a) => !a.acked);
+  const pending = shownPrAttention(attention, prs, [stack]).filter((a) => !a.acked);
   if (!pending.length) return null;
-  const ack = async () => {
+  const label = prs.length > 1 ? 'Ack stack' : 'Ack';
+  const ack = async (e: Event) => {
+    e.stopPropagation();
     if (busy) return;
     setBusy(true);
     setError('');
     try {
       await ackPrAttention(pending);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not acknowledge PRs.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not acknowledge PRs.');
     } finally {
       setBusy(false);
     }
   };
-  return html`<div class="tabhead pr-ack-all"><button class="btn" disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : 'Ack all'}</button>${error && html`<span class="bad" role="alert">${error}</span>`}</div>`;
+  return html`<span class="prack" onClick=${(e: Event) => e.stopPropagation()}><button class="btn" data-stack=${stack.id} disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : label}</button>${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
 }
 
 export function PRs({ inp, more }: { inp: PrsInputs; more?: OlderControl }) {
   const older = more && html`<${ShowOlder} kind="prs" more=${more} />`;
-  return [html`<${PrAckAll} items=${inp.prAttention} />`, inp.view === 'cards' ? prCards(inp, older) : prTable(inp, older)];
+  return inp.view === 'cards' ? prCards(inp, older) : prTable(inp, older);
 }

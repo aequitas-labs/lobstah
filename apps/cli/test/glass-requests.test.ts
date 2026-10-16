@@ -263,40 +263,45 @@ function prAttentionFixture() {
   return pr;
 }
 
-it('Ack all acknowledges every shown PR and stack, leaves other attention alone, and new states stand again', async () => {
+/** Standing PR and stack attention: the lone failing #101, and the ready stack #102-#103. */
+const prStates = () => buildTendReport().attention.filter((a) => a.key.startsWith('pr:') || a.key.startsWith('stack:'));
+const lone = () => prStates().filter((a) => a.key.endsWith('#101'));
+const stack = () => prStates().filter((a) => !a.key.endsWith('#101'));
+
+it("Ack stack acknowledges that stack's states only: the lone PR and other attention stand, and a new state stands again", async () => {
   const pr = prAttentionFixture();
   const { meta } = askDecision({ title: 'Still needs an answer', askedBy: 'test', maxBytes: 1024 });
-  const states = () => buildTendReport().attention.filter((a) => a.key.startsWith('pr:') || a.key.startsWith('stack:'));
-  const items = states().map(({ key, stateHash }) => ({ key, stateHash }));
-  expect(states().map((a) => a.kind)).toEqual(expect.arrayContaining(['pr:checks', 'stack-ready']));
+  expect(lone().map((a) => a.kind)).toEqual(['pr:checks']);
+  expect(stack().map((a) => a.kind)).toContain('stack-ready');
+  const items = stack().map(({ key, stateHash }) => ({ key, stateHash }));
   const body = { kind: 'pr-ack', payload: { items } };
   expect((await post(body, { 'x-lobstah-token': '' })).status).toBe(403);
   expect(listAcks()).toEqual([]);
   expect((await post(body)).status).toBe(200);
-  expect(states().every((a) => a.acked?.by === 'glass')).toBe(true);
+  expect(stack().every((a) => a.acked?.by === 'glass')).toBe(true);
+  expect(lone().every((a) => !a.acked)).toBe(true);
   expect(new Set(listAcks().map((a) => a.key))).toEqual(new Set(items.map((a) => a.key)));
   expect(buildTendReport().attention.find((a) => a.key === meta.key)?.acked).toBeUndefined();
   expect(buildGlassSnapshot().prs).toHaveLength(3);
   expect((await post({ kind: 'pr-ack', payload: { items: [{ key: meta.key, stateHash: 'anything' }] } })).status).toBe(400);
   expect((await post({ kind: 'pr-ack', payload: { items: [null] } })).status).toBe(400);
   expect((await post({ kind: 'pr-ack', payload: {} })).status).toBe(400);
-  // A new head re-stands just that PR and its stack; a stale page cannot ack the new state.
-  upsertPr(pr(101, 'next-101'));
+  // A new head re-stands the stack; a stale page cannot ack the new state.
   upsertPr(pr(103, 'next-103'));
   syncStackReadiness();
-  expect(states().every((a) => !a.acked)).toBe(true);
+  expect(stack().some((a) => !a.acked)).toBe(true);
   expect((await post(body)).status).toBe(200);
-  expect(states().every((a) => !a.acked)).toBe(true);
+  expect(stack().some((a) => !a.acked)).toBe(true);
 });
 
-it('Ack all is scoped to the submitted visible PRs, including an already acknowledged state', async () => {
+it("a lone PR's Ack acknowledges only it, and again is a no-op", async () => {
   prAttentionFixture();
-  const items = buildTendReport().attention.filter((a) => a.key.startsWith('pr:')).map(({ key, stateHash }) => ({ key, stateHash }));
+  const items = lone().map(({ key, stateHash }) => ({ key, stateHash }));
   expect(items).toHaveLength(1);
   const body = { kind: 'pr-ack', payload: { items } };
   await post(body);
   const first = listAcks();
   await post(body);
   expect(listAcks()).toEqual(first);
-  expect(buildTendReport().attention.find((a) => a.key.startsWith('stack:'))?.acked).toBeUndefined();
+  expect(stack().every((a) => !a.acked)).toBe(true);
 });

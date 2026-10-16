@@ -238,8 +238,8 @@ signs one session on as the orchestrator for its grounds, and `man report`
 prints the delta since the last acknowledged report. `lobstah glass` serves
 it all as a live localhost page — the spyglass. Opening a decision or report
 acknowledges it and stops the pet walking for that state; decisions stay open
-until answered. The PR section’s **Ack all** acknowledges its visible PR and
-stack attention. A changed state stands again. Reports stay newest first
+until answered. Each PR stack’s **Ack stack** (a lone PR’s **Ack**)
+acknowledges that stack’s PR and stack attention. A changed state stands again. Reports stay newest first
 when acknowledged. `man init`
 installs a Claude Code Stop hook that parks the session on the fleet and
 continues the turn the moment something needs it.

@@ -485,7 +485,7 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Acknowledge the PR/stack states shown in a section, using the guarded request path. */
+/** Acknowledge the PR/stack states one stack group showed, using the guarded request path. */
 export async function ackPrAttention(items: Array<{ key: string; stateHash: string }>): Promise<void> {
   const token = getState().snapshot?.focusToken;
   if (!token) throw new Error('Reload the glass before acknowledging.');
