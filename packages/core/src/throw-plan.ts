@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { Config } from './config.js';
+import { configPermissionMode, type Config } from './config.js';
 import { lobstahHome } from './paths.js';
 import { listRoster, rosterByAddress, terminalAppName, type RosterEntry, type TerminalApp } from './roster.js';
 import { listTraps, readTrap, readTrapAnchor, trapByAddress, trapLastSeen, type TrapRegistration } from './soak.js';
@@ -146,7 +146,7 @@ function planEntry(entry: RosterEntry, cfg: Config, opts: ThrowPlanOptions): Thr
     why: '',
     ...(harness ? { harness, harnessFrom: entry.profile?.harness ? 'profile' : 'last sign-on' } : {}),
     ...((entry.profile?.model ?? entry.model) ? { model: entry.profile?.model ?? entry.model } : {}),
-    ...(entry.config || entry.profile?.config ? { config: { ...entry.config, ...entry.profile?.config } } : {}),
+    ...startConfig(entry, cfg),
     ...terminalFor(entry, cfg),
     worktree: entry.worktree,
     ...(entry.branch ? { branch: entry.branch } : {}),
@@ -236,6 +236,19 @@ function unrecordedAnchors(known: Set<string>): ThrowPlanRow[] {
       ...(anchor.sessionId ? { sessionId: anchor.sessionId } : {}),
     }];
   });
+}
+
+/**
+ * The config a throw starts the trap with: what it last signed on with, the
+ * configured `[harness].permissionMode` (the repo's, else the global), then
+ * its saved profile. The permission mode it was last seen in is left out: a
+ * throw starts in auto unless the profile or the config names a mode.
+ */
+function startConfig(entry: RosterEntry, cfg: Config): { config?: Record<string, string> } {
+  const { permissionMode: _seen, ...last } = entry.config ?? {};
+  const configured = configPermissionMode(cfg, entry.repo);
+  const config = { ...last, ...(configured ? { permissionMode: configured } : {}), ...entry.profile?.config };
+  return Object.keys(config).length ? { config } : {};
 }
 
 /** The plan for a selection. Read-only. */

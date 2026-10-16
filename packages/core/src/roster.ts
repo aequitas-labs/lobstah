@@ -78,6 +78,8 @@ export interface RosterEntry {
   lastCatch?: string;
   /** The saved configuration a throw applies. */
   profile?: TrapProfile;
+  /** The permission mode the last throw started this session in; a session soaked by hand has none. */
+  startMode?: string;
   creationReason?: string;
   updatedAt: string;
 }
@@ -185,7 +187,7 @@ export function forgetRoster(trapId: string): RosterEntry | undefined {
  */
 export function recordRosterSignOn(
   reg: TrapRegistration,
-  opts: { soakBranch?: string; revision?: TrapRevision; creationReason?: string; now?: number } = {},
+  opts: { soakBranch?: string; revision?: TrapRevision; creationReason?: string; startMode?: string; now?: number } = {},
 ): RosterEntry {
   const at = new Date(opts.now ?? Date.now()).toISOString();
   const prior = readRoster(reg.trapId);
@@ -209,6 +211,8 @@ export function recordRosterSignOn(
   setOrDrop(entry, 'createdWorktree', reg.createdWorktree || undefined);
   setOrDrop(entry, 'window', reg.window);
   setOrDrop(entry, 'link', reg.link);
+  // A throw names the mode; the same session soaking again keeps it.
+  setOrDrop(entry, 'startMode', opts.startMode ?? (prior?.sessionId === reg.sessionId ? prior.startMode : undefined));
   setOrDrop(entry, 'model', seen.model);
   setOrDrop(entry, 'config', seen.config);
   if (opts.soakBranch ?? prior?.soakBranch) entry.soakBranch = opts.soakBranch ?? prior?.soakBranch;

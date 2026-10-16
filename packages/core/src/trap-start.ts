@@ -42,6 +42,8 @@ export interface TrapReservation {
   worktree?: string;
   /** The batch throw this reservation belongs to. */
   batch?: string;
+  /** The permission mode the throw started the session in (`auto`, `bypassPermissions`, ...). */
+  startMode?: string;
 }
 
 /** `<trapId>-<32 hex>`: the id prefix finds the reservation, the rest proves it. */
@@ -149,6 +151,7 @@ export function reserveTrap(opts: {
   returning?: { trapId: string; worktree: string };
   creationReason?: string;
   batch?: string;
+  startMode?: string;
   /** A new throw enforces its configured repo cap under a cross-process reservation lock. */
   maxTraps?: number;
   now?: number;
@@ -220,6 +223,7 @@ export function reserveTrap(opts: {
     ...(opts.by ? { by: opts.by } : {}),
     ...(opts.request ? { request: opts.request } : {}),
     ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
+    ...(opts.startMode ? { startMode: opts.startMode } : {}),
     ...(opts.returning ? { worktree: opts.returning.worktree } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   };

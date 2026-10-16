@@ -181,6 +181,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--count': { value: '<n>' },
       '--harness': { value: HARNESS },
       '--request': { value: '<id>' },
+      '--bypass': {},
       '--timeout': { value: '<secs>' },
       '--all': {},
       '--repo': { value: '<key>' },
@@ -348,7 +349,7 @@ Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
 --wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
 \`trap bypass <trap> on|off\` (a person, at a terminal): the trap's next start runs with no permission checks
-(Claude Code bypassPermissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.
+(Claude Code --dangerously-skip-permissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.
 \`trap grant|grants|revoke\` = \`grant|grants|revoke\`.`,
   grant: `Allow traps to run one command (or, with --prefix, the command with more arguments; never
 anything joined on with ;, &&, | or a redirect), or with --path to write one file (a trailing
@@ -399,7 +400,7 @@ PR, and merge gate. Pure disk read.`,
   'man:throw': `Bring roster traps back, or start fresh, and wait until they listen; live/starting traps refuse.
 <trap>: one; --all: grounds; --repo: one repo; --new [--count N] [--request <id>]: fresh traps.
 --new shows reusable traps; --reason is required when any exist and never overrides the repo's traps cap.
---dry-run (or --plan) applies the same guards and launches nothing.`,
+--dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's.`,
   'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull. set (the
 helm's) saves how a throw starts it; default or key= clears a field. forget removes a
 stowed trap's record, worktree, and protected ref (refused while it has unpushed commits).`,

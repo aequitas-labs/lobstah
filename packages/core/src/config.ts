@@ -13,6 +13,35 @@ export interface HarnessDefaults {
   default?: string;
   model?: string;
   effort?: string;
+  /**
+   * The permission mode a thrown trap starts in: `auto` (the default),
+   * `bypass`, or another Claude Code mode. A roster profile and
+   * `man throw --bypass` come first.
+   */
+  permissionMode?: string;
+}
+
+/** Permission modes a throw can start a trap in; `bypass` is `bypassPermissions`. */
+export const TRAP_PERMISSION_MODES = ['auto', 'bypass', 'bypassPermissions', 'default', 'acceptEdits', 'plan', 'dontAsk'] as const;
+
+/** A permission mode as a throw names it: `bypass` is `bypassPermissions`; empty is none. */
+export function normalizePermissionMode(mode: string | undefined | null): string | undefined {
+  if (!mode) return undefined;
+  return mode === 'bypass' ? 'bypassPermissions' : mode;
+}
+
+function parseHarness(raw: unknown, where: string): HarnessDefaults | undefined {
+  if (raw === undefined) return undefined;
+  const h = raw as HarnessDefaults;
+  if (h.permissionMode !== undefined && !(TRAP_PERMISSION_MODES as readonly string[]).includes(String(h.permissionMode))) {
+    throw new Error(`${where}.permissionMode must be one of ${TRAP_PERMISSION_MODES.join(', ')}`);
+  }
+  return h;
+}
+
+/** The configured permission mode a repo's thrown traps start in: the repo's, else the global one. */
+export function configPermissionMode(cfg: Pick<Config, 'repos' | 'harness'>, repoKey: string | undefined): string | undefined {
+  return normalizePermissionMode((repoKey ? cfg.repos[repoKey]?.harness?.permissionMode : undefined) ?? cfg.harness.permissionMode);
 }
 
 export interface RepoConfig {
@@ -501,7 +530,7 @@ export function loadConfig(): Config {
       trunk: String(r.trunk ?? 'main'),
       setup: Array.isArray(r.setup) ? r.setup.map(String) : undefined,
       env: (r.env as Record<string, string>) ?? undefined,
-      harness: (r.harness as HarnessDefaults) ?? undefined,
+      harness: parseHarness(r.harness, `[repos.${key}.harness]`),
       pickup: r.pickup === undefined ? undefined : Boolean(r.pickup),
       scratch: Array.isArray(r.scratch) ? r.scratch.map(String) : undefined,
       pushEarly: r.pushEarly === undefined ? undefined : Boolean(r.pushEarly),
@@ -525,7 +554,7 @@ export function loadConfig(): Config {
   }
   return {
     repos,
-    harness: (raw.harness as HarnessDefaults) ?? {},
+    harness: parseHarness(raw.harness, '[harness]') ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
     soak: parseSoak(raw.soak),
     helm,
