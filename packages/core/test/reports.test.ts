@@ -18,6 +18,8 @@ import {
   ReportError,
   reportDir,
   resolveReportFile,
+  rewriteImageLinks,
+  unattachedImages,
 } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -114,5 +116,85 @@ describe('a helm report', () => {
     removeHelmReport(key);
     removeHelmReport(older.key); // a dispatch report goes with its state, not here
     expect(listReports().map((r) => r.key)).toEqual([older.key]);
+  });
+});
+
+describe('images in folders under the page', () => {
+  const shot = (rel: string, body = 'IMG') => {
+    const file = path.join(src, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body);
+    return file;
+  };
+  const key = () => dispatchReportKey(ID, 'work');
+
+  it('attaches an image the page links by a path under its directory, and links it by its stored name', () => {
+    const page = write('r.md', '# Walk\n\n![one](walkthrough-shots/01.jpg)\n![tray](tray.png)\n');
+    const meta = fileReport({ ...base, key: key(), file: page, attach: [shot('walkthrough-shots/01.jpg'), write('tray.png', 'PNG')] });
+    expect(meta.attachments.map((a) => a.name)).toEqual(['01.jpg', 'tray.png']);
+    expect(readReportMarkdown(key())).toBe('# Walk\n\n![one](01.jpg)\n![tray](tray.png)\n');
+    expect(resolveReportFile(key(), '01.jpg')).toBe(path.join(laneDirs('work').state, ID, 'attachments', '01.jpg'));
+    expect(unattachedImages(readReportMarkdown(key())!, meta)).toEqual([]);
+  });
+
+  it('takes an --attach path from the page directory when the working directory has none', () => {
+    shot('shots/a b.png');
+    const page = write('r.md', '![a](shots/a%20b.png)\n');
+    expect(fs.existsSync('shots')).toBe(false);
+    const meta = fileReport({ ...base, key: key(), file: page, attach: ['shots/a b.png'] });
+    expect(meta.attachments.map((a) => a.name)).toEqual(['a b.png']);
+    expect(readReportMarkdown(key())).toBe('![a](<a b.png>)\n');
+  });
+
+  it('gives two folders\' images of one name distinct stored names, each link reaching its own', () => {
+    const page = write('r.md', '![a](a/01.png) ![b](b/01.png)\n');
+    shot('a/01.png', 'IMG0');
+    shot('b/01.png', 'IMG1');
+    const meta = fileReport({ ...base, key: key(), file: page, attachDirs: [path.join(src, 'a'), path.join(src, 'b')] });
+    expect(meta.attachments.map((a) => a.name)).toEqual(['01.png', '01-2.png']);
+    expect(readReportMarkdown(key())).toBe('![a](01.png) ![b](01-2.png)\n');
+    expect(meta.renamed?.['01.png']).toBeUndefined();
+    expect(fs.readFileSync(resolveReportFile(key(), '01-2.png')!, 'utf8')).toBe('IMG1');
+  });
+
+  it('--attach-dir takes every image directly in the folder, and nothing else', () => {
+    shot('shots/02.png');
+    shot('shots/01.jpg');
+    shot('shots/notes.txt');
+    shot('shots/deeper/03.png');
+    const meta = fileReport({ ...base, key: key(), file: write('r.md', '![](shots/01.jpg)'), attachDirs: [path.join(src, 'shots')] });
+    expect(meta.attachments.map((a) => a.name)).toEqual(['01.jpg', '02.png']);
+  });
+
+  it('refuses paths out of the page directory, and files nothing', () => {
+    const page = shot('pages/r.md', '![x](../out.png)');
+    shot('out.png');
+    shot('pages/empty/.keep');
+    const refused = (opts: { attach?: string[]; attachDirs?: string[] }, pattern: RegExp) => {
+      expect(() => fileReport({ ...base, key: key(), file: page, ...opts })).toThrow(ReportError);
+      expect(() => fileReport({ ...base, key: key(), file: page, ...opts })).toThrow(pattern);
+    };
+    expect(fs.existsSync('../out.png')).toBe(false);
+    refused({ attach: ['../out.png'] }, /--attach \.\.\/out\.png: not under the page's directory/);
+    refused({ attachDirs: [src] }, /not under the page's directory/);
+    refused({ attachDirs: [path.join(src, 'pages', 'empty')] }, /no images/);
+    refused({ attachDirs: [path.join(src, 'pages', 'nowhere')] }, /no such directory/);
+    expect(readReport(key())).toBeUndefined();
+  });
+
+  it('keeps a link out of the tree as written, and reports it with unattached ones', () => {
+    const page = shot('pages/r.md', '![x](../out.png) ![y](missing.png) ![z](https://example.com/z.png) ![w](sub/w.png)\n');
+    const meta = fileReport({ ...base, key: key(), file: page, attach: [shot('out.png')] });
+    const filed = readReportMarkdown(key())!;
+    expect(filed).toContain('![x](../out.png)');
+    expect(unattachedImages(filed, meta)).toEqual(['../out.png', 'missing.png', 'sub/w.png']);
+  });
+});
+
+describe('rewriteImageLinks', () => {
+  it('rewrites image targets outside code, keeps titles and plain links', () => {
+    const md = '![a](s/1.png "one") [link](s/1.png)\n`![c](s/1.png)`\n```\n![d](s/1.png)\n```\n![e](<s/2 x.png>)\n';
+    const out = rewriteImageLinks(md, (t) => ({ 's/1.png': '1.png', 's/2 x.png': '2 x.png' })[t]);
+    expect(out).toBe('![a](1.png "one") [link](s/1.png)\n`![c](s/1.png)`\n```\n![d](s/1.png)\n```\n![e](<2 x.png>)\n');
   });
 });

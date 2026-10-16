@@ -8,7 +8,7 @@ import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, s
   noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop, baitBrief } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
-import { charter, HELM_REMINDER } from '../src/charter.js';
+import { charter, FILE_REPORT_RULE, HELM_REMINDER } from '../src/charter.js';
 import { attentionNow } from '@lobstah/supervisor';
 import { DEFAULT_WAIT, IdleWait } from '@lobstah/core';
 
@@ -128,6 +128,15 @@ describe('lobstah hook user-prompt-submit', () => {
       }
     });
   }
+
+  it('tells the helm, in its charter Role and both man skills, to file its own pages with man file', () => {
+    expect(charter({ name: 'fleet', repos: ['web'] }).split('Role:')[1]?.split('Fences:')[0]).toContain(FILE_REPORT_RULE);
+    for (const plugin of ['claude-code', 'codex']) {
+      const skill = fs.readFileSync(fileURLToPath(new URL(`../../../plugins/${plugin}/skills/man/SKILL.md`, import.meta.url)), 'utf8');
+      expect(skill).toContain(FILE_REPORT_RULE);
+      expect(skill.split('## Working set')[1]?.split('## Rules')[0]).toContain('lobstah man file <file.md> [--attach <img>] [--title <t>]');
+    }
+  });
 
   it('includes the same reminder in the helm charter Role section', () => {
     expect(charter({ name: 'fleet', repos: ['web'] }).split('Role:')[1]?.split('Fences:')[0]).toContain(HELM_REMINDER);

@@ -582,8 +582,22 @@ the helm files to keep.
   image the page names by bare filename (`![tray](tray.png)`) resolves to
   that directory. The note stays one line.
 - **Filing a helm report.** `lobstah man file <file.md> [--attach <file> ...]
-  [--title <text>]`. It is stored under the helm's grounds,
-  `reports/<grounds>/<rid>/`, with the same layout, and the author is `helm`.
+  [--attach-dir <dir> ...] [--title <text>]`. It is stored under the helm's
+  grounds, `reports/<grounds>/<rid>/`, with the same layout, and the author
+  is `helm`. The helm files its own reports, plans, and step lists this way:
+  a file left only in the chat does not reach the glass deck.
+- **Images in folders.** A page may link an image by a path under its own
+  directory (`![step 1](walkthrough-shots/01.jpg)`). `--attach` takes that
+  path from the working directory, or else from the page's directory.
+  `--attach-dir <dir>` attaches every image (`.png .jpg .jpeg .gif .webp`)
+  directly in a folder. Attachments are stored flat, so the filed copy
+  rewrites each such link to the image's stored name (`01.jpg`, or
+  `01-2.jpg` when two folders hold an `01.jpg`). A path resolved from the
+  page's directory must stay inside its tree: `..` out of it, and an
+  `--attach-dir` outside it, are refused, and nothing is filed. A link that
+  leaves the tree, or names an image that was not attached, is kept as it
+  is; the glass does not load it, and the filing prints a `warning` that
+  lists such links. Both `report --report` and `man file` take these flags.
 - **The helm's todos.** Reminders the helm keeps for itself ("merge #2268
   once the API is in production") go in `lobstah todo add "<text>"`, not
   only in the conversation. The text is free: any detail, link, or PR goes

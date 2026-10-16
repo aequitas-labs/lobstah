@@ -113,6 +113,47 @@ describe('man file', () => {
     expect(fs.existsSync(path.join(home, 'reports', 'fleet', r!.key.split(':').at(-1)!, 'report.md'))).toBe(true);
     expect(res.stdout).toContain(`lobstah attention ack ${r!.key}`);
   });
+
+  it('attaches a folder of images the page links by relative path, from the page directory', () => {
+    fs.mkdirSync(path.join(src, 'walkthrough-shots'));
+    for (const n of ['01.jpg', '02.jpg']) fs.writeFileSync(path.join(src, 'walkthrough-shots', n), 'JPG');
+    write('walk.md', '# Walkthrough\n\n![1](walkthrough-shots/01.jpg)\n![2](walkthrough-shots/02.jpg)\n');
+    const env: NodeJS.ProcessEnv = { ...process.env, LOBSTAH_HOME: home };
+    delete env.CLAUDE_CODE_SESSION_ID;
+    const res = spawnSync(process.execPath, [cli, 'man', 'file', 'walk.md', '--attach-dir', 'walkthrough-shots'], { encoding: 'utf8', env, cwd: src, timeout: 10_000 });
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stdout).toContain('attachments: 2');
+    expect(res.stdout).not.toContain('warning');
+    const [r] = listReports();
+    expect(fs.readFileSync(path.join(home, 'reports', 'fleet', r!.key.split(':').at(-1)!, 'report.md'), 'utf8')).toContain('![1](01.jpg)\n![2](02.jpg)');
+  });
+
+  it('warns about images the page links but did not attach, and refuses a folder outside the page', () => {
+    fs.mkdirSync(path.join(src, 'pages'));
+    const page = write(path.join('pages', 'p.md'), '![a](shots/a.png)\n');
+    const warned = lobstah('man', 'file', page);
+    expect(warned.status, warned.stderr).toBe(0);
+    expect(warned.stdout).toContain('the page links 1 image(s) the glass cannot show: shots/a.png');
+    const refused = lobstah('man', 'file', page, '--attach-dir', src);
+    expect(refused.status).toBe(2);
+    expect(refused.stdout + refused.stderr).toContain("not under the page's directory");
+    expect(listReports()).toHaveLength(1);
+  });
+});
+
+describe('report done --report --attach-dir', () => {
+  it('files the folder with the page and rewrites its links', () => {
+    enqueue({ id: A, repo: 'web', brief: 'b' });
+    fs.mkdirSync(path.join(src, 'shots'));
+    fs.writeFileSync(path.join(src, 'shots', 'x.png'), 'PNG');
+    const res = lobstah('report', A, 'done', 'shots', '--report', write('r.md', '![x](shots/x.png)\n'), '--attach-dir', path.join(src, 'shots'));
+    expect(res.status, res.stderr).toBe(0);
+    expect(fs.readFileSync(path.join(laneDirs('work').state, A, 'report.md'), 'utf8')).toBe('![x](x.png)\n');
+    enqueue({ id: B, repo: 'web', brief: 'b' });
+    const alone = lobstah('report', B, 'done', '--attach-dir', path.join(src, 'shots'));
+    expect(alone.status).toBe(2);
+    expect(alone.stdout + alone.stderr).toContain('--attach and --attach-dir go with --report');
+  });
 });
 
 describe('the report attention kind', () => {

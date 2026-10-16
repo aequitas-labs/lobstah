@@ -10,10 +10,12 @@ import {
   loadConfig,
   newHelmReportKey,
   readReport,
+  readReportMarkdown,
   readSessionClaim,
   readEvidence,
   storedDescriptor,
   trapNameForId,
+  unattachedImages,
 } from '@lobstah/core';
 import type { Lane, ReportMeta, TendAttention } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
@@ -33,18 +35,19 @@ function trapOf(id: string, lane: Lane): string | undefined {
 }
 
 /**
- * `report done|failed --report <file.md> [--attach <file>]`: file the
+ * `report done|failed --report <file.md> [--attach <file>] [--attach-dir <dir>]`: file the
  * dispatch's report, then ack the report of every dispatch before it in its
  * follow-up chain. Throws ReportError before anything is copied when a file
  * is refused.
  */
-export function fileDispatchReport(id: string, lane: Lane, file: string, attach: string[]): ReportMeta {
+export function fileDispatchReport(id: string, lane: Lane, file: string, attach: string[], attachDirs: string[] = []): ReportMeta {
   const descriptor = storedDescriptor(id, lane);
   const trap = trapOf(id, lane);
   const meta = fileReport({
     key: dispatchReportKey(id, lane),
     file,
     attach,
+    attachDirs,
     fallbackTitle: descriptor ? briefTitle(descriptor.brief) : id,
     author: trap ?? 'headless',
     maxBytes: loadConfig().limits.attachmentMaxBytes,
@@ -62,20 +65,32 @@ export function fileDispatchReport(id: string, lane: Lane, file: string, attach:
   return meta;
 }
 
-/** `man file <file.md> [--attach <file>] [--title <text>]`: a helm's own report under its grounds. */
-export function fileHelmReport(grounds: string, file: string, attach: string[], title?: string): ReportMeta {
+/** `man file <file.md> [--attach <file>] [--attach-dir <dir>] [--title <text>]`: a helm's own report under its grounds. */
+export function fileHelmReport(grounds: string, file: string, attach: string[], title?: string, attachDirs: string[] = []): ReportMeta {
   const cfg = loadConfig();
   grounds = storageGrounds(grounds, cfg);
   return fileReport({
     key: newHelmReportKey(grounds),
     file,
     attach,
+    attachDirs,
     ...(title ? { title } : {}),
     fallbackTitle: `helm report · ${displayGrounds(grounds, cfg)}`,
     author: 'helm',
     maxBytes: cfg.limits.attachmentMaxBytes,
     grounds,
   });
+}
+
+/**
+ * The warning for images the filed page links but the glass cannot show,
+ * or undefined when every image resolves.
+ */
+export function unattachedWarning(meta: ReportMeta): string | undefined {
+  const missing = unattachedImages(readReportMarkdown(meta.key) ?? '', meta);
+  if (missing.length === 0) return undefined;
+  const shown = missing.slice(0, 5).join(', ') + (missing.length > 5 ? `, and ${missing.length - 5} more` : '');
+  return `the page links ${missing.length} image(s) the glass cannot show: ${shown}. Attach each with --attach <file>, or a folder of them with --attach-dir <dir>; a path must stay under the page's directory`;
 }
 
 /** One `report` attention item per filed report: it stands until acked. */
