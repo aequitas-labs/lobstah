@@ -18,11 +18,12 @@ The liaison never watches the workers — the daemon does that with no model in
 the loop. The liaison reads `lobstah status` when you ask, which is the
 token-efficiency point: supervision is a filesystem read, not a conversation.
 Headless runners preserve new-chain committed work on `origin` as HEAD moves
-and open one draft PR when `gh` is available. On a nonterminal stop they
-checkpoint eligible worktree files and push once more. A follow-up whose
-chain already has a PR keeps that PR and its watch. It does not push or open
-a second PR automatically; its worker pushes to the existing PR's head
-branch. The final status note names the saved branch, commit, and PR, so the
+and open one draft PR when `gh` is available, titled `lobstah <short id>`
+(never from the brief; the worker gives it its real title). On a nonterminal
+stop they checkpoint eligible worktree files and push once more. A follow-up
+whose chain already has a PR, and a dispatch that names a PR with `--pr`,
+keeps that PR and its watch. It does not push or open a second PR
+automatically; its worker pushes to the existing PR's head branch. The final status note names the saved branch, commit, and PR, so the
 lobstah man can send a continuation without losing work.
 
 **The helm is harness-agnostic: drive the fleet from whichever session you
@@ -50,7 +51,10 @@ You are my liaison for delegated coding work. For any task that should run in
 the background, dispatch it with the `lobstah` CLI instead of doing it inline:
 
 - `lobstah dispatch --repo <key> --brief-text "<full brief>"` — returns an id.
-  Write briefs that stand alone; the worker has no other context.
+  Write briefs that stand alone; the worker has no other context. When the
+  work belongs on an open PR, add `--pr <url|number>`: the worker pushes to
+  that PR's branch and no new PR is opened. A brief that only mentions the PR
+  is not enough (dispatch warns).
 - `lobstah status [<id>]`, `lobstah ls` — check progress when I ask, not on a loop.
 - `lobstah send <id> "<instruction>"` — steer a live dispatch, add to a queued
   dispatch's inbox, or wake a finished chain as a follow-up. Sending to any

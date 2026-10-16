@@ -30,8 +30,8 @@ export function buildPrompt(brief: string, opts: { id: string; nudge?: string; a
       ? `Commit your work with clear messages. This chain already has PR ${opts.existingPr.url}. The runner does not push or open another PR. ` +
         `${pushRule(opts.existingPr.headRefName, opts.id)} ` +
         `Report done with the same PR URL. Do not merge anything.`
-      : `Commit your work with clear messages. The runner pushes committed HEAD early and opens or adopts one draft PR for the branch when available; do not create a duplicate PR. ` +
-        `When finished, mark the draft ready for review if appropriate, then report done with its URL. Do not merge anything.`,
+      : `Commit your work with clear messages. The runner pushes committed HEAD early and opens or adopts one draft PR for the branch when available, titled \`lobstah ${opts.id.slice(0, 8)}\`; do not create a duplicate PR. ` +
+        `When finished, give that PR a real title (\`gh pr edit --title\`), mark it ready for review if appropriate, then report done with its URL. Do not merge anything.`,
     `--- BRIEF ---`,
     opts.existingPr
       ? `${brief}\n\nExisting chain PR: ${opts.existingPr.url}. Head branch: ${opts.existingPr.headRefName ?? 'inspect the PR'}. The runner will not push this follow-up.`

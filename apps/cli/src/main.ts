@@ -248,6 +248,7 @@ import { setTerminalTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows } from './report-file.js';
 import { reviewRows } from './reviews.js';
+import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { todoTable, todoViews } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
@@ -261,7 +262,11 @@ work (humans and agents):
   dispatch (--repo <key> | --pool <name>) (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
            [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap> | --trap-any] [--chore] [--id <uuid>]
+           [--pr <url|number>]
                                   queue a supervised dispatch; prints the id.
+                                  --pr works on that open PR: the runner
+                                  pushes no lobstah/<id> branch and opens no
+                                  PR; the worker pushes to the PR's branch.
                                   --for addresses the work to a signed-on
                                   worktree (sticky: waits for that trap,
                                   never falls back headless; session:<id>
@@ -285,7 +290,7 @@ work (humans and agents):
   focus <trap>                    bring a live trap's recorded window forward
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--] <message>
+  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--] <message>
                                   steer a live chain, queue for its pending
                                   member, or wake finished work as a follow-up;
                                   (arrives at its next park; undeliverable
@@ -1158,6 +1163,9 @@ async function mainCli(): Promise<void> {
         for: opt('--for'),
         ...(poolName !== undefined ? { pool: poolName } : {}),
       };
+      // --pr: the dispatch works on this existing PR. The runner opens no PR of its own.
+      const prTarget = opt('--pr');
+      if (prTarget !== undefined) d.pr = resolvePrTarget(repo, prTarget);
       const lane: Lane = has('--chore') ? 'chore' : 'work';
       const caller = callerSession(opt('--session'));
       let selected: Awaited<ReturnType<typeof trapForRepo>> | undefined;
@@ -1172,7 +1180,11 @@ async function mainCli(): Promise<void> {
         else d.trapAny = true;
       }
       const warnings = startDispatch(d, lane, values('--attach'), caller);
-      console.log(toonKV({ id: d.id, repo, lane, ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(selected ? { trapAction: selected.action, reason: selected.why } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
+      if (!d.pr && !d.followUp) {
+        for (const url of briefPrMentions(d.brief, repo))
+          warnings.push(`the brief names ${url}, but this dispatch will open its own draft PR; to push to that PR instead, dispatch with --pr ${url}`);
+      }
+      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(selected ? { trapAction: selected.action, reason: selected.why } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
@@ -1320,7 +1332,9 @@ async function mainCli(): Promise<void> {
       gateHelm(sender);
       const from = sid !== undefined && helmOf(sid) !== undefined ? 'helm' : sid !== undefined ? `session:${sid.slice(0, 8)}` : 'terminal';
       const text = rest.join(' ');
+      const prOnlyForFollowUp = '--pr applies only when send starts a follow-up of a finished dispatch; to work on a PR, dispatch with --pr';
       if (target.startsWith('wt:') || target.startsWith('session:') || trapByAddress(target) || /^[a-z]+-[a-z]+$/.test(target)) {
+        if (opt('--pr') !== undefined) throw new UsageError(prOnlyForFollowUp);
         let trapId = target.startsWith('session:') ? undefined : trapByAddress(target)?.trapId;
         if (!trapId && target.startsWith('session:')) {
           const t = trapBySession(target.slice('session:'.length));
@@ -1372,6 +1386,7 @@ async function mainCli(): Promise<void> {
       const queued = chain.filter((member) => member.bucket === 'queue').at(-1);
       const recipient = active ?? queued;
       if (recipient) {
+        if (opt('--pr') !== undefined) throw new UsageError(prOnlyForFollowUp);
         const member = recipient;
         const attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(member.id, member.lane)) ?? [];
         const block = attachmentBlock(attachments);
@@ -1418,6 +1433,7 @@ async function mainCli(): Promise<void> {
         followUp: origin.id,
         for: address,
         ...(!address && origin.descriptor.pool ? { pool: origin.descriptor.pool } : {}),
+        ...(opt('--pr') !== undefined ? { pr: resolvePrTarget(origin.descriptor.repo, opt('--pr')!) } : {}),
       };
       const warnings = startDispatch(followUp, origin.lane, values('--attach'), sender);
       if (!has('--no-reply')) expectReply({ dispatchId: followUp.id, lane: origin.lane, from, text });

@@ -135,6 +135,15 @@ export function remotePolicyFor(
   };
 }
 
+/**
+ * The title of a draft PR the runner opens: neutral, never from the brief.
+ * A brief's first line is often a markdown heading written for the worker,
+ * not a PR title. The worker gives the PR its real title.
+ */
+export function draftPrTitle(id: string): string {
+  return `lobstah ${short(id)}`;
+}
+
 /** The note a cold replacement session reads in place of the conversation. */
 function coldNote(cold: NonNullable<StartPlan['cold']>, cwd: string, trunk: string): string {
   const parts = [worktreeProgress(cwd, trunk)];
@@ -319,7 +328,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   const remoteEnabled = Object.values(remotePolicy).some(Boolean);
   const remote = keepRemote({
     id, lane, cwd, trunk: repo.trunk,
-    title: descriptor.brief.split('\n')[0]?.trim() || `Lobstah dispatch ${short(id)}`,
+    title: draftPrTitle(id),
     policy: remotePolicy,
     existingPrUrl: existingPr?.url,
   });
