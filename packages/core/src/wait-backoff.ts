@@ -19,6 +19,22 @@ function write(key: string, value: unknown): void {
   atomicRenameSync(tmp, file);
 }
 
+/**
+ * Whether a prompt hook's prompt is only harness-injected notification: one
+ * or more `<task-notification>` envelopes (a finished background task or
+ * subagent), optionally inside `<system-reminder>` text, and nothing else.
+ * Claude Code runs UserPromptSubmit for these turns too, with no field that
+ * says so, and a backgrounded `man wait` or `soak --wait` ending quietly
+ * arrives as one. Anything a person typed, or any other text, is not.
+ */
+export function injectedPrompt(prompt: unknown): boolean {
+  if (typeof prompt !== 'string' || !/<task-notification>[\s\S]*?<\/task-notification>/.test(prompt)) return false;
+  const rest = prompt
+    .replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '')
+    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\b[^>]*>/g, '');
+  return rest.trim() === '';
+}
+
 /** A prompt/event resets its session; a dispatch/send resets all local waiters. */
 export function resetWaitBackoff(session?: string): void {
   write(session ? resetKey(session) : 'activity', randomUUID());

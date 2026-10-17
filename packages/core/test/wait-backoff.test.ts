@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_WAIT, IdleWait, enqueue, ensureLayout, loadConfig, resetWaitBackoff, sendMessage, waitTimeoutSecs } from '../src/index.js';
+import { DEFAULT_WAIT, IdleWait, enqueue, ensureLayout, injectedPrompt, loadConfig, resetWaitBackoff, sendMessage, waitTimeoutSecs } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -80,5 +80,24 @@ describe('idle waiter history', () => {
     expect(old.remainingMs(1000)).toBe(900_000);
     expect(old.expired(900_999)).toBe(false);
     expect(old.expired(901_000)).toBe(true);
+  });
+});
+
+describe('injectedPrompt', () => {
+  const env = (id: string) => `<task-notification>\n<task-id>${id}</task-id>\n<status>failed</status>\n<summary>Background command "man wait" failed with exit code 3</summary>\n</task-notification>`;
+  it('is true only for prompts made of task-notification envelopes and system reminders', () => {
+    expect(injectedPrompt(env('a'))).toBe(true);
+    expect(injectedPrompt(`${env('a')}\n\n${env('b')}\n`)).toBe(true);
+    expect(injectedPrompt(`<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n</system-reminder>\n${env('a')}`)).toBe(true);
+    expect(injectedPrompt(`<system-reminder id="x1">note</system-reminder id="x1">\n${env('a')}`)).toBe(true);
+  });
+  it('is false for anything a person typed, and for system text alone', () => {
+    expect(injectedPrompt('ship it')).toBe(false);
+    expect(injectedPrompt(`${env('a')}\nalso, check #257`)).toBe(false);
+    expect(injectedPrompt('look at this: <task-notification> is the tag')).toBe(false);
+    expect(injectedPrompt('<system-reminder>a message from another session</system-reminder>')).toBe(false);
+    expect(injectedPrompt('')).toBe(false);
+    expect(injectedPrompt(undefined)).toBe(false);
+    expect(injectedPrompt({ prompt: env('a') })).toBe(false);
   });
 });

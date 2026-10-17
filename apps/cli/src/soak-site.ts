@@ -56,6 +56,8 @@ export interface HookInput {
   stop_hook_active?: boolean;
   model?: unknown;
   permission_mode?: unknown;
+  /** UserPromptSubmit: the prompt text. */
+  prompt?: unknown;
 }
 
 /**

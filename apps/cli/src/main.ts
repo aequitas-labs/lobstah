@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   IdleWait,
   resetWaitBackoff,
+  injectedPrompt,
   goalDate,
   addGoal,
   removeGoal,
@@ -918,7 +919,9 @@ async function mainCli(): Promise<void> {
     try {
       const hook = readHookStdin();
       const trap = hook?.session_id ? trapBySession(hook.session_id) : undefined;
-      if (hook?.session_id && (trap || helmOf(hook.session_id))) resetWaitBackoff(hook.session_id);
+      // A person's prompt resets the quiet-waiter backoff. A finished background
+      // task's notification (the quiet `man wait` or `soak --wait` itself) does not.
+      if (hook?.session_id && (trap || helmOf(hook.session_id)) && !injectedPrompt(hook.prompt)) resetWaitBackoff(hook.session_id);
       if (trap) resumeTrapTurn(trap, true);
       if (hook?.session_id && !trapBySession(hook.session_id) && helmOf(hook.session_id)) {
         const { dailyGoalsContext } = await import('./goals.js');
