@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.10 — 2026-10-17
+
+### Quiet waiters back off for real
+
+A finished background task (the helm's quiet `man wait`, a trap's
+`soak --wait`) comes back as an injected turn, and that turn fired the prompt
+hook, which reset the backoff. So every quiet wait started again at 900 s.
+A prompt that is only `<task-notification>` envelopes no longer resets it.
+Typed prompts and real wakes still reset at once. Quiet waits now go 900, 900,
+900, 1800, 3600, 7200, then 14400 s. (#259)
+
+### The day's goals prompt waits for a person
+
+The once-a-day goals prompt fired on the first turn after 04:00, even when
+that turn was a task notification with nobody there. It now waits for the
+first prompt a person types, and a notification doesn't use up the day's
+prompt. (#260)
+
 ## 0.7.9 — 2026-10-16
 
 ### Traps start in auto permission mode
