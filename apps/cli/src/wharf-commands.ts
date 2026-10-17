@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { IdleWait, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
+import { IdleWait, injectedPrompt, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
   readBrokerAgent, brokerRequest, WharfBackend, recordWharfCatch, type BrokerPoll } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
@@ -258,7 +258,7 @@ export async function wharfHook(cmd: string | undefined, args: string[]): Promis
   if (scope?.kind !== 'wharf') return false;
   const input = readHookStdin(), agent = readBrokerAgent(scope.grounds, input?.cwd ?? process.cwd());
   try {
-    if (args[0] === 'user-prompt-submit' && input?.session_id) resetWaitBackoff(input.session_id);
+    if (args[0] === 'user-prompt-submit' && input?.session_id && !injectedPrompt(input.prompt)) resetWaitBackoff(input.session_id);
     if (agent) {
       if (input?.session_id && input.session_id !== agent.session) return true;
       if (args[0] === 'session-end') await endBrokerAgent(agent);

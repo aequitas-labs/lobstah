@@ -95,6 +95,31 @@ describe('lobstah hook user-prompt-submit', () => {
     expect(hook(['hook', 'user-prompt-submit'], { session_id: NOBODY }).status).toBe(0);
     expect(fs.readdirSync(path.join(home, 'wait-backoff')).sort()).toEqual(before);
   });
+  it("a finished background task's notification keeps the backoff; three quiet cycles then double; a person's prompt resets", () => {
+    takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000 });
+    trap('quiet-trap');
+    // The turn Claude Code injects when a backgrounded `man wait` (or `soak --wait`) times out.
+    const notice = (id: string) =>
+      `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>toolu_01</tool-use-id>\n<output-file>/tmp/tasks/${id}.output</output-file>\n` +
+      `<status>failed</status>\n<summary>Background command "Re-arm the watcher" failed with exit code 3</summary>\n</task-notification>`;
+    for (const session of [HELM, 'quiet-trap']) {
+      const timeouts: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const wait = new IdleWait(session, DEFAULT_WAIT, undefined, 0);
+        timeouts.push(wait.timeoutSecs);
+        wait.timedOut(wait.timeoutSecs * 1000);
+        expect(hook(['hook', 'user-prompt-submit'], { session_id: session, hook_event_name: 'UserPromptSubmit', prompt: notice(`b${i}`) }).status).toBe(0);
+      }
+      expect(timeouts).toEqual([900, 900, 900, 1800, 3600]);
+      // Wrapped in system-reminder text, still the harness's.
+      const wrapped = `<system-reminder>\nAn automated background-task event.\n</system-reminder>\n${notice('w')}`;
+      expect(hook(['hook', 'user-prompt-submit'], { session_id: session, prompt: wrapped }).status).toBe(0);
+      expect(new IdleWait(session, DEFAULT_WAIT).timeoutSecs).toBe(7200);
+      expect(hook(['hook', 'user-prompt-submit'], { session_id: session, prompt: 'what is the fleet doing?' }).status).toBe(0);
+      expect(new IdleWait(session, DEFAULT_WAIT).timeoutSecs).toBe(900);
+    }
+  });
+
   for (const harness of ['claude', 'codex'] as const) {
     it(`${harness}: captures only observed fields on hooks for both registered roles`, () => {
       takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: [] }, ttlMs: 60_000, identity: { harness } });

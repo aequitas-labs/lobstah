@@ -189,7 +189,10 @@ send a continuation.
 
 The defaults wait 900, 900, 900, 1800, 3600, 7200, then 14400 seconds.
 History is stored per session across re-arms. An event or user prompt resets
-that session; a dispatch or send resets all this boat's waiters. Already-armed
+that session; a dispatch or send resets all this boat's waiters. A prompt the
+harness injects when a background task finishes (a `<task-notification>`,
+which is how a backgrounded `man wait` or `soak --wait` ending quietly comes
+back) is not a user prompt and does not reset. Already-armed
 waiters adopt a fresh base deadline on their next poll. Polling and liveness
 heartbeats keep their usual cadence, so events still wake immediately.
 `--peek` and zero-time trap probes do not advance the backoff.
