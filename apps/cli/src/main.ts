@@ -919,14 +919,19 @@ async function mainCli(): Promise<void> {
     try {
       const hook = readHookStdin();
       const trap = hook?.session_id ? trapBySession(hook.session_id) : undefined;
-      // A person's prompt resets the quiet-waiter backoff. A finished background
-      // task's notification (the quiet `man wait` or `soak --wait` itself) does not.
-      if (hook?.session_id && (trap || helmOf(hook.session_id)) && !injectedPrompt(hook.prompt)) resetWaitBackoff(hook.session_id);
+      // A finished background task's notification (the quiet `man wait` or
+      // `soak --wait` itself) is a turn, but no person wrote it.
+      const person = !injectedPrompt(hook?.prompt);
+      // A person's prompt resets the quiet-waiter backoff; a notification does not.
+      if (hook?.session_id && (trap || helmOf(hook.session_id)) && person) resetWaitBackoff(hook.session_id);
+      // Every turn, injected or typed, ends a trap's idleness and earns its own correction.
       if (trap) resumeTrapTurn(trap, true);
       if (hook?.session_id && !trapBySession(hook.session_id) && helmOf(hook.session_id)) {
         const { dailyGoalsContext } = await import('./goals.js');
         const helm = helmOf(hook.session_id)!;
-        const daily = dailyGoalsContext(helm.grounds, loadConfig());
+        // The day's goals prompt waits for the person's first message: a
+        // notification neither gets it nor uses up the day's claim.
+        const daily = person ? dailyGoalsContext(helm.grounds, loadConfig()) : undefined;
         console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [HELM_REMINDER, daily].filter(Boolean).join('\n') } }));
       }
     } catch { /* a reminder never breaks the user's turn */ }

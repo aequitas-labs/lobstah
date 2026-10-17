@@ -90,7 +90,9 @@ for writes. Files are editable Markdown at
 
 The first user prompt of a new day adds a non-blocking reminder to the helm:
 handle that message, then put yesterday's recap and a draft of today's goals
-on one card. Existing goals, a `Goals for YYYY-MM-DD` card, or an already
+on one card. A turn the harness injects when a background task finishes (a
+`<task-notification>`, such as a quiet `man wait` ending) is not a user
+prompt: it neither gets the reminder nor uses it up. Existing goals, a `Goals for YYYY-MM-DD` card, or an already
 delivered reminder suppress another ask. The helm saves the answered goals
 with `goals set`; the first reminder leaves a comment in that same daily file.
 The helm uses them to order work and choose the next quiet step.

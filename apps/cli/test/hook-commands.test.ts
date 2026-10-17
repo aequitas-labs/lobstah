@@ -154,6 +154,28 @@ describe('lobstah hook user-prompt-submit', () => {
     });
   }
 
+  it("the day's goals prompt waits for the person's first message: a task notification neither gets it nor uses it up", () => {
+    takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+    const notice = `<task-notification>\n<task-id>b1</task-id>\n<status>failed</status>\n<summary>Background command "man wait" failed with exit code 3</summary>\n</task-notification>`;
+    const turn = (prompt: string) => {
+      const res = hook(['hook', 'user-prompt-submit'], { session_id: HELM, hook_event_name: 'UserPromptSubmit', prompt });
+      expect(res.status, res.stderr).toBe(0);
+      return JSON.parse(res.stdout).hookSpecificOutput.additionalContext as string;
+    };
+    const goalsDir = path.join(home, 'goals');
+    const claimed = () => (fs.existsSync(goalsDir) ? fs.readdirSync(goalsDir, { recursive: true }).filter((f) => String(f).endsWith('.md')) : []);
+    for (const prompt of [notice, `<system-reminder>\nautomated\n</system-reminder>\n${notice}`]) {
+      const context = turn(prompt);
+      expect(context).toContain(HELM_REMINDER);
+      expect(context).not.toContain('First message of the day');
+      expect(claimed()).toEqual([]);
+    }
+    expect(turn('good morning')).toContain('First message of the day');
+    expect(claimed()).toHaveLength(1);
+    expect(turn(notice)).not.toContain('First message of the day');
+    expect(turn('next')).not.toContain('First message of the day');
+  });
+
   it('tells the helm, in its charter Role and both man skills, to file its own pages with man file', () => {
     expect(charter({ name: 'fleet', repos: ['web'] }).split('Role:')[1]?.split('Fences:')[0]).toContain(FILE_REPORT_RULE);
     for (const plugin of ['claude-code', 'codex']) {
