@@ -234,6 +234,7 @@ import {
   backfillPrWatches,
   cutTitle,
   syncPrWatches,
+  runDueManWatches,
   pollSecs,
   runPrCheck,
 } from './pr-watch.js';
@@ -673,14 +674,6 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
   }
 }
 
-function runDueManWatches(): void {
-  const every = pollSecs();
-  syncPrWatches();
-  for (const w of listWatches()) {
-    if (w.owner === 'man' && !w.key.startsWith('pr:') && watchDue(w, every)) runWatchCheck(w);
-  }
-  // The daemon observes dispatch-owned PR watches even with no helm signed on.
-}
 
 /** A trap request as a man wait event: its id, repo, and harness. */
 function trapRequestFields(n: Notice): Record<string, string> | undefined {

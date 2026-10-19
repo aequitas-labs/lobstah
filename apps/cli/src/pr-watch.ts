@@ -239,6 +239,20 @@ export function syncPrWatches(at = Date.now(), opts: { run?: PrBatchRun } = {}):
   return { refreshed };
 }
 
+/** A failed poll (a lock race, a GitHub outage) is logged; the wait goes on and polls again. */
+export function runDueManWatches(log: (message: string) => void = (m) => console.error(m)): void {
+  try {
+    const every = pollSecs();
+    syncPrWatches();
+    for (const w of listWatches()) {
+      if (w.owner === 'man' && !w.key.startsWith('pr:') && watchDue(w, every)) runWatchCheck(w);
+    }
+  } catch (err) {
+    log(`lobstah: watch poll failed: ${err instanceof Error ? err.message : String(err)}; still waiting`);
+  }
+  // The daemon observes dispatch-owned PR watches even with no helm signed on.
+}
+
 function laneOf(id: string): Lane | undefined {
   return (['work', 'chore'] as Lane[]).find((l) => fs.existsSync(evidencePath(id, l)) || readStatusLog(id, l).length > 0);
 }

@@ -25,6 +25,7 @@ export * from './harness.js';
 export * from './gh-errors.js';
 export * from './github-budget.js';
 export * from './pr-poll.js';
+export * from './dir-lock.js';
 export * from './watch.js';
 export * from './soak.js';
 export * from './session-link.js';

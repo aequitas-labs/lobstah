@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
+import { tryDirLock } from './dir-lock.js';
 import { parsePrRef, ghPrViewDirect } from './pr.js';
 import type { GhPrView, PrRef } from './pr.js';
 import { readPr } from './prs.js';
@@ -174,18 +175,10 @@ export function preparePrWatchBatch(
     if (!due.has(repo)) continue;
     const file = cycleFile(repo),
       lock = `${file}.lock`;
-    try {
-      fs.mkdirSync(lock);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      // A crashed batch is retried, never a permanently claimed cycle.
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock);
-      } catch {
-        /* raced */
-      }
-      continue;
-    }
+    // A crashed batch is retried, never a permanently claimed cycle; a slow
+    // one keeps its claim while its process lives.
+    const held = tryDirLock(lock, { staleMs: 120_000 });
+    if (!held) continue;
     try {
       const before = readCycle(repo);
       if (before && now < before.nextAt) continue;
@@ -286,7 +279,7 @@ export function preparePrWatchBatch(
       atomicRenameSync(tmp, file);
       if (limited) break; // one shared failure, never hammer the next repository
     } finally {
-      fs.rmdirSync(lock);
+      held.release();
     }
   }
 }

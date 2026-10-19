@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { uniqueTempPath, atomicRenameSync, lobstahHome, readDirIfPresent } from './paths.js';
+import { withDirLock } from './dir-lock.js';
 import { classifyGhError, firstMeaningfulLine, isBackoffKind } from './gh-errors.js';
 import type { GhErrorKind } from './gh-errors.js';
 import { postNotice } from './notices.js';
@@ -113,43 +114,12 @@ function eventsPath(key: string): string {
 /** Publish/retire under a short lock, never while running the external check. */
 function withWatchLock<T>(key: string, action: (deadline: number) => T): T {
   fs.mkdirSync(watchesDir(), { recursive: true });
-  const lock = `${watchPath(key)}.lock`;
   const deadline = Date.now() + 10_000;
-  // Windows can report these while another writer's removed directory still
-  // has open handles. Retry briefly, but retain the error if it persists.
-  const transient = (err: unknown) => ['EPERM', 'EBUSY', 'EACCES'].includes((err as NodeJS.ErrnoException).code ?? '');
-  const pause = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-  for (;;) {
-    try {
-      fs.mkdirSync(lock);
-      break;
-    } catch (err) {
-      const exists = (err as NodeJS.ErrnoException).code === 'EEXIST';
-      if (!exists && !transient(err)) throw err;
-      if (exists) {
-        try {
-          if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock);
-        } catch {
-          /* another writer cleared the lock */
-        }
-      }
-      if (Date.now() >= deadline) throw exists ? new Error(`Watch locked: ${key}`) : err;
-      pause();
-    }
-  }
-  try {
-    return action(deadline);
-  } finally {
-    for (;;) {
-      try {
-        fs.rmdirSync(lock);
-        break;
-      } catch (err) {
-        if (!transient(err) || Date.now() >= deadline) throw err;
-        pause();
-      }
-    }
-  }
+  return withDirLock(`${watchPath(key)}.lock`, () => action(deadline), {
+    staleMs: 120_000,
+    waitMs: 10_000,
+    busy: () => new Error(`Watch locked: ${key}`),
+  });
 }
 
 function writeWatchUnlocked(w: Watch, deadline: number): void {

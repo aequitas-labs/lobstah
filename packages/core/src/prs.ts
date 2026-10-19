@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
+import { withDirLock } from './dir-lock.js';
 import { parsePrRef, prStandingKinds } from './pr.js';
 import type { PrEvidence, PrStandingKind } from './pr.js';
 
@@ -150,29 +151,12 @@ export function readPrs(): PrRecord[] {
 /** One process at a time may plan and claim work for a PR. Observations use the same lock. */
 export function withPrLock<T>(key: string, action: () => T): T {
   fs.mkdirSync(prsDir(), { recursive: true });
-  const lock = `${prRecordFile(key)}.lock`;
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    try {
-      fs.mkdirSync(lock);
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      try {
-        // A crashed claimant leaves a directory. Its work is reconsidered on the next tick.
-        if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock);
-      } catch {
-        /* another process removed it first */
-      }
-      if (Date.now() >= deadline) throw new Error(`PR record locked: ${key}`);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-  }
-  try {
-    return action();
-  } finally {
-    fs.rmdirSync(lock);
-  }
+  // A crashed claimant leaves a directory. Its work is reconsidered on the next tick.
+  return withDirLock(`${prRecordFile(key)}.lock`, action, {
+    staleMs: 120_000,
+    waitMs: 10_000,
+    busy: () => new Error(`PR record locked: ${key}`),
+  });
 }
 
 /**
