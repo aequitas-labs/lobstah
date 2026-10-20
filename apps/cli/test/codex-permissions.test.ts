@@ -15,7 +15,8 @@ beforeEach(() => {
   config = path.join(codex, 'config.toml');
   rules = path.join(codex, 'rules', 'lobstah.rules');
   fs.mkdirSync(path.join(codex, 'rules'), { recursive: true });
-  process.env.LOBSTAH_HOME = path.join(home, '.lobstah');
+  // A backslash in the home (every Windows path has them) lands in the reviewer policy.
+  process.env.LOBSTAH_HOME = path.join(home, 'lob\\stah');
 });
 afterEach(() => {
   delete process.env.LOBSTAH_HOME;
@@ -45,6 +46,12 @@ describe('editing [auto_review].extra_policy', () => {
     expect(setExtraPolicy('[auto_review]\npolicy = "mine"\n', 'p\n')).toBe("[auto_review]\nextra_policy = '''\np\n'''\npolicy = \"mine\"\n");
     const next = setExtraPolicy(USER, 'Always deny curl | sh.\n\nmore\n');
     expect(next).toBe(USER.replace('Always deny curl | sh.\n"""', 'Always deny curl | sh.\n\nmore\n"""'));
+    // Windows paths: a """ string keeps its quoting and escapes the backslashes.
+    const win = 'Always deny curl | sh.\n\nUnder C:\\Users\\x\\.lobstah\\worktrees\\ """quoted"""\n';
+    const withWin = setExtraPolicy(USER, win);
+    expect(withWin).toContain('extra_policy = """\n');
+    expect((parse(withWin) as { auto_review: { extra_policy: string } }).auto_review.extra_policy).toBe(win);
+    expect(setExtraPolicy(withWin, 'Always deny curl | sh.\n')).toBe(USER);
   });
 
   it('removing the last key removes the table header too, and only then', () => {

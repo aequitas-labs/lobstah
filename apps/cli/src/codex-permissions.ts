@@ -117,7 +117,8 @@ export function mergePolicy(policy: string | undefined, entries: string[]): stri
  */
 function tomlString(value: string, prefer: '"""' | "'''" = "'''"): string {
   const plain = !/[\x00-\x08\x0b-\x1f\x7f]/.test(value) && value.endsWith('\n');
-  if (plain && prefer === '"""' && !value.includes('\\') && !value.includes('"""')) return `"""\n${value}"""`;
+  // A basic string escapes its backslashes and quote runs, so the user's """ quoting survives any text.
+  if (plain && prefer === '"""') return `"""\n${value.replace(/\\/g, '\\\\').replace(/"""/g, '""\\"')}"""`;
   if (plain && !value.includes("'''")) return `'''\n${value}'''`;
   return stringify({ v: value }).replace(/^v = /, '').trim();
 }
