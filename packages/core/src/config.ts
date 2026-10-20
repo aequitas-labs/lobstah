@@ -389,6 +389,38 @@ export interface Config {
   attentionKinds: AttentionKind[];
   /** Review requests (`[reviews]`, with `[repos.<key>.reviews]` overrides). Off by default. */
   reviews: ReviewsConfig;
+  /** `[permissions]`: additions to lobstah's Claude Code auto-mode profile. */
+  permissions: PermissionsConfig;
+}
+
+/**
+ * What `lobstah permissions apply` adds to the user's Claude Code settings
+ * beyond lobstah's base profile: classifier context (`autoMode.environment`)
+ * and permission rules (`permissions.allow` / `deny`).
+ */
+export interface PermissionsConfig {
+  environment: string[];
+  allow: string[];
+  deny: string[];
+}
+
+/** `Tool` or `Tool(specifier)`, as Claude Code's permission rules are written. */
+const PERMISSION_RULE = /^[A-Za-z][\w-]*(\(.+\))?$/;
+
+function parsePermissions(raw: unknown): PermissionsConfig {
+  const out: PermissionsConfig = { environment: [], allow: [], deny: [] };
+  if (raw === undefined) return out;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('[permissions] must be a table');
+  for (const [key, value] of Object.entries(raw)) {
+    if (key !== 'environment' && key !== 'allow' && key !== 'deny') throw new Error(`[permissions].${key} is not a key: use environment, allow, or deny`);
+    if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || !v.trim())) throw new Error(`[permissions].${key} must be a list of non-empty strings`);
+    if (key !== 'environment') {
+      const bad = (value as string[]).find((v) => !PERMISSION_RULE.test(v));
+      if (bad !== undefined) throw new Error(`[permissions].${key}: "${bad}" is not a permission rule — write Tool or Tool(specifier), e.g. Bash(npm run test *)`);
+    }
+    out[key] = [...new Set(value as string[])];
+  }
+  return out;
 }
 
 /**
@@ -570,6 +602,7 @@ export function loadConfig(): Config {
     readySettleSecs,
     attentionKinds: parseAttentionKinds(raw.attentionKinds),
     reviews: withConfigPath(() => parseReviews(raw.reviews, reposRaw)),
+    permissions: withConfigPath(() => parsePermissions(raw.permissions)),
   };
 }
 

@@ -91,6 +91,22 @@ describe('config precedence: descriptor > repo > global > default', () => {
       expect(() => loadConfig()).toThrow(/readySettleSecs must be a non-negative number/);
     }
   });
+  it('[permissions] lists extend the auto-mode profile; a mistyped key or rule is refused', () => {
+    expect(loadConfig().permissions).toEqual({ environment: [], allow: [], deny: [] });
+    fs.writeFileSync(
+      path.join(home, 'config.toml'),
+      `[permissions]\nenvironment = ["**Trusted orgs**: acme"]\nallow = ["Bash(wrangler dev *)", "Bash(wrangler dev *)"]\ndeny = ["Bash(vercel env pull *)"]\n`,
+    );
+    expect(loadConfig().permissions).toEqual({ environment: ['**Trusted orgs**: acme'], allow: ['Bash(wrangler dev *)'], deny: ['Bash(vercel env pull *)'] });
+    for (const [body, error] of [
+      ['allows = ["Read"]', /\[permissions\]\.allows is not a key/],
+      ['allow = "Read"', /\[permissions\]\.allow must be a list of non-empty strings/],
+      ['allow = ["wrangler dev"]', /"wrangler dev" is not a permission rule/],
+    ] as const) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[permissions]\n${body}\n`);
+      expect(() => loadConfig()).toThrow(error);
+    }
+  });
   it('defaults the idle-claim notice grace to 180 seconds and honors the soak override', () => {
     expect(loadConfig().soak.claimIdleNoticeSecs).toBe(180);
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nclaimIdleNoticeSecs = 240\n');

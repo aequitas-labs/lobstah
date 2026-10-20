@@ -405,6 +405,51 @@ as that identity, with its token. Any key except `enabled`, `repos` and
 The `review` attention kind is not in the default `attentionKinds`; add it to
 let review items walk in `man tend`, the glass, and the pet.
 
+## `[permissions]` — the Claude Code auto-mode profile
+
+Traps and the helm run Claude Code in auto mode. `lobstah permissions apply`
+merges lobstah's profile into your Claude Code user settings
+(`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`). That is
+the only file Claude Code reads `autoMode.environment` from, apart from managed
+settings and `--settings`.
+
+The base profile adds context for the classifier:
+- lobstah's worktrees are your development checkouts;
+- the helm doing what you asked in its chat is not a bypass;
+- merges to trunk, production deploys, secrets, accounts and lobstah's own
+  permission controls stay yours.
+
+It also allows `Read` and `Edit` on `<lobstah home>/worktrees/**`.
+`[permissions]` adds to it:
+
+```toml
+[permissions]
+environment = ["**Trusted GitHub orgs**: acme and acme-labs are the user's own orgs."]
+allow = ["Bash(wrangler dev *)"]
+deny  = ["Bash(vercel env pull *)"]
+```
+
+| Key | Meaning |
+|---|---|
+| `environment` | Prose entries added to `autoMode.environment`, e.g. trusted orgs, cloud accounts, or env-pull policy. |
+| `allow`, `deny` | Claude Code permission rules (`Tool` or `Tool(specifier)`) added to `permissions.allow` / `permissions.deny`. These are resolved before the classifier. |
+
+**What each form does:**
+- Bare `lobstah permissions` shows the diff and writes nothing.
+- `apply` merges, keeping every existing key and rule. A new
+  `autoMode.environment` starts with `"$defaults"`, so Claude Code's built-in
+  context stays.
+- `remove` takes lobstah's entries out.
+- Both `apply` and `remove` back up the previous file to
+  `<lobstah home>/backups/`, ask before writing (`--yes` skips the question),
+  and refuse inside an agent's shell.
+
+lobstah records the entries it added in `<lobstah home>/claude-permissions.json`,
+so a re-run after editing `[permissions]` removes only lobstah's own stale
+entries. `lobstah doctor` reports whether the profile is applied and current.
+There is one Claude Code user settings file, so there is one `[permissions]`
+table rather than one per grounds.
+
 ## Environment
 
 | Variable | Meaning |

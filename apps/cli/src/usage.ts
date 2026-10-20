@@ -156,6 +156,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   grants: { flags: { '--all': {}, '--json': {} }, maxPositionals: 0 },
   revoke: { flags: {}, positionals: '<grant-id>' },
+  permissions: { subverbs: ['show', 'apply', 'remove'], flags: { '--yes': {} }, flagSubverbs: { '--yes': ['apply', 'remove'] } },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--remove': {}, '--keep': {}, '--force': {}, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
@@ -359,6 +360,12 @@ Claude Code honours grants through the plugin's mod, Codex through its Permissio
   grants: `What a person has granted: id, what, once or always, harness, trap, who, when, uses.
 --all adds spent, expired and revoked grants. A trap checks a relayed approval here.`,
   revoke: `Revoke a grant by id. Anyone may take a permission away.`,
+  permissions: `lobstah's Claude Code auto-mode profile: context for the classifier (lobstah's worktrees
+are the user's checkouts; the helm acting on the user's chat is not a bypass; merges, deploys,
+secrets stay human) plus Read/Edit on the worktrees, and [permissions] from config.toml.
+Bare (or show): the diff against your Claude Code user settings. apply merges it there, keeping
+every existing key and rule; remove takes lobstah's entries out. Both back up the file and ask
+first (--yes: don't ask). A person's command: refused in an agent's shell.`,
   stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
 finalizes; unread messages wait the grace. Keeps the worktree; --remove removes one
 soak created unless dirty, untracked, unpushed, or without upstream (says why);
