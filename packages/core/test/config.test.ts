@@ -92,16 +92,25 @@ describe('config precedence: descriptor > repo > global > default', () => {
     }
   });
   it('[permissions] lists extend the auto-mode profile; a mistyped key or rule is refused', () => {
-    expect(loadConfig().permissions).toEqual({ environment: [], allow: [], deny: [] });
+    expect(loadConfig().permissions).toEqual({ environment: [], allow: [], deny: [], codex: { forbidden: [], prompt: [], allow: [] } });
     fs.writeFileSync(
       path.join(home, 'config.toml'),
       `[permissions]\nenvironment = ["**Trusted orgs**: acme"]\nallow = ["Bash(wrangler dev *)", "Bash(wrangler dev *)"]\ndeny = ["Bash(vercel env pull *)"]\n`,
     );
-    expect(loadConfig().permissions).toEqual({ environment: ['**Trusted orgs**: acme'], allow: ['Bash(wrangler dev *)'], deny: ['Bash(vercel env pull *)'] });
+    expect(loadConfig().permissions).toEqual({
+      environment: ['**Trusted orgs**: acme'],
+      allow: ['Bash(wrangler dev *)'],
+      deny: ['Bash(vercel env pull *)'],
+      codex: { forbidden: [], prompt: [], allow: [] },
+    });
+    fs.writeFileSync(path.join(home, 'config.toml'), `[permissions.codex]\nforbidden = [["vercel", "env", "pull"], ["vercel", "env", "pull"]]\nallow = [["wrangler", "dev"]]\n`);
+    expect(loadConfig().permissions.codex).toEqual({ forbidden: [['vercel', 'env', 'pull']], prompt: [], allow: [['wrangler', 'dev']] });
     for (const [body, error] of [
       ['allows = ["Read"]', /\[permissions\]\.allows is not a key/],
       ['allow = "Read"', /\[permissions\]\.allow must be a list of non-empty strings/],
       ['allow = ["wrangler dev"]', /"wrangler dev" is not a permission rule/],
+      ['codex = { allow = ["wrangler dev"] }', /\[permissions\.codex\]\.allow must be a list of command prefixes/],
+      ['codex = { allows = [] }', /\[permissions\.codex\]\.allows is not a key/],
     ] as const) {
       fs.writeFileSync(path.join(home, 'config.toml'), `[permissions]\n${body}\n`);
       expect(() => loadConfig()).toThrow(error);

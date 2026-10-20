@@ -4,6 +4,8 @@ import * as path from 'node:path';
 import { atomicRenameSync, GrantError, loadConfig, lobstahHome, toonKV, uniqueTempPath, worktreesDir } from '@lobstah/core';
 import type { PermissionsConfig } from '@lobstah/core';
 import type { DoctorRow } from './doctor.js';
+import { codexHome, planCodex, writeCodexPlan } from './codex-permissions.js';
+import type { ExecpolicyCheck } from './codex-permissions.js';
 
 /**
  * lobstah's Claude Code auto-mode profile. Traps and the helm run Claude Code
@@ -260,27 +262,33 @@ export function permissionsRow(ext: PermissionsConfig, env: NodeJS.ProcessEnv = 
 export async function permissionsCommand(
   sub: string | undefined,
   opts: { yes: boolean },
-  io: { env?: NodeJS.ProcessEnv; tty?: boolean; log?: (s: string) => void; ask?: (q: string) => boolean } = {},
+  io: { env?: NodeJS.ProcessEnv; tty?: boolean; log?: (s: string) => void; ask?: (q: string) => boolean; check?: ExecpolicyCheck } = {},
 ): Promise<void> {
   const { agentSession, confirm } = await import('./grants-cli.js');
   const env = io.env ?? process.env;
   const log = io.log ?? ((s: string) => console.log(s));
   if (sub !== undefined && sub !== 'show' && sub !== 'apply' && sub !== 'remove') throw new Error(`permissions takes show, apply, or remove (got ${sub})`);
+  const ext = loadConfig().permissions;
   const file = claudeSettingsFile(env);
-  const desired = sub === 'remove' ? EMPTY_PROFILE : desiredProfile(loadConfig().permissions);
+  const desired = sub === 'remove' ? EMPTY_PROFILE : desiredProfile(ext);
   const plan = planProfile(readSettings(file), desired, readOwned(file));
+  const codex = planCodex(ext, sub === 'remove', env);
   log(renderDiff(file, plan.changes));
-  if (sub === undefined || sub === 'show' || plan.changes.length === 0) return;
+  log(codex ? renderDiff(codex.home, codex.changes) : `${codexHome(env)}: Codex is not set up here; nothing to change`);
+  const pending = plan.changes.length + (codex?.changes.length ?? 0);
+  if (sub === undefined || sub === 'show' || pending === 0) return;
   const agent = agentSession(env);
   if (agent) throw new GrantError(`permissions ${sub} is for a person, not an agent session (${agent} is set): run it in your own terminal.`);
   if (!opts.yes) {
     const tty = io.tty ?? (!!process.stdin.isTTY && !!process.stdout.isTTY);
     if (!tty) throw new Error(`not written: confirm at a terminal, or pass --yes`);
-    if (!(io.ask ?? confirm)(`Write these changes to ${file}?`)) {
+    if (!(io.ask ?? confirm)('Write these changes?')) {
       log(toonKV({ written: false }));
       return;
     }
   }
-  const result = writePlan(file, plan, desired);
-  log(toonKV({ written: true, ...result }));
+  // Codex first: its checks (TOML round trip, execpolicy) can refuse before anything is written.
+  const codexResult = codex && codex.changes.length ? writeCodexPlan(codex, env, io.check) : undefined;
+  const result = plan.changes.length ? writePlan(file, plan, desired) : undefined;
+  log(toonKV({ written: true, ...result, ...codexResult }));
 }

@@ -402,17 +402,46 @@ export interface PermissionsConfig {
   environment: string[];
   allow: string[];
   deny: string[];
+  /** `[permissions.codex]`: Codex command rules, each an argv prefix. */
+  codex: CodexRulesConfig;
+}
+
+/** Codex execpolicy decisions. An `allow` runs the command outside Codex's sandbox. */
+export interface CodexRulesConfig {
+  forbidden: string[][];
+  prompt: string[][];
+  allow: string[][];
+}
+
+function parseCodexRules(raw: unknown): CodexRulesConfig {
+  const out: CodexRulesConfig = { forbidden: [], prompt: [], allow: [] };
+  if (raw === undefined) return out;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('[permissions.codex] must be a table');
+  for (const [key, value] of Object.entries(raw)) {
+    if (key !== 'forbidden' && key !== 'prompt' && key !== 'allow') throw new Error(`[permissions.codex].${key} is not a key: use forbidden, prompt, or allow`);
+    const prefix = (v: unknown) => Array.isArray(v) && v.length > 0 && v.every((w) => typeof w === 'string' && w.trim() && !/\s/.test(w));
+    if (!Array.isArray(value) || !value.every(prefix)) {
+      throw new Error(`[permissions.codex].${key} must be a list of command prefixes, each a list of words, e.g. [["wrangler", "dev"]]`);
+    }
+    const seen = new Set<string>();
+    out[key] = (value as string[][]).filter((p) => !seen.has(JSON.stringify(p)) && seen.add(JSON.stringify(p)));
+  }
+  return out;
 }
 
 /** `Tool` or `Tool(specifier)`, as Claude Code's permission rules are written. */
 const PERMISSION_RULE = /^[A-Za-z][\w-]*(\(.+\))?$/;
 
 function parsePermissions(raw: unknown): PermissionsConfig {
-  const out: PermissionsConfig = { environment: [], allow: [], deny: [] };
+  const out: PermissionsConfig = { environment: [], allow: [], deny: [], codex: parseCodexRules(undefined) };
   if (raw === undefined) return out;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('[permissions] must be a table');
   for (const [key, value] of Object.entries(raw)) {
-    if (key !== 'environment' && key !== 'allow' && key !== 'deny') throw new Error(`[permissions].${key} is not a key: use environment, allow, or deny`);
+    if (key === 'codex') {
+      out.codex = parseCodexRules(value);
+      continue;
+    }
+    if (key !== 'environment' && key !== 'allow' && key !== 'deny') throw new Error(`[permissions].${key} is not a key: use environment, allow, deny, or [permissions.codex]`);
     if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || !v.trim())) throw new Error(`[permissions].${key} must be a list of non-empty strings`);
     if (key !== 'environment') {
       const bad = (value as string[]).find((v) => !PERMISSION_RULE.test(v));
