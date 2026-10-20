@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, laneDirs, lobstahHome, readDirIfPresent } from './paths.js';
+import { withDirLock } from './dir-lock.js';
 import type { Lane } from './types.js';
 import type { Evidence } from './types.js';
 import { sanitizeWorker, workerProfile } from './worker-profile.js';
@@ -286,28 +287,11 @@ function writeStore(store: StatsStore): void {
 /** One process at a time changes the store; a crashed holder's lock goes stale after two minutes. */
 function withStatsLock<T>(action: () => T): T {
   fs.mkdirSync(lobstahHome(), { recursive: true });
-  const lock = `${statsPath()}.lock`;
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    try {
-      fs.mkdirSync(lock);
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock);
-      } catch {
-        /* another process removed it first */
-      }
-      if (Date.now() >= deadline) throw new Error('stats store locked');
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-  }
-  try {
-    return action();
-  } finally {
-    fs.rmdirSync(lock);
-  }
+  return withDirLock(`${statsPath()}.lock`, action, {
+    staleMs: 120_000,
+    waitMs: 10_000,
+    busy: () => new Error('stats store locked'),
+  });
 }
 
 /** The store as saved; with none (or an unreadable one), backfilled once and saved. Call under the lock. */

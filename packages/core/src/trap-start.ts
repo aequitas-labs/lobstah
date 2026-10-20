@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, soakingDir } from './paths.js';
+import { withDirLock } from './dir-lock.js';
 import { postNotice } from './notices.js';
 import { pendingIds, queuedDescriptor } from './queue.js';
 import { newTrapId, readTrap, listTraps, trapLabel } from './soak.js';
@@ -159,23 +160,14 @@ export function reserveTrap(opts: {
   if (!opts.returning && opts.maxTraps !== undefined) {
     fs.mkdirSync(soakingDir(), { recursive: true });
     const lock = path.join(soakingDir(), `${hashTicket(opts.repo)}.capacity-lock`);
-    const deadline = Date.now() + 10_000;
-    for (;;) {
-      try { fs.mkdirSync(lock); break; }
-      catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-        try { if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock); } catch { /* another writer released it */ }
-        if (Date.now() >= deadline) throw new Error(`trap capacity locked for repo ${opts.repo}; try again`);
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-      }
-    }
-    try {
+    const max = opts.maxTraps;
+    return withDirLock(lock, () => {
       const entries = new Map([...listRoster(), ...listTraps(), ...listReservations()].filter((r) => r.repo === opts.repo).map((r) => [r.trapId, r.name ?? `wt:${r.trapId}`]));
-      if (entries.size >= opts.maxTraps) throw new Error(`${opts.repo}: ${entries.size}/${opts.maxTraps} traps; cannot create more. Existing traps: ${[...entries.values()].join(', ') || '(none)'}. Use dispatch --trap-any, or stow and man roster forget an unwanted trap.`);
+      if (entries.size >= max) throw new Error(`${opts.repo}: ${entries.size}/${max} traps; cannot create more. Existing traps: ${[...entries.values()].join(', ') || '(none)'}. Use dispatch --trap-any, or stow and man roster forget an unwanted trap.`);
       // The reservation is visible before releasing the cap lock, including across processes.
       const { maxTraps: _cap, ...unguarded } = opts;
       return reserveTrap(unguarded);
-    } finally { fs.rmdirSync(lock); }
+    }, { staleMs: 120_000, waitMs: 10_000, busy: () => new Error(`trap capacity locked for repo ${opts.repo}; try again`) });
   }
   const now = opts.now ?? Date.now();
   let trapId = opts.returning?.trapId ?? newTrapId();

@@ -302,3 +302,36 @@ describe('shared GitHub budget', () => {
     expect(listNotices()).toEqual([]);
   });
 });
+
+describe('repository batch lock', () => {
+  const lockOf = (repo: string) => path.join(home, 'pr-polls', `acme_${repo}.json.lock`);
+
+  it('a batch outlasting the stale rule keeps its lock: a second poller cannot take it', () => {
+    register(1);
+    let second: ReturnType<PrBatchRun> | undefined;
+    const run = vi.fn<PrBatchRun>(() => {
+      // GitHub is slow: the batch is still running ten minutes after it took its lock.
+      fs.utimesSync(lockOf('web'), T / 1000, T / 1000);
+      vi.setSystemTime(T + 10 * 60_000);
+      const inner = vi.fn<PrBatchRun>(() => response({ pr1: snapshot(1) }));
+      preparePrWatchBatch(45, Date.now(), { run: inner });
+      expect(inner).not.toHaveBeenCalled();
+      expect(fs.existsSync(lockOf('web'))).toBe(true);
+      return (second = response({ pr1: snapshot(1) }));
+    });
+    expect(() => preparePrWatchBatch(45, T, { run })).not.toThrow();
+    expect(second).toBeDefined();
+    expect(fs.existsSync(lockOf('web'))).toBe(false);
+    expect(cachedPrView(ref(1))).toMatchObject({ headRefOid: 'sha1' });
+  });
+
+  it('a batch whose lock was removed underneath it finishes without throwing', () => {
+    register(1);
+    const run = vi.fn<PrBatchRun>(() => {
+      fs.rmSync(lockOf('web'), { recursive: true, force: true });
+      return response({ pr1: snapshot(1) });
+    });
+    expect(() => preparePrWatchBatch(45, T, { run })).not.toThrow();
+    expect(cachedPrView(ref(1))).toMatchObject({ headRefOid: 'sha1' });
+  });
+});

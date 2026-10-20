@@ -565,7 +565,12 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   // Wedge handling waits one wedge threshold after a resume for events to flow again.
   const wedgeGrace = resumed !== undefined && now - resumed <= wedgeMs;
   writeHeartbeat(cfg);
-  hooks.prWatches?.(hooks.now?.() ?? Date.now(), log);
+  try {
+    hooks.prWatches?.(hooks.now?.() ?? Date.now(), log);
+  } catch (err) {
+    // A failed PR poll must not skip the rest of the tick (ghost sweeps, claims).
+    log(`pr watches: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {
     const label = trapLabel({ trapId: action.trapId, name: trapNameForId(action.trapId) });

@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { lobstahHome } from './paths.js';
+import { withDirLock } from './dir-lock.js';
 import { REPO_PLACEHOLDER_OPEN, alwaysScope, checkoutRoots, locateInRepo, normaliseCommand } from './grant-scope.js';
 import type { CheckoutRoot } from './grant-scope.js';
 
@@ -158,29 +159,13 @@ export function readLedger(): Ledger {
 /** Run `fn` holding the ledger's lock, so two hooks never spend one once-grant. */
 function withLock<T>(fn: () => T): T {
   fs.mkdirSync(grantsDir(), { recursive: true, mode: 0o700 });
-  const lock = path.join(grantsDir(), 'ledger.lock');
-  const deadline = Date.now() + 5000;
-  for (;;) {
-    try {
-      fs.mkdirSync(lock);
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      // A holder that died leaves the lock behind; one older than the wait is taken over.
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > 5000) fs.rmSync(lock, { recursive: true, force: true });
-      } catch {
-        /* it went away */
-      }
-      if (Date.now() > deadline) throw new GrantError('the grants ledger is locked; try again');
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-    }
-  }
-  try {
-    return fn();
-  } finally {
-    fs.rmSync(lock, { recursive: true, force: true });
-  }
+  // A holder that died leaves the lock behind; one older than the wait is taken over.
+  return withDirLock(path.join(grantsDir(), 'ledger.lock'), fn, {
+    staleMs: 5000,
+    waitMs: 5000,
+    pauseMs: 20,
+    busy: () => new GrantError('the grants ledger is locked; try again'),
+  });
 }
 
 function append(head: string, ev: LedgerEvent): void {

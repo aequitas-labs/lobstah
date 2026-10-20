@@ -19,7 +19,7 @@ import {
   runWatchCheck,
 } from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
-import { pickupOwnsReviewFeedback, stampPrEvidence, workEvents } from '../src/pr-watch.js';
+import { pickupOwnsReviewFeedback, runDueManWatches, stampPrEvidence, workEvents } from '../src/pr-watch.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`):
@@ -261,5 +261,17 @@ ${mode === 'all-forbidden' ? `echo 'GraphQL: Resource not accessible by integrat
     expect(tend.stdout).toContain('pr:acme/web#12');
     expect(tend.stdout).toContain('Resource not accessible by integration');
     expect(tend.stdout).toContain('failing since 2026-09-28T00:00:00.000Z');
+  });
+});
+
+describe("man wait's poll", () => {
+  it('logs a poller failure and returns, so the wait keeps waiting', () => {
+    // The batch cannot make its folder: every poll throws inside.
+    fs.rmSync(path.join(home, 'pr-polls'), { recursive: true, force: true });
+    fs.writeFileSync(path.join(home, 'pr-polls'), '');
+    const logged: string[] = [];
+    expect(() => runDueManWatches((m) => logged.push(m))).not.toThrow();
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatch(/^lobstah: watch poll failed: .*pr-polls.*; still waiting$/);
   });
 });

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
+import { withDirLock } from './dir-lock.js';
 import { postNotice } from './notices.js';
 
 interface Budget {
@@ -31,28 +32,11 @@ function write(s: BudgetState): void {
 
 function withBudgetLock<T>(action: () => T): T {
   fs.mkdirSync(lobstahHome(), { recursive: true });
-  const lock = `${file()}.lock`,
-    deadline = Date.now() + 10_000;
-  for (;;) {
-    try {
-      fs.mkdirSync(lock);
-      break;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > 120_000) fs.rmdirSync(lock);
-      } catch {
-        /* raced */
-      }
-      if (Date.now() >= deadline) throw new Error('GitHub budget state locked; retry next cycle');
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-  }
-  try {
-    return action();
-  } finally {
-    fs.rmdirSync(lock);
-  }
+  return withDirLock(`${file()}.lock`, action, {
+    staleMs: 120_000,
+    waitMs: 10_000,
+    busy: () => new Error('GitHub budget state locked; retry next cycle'),
+  });
 }
 
 /** gh api --include: headers come with the request, never a separate rate_limit poll. */

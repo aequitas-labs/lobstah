@@ -14,7 +14,7 @@ import {
   requestCancel,
   touchEvents,
 } from '@lobstah/core';
-import { reconcileOne } from '../src/daemon.js';
+import { reconcileOne, tick } from '../src/daemon.js';
 import type { ActiveState } from '../src/daemon.js';
 import { DEFAULT_LIMITS, DEFAULT_SOAK } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -171,5 +171,30 @@ describe('reconcileOne — a runner paused on something external is not a wedge'
 
     expect(logs).toEqual([]);
     expect(readStatusLog('wp', 'work').at(-1)?.verb).toBe('paused');
+  });
+});
+
+describe('tick — a failed PR poll', () => {
+  it('is logged, and the rest of the tick still runs', () => {
+    const st = claimed('t1');
+    fs.writeFileSync(
+      path.join(st.dir, 'runner.json'),
+      JSON.stringify({ pid: DEAD_PID, startedAt: new Date().toISOString(), attempts: 1 }),
+    );
+    requestCancel('t1', 'work');
+    const log: string[] = [];
+    expect(() =>
+      tick((m) => log.push(m), {
+        prWatches: () => {
+          throw new Error("ENOENT: no such file or directory, rmdir 'acme_web.json.lock'");
+        },
+        spawnRunner: () => {
+          throw new Error('no runner may start');
+        },
+      }),
+    ).not.toThrow();
+    expect(log).toContain("pr watches: ENOENT: no such file or directory, rmdir 'acme_web.json.lock'");
+    // Reconciliation, after the poll, still finalized the cancelled dispatch.
+    expect(fs.existsSync(path.join(laneDirs('work').done, 't1'))).toBe(true);
   });
 });
