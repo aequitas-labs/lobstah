@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DecisionError, addGrant, ensureLayout, listGrants, readDecision, readDecisionDetail, signOnTrap, unhandled } from '@lobstah/core';
-import { askPermission, callRequests, patchPaths, personOnly, rosterConfigPatch } from '../src/grants-cli.js';
+import { askPermission, callRequests, confirm, patchPaths, personOnly, rosterConfigPatch } from '../src/grants-cli.js';
 import { answerKey } from '../src/decision-answer.js';
 import { harnessCommand } from '../src/throw.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -257,5 +257,40 @@ describe('a bypass trap', () => {
       'auto',
       '/lobstah:trap soak --ticket t',
     ]);
+  });
+});
+
+describe('the y/N prompt', () => {
+  /** A terminal's stdin as Node leaves it: non-blocking, so EAGAIN until the person types a line. */
+  const terminal = (line: string | Error, waits = 2) => {
+    let calls = 0;
+    return (buf: Buffer) => {
+      if (calls++ < waits) throw Object.assign(new Error('EAGAIN: resource temporarily unavailable, read'), { code: 'EAGAIN' });
+      if (line instanceof Error) throw line;
+      return buf.write(line);
+    };
+  };
+  const ask = (read: (buf: Buffer) => number) => {
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      return confirm('Write these changes?', read);
+    } finally {
+      out.mockRestore();
+    }
+  };
+
+  it('waits through EAGAIN for the answer: y and yes are yes', () => {
+    expect(ask(terminal('y\n'))).toBe(true);
+    expect(ask(terminal('YES\n', 5))).toBe(true);
+  });
+
+  it('n, an empty line, and end of input are no', () => {
+    expect(ask(terminal('n\n'))).toBe(false);
+    expect(ask(terminal('\n'))).toBe(false);
+    expect(ask(terminal(''))).toBe(false);
+  });
+
+  it('a read that fails is an error, never a silent no', () => {
+    expect(() => ask(terminal(Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' })))).toThrow(/could not read your answer: EIO/);
   });
 });
