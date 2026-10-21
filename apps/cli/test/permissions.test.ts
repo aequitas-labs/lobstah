@@ -28,10 +28,10 @@ afterEach(() => {
   removeTempDir(home);
 });
 
-const NO_EXT = { environment: [], allow: [], deny: [] };
+const NO_EXT = { environment: [], allow: [], deny: [], codex: { forbidden: [], prompt: [], allow: [] } };
 const profile = (p: Partial<Profile>): Profile => ({ ...EMPTY_PROFILE, ...p });
 /** A person's terminal: no agent variables, Claude settings in the temp home. */
-const person = () => ({ CLAUDE_CONFIG_DIR: claudeDir }) as NodeJS.ProcessEnv;
+const person = () => ({ CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(home, 'no-codex') }) as NodeJS.ProcessEnv;
 const run = async (sub: string | undefined, opts: { yes?: boolean; env?: NodeJS.ProcessEnv; tty?: boolean; ask?: () => boolean } = {}) => {
   const out: string[] = [];
   await permissionsCommand(sub, { yes: opts.yes ?? false }, { env: opts.env ?? person(), tty: opts.tty ?? false, log: (s) => out.push(s), ask: opts.ask });
@@ -145,6 +145,6 @@ describe('doctor', () => {
 
   it('desired is the base profile plus config, each entry once', () => {
     const base = baseProfile('/h', '/h/worktrees');
-    expect(desiredProfile({ environment: [], allow: [base.allow[0]!, 'X'], deny: [] }, base).allow).toEqual([...base.allow, 'X']);
+    expect(desiredProfile({ ...NO_EXT, allow: [base.allow[0]!, 'X'] }, base).allow).toEqual([...base.allow, 'X']);
   });
 });

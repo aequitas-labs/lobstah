@@ -33,6 +33,7 @@ import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import { petRow } from './pet.js';
 import { claudeHooks, codexHooks, hookRow, listenerRow } from './hook-readiness.js';
 import { permissionsRow } from './permissions.js';
+import { codexPermissionsRow } from './codex-permissions.js';
 
 export interface DoctorRow {
   check: string;
@@ -394,8 +395,8 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   const listeners = listenerRow(now);
   push(listeners.check, listeners.status, listeners.detail);
   try {
-    const perms = permissionsRow(loadConfig().permissions);
-    push(perms.check, perms.status, perms.detail);
+    const ext = loadConfig().permissions;
+    for (const row of [permissionsRow(ext), codexPermissionsRow(ext)]) push(row.check, row.status, row.detail);
   } catch {
     // an unloadable config is already its own row
   }

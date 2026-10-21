@@ -413,7 +413,7 @@ merges lobstah's profile into your Claude Code user settings
 the only file Claude Code reads `autoMode.environment` from, apart from managed
 settings and `--settings`.
 
-The base profile adds context for the classifier:
+The base profile adds context for Claude Code's classifier:
 - lobstah's worktrees are your development checkouts;
 - the helm doing what you asked in its chat is not a bypass;
 - merges to trunk, production deploys, secrets, accounts and lobstah's own
@@ -427,12 +427,28 @@ It also allows `Read` and `Edit` on `<lobstah home>/worktrees/**`.
 environment = ["**Trusted GitHub orgs**: acme and acme-labs are the user's own orgs."]
 allow = ["Bash(wrangler dev *)"]
 deny  = ["Bash(vercel env pull *)"]
+
+[permissions.codex]
+forbidden = [["vercel", "env", "pull"]]
+allow     = [["wrangler", "dev"]]
 ```
 
 | Key | Meaning |
 |---|---|
 | `environment` | Prose entries added to `autoMode.environment`, e.g. trusted orgs, cloud accounts, or env-pull policy. |
 | `allow`, `deny` | Claude Code permission rules (`Tool` or `Tool(specifier)`) added to `permissions.allow` / `permissions.deny`. These are resolved before the classifier. |
+| `codex.forbidden`, `codex.prompt`, `codex.allow` | Codex command rules, each an argv prefix (`["gh", "pr", "merge"]`). A Codex `allow` runs the command outside Codex's sandbox, so these are never translated from the Claude rules. |
+
+**Codex.** Codex has its own home: `$CODEX_HOME`, else `~/.codex`. When it exists, the same verbs also change two things there:
+- **The auto reviewer's added policy.** This is `[auto_review].extra_policy` in `config.toml`, which Codex's reviewer reads alongside its own policy. lobstah writes a block between `<!-- lobstah:begin … -->` and `<!-- lobstah:end -->` holding the same three facts and `environment`.
+  - Text outside the markers is yours and stays.
+  - lobstah edits only the key's own lines, keeping comments, key order and the string's quoting. It parses the file before and after; anything else changing refuses the write.
+- **`rules/lobstah.rules`.** This file is wholly lobstah's. It holds the base rules plus `[permissions.codex]`:
+  - forbidden: `lobstah grant`, `lobstah trap grant|bypass` and `lobstah permissions apply|remove`;
+  - prompt: `gh pr merge`.
+  - `codex execpolicy check` loads every rule before the file is put in place.
+
+`remove` deletes `rules/lobstah.rules` and lobstah's block. Neither verb sets `approvals_reviewer` or `approval_policy`: `man throw` already starts Codex traps with `--approve-for-me`.
 
 **What each form does:**
 - Bare `lobstah permissions` shows the diff and writes nothing.

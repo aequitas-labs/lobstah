@@ -360,12 +360,13 @@ Claude Code honours grants through the plugin's mod, Codex through its Permissio
   grants: `What a person has granted: id, what, once or always, harness, trap, who, when, uses.
 --all adds spent, expired and revoked grants. A trap checks a relayed approval here.`,
   revoke: `Revoke a grant by id. Anyone may take a permission away.`,
-  permissions: `lobstah's Claude Code auto-mode profile: context for the classifier (lobstah's worktrees
-are the user's checkouts; the helm acting on the user's chat is not a bypass; merges, deploys,
-secrets stay human) plus Read/Edit on the worktrees, and [permissions] from config.toml.
-Bare (or show): the diff against your Claude Code user settings. apply merges it there, keeping
-every existing key and rule; remove takes lobstah's entries out. Both back up the file and ask
-first (--yes: don't ask). A person's command: refused in an agent's shell.`,
+  permissions: `lobstah's auto-mode profile: context for Claude Code's classifier and Codex's auto reviewer
+(lobstah's worktrees are the user's checkouts; the helm acting on the user's chat is not a bypass;
+merges, deploys, secrets stay human), Read/Edit on the worktrees, Codex rules forbidding lobstah's
+permission verbs, and [permissions] from config.toml. Bare (or show): the diff. apply merges into
+~/.claude/settings.json and ~/.codex (config.toml's [auto_review].extra_policy, rules/lobstah.rules),
+keeping everything else; remove takes lobstah's entries out. Both back up and ask first (--yes:
+don't ask). A person's command: refused in an agent's shell.`,
   stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
 finalizes; unread messages wait the grace. Keeps the worktree; --remove removes one
 soak created unless dirty, untracked, unpushed, or without upstream (says why);
