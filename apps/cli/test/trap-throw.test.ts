@@ -366,7 +366,7 @@ describe('the start command', () => {
       process.env.UME_HOME = 'relative-ume';
       const relative = trapWritableDirs(primary);
       expect(relative.slice(0, 2)).toEqual([lobstahHome(), path.join(primary, 'relative-ume')]);
-      expect(path.resolve(relative[2]!)).toBe(path.join(primary, '.git'));
+      expect(fs.realpathSync.native(relative[2]!)).toBe(fs.realpathSync.native(path.join(primary, '.git')));
     } finally {
       if (priorUmeHome === undefined) delete process.env.UME_HOME;
       else process.env.UME_HOME = priorUmeHome;
