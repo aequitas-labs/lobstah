@@ -5,7 +5,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "lobstah-wharf",
-  "account_id": "73dd625ed4d46d151a0de5624ff71379",
+  "account_id": "cdde311c7a0f2943ec259f0548460a85",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-09",
   "compatibility_flags": ["nodejs_compat"],

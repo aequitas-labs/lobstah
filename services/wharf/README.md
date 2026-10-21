@@ -21,7 +21,7 @@ Never use real credentials in tests or pass secrets in process arguments.
 ## Deploying
 
 Nothing in this repo deploys the wharf: no script, no CI job. A maintainer with
-access to the `aequitas labs` Cloudflare account (`73dd625ed4d46d151a0de5624ff71379`,
+access to the `lobstah` Cloudflare account (`cdde311c7a0f2943ec259f0548460a85`,
 the account that serves `lobstah.dev`) runs it by hand. `wrangler.jsonc` holds
 the deployment; there is no secret in it.
 
