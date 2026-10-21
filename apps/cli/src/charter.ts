@@ -1,9 +1,10 @@
 import { displayGrounds, helmChat, loadConfig, readHelm, type Config, type Grounds } from '@lobstah/core';
 
-export const HELM_REMINDER = 'Helm reminder: any question or choice for the human goes on a card with lobstah man ask, not only in chat.';
+export const CARD_LINK_RULE = 'Always refer to a card with a clickable Markdown link, using the url printed by lobstah man ask.';
+export const HELM_REMINDER = 'Helm reminder: any question or choice for the human goes on a card with lobstah man ask, not only in chat. ' + CARD_LINK_RULE;
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';
-export const CHAT_BRIEF_RULE = 'Chat brief (while chat=brief): when a card carries the detail, reply with one line pointing to it; on wakes with nothing new, only re-arm; answer direct questions directly.';
+export const CHAT_BRIEF_RULE = 'Chat brief (while chat=brief): when a card carries the detail, reply with one clickable Markdown link to it; on wakes with nothing new, only re-arm; answer direct questions directly.';
 
 export function helmChatRule(grounds?: string): string {
   return grounds !== undefined && helmChat(readHelm(grounds)) === 'brief' ? CHAT_BRIEF_RULE : '';

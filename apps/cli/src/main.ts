@@ -214,6 +214,7 @@ import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
 import { requestShow, validShowHash } from './glass-presence.js';
+import { decisionHash } from './glass-diff.js';
 import { focusTrap } from './focus.js';
 import {
   glassLines,
@@ -1977,9 +1978,11 @@ async function mainCli(): Promise<void> {
         throw err;
       }
       const { meta, replaced } = asked;
+      const url = `${glassUrl(glassPort())}/${decisionHash(meta.key)}`;
       console.log(
         toonKV({
           key: meta.key,
+          url,
           title: meta.title,
           ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
           options: meta.options.join(' | '),
@@ -1990,7 +1993,7 @@ async function mainCli(): Promise<void> {
       );
       console.log(
         toonHelp([
-          'the glass shows it as a card on the deck; the answer wakes man wait as a decision-answer event',
+          `Point to it with [card](${url}); the answer wakes man wait as a decision-answer event`,
           `lobstah man ask --withdraw ${meta.key}   (when it no longer needs the human)`,
         ]),
       );

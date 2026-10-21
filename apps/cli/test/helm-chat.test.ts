@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { consumeHelmChatChange, ensureLayout, helmChat, heartbeatHelm, loadConfig, readHelm, readSessionWatcher, setHelmChat, takeHelm, enqueue } from '@lobstah/core';
-import { charter, CHAT_BRIEF_RULE } from '../src/charter.js';
+import { charter, CHAT_BRIEF_RULE, CARD_LINK_RULE } from '../src/charter.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
@@ -58,6 +58,7 @@ it('CLI toggles persist across processes, heartbeat, re-sign and takeover, scope
   const signed = run(['man', 'helm', '--session', session]);
   expect(signed.status, signed.stderr).toBe(0);
   expect(signed.stdout).not.toContain(CHAT_BRIEF_RULE);
+  expect(signed.stdout).toContain(CARD_LINK_RULE);
   seat('other', 'other-helm');
   const result = run(['man', 'chat', 'brief', '--session', session]);
   expect(result.status, result.stderr).toBe(0);
@@ -65,7 +66,9 @@ it('CLI toggles persist across processes, heartbeat, re-sign and takeover, scope
   expect(readHelm('fleet')?.chat).toBe('brief');
   expect(helmChat(readHelm('other'))).toBe('full');
   heartbeatHelm(session);
-  expect(run(['man', 'helm', '--session', session]).stdout).toContain(CHAT_BRIEF_RULE);
+  const resigned = run(['man', 'helm', '--session', session]);
+  expect(resigned.stdout).toContain(CHAT_BRIEF_RULE);
+  expect(resigned.stdout).toContain(CARD_LINK_RULE);
   expect(readHelm('fleet')?.chat).toBe('brief');
   takeHelm({ sessionId: 'replacement', grounds: { name: 'fleet', repos: ['web'] }, take: true, ttlMs: 60_000 });
   expect(readHelm('fleet')?.chat).toBe('brief');
