@@ -1391,8 +1391,9 @@ trap is listening. Its reservation (`trap-starting`), sign-on
 (`trap-signed-on`), and sign-off (`trap-stowed`) are quiet: tend, the
 digest's `traps` table, and the glass show them. A ghost sweep of an idle
 trap is quiet the same way; a ghost sweep of a trap that held a catch wakes.
-A batch posts no `trap-available` per trap: when every throw has settled it
-posts one `trap-batch` notice with the counts and the names that failed. A
+Timely arrivals in a batch post no individual `trap-available`: when every
+throw has settled it posts one `trap-batch` notice with the counts and the
+names that failed. A late first park posts its own `trap-available`. A
 trap that failed to start (`trap-start-failed`) and work addressed to a trap
 that is gone (`bait-orphaned`) still wake.
 
