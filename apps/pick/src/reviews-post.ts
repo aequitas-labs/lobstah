@@ -11,6 +11,7 @@ import {
   reviewMarker,
   reviewRoundDir,
   writeReview,
+  acknowledgeReview,
 } from '@lobstah/core';
 import type { ReviewComment, ReviewRound } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
@@ -18,19 +19,17 @@ import { loadPickupConfig } from './config.js';
 const API = 'https://api.github.com';
 
 /**
- * The only review event lobstah ever sends itself. Neither postReview nor
- * stageReview takes an event argument: no configuration, caller or draft
- * can approve or request changes. A staged review is sent by the person,
- * from their own review tool, with whatever event they choose there.
+ * Automated reviews may comment or request changes for blocking findings.
+ * APPROVE requires an approve verdict and a human glass action.
  */
-const EVENT = 'COMMENT';
+export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE';
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<Response>;
 
 export type PostResult = { posted: true; reviewId: string; by: string } | { posted: false; why: string };
 
-/** Who asked for the post: the CLI, or `[reviews].post = "auto"`. */
-export type PostBy = 'cli' | 'auto';
+/** Who asked for the post: the CLI, a glass button, or automatic publishing. */
+export type PostBy = 'cli' | 'auto' | 'glass';
 
 type Opts = { token?: () => string; fetch?: FetchLike; now?: number };
 
@@ -96,6 +95,10 @@ function inlineComments(comments: ReviewComment[], r: ReviewRound) {
   return comments.map((x) => ({ path: x.path, line: x.line, side: x.side ?? 'RIGHT', body: `${x.body.trimEnd()}\n\n${reviewMarker(r.id)}` }));
 }
 
+function draftComments(draft: { comments: ReviewComment[]; blocking: ReviewComment[] }): ReviewComment[] {
+  return [...draft.comments, ...draft.blocking.filter(b => !draft.comments.some(c => c.path === b.path && c.line === b.line && c.body === b.body))];
+}
+
 function reviewBody(body: string, r: ReviewRound): string {
   const staleLine = r.state === 'stale' ? `\n\n_Drafted at ${r.headSha.slice(0, 7)}; the PR has moved since._` : '';
   return `${body.trimEnd()}${staleLine}\n\n${reviewMarker(r.id)}`;
@@ -131,7 +134,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
           await github<{ id: number }>(f, token(), 'POST', base, {
             commit_id: r.headSha,
             body: reviewBody(draft.body, r),
-            comments: inlineComments(draft.comments, r),
+            comments: inlineComments(draftComments(draft), r),
           })
         ).id;
     fs.writeFileSync(lock, JSON.stringify({ reviewId: String(id), at }));
@@ -154,14 +157,14 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
 }
 
 /**
- * Post the newest round as a comment-only review, as the configured
+ * Post the newest round with its selected verdict, as the configured
  * identity: submit its staged pending review, or create the review when it
  * was never staged (`[reviews].post = "auto"`). At most once per round:
  * `posted.json` guards the write, and a sent review that already carries
  * the round's marker (another boat posted it) is recorded instead. A stale
  * draft is always refused; re-draft against the current head before publishing.
  */
-export async function postReview(key: string, opts: Opts & { by: PostBy; stale?: boolean }): Promise<PostResult> {
+export async function postReview(key: string, opts: Opts & { by: PostBy; stale?: boolean; event?: ReviewEvent }): Promise<PostResult> {
   const c = context(key, opts);
   if (typeof c === 'string') return { posted: false, why: c };
   const { r, token, f, at, base } = c;
@@ -170,6 +173,14 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
   if (r.state !== 'drafted') return { posted: false, why: `${key}: the newest round is ${r.state}; there is no draft to post` };
   const draft = readRoundDraft(key, r.id);
   if ('error' in draft) return { posted: false, why: `${key}: ${draft.error}` };
+  const event = opts.event ?? (draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT');
+  if (!['COMMENT', 'REQUEST_CHANGES', 'APPROVE'].includes(event)) return { posted: false, why: 'invalid review event' };
+  const expected = draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT';
+  if (opts.by === 'glass' && event !== expected) return { posted: false, why: 'the action does not match the draft verdict' };
+  if (opts.by === 'auto' && (event === 'APPROVE' || draft.verdict === 'approve')) return { posted: false, why: 'approval needs your explicit click' };
+  if (opts.by === 'auto' && event !== expected) return { posted: false, why: 'automatic publishing must follow the blocking findings' };
+  if (event === 'APPROVE' && (opts.by !== 'glass' || draft.verdict !== 'approve' || draft.blocking.length)) return { posted: false, why: 'approval requires an approve verdict and your explicit click' };
+  if (event === 'REQUEST_CHANGES' && !draft.blocking.length) return { posted: false, why: 'request changes requires blocking findings' };
   const lock = receipt(key, r.id, 'posted.json', opts.by, at);
   if (!lock) return { posted: false, why: `${key}: a post of this round is already in flight or done` };
   try {
@@ -189,15 +200,16 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
       return { posted: false, why: `${key}: the PR head changed or closed before publishing; re-draft it` };
     }
     const posted = r.staged
-      ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event: EVENT, body: reviewBody(draft.body, r) })
+      ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event, body: reviewBody(draft.body, r) })
       : await github<{ id: number }>(f, token(), 'POST', base, {
           commit_id: r.headSha,
-          event: EVENT,
+          event,
           body: reviewBody(draft.body, r),
-          comments: inlineComments(draft.comments, r),
+          comments: inlineComments(draftComments(draft), r),
         });
     fs.writeFileSync(lock, JSON.stringify({ reviewId: String(posted.id), by: opts.by, at }));
     markReviewPosted(key, r.id, { reviewId: String(posted.id), by: opts.by, at });
+    if (opts.by !== 'auto') acknowledgeReview(key, opts.now);
     return { posted: true, reviewId: String(posted.id), by: opts.by };
   } catch (err) {
     fs.rmSync(lock, { force: true });
@@ -259,6 +271,7 @@ export async function dismissReviewRound(key: string, by: string, opts: Opts = {
   const why = await discardStaged(key, opts);
   if (why) return why;
   const out = dismissReview(key, by, opts.now);
+  if (typeof out !== 'string') acknowledgeReview(key, opts.now);
   return typeof out === 'string' ? out : undefined;
 }
 

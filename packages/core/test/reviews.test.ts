@@ -14,6 +14,11 @@ import {
   readReview,
   redraftReview,
   reviewAttention,
+  refreshReviewNotifications,
+  markReviewSeen,
+  acknowledgeReview,
+  reviewRoundDir,
+  readRoundDraft,
   reviewBrief,
   reviewSettings,
   withdrawUnseenReviews,
@@ -144,32 +149,65 @@ describe('review rounds', () => {
   });
 });
 
-describe('review attention', () => {
-  it('stands while the newest round is requested with no job, drafted, stale or failed', () => {
+describe('review notifications', () => {
+  const key = 'review:acme/web#7';
+  it('requests are silent; draft ready notifies once and opening only marks seen', () => {
     observeReviewRequest(seen(), T0);
-    const item = readReview('review:acme/web#7')!;
-    const stands = (state: string, dispatch?: string): boolean => {
-      item.rounds[0] = { ...item.rounds[0]!, state: state as never, ...(dispatch ? { dispatch } : {}) };
-      if (!dispatch) delete item.rounds[0].dispatch;
-      return reviewAttention(T0, [item]).length === 1;
-    };
-    expect(stands('requested')).toBe(true);
-    expect(stands('requested', 'd1')).toBe(false); // a job is drafting it
-    expect(stands('drafting', 'd1')).toBe(false);
-    for (const s of ['drafted', 'stale', 'failed']) expect(stands(s)).toBe(true);
-    for (const s of ['posted', 'dismissed', 'withdrawn']) expect(stands(s)).toBe(false);
+    expect(refreshReviewNotifications(T0)).toEqual([]);
+    expect(reviewAttention(T0)).toEqual([]);
+    const item = readReview(key)!;
+    Object.assign(item.rounds[0]!, { state: 'drafted', verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 4, body: 'race' }], draftedAt: new Date(T0).toISOString() });
+    writeReview(item);
+    expect(refreshReviewNotifications(T0 + 1)[0]).toMatchObject({ hash: '#review-review%3Aacme%2Fweb%237', notification: { kind: 'draft-ready', text: 'Draft ready: #7 · request changes · 1 blocking' } });
+    expect(refreshReviewNotifications(T0 + 2)).toEqual([]);
+    markReviewSeen(key, T0 + 3);
+    expect(latestRound(readReview(key)!)).toMatchObject({ seenAt: new Date(T0 + 3).toISOString(), notification: { kind: 'draft-ready' } });
+    expect(reviewAttention(T0 + 3)).toHaveLength(1);
+    acknowledgeReview(key, T0 + 4);
+    expect(reviewAttention(T0 + 4)).toEqual([]);
+    expect(refreshReviewNotifications(T0 + 5)).toEqual([]);
   });
 
-  it('carries the PR, and a state hash that changes with the round', () => {
-    observeReviewRequest(seen(), T0);
-    const [a] = reviewAttention(T0 + 60_000);
-    expect(a).toMatchObject({ kind: 'review', key: 'review:acme/web#7', verb: 'requested', ageSecs: 3660, prUrl: 'https://github.com/acme/web/pull/7', repo: 'web' });
-    observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0);
-    expect(reviewAttention(T0)[0]!.stateHash).not.toBe(a!.stateHash);
+  it('approve waits with needs-you; an action clears it without renotifying', () => {
+    const item = observeReviewRequest(seen(), T0).item;
+    Object.assign(item.rounds[0]!, { state: 'drafted', verdict: 'approve', draftedAt: new Date(T0).toISOString() });
+    writeReview(item);
+    expect(refreshReviewNotifications(T0 + 1)[0]?.notification.kind).toBe('needs-you');
+    expect(latestRound(readReview(key)!)?.needsYou).toBe(true);
+    markReviewSeen(key, T0 + 2);
+    expect(latestRound(readReview(key)!)?.needsYou).toBe(true);
+    acknowledgeReview(key, T0 + 3);
+    expect(latestRound(readReview(key)!)?.needsYou).toBeUndefined();
+    expect(refreshReviewNotifications(T0 + 4)).toEqual([]);
+  });
+
+  it('auto published reviews notify published, while human publishing is already acknowledged', () => {
+    const item = observeReviewRequest(seen(), T0).item;
+    Object.assign(item.rounds[0]!, { state: 'posted', by: 'auto', postedAt: new Date(T0).toISOString(), verdict: 'comment' });
+    writeReview(item);
+    expect(refreshReviewNotifications(T0 + 1)[0]?.notification).toMatchObject({ kind: 'published', text: 'Published: #7 · comment · 0 blocking' });
+    item.rounds[0]!.by = 'glass'; writeReview(item);
+    expect(refreshReviewNotifications(T0 + 2)).toEqual([]);
   });
 });
 
 describe('drafts', () => {
+  it('reads verdict and file/line blockers, rejects malformed or contradictory metadata, and defaults legacy drafts to comment', () => {
+    observeReviewRequest(seen(), T0);
+    const dir = reviewRoundDir('review:acme/web#7', 'RRE_1')!; fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review.md'), 'Summary');
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ verdict: 'comment', blocking: [] });
+    const meta = (verdict: string, blocking: unknown[]) => fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict, blocking }));
+    meta('request_changes', [{ path: 'a.ts', line: 9, body: 'Race' }]);
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 9 }] });
+    meta('approve', [{ path: 'a.ts', line: 9, body: 'Race' }]);
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toHaveProperty('error');
+    meta('request_changes', []);
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toHaveProperty('error');
+    meta('comment', [{ path: 'a.ts', line: 0, body: 'Race' }]);
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toHaveProperty('error');
+  });
+
   it('the brief drafts into the round directory and forbids every write to the PR', () => {
     observeReviewRequest(seen(), T0);
     const item = readReview('review:acme/web#7')!;
@@ -179,7 +217,7 @@ describe('drafts', () => {
     expect(brief).toContain('git worktree add --detach /x/rounds/RRE_1/checkout FETCH_HEAD');
     expect(brief).toContain('Use no other path; lobstah removes it when the job ends.');
     expect(brief).not.toContain('<tmpdir>');
-    expect(brief).toContain('Write two files in /x/rounds/RRE_1');
+    expect(brief).toContain('Write three files in /x/rounds/RRE_1');
     expect(brief).toContain('Do not post, approve, request changes, comment on, push to, or edit the PR.');
     expect(brief).toContain('lobstah report d1 done');
     expect(brief).toContain("Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md");

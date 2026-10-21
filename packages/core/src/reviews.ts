@@ -27,7 +27,7 @@ export interface ReviewSettings {
   publish: boolean;
   /** Who drafts: no one, a free trap of the repo (then headless after trapWaitSecs), or headless. */
   work: ReviewWork;
-  /** `draft`: stage the draft as the identity's pending review, sent from the review tool. `auto`: post it as a comment-only review once drafted. */
+  /** `draft`: stage the draft as the identity's pending review, sent from the review tool. `auto`: publish by verdict once drafted; approval always waits for a person. */
   post: ReviewPost;
   harness?: string;
   model?: string;
@@ -151,6 +151,14 @@ export function reviewSettings(cfg: ReviewsConfig, repoKey?: string): ReviewSett
 export const REVIEW_ROUND_STATES = ['requested', 'drafting', 'drafted', 'stale', 'failed', 'posted', 'dismissed', 'withdrawn'] as const;
 export type ReviewRoundState = (typeof REVIEW_ROUND_STATES)[number];
 
+export const REVIEW_VERDICTS = ['approve', 'comment', 'request_changes'] as const;
+export type ReviewVerdict = (typeof REVIEW_VERDICTS)[number];
+export interface BlockingFinding { path: string; line: number; body: string }
+export interface ReviewNotification { kind: 'draft-ready' | 'needs-you' | 'published'; at: string; text: string }
+
+/** Stable row target shared by notifications, the pet, and the glass. */
+export const reviewHash = (key: string): string => `#review-${encodeURIComponent(key)}`;
+
 export interface ReviewRound {
   /** The request event's id: one round per request. */
   id: string;
@@ -163,6 +171,13 @@ export interface ReviewRound {
   draftOnly?: boolean;
   /** Whether this job was explicitly started with publishing enabled. */
   publish?: boolean;
+  verdict?: ReviewVerdict;
+  blocking?: BlockingFinding[];
+  needsYou?: boolean;
+  seenAt?: string;
+  acknowledgedAt?: string;
+  notification?: ReviewNotification;
+  notificationGeneration?: string;
   /** The head the round reviews. */
   headSha: string;
   state: ReviewRoundState;
@@ -394,7 +409,7 @@ export function reviewCheckoutDir(key: string, roundId: string): string | undefi
 }
 
 /** A round's draft as its job wrote it, or why it cannot be read. A missing comments.json is no inline comments. */
-export function readRoundDraft(key: string, roundId: string): { body: string; comments: ReviewComment[] } | { error: string } {
+export function readRoundDraft(key: string, roundId: string): { body: string; comments: ReviewComment[]; verdict: ReviewVerdict; blocking: BlockingFinding[] } | { error: string } {
   const dir = reviewRoundDir(key, roundId);
   if (!dir) return { error: 'malformed review key or round id' };
   let body: string;
@@ -413,7 +428,27 @@ export function readRoundDraft(key: string, roundId: string): { body: string; co
       comments = 'comments.json is not valid JSON';
     }
   }
-  return typeof comments === 'string' ? { error: comments } : { body, comments };
+  if (typeof comments === 'string') return { error: comments };
+  // Older in-flight jobs wrote only the summary and comments. They remain
+  // comment drafts; no missing metadata can ever imply approval.
+  let verdict: ReviewVerdict = 'comment';
+  let blocking: BlockingFinding[] = [];
+  const meta = path.join(dir, 'verdict.json');
+  if (fs.existsSync(meta)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(meta, 'utf8'));
+      verdict = oneOf(raw.verdict, REVIEW_VERDICTS, 'verdict.json verdict');
+      const findings = parseReviewComments(raw.blocking);
+      if (typeof findings === 'string') return { error: `verdict.json blocking: ${findings}` };
+      blocking = findings;
+      if (verdict === 'approve' && blocking.length) return { error: 'an approve verdict cannot have blocking findings' };
+      if (verdict === 'request_changes' && !blocking.length) return { error: 'request_changes needs blocking findings with file and line' };
+      if (blocking.length) verdict = 'request_changes';
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'invalid verdict.json' };
+    }
+  }
+  return { body, comments, verdict, blocking };
 }
 
 /** The `prReview` brief: draft, never post. */
@@ -427,7 +462,7 @@ export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identi
     `2. For context beyond the diff, make a throwaway checkout of the PR head at exactly ${opts.checkout}: \`git fetch origin pull/${number}/head\`, then \`git worktree add --detach ${opts.checkout} FETCH_HEAD\`. Use no other path; lobstah removes it when the job ends. Never switch, commit to, or push this checkout's own branch.`,
     "3. Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md, .github/pull_request_template.md) and hold the change to it.",
     '4. Review it the way the reviewer would: correctness first, then risk, then clarity. No style nits unless they hide a bug. Follow any review rules appended below this brief too.',
-    `5. Write two files in ${opts.outDir}: \`review.md\`, the review's summary body in markdown; and \`comments.json\`, the inline comments as a JSON array of \`{"path": "<file>", "line": <line in the PR head's version>, "side": "RIGHT", "body": "<markdown>"}\` (\`[]\` when there are none).`,
+    `5. Write three files in ${opts.outDir}: \`review.md\`, the review's summary body in markdown; and \`comments.json\`, the inline comments as a JSON array of \`{"path": "<file>", "line": <line in the PR head's version>, "side": "RIGHT", "body": "<markdown>"}\` (\`[]\` when there are none); and \`verdict.json\` as \`{"verdict":"approve|comment|request_changes","blocking":[{"path":"<file>","line":<positive line>,"body":"<blocking finding>"}]}\`. Every blocking finding needs a file and line. Use request_changes for blockers, approve only when ready to merge, otherwise comment. Approve must have no blockers; request_changes must have at least one.`,
     '6. Do not post, approve, request changes, comment on, push to, or edit the PR. If you cannot review it (too large, missing context), say so in review.md.',
     `7. Report done: \`lobstah report ${opts.id} done "<one line>"\`.`,
   ].join('\n');
@@ -443,7 +478,7 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   const r = item && latestRound(item);
   if (!item || !r) return `no review item ${key}`;
   if (r.state !== 'stale' && r.state !== 'failed') return `${key}: the newest round is ${r.state}; only a stale or failed round re-drafts`;
-  const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, ...rest } = r;
+  const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, verdict: _v, blocking: _b, notification: _n, needsYou: _y, seenAt: _seen, acknowledgedAt: _ack, ...rest } = r;
   item.rounds[item.rounds.length - 1] = { ...rest, ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 }
@@ -472,6 +507,8 @@ export function markReviewPosted(key: string, roundId: string, post: { reviewId:
   Object.assign(r, { state: 'posted', postedAt: post.at, postedReviewId: post.reviewId, by: post.by });
   delete r.reason;
   delete r.staged;
+  delete r.needsYou;
+  if (post.by !== 'auto') { delete r.notification; r.acknowledgedAt = post.at; }
   return writeReview({ ...item, updatedAt: post.at });
 }
 
@@ -489,33 +526,64 @@ export function reviewStands(round: ReviewRound | undefined): boolean {
 export function reviewStateHash(item: ReviewItem): string {
   const r = latestRound(item);
   return createHash('sha1')
-    .update(`${item.key}\n${r?.id ?? ''}\n${r?.state ?? ''}\n${r?.headSha ?? ''}`)
+    .update(`${item.key}\n${r?.id ?? ''}\n${r?.state ?? ''}\n${r?.headSha ?? ''}\n${r?.notificationGeneration ?? ''}`)
     .digest('hex')
     .slice(0, 16);
 }
 
-/** One `review` attention item per PR whose newest round stands. */
+/** Opening is seen; only an explicit action clears notification and needs-you. */
+export function markReviewSeen(key: string, now = Date.now()): boolean {
+  const item = readReview(key); const r = item && latestRound(item);
+  if (!item || !r) return false;
+  r.seenAt = new Date(now).toISOString();
+  writeReview({ ...item, updatedAt: r.seenAt });
+  return true;
+}
+
+export function acknowledgeReview(key: string, now = Date.now()): boolean {
+  const item = readReview(key); const r = item && latestRound(item);
+  if (!item || !r) return false;
+  r.acknowledgedAt = new Date(now).toISOString();
+  delete r.notification; delete r.needsYou;
+  writeReview({ ...item, updatedAt: r.acknowledgedAt });
+  return true;
+}
+
+/** Pet-only review notifications. Requests never stand in tend or on deck. */
 export function reviewAttention(now: number, items: ReviewItem[] = listReviews()): TendAttention[] {
-  const out: TendAttention[] = [];
-  for (const item of items) {
+  return items.flatMap(item => {
     const r = latestRound(item);
-    if (!r || !reviewStands(r)) continue;
-    out.push({
-      kind: 'review',
-      key: item.key,
-      stateHash: reviewStateHash(item),
-      id: item.key,
-      lane: 'chore',
-      verb: r.state,
-      ageSecs: Math.max(0, Math.round((now - Date.parse(r.requestedAt)) / 1000)),
-      at: r.requestedAt,
-      standingSince: r.draftedAt ?? r.requestedAt,
-      note: `${item.pr.owner}/${item.pr.repo}#${item.pr.number} ${item.pr.title}${r.requestedBy ? ` (asked by ${r.requestedBy})` : ''}`,
-      ...(item.pr.repoKey ? { repo: item.pr.repoKey } : {}),
-      prUrl: item.pr.url,
-      number: item.pr.number,
-      headSha: r.headSha,
-    });
+    if (!r?.notification || r.wharf || ['dismissed', 'withdrawn'].includes(r.state)) return [];
+    return [{ kind: 'review' as const, key: item.key, stateHash: reviewStateHash(item), id: item.key,
+      lane: 'chore' as const, verb: r.notification.kind, ageSecs: Math.max(0, Math.round((now - Date.parse(r.notification.at)) / 1000)),
+      at: r.notification.at, standingSince: r.notification.at, note: r.notification.text,
+      ...(item.pr.repoKey ? { repo: item.pr.repoKey } : {}), prUrl: item.pr.url, number: item.pr.number, headSha: r.headSha }];
+  });
+}
+
+/** Create one notification per completed draft/publish generation; no request notifications. */
+export function refreshReviewNotifications(now = Date.now()): Array<{ key: string; notification: ReviewNotification; hash: string }> {
+  const events: Array<{ key: string; notification: ReviewNotification; hash: string }> = [];
+  for (const item of listReviews()) {
+    const r = latestRound(item);
+    if (!r || r.wharf || !['drafted', 'posted'].includes(r.state)) continue;
+    if (r.state === 'posted' && r.by !== 'auto') continue;
+    const generation = `${r.id}:${r.dispatch ?? ''}:${r.state}:${r.postedAt ?? r.draftedAt ?? r.headSha}`;
+    if (r.notificationGeneration === generation) continue;
+    r.notificationGeneration = generation;
+    const completed = r.postedAt ?? r.draftedAt;
+    if (completed && r.acknowledgedAt && r.acknowledgedAt >= completed) {
+      writeReview(item); continue;
+    }
+    const needsYou = r.state === 'drafted' && r.verdict === 'approve';
+    r.needsYou = needsYou;
+    delete r.seenAt;
+    const verdict = (r.verdict ?? 'comment').replace('_', ' ');
+    const kind = r.state === 'posted' ? 'published' : needsYou ? 'needs-you' : 'draft-ready';
+    const label = kind === 'published' ? 'Published' : needsYou ? 'Draft ready (needs you)' : 'Draft ready';
+    r.notification = { kind, at: new Date(now).toISOString(), text: `${label}: #${item.pr.number} · ${verdict} · ${r.blocking?.length ?? 0} blocking` };
+    writeReview({ ...item, updatedAt: r.notification.at });
+    events.push({ key: item.key, notification: r.notification, hash: reviewHash(item.key) });
   }
-  return out;
+  return events;
 }

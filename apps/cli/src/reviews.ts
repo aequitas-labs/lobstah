@@ -1,4 +1,4 @@
-import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands } from '@lobstah/core';
+import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft } from '@lobstah/core';
 import type { GlassReview } from '@lobstah/core';
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
@@ -34,7 +34,10 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const asker = automatic ? item.pr.author : (r.requestedBy ?? item.pr.author);
     const name = automatic ? item.pr.authorName : (r.requestedByName ?? (asker === item.pr.author ? item.pr.authorName : undefined));
     const avatar = automatic ? item.pr.authorAvatarUrl : (r.requestedByAvatarUrl ?? (asker === item.pr.author ? item.pr.authorAvatarUrl : undefined));
+    const draft = ['drafted', 'stale'].includes(r.state) ? readRoundDraft(item.key, r.id) : undefined;
     out.push({
+      verdict: r.verdict, blocking: r.blocking, needsYou: r.needsYou, seenAt: r.seenAt, acknowledgedAt: r.acknowledgedAt, notification: r.notification,
+      ...(draft && !('error' in draft) ? { summary: draft.body } : {}),
       mode: reviewSettings(config, item.pr.repoKey).mode,
       publish: reviewSettings(config, item.pr.repoKey).publish,
       key: item.key,

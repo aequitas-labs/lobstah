@@ -310,6 +310,13 @@ export interface GlassReview {
   askerAvatarUrl?: string;
   automatic?: boolean;
   stagedReviewUrl?: string;
+  verdict?: import('./reviews.js').ReviewVerdict;
+  blocking?: import('./reviews.js').BlockingFinding[];
+  summary?: string;
+  needsYou?: boolean;
+  seenAt?: string;
+  acknowledgedAt?: string;
+  notification?: import('./reviews.js').ReviewNotification;
   requestedAt: string;
   state: ReviewRoundState;
   /** The newest round waits on the person (it is in the review attention kind's standing set). */

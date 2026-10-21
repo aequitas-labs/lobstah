@@ -240,7 +240,7 @@ final class PetView: NSView {
   weak var pet: Pet?
   override func mouseDown(with event: NSEvent) {
     guard let item = pet?.item else { focusHelm(); return }
-    delegate.hideClicked(item)
+    if item.kind != "review" { delegate.hideClicked(item) }
     clickAttentionItem(item, glass: glassURL,
       helmLive: helmIsLive(readHelm()),
       open: { NSWorkspace.shared.open($0) },

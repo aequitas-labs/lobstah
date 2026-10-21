@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +22,8 @@ import {
   recordGitHubResponse,
   requestCancel,
   reviewBrief,
+  acknowledgeReview,
+  refreshReviewNotifications,
   reviewCheckoutDir,
   reviewRoundDir,
   reviewSettings,
@@ -114,7 +117,7 @@ export async function reviewsLoop(
   identity: string,
   token: () => string,
   log: (m: string) => void = () => {},
-  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number; wharf?: ReviewWharfOptions } = {},
+  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number; wharf?: ReviewWharfOptions; notify?: (event: { key: string; text: string; kind: string; url: string }) => void } = {},
 ): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.reviews.enabled) return;
@@ -131,6 +134,19 @@ export async function reviewsLoop(
   if (wharf) await claimReviewDocs(log, w);
   draftReviews(identity, log, now);
   if (!githubBlockedUntil(now)) await postOrStage(gh, log);
+  for (const event of refreshReviewNotifications(now)) {
+    const port = Number(process.env.LOBSTAH_GLASS_PORT ?? cfg.glass.port);
+    const url = `http://127.0.0.1:${port}/${event.hash}`;
+    const notice = { key: event.key, text: event.notification.text, kind: event.notification.kind, url };
+    if (opts.notify) opts.notify(notice);
+    else if (cfg.hooks.notify?.command) {
+      const child = spawn(cfg.hooks.notify.command, { shell: true, detached: true, stdio: 'ignore', env: { ...process.env,
+        LOBSTAH_ID: event.key, LOBSTAH_KEY: event.key, LOBSTAH_LANE: 'chore', LOBSTAH_VERB: notice.kind,
+        LOBSTAH_NOTE: notice.text, LOBSTAH_AT: event.notification.at, LOBSTAH_URL: url, LOBSTAH_GLASS_URL: url, LOBSTAH_PR_URL: url,
+      } });
+      child.on('error', err => log(`review notify: ${err.message}`)); child.unref();
+    }
+  }
   if (wharf) {
     await runReviewRequests(log, { ...w, dismiss: (key) => dismissReviewRound(key, 'hosted', gh) });
     await publishReviewDocs(log, w);
@@ -164,10 +180,15 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
     const r = latestRound(item);
     if (r?.state !== 'drafted' || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
     const settings = reviewSettings(loadConfig().reviews, item.pr.repoKey);
-    const publish = settings.mode !== 'notify' && settings.publish && (r.publish ?? !r.draftOnly);
+    const draft = readRoundDraft(item.key, r.id);
+    if ('error' in draft) continue;
+    if (r.verdict !== draft.verdict || JSON.stringify(r.blocking) !== JSON.stringify(draft.blocking)) {
+      r.verdict = draft.verdict; r.blocking = draft.blocking; writeReview(item);
+    }
+    const publish = draft.verdict !== 'approve' && settings.mode !== 'notify' && settings.publish && (r.publish ?? !r.draftOnly);
     if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
-      log(out.posted ? `${item.key}: comment review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
+      log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
     } else if (!r.staged) {
       const out = await stageReview(item.key, gh);
       log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${out.why}`);
@@ -383,7 +404,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if ('error' in draft) {
       Object.assign(r, { state: 'failed', reason: `the review job finished without a usable draft: ${draft.error}` });
     } else {
-      Object.assign(r, { state: 'drafted', draftedAt: job.at ?? new Date(now).toISOString() });
+      Object.assign(r, { verdict: draft.verdict, blocking: draft.blocking, state: 'drafted', draftedAt: job.at ?? new Date(now).toISOString() });
       delete r.reason;
       // The head moved while the job ran: the draft reviews an older head.
       if (r.headSha !== item.pr.headSha) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
@@ -399,7 +420,7 @@ export async function draftReviewOnDemand(key: string, now = Date.now()): Promis
   const item = readReview(key);
   const round = item && latestRound(item);
   if (!item || !round) return `no review item ${key}`;
-  if (reviewSettings(loadConfig().reviews, item.pr.repoKey).mode === 'notify') return 'reviews are in notify mode; switch to on-demand or an automatic mode to review';
+  if (reviewSettings(loadConfig().reviews, item.pr.repoKey).mode === 'notify' && round.state === 'requested') return 'reviews are in notify mode; switch to on-demand or an automatic mode to review';
   if (!['requested', 'stale', 'failed'].includes(round.state) || (round.state === 'requested' && round.dispatch)) return `${key}: this round is already ${round.state}`;
   const why = noJob(item, round, startedToday(listReviews(), now));
   if (why) return why;
@@ -409,6 +430,7 @@ export async function draftReviewOnDemand(key: string, now = Date.now()): Promis
     const why = await redraftReviewRound(key, { now });
     if (why) return why;
   }
+  acknowledgeReview(key, now);
   draftReviews(identity, () => {}, now, key);
   return latestRound(readReview(key)!)?.state === 'drafting' ? undefined : 'the round could not start drafting';
 }

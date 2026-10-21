@@ -71,6 +71,14 @@ const config = (...extra: string[]) => fs.writeFileSync(path.join(home, 'config.
 const tok = () => 'token';
 
 describe('the reviews loop', () => {
+  it('new requests remain silent across polls, with no notification callbacks', async () => {
+    config(); const notify = vi.fn();
+    for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []), notify });
+    expect(listReviews()).toHaveLength(1);
+    expect(notify).not.toHaveBeenCalled();
+    expect(latestRound(readReview('review:acme/web#1')!)?.notification).toBeUndefined();
+  });
+
   it('fetches and caches requester and author names/avatars in the same gh search', async () => {
     config();
     const calls: Array<{ query: string; q: string }> = [];

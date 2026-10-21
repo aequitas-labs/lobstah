@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { activeIds, answeredAt, laneDirs, lastEventAt, questionHeld, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
+import { activeIds, answeredAt, listReviews, laneDirs, lastEventAt, questionHeld, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
 
 export interface NotifyEvent {
@@ -48,6 +48,7 @@ export function pendingNotifications(
   }
   fs.writeFileSync(cursorPath(id, lane), String(end));
   const question = (e: StatusEntry) => e.verb === 'needs-decision' || e.verb === 'blocked';
+  if (listReviews().some(item => item.rounds.some(r => r.dispatch === id))) return [];
   return fresh
     .filter((e) => verbs.includes(e.verb) && !(question(e) && answeredAt(id, lane, e.at) !== undefined))
     .map((entry) => ({ id, lane, entry }));

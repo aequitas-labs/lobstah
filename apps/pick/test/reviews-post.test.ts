@@ -90,6 +90,34 @@ describe('postReview', () => {
     expect(await postReview(KEY, { by: 'cli', token: tok, fetch: github(calls) })).toMatchObject({ posted: false, why: expect.stringContaining('already posted') });
   });
 
+  it.each(['approve', 'comment', 'request_changes'] as const)('publishes %s only through its allowed path', async verdict => {
+    drafted();
+    const blocking = verdict === 'request_changes' ? [{ path: 'src/a.ts', line: 14, body: 'This loses writes.' }] : [];
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict, blocking }));
+    const calls: Call[] = [];
+    const result = await postReview(KEY, { by: 'auto', token: tok, fetch: github(calls) });
+    if (verdict === 'approve') {
+      expect(result).toMatchObject({ posted: false, why: expect.stringContaining('explicit click') });
+      expect(calls).toEqual([]);
+      expect(await postReview(KEY, { by: 'cli', event: 'APPROVE', token: tok, fetch: github(calls) })).toMatchObject({ posted: false });
+      expect(await postReview(KEY, { by: 'auto', event: 'APPROVE', token: tok, fetch: github(calls) })).toMatchObject({ posted: false });
+      expect(posts(calls)).toHaveLength(0);
+      expect(await postReview(KEY, { by: 'glass', event: 'APPROVE', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+      expect(posts(calls)[0]?.body).toMatchObject({ event: 'APPROVE', body: `Looks right.\n\n${MARKER}` });
+    } else {
+      expect(result).toMatchObject({ posted: true });
+      expect(posts(calls)[0]?.body?.event).toBe(blocking.length ? 'REQUEST_CHANGES' : 'COMMENT');
+      if (blocking.length) expect(posts(calls)[0]?.body?.comments).toContainEqual(expect.objectContaining({ path: 'src/a.ts', line: 14, body: expect.stringContaining('This loses writes.') }));
+    }
+  });
+
+  it('refuses an action that no longer matches the verdict', async () => {
+    drafted(); const calls: Call[] = [];
+    expect(await postReview(KEY, { by: 'glass', event: 'APPROVE', token: tok, fetch: github(calls) })).toMatchObject({ posted: false });
+    expect(await postReview(KEY, { by: 'glass', event: 'REQUEST_CHANGES', token: tok, fetch: github(calls) })).toMatchObject({ posted: false });
+    expect(calls).toEqual([]);
+  });
+
   it('two Posts of one round at once make one POST', async () => {
     drafted();
     const calls: Call[] = [];
@@ -139,6 +167,19 @@ describe('posting from the reviews loop', () => {
   const search: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { search: { issueCount: 1, nodes: [] } } }) });
   const config = (post: string) =>
     fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'work = "off"', `post = "${post}"`, '[repos.web]', 'path = "/w"', 'origin = "git@github.com:acme/web.git"'].join('\n'));
+
+  it.each(['approve', 'comment', 'request_changes'] as const)('auto-review %s notifies only at completion, once, with a Reviews row link', async verdict => {
+    config('auto'); drafted();
+    const blocking = verdict === 'request_changes' ? [{ path: 'a.ts', line: 2, body: 'Race' }] : [];
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict, blocking }));
+    const notices: Array<{ key: string; kind: string; text: string; url: string }> = []; const calls: Call[] = [];
+    for (let i = 0; i < 3; i++) await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls), notify: e => notices.push(e) });
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.kind).toBe(verdict === 'approve' ? 'needs-you' : 'published');
+    expect(notices[0]?.url).toContain('/#review-review%3Aacme%2Fweb%237');
+    expect(posts(calls).map(c => c.body?.event)).toEqual([verdict === 'approve' ? undefined : verdict === 'request_changes' ? 'REQUEST_CHANGES' : 'COMMENT']);
+    expect(latestRound(readReview(KEY)!)?.needsYou).toBe(verdict === 'approve');
+  });
 
   it('post = "draft" stages the draft as a pending review, once, and never posts it', async () => {
     config('draft');

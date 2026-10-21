@@ -19,7 +19,8 @@ const TONE: Record<string, string> = { drafted: 'ok', stale: 'warn', failed: 'ba
 /** The state as a person reads it: a staged draft is waiting in the review tool. */
 export const reviewState = (r: Pick<GlassReview, 'state' | 'staged'>): string => r.state;
 
-export const openReview = (r: Pick<GlassReview, 'reviewUrl'>) => () => {
+export const openReview = (r: Pick<GlassReview, 'reviewUrl'> & { key?: string }) => () => {
+  if (r.key) void reviewRequest('review-seen', { key: r.key });
   window.open(r.reviewUrl, '_blank', 'noopener');
 };
 
@@ -45,13 +46,17 @@ function Actions({ r, canDraft, publish }: { r: GlassReview; canDraft: boolean; 
     setBusy(false);
   };
   return html`<span class="rv-actions">
-    ${canDraft && ['requested', 'stale', 'failed'].includes(r.state) && html`<button class="btn" disabled=${busy} title=${publish ? 'Review this round and publish a COMMENT review if the draft is fresh; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${publish ? 'Review (publish)' : 'Review (draft)'}</button>`}
-    ${OPEN.has(r.state) && html`<button class="btn" disabled=${busy} title="Dismiss this round and remove it from attention; delete its staged pending draft, if any. Does not decline the review on GitHub." onClick=${act('review-dismiss')}>Dismiss</button>`}
+    ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<button class="btn" disabled=${busy} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}</button>`}
+    ${r.state === 'drafted' && html`<button class="btn" disabled=${busy} onClick=${act(r.verdict === 'approve' ? 'review-approve' : r.verdict === 'request_changes' ? 'review-request-changes' : 'review-comment')}>${r.verdict === 'approve' ? 'Approve' : r.verdict === 'request_changes' ? 'Request changes' : 'Publish comment'}</button>`}
+    ${(OPEN.has(r.state) || r.notification) && html`<button class="btn" disabled=${busy} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub." onClick=${act('review-skip')}>Skip</button>`}
     ${error && html`<span class="bad" role="alert">${error}</span>`}
   </span>`;
 }
 
-const badge = (r: GlassReview) => html`<span class=${'badge ' + (TONE[r.state] ?? '')}>${reviewState(r)}</span>`;
+const badge = (r: GlassReview) =>
+  html`<span class=${'badge ' + (TONE[r.state] ?? '')}>${reviewState(r)}</span>${r.verdict && html`<span class="badge">${r.verdict.replace('_', ' ')}</span>`}${r.needsYou && html`<span class="badge warn">needs you</span>`}`;
+const findings = (r: GlassReview) =>
+  html`${r.summary && html`<details onClick=${(e: Event) => e.stopPropagation()}><summary>Summary</summary><div class="rv-reason">${r.summary}</div></details>`}${r.blocking?.map((b) => html`<div class="rv-reason bad">${b.path}:${b.line} · ${b.body}</div>`)}`;
 
 const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?? r.requestedBy ?? r.author}>
   ${r.askerAvatarUrl && html`<img src=${r.askerAvatarUrl} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" />`}
@@ -61,12 +66,18 @@ const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?
 
 const staged = (r: GlassReview) =>
   r.staged &&
-  html`<a class="rv-staged" href=${r.stagedReviewUrl ?? r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => e.stopPropagation()}>Open pending review</a>`;
+  html`<a class="rv-staged" href=${r.stagedReviewUrl ?? r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => {
+    e.stopPropagation();
+    void reviewRequest('review-seen', { key: r.key });
+  }}>Open pending review</a>`;
 
 function row(r: GlassReview, canDraft: boolean, publish: boolean) {
-  return html`<tr key=${r.key} class=${'rowhead' + (OPEN.has(r.state) ? '' : ' acked')} onClick=${openReview(r)}>
-    <td><a href=${r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => e.stopPropagation()}>${r.repo}#${r.number}</a></td>
-    <td class="grow">${r.title}</td>
+  return html`<tr key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'rowhead' + (r.seenAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} onClick=${openReview(r)}>
+    <td><a href=${r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => {
+      e.stopPropagation();
+      void reviewRequest('review-seen', { key: r.key });
+    }}>${r.repo}#${r.number}</a></td>
+    <td class="grow">${r.title}${findings(r)}</td>
     <td>${r.author}</td>
     <td>${asker(r)}</td>
     <td>${Age(r.requestedAt)}</td>
@@ -77,11 +88,11 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
 
 function card(r: GlassReview, canDraft: boolean, publish: boolean) {
   const meta = reviewMeta(r);
-  return html`<div key=${r.key} class=${'card rv-card' + (OPEN.has(r.state) ? '' : ' acked')} role="link" tabindex="0" onKeyDown=${(
+  return html`<div key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'card rv-card' + (r.seenAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} role="link" tabindex="0" onKeyDown=${(
     e: KeyboardEvent,
   ) => {
     if (e.key === 'Enter' && e.target === e.currentTarget) openReview(r)();
-  }} onClick=${openReview(r)}><div class="top"><b title=${r.title}>${r.title}</b>${badge(r)}</div><div class="rv-asker">${asker(r)}</div><div class="meta" title=${meta.text}>${r.repo}#${r.number} · ${Age(r.requestedAt)} ago</div>${r.reason && html`<div class="rv-reason">${r.reason}</div>`}<div class="foot">${staged(r)}<span class="footact"><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></span></div></div>`;
+  }} onClick=${openReview(r)}><div class="top"><b title=${r.title}>${r.title}</b>${badge(r)}</div><div class="rv-asker">${asker(r)}</div><div class="meta" title=${meta.text}>${r.repo}#${r.number} · ${Age(r.requestedAt)} ago</div>${findings(r)}${r.reason && html`<div class="rv-reason">${r.reason}</div>`}<div class="foot">${staged(r)}<span class="footact"><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></span></div></div>`;
 }
 
 export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews']; setup?: GlassSnapshot['reviewSetup']; repo?: string }) {
@@ -102,7 +113,7 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
         ) => {
           const next = (e.currentTarget as HTMLSelectElement).value;
           return change(next, next.startsWith('auto-') ? next === 'auto-review' : publish);
-        }}><option value="notify">Notify</option><option value="on-demand">On-demand</option><option value="auto-draft">Auto draft</option><option value="auto-review">Auto review</option></select></label><label title="Publish sends a COMMENT review only, after verifying the PR head; draft leaves a pending review"><input type="checkbox" aria-label="Publish reviews" checked=${publish} disabled=${busy} onChange=${(
+        }}><option value="notify">Notify</option><option value="on-demand">On-demand</option><option value="auto-draft">Auto draft</option><option value="auto-review">Auto review</option></select></label><label title="Publish sends request changes for blocking findings, otherwise a comment. Approve always needs your click."><input type="checkbox" aria-label="Publish reviews" checked=${publish} disabled=${busy} onChange=${(
           e: Event,
         ) => {
           const next = (e.currentTarget as HTMLInputElement).checked;

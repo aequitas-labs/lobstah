@@ -1771,9 +1771,16 @@ a.lob {
 }
 .rv-card .top {
   align-items: flex-start;
+  justify-content: flex-start;
+  flex-wrap: wrap;
 }
 .rv-card .top > b {
+  flex: 1 0 100%;
   white-space: normal;
+}
+.rv-card.seen,
+.rowhead.seen {
+  opacity: 0.78;
 }
 .rv-reason {
   margin-top: 6px;

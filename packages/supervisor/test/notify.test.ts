@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, ensureLayout } from '@lobstah/core';
+import { appendStatus, ensureLayout, observeReviewRequest, writeReview } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, freshWakeEvents, notifiableIds, pendingNotifications } from '../src/notify.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -18,6 +18,13 @@ afterEach(() => {
 });
 
 describe('notifications', () => {
+  it('review jobs leave notifications to the draft-ready/published path', () => {
+    const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'a', headSha: 'abc' }, round: { id: 'r', requestedAt: new Date().toISOString() } }).item;
+    item.rounds[0]!.dispatch = 'review-job'; writeReview(item);
+    appendStatus('review-job', 'chore', 'done', 'Draft complete');
+    expect(pendingNotifications('review-job', 'chore')).toEqual([]);
+  });
+
   it('a pause before arming wakes once, without reminders; a later pause wakes again', () => {
     fs.mkdirSync(path.join(home, 'active', 'pause'));
     appendStatus('pause', 'work', 'paused', 'CI pending', undefined, { waitingOn: 'pr', link: 'https://github.com/o/r/pull/1' });

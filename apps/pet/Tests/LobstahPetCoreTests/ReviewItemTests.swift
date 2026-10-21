@@ -9,15 +9,18 @@ final class ReviewItemTests: XCTestCase {
     AttentionItem(id: "review:acme/web#\(n)", verb: "drafted", note: "acme/web#\(n) Add the thing", key: "review:acme/web#\(n)", kind: "review", prUrl: "https://github.com/acme/web/pull/\(n)", stateHash: "h")
   }
 
-  func testAReviewRequestHasItsOwnLabel() {
-    XCTAssertEqual(review(7).kindLabel, "review request")
-    XCTAssertEqual(review(7).bubbleText, "review request · acme/web#7 Add the thing")
-  }
-
-  func testAReviewRequestOpensThePrInItsReviewTool() {
+  func testDraftNotificationTextAndReviewInboxTarget() {
     var item = review(7)
-    XCTAssertEqual(item.prLink?.absoluteString, "https://github.com/acme/web/pull/7")
-    item.reviewUrl = "https://app.graphite.com/github/pr/acme/web/7"
-    XCTAssertEqual(item.prLink?.absoluteString, "https://app.graphite.com/github/pr/acme/web/7")
+    item.reviewUrl = "linear://review/acme/web/pull/7"
+    XCTAssertNil(item.prLink)
+    XCTAssertNil(item.kindLabel)
+    XCTAssertEqual(item.glassTarget(glass: glass)?.hash, "#review-review%3Aacme%2Fweb%237")
+    XCTAssertEqual(item.glassTarget(glass: glass)?.url.absoluteString, "http://127.0.0.1:4949/#review-review%3Aacme%2Fweb%237")
+    var commands: [[String]] = []
+    var opened: [URL] = []
+    clickAttentionItem(item, glass: glass, open: { opened.append($0) }, focusHelm: { _ in }, acknowledge: { commands.append($0) })
+    XCTAssertEqual(commands, [["reviews", "seen", "review:acme/web#7"]])
+    XCTAssertEqual(opened.first?.fragment, "review-review%3Aacme%2Fweb%237")
+    XCTAssertEqual(item.ackArguments, ["attention", "ack", "review:acme/web#7", "--by", "pet"])
   }
 }
