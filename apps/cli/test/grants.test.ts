@@ -249,7 +249,7 @@ describe('a bypass trap', () => {
     expect(claude.argv).toEqual(['claude', '--dangerously-skip-permissions', '/lobstah:trap soak --ticket t']);
     expect(claude.unapplied).toEqual([]);
     const codex = harnessCommand({ harness: 'codex', cwd: home, ticket: 't', config: { bypass: 'true' } });
-    expect(codex.argv).toEqual(['codex', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket t']);
+    expect(codex.argv).toEqual(['codex', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket t']);
     // Without it, a trap starts in its roster mode, else auto.
     expect(harnessCommand({ harness: 'claude', cwd: home, ticket: 't', config: { permissionMode: 'auto' } }).argv).toEqual([
       'claude',

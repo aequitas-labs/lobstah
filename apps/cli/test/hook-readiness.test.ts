@@ -67,6 +67,18 @@ describe('doctor: Codex hook readiness', () => {
     );
   });
 
+  it('also reports startup-blocking UserPromptSubmit and PermissionRequest trust', () => {
+    const hooks = JSON.parse(JSON.stringify(HOOKS_JSON));
+    hooks.hooks.UserPromptSubmit = [{ hooks: [{ type: 'command', command: 'lobstah hook user-prompt-submit', timeout: 5 }] }];
+    hooks.hooks.PermissionRequest = [{ hooks: [{ type: 'command', command: 'lobstah hook permission-request', timeout: 10 }] }];
+    codexHome(['stop', 'session_start', 'post_tool_use', 'session_end'].map((e) => trust(e)).join('\n'), hooks);
+    const row = hookRow(codexHooks(opts()), NOW);
+    expect(row.status).toBe('fail');
+    expect(row.detail).toContain('trap not ready (needs UserPromptSubmit and PermissionRequest)');
+    expect(row.detail).toContain('UserPromptSubmit: installed, untrusted');
+    expect(row.detail).toContain('PermissionRequest: installed, untrusted');
+  });
+
   it('untrusted Stop and SessionStart, never run: not healthy, and the remedy names /hooks', () => {
     codexHome(trust('post_tool_use') + trust('session_end'));
     const h = codexHooks(opts());

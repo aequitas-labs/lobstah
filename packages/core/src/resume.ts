@@ -187,8 +187,10 @@ export function codexRolloutFile(threadId: string, home: string = codexHome()): 
 }
 
 /**
- * Whether a Codex thread was written by the Codex desktop app rather than
- * the CLI — its rollout's `session_meta.originator` names the desktop app
+ * Whether a Codex thread was written by a Codex app rather than
+ * the CLI. The VS Code extension is identified by `source: "vscode"`;
+ * its thread may still have an active app writer. Otherwise the rollout's
+ * `session_meta.originator` names the desktop app
  * ("Codex Desktop", "codex_work_desktop"); a CLI run says `codex_exec` or
  * `codex_sdk_ts`. `codex exec resume` has been observed to refuse desktop
  * threads ("thread/resume failed: no rollout found for thread id …", e2de5dd7),
@@ -211,6 +213,9 @@ export function codexDesktopThread(threadId: string, home: string = codexHome())
   } catch {
     return undefined;
   }
+  // VS Code may report codex-tui as originator. Its source is authoritative:
+  // resuming that extension-owned thread can fail with an active writer.
+  if (/"source"\s*:\s*"vscode"/.test(head)) return 'VS Code extension';
   const originator = /"originator"\s*:\s*"([^"]*)"/.exec(head)?.[1];
   return originator && /desktop/i.test(originator) ? originator : undefined;
 }

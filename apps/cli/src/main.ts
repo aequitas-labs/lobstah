@@ -3128,7 +3128,7 @@ async function mainCli(): Promise<void> {
           name: opt('--name'),
           window,
           link: linkIgnored ? undefined : linkFlag,
-          ...(reservation ? { trapId: reservation.trapId } : {}),
+          ...(reservation ? { trapId: reservation.trapId, startDeadline: reservation.deadline } : {}),
           ...(reservation?.batch ? { batch: reservation.batch } : {}),
           ...(reservation?.creationReason ? { creationReason: reservation.creationReason } : {}),
           ...(reservation?.startMode ? { startMode: reservation.startMode } : {}),

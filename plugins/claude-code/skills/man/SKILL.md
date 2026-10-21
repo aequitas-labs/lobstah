@@ -89,8 +89,11 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
   falls back to a headless worker. `man tend` lists live traps.
 - `man throw` opens each trap's session in Terminal.app or iTerm2 and returns
   when it listens. A starting trap takes `--for <name>` at once. A trap that
-  does not sign on by `--timeout` (default 180 seconds) gets a
-  `trap-start-failed` notice and its reservation is withdrawn. If the
+  does not sign on by `--timeout` (Codex: `[soak].codexStartSecs`, default
+  600 seconds; others: 180 seconds) gets a `trap-start-failed` notice.
+  Codex keeps its ticket for late sign-on and fences another launch; check
+  the terminal or `lobstah stow --wt <trap>` before retrying. Other harnesses
+  withdraw the reservation. If the
   terminal cannot open (a refused Automation permission), say so; the human
   can copy the start command from the trap's card in the glass. Never work
   around a refused permission.

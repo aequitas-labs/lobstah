@@ -1,5 +1,7 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   dropReservation,
   guardNewTraps,
@@ -33,6 +35,7 @@ import {
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
+import { codexTrapHookArgs } from './codex-startup.js';
 
 /** One terminal tab to open: a directory, an environment, and a command line. */
 export interface TerminalLaunch {
@@ -162,7 +165,8 @@ export function harnessCommand(opts: {
     return { cwd: opts.cwd, env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }, argv, unapplied, mode };
   }
   if (opts.harness === 'codex') {
-    const argv = ['codex'];
+    // Codex otherwise replaces the trap's custom tab title on every TUI update.
+    const argv = ['codex', '-c', 'tui.terminal_title=[]'];
     if (opts.model) argv.push('-m', opts.model);
     // No approvals and no sandbox: a person's bypass.
     if (mode === 'bypassPermissions') argv.push('--dangerously-bypass-approvals-and-sandbox');
@@ -183,11 +187,11 @@ export function harnessCommand(opts: {
 
 /**
  * Directories a Codex trap in `cwd` writes outside its worktree: lobstah's
- * home (every report and park) and the repo's git common directory (a
- * linked worktree commits there).
+ * home (every report and park), ume's push ledger, and the repo's git common
+ * directory (a linked worktree commits there).
  */
 export function trapWritableDirs(cwd: string): string[] {
-  const dirs = [lobstahHome()];
+  const dirs = [lobstahHome(), path.resolve(cwd, process.env.UME_HOME || path.join(os.homedir(), '.ume'))];
   const git = spawnSync('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
   const common = git.status === 0 ? git.stdout.trim() : '';
   if (common) dirs.push(common);
@@ -232,7 +236,7 @@ export interface ThrowResult {
   seconds: number;
 }
 
-type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'terminal' | 'command' | 'mode'>;
+type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'terminal' | 'harness' | 'command' | 'mode'> & { timeoutSecs: number };
 
 /** What every throw takes. */
 export interface ThrowOptions {
@@ -249,8 +253,16 @@ export interface ThrowOptions {
   bypass?: boolean;
 }
 
+/** Explicit CLI timeout wins; Codex gets time for plugin and model startup. */
+export function startTimeoutSecs(opts: Pick<ThrowOptions, 'cfg' | 'timeoutSecs'>, harness: string): number {
+  return opts.timeoutSecs ?? (harness === 'codex' ? opts.cfg.soak.codexStartSecs : DEFAULT_TRAP_START_SECS);
+}
+
 /** A throw that launched but did not come back in time. */
 export class ThrowTimeoutError extends Error {}
+
+/** The Codex process may still arrive; its reservation was retained. */
+export class ThrowPendingError extends ThrowTimeoutError {}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -280,17 +292,21 @@ function giveUp(trapId: string, label: string, repo: string | undefined, retry: 
 /** Open the command, then wait until the trap signed on after `started` and parked. */
 async function launchAndWait(
   opts: ThrowOptions,
-  w: { trapId: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode'> },
+  w: { trapId: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
 ): Promise<ThrowResult> {
-  const timeoutSecs = opts.timeoutSecs ?? DEFAULT_TRAP_START_SECS;
+  const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
   try {
+    if (w.launched.harness === 'codex') {
+      // An unattended throw must not park at the interactive update picker.
+      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...codexTrapHookArgs());
+    }
     await w.adapter.launch(w.command);
   } catch (err) {
     giveUp(w.trapId, w.label, w.repo, w.retry, w.started, err instanceof Error ? err.message : String(err));
     throw err;
   }
   const command = launchShellText({ ...w.command, argv: w.command.argv.map((a) => a.replace(w.ticket, '<ticket>')) });
-  opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode });
+  opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode, timeoutSecs });
   const deadline = w.started + timeoutSecs * 1000;
   for (;;) {
     const reg = readTrap(w.trapId);
@@ -307,7 +323,12 @@ async function launchAndWait(
       };
     }
     if (Date.now() >= deadline) {
-      if (fresh) throw new ThrowTimeoutError(`${w.label} signed on but has not listened within ${timeoutSecs}s — it is live; check its session`);
+      if (fresh) throw new (w.launched.harness === 'codex' ? ThrowPendingError : ThrowTimeoutError)(`${w.label} signed on but has not listened within ${timeoutSecs}s — it is live; check its session`);
+      if (w.launched.harness === 'codex') {
+        // Keep both the ticket and the fence: an already-open slow session
+        // can redeem late, and retry cannot create a competing writer.
+        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying`);
+      }
       giveUp(w.trapId, w.label, w.repo, w.retry, w.started, `no sign-on within ${timeoutSecs}s`);
       throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged`);
     }
@@ -320,9 +341,8 @@ async function launchAndWait(
  * listens. The plan decides resume or cold start and whether the checkout is
  * kept or recreated; a same-id reservation fences a second launch; the
  * terminal adapter opens the session; the throw returns only after the
- * trap signed on under its own id and parked. On a timeout the reservation
- * is withdrawn, so a late session cannot take the trap, and the roster stays
- * as it was.
+ * trap signed on under its own id and parked. Codex timeouts retain the
+ * reservation for late sign-on; other harnesses withdraw it.
  */
 export async function throwTrap(opts: ThrowOptions & { address: string }): Promise<ThrowResult> {
   const started = Date.now();
@@ -342,7 +362,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
     repo: entry.repo!,
     harness: row.harness,
     name: entry.name,
-    startSecs: opts.timeoutSecs ?? DEFAULT_TRAP_START_SECS,
+    startSecs: startTimeoutSecs(opts, row.harness ?? entry.harness),
     by: opts.by,
     returning: { trapId: entry.trapId, worktree: entry.worktree },
     startMode: startMode(row.config, opts.bypass),
@@ -382,7 +402,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
     command,
     adapter,
     started,
-    launched: { trap: label, action: row.action, why: row.why, checkout, terminal },
+    launched: { trap: label, action: row.action, why: row.why, checkout, terminal, harness: row.harness ?? entry.harness },
   });
 }
 
@@ -413,7 +433,7 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
   const { reservation, ticket } = reserveTrap({
     repo: opts.repo,
     harness: profile.harness,
-    startSecs: opts.timeoutSecs ?? DEFAULT_TRAP_START_SECS,
+    startSecs: startTimeoutSecs(opts, profile.harness),
     by: opts.by,
     ...(opts.request ? { request: opts.request } : {}),
     creationReason: opts.reason?.trim() || `no free live or stowed ${opts.repo} trap existed at creation`,
@@ -440,14 +460,14 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     command,
     adapter,
     started,
-    launched: { trap: label, action: 'new', why: reservation.creationReason!, checkout: 'created', terminal },
+    launched: { trap: label, action: 'new', why: reservation.creationReason!, checkout: 'created', terminal, harness: profile.harness },
   });
 }
 
 /** One trap's outcome in a batch. */
 export interface BatchResult {
   trap: string;
-  result: 'resumed' | 'cold' | 'new' | 'skipped' | 'failed';
+  result: 'resumed' | 'cold' | 'new' | 'skipped' | 'starting' | 'failed';
   why: string;
   seconds?: number;
 }
@@ -475,7 +495,7 @@ export async function throwBatch(
       jobs.push(
         throwTrap({ ...each, address: `wt:${row.trapId}` }).then(
           (r) => ({ trap, result: r.action === 'resume' ? 'resumed' : 'cold', why: r.why, seconds: r.seconds }) as BatchResult,
-          (err: unknown) => ({ trap, result: 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
+          (err: unknown) => ({ trap, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
         ),
       );
     }
@@ -485,7 +505,7 @@ export async function throwBatch(
       jobs.push(
         throwNew({ ...each, reason: opts.reason ?? `requested batch of ${opts.count} new traps; no reusable trap at batch start`, repo: opts.repo, ...(opts.harness ? { harness: opts.harness } : {}) }).then(
           (r) => ({ trap: r.trap, result: 'new', why: r.why, seconds: r.seconds }) as BatchResult,
-          (err: unknown) => ({ trap: `new ${opts.repo} trap ${i + 1}`, result: 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
+          (err: unknown) => ({ trap: `new ${opts.repo} trap ${i + 1}`, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
         ),
       );
     }
@@ -499,8 +519,9 @@ export async function throwBatch(
     text:
       `batch throw settled: ${back} available (${count('resumed')} resumed, ${count('cold')} cold, ${count('new')} new), ` +
       `${count('skipped')} skipped, ${failed.length} failed` +
+      (count('starting') ? `, ${count('starting')} still starting` : '') +
       (failed.length ? ` — failed: ${failed.map((f) => f.trap).join(', ')}` : '') +
-      (back ? ` — available: ${results.filter((r) => r.result !== 'skipped' && r.result !== 'failed').map((r) => r.trap).join(', ')}` : ''),
+      (back ? ` — available: ${results.filter((r) => r.result === 'resumed' || r.result === 'cold' || r.result === 'new').map((r) => r.trap).join(', ')}` : ''),
     refId: batch,
     ...('repo' in opts ? { repo: opts.repo } : {}),
     by: opts.by,
@@ -525,7 +546,7 @@ export async function trapForRepo(opts: ThrowOptions & { repo: string; harness?:
 }
 
 /** What `man throw` prints once the terminal opened. */
-export function launchedText(launched: Launched, timeoutSecs = DEFAULT_TRAP_START_SECS): string {
+export function launchedText(launched: Launched, timeoutSecs = launched.timeoutSecs): string {
   return toonKV({
     trap: launched.trap,
     start: launched.action,

@@ -28,6 +28,36 @@ the CLI: plugin 0.5.10 goes with `lobstah` 0.5.10. After every
 `lobstah doctor` shows a `plugin codex` row, and the session-start brief
 says when the plugin is behind.
 
+## Thrown trap startup
+
+Codex 0.160.1 blocks at **Hooks need review** before the first model turn
+when any hook definition is new or changed. A longer throw timeout cannot
+clear that picker. `man throw` supplies invocation-scoped `hooks.state`
+hashes for the installed plugin's six exact `lobstah hook <event>` commands.
+Thrown sessions also set `check_for_update_on_startup=false` for that
+invocation, so an interactive update picker cannot hold the launch.
+The launcher rejects a plugin definition containing another command; it
+never uses `--dangerously-bypass-hook-trust`, edits saved trust, enables a
+disabled hook, or approves repo/user/other-plugin hooks. Those still require
+their normal review. Manually launched Codex sessions still use `/hooks`.
+
+In 0.160.1, linked worktrees inherit project trust and hook declarations
+from their primary checkout, including the primary hook source path. They
+do not need blanket trust for `~/.codex/worktrees` or `~/.lobstah/worktrees`.
+An untrusted primary project still needs its normal folder trust decision.
+Auto-mode launches add only lobstah's home, ume's home (`UME_HOME`, otherwise
+`~/.ume`), and the repository's git common directory as extra writable roots.
+This lets ume write its push ledger without granting the rest of the home
+directory.
+`doctor` checks the additional `UserPromptSubmit` and `PermissionRequest`
+hooks when declared; either can block startup even when the four lifecycle
+hooks are already trusted. Its trust status reads saved configuration; the
+throw's invocation overrides do not change that saved status.
+
+Verified against the [0.160.1 startup review](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/startup_hooks_review.rs),
+[worktree config loader](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/config/src/loader/mod.rs),
+and [hook-state merge](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/hooks/src/config_rules.rs).
+
 ## What the plugin adds
 
 | Piece | What it does |
