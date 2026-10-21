@@ -58,6 +58,17 @@ Verified against the [0.160.1 startup review](https://github.com/openai/codex/bl
 [worktree config loader](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/config/src/loader/mod.rs),
 and [hook-state merge](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/hooks/src/config_rules.rs).
 
+### Resume folder selection
+
+Codex 0.160.1 shows **Working directory · resume** when the saved session cwd
+and current launch cwd differ. Starting the process with a shell `cd` does
+not answer that picker. Each generated Codex command now also passes
+`--cd <launch-directory>`; returning traps always choose their own worktree,
+even when their session history began in the primary checkout. This selects
+the current directory for that invocation without saving a global preference.
+New traps still start in the primary checkout, where their first `soak`
+creates and enters the worktree.
+
 ## What the plugin adds
 
 | Piece | What it does |
