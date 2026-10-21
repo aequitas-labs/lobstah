@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.11 — 2026-10-21
+
+### Lock races no longer crash `man wait`
+
+Two pollers racing for a PR record could make `man wait` exit with
+"ENOENT rmdir pr-polls/...lock" or "PR record locked". The locks now go
+through one shared directory-lock helper, so a lost race waits and retries
+instead of crashing the watcher. (#261)
+
+### A permission profile for Claude Code and Codex
+
+`lobstah permissions show|apply|remove [--yes]` gives the agents' permission
+checks context about lobstah:
+
+- Trap worktrees are your own checkouts.
+- The helm acting on your instruction in its chat isn't a bypass.
+- Merges, production deploys, secrets, accounts and lobstah's own permission
+  controls stay yours.
+
+It merges a base profile, plus a new `[permissions]` table in config.toml
+(environment, allow, deny), into Claude Code's user settings
+(`autoMode.environment` and narrow allows). It also writes a lobstah-marked
+block in `~/.codex/config.toml` `[auto_review].extra_policy` and a
+lobstah-only `~/.codex/rules/lobstah.rules`, checked with
+`codex execpolicy check`.
+
+It shows one diff and asks before writing. It keeps backups, never replaces
+your own entries, and refuses to run from an agent shell. `remove` restores
+the files. `doctor` reports both halves. (#262, #263)
+
 ## 0.7.10 — 2026-10-17
 
 ### Quiet waiters back off for real
