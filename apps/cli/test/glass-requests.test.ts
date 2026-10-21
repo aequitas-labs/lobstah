@@ -13,7 +13,6 @@ import {
   listNotices,
   listRequests,
   listGrants,
-  unhandled,
   readDecisionAnswer,
   reserveTrap,
   shellQuote,
@@ -26,6 +25,7 @@ import { REQUEST_KIND_MAX_BYTES, buildGlassSnapshot, requestBodyCap, serveGlass 
 import { buildTendReport } from '../src/tend.js';
 import { listAcks } from '../src/acks.js';
 import { askPermission } from '../src/grants-cli.js';
+import { glassDecisions } from '../src/decisions.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -63,39 +63,18 @@ const post = (body: unknown, headers: Record<string, string> = {}, method = 'POS
 it('a glass Allow always answer persists a Codex prefix grant', async () => {
   const command = 'ume push .temp/plan.html --session f6cc416c --project p --gate plan --title "Plan"';
   const card = askPermission({ dispatch: 'codex-work', lane: 'work', ask: { command, harness: 'codex' } });
+  expect(glassDecisions().find((d) => d.key === card.key)?.permission).toBe(true);
   const response = await post({ kind: 'decision-answer', payload: { key: card.key, option: 'Allow always', files: [] } });
   expect(response.status).toBe(201);
   expect(listGrants().grants).toMatchObject([{ command: 'ume push', match: 'prefix', mode: 'always', harness: 'codex', by: 'glass' }]);
 });
 
-it('a typed Allow always answer writes the grant, rather than silently storing only a comment', async () => {
-  const card = askPermission({
-    dispatch: 'codex-work',
-    lane: 'work',
-    ask: { command: 'ume push plan.html --gate plan', harness: 'codex' },
-  });
-  const response = await post({ kind: 'decision-answer', payload: { key: card.key, text: 'allow always: ume push', files: [] } });
-  expect(response.status).toBe(201);
-  expect(readDecisionAnswer(card.key)?.option).toBe('Allow always');
-  expect(listGrants().grants).toMatchObject([{ command: 'ume push', match: 'prefix', harness: 'codex', by: 'glass' }]);
-});
-
-it.each(['why?', 'Please explain the command first.', 'allow allow ume push please'])('relays a free permission reply without granting: %s', async (text) => {
+it('refuses a permission answer without a button option, including typed allowances', async () => {
   const card = askPermission({ dispatch: 'codex-work', lane: 'work', ask: { command: 'ume push plan.html', harness: 'codex' } });
-  const response = await post({ kind: 'decision-answer', payload: { key: card.key, text, files: [] } });
-  expect(response.status).toBe(201);
-  expect(readDecisionAnswer(card.key)).toMatchObject({ text });
-  expect(readDecisionAnswer(card.key)?.option).toBeUndefined();
-  expect(listGrants().grants).toEqual([]);
-  expect(unhandled('codex-work', 'work')[0]?.text).toContain(text);
-});
-
-it('a mismatched allowance scope keeps the permission card open without a grant', async () => {
-  const card = askPermission({ dispatch: 'codex-work', lane: 'work', ask: { command: 'ume push plan.html', harness: 'codex' } });
-  for (const text of ['allow once: git push', 'allow always: git push']) {
-    const response = await post({ kind: 'decision-answer', payload: { key: card.key, text, files: [] } });
-    expect(response.status).toBe(403);
-    expect((await response.json()).reason).toContain('the allowance scope does not match');
+  for (const payload of [{}, { text: 'why?' }, { text: 'allow always: ume push' }, { option: '', text: 'Allow once' }]) {
+    const response = await post({ kind: 'decision-answer', payload: { key: card.key, ...payload, files: [] } });
+    expect(response.status).toBe(400);
+    expect((await response.json()).reason).toContain('choose Allow once, Allow always, or No');
     expect(readDecisionAnswer(card.key)).toBeUndefined();
     expect(listGrants().grants).toEqual([]);
   }

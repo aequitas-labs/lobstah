@@ -52,6 +52,7 @@ function attachments(key: string, list: Attachment[]) {
 
 function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: string) {
   const key = c.key;
+  const permission = c.kind === 'decision' && c.permission;
   const options = c.kind === 'decision' ? c.options : [];
   const notes = (c.kind === 'decision' && c.optionNotes) || {};
   const text = draft?.text ?? '';
@@ -64,9 +65,16 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
     options.length > 0 &&
       html`<div class="doptions">${options.map((o, i) => {
         const k = hotkey(i);
-        return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => toggleOption(key, o)}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</button>`;
+        return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => {
+          if (permission) {
+            setDraft(key, { option: o, error: undefined });
+            void sendAnswer(key);
+          } else toggleOption(key, o);
+        }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</button>`;
       })}</div>`,
-    html`<div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
+    permission && draft?.error && html`<div class="bad derr">${draft.error}</div>`,
+    !permission &&
+      html`<div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
       class="danswer"
       rows="2"
       aria-keyshortcuts=${textKey}
@@ -81,7 +89,8 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
       }}
       onPaste=${(e: ClipboardEvent) => void pasteImages(key, e)}
     ></textarea></div>`,
-    html`<div class="dfoot">
+    !permission &&
+      html`<div class="dfoot">
       <label class="btn dattach" title="attach images or files">attach<input type="file" multiple accept=${accept} disabled=${sending} onChange=${(
         e: Event,
       ) => {
@@ -159,15 +168,15 @@ export function DeckDecisions({
 }
 
 /** The modal's key legend: what each key does here. */
-function legend(options: number) {
+function legend(options: number, permission = false) {
   const pick = Math.min(options, HOTKEY_MAX);
-  const text = options + 1 <= HOTKEY_MAX ? String(options + 1) : undefined;
+  const text = !permission && options + 1 <= HOTKEY_MAX ? String(options + 1) : undefined;
   const parts = [
     pick > 0 && [html`<kbd>1</kbd>`, pick > 1 && ['–', html`<kbd>${pick}</kbd>`], ' choose'],
     text && [html`<kbd>${text}</kbd>`, ' write'],
     pick > 0 && [html`<kbd>Enter</kbd>`, ' on a chosen option sends'],
     [html`<kbd>←</kbd>`, ' ', html`<kbd>→</kbd>`, ' previous / next'],
-    [html`<kbd>Esc</kbd>`, ' leaves the text box, then closes'],
+    [html`<kbd>Esc</kbd>`, permission ? ' closes' : ' leaves the text box, then closes'],
     [html`<kbd>d</kbd>`, ' opens decisions anywhere'],
   ].filter(Boolean);
   return html`<div class="dlegend dim">${parts.flatMap((p, i) => (i ? [' · ', p] : [p]))}</div>`;
@@ -229,7 +238,7 @@ export function DecisionModal({
   const i = c ? order.indexOf(c) : -1;
   const shell = (label: string, body: unknown, shown = '') =>
     html`<div id="doverlay" class="open" onClick=${(e: Event) => e.target === e.currentTarget && closeDecision()}>
-      <div class="modal dmodal" role="dialog" aria-modal="true" aria-labelledby="dmodal-title" tabindex="-1" ref=${box} onKeyDown=${trap} data-decision=${shown}>
+      <div class=${'modal dmodal' + (c?.kind === 'decision' && c.permission ? ' dpermission' : '')} role="dialog" aria-modal="true" aria-labelledby="dmodal-title" tabindex="-1" ref=${box} onKeyDown=${trap} data-decision=${shown}>
         <button type="button" class="x" aria-label="close" aria-keyshortcuts="Escape" onClick=${closeDecision}>×</button>
         <h3 id="dmodal-title" class="sr-only">${label}</h3>
         ${body}
@@ -257,7 +266,7 @@ export function DecisionModal({
       ${c.kind === 'decision' && c.detail.trim() && html`<${Markdown} text=${c.detail} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`}
       ${c.kind === 'decision' && attachments(c.key, c.attachments)}
       ${draft?.sent ? html`<div class="danswered ok">answered · ${draft.sent}</div>` : answerForm(c, draft, extensions.join(','))}
-      ${legend(c.kind === 'decision' ? c.options.length : 0)}`,
+      ${legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && c.permission)}`,
     c.key,
   );
 }

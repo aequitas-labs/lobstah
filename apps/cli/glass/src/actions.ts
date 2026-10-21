@@ -143,7 +143,7 @@ export function decisionNumberKey(n: number): boolean {
     document.querySelectorAll<HTMLElement>('.dmodal .dopt')[n - 1]?.focus();
     return true;
   }
-  if (n === options.length + 1) {
+  if (n === options.length + 1 && !(c.kind === 'decision' && c.permission)) {
     document.querySelector<HTMLElement>('.dmodal textarea.danswer')?.focus();
     return true;
   }
@@ -323,8 +323,14 @@ export async function sendAnswer(key: string): Promise<void> {
   const token = getState().snapshot?.focusToken;
   const draft = getState().drafts[key] ?? emptyDraft();
   if (draft.sending || draft.sent) return;
-  if (!draft.option && !draft.text.trim() && draft.files.length === 0) {
-    setDraft(key, { error: 'Choose an option, write an answer, or attach a file.' });
+  const card = currentCards().find((c) => c.key === key);
+  const permission = card?.kind === 'decision' && card.permission;
+  const text = permission ? '' : draft.text;
+  const files = permission ? [] : draft.files;
+  if (!draft.option && !text.trim() && files.length === 0) {
+    setDraft(key, {
+      error: permission ? 'Choose Allow once, Allow always, or No.' : 'Choose an option, write an answer, or attach a file.',
+    });
     return;
   }
   if (!token) {
@@ -341,8 +347,8 @@ export async function sendAnswer(key: string): Promise<void> {
         payload: {
           key,
           ...(draft.option ? { option: draft.option } : {}),
-          ...(draft.text.trim() ? { text: draft.text } : {}),
-          files: draft.files.map((f) => ({ name: f.name, data: f.data })),
+          ...(text.trim() ? { text } : {}),
+          files: files.map((f) => ({ name: f.name, data: f.data })),
         },
       }),
     });
@@ -351,7 +357,7 @@ export async function sendAnswer(key: string): Promise<void> {
       setDraft(key, { sending: false, error: result.reason ?? `The answer was refused (${response.status}).` });
       return;
     }
-    setDraft(key, { sending: false, sent: answerSummary({ option: draft.option, text: draft.text, files: draft.files.length }) });
+    setDraft(key, { sending: false, sent: answerSummary({ option: draft.option, text, files: files.length }) });
     // Answered in the modal: the next open decision loads, or the all-answered state.
     const open = getState().decisionModal;
     if (open?.key === key) setState({ decisionModal: nextOpen(currentCards(), getState().drafts, key) ?? { key: null } });

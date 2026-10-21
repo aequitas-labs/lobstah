@@ -1192,6 +1192,15 @@ a.lob {
   color: var(--dim);
   overflow-wrap: anywhere;
 }
+.dpermission .dopt {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.dpermission .mdpage pre.mdcode {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .danswer {
   display: block;
   width: 100%;

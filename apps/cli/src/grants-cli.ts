@@ -422,21 +422,6 @@ export function permissionAnswerAllowed(decision: DecisionMeta, option: string |
   }
 }
 
-/** Recognise explicit permission choices; other text remains an ordinary reply. */
-export function permissionAnswerOption(decision: DecisionMeta, option?: string, text?: string): string | undefined {
-  if (!decision.permission || (option !== undefined && option !== '')) return option;
-  const ask = decision.permission;
-  const match = /^(allow once|allow always|no)(?:\s*:\s*(.*))?$/i.exec(text?.trim() ?? '');
-  if (!match) return undefined;
-  const selected = PERMISSION_OPTIONS.find((o) => o.toLowerCase() === match?.[1]?.toLowerCase());
-  const target = match?.[2]?.trim();
-  const scope = ask.command !== undefined ? commandGrantScope(ask.command).command : ask.path;
-  if (selected !== 'No' && target !== undefined && target !== scope && target !== ask.command && target !== ask.path) {
-    throw new GrantError('the allowance scope does not match this permission card; no grant was written');
-  }
-  return selected;
-}
-
 /**
  * After a permission card is answered in the glass: write the grant and tell
  * the trap. "Allow once" is good for the asking trap alone; "Allow always"
@@ -455,7 +440,6 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
         `Chris answered No to ${target}. Do not run it. Carry on without it, or report what you need instead.`,
         'glass',
       );
-    else if (answer.text) sendMessage(decision.dispatch, lane, `Chris replied about ${target}:\n${answer.text}`, answer.by);
     return undefined;
   }
   const once = answer.option === 'Allow once';
