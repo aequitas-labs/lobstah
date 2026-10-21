@@ -16,6 +16,10 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * through every tab in both views, the filters, every modal, the lobs, and
  * the preview lob; every visible section is compared after each step.
  *
+ * Runtime helm chat controls and their mode text are removed before comparing;
+ * helm-chat.test.ts covers their actual HTTP round-trip. Browser preference
+ * hint text and the settings title are normalized to their pre-toggle form.
+ *
  * The comparison is canonical, and each normalization is a documented
  * difference of the Preact page, not a visible one:
  * - event handlers are listeners, not on* attributes, so on* attributes
@@ -133,6 +137,15 @@ const STACK_NUMBER = /^#\d+$/;
 function foldPrTitles(el: Element): Node {
   const copy = el.cloneNode(true) as Element;
   const doc = el.ownerDocument;
+  for (const n of copy.querySelectorAll('[data-helm-chat]')) n.remove();
+  if (copy.querySelector('.settings')) {
+    const title = copy.querySelector('h3');
+    if (title) title.textContent = '⚙ settings';
+    const hints = copy.querySelectorAll('.settings .hint');
+    if (hints[0]) hints[0].textContent = 'cards or table';
+    if (hints[1]) hints[1].textContent = 'crawling lobsters';
+  }
+  for (const n of copy.querySelectorAll('.chip.click .dim')) n.textContent = (n.textContent ?? '').replace(/ · chat (full|brief)$/, '');
   for (const n of copy.querySelectorAll('.prack')) n.remove();
   // Intentional worker UI additions have functional coverage separately.
   // Keep comparing the unrelated UI against the frozen pre-metadata page.

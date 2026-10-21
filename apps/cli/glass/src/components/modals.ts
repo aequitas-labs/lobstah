@@ -10,7 +10,8 @@ import {
   trapFileUrl,
 } from '../../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
-import { closeModal, setLobs, setView, showModal } from '../actions.js';
+import { closeModal, setLobs, setView, showModal, changeHelmChat } from '../actions.js';
+import { useState } from 'preact/hooks';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
 import { LinkedText } from './links.js';
@@ -45,6 +46,20 @@ const close = html`<span class="x" onClick=${closeModal}>×</span>`;
 const seg = (set: (v: string) => void, opts: Array<[string, string]>, cur: string) =>
   html`<span class="seg">${opts.map(([v, l]) => html`<button class=${v === cur ? 'on' : ''} onClick=${() => set(v)}>${l}</button>`)}</span>`;
 
+function HelmChatControl({ helm }: { helm: GlassHelm }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
+  const change = async (chat: 'full' | 'brief') => {
+    setPending(true);
+    setError(await changeHelmChat(helm.grounds, chat));
+    setPending(false);
+  };
+  return html`<div class="row" data-helm-chat=${helm.grounds}>
+    <span class="lbl">helm chat · ${helm.grounds}<span class="hint">this helm · takes effect next turn</span>${error && html`<span class="bad" role="alert">${error}</span>`}</span>
+    <span class="seg" aria-label=${`helm chat ${helm.grounds}`}>${(['full', 'brief'] as const).map((chat) => html`<button class=${chat === (helm.chat ?? 'full') ? 'on' : ''} disabled=${pending} onClick=${() => change(chat)}>${chat}</button>`)}</span>
+  </div>`;
+}
+
 function settingsModal(item: SettingsItem, prefs: GlassPrefs) {
   const view = seg(
     setView,
@@ -65,8 +80,8 @@ function settingsModal(item: SettingsItem, prefs: GlassPrefs) {
   const kinds = item.attentionError ? item.attentionError : (item.attentionKinds || []).join(' · ');
   return [
     close,
-    html`<h3>⚙ settings <span class="dim" style="font-weight:normal">· this browser only</span></h3>`,
-    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">cards or table (notices stay a table)</span></span>${view}</div><div class="row"><span class="lbl">lobs<span class="hint">crawling lobsters in this page</span></span>${lobs}</div><div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
+    html`<h3>⚙ settings</h3>`,
+    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this browser · cards or table</span></span>${view}</div><div class="row"><span class="lbl">lobs<span class="hint">this browser · crawling lobsters</span></span>${lobs}</div>${item.helms.map((helm) => html`<${HelmChatControl} key=${helm.grounds} helm=${helm} />`)}<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
   ];
 }
 

@@ -943,6 +943,17 @@ gates the digest above.
 The lobstah man skill prints the glass URL. `[glass].port` sets the port;
 `LOBSTAH_GLASS_PORT` takes precedence.
 
+**Compare chat detail at runtime.** `lobstah man chat brief` asks the helm to
+point at a card in one line when it already carries the detail, keep wakes
+with nothing new quiet, and answer direct questions directly. `lobstah man
+chat full` restores normal output. Use `--grounds <name>` when needed. A
+person at a terminal or that grounds' helm may toggle it; glass Settings
+has the same switch per helm. `man tend` and the glass helm chip show the
+current mode. The seat stores the override through re-sign and takeover;
+relieving removes it. `[helm].chat` supplies the default (`"full"`). The
+next prompt, `man wait`, or Stop-hook wake carries the change, including
+a one-time full-mode notice to retire an earlier brief instruction.
+
 **One helm per grounds, enforced.** A **grounds** is a named territory: the
 subset of configured repos one orchestrator oversees (`[grounds.*]`; with
 none configured, one implicit `home` grounds covers every repo). A repo

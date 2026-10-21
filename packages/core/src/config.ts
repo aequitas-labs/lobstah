@@ -292,7 +292,11 @@ export interface SoakConfig {
   terminal?: 'terminal' | 'iterm';
 }
 
+export type HelmChat = 'full' | 'brief';
+
 export interface HelmConfig {
+  /** Default chat detail; a grounds' helm seat may override it at runtime. */
+  chat: HelmChat;
   /** IANA timezone for the 04:00-local daily goals boundary; absent uses the system zone. */
   timezone?: string;
   /** Queued age before lack of a claim needs attention; 0 disables. */
@@ -499,6 +503,7 @@ export const DEFAULT_SOAK: SoakConfig = {
 };
 
 export const DEFAULT_HELM: HelmConfig = {
+  chat: 'full',
   queuedNoticeSecs: 180,
   stalledNoticeSecs: 1200,
   idleWorkingNoticeSecs: 60,
@@ -556,6 +561,7 @@ export function loadConfig(): Config {
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
+  if (helm.chat !== 'full' && helm.chat !== 'brief') throw new Error('[helm].chat must be "full" or "brief"');
   const wait = { ...DEFAULT_WAIT, ...((raw.wait as Partial<WaitConfig>) ?? {}) };
   for (const key of ['baseTimeoutSecs', 'baseRepeats', 'maxTimeoutSecs'] as const) {
     if (typeof wait[key] !== 'number' || !Number.isSafeInteger(wait[key]) || wait[key] <= 0)

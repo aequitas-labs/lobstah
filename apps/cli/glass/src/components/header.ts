@@ -42,7 +42,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
-        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
+        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds} · chat ${h.chat ?? 'full'}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
     ),
   ];
 }
