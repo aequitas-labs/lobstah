@@ -102,14 +102,14 @@ the Worker.
 The wharf's local Workers test runtime also exercises the receiver's migrations
 and schema-2 retry transaction against native D1 (`test/telemetry.test.ts`).
 
-## Deployment (aequitas labs)
+## Deployment (lobstah account)
 
 Chris approved the initial deployment directly. Version
 `f2e14ef8-c4ea-4750-aece-714c08291da4` was deployed at
 `2026-10-14T04:16:01.879Z`. Outside checks returned 200 with zero counts for
 all three badges and public `/v1/stats`; posting `{}` to `/v1/daily` returned 400. No valid daily test payload was sent to production.
 
-Use the **aequitas labs** account (`73dd625ed4d46d151a0de5624ff71379`). This
+Use the **lobstah** account (`cdde311c7a0f2943ec259f0548460a85`). This
 machine's separate Wrangler sign-in is selected by
 `XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare"` on **every** Wrangler
 command; omitting it selects a different company's account. Do not log in or

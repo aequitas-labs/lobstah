@@ -146,7 +146,9 @@ reads every `lobstah` command, flag, skill, package and tool name out of
 ## Deploying
 
 Nothing in this repo deploys the site: no script, no CI job. A maintainer with
-access to the `aequitas labs` Cloudflare account runs it by hand.
+access to the `lobstah` Cloudflare account (`cdde311c7a0f2943ec259f0548460a85`,
+which holds the `lobstah.dev` zone) runs it by hand. `wrangler.jsonc` names
+the account, so a sign-in that sees several accounts still deploys to this one.
 
 The site is a Cloudflare Worker that serves the built folder as static files
 at `lobstah.dev`. `wrangler.jsonc` holds all of it. A deploy builds the site
