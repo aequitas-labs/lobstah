@@ -49,17 +49,28 @@ export function agentSession(env: NodeJS.ProcessEnv = process.env): string | und
   return AGENT_ENV.find((k) => env[k] !== undefined);
 }
 
-/** Ask the person to confirm at the terminal. */
-export function confirm(question: string): boolean {
-  process.stdout.write(`${question} [y/N] `);
+/**
+ * One line of the person's answer from stdin. Reading `process.stdin` at all
+ * (even `isTTY`) leaves a terminal's stdin non-blocking, so a read gets
+ * EAGAIN until a line is typed: that means "not yet", never "no". End of
+ * input is an empty answer; any other read error is an error, not a no.
+ */
+export function readAnswer(read: (buf: Buffer) => number = (buf) => fs.readSync(0, buf, 0, buf.length, null)): string {
   const buf = Buffer.alloc(256);
-  let n = 0;
-  try {
-    n = fs.readSync(0, buf, 0, buf.length, null);
-  } catch {
-    return false;
+  for (;;) {
+    try {
+      return buf.subarray(0, read(buf)).toString('utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EAGAIN') throw new GrantError(`could not read your answer: ${(err as Error).message}`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
   }
-  return /^\s*y(es)?\s*$/i.test(buf.subarray(0, n).toString('utf8'));
+}
+
+/** Ask the person to confirm at the terminal; only y or yes is a yes. */
+export function confirm(question: string, read?: (buf: Buffer) => number): boolean {
+  process.stdout.write(`${question} [y/N] `);
+  return /^\s*y(es)?\s*$/i.test(readAnswer(read));
 }
 
 const localPerson = (): string => `local:${os.userInfo().username}`;

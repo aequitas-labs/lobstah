@@ -104,7 +104,7 @@ describe('lobstah permissions', () => {
 
   it('apply asks before writing; no answer, no tty, or an agent shell writes nothing', async () => {
     fs.writeFileSync(file, JSON.stringify(USER));
-    await expect(run('apply')).rejects.toThrow(/not written: confirm at a terminal, or pass --yes/);
+    await expect(run('apply')).rejects.toThrow(/not written: not a terminal; review with `lobstah permissions show` and re-run with --yes/);
     expect(await run('apply', { tty: true, ask: () => false })).toContain('written: false');
     await expect(run('apply', { yes: true, env: { ...person(), CLAUDECODE: '1' } })).rejects.toThrow(/for a person, not an agent session \(CLAUDECODE is set\)/);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(USER);
