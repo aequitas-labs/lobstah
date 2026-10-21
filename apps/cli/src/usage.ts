@@ -30,6 +30,7 @@ export interface CommandSpec {
 const HARNESS = 'claude|codex';
 
 export const COMMANDS: Record<string, CommandSpec> = {
+  setup: { subverbs: ['reviews'], flags: { '--identity': { value: '<github-login>' } }, maxPositionals: 1 },
   wharf: {
     subverbs: ['login', 'logout', 'whoami', 'requests', 'request-receipt', 'request-execute', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries'],
     flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--name': { value: '<boat>' }, '--helm': {}, '--work-only': {}, '--credential-file': { value: '<file|->' }, '--timeout': { value: '<seconds>' } },
@@ -275,6 +276,8 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
+  setup: `\`setup reviews\` derives your GitHub login (or --identity), writes a self-contained notify configuration,
+enables review notifications, and installs pick. Refuses installation while unrelated issue or PR-feedback pickup is enabled.`,
   dispatch: `Queue work; prints id. Claimed helm: --session <helm-id>. --attach copies files. --for <name>, wt:<name>, wt:<id> is sticky; session:<id> resolves to its trap.
 --trap-any: free live → return stowed → new below the repo's traps cap; at capacity waits, never headless.
 --pool: warm headless worktree, exclusive with --for/--trap-any. --pr: push to that open PR, open none. Alias: set --bait.`,
@@ -378,8 +381,8 @@ Clears the tab name sign-on set.`,
 writes + loads a launchd agent / systemd user unit; restart restarts it and
 waits for the new heartbeat (refused while dispatches are active, unless
 --force); status shows installed, running, pid, version, heartbeat age.`,
-  pick: `Tracker loops: poll Linear/GitHub, dispatch assigned work, report back,
-reconcile, merge. install, uninstall, and restart manage its user service.`,
+  pick: `Run enabled tracker, review-request and watch loops. install prints which loops will run for each repo,
+including warnings for issue and PR-feedback pickup, before loading its user service. uninstall and restart manage that service.`,
   doctor: `Check binaries, config, repos, harnesses, the daemon heartbeat, and the
 desktop pet (installed, running, whether its last read worked); exit 1 on
 failures.`,

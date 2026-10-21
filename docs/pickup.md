@@ -270,15 +270,15 @@ When the search stops returning a PR (the request was withdrawn, the
 person reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
 truncated search (more than 50 results) withdraws nothing.
 
-**Drafting.** With `[reviews].work` other than `"off"`, a requested round in
-a configured repo gets a review job: a chore-lane dispatch with the
+**Drafting.** `[reviews].mode = "notify"` starts no jobs. `"on-demand"` enables the glass Review action for requested, stale, or failed rounds and starts nothing automatically. `"auto-draft"` and `"auto-review"` start a review job for each requested round in
+a configured repo: a chore-lane dispatch with the
 `prReview` brief, `readOnly` (the runner pushes nothing, opens no PR, and
 checkpoints nothing), and the `[reviews]` cost bounds. With `work = "trap"`
 the job waits `trapWaitSecs` for a free trap of the repo, then pick hands it
 to the daemon. The job reads the PR with `gh`, makes any checkout it needs
 as a detached worktree of `pull/<n>/head` at the fixed path
-`rounds/<round id>/checkout`, and writes `review.md` (the summary) and
-`comments.json` (inline comments: `path`, `line`, `side`, `body`) into the
+`rounds/<round id>/checkout`, and writes `review.md` (the summary),
+`comments.json` (inline comments: `path`, `line`, `side`, `body`), and `verdict.json` (`verdict`: `approve`, `comment`, or `request_changes`; `blocking`: findings with `path`, positive `line`, and `body`) into the
 round's directory, `rounds/<round id>/`. Whenever the round's job ends
 (drafted, stale, failed, or withdrawn and its job cancelled, a re-request
 included), pick removes that checkout: `git worktree remove --force`, then
@@ -293,7 +293,7 @@ outside the configured repos, or `maxPerDay` jobs already started today
 (UTC) leave the round `requested` with the reason. `lobstah reviews redraft
 <key>` drafts a stale or failed round again at the current head.
 
-**Staging and posting.** With `[reviews].post = "draft"` (the default), a
+**Staging and posting.** With `mode = "auto-draft"` or `publish = false` for an on-demand job, a
 fresh draft is staged on the PR as the identity's **pending review**:
 `POST /repos/{o}/{r}/pulls/{n}/reviews` with no event, `commit_id` set to the
 head the draft reviewed, the inline comments, and a body ending with
@@ -304,12 +304,8 @@ sends it, with whatever event they choose. When the request then disappears from
 search, pick reads that review once: submitted marks the round `posted` (by
 `review tool`), deleted dismisses it, still pending withdraws it.
 
-With `"auto"`, a fresh draft is posted at once as a comment-only review
-(`event: COMMENT`). `lobstah reviews post <key>` sends a staged review as a
-comment-only review too. Neither path takes an event argument, so lobstah
-itself never approves or requests changes. A stale draft is never staged or
-posted on its own, and posts by hand only with `--stale`, which adds a line
-saying the PR has moved. Each round is staged at most once and posted at
+With `mode = "auto-review"` (also legacy `post = "auto"`), pick publishes fresh drafts as REQUEST_CHANGES when there are blocking findings, otherwise COMMENT. An approve verdict is staged pending with a needs-you marker and always waits for the person’s Approve click; approval is never automatic. The glass Publish toggle selects draft or publish, including for on-demand jobs; the row action reads Review (draft) or Review (publish). The repo filter scopes both settings to `[repos.<key>.reviews]`, otherwise they change the global `[reviews]` default. Jobs started with publishing off stay draft-only even if the toggle changes later. Manual drafting respects `maxPerDay`, including retries of the same round. `lobstah reviews post <key>` explicitly sends a staged review as a
+comment review. The glass shows Approve, Request changes, or Publish comment according to the verdict; Approve posts APPROVE with the summary as the identity, only on the person’s explicit click. The glass shows requester names/avatars cached from the same authenticated search; workflow requests show the PR author with an automatic badge. Cards and rows open the configured review tool; drafted rounds link to their pending review. Skip (formerly Dismiss) means “Handle it yourself; removes lobstah’s draft”: it deletes any staged pending review without declining the request on GitHub. Redraft starts a stale round again. Every row action acknowledges and clears its notification and needs-you marker; opening a row only marks it seen and dims it. A stale draft is never staged or posted, including by hand. Publishing checks the live PR head immediately before submission; a changed or closed PR requires a new draft. Each round is staged at most once and posted at
 most once: `staged.json` and `posted.json` in the round's directory are
 created with `wx` before the call and removed if it fails, and a review on
 the PR that already carries the round's marker is adopted (pending) or
@@ -330,9 +326,7 @@ pending draft with its own token and marks the request done or refused. The
 wharf never calls GitHub.
 
 Round states: `requested`, `drafting`, `drafted`, `stale`, `failed`,
-`posted`, `dismissed`, `withdrawn`. The `review` attention item stands while
-the newest round is `drafted`, `stale`, `failed`, or `requested` with no job
-to draft it. `lobstah reviews` lists open items; `--all` adds the rest.
+`posted`, `dismissed`, `withdrawn`. The Reviews tab is the inbox; it shows a count, and no review cards appear on deck or tend. Requests are silent. Only a completed draft (“Draft ready: #7 · request changes · 2 blocking”), an approve verdict needing the person, or an automatically published review notifies through `[hooks.notify]` and the pet. Notifications deep-link to the Reviews row; wharf notification delivery comes later. Generic review-job done notifications are suppressed to avoid duplicates. `lobstah reviews` lists open items; `--all` adds the rest.
 
 ## Merge loop
 

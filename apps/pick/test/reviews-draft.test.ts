@@ -17,7 +17,7 @@ import {
   reviewRoundDir,
   writeReview,
 } from '@lobstah/core';
-import { draftReviews } from '../src/loops/reviews.js';
+import { draftReviewOnDemand, draftReviews } from '../src/loops/reviews.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -25,16 +25,18 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-reviews-draft-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  process.env.LOBSTAH_TEST_REVIEW_TOKEN = 'fixture';
 });
 afterEach(() => {
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
+  delete process.env.LOBSTAH_TEST_REVIEW_TOKEN;
 });
 
 const NOW = Date.parse('2026-10-15T12:00:00Z');
 const KEY = 'review:acme/web#7';
 const config = (...lines: string[]) =>
-  fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', ...lines, '[repos.web]', 'path = "/w"'].join('\n'));
+  fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'identity = "chris"', 'tokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"', ...(lines.some((s) => s.startsWith('work') || s.startsWith('mode')) ? [] : ['work = "trap"']), ...lines, '[repos.web]', 'path = "/w"'].join('\n'));
 
 function request(over: { number?: number; repoKey?: string | null; head?: string; skip?: string } = {}): string {
   const number = over.number ?? 7;
@@ -61,6 +63,55 @@ function request(over: { number?: number; repoKey?: string | null; head?: string
 const round = (key = KEY) => latestRound(readReview(key)!)!;
 
 describe('starting a review job', () => {
+  it('notify starts no jobs; on-demand starts only the clicked round as a pending-only trap review', async () => {
+    config('mode = "notify"');
+    request();
+    draftReviews('chris', () => {}, NOW);
+    expect(pendingIds('chore')).toEqual([]);
+    expect(await draftReviewOnDemand(KEY, NOW)).toContain('notify mode');
+    config('mode = "on-demand"');
+    request({ number: 8 });
+    draftReviews('chris', () => {}, NOW);
+    expect(pendingIds('chore')).toEqual([]);
+    expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+    expect(round()).toMatchObject({ state: 'drafting', draftOnly: true });
+    expect(queuedDescriptor(round().dispatch!, 'chore')).toMatchObject({ readOnly: true, trapAny: true });
+    expect(round('review:acme/web#8').state).toBe('requested');
+    expect(pendingIds('chore')).toHaveLength(1);
+  });
+
+  it.each(['notify', 'on-demand'])('%s repo overrides stop automatic jobs even with a publishing global default', (mode) => {
+    config('mode = "auto-review"');
+    fs.appendFileSync(path.join(home, 'config.toml'), `\n[repos.web.reviews]\nmode = "${mode}"\npublish = true\n`);
+    request();
+    draftReviews('chris', () => {}, NOW);
+    expect(pendingIds('chore')).toEqual([]);
+    expect(round().state).toBe('requested');
+  });
+
+  it('on-demand uses the repo publish toggle and leaves other requests untouched', async () => {
+    config('mode = "notify"');
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[repos.web.reviews]\nmode = "on-demand"\npublish = true\n');
+    request();
+    request({ number: 8 });
+    expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+    expect(round()).toMatchObject({ state: 'drafting', publish: true, draftOnly: false });
+    expect(round('review:acme/web#8').state).toBe('requested');
+    expect(pendingIds('chore')).toHaveLength(1);
+  });
+
+  it('manual redrafts respect the daily cap, including prior starts of the same round', async () => {
+    config('mode = "on-demand"', 'maxPerDay = 1');
+    request();
+    expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+    const item = readReview(KEY)!;
+    item.rounds[0]!.state = 'failed';
+    writeReview(item);
+    expect(await draftReviewOnDemand(KEY, NOW)).toContain('daily cap');
+    expect(pendingIds('chore')).toHaveLength(1);
+    expect(await draftReviewOnDemand(KEY, NOW + 24 * 3600_000)).toBeUndefined();
+    expect(round().draftStarts).toHaveLength(2);
+  });
   it('work = trap: a read-only chore for a free trap of the repo, with the cost bounds and the trap wait', () => {
     config('maxBudgetUsd = 3');
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[hooks.brief]\nprReview = "Flag missing tests."\n[repos.web.hooks.brief]\nprReview = "Check the migration order."\n');

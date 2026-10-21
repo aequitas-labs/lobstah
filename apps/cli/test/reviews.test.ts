@@ -29,12 +29,14 @@ function request(number: number, id = `RRE_${number}`): void {
 const reviewKeys = () => buildTendReport().attention.filter((a) => a.kind === 'review').map((a) => a.key);
 
 describe('review attention in tend', () => {
-  it('walks only when [reviews] is on and attentionKinds lists review', () => {
+  it('never adds review requests to tend, even with review in attentionKinds', () => {
     request(7);
     fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\n');
-    expect(reviewKeys()).toEqual([]); // not in the default kinds
+    expect(reviewKeys()).toEqual([]); // enabling reviews includes their notifications by default
+    fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["question"]\n[reviews]\nenabled = true\n');
+    expect(reviewKeys()).toEqual([]); // an explicit attention list is respected
     fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["review"]\n[reviews]\nenabled = true\n');
-    expect(reviewKeys()).toEqual(['review:acme/web#7']);
+    expect(reviewKeys()).toEqual([]);
     fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["review"]\n[reviews]\nenabled = false\n');
     expect(reviewKeys()).toEqual([]);
   });

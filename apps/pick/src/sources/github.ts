@@ -14,6 +14,9 @@ export interface GithubConfig {
   token: () => string;
   startLabel: string;
   claimedLabel: string;
+  /** Defaults preserve existing pickup behavior. */
+  issues?: boolean;
+  prFeedback?: boolean;
 }
 
 const API = 'https://api.github.com';
@@ -64,7 +67,8 @@ export class GithubSource implements Source, MergeSource {
   }
 
   owns(key: string): boolean {
-    return key.startsWith(`${this.name}#`);
+    if (!key.startsWith(`${this.name}#`)) return false;
+    return key.startsWith(`${this.name}#pr`) ? this.cfg.prFeedback !== false : this.cfg.issues !== false;
   }
 
   private async api<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -91,7 +95,7 @@ export class GithubSource implements Source, MergeSource {
 
   async poll(ctx?: PollContext): Promise<WorkItem[]> {
     const items: WorkItem[] = [];
-    const issues = await this.api<GhIssue[]>(
+    const issues = this.cfg.issues === false ? [] : await this.api<GhIssue[]>(
       'GET',
       `/repos/${this.cfg.repo}/issues?labels=${encodeURIComponent(this.cfg.startLabel)}&assignee=${this.cfg.identity}&state=open&per_page=50`,
     );
@@ -113,6 +117,7 @@ export class GithubSource implements Source, MergeSource {
     // the newest feedback event, so every new event re-keys and the brief
     // reads the live thread rather than a snapshot; the dispatch loop
     // serializes rounds per subject.
+    if (this.cfg.prFeedback === false) return items;
     const evidence = prEvidenceIndex();
     const pulls = await this.api<GhPull[]>('GET', `/repos/${this.cfg.repo}/pulls?state=open&per_page=50`);
     for (const pr of pulls) {
@@ -225,6 +230,7 @@ export class GithubSource implements Source, MergeSource {
   }
 
   async inProgress(): Promise<TrackedItem[]> {
+    if (this.cfg.issues === false) return [];
     const issues = await this.api<GhIssue[]>(
       'GET',
       `/repos/${this.cfg.repo}/issues?labels=${encodeURIComponent(this.cfg.claimedLabel)}&state=all&per_page=100`,

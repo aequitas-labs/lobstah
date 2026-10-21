@@ -45,8 +45,8 @@ public struct AttentionItem: Decodable, Equatable {
   /** The identity stays fixed when labels, order, or acknowledgements change. */
   public var identity: String { "\(kind ?? "question"):\(key ?? id)" }
 
-  /** pr:* and review pets click through to the PR (in its review tool, where a staged review draft is sent); question, landed, and watch go to the helm. */
-  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready" || kind == "review") ? (reviewUrl ?? prUrl).flatMap(URL.init(string:)) : nil }
+  /** PR pets open the repo review tool; review notifications open their row in the glass. */
+  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready" ) ? (reviewUrl ?? prUrl).flatMap(URL.init(string:)) : nil }
 
   /**
    * The glass this item belongs to: the one place that picks between the
@@ -92,6 +92,7 @@ public struct AttentionItem: Decodable, Equatable {
       return GlassTarget(hash: address.url.fragment.map { "#\($0)" } ?? "", url: address.url)
     }
     guard let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
+    if kind == "review", let url = URL(string: "\(glass.absoluteString)/#review-\(encoded)") { return GlassTarget(hash: "#review-\(encoded)", url: url) }
     if let url = reportLink(glass: glass) { return GlassTarget(hash: "#report/\(encoded)", url: url) }
     if let url = decisionLink(glass: glass) { return GlassTarget(hash: "#decision/\(encoded)", url: url) }
     return nil
@@ -115,7 +116,7 @@ public struct AttentionItem: Decodable, Equatable {
     case "landed": return "landed"
     case "watch": return "watch"
     case "report": return "report"
-    case "review": return "review request"
+    case "review": return nil
     default: return nil
     }
   }
@@ -174,7 +175,8 @@ public func clickAttentionItem(
   } else {
     focusHelm(glass)
   }
-  if let args = item.ackArguments { acknowledge(args) }
+  if item.kind == "review", let key = item.key { acknowledge(["reviews", "seen", key]) }
+  else if let args = item.ackArguments { acknowledge(args) }
 }
 
 /// Items this pet clicked or acknowledged: identity → the stateHash it hid,

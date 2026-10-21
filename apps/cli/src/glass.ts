@@ -8,6 +8,10 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   awaitingReply,
+  latestRound,
+  readReview,
+  acknowledgeReview,
+  markReviewSeen,
   displayGrounds,
   codexDesktopThread,
   activeIds,
@@ -70,8 +74,9 @@ import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
-import { dismissReviewRound, readMergeView, redraftReviewRound } from '@lobstah/pick';
+import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { glassReviews } from './reviews.js';
+import { reviewSetupView, writeReviewMode } from './reviews-setup.js';
 import { buildTendReport, landedCatches } from './tend.js';
 import { todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
@@ -127,7 +132,10 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['decision-viewed', 1024],
   ['report-viewed', 1024],
   ['review-dismiss', 1024],
+  ...['review-skip', 'review-seen', 'review-approve', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
   ['review-redraft', 1024],
+  ['review-draft', 1024],
+  ['review-mode', 1024],
   ['pr-ack', 256 * 1024],
 ]);
 
@@ -687,6 +695,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     ...attention,
     reports: reportRows(),
     reviews: glassReviews(reviewTools(cfg)),
+    reviewSetup: reviewSetupView(),
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
@@ -877,12 +886,35 @@ export function serveGlass(
               return reply(500, { ok: false, reason: 'The view could not be stored.' });
             }
           }
+          case 'review-mode': {
+            const { mode, repo, publish } = (body.payload ?? {}) as { mode?: unknown; repo?: unknown; publish?: unknown };
+            if (typeof mode !== 'string') return reply(400, { ok: false, reason: 'A reviews mode is required.' });
+            if ((repo !== undefined && (typeof repo !== 'string' || !repo)) || (publish !== undefined && typeof publish !== 'boolean')) return reply(400, { ok: false, reason: 'A repo key and boolean publish setting are required.' });
+            try {
+              writeReviewMode(mode, undefined, { repo: repo as string | undefined, publish: publish as boolean | undefined });
+              return reply(200, { ok: true });
+            } catch (err) {
+              return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) });
+            }
+          }
+          case 'review-skip':
+          case 'review-seen':
+          case 'review-approve':
+          case 'review-request-changes':
+          case 'review-comment':
           case 'review-dismiss':
+          case 'review-draft':
           case 'review-redraft': {
-            // A click on the Reviews tab. Sending happens in the review tool; these only drop or re-draft.
+            // On-demand jobs follow the repo's current draft/publish setting.
             const key = (body.payload as { key?: unknown } | undefined)?.key;
             if (typeof key !== 'string' || !key.startsWith('review:') || key.length > 200) return reply(400, { ok: false, reason: 'A review key is required.' });
-            const act = body.kind === 'review-dismiss' ? dismissReviewRound(key, 'glass') : redraftReviewRound(key);
+            if (body.kind === 'review-seen') { const ok = markReviewSeen(key); return reply(ok ? 200 : 404, { ok }); }
+            acknowledgeReview(key);
+            const current = readReview(key);
+            if (body.kind === 'review-skip' && current && latestRound(current)?.state === 'posted') return reply(200, { ok: true });
+            const event = body.kind === 'review-approve' ? 'APPROVE' : body.kind === 'review-request-changes' ? 'REQUEST_CHANGES' : body.kind === 'review-comment' ? 'COMMENT' : undefined;
+            const act = event ? postReview(key, { by: 'glass', event }).then(out => out.posted ? undefined : out.why)
+              : ['review-dismiss', 'review-skip'].includes(body.kind) ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);
             void act.then(
               (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),
               () => reply(500, { ok: false, reason: 'The review could not be changed.' }),

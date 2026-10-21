@@ -327,6 +327,7 @@ outside `~/.lobstah/worktrees`: `lobstah cull`, the retention cull,
 | Key | Default | Meaning |
 |---|---|---|
 | `pollSecs` | `45` | Poll cadence. Outbound only — no webhooks, ever. |
+| `watches` | off for reviews-only; on otherwise | Poll registered watches and their follow-up jobs. Reviews-only setups do not start unrelated watch work; explicit `true` opts in. |
 | `liveComment` | `true` | Keep one editable, marked status comment per dispatch. Routine edits are capped at once per minute; human-needed and terminal transitions still post a fresh notification comment. Falls back to transition comments if editing is unavailable. |
 | `pools` | `[]` | Pool names (`["codeclaw"]`). An issue dispatch for repo R runs in the first listed `[pools.<name>]` whose `repo` is R. Review rounds are follow-ups and keep their chain's worktree rule. |
 
@@ -357,18 +358,20 @@ secret:
 Two modes. **Single-repo**: name the forge repo explicitly. **Multi-repo**:
 omit `repo`/`key` and the `[repos.*]` table becomes the source of truth —
 every repo with `pickup = true` and a GitHub `origin` is polled, its lobstah
-key reused as the routing key. Opt-in is per repo, never implied.
+key reused as the routing key. Opt-in is per repo, never implied. With no repo opted in, the identity/token can still serve reviews; no tracker pickup runs.
 
 | Key | Default | Meaning |
 |---|---|---|
+| `publish` | `false` (`true` for auto-review) | The glass draft/publish toggle, including on-demand jobs. Switching it changes auto-draft ↔ auto-review. Each job remembers whether publishing was enabled when it started. |
 | `identity` | required | The bot login work is assigned to / authored by. |
 | `repo` | single-repo mode | `owner/name`. Omit for multi-repo mode. |
 | `key` | single-repo mode | Lobstah repo key for dispatches and rebase chores. |
 | `startLabel` | `lobstah` | Label + assignee + open = pickup. |
 | `claimedLabel` | `lobstah:claimed` | Applied on claim. |
+| `issues`, `feedback` | explicit opt-ins | Enable issue or PR-feedback pickup independently. Setting either makes unspecified loops off. Legacy configs with neither retain both loops on, with a doctor/pre-install warning. `prFeedback` remains an alias for `feedback`. |
 
 `[pickup.github.overrides.<key>]` — multi-repo per-repo overrides:
-`startLabel`, `claimedLabel`, and a nested `merge` table layered over
+`startLabel`, `claimedLabel`, `issues`, `feedback`, and a nested `merge` table layered over
 `[pickup.github.merge]`.
 
 ### `[pickup.github.merge]` — off by default
@@ -386,25 +389,29 @@ See [pickup.md](pickup.md) for the loop semantics these keys drive.
 
 ## `[reviews]` — review requests (`lobstah pick`), off by default
 
-When someone asks `[pickup.github].identity` for a review, `lobstah pick`
+Run `lobstah setup reviews` (optional `--identity <login>`) to derive the GitHub login, write a self-contained notify configuration, enable review notifications, and install pick. It refuses to install reviews-only polling while issue/feedback pickup is also enabled.
+
+When someone asks `[reviews].identity` for a review, `lobstah pick`
 files a review item ([pickup.md](pickup.md), "Review requests"). It searches
-as that identity, with its token. Any key except `enabled`, `repos` and
-`maxPerDay` can be overridden per repo under `[repos.<key>.reviews]`.
+as that identity, with its token source, independently of `[pickup.github]`. Identity defaults to `gh api user`; the token source defaults to `gh auth token`. Existing pickup credentials remain a fallback. Mode, publish, cost bounds, and skip rules can be overridden per repo under `[repos.<key>.reviews]`; those overrides win over `[reviews]`. The glass repo filter scopes the mode switch and Publish toggle to that repo; All repos edits the global default. `lobstah doctor` shows each repo’s effective mode before pick is installed.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | Opt-in. Off means no search call at all. |
 | `repos` | `"configured"` | `"configured"`: only PRs in a `[repos.*]` origin. `"any"`: every repo the token can see. |
-| `work` | `"trap"` | Who drafts the review: `"off"`, `"trap"` (a free trap of that repo, then headless after `trapWaitSecs`), or `"headless"`. |
-| `post` | `"draft"` | `"draft"`: stage the draft as the identity's pending review on the PR, to edit and send from the review tool. `"auto"`: post the draft as a comment-only review once drafted. lobstah never approves or requests changes. |
+| `mode` | `"notify"` | `"notify"`: silent requests in Reviews; `"on-demand"`: only the glass Review action starts a round; `"auto-draft"`: new requests get trap drafts staged pending; `"auto-review"`: new requests get drafts published as REQUEST_CHANGES with blockers, COMMENT otherwise; approve verdicts wait for a click. |
+| `publish` | `false` (`true` for auto-review) | The glass draft/publish toggle, including on-demand jobs. Switching it changes auto-draft ↔ auto-review. Each job remembers whether publishing was enabled when it started. |
+| `identity` | `gh api user` | The reviewer login. |
+| `tokenCommand`, `tokenFile`, `tokenEnv` | `gh auth token` | Token sources, using the same precedence as pickup. |
+| `work` | legacy | `"off"` maps to on-demand, `"trap"`/`"headless"` map to auto-draft; explicit mode wins. The worker choice still applies to automatic jobs. |
+| `post` | legacy | `"draft"` stages pending; `"auto"` maps to auto-review. Explicit mode/publish wins. Automatic publishing uses REQUEST_CHANGES for blockers or COMMENT; APPROVE requires a click in the glass. All publishing refuses stale drafts. |
 | `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
 | `maxPerDay` | `20` | Review jobs started per day. Past it, items file with no job. |
 | `skipAuthors`, `skipLabels` | `[]` | Requests on PRs by these authors or with these labels file an item but start no job. |
 
-The `review` attention kind is not in the default `attentionKinds`; add it to
-let review items walk in `man tend`, the glass, and the pet.
+Requests land silently in the Reviews inbox with a tab count, never on deck or tend. Draft-ready and automatic-published notifications use `[hooks.notify]` and the pet, with a `#review-<encoded key>` link to the row. The hook gets `LOBSTAH_NOTE`, `LOBSTAH_VERB` (`draft-ready`, `needs-you`, `published`) and `LOBSTAH_URL` / `LOBSTAH_GLASS_URL`. Opening marks seen; a row action clears the notification and needs-you marker. Wharf notification delivery is deferred.
 
 ## `[permissions]` — the Claude Code auto-mode profile
 

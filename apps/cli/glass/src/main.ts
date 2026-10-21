@@ -7,6 +7,7 @@ import {
   decisionNumberKey,
   loadStats,
   openDecision,
+  reviewRequest,
   sendAnswer,
   stepDecision,
 } from './actions.js';
@@ -39,7 +40,7 @@ function reportRedirect(): boolean {
 const initialState = (): GlassState => ({
   snapshot: undefined,
   route: currentRoute(),
-  prefs: loadPrefs(),
+  prefs: location.hash.startsWith('#review-') ? { ...loadPrefs(), repo: '', q: '' } : loadPrefs(),
   modal: null,
   detail: null,
   older: NO_OLDER,
@@ -93,6 +94,7 @@ function startGlass(): void {
 
   let paintedRoute: ReturnType<typeof currentRoute> | undefined;
   let hadSnapshot = false;
+  let reviewScrolled: string | null = null;
   const paint = () => {
     const state = getState();
     const enteredTab = state.route !== paintedRoute || (!hadSnapshot && !!state.snapshot);
@@ -104,6 +106,21 @@ function startGlass(): void {
     if (enteredTab) window.scrollTo(0, 0);
     if (!state.focusDecision) scrolledTo = null;
     scrollToDecision(state.focusDecision);
+    const match = /^#review-(.+)$/.exec(location.hash);
+    if (match) {
+      let key: string;
+      try {
+        key = decodeURIComponent(match[1]!);
+      } catch {
+        return;
+      }
+      const row = [...document.querySelectorAll('[data-review]')].find((el) => el.getAttribute('data-review') === key);
+      if (row && reviewScrolled !== key) {
+        reviewScrolled = key;
+        row.scrollIntoView?.({ block: 'center' });
+        void reviewRequest('review-seen', { key });
+      }
+    } else reviewScrolled = null;
   };
 
   /** A `#decision/<key>` link scrolls to its card once, when the card first renders. */
@@ -122,7 +139,11 @@ function startGlass(): void {
     if (reportRedirect()) return;
     const focusDecision = decisionFromHash(location.hash);
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
-    setState({ route, focusDecision });
+    setState({
+      route,
+      focusDecision,
+      ...(location.hash.startsWith('#review-') ? { prefs: { ...getState().prefs, repo: '', q: '' } } : {}),
+    });
     // A `#decision/<key>` link (a lob, the pet) opens that decision too.
     if (focusDecision) openDecision(focusDecision);
     if (route === 'stats') void loadStats();

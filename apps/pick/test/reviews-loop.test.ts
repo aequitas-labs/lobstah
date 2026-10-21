@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, latestRound, listReviews, readReview, recordGitHubRateLimit } from '@lobstah/core';
+import { addWatch, ensureLayout, latestRound, listReviews, pendingIds, readReview, recordGitHubRateLimit } from '@lobstah/core';
+import { runPickup } from '../src/run.js';
 import { REVIEW_SEARCH, reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -14,6 +15,8 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.LOBSTAH_TEST_REVIEW_TOKEN;
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
@@ -28,6 +31,8 @@ interface Pr {
   author?: string;
   labels?: string[];
   head?: string;
+  requester?: string;
+  automatic?: boolean;
   requests?: Array<{ id: string; at: string; to: string; team?: boolean }>;
 }
 
@@ -38,14 +43,14 @@ function node(pr: Pr) {
     title: `pr ${pr.number}`,
     isDraft: false,
     headRefOid: pr.head ?? 'aaaaaaa1',
-    author: { login: pr.author ?? 'dana' },
+    author: { login: pr.author ?? 'dana', name: 'Dana Developer', avatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4' },
     repository: { nameWithOwner: pr.repo ?? 'acme/web' },
     labels: { nodes: (pr.labels ?? []).map((name) => ({ name })) },
     timelineItems: {
       nodes: (pr.requests ?? [{ id: `RRE_${pr.number}`, at: '2026-10-15T09:00:00Z', to: ME }]).map((r) => ({
         id: r.id,
         createdAt: r.at,
-        actor: { login: 'dana' },
+        actor: { login: pr.requester ?? 'dana', __typename: pr.automatic ? 'Bot' : 'User', name: pr.automatic ? undefined : 'Dana Developer', avatarUrl: 'https://avatars.githubusercontent.com/u/8?v=4' },
         requestedReviewer: r.team ? { __typename: 'Team' } : { __typename: 'User', login: r.to },
       })),
     },
@@ -66,6 +71,56 @@ const config = (...extra: string[]) => fs.writeFileSync(path.join(home, 'config.
 const tok = () => 'token';
 
 describe('the reviews loop', () => {
+  it('new requests remain silent across polls, with no notification callbacks', async () => {
+    config(); const notify = vi.fn();
+    for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []), notify });
+    expect(listReviews()).toHaveLength(1);
+    expect(notify).not.toHaveBeenCalled();
+    expect(latestRound(readReview('review:acme/web#1')!)?.notification).toBeUndefined();
+  });
+
+  it('fetches and caches requester and author names/avatars in the same gh search', async () => {
+    config();
+    const calls: Array<{ query: string; q: string }> = [];
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1, requester: 'github-actions', automatic: true }], calls) });
+    expect(calls).toHaveLength(1);
+    expect(readReview('review:acme/web#1')).toMatchObject({
+      pr: { authorName: 'Dana Developer', authorAvatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4' },
+      rounds: [{ requestedBy: 'github-actions', requestedAutomatically: true, requestedByAvatarUrl: 'https://avatars.githubusercontent.com/u/8?v=4' }],
+    });
+  });
+
+  it('a self-contained reviews block needs no pickup table and notify mode dispatches nothing', async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nidentity = "chris"\ntokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"\nrepos = "any"\n');
+    process.env.LOBSTAH_TEST_REVIEW_TOKEN = 'fixture';
+    const checked = path.join(home, 'unexpected-watch-check');
+    const script = path.join(home, 'watch.cjs');
+    fs.writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(checked)}, 'ran'); console.log('{"cursor":"1","events":[]}');`);
+    addWatch('fixture:unrelated', `node "${script}"`);
+    await runPickup('once', { reviewRun: gh([{ number: 2 }], []) });
+    expect(fs.existsSync(checked)).toBe(false);
+    expect(listReviews()).toHaveLength(1);
+    expect(pendingIds('work')).toEqual([]);
+    expect(pendingIds('chore')).toEqual([]);
+  });
+  it('a reviews-only pick cycle files requests without polling authored PR feedback or dispatching jobs', async () => {
+    config();
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[pickup.github]\nidentity = "chris"\ntokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"\n');
+    process.env.LOBSTAH_TEST_REVIEW_TOKEN = 'fixture';
+    // If PR-feedback pickup runs, this identity-owned PR would yield fresh feedback.
+    const fetcher = vi.fn(async () => new Response(JSON.stringify([{
+      number: 99, html_url: 'https://github.com/acme/web/pull/99', user: { login: ME },
+      head: { ref: 'lobstah/11111111-1111-4111-8111-111111111111', sha: 'aaaaaaa1' },
+      body: 'Please fix the new review comments',
+    }])));
+    vi.stubGlobal('fetch', fetcher);
+    await runPickup('once', { reviewRun: gh([{ number: 1, author: ME }], []) });
+    expect(listReviews()).toHaveLength(1);
+    expect(latestRound(listReviews()[0]!)?.state).toBe('requested');
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(pendingIds('work')).toEqual([]);
+    expect(pendingIds('chore')).toEqual([]);
+  });
   it('with no [reviews] table makes no call and files nothing', async () => {
     const calls: Array<{ query: string; q: string }> = [];
     await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], calls) });

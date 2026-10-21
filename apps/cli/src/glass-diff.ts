@@ -151,6 +151,7 @@ export type GlassTab = (typeof GLASS_TABS)[number];
 
 export function tabFromHash(hash: string | undefined | null): GlassTab {
   const tab = String(hash || '').replace(/^#/, '');
+  if (tab.startsWith('review-')) return 'reviews';
   return (GLASS_TABS as readonly string[]).includes(tab) ? (tab as GlassTab) : 'deck';
 }
 
@@ -312,6 +313,9 @@ export function validShowHash(hash: unknown): hash is string {
   if (typeof hash !== 'string') return false;
   if (hash === '') return true;
   if (hash.length > 1024 || !hash.startsWith('#') || /[\s\x00-\x1f\x7f]/.test(hash)) return false;
+    if (/^#review-.+/.test(hash)) {
+    try { return /^review:[^\s]+\/[^\s]+#\d+$/.test(decodeURIComponent(hash.slice(8))); } catch { return false; }
+  }
   return (GLASS_TABS as readonly string[]).includes(hash.slice(1)) || decisionFromHash(hash) !== null || reportFromHash(hash) !== null;
 }
 
@@ -542,7 +546,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, LANDED_MAX),
       reports,
-      reviews: reviews.filter((r) => r.stands),
+      reviews: [],
       inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', verb: '' })),
       traps: deckTraps.map((t) => seat(trapView(d, t))),
       stacks: stacks.filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),

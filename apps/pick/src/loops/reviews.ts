@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -14,12 +15,15 @@ import {
   observeReviewRequest,
   queuedDescriptor,
   readRoundDraft,
+  readReview,
   readStatusLog,
   reconcile,
   recordGitHubRateLimit,
   recordGitHubResponse,
   requestCancel,
   reviewBrief,
+  acknowledgeReview,
+  refreshReviewNotifications,
   reviewCheckoutDir,
   reviewRoundDir,
   reviewSettings,
@@ -29,9 +33,9 @@ import {
   writeReview,
 } from '@lobstah/core';
 import type { ReviewItem, ReviewRound } from '@lobstah/core';
-import { githubRepoFromOrigin } from '../config.js';
+import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
 import { dispatchLane } from './report.js';
-import { dismissReviewRound, postReview, settleStagedReview, stageReview } from '../reviews-post.js';
+import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview, stageReview } from '../reviews-post.js';
 import { claimReviewDocs, publishReviewDocs, reviewScope, runReviewRequests } from '../reviews-wharf.js';
 import type { ReviewWharfOptions } from '../reviews-wharf.js';
 import type { FetchLike } from '../reviews-post.js';
@@ -49,11 +53,11 @@ export const REVIEW_SEARCH = `query($q: String!) {
     nodes {
       ... on PullRequest {
         number url title isDraft headRefOid
-        author { login }
+        author { login avatarUrl ... on User { name } }
         repository { nameWithOwner }
         labels(first: 20) { nodes { name } }
         timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
-          nodes { ... on ReviewRequestedEvent { id createdAt actor { login } requestedReviewer { __typename ... on User { login } } } }
+          nodes { ... on ReviewRequestedEvent { id createdAt actor { __typename login avatarUrl ... on User { name } } requestedReviewer { __typename ... on User { login } } } }
         }
       }
     }
@@ -70,11 +74,11 @@ interface SearchPr {
   title?: string;
   isDraft?: boolean;
   headRefOid?: string;
-  author?: { login?: string } | null;
+  author?: { login?: string; name?: string; avatarUrl?: string } | null;
   repository?: { nameWithOwner?: string };
   labels?: { nodes?: Array<{ name?: string }> };
   timelineItems?: {
-    nodes?: Array<{ id?: string; createdAt?: string; actor?: { login?: string } | null; requestedReviewer?: { __typename?: string; login?: string } | null }>;
+    nodes?: Array<{ id?: string; createdAt?: string; actor?: { __typename?: string; login?: string; name?: string; avatarUrl?: string } | null; requestedReviewer?: { __typename?: string; login?: string } | null }>;
   };
 }
 
@@ -113,7 +117,7 @@ export async function reviewsLoop(
   identity: string,
   token: () => string,
   log: (m: string) => void = () => {},
-  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number; wharf?: ReviewWharfOptions } = {},
+  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number; wharf?: ReviewWharfOptions; notify?: (event: { key: string; text: string; kind: string; url: string }) => void } = {},
 ): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.reviews.enabled) return;
@@ -130,6 +134,19 @@ export async function reviewsLoop(
   if (wharf) await claimReviewDocs(log, w);
   draftReviews(identity, log, now);
   if (!githubBlockedUntil(now)) await postOrStage(gh, log);
+  for (const event of refreshReviewNotifications(now)) {
+    const port = Number(process.env.LOBSTAH_GLASS_PORT ?? cfg.glass.port);
+    const url = `http://127.0.0.1:${port}/${event.hash}`;
+    const notice = { key: event.key, text: event.notification.text, kind: event.notification.kind, url };
+    if (opts.notify) opts.notify(notice);
+    else if (cfg.hooks.notify?.command) {
+      const child = spawn(cfg.hooks.notify.command, { shell: true, detached: true, stdio: 'ignore', env: { ...process.env,
+        LOBSTAH_ID: event.key, LOBSTAH_KEY: event.key, LOBSTAH_LANE: 'chore', LOBSTAH_VERB: notice.kind,
+        LOBSTAH_NOTE: notice.text, LOBSTAH_AT: event.notification.at, LOBSTAH_URL: url, LOBSTAH_GLASS_URL: url, LOBSTAH_PR_URL: url,
+      } });
+      child.on('error', err => log(`review notify: ${err.message}`)); child.unref();
+    }
+  }
   if (wharf) {
     await runReviewRequests(log, { ...w, dismiss: (key) => dismissReviewRound(key, 'hosted', gh) });
     await publishReviewDocs(log, w);
@@ -154,21 +171,25 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
 }
 
 /**
- * A fresh draft goes to GitHub one of two ways. `[reviews].post = "draft"`
- * (the default) stages it as the person's pending review, to edit and send
- * from their review tool. `"auto"` posts it as a comment-only review. A
- * stale draft is never staged or posted on its own, and a failed attempt
- * is not retried on its own (the round keeps the reason).
+ * A fresh draft is staged pending or published as COMMENT according to
+ * the repo policy and the job's publishing receipt. Stale drafts and failed
+ * attempts are not retried automatically.
  */
 async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: number }, log: (m: string) => void): Promise<void> {
-  const rc = loadConfig().reviews;
   for (const item of listReviews()) {
     const r = latestRound(item);
-    if (r?.state !== 'drafted' || r.staged || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
-    if (reviewSettings(rc, item.pr.repoKey).post === 'auto') {
+    if (r?.state !== 'drafted' || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
+    const settings = reviewSettings(loadConfig().reviews, item.pr.repoKey);
+    const draft = readRoundDraft(item.key, r.id);
+    if ('error' in draft) continue;
+    if (r.verdict !== draft.verdict || JSON.stringify(r.blocking) !== JSON.stringify(draft.blocking)) {
+      r.verdict = draft.verdict; r.blocking = draft.blocking; writeReview(item);
+    }
+    const publish = draft.verdict !== 'approve' && settings.mode !== 'notify' && settings.publish && (r.publish ?? !r.draftOnly);
+    if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
-      log(out.posted ? `${item.key}: review posted (${out.reviewId})` : `${item.key}: auto-post failed: ${out.why}`);
-    } else {
+      log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
+    } else if (!r.staged) {
       const out = await stageReview(item.key, gh);
       log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${out.why}`);
     }
@@ -230,12 +251,20 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
           url: pr.url,
           title: pr.title ?? '',
           author,
+          ...(pr.author?.name ? { authorName: pr.author.name } : {}),
+          ...(pr.author?.avatarUrl ? { authorAvatarUrl: pr.author.avatarUrl } : {}),
           headSha: pr.headRefOid,
           ...(labels.length ? { labels } : {}),
           ...(pr.isDraft ? { draft: true } : {}),
           ...(repoKey ? { repoKey } : {}),
         },
-        round: { id: request.id!, requestedAt: request.createdAt!, ...(request.actor?.login ? { requestedBy: request.actor.login } : {}) },
+        round: {
+          id: request.id!, requestedAt: request.createdAt!,
+          ...(request.actor?.login ? { requestedBy: request.actor.login } : {}),
+          ...(request.actor?.name ? { requestedByName: request.actor.name } : {}),
+          ...(request.actor?.avatarUrl ? { requestedByAvatarUrl: request.actor.avatarUrl } : {}),
+          requestedAutomatically: request.actor?.__typename === 'Bot' || /(?:\[bot\]$|^github-actions$)/i.test(request.actor?.login ?? ''),
+        },
         ...(skip ? { skip } : {}),
       },
       now,
@@ -260,14 +289,13 @@ function verbOf(id: string): { lane: 'work' | 'chore'; verb: string; note?: stri
 /** Jobs started on the UTC day of `now`, across every item. */
 function startedToday(items: ReviewItem[], now: number): number {
   const day = new Date(now).toISOString().slice(0, 10);
-  return items.reduce((n, i) => n + i.rounds.filter((r) => r.dispatchedAt?.slice(0, 10) === day).length, 0);
+  return items.reduce((n, i) => n + i.rounds.reduce((m, r) => m + (r.draftStarts ?? (r.dispatchedAt ? [r.dispatchedAt] : [])).filter((at) => at.slice(0, 10) === day).length, 0), 0);
 }
 
 /** Why a requested round gets no job, or undefined when it gets one. */
 function noJob(item: ReviewItem, round: ReviewRound, started: number): string | undefined {
   const rc = loadConfig().reviews;
   if (round.reason?.startsWith('skipped:')) return round.reason;
-  if (reviewSettings(rc, item.pr.repoKey).work === 'off') return undefined; // the person reviews it themselves: no reason to show
   if (!item.pr.repoKey) return 'no job: not a configured repo, so there is no checkout to review in';
   if (started >= rc.maxPerDay) return `no job: the daily cap ([reviews].maxPerDay = ${rc.maxPerDay}) is reached`;
   return undefined;
@@ -279,15 +307,16 @@ function noJob(item: ReviewItem, round: ReviewRound, started: number): string | 
  * the daemon when its trap wait expires, and cancel the job of a round the
  * request no longer stands for.
  */
-export function draftReviews(identity: string, log: (m: string) => void = () => {}, now = Date.now()): void {
+export function draftReviews(identity: string, log: (m: string) => void = () => {}, now = Date.now(), manualKey?: string): void {
   const cfg = loadConfig();
   const items = listReviews();
   const scopes = backendScopes(cfg);
   let started = startedToday(items, now);
   for (const item of items) {
+    if (manualKey && item.key !== manualKey) continue;
     const r = latestRound(item);
     if (!r) continue;
-    const settings = reviewSettings(cfg.reviews, item.pr.repoKey);
+    const settings = { ...reviewSettings(cfg.reviews, item.pr.repoKey), ...(manualKey ? { work: 'trap' as const } : {}) };
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
     // A withdrawn or dismissed round (the request went, a re-request superseded it, or the person dropped it) has its job cancelled, then its checkout removed once the job ends.
@@ -307,7 +336,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if (r.state === 'requested' && !r.dispatch) {
       // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.
       if (reviewScope(item, scopes) && !r.wharf?.mine) continue;
-      const why = noJob(item, r, started);
+      const why = settings.work === 'off' ? undefined : noJob(item, r, started);
       if (settings.work === 'off' || why) {
         if (why && r.reason !== why) {
           r.reason = why;
@@ -334,7 +363,11 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
         },
         'chore',
       );
-      Object.assign(r, { state: 'drafting', dispatch: id, dispatchedAt: new Date(now).toISOString() });
+      const at = new Date(now).toISOString();
+      r.draftStarts = [...(r.draftStarts ?? (r.dispatchedAt ? [r.dispatchedAt] : [])), at];
+      Object.assign(r, { state: 'drafting', dispatch: id, dispatchedAt: at });
+      r.publish = settings.publish;
+      r.draftOnly = !settings.publish;
       delete r.reason;
       save();
       started++;
@@ -371,7 +404,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if ('error' in draft) {
       Object.assign(r, { state: 'failed', reason: `the review job finished without a usable draft: ${draft.error}` });
     } else {
-      Object.assign(r, { state: 'drafted', draftedAt: job.at ?? new Date(now).toISOString() });
+      Object.assign(r, { verdict: draft.verdict, blocking: draft.blocking, state: 'drafted', draftedAt: job.at ?? new Date(now).toISOString() });
       delete r.reason;
       // The head moved while the job ran: the draft reviews an older head.
       if (r.headSha !== item.pr.headSha) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
@@ -380,6 +413,26 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     removeReviewCheckout(item, r, log);
     log(`${item.key}: review ${r.state}`);
   }
+}
+
+/** Start one requested, stale, or failed round according to its repo policy. */
+export async function draftReviewOnDemand(key: string, now = Date.now()): Promise<string | undefined> {
+  const item = readReview(key);
+  const round = item && latestRound(item);
+  if (!item || !round) return `no review item ${key}`;
+  if (reviewSettings(loadConfig().reviews, item.pr.repoKey).mode === 'notify' && round.state === 'requested') return 'reviews are in notify mode; switch to on-demand or an automatic mode to review';
+  if (!['requested', 'stale', 'failed'].includes(round.state) || (round.state === 'requested' && round.dispatch)) return `${key}: this round is already ${round.state}`;
+  const why = noJob(item, round, startedToday(listReviews(), now));
+  if (why) return why;
+  const identity = loadPickupConfig().reviews?.identity;
+  if (!identity) return 'reviews are not enabled; run lobstah setup reviews';
+  if (round.state !== 'requested') {
+    const why = await redraftReviewRound(key, { now });
+    if (why) return why;
+  }
+  acknowledgeReview(key, now);
+  draftReviews(identity, () => {}, now, key);
+  return latestRound(readReview(key)!)?.state === 'drafting' ? undefined : 'the round could not start drafting';
 }
 
 /**

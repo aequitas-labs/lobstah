@@ -7,6 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   IdleWait,
+  reviewAttention,
+  markReviewSeen,
+  acknowledgeReview,
   resetWaitBackoff,
   injectedPrompt,
   goalDate,
@@ -314,7 +317,7 @@ work (humans and agents):
   reviews [--all] [--json]        PRs that ask for your review, and each
                                   one's newest round
   reviews redraft <key>           draft a stale or failed review again
-  reviews post <key> [--stale]    send the staged draft as a comment-only review
+  reviews post <key>              send a fresh draft as a comment-only review
   reviews dismiss <key>           drop the review and its pending draft
   prs [sync]                      list known PRs, or refresh due PR watches
   cull [--older-than <days>] [--apply]
@@ -1836,9 +1839,14 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'reviews': {
+      if (pos[0] === 'seen') {
+        if (!pos[1] || !markReviewSeen(pos[1])) throw new UsageError('no such review');
+        console.log(toonKV({ key: pos[1], seen: true })); break;
+      }
       if (pos[0] === 'redraft' || pos[0] === 'post' || pos[0] === 'dismiss') {
         const key = pos[1];
         if (!key) throw new UsageError(`reviews ${pos[0]} requires a review key\n\n${usageFor('reviews')!}`);
+        acknowledgeReview(key);
         if (pos[0] === 'redraft') {
           const why = await redraftReviewRound(key);
           if (why) throw new Error(why);
@@ -1848,7 +1856,7 @@ async function mainCli(): Promise<void> {
           if (why) throw new Error(why);
           console.log(toonKV({ key, state: 'dismissed' }));
         } else {
-          const out = await postReview(key, { by: 'cli', stale: has('--stale') });
+          const out = await postReview(key, { by: 'cli', event: 'COMMENT' });
           if (!out.posted) throw new Error(out.why);
           console.log(toonKV({ key, state: 'posted', reviewId: out.reviewId, event: 'COMMENT' }));
         }
@@ -2018,6 +2026,7 @@ async function mainCli(): Promise<void> {
     case 'attention': {
       const sub = pos[0];
       const report = buildTendReport();
+      if (loadConfig().reviews.enabled) report.attention.push(...reviewAttention(Date.now()));
       pruneStaleAcks(report.attention);
       if (sub === 'ack' || sub === 'unack') {
         const key = pos[1];
@@ -2026,6 +2035,10 @@ async function mainCli(): Promise<void> {
           if (!removeAck(key)) throw new UsageError(`no ack for "${key}" — \`lobstah attention\` lists items and their ack state`);
           console.log(toonKV({ key, acked: false }));
           break;
+        }
+        if (key.startsWith('review:')) {
+          if (!acknowledgeReview(key)) throw new UsageError('no such review');
+          console.log(toonKV({ key, acked: true })); break;
         }
         // A report acks by its key whether or not attentionKinds walks reports.
         const filed = key.startsWith('report:') ? readReport(key) : undefined;
@@ -2037,9 +2050,8 @@ async function mainCli(): Promise<void> {
         break;
       }
       if (has('--json')) {
-        // The pet's read: the same items and fields as `man tend --json`
-        // puts under `attention`, without the rest of the report, and without
-        // a question still held on the helm's turn.
+        // The pet also receives completed-review notifications, which stay
+        // out of the helm's tend report. Held questions remain hidden.
         console.log(JSON.stringify({ attention: report.attention.filter((a) => !a.held) }));
         break;
       }
@@ -3357,6 +3369,10 @@ async function mainCli(): Promise<void> {
     case 'pick': {
       const kind = cmd as 'daemon' | 'pick';
       if (pos[0] === 'install') {
+        if (kind === 'pick') {
+          const { loadPickupConfig, pickupPlan } = await import('@lobstah/pick');
+          for (const line of pickupPlan(loadPickupConfig())) console.log(line);
+        }
         const res = installService(kind);
         console.log(toonKV({ service: kind, file: res.file, loaded: res.loaded, detail: res.detail }));
         break;
@@ -3774,6 +3790,12 @@ wallClockSecs      = 3600
         }),
       );
       console.log(toonHelp(['lobstah permissions apply   (add lobstah\'s auto-mode profile to your Claude Code settings; shows the diff and asks)']));
+      break;
+    }
+    case 'setup': {
+      if (pos[0] !== 'reviews') throw new UsageError(usageFor('setup')!);
+      const { setupReviews } = await import('./reviews-setup.js');
+      await setupReviews(opt('--identity'));
       break;
     }
     case '__pool-warm': {

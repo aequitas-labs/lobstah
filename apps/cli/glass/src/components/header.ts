@@ -47,20 +47,20 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
   ];
 }
 
-/**
- * The repo options are rebuilt only when their count changes — the old
- * page's behavior, kept: a repo list that swaps one name for another at the
- * same count keeps the options it had.
- */
-let repoOptions: string[] = [];
+/** Configured repos remain selectable even with no dispatches or PR work. */
 function repoList(d: GlassSnapshot): string[] {
-  const repos = [
+  return [
     ...new Set(
-      [...d.dispatches.map((x) => x.repo), ...d.notices.map((x) => x.repo), ...d.prs.map((x) => x.repo)].filter(Boolean) as string[],
+      [
+        ...(d.repoKeys ?? []),
+        ...Object.keys(d.reviewSetup?.perRepo ?? {}),
+        ...(d.reviews ?? []).map((x) => x.repoKey),
+        ...d.dispatches.map((x) => x.repo),
+        ...d.notices.map((x) => x.repo),
+        ...d.prs.map((x) => x.repo),
+      ].filter(Boolean) as string[],
     ),
   ].sort();
-  if (repos.length !== repoOptions.length) repoOptions = repos;
-  return repoOptions;
 }
 let kindOptions: string[] = [];
 function kindList(d: GlassSnapshot): string[] {
@@ -120,7 +120,7 @@ export function Header({
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
     html`<nav class="tabs" id="tabs" aria-label="Spyglass views">${GLASS_TABS.map(
       (t) =>
-        html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined}>${TAB_LABEL[t]}${t === 'deck' && unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new decision${unread === 1 ? '' : 's'}`}>${unread}</span>`}</a>`,
+        html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined}>${TAB_LABEL[t]}${t === 'reviews' && (d?.reviews ?? []).filter((r) => r.stands || r.notification).length > 0 && html`<span class="dbadge" aria-label="reviews in inbox">${d?.reviews?.filter((r) => r.stands || r.notification).length}</span>`}${t === 'deck' && unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new decision${unread === 1 ? '' : 's'}`}>${unread}</span>`}</a>`,
     )}</nav>`,
     controls(d, tab, st),
   ];
