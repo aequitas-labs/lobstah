@@ -256,7 +256,10 @@ export function grantCovers(g: Grant, req: GrantRequest, roots: readonly Checkou
     }
     if (cmd === want) return true;
     if (g.match !== 'prefix' || !cmd.startsWith(`${want} `)) return false;
-    return !SHELL_JOINERS.test(cmd.slice(want.length));
+    const rest = cmd.slice(want.length);
+    // Boolean flag parsers may let a later flag negate the granted dry run.
+    if (/(?:^|\s)--dry-run(?:\s|$)/.test(want) && /--(?:no-?)?dry[-_]?run\b/i.test(rest)) return false;
+    return !SHELL_JOINERS.test(rest);
   }
   if (g.path !== undefined) {
     if (!(WRITE_TOOLS as readonly string[]).includes(req.tool) || !req.path) return false;

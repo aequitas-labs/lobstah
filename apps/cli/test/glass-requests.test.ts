@@ -13,6 +13,7 @@ import {
   listNotices,
   listRequests,
   listGrants,
+  unhandled,
   readDecisionAnswer,
   reserveTrap,
   shellQuote,
@@ -79,12 +80,22 @@ it('a typed Allow always answer writes the grant, rather than silently storing o
   expect(listGrants().grants).toMatchObject([{ command: 'ume push', match: 'prefix', harness: 'codex', by: 'glass' }]);
 });
 
-it('an ambiguous permission reply keeps the card open and asks for an explicit choice', async () => {
+it.each(['why?', 'Please explain the command first.', 'allow allow ume push please'])('relays a free permission reply without granting: %s', async (text) => {
   const card = askPermission({ dispatch: 'codex-work', lane: 'work', ask: { command: 'ume push plan.html', harness: 'codex' } });
-  for (const text of ['allow allow ume push please', 'allow always: git push']) {
+  const response = await post({ kind: 'decision-answer', payload: { key: card.key, text, files: [] } });
+  expect(response.status).toBe(201);
+  expect(readDecisionAnswer(card.key)).toMatchObject({ text });
+  expect(readDecisionAnswer(card.key)?.option).toBeUndefined();
+  expect(listGrants().grants).toEqual([]);
+  expect(unhandled('codex-work', 'work')[0]?.text).toContain(text);
+});
+
+it('a mismatched allowance scope keeps the permission card open without a grant', async () => {
+  const card = askPermission({ dispatch: 'codex-work', lane: 'work', ask: { command: 'ume push plan.html', harness: 'codex' } });
+  for (const text of ['allow once: git push', 'allow always: git push']) {
     const response = await post({ kind: 'decision-answer', payload: { key: card.key, text, files: [] } });
     expect(response.status).toBe(403);
-    expect((await response.json()).reason).toContain('choose Allow once, Allow always, or No');
+    expect((await response.json()).reason).toContain('the allowance scope does not match');
     expect(readDecisionAnswer(card.key)).toBeUndefined();
     expect(listGrants().grants).toEqual([]);
   }

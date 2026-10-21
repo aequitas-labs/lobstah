@@ -93,6 +93,19 @@ describe('what a grant covers', () => {
     }
   });
 
+  it('a dry-run prefix refuses later dry-run flag variants that could override it', () => {
+    const command = 'npx wrangler deploy --dry-run';
+    const g = grant({ command, match: 'prefix' });
+    expect(grantCovers(g, bash(command))).toBe(true);
+    expect(grantCovers(g, bash(`${command} --outdir tmp`))).toBe(true);
+    for (const extra of ['--dry-run=false', '--no-dry-run', '--dry-run false', '--dryRun=false', '--noDryRun', '--dry-run=true', '"--dry-run=false"']) {
+      expect(grantCovers(g, bash(`${command} --outdir tmp ${extra}`)), extra).toBe(false);
+    }
+    // Exact approval of an explicit command still means that exact command.
+    const explicit = `${command} --no-dry-run`;
+    expect(grantCovers(grant({ command: explicit, match: 'exact' }), bash(explicit))).toBe(true);
+  });
+
   it('keeps to its harness and its trap', () => {
     expect(grantCovers(grant({ command: 'x', match: 'exact', harness: 'codex' }), bash('x'))).toBe(false);
     expect(grantCovers(grant({ command: 'x', match: 'exact', harness: 'codex' }), bash('x', { harness: 'codex' }))).toBe(true);
