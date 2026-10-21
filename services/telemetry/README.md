@@ -116,8 +116,8 @@ command; omitting it selects a different company's account. Do not log in or
 log out, or inspect the saved credentials. Confirm the account first.
 
 The database `lobstah-telemetry` is already created (ENAM):
-`fb7a04cd-d62a-414d-b990-84fbe5593de0`. Migrations `0001_init.sql` and
-`0002_daily_catches.sql` are applied.
+`42e19f00-6bae-443e-bdb8-7195ae4ef2b8`, a copy of the aequitas labs database
+(`fb7a04cd-…`) taken at the account split. Migrations `0001` to `0003` are applied.
 Do not create another database. Rate limiter namespaces `1531` and `1532`
 are account-local positive integers reserved for this receiver, not resource
 ids. Logs, invocation logs and Logpush stay off. No secret is required.

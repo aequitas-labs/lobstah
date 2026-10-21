@@ -20,7 +20,7 @@
     {
       "binding": "DB",
       "database_name": "lobstah-telemetry",
-      "database_id": "fb7a04cd-d62a-414d-b990-84fbe5593de0",
+      "database_id": "42e19f00-6bae-443e-bdb8-7195ae4ef2b8",
       "migrations_dir": "migrations"
     }
   ],
