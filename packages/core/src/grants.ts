@@ -480,17 +480,31 @@ export function sessionGuarded(req: GrantRequest): boolean {
   if (/mcp__lobstah__.*(?:grant|config)/i.test(req.tool)) return true;
   {
     const real = (p: string) => {
+      let head = path.resolve(p);
+      const tail: string[] = [];
+      while (!fs.existsSync(head) && path.dirname(head) !== head) {
+        tail.unshift(path.basename(head));
+        head = path.dirname(head);
+      }
       try {
-        return fs.realpathSync(p);
+        return path.join(fs.realpathSync(head), ...tail);
       } catch {
-        return p;
+        return path.resolve(p);
       }
     };
+    const settingsRoots = [
+      process.env.CLAUDE_CONFIG_DIR ?? path.join(process.env.HOME ?? '', '.claude'),
+      process.env.CODEX_HOME ?? path.join(process.env.HOME ?? '', '.codex'),
+    ]
+      .filter(Boolean)
+      .map(real);
+    const settingsNames = ['settings.json', 'settings.local.json', 'config.toml', 'hooks.json', 'hooks', 'rules'];
     // Relative paths resolve in the caller's cwd; symlink targets count too.
     for (const raw of [
       ...strings.filter((v) => !v.includes('\n')),
       ...strings.flatMap((v) => v.split(/\s+/).map((t) => t.replace(/^["']|["']$/g, ''))),
     ]) {
+      if (!raw.trim()) continue;
       let file = path.resolve(req.cwd ?? process.cwd(), raw.replace(/^~(?=\/)/, process.env.HOME ?? ''));
       let head = file;
       const tail: string[] = [];
@@ -503,6 +517,14 @@ export function sessionGuarded(req: GrantRequest): boolean {
       } catch {
         /* use absolute path */
       }
+      if (
+        settingsRoots.some(
+          (root) =>
+            file === root ||
+            settingsNames.some((name) => file === path.join(root, name) || file.startsWith(path.join(root, name) + path.sep)),
+        )
+      )
+        return true;
       if (
         file === real(lobstahHome()) ||
         file.startsWith(real(grantsDir()) + path.sep) ||

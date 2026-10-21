@@ -406,6 +406,15 @@ describe('session grants', () => {
     run(['hook', 'permission-request'], { session_id: 'browser-trap', tool_name: 'mcp__browser__navigate', tool_input: { url: 'https://example.com/private' }, cwd: t.worktree });
     expect(standingDecisions()[0]?.permission?.sessionGrant).toMatchObject({ session: 'browser-trap', tools: 'mcp__browser__*', hosts: ['example.com'] });
   });
+  it('custom Claude and Codex settings locations remain protected by session grants', () => {
+    addGrant({ mode: 'session', session: 'settings-session', tools: 'Write', by: 'glass' });
+    for (const [variable, name] of [['CLAUDE_CONFIG_DIR', 'settings.json'], ['CODEX_HOME', 'config.toml']]) {
+      const settingsRoot = path.join(home, variable.toLowerCase(), 'not-created-yet');
+      const h = { session_id: 'settings-session', tool_name: 'Write', tool_input: { file_path: path.join(settingsRoot, name!), content: '{}' }, cwd: home };
+      expect(run(['hook', 'permission-request'], h, { [variable!]: settingsRoot }).stdout).toBe('');
+    }
+  });
+
   it('PreToolUse does not spend a legacy once grant before a permission request needs it', () => {
     trap('legacy-trap', 'claude');
     addGrant({ command: 'echo fixture', mode: 'once', trap: trapBySession('legacy-trap')!.name, by: 'glass' });
