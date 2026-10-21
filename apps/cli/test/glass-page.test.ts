@@ -551,12 +551,12 @@ describe('glass page: modals', () => {
   it('⚙ opens settings; the view switch persists in this browser and applies everywhere', async () => {
     const g = await page(acceptanceFleet(), { hash: '#dispatches' });
     await click(g, g.$('#gearbtn'));
-    expect(text(g.$('#modalbox h3'))).toBe('⚙ settings · this browser only');
+    expect(text(g.$('#modalbox h3'))).toBe('⚙ settings');
     expect(text(g.$('#modalbox .settings .row:last-child'))).toContain('question · landed · pr:draft');
     await click(g, g.$$('#modalbox .seg button').find((b) => text(b) === 'cards')!);
     expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).view).toBe('cards');
     expect(g.$$('#dispatches .card')).toHaveLength(4);
-    expect(g.$$('#modalbox .seg button.on').map(text)).toEqual(['cards', 'on']);
+    expect(g.$$('#modalbox .seg button.on').map(text)).toEqual(['cards', 'on', 'full']);
   });
 });
 
@@ -794,7 +794,7 @@ describe('glass page: header', () => {
   it('the helm chip names the man and opens the helm modal with its resume command', async () => {
     const g = await page(acceptanceFleet());
     const chip = g.$('#chips .chip.click')!;
-    expect(text(chip)).toBe('⛵ claude @ web helm fleet 30s ago');
+    expect(text(chip)).toBe('⛵ claude @ web helm fleet · chat full 30s ago');
     expect(chip.querySelector('.ok')).toBeTruthy();
     await click(g, chip);
     expect(text(g.$('#modalbox h3'))).toBe('⛵ claude @ web');

@@ -228,6 +228,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:helm': {
     flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--label': { value: '<name>' }, '--take': {}, '--harness': { value: HARNESS } },
   },
+  'man:chat': { positionals: 'brief|full', subverbs: ['brief', 'full'], maxPositionals: 1, flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' } } },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
@@ -427,6 +428,9 @@ Sign-on records who the man is (harness, directory, host; --label names it).
 A live foreign holder refuses without --take; a stale one is claimable.
 The session id resolves --session, then hook stdin, then
 $CLAUDE_CODE_SESSION_ID — so inside Claude Code no flag is needed.`,
+  'man:chat': `Set this grounds' helm chat to brief or full without a config edit or restart.
+Brief points at cards instead of repeating their detail and keeps routine wakes quiet.
+The seat retains the override on re-sign and takeover. A terminal user or this grounds' helm may change it.`,
   'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
 cleared too.`,
   'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout,

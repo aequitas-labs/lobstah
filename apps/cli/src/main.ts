@@ -117,6 +117,9 @@ import {
   storageGrounds,
   captureWindow,
   heartbeatHelm,
+  helmChat,
+  setHelmChat,
+  consumeHelmChatChange,
   expectReply,
   takeReplies,
   dueUnanswered,
@@ -200,7 +203,7 @@ import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
-import { charter, HELM_REMINDER } from './charter.js';
+import { charter, HELM_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS } from './tend.js';
 import { runCull } from './cull.js';
@@ -214,6 +217,7 @@ import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
 import { requestShow, validShowHash } from './glass-presence.js';
+import { decisionHash } from './glass-diff.js';
 import { focusTrap } from './focus.js';
 import {
   glassLines,
@@ -430,6 +434,8 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   digest. A live holder refuses without
                                   --take; a stale one is claimable.
   man relieve [--session <id>]    step down from the helm.
+  man chat brief|full [--grounds <name>]
+                                  change helm chat detail at runtime
   man init [--shared|--global] [--marker]
                                   install the haul Stop hook: this project's
                                   .claude/settings.local.json by default,
@@ -928,7 +934,8 @@ async function mainCli(): Promise<void> {
         // The day's goals prompt waits for the person's first message: a
         // notification neither gets it nor uses up the day's claim.
         const daily = person ? dailyGoalsContext(helm.grounds, loadConfig()) : undefined;
-        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [HELM_REMINDER, daily].filter(Boolean).join('\n') } }));
+        const chatChange = consumeHelmChatChange(helm.grounds);
+        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [HELM_REMINDER, chatChange === 'full' ? 'Helm chat: full.' : '', helmChatRule(helm.grounds), daily].filter(Boolean).join('\n') } }));
       }
     } catch { /* a reminder never breaks the user's turn */ }
     return;
@@ -1979,9 +1986,11 @@ async function mainCli(): Promise<void> {
         throw err;
       }
       const { meta, replaced } = asked;
+      const url = `${glassUrl(glassPort())}/${decisionHash(meta.key)}`;
       console.log(
         toonKV({
           key: meta.key,
+          url,
           title: meta.title,
           ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
           options: meta.options.join(' | '),
@@ -1992,7 +2001,7 @@ async function mainCli(): Promise<void> {
       );
       console.log(
         toonHelp([
-          'the glass shows it as a card on the deck; the answer wakes man wait as a decision-answer event',
+          `Point to it with [card](${url}); the answer wakes man wait as a decision-answer event`,
           `lobstah man ask --withdraw ${meta.key}   (when it no longer needs the human)`,
         ]),
       );
@@ -2367,6 +2376,19 @@ async function mainCli(): Promise<void> {
       if (digest.changed && !has('--peek')) advanceCursor(cursor, digest.now);
       break;
     }
+    case 'man:chat': {
+      const chat = pos[0];
+      if (pos.length !== 1 || (chat !== 'brief' && chat !== 'full')) throw new UsageError('usage: lobstah man chat brief|full [--grounds <name>]');
+      const cfg = loadConfig();
+      const caller = callerSession(opt('--session'));
+      if (caller && trapBySession(caller.id)) throw new Error('a trap cannot change helm chat');
+      const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));
+      // A person at a terminal may toggle it; an identified agent must own this helm.
+      if (caller) gateHelm(caller, grounds.name);
+      const seat = setHelmChat(grounds.name, chat);
+      console.log(toonKV({ grounds: displayGrounds(seat.grounds, cfg), chat, note: "takes effect on the helm's next turn" }));
+      break;
+    }
     case 'man:helm': {
       // Take the helm: sign this session on as the one lobstah man for its
       // grounds. The registration enables the Stop-hook arm check (no marker file
@@ -2403,6 +2425,7 @@ async function mainCli(): Promise<void> {
           helm: displayGrounds(grounds.name, cfg),
           man: helmLabel(res.ok),
           worker: workerLabel(res.ok),
+          chat: helmChat(res.ok, cfg),
           session: sessionId,
           ...(res.ok.tookFrom
             ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` }
@@ -2479,12 +2502,20 @@ async function mainCli(): Promise<void> {
       // An identified helm defaults to its own grounds, and waiting is
       // liveness: the park heartbeats the registration for it.
       const callerHelm = sid !== undefined ? helmOf(sid) : undefined;
+      const chatAtWait = helmChat(callerHelm, cfgWait);
+      const currentChat = () => helmChat(sid ? helmOf(sid) : undefined, loadConfig());
       if (callerHelm) {
         heartbeatHelm(callerHelm.sessionId);
         groundsName ??= callerHelm.grounds;
       }
       try {
         const idle = new IdleWait(sid, cfgWait.wait, opt('--timeout'));
+        const chatChange = callerHelm ? consumeHelmChatChange(callerHelm.grounds) : undefined;
+        if (chatChange) {
+          console.log(toonKV({ event: 'helm-chat', chat: chatChange }));
+          console.log('next: use the current chat mode, then re-arm `lobstah man wait`.');
+          break;
+        }
         const emit = (evs: ReturnType<typeof attentionNow>) => {
           for (const e of evs) {
             console.log(toonKV({ id: e.id, lane: e.lane, verb: e.entry.verb, waitingOn: e.entry.waitingOn, link: e.entry.link, note: e.entry.note, at: e.entry.at }));
@@ -2566,6 +2597,13 @@ async function mainCli(): Promise<void> {
         }
         while (idle.probe || !idle.expired()) {
           await new Promise((r) => setTimeout(r, 1500));
+          if (callerHelm && currentChat() !== chatAtWait) {
+            consumeHelmChatChange(callerHelm.grounds);
+            console.log(toonKV({ event: 'helm-chat', chat: currentChat() }));
+            console.log('next: use the current chat mode, then re-arm `lobstah man wait`.');
+            idle.woke();
+            return;
+          }
           if (callerHelm) heartbeatHelm(callerHelm.sessionId); // waiting IS liveness
           const fresh = freshWakeEvents(baseline, undefined, matchGrounds);
           // Taken after the wake scan: a send answered by a waking verb is
@@ -2613,6 +2651,8 @@ async function mainCli(): Promise<void> {
         process.exitCode = 3; // 2 means a usage mistake; timeout gets its own code
         break;
       } finally {
+        const rule = helmChatRule(callerHelm?.grounds ?? groundsName);
+        if (rule) console.log(`next: ${rule}`);
         waiter?.stop();
       }
     }
@@ -2716,7 +2756,10 @@ async function mainCli(): Promise<void> {
           } else clearParkRenewal(trapReg.trapId);
           break;
         }
-        const emit = (reason: string) => console.log(JSON.stringify({ decision: 'block', reason }));
+        const emit = (reason: string) => {
+          const rule = helmChatRule(hook?.session_id ? helmOf(hook.session_id)?.grounds : undefined);
+          console.log(JSON.stringify({ decision: 'block', reason: reason + (rule ? `\n${rule}` : '') }));
+        };
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
         const relievedNotice = hook?.session_id ? consumeRelievedNotice(hook.session_id) : undefined;
@@ -2734,6 +2777,12 @@ async function mainCli(): Promise<void> {
         // The helm ended a turn: a question it left unanswered walks to the human.
         if (helm) releaseHeldQuestions(helm);
         const cfgHaul = loadConfig();
+        const chatAtPark = helmChat(helm, cfgHaul);
+        const chatChange = helm ? consumeHelmChatChange(helm.grounds) : undefined;
+        if (chatChange) {
+          emit(`Helm chat: ${chatChange}. Use the current mode; the Stop hook re-parks at turn end.`);
+          break;
+        }
         // Strict helm rule: with a claimed lobstah man anywhere, no other
         // session parks as one — a marker-armed bystander would consume the
         // helm's wakes. Silent: a hook never breaks a stop with noise.
@@ -2863,6 +2912,12 @@ async function mainCli(): Promise<void> {
           const baseline = captureWaitBaseline();
           while (!idle.expired()) {
             await new Promise((r) => setTimeout(r, 1500));
+            if (helm && helmChat(helmOf(helm.sessionId)) !== chatAtPark) {
+              consumeHelmChatChange(helm.grounds);
+              emit(`Helm chat: ${helmChat(helmOf(helm.sessionId))}. Use the current mode; the Stop hook re-parks at turn end.`);
+              idle.woke();
+              return;
+            }
             if (helm) heartbeatHelm(helm.sessionId, { parked: true }); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too

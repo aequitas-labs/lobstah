@@ -81,6 +81,7 @@ export interface Seat<T> {
 export interface SettingsItem {
   attentionKinds: string[];
   attentionError?: string;
+  helms: GlassHelm[];
 }
 /** A dispatch modal shows the summary until the detail lands, then both. */
 export type ModalItem = GlassHelm | GlassDispatchSummary | GlassDispatch | GlassPr | GlassTrapView | SettingsItem;
@@ -447,7 +448,7 @@ export function modalItem(d: GlassSnapshot, modal: ModalRef | null, detail?: Dis
     return summary && full ? { ...summary, ...full } : (summary ?? full ?? null);
   }
   if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || null;
-  if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError };
+  if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError, helms: d.helms };
   const t = d.traps.find((v) => v.trapId === modal.key);
   return t ? trapView(d, t) : null;
 }

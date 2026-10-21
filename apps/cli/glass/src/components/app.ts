@@ -51,6 +51,7 @@ export function App({ state }: { state: GlassState }) {
   const onOverlay = (e: Event) => {
     if (e.target === e.currentTarget) closeModal();
   };
+  // Each modal owns its controls: retain them on polls, reset them when switching cards.
   return [
     html`<${Header} d=${d} inp=${inp} tab=${tab} st=${state.prefs} stale=${state.stale} unread=${unread.length} />`,
     GLASS_TABS.map(
@@ -60,7 +61,7 @@ export function App({ state }: { state: GlassState }) {
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
     html`<${LightboxView} box=${state.lightbox} />`,
-    html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
+    html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
     d &&
       html`<${DecisionModal} open=${state.decisionModal} order=${modalOrder()} drafts=${state.drafts} extensions=${d.answerLimits?.extensions ?? []} />`,
     d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`,

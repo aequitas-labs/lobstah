@@ -21,6 +21,9 @@ import {
   readActivity,
   executorPath,
   helmLabel,
+  helmChat,
+  setHelmChat,
+  resolveGrounds,
   laneDirs,
   listHelms,
   listNotices,
@@ -103,8 +106,8 @@ import { backendViews, hostedDispatches } from './hosted-view.js';
  * (`/requests`) that wakes the helm. It runs nothing itself. Its pages report
  * their presence (`/api/presence`), and the local pet or CLI may ask an open
  * page to show an item (`/api/show`, glass-presence.ts). The
- * ⚙ settings modal's two preferences (view, lobs) are the viewing browser's
- * own, kept in its localStorage — the server has nothing to write.
+ * ⚙ settings keeps view/lobs in browser localStorage; helm chat writes only
+ * the selected grounds' seat through a token-gated request.
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
@@ -129,6 +132,7 @@ export function requestBodyCap(): number {
 /** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
+  ['helm-chat', 1024],
   ['decision-viewed', 1024],
   ['report-viewed', 1024],
   ['review-dismiss', 1024],
@@ -551,6 +555,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
     ...h,
+    chat: helmChat(h, cfg),
     grounds: displayGrounds(h.grounds, cfg),
     session: h.sessionId.slice(0, 8),
     man: helmLabel(h),
@@ -853,6 +858,22 @@ export function serveGlass(
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
+          case 'helm-chat': {
+            const { grounds, chat } = (body.payload ?? {}) as { grounds?: unknown; chat?: unknown };
+            if (typeof grounds !== 'string' || grounds.length > 200 || (chat !== 'full' && chat !== 'brief')) {
+              return reply(400, { ok: false, reason: 'Helm grounds and chat full or brief are required.' });
+            }
+            let name: string;
+            try { name = resolveGrounds(loadConfig(), grounds).name; }
+            catch { return reply(400, { ok: false, reason: 'Unknown helm grounds.' }); }
+            try {
+              const seat = setHelmChat(name, chat);
+              return reply(200, { ok: true, grounds: displayGrounds(seat.grounds, loadConfig()), chat });
+            } catch (err) {
+              if (err instanceof Error && err.message.startsWith('no helm signed on')) return reply(409, { ok: false, reason: 'No helm is signed on for these grounds.' });
+              return reply(500, { ok: false, reason: 'The helm chat setting could not be stored.' });
+            }
+          }
           case 'decision-answer': {
             try {
               const { key, ...answer } = decisionAnswerRequest(body.payload);
