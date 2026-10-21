@@ -280,8 +280,7 @@ export async function permissionsCommand(
   const agent = agentSession(env);
   if (agent) throw new GrantError(`permissions ${sub} is for a person, not an agent session (${agent} is set): run it in your own terminal.`);
   if (!opts.yes) {
-    const tty = io.tty ?? (!!process.stdin.isTTY && !!process.stdout.isTTY);
-    if (!tty) throw new Error('not written: not a terminal; review with `lobstah permissions show` and re-run with --yes');
+    if (io.tty === false && !io.ask) throw new Error('no terminal to confirm; re-run with --yes');
     if (!(io.ask ?? confirm)('Write these changes?')) {
       log(toonKV({ written: false }));
       return;

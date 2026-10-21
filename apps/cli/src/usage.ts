@@ -139,13 +139,14 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   trap: {
     subverbs: ['title-set', 'bypass'],
-    flags: { '--session': { value: '<id>' } },
-    flagSubverbs: { '--session': ['title-set'] },
+    flags: { '--session': { value: '<id>' }, '--yes': {} },
+    flagSubverbs: { '--session': ['title-set'], '--yes': ['bypass'] },
     positionals: '[<trap> on|off]',
   },
   grant: {
     flags: {
       '--prefix': {},
+      '--yes': {},
       '--once': {},
       '--harness': { value: 'claude|codex|any' },
       '--expires': { value: '<iso|30m|4h|2d>' },
@@ -349,12 +350,12 @@ Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
 --wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
-\`trap bypass <trap> on|off\` (a person, at a terminal): the trap's next start runs with no permission checks
+\`trap bypass <trap> on|off\` (a person; --yes skips confirmation): the trap's next start runs with no permission checks
 (Claude Code --dangerously-skip-permissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.
 \`trap grant|grants|revoke\` = \`grant|grants|revoke\`.`,
   grant: `Allow traps to run one command (or, with --prefix, the command with more arguments; never
 anything joined on with ;, &&, | or a redirect), or with --path to write one file (a trailing
-slash: anything under it). For a person at a terminal: it asks to confirm, and refuses inside
+slash: anything under it). For a person: it asks to confirm (--yes skips), and refuses inside
 an agent session. --once: one use, within the hour unless --expires. --trap: one trap only.
 Claude Code honours grants through the plugin's mod, Codex through its PermissionRequest hook.`,
   grants: `What a person has granted: id, what, once or always, harness, trap, who, when, uses.

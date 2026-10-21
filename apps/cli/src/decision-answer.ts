@@ -1,7 +1,7 @@
 import { DecisionError, GrantError, answerDecision, askDecision, decisionDir, loadConfig, markDecisionViewed, markQuestionViewed, readDecision } from '@lobstah/core';
 import type { DecisionAnswer, DecisionMeta, DecisionUpload, Lane } from '@lobstah/core';
 import * as fs from 'node:fs';
-import { applyPermissionAnswer, permissionAnswerAllowed } from './grants-cli.js';
+import { applyPermissionAnswer, permissionAnswerAllowed, permissionAnswerOption } from './grants-cli.js';
 import { buildTendReport } from './tend.js';
 import { currentAck, writeAck } from './acks.js';
 
@@ -31,15 +31,17 @@ export function answerKey(key: string, req: AnswerRequest): { decision: Decision
   if (key.startsWith('decision:')) {
     // A permission card: only the glass may allow. An allow writes the grant and tells the trap.
     const asked = readDecision(key);
+    let option = req.option;
     if (asked?.permission) {
       try {
-        permissionAnswerAllowed(asked, req.option, req.by);
+        option = permissionAnswerOption(asked, option, req.text);
+        permissionAnswerAllowed(asked, option, req.by);
       } catch (err) {
         if (err instanceof GrantError) throw new DecisionError(err.message, 403);
         throw err;
       }
     }
-    const answer = answerDecision({ key, ...req, maxBytes });
+    const answer = answerDecision({ key, ...req, option, maxBytes });
     const decision = readDecision(key)!;
     if (decision.permission) applyPermissionAnswer(decision, answer);
     return { decision, answer };
