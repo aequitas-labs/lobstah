@@ -303,8 +303,9 @@ describe('the start command', () => {
       unapplied: ['fast'],
       mode: 'acceptEdits',
     });
-    const codex = startCommand(row({ action: 'resume', resumeFrom: '/w/soak-abcd1234', harness: 'codex', model: 'gpt-5.5', config: { effort: 'high', permissionMode: 'default' } }), entry, 'T');
-    expect(codex.argv).toEqual(['codex', '-c', 'tui.terminal_title=[]', '-m', 'gpt-5.5', '-c', 'model_reasoning_effort="high"', 'resume', 'sess-1', '$lobstah:trap soak --ticket T']);
+    const codex = startCommand(row({ action: 'resume', resumeFrom: '/old-primary', harness: 'codex', model: 'gpt-5.5', config: { effort: 'high', permissionMode: 'default' } }), entry, 'T');
+    expect(codex.cwd).toBe(entry.worktree);
+    expect(codex.argv).toEqual(['codex', '--cd', entry.worktree, '-c', 'tui.terminal_title=[]', '-m', 'gpt-5.5', '-c', 'model_reasoning_effort="high"', 'resume', 'sess-1', '$lobstah:trap soak --ticket T']);
     expect(codex).toMatchObject({ unapplied: [], mode: 'default' });
     expect(startCommand(row({ harness: 'claude' }), entry, 'T')).toMatchObject({ cwd: '/w/soak-abcd1234', argv: ['claude', '--permission-mode', 'auto', '/lobstah:trap soak --ticket T'] });
   });
@@ -313,14 +314,14 @@ describe('the start command', () => {
     const base = { cwd: '/w', ticket: 'T' };
     expect(harnessCommand({ ...base, harness: 'claude' })).toMatchObject({ argv: ['claude', '--permission-mode', 'auto', '/lobstah:trap soak --ticket T'], mode: 'auto' });
     expect(harnessCommand({ ...base, harness: 'codex', writableDirs: ['/home/.lobstah', '/repo/.git'] })).toMatchObject({
-      argv: ['codex', '-c', 'tui.terminal_title=[]', '--approve-for-me', '-c', 'sandbox_workspace_write.network_access=true', '--add-dir', '/home/.lobstah', '--add-dir', '/repo/.git', '$lobstah:trap soak --ticket T'],
+      argv: ['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '--approve-for-me', '-c', 'sandbox_workspace_write.network_access=true', '--add-dir', '/home/.lobstah', '--add-dir', '/repo/.git', '$lobstah:trap soak --ticket T'],
       mode: 'auto',
       unapplied: [],
     });
     // The roster profile's mode, as today.
     expect(harnessCommand({ ...base, harness: 'claude', config: { permissionMode: 'plan' } }).argv).toEqual(['claude', '--permission-mode', 'plan', '/lobstah:trap soak --ticket T']);
     expect(harnessCommand({ ...base, harness: 'codex', config: { permissionMode: 'acceptEdits' } })).toMatchObject({
-      argv: ['codex', '-c', 'tui.terminal_title=[]', '$lobstah:trap soak --ticket T'],
+      argv: ['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '$lobstah:trap soak --ticket T'],
       unapplied: ['permissionMode=acceptEdits'],
     });
     // `man throw --bypass`, over any profile.
@@ -330,8 +331,8 @@ describe('the start command', () => {
     });
     // `bypass` is a mode a profile or the config can name.
     expect(harnessCommand({ ...base, harness: 'claude', config: { permissionMode: 'bypass' } }).argv).toEqual(['claude', '--dangerously-skip-permissions', '/lobstah:trap soak --ticket T']);
-    expect(harnessCommand({ ...base, harness: 'codex', config: { permissionMode: 'bypassPermissions' } }).argv).toEqual(['codex', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
-    expect(harnessCommand({ ...base, harness: 'codex', bypass: true, writableDirs: ['/x'] }).argv).toEqual(['codex', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
+    expect(harnessCommand({ ...base, harness: 'codex', config: { permissionMode: 'bypassPermissions' } }).argv).toEqual(['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
+    expect(harnessCommand({ ...base, harness: 'codex', bypass: true, writableDirs: ['/x'] }).argv).toEqual(['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
     expect([startMode(), startMode({ permissionMode: 'plan' }), startMode({ permissionMode: 'plan', bypass: 'true' }), startMode({}, true)]).toEqual([
       'auto',
       'plan',

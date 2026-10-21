@@ -166,7 +166,7 @@ export function harnessCommand(opts: {
   }
   if (opts.harness === 'codex') {
     // Codex otherwise replaces the trap's custom tab title on every TUI update.
-    const argv = ['codex', '-c', 'tui.terminal_title=[]'];
+    const argv = ['codex', '--cd', opts.cwd, '-c', 'tui.terminal_title=[]'];
     if (opts.model) argv.push('-m', opts.model);
     // No approvals and no sandbox: a person's bypass.
     if (mode === 'bypassPermissions') argv.push('--dangerously-bypass-approvals-and-sandbox');
@@ -200,15 +200,18 @@ export function trapWritableDirs(cwd: string): string[] {
 
 /**
  * The start command for a planned throw. Resume reopens the saved session
- * from the directory its history is keyed by; a cold start opens a new
- * session in the trap's worktree. Either way the first prompt redeems the
+ * from its transcript directory for Claude; Codex always selects the trap's
+ * worktree explicitly. A cold start opens a new session in that worktree. Either way the first prompt redeems the
  * ticket, so the session signs on under the trap's own id and name.
  */
 export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: string, bypass?: boolean): StartCommand {
   const resume = row.action === 'resume';
-  const cwd = resume ? (row.resumeFrom ?? entry.worktree) : entry.worktree;
+  const harness = row.harness ?? entry.harness;
+  // Codex can resume a session whose saved cwd is the primary checkout.
+  // Its explicit --cd must select this trap's checkout, not that history cwd.
+  const cwd = resume && harness !== 'codex' ? (row.resumeFrom ?? entry.worktree) : entry.worktree;
   return harnessCommand({
-    harness: row.harness ?? entry.harness,
+    harness,
     cwd,
     ticket,
     ...(bypass ? { bypass } : {}),
