@@ -1,5 +1,7 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   dropReservation,
   guardNewTraps,
@@ -185,11 +187,11 @@ export function harnessCommand(opts: {
 
 /**
  * Directories a Codex trap in `cwd` writes outside its worktree: lobstah's
- * home (every report and park) and the repo's git common directory (a
- * linked worktree commits there).
+ * home (every report and park), ume's push ledger, and the repo's git common
+ * directory (a linked worktree commits there).
  */
 export function trapWritableDirs(cwd: string): string[] {
-  const dirs = [lobstahHome()];
+  const dirs = [lobstahHome(), path.resolve(cwd, process.env.UME_HOME || path.join(os.homedir(), '.ume'))];
   const git = spawnSync('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
   const common = git.status === 0 ? git.stdout.trim() : '';
   if (common) dirs.push(common);
@@ -294,7 +296,10 @@ async function launchAndWait(
 ): Promise<ThrowResult> {
   const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
   try {
-    if (w.launched.harness === 'codex') w.command.argv.splice(1, 0, ...codexTrapHookArgs());
+    if (w.launched.harness === 'codex') {
+      // An unattended throw must not park at the interactive update picker.
+      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...codexTrapHookArgs());
+    }
     await w.adapter.launch(w.command);
   } catch (err) {
     giveUp(w.trapId, w.label, w.repo, w.retry, w.started, err instanceof Error ? err.message : String(err));

@@ -254,6 +254,7 @@ describe('man throw <name>', () => {
     let launchText = '';
     await expect(throwTrap({ address: 'amber-gull', cfg, batch: 'late-codex', adapter: idle(seen), pollMs: 50, onLaunch: (l) => { launchText = launchedText(l); } })).rejects.toThrow(/ticket remains valid for late sign-on/);
     expect(launchText).toContain('up to 1s');
+    expect(seen[0]!.argv).toContain('check_for_update_on_startup=false');
     const held = readReservation(reg.trapId)!;
     expect(Date.parse(held.deadline) - Date.parse(held.reservedAt)).toBe(1000);
     await expect(throwTrap({ address: 'amber-gull', cfg, adapter: idle(seen) })).rejects.toThrow(TrapStartingError);
@@ -351,12 +352,25 @@ describe('the start command', () => {
     expect(freshProfile(cfg(), 'r').config).toBeUndefined();
   });
 
-  it('gives a Codex trap lobstah home and the repo git directory to write', () => {
-    const dirs = trapWritableDirs(process.cwd());
-    expect(dirs[0]).toBe(lobstahHome());
-    expect(dirs).toHaveLength(2);
-    expect(path.isAbsolute(dirs[1]!)).toBe(true);
-    expect(trapWritableDirs(os.tmpdir())).toEqual([lobstahHome()]);
+  it('gives a Codex trap only lobstah home, ume home, and the repo git directory to write', () => {
+    const priorUmeHome = process.env.UME_HOME;
+    try {
+      delete process.env.UME_HOME;
+      const dirs = trapWritableDirs(process.cwd());
+      expect(dirs.slice(0, 2)).toEqual([lobstahHome(), path.join(os.homedir(), '.ume')]);
+      expect(dirs).toHaveLength(3);
+      expect(path.isAbsolute(dirs[2]!)).toBe(true);
+      expect(trapWritableDirs(os.tmpdir())).toEqual([lobstahHome(), path.join(os.homedir(), '.ume')]);
+      process.env.UME_HOME = path.join(tmp, 'custom-ume');
+      expect(trapWritableDirs(os.tmpdir())).toEqual([lobstahHome(), process.env.UME_HOME]);
+      process.env.UME_HOME = 'relative-ume';
+      const relative = trapWritableDirs(primary);
+      expect(relative.slice(0, 2)).toEqual([lobstahHome(), path.join(primary, 'relative-ume')]);
+      expect(path.resolve(relative[2]!)).toBe(path.join(primary, '.git'));
+    } finally {
+      if (priorUmeHome === undefined) delete process.env.UME_HOME;
+      else process.env.UME_HOME = priorUmeHome;
+    }
   });
 
   it('quotes every word of the shell text a terminal runs', () => {
