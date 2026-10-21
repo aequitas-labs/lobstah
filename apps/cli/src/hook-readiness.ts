@@ -77,8 +77,8 @@ function lobstahHandler(groups: HookGroups[string] | undefined): [number, number
 }
 
 /** Extra plugin events also participate in Codex's blocking startup review. */
-export type CodexHook = LobstahHook | 'UserPromptSubmit' | 'PermissionRequest';
-export const CODEX_EXTRA_HOOKS = ['UserPromptSubmit', 'PermissionRequest'] as const;
+export type CodexHook = LobstahHook | 'UserPromptSubmit' | 'PermissionRequest' | 'PreToolUse';
+export const CODEX_EXTRA_HOOKS = ['UserPromptSubmit', 'PermissionRequest', 'PreToolUse'] as const;
 
 /** Codex's snake_case event label, as its hook trust keys use it. */
 const snake = (hook: CodexHook) => hook.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();

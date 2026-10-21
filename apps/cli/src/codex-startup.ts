@@ -8,6 +8,7 @@ const COMMANDS: Record<CodexHook, string> = {
   SessionStart: 'lobstah hook session-start',
   UserPromptSubmit: 'lobstah hook user-prompt-submit',
   PostToolUse: 'lobstah hook post-tool-use',
+  PreToolUse: 'lobstah hook pre-tool-use',
   PermissionRequest: 'lobstah hook permission-request',
   Stop: 'lobstah hook stop',
   SessionEnd: 'lobstah hook session-end',

@@ -358,7 +358,7 @@ describe('lobstah hook', () => {
   it('bare prints its card; an unknown event is a usage error', () => {
     const bare = hook(['hook'], {});
     expect(bare.status).toBe(0);
-    expect(bare.stdout).toContain('session-start|user-prompt-submit|stop|post-tool-use|session-end|permission-request|grant-check');
+    expect(bare.stdout).toContain('session-start|user-prompt-submit|stop|post-tool-use|session-end|permission-request|pre-tool-use|grant-check');
     const unknown = hook(['hook', 'pre-compact'], {});
     expect(unknown.status).toBe(2);
   });
@@ -372,6 +372,7 @@ describe('lobstah hook', () => {
         UserPromptSubmit: 'lobstah hook user-prompt-submit',
         PostToolUse: 'lobstah hook post-tool-use',
         PermissionRequest: 'lobstah hook permission-request',
+        PreToolUse: 'lobstah hook pre-tool-use',
         Stop: 'lobstah hook stop',
         SessionEnd: 'lobstah hook session-end',
       });

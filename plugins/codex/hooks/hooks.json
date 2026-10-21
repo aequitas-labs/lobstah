@@ -1,5 +1,5 @@
 {
-  "description": "Park the session while lobstah work is in flight; wake it the moment something needs attention. Each hook runs `lobstah hook <event>`, which detects the session's role (helm, trap, or neither). The Stop hook is inert unless the directory opts in with a .lobstah-man file (or LOBSTAH_MAN=1) or the session is soaking (lobstah soak). SessionStart announces the session id; SessionEnd stows a soaking session cleanly. PostToolUse runs `lobstah hook post-tool-use`: a soaking session's liveness and activity, throttled, inert elsewhere. PermissionRequest runs `lobstah hook permission-request`: a call a person granted (`lobstah grant`, or Allow on a glass card) runs without the prompt; inert for anything not granted and outside traps.",
+  "description": "Lobstah lifecycle and grant hooks. Session grants match one helm or trap session and a time-limited tool scope. Legacy command/path grants remain trap-only. PreToolUse and PermissionRequest consult the ledger; Claude Code also loads the tool.check mod. Expired or revoked grants do not match. Harness deny rules and organization limits still apply.",
   "hooks": {
     "SessionStart": [
       {
@@ -52,7 +52,7 @@
           {
             "type": "command",
             "command": "lobstah hook stop",
-            "statusMessage": "lobstah park — waiting for the fleet",
+            "statusMessage": "lobstah park \u2014 waiting for the fleet",
             "timeout": 14500
           }
         ]
@@ -65,6 +65,17 @@
             "type": "command",
             "command": "lobstah hook session-end",
             "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lobstah hook pre-tool-use",
+            "timeout": 10
           }
         ]
       }

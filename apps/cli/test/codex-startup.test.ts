@@ -24,12 +24,12 @@ afterEach(() => removeTempDir(home));
 const args = () => codexTrapHookArgs({ env: { CODEX_HOME: home } });
 
 describe('Codex trap startup trust', () => {
-  it('scopes six current hook hashes to the invocation, preserving user config and enablement', () => {
+  it('scopes seven current hook hashes to the invocation, preserving user config and enablement', () => {
     const before = fs.readFileSync(config, 'utf8');
     const overrides = args();
     expect(overrides[0]).toBe('-c');
     const state = (parse(overrides[1]!) as any).hooks.state;
-    expect(Object.keys(state)).toHaveLength(6);
+    expect(Object.keys(state)).toHaveLength(7);
     expect(Object.keys(state).every((k) => k.startsWith('lobstah@lobstah:hooks/hooks.json:'))).toBe(true);
     for (const entry of Object.values(state)) expect(entry).toEqual({ trusted_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) });
     expect(state).not.toHaveProperty('repo:stop:0:0');
@@ -40,7 +40,7 @@ describe('Codex trap startup trust', () => {
   it.each([
     ['suffix', (h: any) => { h.hooks.Stop[0].hooks[0].command += '; echo unexpected'; }],
     ['Windows command', (h: any) => { h.hooks.Stop[0].hooks[0].commandWindows = 'echo unexpected'; }],
-    ['unknown event', (h: any) => { h.hooks.PreToolUse = h.hooks.Stop; }],
+    ['unknown event', (h: any) => { h.hooks.UnknownEvent = h.hooks.Stop; }],
     ['other handler type', (h: any) => { h.hooks.Stop[0].hooks[0].type = 'prompt'; }],
   ])('refuses an unrecognized plugin definition: %s', (_, alter) => {
     const hooks = bundled();

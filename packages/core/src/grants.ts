@@ -30,7 +30,7 @@ import type { CheckoutRoot } from './grant-scope.js';
  */
 
 export type GrantHarness = 'claude' | 'codex' | 'any';
-export type GrantMode = 'once' | 'always';
+export type GrantMode = 'once' | 'always' | 'session';
 
 /** An unused once-grant lapses after this long unless an expiry is given. */
 export const ONCE_TTL_MS = 60 * 60 * 1000;
@@ -57,6 +57,12 @@ export interface Grant {
   /** The dispatch whose request it answered, when it came from a card. */
   dispatch?: string;
   expiresAt?: string;
+  session?: string;
+  tools?: string;
+  hosts?: string[];
+  reason?: string;
+  audit?: Array<{ tool: string; at: string; hosts?: string[] }>;
+  callIds?: string[];
   uses: number;
   lastUsedAt?: string;
   revokedAt?: string;
@@ -64,6 +70,10 @@ export interface Grant {
 }
 
 export interface GrantInput {
+  session?: string;
+  tools?: string;
+  hosts?: string[];
+  reason?: string;
   command?: string;
   match?: 'exact' | 'prefix';
   path?: string;
@@ -79,6 +89,9 @@ export interface GrantInput {
 export interface GrantRequest {
   harness: 'claude' | 'codex';
   tool: string;
+  session?: string;
+  input?: Record<string, unknown>;
+  cwd?: string;
   command?: string;
   path?: string;
   trap?: string;
@@ -86,7 +99,7 @@ export interface GrantRequest {
 
 type LedgerEvent =
   | ({ type: 'grant' } & Omit<Grant, 'uses' | 'lastUsedAt' | 'revokedAt' | 'revokedBy'>)
-  | { type: 'use'; id: string; at: string; session?: string }
+  | { type: 'use'; id: string; at: string; session?: string; tool?: string; hosts?: string[]; callId?: string }
   | { type: 'revoke'; id: string; at: string; by: string };
 
 export class GrantError extends Error {}
@@ -133,14 +146,20 @@ export function readLedger(): Ledger {
     } catch {
       return { grants: [...byId.values()], intact: false, problem: `line ${n + 1} is not JSON`, head };
     }
-    if (ev.prev !== head) return { grants: [...byId.values()], intact: false, problem: `line ${n + 1} does not follow the line before it`, head };
+    if (ev.prev !== head)
+      return { grants: [...byId.values()], intact: false, problem: `line ${n + 1} does not follow the line before it`, head };
     head = sha(line);
     if (ev.type === 'grant') {
       const { type: _type, prev: _prev, ...grant } = ev as LedgerEvent & { type: 'grant'; prev?: unknown };
       byId.set(grant.id, { ...grant, uses: 0 });
     } else if (ev.type === 'use') {
       const g = byId.get(ev.id);
-      if (g) Object.assign(g, { uses: g.uses + 1, lastUsedAt: ev.at });
+      if (g) {
+        Object.assign(g, { uses: g.uses + 1, lastUsedAt: ev.at });
+        if (ev.tool)
+          g.audit = [...(g.audit ?? []), { tool: ev.tool, at: ev.at, ...(ev.hosts?.length ? { hosts: ev.hosts } : {}) }].slice(-20);
+        if (ev.callId) g.callIds = [...(g.callIds ?? []), ev.callId].slice(-50);
+      }
     } else if (ev.type === 'revoke') {
       const g = byId.get(ev.id);
       if (g && !g.revokedAt) Object.assign(g, { revokedAt: ev.at, revokedBy: ev.by });
@@ -206,7 +225,11 @@ export function commandGrantScope(raw: string): { command: string; match: 'exact
   if ((words[0] === 'pnpm' || words[0] === 'npm' || words[0] === 'bun') && ['run', 'exec', 'dlx'].includes(words[1] ?? '')) count = 3;
   if ((words[0] === 'git' && ['remote', 'worktree', 'submodule', 'stash'].includes(words[1] ?? '')) || words[0] === 'gh') count = 3;
   if (words[0] === 'ume' && ['intents', 'work', 'theme', 'sdk', 'hooks', 'local', 'skill', 'agent'].includes(words[1] ?? '')) count = 3;
-  if (['exec', 'dlx'].includes(words[1] ?? '') && ['node', 'python', 'python3', 'sh', 'bash', 'zsh', 'ruby', 'perl', 'deno', 'tsx', 'ts-node'].includes(words[2] ?? '')) return exact;
+  if (
+    ['exec', 'dlx'].includes(words[1] ?? '') &&
+    ['node', 'python', 'python3', 'sh', 'bash', 'zsh', 'ruby', 'perl', 'deno', 'tsx', 'ts-node'].includes(words[2] ?? '')
+  )
+    return exact;
   if (words.length < count || words.slice(0, count).some((w) => !/^[A-Za-z0-9_.-]+$/.test(w) || w.startsWith('-'))) return exact;
   // A dry run must never become permission to perform the operation for real.
   if (words.includes('--dry-run')) {
@@ -241,6 +264,9 @@ function pathCovers(want: string, have: string, sep: string): boolean {
  * so it covers the same command or file in any checkout of the repo.
  */
 export function grantCovers(g: Grant, req: GrantRequest, roots: readonly CheckoutRoot[] = checkoutRoots()): boolean {
+  if (g.mode === 'session') return sessionGrantCovers(g, req);
+  if (req.session) return false;
+  if (req.session && g.session && req.session !== g.session) return false;
   if (g.harness !== 'any' && g.harness !== req.harness) return false;
   if (g.trap && g.trap !== req.trap) return false;
   const widen = g.mode === 'always';
@@ -266,7 +292,12 @@ export function grantCovers(g: Grant, req: GrantRequest, roots: readonly Checkou
     if (widen) {
       const dir = g.path.endsWith('/') || g.path.endsWith(path.sep);
       // A legacy always-grant names an absolute path: read it as repo-relative when it sits in a checkout.
-      const scope = g.repo !== undefined ? { repo: g.repo, rel: g.path.replace(/\/$/, '') } : path.isAbsolute(g.path) ? locateInRepo(g.path, roots) : undefined;
+      const scope =
+        g.repo !== undefined
+          ? { repo: g.repo, rel: g.path.replace(/\/$/, '') }
+          : path.isAbsolute(g.path)
+            ? locateInRepo(g.path, roots)
+            : undefined;
       if (scope && scope.rel !== '') {
         const at = locateInRepo(req.path, roots);
         if (!at || at.repo !== scope.repo) return false;
@@ -294,6 +325,32 @@ export function listGrants(opts: { all?: boolean; now?: number } = {}): { grants
 export function addGrant(input: GrantInput, now = new Date(), roots: readonly CheckoutRoot[] = checkoutRoots()): Grant {
   const command = input.command?.trim();
   const target = input.path?.trim();
+  if (input.mode === 'session') {
+    const { expiresAt, hosts } = validateSessionGrant(input, now);
+    const tool = input.tools!;
+    const grant: Grant = {
+      id: `g-${crypto.randomBytes(4).toString('hex')}`,
+      at: now.toISOString(),
+      by: input.by,
+      harness: input.harness ?? 'any',
+      mode: 'session',
+      session: input.session,
+      tools: tool,
+      ...(command ? { command, match: 'prefix' } : {}),
+      ...(hosts.length ? { hosts: [...new Set(hosts)] } : {}),
+      ...(input.reason ? { reason: input.reason.slice(0, 1000) } : {}),
+      ...(input.trap ? { trap: input.trap } : {}),
+      expiresAt,
+      uses: 0,
+    };
+    return withLock(() => {
+      const ledger = readLedger();
+      if (!ledger.intact) throw new GrantError('the grants ledger is damaged');
+      const { uses: _u, ...rest } = grant;
+      append(ledger.head, { type: 'grant', ...rest });
+      return grant;
+    });
+  }
   if (!command === !target) throw new GrantError('a grant names one command or one path');
   if (command && input.match === 'prefix' && SHELL_JOINERS.test(command)) {
     throw new GrantError('a prefix grant cannot contain shell syntax (;, &, |, a redirect or a subshell); grant the exact command instead');
@@ -349,7 +406,7 @@ export function revokeGrant(id: string, by: string, now = new Date()): Grant {
  * once-grant is spent by it. Returns undefined when nothing covers it, or
  * when the ledger is damaged.
  */
-export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date } = {}): Grant | undefined {
+export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date; callId?: string } = {}): Grant | undefined {
   const now = opts.now ?? new Date();
   if (!fs.existsSync(ledgerPath())) return undefined;
   const roots = checkoutRoots();
@@ -362,7 +419,142 @@ export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date
       .sort((a, b) => (a.mode === b.mode ? 0 : a.mode === 'always' ? -1 : 1));
     const g = covering[0];
     if (!g) return undefined;
-    append(ledger.head, { type: 'use', id: g.id, at: now.toISOString(), ...(opts.session ? { session: opts.session } : {}) });
+    if (opts.callId && g.callIds?.includes(opts.callId)) return g;
+    append(ledger.head, {
+      type: 'use',
+      id: g.id,
+      at: now.toISOString(),
+      ...(opts.session ? { session: opts.session } : {}),
+      ...(g.mode === 'session'
+        ? { tool: req.tool, hosts: toolHosts(req.input ?? {}).hosts, ...(opts.callId ? { callId: opts.callId } : {}) }
+        : {}),
+    });
     return { ...g, uses: g.uses + 1, lastUsedAt: now.toISOString() };
   });
+}
+
+/** URL hosts only: never retain typed text, paths, queries, or other tool inputs. */
+export function toolHosts(input: Record<string, unknown>): { hosts: string[]; invalid: boolean } {
+  const hosts = new Set<string>();
+  let invalid = false;
+  let count = 0;
+  const walk = (value: unknown, key = '', depth = 0): void => {
+    if (++count > 10000 || depth > 20) {
+      invalid = true;
+      return;
+    }
+    if (typeof value === 'string') {
+      if (/^(?:https?|file|ftp):\/\//i.test(value) || /^(?:url|uri)$/i.test(key)) {
+        try {
+          const u = new URL(value);
+          if (!['http:', 'https:'].includes(u.protocol)) invalid = true;
+          else hosts.add(u.hostname.toLowerCase().replace(/\.$/, ''));
+        } catch {
+          invalid = true;
+        }
+      }
+    } else if (Array.isArray(value)) value.forEach((x) => walk(x, key, depth + 1));
+    else if (value && typeof value === 'object') Object.entries(value).forEach(([k, v]) => walk(v, k, depth + 1));
+  };
+  walk(input);
+  return { hosts: [...hosts], invalid };
+}
+
+/** Literal sensitive targets are never covered, even by a broad session tool glob. */
+export function sessionGuarded(req: GrantRequest): boolean {
+  const strings: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') strings.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(req.input ?? {});
+  if (req.command) strings.push(req.command);
+  if (req.path) strings.push(req.path);
+  const text = strings.join('\n').replace(/\\/g, '/');
+  if (/\blobstah\b[^\n;|&]*\bgrants?\b/i.test(text)) return true;
+  const protectedText =
+    /(?:^|[/\s'"~])\.(?:claude|codex)\/(?:settings(?:\.local)?\.json|config\.toml|hooks(?:\.json|\/)|rules\/)|\.lobstah\/(?:grants(?:\/|$)|config\.toml)/i;
+  if (protectedText.test(text) || text.includes(grantsDir()) || text.includes(path.join(lobstahHome(), 'config.toml'))) return true;
+  if (req.cwd && path.resolve(req.cwd) === path.resolve(lobstahHome()) && /\bconfig\.toml\b/.test(text)) return true;
+  if (/mcp__lobstah__.*(?:grant|config)/i.test(req.tool)) return true;
+  {
+    const real = (p: string) => {
+      try {
+        return fs.realpathSync(p);
+      } catch {
+        return p;
+      }
+    };
+    // Relative paths resolve in the caller's cwd; symlink targets count too.
+    for (const raw of [
+      ...strings.filter((v) => !v.includes('\n')),
+      ...strings.flatMap((v) => v.split(/\s+/).map((t) => t.replace(/^["']|["']$/g, ''))),
+    ]) {
+      let file = path.resolve(req.cwd ?? process.cwd(), raw.replace(/^~(?=\/)/, process.env.HOME ?? ''));
+      let head = file;
+      const tail: string[] = [];
+      while (!fs.existsSync(head) && path.dirname(head) !== head) {
+        tail.unshift(path.basename(head));
+        head = path.dirname(head);
+      }
+      try {
+        file = path.join(fs.realpathSync(head), ...tail);
+      } catch {
+        /* use absolute path */
+      }
+      if (
+        file === real(lobstahHome()) ||
+        file.startsWith(real(grantsDir()) + path.sep) ||
+        file === path.join(real(lobstahHome()), 'config.toml') ||
+        /[/]\.(?:claude|codex)[/](?:settings(?:\.local)?\.json|config\.toml|hooks(?:\.json|[/])|rules[/])/.test(file)
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
+export function sessionGrantCovers(g: Grant, req: GrantRequest): boolean {
+  if (!req.session || req.session !== g.session || !g.expiresAt || !grantActive(g)) return false;
+  if (g.harness !== 'any' && g.harness !== req.harness) return false;
+  if (!g.tools || sessionGuarded(req)) return false;
+  const pattern = g.tools
+    .split('*')
+    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  if (!new RegExp(`^${pattern}$`).test(req.tool)) return false;
+  if (['Bash', 'shell', 'exec_command'].includes(req.tool.split('.').at(-1)!)) {
+    if (g.tools !== 'Bash' || !g.command || !req.command) return false;
+    return grantCovers({ ...g, mode: 'once', session: undefined, trap: undefined }, { ...req, session: undefined }, []);
+  }
+  const urls = toolHosts(req.input ?? {});
+  if (
+    g.hosts?.length &&
+    (urls.invalid || urls.hosts.some((h) => !g.hosts!.includes(h)) || (/navigate|WebFetch/i.test(req.tool) && !urls.hosts.length))
+  )
+    return false;
+  return true;
+}
+
+/** Validate a request without writing any grant or ledger entry. */
+export function validateSessionGrant(input: GrantInput, now = new Date()): { expiresAt: string; hosts: string[] } {
+  const command = input.command?.trim();
+  const target = input.path?.trim();
+  if (!input.session || !/^[A-Za-z0-9_-]{1,200}$/.test(input.session)) throw new GrantError('a session grant needs exactly one session id');
+  if (!input.tools || !/^[A-Za-z0-9_.*-]{1,200}$/.test(input.tools) || !/[A-Za-z0-9]/.test(input.tools))
+    throw new GrantError('an exact tool name or tool glob is required');
+  if (target) throw new GrantError('a session grant cannot name a file');
+  const tool = input.tools;
+  if ((tool === 'Bash' || /(?:^|[.*_])(Bash|shell|exec_command)(?:$|[.*_])/.test(tool)) && (!command || input.match !== 'prefix'))
+    throw new GrantError('Bash session grants require a command prefix');
+  if (command && (tool !== 'Bash' || input.match !== 'prefix' || SHELL_JOINERS.test(command)))
+    throw new GrantError('a session Bash prefix cannot contain shell syntax');
+  const expiresAt = input.expiresAt ?? new Date(now.getTime() + 15 * 60_000).toISOString();
+  const ttl = Date.parse(expiresAt) - now.getTime();
+  if (!Number.isFinite(ttl) || ttl <= 0 || ttl > 4 * 3600_000) throw new GrantError('session grants expire after at most 4h');
+  const hosts = (input.hosts ?? []).map((h) => h.trim().toLowerCase().replace(/\.$/, ''));
+  if (hosts.some((h) => !h || h.includes('*') || new URL(`https://${h}`).hostname !== h || /[/:@?#]/.test(h)))
+    throw new GrantError('hosts must be exact hostnames without URL paths or wildcards');
+  return { expiresAt, hosts };
 }

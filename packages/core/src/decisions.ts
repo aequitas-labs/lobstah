@@ -35,6 +35,9 @@ import type { Attachment, Lane } from './types.js';
  * to the grants ledger.
  */
 export interface PermissionAsk {
+  session?: string;
+  tool?: string;
+  sessionGrant?: { session: string; tools: string; hosts?: string[]; durationMs: number; reason: string; command?: string };
   command?: string;
   path?: string;
   harness: 'claude' | 'codex' | 'any';

@@ -11,6 +11,7 @@ import {
   enqueue,
   ensureLayout,
   listGrants,
+  revokeGrant,
   readDecision,
   readDecisionDetail,
   signOnTrap,
@@ -151,6 +152,19 @@ describe('lobstah hook grant-check (the Claude Code mod)', () => {
 });
 
 describe('the Claude Code mod', () => {
+  it('the real mod allows a matching helm tool ask, but preserves denials and immediate revocation', async () => {
+    const g = addGrant({ mode: 'session', session: 'helm-session', tools: 'mcp__browser__*', hosts: ['example.com'], by: 'glass' });
+    const { register } = await import(new URL('../../../plugins/claude-code/hooks/grants.mjs', import.meta.url).href);
+    let handler: any;
+    register((_event: unknown, _filter: unknown, fn: unknown) => { handler = fn; });
+    const api = { env: { get: async (key: string) => key === 'LOBSTAH_HOME' ? home : os.homedir() }, fs: { exists: async (file: string) => fs.existsSync(file) }, session: { id: async () => 'helm-session', cwd: async () => home }, process: { run: async (_cmd: string[], opts: { stdin: string }) => { const r = run(['hook', 'grant-check'], JSON.parse(opts.stdin)); return { exitCode: r.status, stdout: r.stdout }; } } };
+    const call = { tool: 'mcp__browser__navigate', input: { url: 'https://example.com/' }, tool_use_id: 'mod-call' };
+    expect(await handler(api, call, async () => ({ decision: 'ask' }))).toMatchObject({ decision: 'allow' });
+    expect(await handler(api, call, async () => ({ decision: 'deny' }))).toEqual({ decision: 'deny' });
+    revokeGrant(g.id, 'glass');
+    expect(await handler(api, call, async () => ({ decision: 'ask' }))).toEqual({ decision: 'ask' });
+  });
+
   it('uses only the mods API: a hooks module may import nothing but its own files and claude-code', () => {
     const source = fs.readFileSync(fileURLToPath(new URL('../../../plugins/claude-code/hooks/grants.mjs', import.meta.url)), 'utf8');
     expect(source).not.toMatch(/^\s*import\b/m);
@@ -185,7 +199,7 @@ describe('a permission card', () => {
 
   it('offers Allow once, Allow always and No, and shows the exact command', () => {
     const c = card();
-    expect(c.options).toEqual(['Allow once', 'Allow always', 'No']);
+    expect(c.options).toEqual(['Allow once', 'Allow always', 'Allow this tool family for 15 min', 'No']);
     expect(c.title).toBe('Allow: wrangler deploy');
     expect(readDecision(c.key)?.permission).toMatchObject({ command: 'wrangler deploy', harness: 'codex' });
   });
@@ -367,5 +381,51 @@ describe('the y/N prompt', () => {
     expect(() => ask(terminal(Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' })))).toThrow(
       /could not read your answer: EIO/,
     );
+  });
+});
+
+describe('session grants', () => {
+  it('an agent can request but cannot grant; a glass click grants only the requested session', async () => {
+    const r = run(['grant', 'request', '--session', 'helm-session', '--tools', 'mcp__browser__*', '--hosts', 'example.com', '--reason', 'Inspect the site'], undefined, { CLAUDECODE: '1' });
+    expect(r.status, r.stderr).toBe(0); expect(listGrants().grants).toEqual([]);
+    const c = standingDecisions()[0]!; expect(c.options).toEqual(['Allow for 15m', 'Allow for 1h', 'Deny']);
+    expect(() => answerKey(c.key, { option: 'Allow for 15m', by: 'cli' })).toThrow('person');
+    answerKey(c.key, { option: 'Allow for 15m', by: 'glass' });
+    expect(listGrants().grants[0]).toMatchObject({ mode: 'session', session: 'helm-session', tools: 'mcp__browser__*', hosts: ['example.com'] });
+    const h = { session_id: 'helm-session', tool_name: 'mcp__browser__navigate', tool_input: { url: 'https://example.com/private?token=secret' }, tool_use_id: 'once-id', cwd: home };
+    expect(JSON.parse(run(['hook', 'pre-tool-use'], h).stdout).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'allow' });
+    expect(JSON.parse(run(['hook', 'permission-request'], h).stdout)).toEqual(ALLOW);
+    expect(listGrants().grants[0]?.uses).toBe(1);
+    expect(run(['hook', 'permission-request'], { ...h, session_id: 'other' }).stdout).toBe('');
+    expect(run(['hook', 'permission-request'], { ...h, tool_input: { url: 'https://evil.example/' } }).stdout).toBe('');
+    expect(run(['grant', '--session', 'helm-session', '--tools', 'WebFetch', '--yes'], undefined, { CLAUDECODE: '1' }).status).not.toBe(0);
+  });
+  it('a denied browser call from an assigned trap files a session request with host pins', () => {
+    const t = trap('browser-trap', 'codex');
+    enqueue({ id: 'browser-job', repo: 'web', brief: 'Read the page' }); claimBait(trapBySession('browser-trap')!);
+    run(['hook', 'permission-request'], { session_id: 'browser-trap', tool_name: 'mcp__browser__navigate', tool_input: { url: 'https://example.com/private' }, cwd: t.worktree });
+    expect(standingDecisions()[0]?.permission?.sessionGrant).toMatchObject({ session: 'browser-trap', tools: 'mcp__browser__*', hosts: ['example.com'] });
+  });
+  it('PreToolUse does not spend a legacy once grant before a permission request needs it', () => {
+    trap('legacy-trap', 'claude');
+    addGrant({ command: 'echo fixture', mode: 'once', trap: trapBySession('legacy-trap')!.name, by: 'glass' });
+    const h = { session_id: 'legacy-trap', tool_name: 'Bash', tool_input: { command: 'echo fixture' }, cwd: home };
+    expect(run(['hook', 'pre-tool-use'], h).stdout).toBe('');
+    expect(listGrants().grants[0]?.uses).toBe(0);
+    expect(JSON.parse(run(['hook', 'permission-request'], h).stdout)).toEqual(ALLOW);
+  });
+
+  it('the old command card adds a 15-minute tool family option scoped to the asking session', () => {
+    const t = trap('family-trap', 'claude');
+    const c = askPermission({ dispatch: 'd-family', lane: 'work', ask: { command: 'npx wrangler deploy --dry-run', harness: 'claude', trap: t.name } });
+    expect(c.options).toContain('Allow this tool family for 15 min');
+    answerKey(c.key, { option: 'Allow this tool family for 15 min', by: 'glass' });
+    expect(listGrants().grants[0]).toMatchObject({ mode: 'session', session: 'family-trap', tools: 'Bash', command: 'npx wrangler deploy --dry-run' });
+  });
+  it('Deny writes no grant and malformed duration/host requests fail before creating a card', () => {
+    const r = run(['grant', 'request', '--session', 's', '--tools', 'WebFetch', '--for', '5h', '--reason', 'Read'], undefined);
+    expect(r.status).not.toBe(0); expect(standingDecisions()).toEqual([]);
+    const ok = run(['grant', 'request', '--session', 's', '--tools', 'WebFetch', '--reason', 'Read'], undefined);
+    expect(ok.status).toBe(0); answerKey(standingDecisions()[0]!.key, { option: 'Deny', by: 'glass' }); expect(listGrants().grants).toEqual([]);
   });
 });

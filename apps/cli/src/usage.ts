@@ -146,6 +146,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   grant: {
     flags: {
+      '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--tools': { value: '<tool-glob>' }, '--hosts': { value: '<a,b>' }, '--for': { value: '<15m|1h>' }, '--reason': { value: '<text>' }, '--command': { value: '<prefix>' },
       '--prefix': {},
       '--yes': {},
       '--once': {},
@@ -232,7 +233,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
   'man:brief': { flags: {} },
-  hook: { flags: {}, subverbs: ['session-start', 'user-prompt-submit', 'stop', 'post-tool-use', 'session-end', 'permission-request', 'grant-check'], maxPositionals: 1 },
+  hook: { flags: {}, subverbs: ['session-start', 'user-prompt-submit', 'stop', 'post-tool-use', 'session-end', 'permission-request', 'pre-tool-use', 'grant-check'], maxPositionals: 1 },
   'man:file': {
     flags: {
       '--attach': { value: '<file>', repeatable: true },
@@ -356,11 +357,8 @@ Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
 \`trap bypass <trap> on|off\` (a person; --yes skips confirmation): the trap's next start runs with no permission checks
 (Claude Code --dangerously-skip-permissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.
 \`trap grant|grants|revoke\` = \`grant|grants|revoke\`.`,
-  grant: `Allow traps to run one command (or, with --prefix, the command with more arguments; never
-anything joined on with ;, &&, | or a redirect), or with --path to write one file (a trailing
-slash: anything under it). For a person: it asks to confirm (--yes skips), and refuses inside
-an agent session. --once: one use, within the hour unless --expires. --trap: one trap only.
-Claude Code honours grants through the plugin's mod, Codex through its PermissionRequest hook.`,
+  grant: `A person grants a command/path, or --tools for one session (15m default, 4h max).
+Agents use grant request to ask in glass. Prefixes never cover shell joiners; --yes skips terminal confirmation.`,
   grants: `What a person has granted: id, what, once or always, harness, trap, who, when, uses.
 --all adds spent, expired and revoked grants. A trap checks a relayed approval here.`,
   revoke: `Revoke a grant by id. Anyone may take a permission away.`,

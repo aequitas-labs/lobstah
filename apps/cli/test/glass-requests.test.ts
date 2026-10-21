@@ -74,7 +74,7 @@ it('refuses a permission answer without a button option, including typed allowan
   for (const payload of [{}, { text: 'why?' }, { text: 'allow always: ume push' }, { option: '', text: 'Allow once' }]) {
     const response = await post({ kind: 'decision-answer', payload: { key: card.key, ...payload, files: [] } });
     expect(response.status).toBe(400);
-    expect((await response.json()).reason).toContain('choose Allow once, Allow always, or No');
+    expect((await response.json()).reason).toContain('choose an option on the permission card');
     expect(readDecisionAnswer(card.key)).toBeUndefined();
     expect(listGrants().grants).toEqual([]);
   }
