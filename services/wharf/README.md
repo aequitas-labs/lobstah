@@ -81,23 +81,43 @@ account's SQLite Durable Object; core does not import this service or Better Aut
 Sign in at `https://glass.lobstah.dev` first. The CLI names the account, and the
 account is the random ID of the signed-in person: open
 `https://glass.lobstah.dev/api/auth/get-session` in that browser and copy
-`user.id`. Then add the wharf and a grounds that uses it to
-`~/.lobstah/config.toml` on each boat:
+`user.id`. Then name the wharf in `~/.lobstah/config.toml` on each boat:
 
 ```toml
 [wharves.lobstah]
 url = "https://api.lobstah.dev"
 account = "<user.id from get-session>"
 tokenEnv = "LOBSTAH_WHARF_TOKEN"
-
-[grounds.away]
-repos = ["lobstah"]
-wharf = "lobstah"
 ```
 
-The grounds' repos must also be configured repos. `tokenEnv` names an override
-variable; leave it unset to use the saved login. On the machine that holds the
-helm:
+`tokenEnv` names an override variable; leave it unset to use the saved login.
+A repo belongs to one grounds, and with no `[grounds.*]` configured every repo
+sits in the implicit `home` grounds. Configuring any grounds replaces it, so
+list every repo you still want steered. A configured `home` is a new grounds:
+the implicit one's helm seat, goals and todo stay behind. Choose one:
+
+- Move the whole fleet to the wharf: one grounds that lists every repo.
+
+  ```toml
+  [grounds.home]
+  repos = ["<every configured repo>"]
+  wharf = "lobstah"
+  ```
+
+- Move some repos: a local grounds for the rest and a wharf grounds for the
+  moved ones, each repo in exactly one.
+
+  ```toml
+  [grounds.home]
+  repos = ["<repos that stay local>"]
+
+  [grounds.away]
+  repos = ["<repos steered from the phone>"]
+  wharf = "lobstah"
+  ```
+
+The examples below use `away`; with the first option, use `home`. On the
+machine that holds the helm:
 
 ```bash
 lobstah wharf login --grounds away --helm
@@ -108,7 +128,7 @@ lobstah man helm --grounds away --session <id>
 `login` prints a URL and code; open it on the phone or any signed-in browser,
 check the boat name and access, and approve. Boats that only fish log in
 without `--helm` (or with `--work-only`) and sign on with
-`lobstah soak --grounds away --repo lobstah --wait`.
+`lobstah soak --grounds away --repo <repo> --wait`.
 
 ### Sign-in, login and limits
 
