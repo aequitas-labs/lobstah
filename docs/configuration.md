@@ -362,6 +362,7 @@ key reused as the routing key. Opt-in is per repo, never implied. With no repo o
 
 | Key | Default | Meaning |
 |---|---|---|
+| `publish` | `false` (`true` for auto-review) | The glass draft/publish toggle, including on-demand jobs. Switching it changes auto-draft ↔ auto-review. Each job remembers whether publishing was enabled when it started. |
 | `identity` | required | The bot login work is assigned to / authored by. |
 | `repo` | single-repo mode | `owner/name`. Omit for multi-repo mode. |
 | `key` | single-repo mode | Lobstah repo key for dispatches and rebase chores. |
@@ -392,17 +393,18 @@ Run `lobstah setup reviews` (optional `--identity <login>`) to derive the GitHub
 
 When someone asks `[reviews].identity` for a review, `lobstah pick`
 files a review item ([pickup.md](pickup.md), "Review requests"). It searches
-as that identity, with its token source, independently of `[pickup.github]`. Identity defaults to `gh api user`; the token source defaults to `gh auth token`. Existing pickup credentials remain a fallback. Settings such as cost bounds and skip rules can be overridden per repo under `[repos.<key>.reviews]`.
+as that identity, with its token source, independently of `[pickup.github]`. Identity defaults to `gh api user`; the token source defaults to `gh auth token`. Existing pickup credentials remain a fallback. Mode, publish, cost bounds, and skip rules can be overridden per repo under `[repos.<key>.reviews]`; those overrides win over `[reviews]`. The glass repo filter scopes the mode switch and Publish toggle to that repo; All repos edits the global default. `lobstah doctor` shows each repo’s effective mode before pick is installed.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | Opt-in. Off means no search call at all. |
 | `repos` | `"configured"` | `"configured"`: only PRs in a `[repos.*]` origin. `"any"`: every repo the token can see. |
-| `mode` | `"notify"` | `"notify"`: items/glass/pet only; `"on-demand"`: the glass Draft review button starts a round; `"auto"`: new requests get trap review jobs. |
+| `mode` | `"notify"` | `"notify"`: items/glass/pet only; `"on-demand"`: only the glass Review action starts a round; `"auto-draft"`: new requests get trap drafts staged pending; `"auto-review"`: new requests get drafts published as COMMENT reviews. |
+| `publish` | `false` (`true` for auto-review) | The glass draft/publish toggle, including on-demand jobs. Switching it changes auto-draft ↔ auto-review. Each job remembers whether publishing was enabled when it started. |
 | `identity` | `gh api user` | The reviewer login. |
 | `tokenCommand`, `tokenFile`, `tokenEnv` | `gh auth token` | Token sources, using the same precedence as pickup. |
-| `work` | legacy | `"off"` maps to on-demand, `"trap"`/`"headless"` map to auto; explicit mode wins. |
-| `post` | legacy | Accepted for compatibility; all automatic and on-demand drafts stay pending for the person to send. Pick never submits or approves a review. |
+| `work` | legacy | `"off"` maps to on-demand, `"trap"`/`"headless"` map to auto-draft; explicit mode wins. The worker choice still applies to automatic jobs. |
+| `post` | legacy | `"draft"` stages pending; `"auto"` maps to auto-review. Explicit mode/publish wins. Publishing always uses COMMENT, never APPROVE or REQUEST_CHANGES, and refuses stale drafts. |
 | `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |

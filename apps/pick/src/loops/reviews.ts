@@ -32,7 +32,7 @@ import {
 import type { ReviewItem, ReviewRound } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
 import { dispatchLane } from './report.js';
-import { dismissReviewRound, redraftReviewRound, settleStagedReview, stageReview } from '../reviews-post.js';
+import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview, stageReview } from '../reviews-post.js';
 import { claimReviewDocs, publishReviewDocs, reviewScope, runReviewRequests } from '../reviews-wharf.js';
 import type { ReviewWharfOptions } from '../reviews-wharf.js';
 import type { FetchLike } from '../reviews-post.js';
@@ -155,16 +155,23 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
 }
 
 /**
- * A fresh draft is staged as the person's pending review, to edit and send
- * from their review tool. A stale draft is never staged on its own, and a failed attempt
- * is not retried on its own (the round keeps the reason).
+ * A fresh draft is staged pending or published as COMMENT according to
+ * the repo policy and the job's publishing receipt. Stale drafts and failed
+ * attempts are not retried automatically.
  */
 async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: number }, log: (m: string) => void): Promise<void> {
   for (const item of listReviews()) {
     const r = latestRound(item);
-    if (r?.state !== 'drafted' || r.staged || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
+    if (r?.state !== 'drafted' || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
+    const settings = reviewSettings(loadConfig().reviews, item.pr.repoKey);
+    const publish = settings.mode !== 'notify' && settings.publish && (r.publish ?? !r.draftOnly);
+    if (publish) {
+      const out = await postReview(item.key, { by: 'auto', ...gh });
+      log(out.posted ? `${item.key}: comment review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
+    } else if (!r.staged) {
       const out = await stageReview(item.key, gh);
       log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${out.why}`);
+    }
   }
 }
 
@@ -338,7 +345,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       const at = new Date(now).toISOString();
       r.draftStarts = [...(r.draftStarts ?? (r.dispatchedAt ? [r.dispatchedAt] : [])), at];
       Object.assign(r, { state: 'drafting', dispatch: id, dispatchedAt: at });
-      if (manualKey) r.draftOnly = true;
+      r.publish = settings.publish;
+      r.draftOnly = !settings.publish;
       delete r.reason;
       save();
       started++;
@@ -386,12 +394,12 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
   }
 }
 
-/** Draft one requested, stale, or failed round immediately, even in notification-only mode. */
+/** Start one requested, stale, or failed round according to its repo policy. */
 export async function draftReviewOnDemand(key: string, now = Date.now()): Promise<string | undefined> {
-  if (loadConfig().reviews.mode === 'notify') return 'reviews are in notify mode; switch to on-demand or auto to draft';
   const item = readReview(key);
   const round = item && latestRound(item);
   if (!item || !round) return `no review item ${key}`;
+  if (reviewSettings(loadConfig().reviews, item.pr.repoKey).mode === 'notify') return 'reviews are in notify mode; switch to on-demand or an automatic mode to review';
   if (!['requested', 'stale', 'failed'].includes(round.state) || (round.state === 'requested' && round.dispatch)) return `${key}: this round is already ${round.state}`;
   const why = noJob(item, round, startedToday(listReviews(), now));
   if (why) return why;

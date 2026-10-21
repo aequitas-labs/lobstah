@@ -2,13 +2,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'smol-toml';
-import { configPath, DEFAULT_ATTENTION_KINDS, loadConfig, REVIEW_MODES, uniqueTempPath, withDirLock } from '@lobstah/core';
+import { configPath, DEFAULT_ATTENTION_KINDS, loadConfig, REVIEW_MODES, reviewSettings, uniqueTempPath, withDirLock } from '@lobstah/core';
 import { loadPickupConfig, pickupPlan } from '@lobstah/pick';
 import { installService } from './service.js';
 
 /** Change only the reviews keys and attention list, retaining comments and unrelated tables. */
-export function writeReviewMode(mode: string, identity?: string): void {
-  if (!(REVIEW_MODES as readonly string[]).includes(mode)) throw new Error('reviews mode must be notify, on-demand, or auto');
+export function writeReviewMode(mode: string, identity?: string, opts: { repo?: string; publish?: boolean } = {}): void {
+  if (!(REVIEW_MODES as readonly string[]).includes(mode)) throw new Error('reviews mode must be notify, on-demand, auto-draft, or auto-review');
+  if (opts.repo && !loadConfig().repos[opts.repo]) throw new Error('unknown review repo');
+  if (opts.publish !== undefined && typeof opts.publish !== 'boolean') throw new Error('reviews publish must be a boolean');
   if (identity !== undefined && !/^[A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?$/.test(identity)) throw new Error('invalid GitHub login');
   const file = configPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -18,17 +20,21 @@ export function writeReviewMode(mode: string, identity?: string): void {
       let text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
       const raw = parse(text) as Record<string, unknown>;
       const reviews = (raw.reviews ?? {}) as Record<string, unknown>;
-      const keys: Record<string, unknown> = { enabled: true, mode, ...(identity ? { identity } : {}) };
+      const publish = opts.publish ?? (mode.startsWith('auto-') ? mode === 'auto-review' : undefined);
+      const keys: Record<string, unknown> = { ...(!opts.repo ? { enabled: true } : {}), mode, ...(publish !== undefined ? { publish } : {}), ...(identity ? { identity } : {}) };
       if (
-        !reviews.tokenCommand &&
+        !opts.repo && !reviews.tokenCommand &&
         !reviews.tokenEnv &&
         !reviews.tokenFile &&
         (identity !== undefined || !(raw.pickup as { github?: unknown } | undefined)?.github)
       )
         keys.tokenCommand = 'gh auth token';
-      if (reviews.repos === undefined && identity !== undefined) keys.repos = 'any';
-      const head = /^\s*\[reviews\]\s*(?:#.*)?$/m.exec(text);
-      if (!head && raw.reviews !== undefined) throw new Error('reviews setup needs a [reviews] table');
+      if (!opts.repo && reviews.repos === undefined && identity !== undefined) keys.repos = 'any';
+      const table = opts.repo ? `repos.${JSON.stringify(opts.repo)}.reviews` : 'reviews';
+      const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const key = opts.repo ? `repos\\.(?:${escape(JSON.stringify(opts.repo))}|${escape(opts.repo)})\\.reviews` : 'reviews';
+      const head = new RegExp(`^[ \\t]*\\[${key}\\][ \\t]*(?:#.*)?$`, 'm').exec(text);
+      if (!opts.repo && !head && raw.reviews !== undefined) throw new Error('reviews setup needs a [reviews] table');
       if (head) {
         const start = head.index + head[0].length;
         const next = /^\s*\[/m.exec(text.slice(start));
@@ -41,7 +47,7 @@ export function writeReviewMode(mode: string, identity?: string): void {
         }
         text = text.slice(0, start) + body + '\n' + text.slice(end);
       } else
-        text += `\n[reviews]\n${Object.entries(keys)
+        text += `\n[${table}]\n${Object.entries(keys)
           .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
           .join('\n')}\n`;
       if (identity !== undefined) {
@@ -106,6 +112,11 @@ export function pickRunning(now = Date.now()): boolean {
 }
 
 export function reviewSetupView() {
-  const cfg = loadConfig().reviews;
-  return { enabled: cfg.enabled, mode: cfg.mode, identity: cfg.identity, running: pickRunning() };
+  const config = loadConfig();
+  const cfg = config.reviews;
+  const perRepo = Object.fromEntries(Object.keys(config.repos).map(key => {
+    const settings = reviewSettings(cfg, key);
+    return [key, { mode: settings.mode, publish: settings.publish, overridden: cfg.perRepo[key]?.mode !== undefined || cfg.perRepo[key]?.publish !== undefined }];
+  }));
+  return { enabled: cfg.enabled, mode: cfg.mode, publish: cfg.publish, perRepo, identity: cfg.identity, running: pickRunning() };
 }

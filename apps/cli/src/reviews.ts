@@ -1,4 +1,4 @@
-import { latestRound, listReviews, prReviewUrl, reviewStands } from '@lobstah/core';
+import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands } from '@lobstah/core';
 import type { GlassReview } from '@lobstah/core';
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
@@ -26,6 +26,7 @@ export function reviewRows(all = false): Array<Record<string, string>> {
 /** The glass's review rows: every item's newest round, and where the PR opens in its review tool. */
 export function glassReviews(tools: Readonly<Record<string, string>> = {}): GlassReview[] {
   const out: GlassReview[] = [];
+  const config = loadConfig().reviews;
   for (const item of listReviews()) {
     const r = latestRound(item);
     if (!r) continue;
@@ -34,6 +35,8 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const name = automatic ? item.pr.authorName : (r.requestedByName ?? (asker === item.pr.author ? item.pr.authorName : undefined));
     const avatar = automatic ? item.pr.authorAvatarUrl : (r.requestedByAvatarUrl ?? (asker === item.pr.author ? item.pr.authorAvatarUrl : undefined));
     out.push({
+      mode: reviewSettings(config, item.pr.repoKey).mode,
+      publish: reviewSettings(config, item.pr.repoKey).publish,
       key: item.key,
       url: item.pr.url,
       reviewUrl: prReviewUrl(item.pr.url, tools),

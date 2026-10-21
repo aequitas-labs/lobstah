@@ -21,6 +21,7 @@ import {
   slotUsage,
   worktreesDir,
   readKeptWorktrees,
+  reviewSettings,
 } from '@lobstah/core';
 import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig, pickupPlan } from '@lobstah/pick';
@@ -303,7 +304,7 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
     try {
       const pk = loadPickupConfig();
       push('pickup', pk.github.some((g) => g.issues || g.prFeedback) ? 'warn' : 'ok', pickupPlan(pk).join('; '));
-      if (cfg.reviews.enabled) push('reviews', pickRunning(now) ? 'ok' : 'warn', `${pk.reviews?.identity ?? 'unknown identity'}; mode ${cfg.reviews.mode}; pick ${pickRunning(now) ? 'running' : 'not running — lobstah setup reviews'}`);
+      if (cfg.reviews.enabled) push('reviews', pickRunning(now) ? 'ok' : 'warn', `${pk.reviews?.identity ?? 'unknown identity'}; mode ${cfg.reviews.mode}; ${Object.keys(cfg.repos).map(key => { const r = reviewSettings(cfg.reviews, key); return `${key}: ${r.mode} (${r.publish ? 'publish COMMENT' : 'draft'})`; }).join('; ')}${Object.keys(cfg.repos).length ? '; ' : ''}pick ${pickRunning(now) ? 'running' : 'not running — lobstah setup reviews'}`);
     } catch (err) {
       push('pickup', 'fail', err instanceof Error ? err.message : String(err));
       if (cfg.reviews.enabled) push('reviews', 'fail', err instanceof Error ? err.message : String(err));

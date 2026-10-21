@@ -18,11 +18,13 @@ export const REVIEW_WORK = ['off', 'trap', 'headless'] as const;
 export type ReviewWork = (typeof REVIEW_WORK)[number];
 export const REVIEW_POST = ['draft', 'auto'] as const;
 export type ReviewPost = (typeof REVIEW_POST)[number];
-export const REVIEW_MODES = ['notify', 'on-demand', 'auto'] as const;
+export const REVIEW_MODES = ['notify', 'on-demand', 'auto-draft', 'auto-review'] as const;
 export type ReviewMode = (typeof REVIEW_MODES)[number];
 
 /** The settings a repo can override under `[repos.<key>.reviews]`. */
 export interface ReviewSettings {
+  mode: ReviewMode;
+  publish: boolean;
   /** Who drafts: no one, a free trap of the repo (then headless after trapWaitSecs), or headless. */
   work: ReviewWork;
   /** `draft`: stage the draft as the identity's pending review, sent from the review tool. `auto`: post it as a comment-only review once drafted. */
@@ -56,6 +58,7 @@ export interface ReviewsConfig extends ReviewSettings {
 export const DEFAULT_REVIEWS: ReviewsConfig = {
   enabled: false,
   mode: 'notify',
+  publish: false,
   repos: 'configured',
   work: 'off',
   post: 'draft',
@@ -84,6 +87,14 @@ function strings(value: unknown, where: string): string[] {
 
 function parseSettings(raw: Record<string, unknown>, where: string): Partial<ReviewSettings> {
   const out: Partial<ReviewSettings> = {};
+  if (raw.mode !== undefined) out.mode = oneOf(raw.mode, REVIEW_MODES, `${where}.mode`);
+  else if (raw.post === 'auto') out.mode = 'auto-review';
+  else if (raw.work === 'off') out.mode = 'on-demand';
+  else if (raw.work !== undefined || raw.post !== undefined) out.mode = 'auto-draft';
+  if (raw.publish !== undefined) {
+    if (typeof raw.publish !== 'boolean') throw new Error(`${where}.publish must be a boolean`);
+    out.publish = raw.publish;
+  }
   if (raw.work !== undefined) out.work = oneOf(raw.work, REVIEW_WORK, `${where}.work`);
   if (raw.post !== undefined) out.post = oneOf(raw.post, REVIEW_POST, `${where}.post`);
   for (const k of ['harness', 'model', 'effort'] as const) if (raw[k] !== undefined) out[k] = String(raw[k]);
@@ -101,7 +112,9 @@ export function parseReviews(raw: unknown, reposRaw: Record<string, Record<strin
   const r = (raw ?? {}) as Record<string, unknown>;
   if (typeof r !== 'object' || Array.isArray(r)) throw new Error('[reviews] must be a table');
   const base = parseSettings(r, '[reviews]');
-  const mode = r.mode !== undefined ? oneOf(r.mode, REVIEW_MODES, '[reviews].mode') : r.work === 'off' ? 'on-demand' : (r.work !== undefined || r.post !== undefined) ? 'auto' : 'notify';
+  const requestedMode = base.mode ?? 'notify';
+  const publish = base.publish ?? (requestedMode === 'auto-review');
+  const mode = requestedMode.startsWith('auto-') ? (publish ? 'auto-review' : 'auto-draft') : requestedMode;
   const perRepo: Record<string, Partial<ReviewSettings>> = {};
   for (const [key, repo] of Object.entries(reposRaw)) {
     if (repo.reviews !== undefined) perRepo[key] = parseSettings(repo.reviews as Record<string, unknown>, `[repos.${key}.reviews]`);
@@ -110,8 +123,9 @@ export function parseReviews(raw: unknown, reposRaw: Record<string, Record<strin
     ...DEFAULT_REVIEWS,
     ...base,
     mode,
-    work: mode === 'auto' ? (base.work && base.work !== 'off' ? base.work : 'trap') : 'off',
-    post: 'draft',
+    publish,
+    work: mode.startsWith('auto-') ? (base.work && base.work !== 'off' ? base.work : 'trap') : 'off',
+    post: publish ? 'auto' : 'draft',
     ...Object.fromEntries(['identity', 'tokenCommand', 'tokenEnv', 'tokenFile'].filter((k) => r[k] !== undefined).map((k) => [k, String(r[k])])),
     limits: { ...DEFAULT_REVIEWS.limits, ...base.limits },
     enabled: r.enabled === undefined ? false : Boolean(r.enabled),
@@ -125,7 +139,11 @@ export function parseReviews(raw: unknown, reposRaw: Record<string, Record<strin
 export function reviewSettings(cfg: ReviewsConfig, repoKey?: string): ReviewSettings {
   const o = (repoKey && cfg.perRepo[repoKey]) || {};
   const { enabled: _e, mode: _mode, identity: _i, tokenCommand: _c, tokenEnv: _v, tokenFile: _f, repos: _r, maxPerDay: _m, perRepo: _p, ...base } = cfg;
-  return { ...base, ...o, work: cfg.mode === 'auto' ? (o.work ?? base.work) : 'off', post: 'draft', limits: { ...base.limits, ...o.limits } };
+  const requestedMode = o.mode ?? cfg.mode;
+  const publish = o.publish ?? (o.mode === 'auto-draft' ? false : o.mode === 'auto-review' ? true : cfg.publish);
+  const mode = requestedMode.startsWith('auto-') ? (publish ? 'auto-review' : 'auto-draft') : requestedMode;
+  const work = mode.startsWith('auto-') ? (o.work && o.work !== 'off' ? o.work : base.work !== 'off' ? base.work : 'trap') : 'off';
+  return { ...base, ...o, mode, publish, work, post: publish ? 'auto' : 'draft', limits: { ...base.limits, ...o.limits } };
 }
 
 // ── The item store ─────────────────────────────────────────────────────────
@@ -141,8 +159,10 @@ export interface ReviewRound {
   requestedByName?: string;
   requestedByAvatarUrl?: string;
   requestedAutomatically?: boolean;
-  /** A manual draft may be staged, but is never automatically submitted. */
+  /** Compatibility receipt: a draft-only job must not be automatically submitted. */
   draftOnly?: boolean;
+  /** Whether this job was explicitly started with publishing enabled. */
+  publish?: boolean;
   /** The head the round reviews. */
   headSha: string;
   state: ReviewRoundState;

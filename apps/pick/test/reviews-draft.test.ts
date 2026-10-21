@@ -71,9 +71,31 @@ describe('starting a review job', () => {
     expect(await draftReviewOnDemand(KEY, NOW)).toContain('notify mode');
     config('mode = "on-demand"');
     request({ number: 8 });
+    draftReviews('chris', () => {}, NOW);
+    expect(pendingIds('chore')).toEqual([]);
     expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
     expect(round()).toMatchObject({ state: 'drafting', draftOnly: true });
     expect(queuedDescriptor(round().dispatch!, 'chore')).toMatchObject({ readOnly: true, trapAny: true });
+    expect(round('review:acme/web#8').state).toBe('requested');
+    expect(pendingIds('chore')).toHaveLength(1);
+  });
+
+  it.each(['notify', 'on-demand'])('%s repo overrides stop automatic jobs even with a publishing global default', (mode) => {
+    config('mode = "auto-review"');
+    fs.appendFileSync(path.join(home, 'config.toml'), `\n[repos.web.reviews]\nmode = "${mode}"\npublish = true\n`);
+    request();
+    draftReviews('chris', () => {}, NOW);
+    expect(pendingIds('chore')).toEqual([]);
+    expect(round().state).toBe('requested');
+  });
+
+  it('on-demand uses the repo publish toggle and leaves other requests untouched', async () => {
+    config('mode = "notify"');
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[repos.web.reviews]\nmode = "on-demand"\npublish = true\n');
+    request();
+    request({ number: 8 });
+    expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+    expect(round()).toMatchObject({ state: 'drafting', publish: true, draftOnly: false });
     expect(round('review:acme/web#8').state).toBe('requested');
     expect(pendingIds('chore')).toHaveLength(1);
   });

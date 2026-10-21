@@ -53,6 +53,22 @@ function seen(over: { id?: string; head?: string; number?: number; skip?: string
 }
 
 describe('[reviews] config', () => {
+  it('resolves mode and publish overrides per repo, with global defaults and legacy auto posting', () => {
+    const cfg = parseReviews({ mode: 'auto-review' }, {
+      web: { reviews: { mode: 'on-demand', publish: false } },
+      api: { reviews: { mode: 'auto-draft' } },
+      cli: { reviews: { publish: false } },
+      ops: { reviews: { mode: 'notify', publish: true } },
+    });
+    expect(reviewSettings(cfg, 'web')).toMatchObject({ mode: 'on-demand', publish: false, work: 'off' });
+    expect(reviewSettings(cfg, 'api')).toMatchObject({ mode: 'auto-draft', publish: false, work: 'trap' });
+    expect(reviewSettings(cfg, 'cli')).toMatchObject({ mode: 'auto-draft', publish: false });
+    expect(reviewSettings(cfg, 'ops')).toMatchObject({ mode: 'notify', publish: true, work: 'off' });
+    expect(reviewSettings(cfg, 'other')).toMatchObject({ mode: 'auto-review', publish: true, work: 'trap', post: 'auto' });
+    expect(parseReviews({ post: 'auto', work: 'off' })).toMatchObject({ mode: 'auto-review', publish: true, work: 'trap' });
+    expect(parseReviews({ mode: 'on-demand', publish: true })).toMatchObject({ mode: 'on-demand', publish: true, work: 'off' });
+    expect(() => parseReviews({ publish: 'yes' })).toThrow('publish must be a boolean');
+  });
   it('is off by default, with the planned defaults', () => {
     const cfg = loadConfig().reviews;
     expect(cfg).toMatchObject({ enabled: false, mode: 'notify', repos: 'configured', work: 'off', post: 'draft', trapWaitSecs: 600, maxPerDay: 20 });

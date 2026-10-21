@@ -314,7 +314,7 @@ work (humans and agents):
   reviews [--all] [--json]        PRs that ask for your review, and each
                                   one's newest round
   reviews redraft <key>           draft a stale or failed review again
-  reviews post <key> [--stale]    send the staged draft as a comment-only review
+  reviews post <key>              send a fresh draft as a comment-only review
   reviews dismiss <key>           drop the review and its pending draft
   prs [sync]                      list known PRs, or refresh due PR watches
   cull [--older-than <days>] [--apply]

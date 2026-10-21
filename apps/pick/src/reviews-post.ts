@@ -67,7 +67,7 @@ function context(key: string, opts: Opts): { r: ReviewRound; token: () => string
   if (!item || !r) return `no review item ${key}`;
   const config = opts.token ? undefined : loadPickupConfig();
   const token = opts.token ?? config?.reviews?.token ?? config?.githubIdentity?.token;
-  if (!token) return 'reviews need [pickup.github] for its identity and token';
+  if (!token) return 'reviews need an identity and token source';
   return { r, token, f: opts.fetch ?? (fetch as FetchLike), at: new Date(opts.now ?? Date.now()).toISOString(), base: `/repos/${item.pr.owner}/${item.pr.repo}/pulls/${item.pr.number}/reviews` };
 }
 
@@ -159,16 +159,15 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
  * was never staged (`[reviews].post = "auto"`). At most once per round:
  * `posted.json` guards the write, and a sent review that already carries
  * the round's marker (another boat posted it) is recorded instead. A stale
- * draft posts only when `stale` is passed, with a line saying the PR has
- * moved since.
+ * draft is always refused; re-draft against the current head before publishing.
  */
 export async function postReview(key: string, opts: Opts & { by: PostBy; stale?: boolean }): Promise<PostResult> {
   const c = context(key, opts);
   if (typeof c === 'string') return { posted: false, why: c };
   const { r, token, f, at, base } = c;
   if (r.state === 'posted') return { posted: false, why: `${key}: this round is already posted` };
-  if (r.state === 'stale' && !opts.stale) return { posted: false, why: `${key}: the draft reviews ${r.headSha.slice(0, 7)} and the PR has moved; re-draft it, or post it anyway as stale` };
-  if (r.state !== 'drafted' && r.state !== 'stale') return { posted: false, why: `${key}: the newest round is ${r.state}; there is no draft to post` };
+  if (r.state === 'stale' || r.headSha !== readReview(key)?.pr.headSha) return { posted: false, why: `${key}: the draft is stale; re-draft it before publishing` };
+  if (r.state !== 'drafted') return { posted: false, why: `${key}: the newest round is ${r.state}; there is no draft to post` };
   const draft = readRoundDraft(key, r.id);
   if ('error' in draft) return { posted: false, why: `${key}: ${draft.error}` };
   const lock = receipt(key, r.id, 'posted.json', opts.by, at);
@@ -180,6 +179,14 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
       fs.writeFileSync(lock, JSON.stringify({ reviewId: String(prior.id), by: 'another boat', at }));
       markReviewPosted(key, r.id, { reviewId: String(prior.id), by: 'another boat', at });
       return { posted: true, reviewId: String(prior.id), by: 'another boat' };
+    }
+    // A push can land between the search and this write. Verify the head
+    // immediately before publishing, including a staged pending review.
+    const current = await github<{ head?: { sha?: string }; state?: string }>(f, token(), 'GET', base.replace(/\/reviews$/, ''));
+    if (current.head?.sha !== r.headSha || (current.state !== undefined && current.state !== 'open')) {
+      fs.rmSync(lock, { force: true });
+      saveRound(key, r.id, (x) => { x.state = 'stale'; x.reason = 'the PR head changed or closed before publishing; re-draft it'; }, at);
+      return { posted: false, why: `${key}: the PR head changed or closed before publishing; re-draft it` };
     }
     const posted = r.staged
       ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event: EVENT, body: reviewBody(draft.body, r) })

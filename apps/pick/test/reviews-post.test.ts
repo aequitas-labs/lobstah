@@ -50,7 +50,7 @@ interface Call {
  * that answers with id 99 (or fails with `postStatus`), a submit of a pending
  * review, one review's state by id, and a delete.
  */
-function github(calls: Call[], existing: Array<{ id: number; body: string; state?: string }> = [], postStatus = 200): FetchLike {
+function github(calls: Call[], existing: Array<{ id: number; body: string; state?: string }> = [], postStatus = 200, head = 'aaaaaaa1'): FetchLike {
   return async (url, init) => {
     calls.push({ method: init.method, url, ...(init.body ? { body: JSON.parse(init.body) } : {}) });
     const one = /\/reviews\/(\d+)$/.exec(url);
@@ -58,6 +58,7 @@ function github(calls: Call[], existing: Array<{ id: number; body: string; state
       const r = existing.find((x) => x.id === Number(one[1]));
       return r ? new Response(JSON.stringify(r), { status: 200 }) : new Response('Not Found', { status: 404 });
     }
+    if (init.method === 'GET' && /\/pulls\/\d+$/.test(url)) return new Response(JSON.stringify({ head: { sha: head }, state: 'open' }));
     if (init.method === 'GET') return new Response(JSON.stringify(existing), { status: 200 });
     if (init.method === 'DELETE') return new Response(JSON.stringify({}), { status: 200 });
     // Let a second, concurrent caller run while this one waits on GitHub.
@@ -98,13 +99,20 @@ describe('postReview', () => {
     expect(both.filter((o) => o.posted)).toHaveLength(1);
   });
 
-  it('a stale draft posts only with stale, and says the PR moved', async () => {
+  it('refuses a stale draft even with the old explicit stale flag', async () => {
     drafted('stale');
     const calls: Call[] = [];
-    expect(await postReview(KEY, { by: 'cli', token: tok, fetch: github(calls) })).toMatchObject({ posted: false, why: expect.stringContaining('re-draft it') });
+    for (const stale of [false, true]) expect(await postReview(KEY, { by: 'cli', stale, token: tok, fetch: github(calls) })).toMatchObject({ posted: false, why: expect.stringContaining('re-draft it') });
     expect(calls).toEqual([]);
-    await postReview(KEY, { by: 'cli', stale: true, token: tok, fetch: github(calls) });
-    expect(posts(calls)[0]!.body!.body).toBe(`Looks right.\n\n_Drafted at aaaaaaa; the PR has moved since._\n\n${MARKER}`);
+  });
+
+  it('checks the live head immediately before publishing, refusing a push after search', async () => {
+    drafted();
+    const calls: Call[] = [];
+    expect(await postReview(KEY, { by: 'auto', token: tok, fetch: github(calls, [], 200, 'bbbbbbb2') })).toMatchObject({ posted: false, why: expect.stringContaining('head changed') });
+    expect(posts(calls)).toEqual([]);
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'stale' });
+    expect(fs.existsSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'posted.json'))).toBe(false);
   });
 
   it('a review already carrying the round marker is recorded, not posted again', async () => {
@@ -148,13 +156,34 @@ describe('posting from the reviews loop', () => {
     expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', staged: { reviewId: '99' } });
   });
 
-  it('legacy post = "auto" stages a pending draft once and never submits it', async () => {
+  it('legacy post = "auto" publishes a COMMENT review once', async () => {
     config('auto');
     drafted();
     const calls: Call[] = [];
     for (let i = 0; i < 2; i++) await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
-    expect(posts(calls).map((c) => c.body!.event)).toEqual([undefined]);
-    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', staged: { reviewId: '99' } });
+    expect(posts(calls).map((c) => c.body!.event)).toEqual(['COMMENT']);
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'posted', by: 'auto' });
+  });
+
+  it.each(['auto-draft', 'auto-review'])('%s follows the repo override and never sends an approval or change request', async (mode) => {
+    config('draft');
+    fs.appendFileSync(path.join(home, 'config.toml'), `\n[repos.web.reviews]\nmode = "${mode}"\n`);
+    drafted();
+    const calls: Call[] = [];
+    await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
+    expect(posts(calls).map(c => c.body?.event)).toEqual([mode === 'auto-review' ? 'COMMENT' : undefined]);
+    expect(latestRound(readReview(KEY)!)?.state).toBe(mode === 'auto-review' ? 'posted' : 'drafted');
+  });
+
+  it('a job started in draft mode stays pending after switching to publish', async () => {
+    config('auto');
+    drafted();
+    const item = readReview(KEY)!;
+    Object.assign(item.rounds[0]!, { publish: false, draftOnly: true });
+    writeReview(item);
+    const calls: Call[] = [];
+    await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
+    expect(posts(calls).map(c => c.body?.event)).toEqual([undefined]);
   });
 
   it('post = "auto" never posts a stale draft, and does not retry a failed post', async () => {
@@ -170,7 +199,7 @@ describe('posting from the reviews loop', () => {
     await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls, [], 422) });
     await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
     expect(posts(calls)).toHaveLength(1);
-    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', reason: expect.stringContaining('stage failed') });
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', reason: expect.stringContaining('post failed') });
   });
 });
 

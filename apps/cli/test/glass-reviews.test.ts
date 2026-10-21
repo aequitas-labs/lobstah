@@ -89,13 +89,13 @@ describe('the Reviews tab', () => {
     const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviewSetup: { enabled: true, mode: 'notify', identity: 'chris', running: true } }, { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g);
     await g.go('#reviews');
-    expect(g.$$('#reviews button').some((b) => b.textContent === 'Draft review')).toBe(false);
+    expect(g.$$('#reviews button').some((b) => b.textContent === 'Review (draft)')).toBe(false);
     const select = g.$('#reviews select') as unknown as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(['notify', 'on-demand', 'auto']);
+    expect([...select.options].map((o) => o.value)).toEqual(['notify', 'on-demand', 'auto-draft', 'auto-review']);
     select.value = 'on-demand';
     select.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
     await g.settle();
-    expect(g.posts().some((p) => p.body === JSON.stringify({ kind: 'review-mode', payload: { mode: 'on-demand' } }))).toBe(true);
+    expect(g.posts().some((p) => p.body === JSON.stringify({ kind: 'review-mode', payload: { mode: 'on-demand', publish: false } }))).toBe(true);
   });
 
   it('a workflow request names the PR author and uses the configured review tool', () => {
@@ -104,6 +104,24 @@ describe('the Reviews tab', () => {
       round: { id: 'RRE_7', requestedAt: ago(60), requestedBy: 'github-actions' },
     });
     expect(glassReviews({ 'acme/web': 'linear-app' })[0]).toMatchObject({ asker: 'dana', askerName: 'Dana Developer', automatic: true, reviewUrl: 'linear://review/acme/web/pull/7' });
+  });
+  it('the repo filter scopes the settings chip and row labels use each repo policy', async () => {
+    const g = await loadGlass(GLASS_PAGE, {
+      ...fleet(), repos: ['web'],
+      reviews: [review(8, { mode: 'on-demand', publish: true })],
+      reviewSetup: { enabled: true, mode: 'notify', publish: false, running: true, perRepo: { web: { mode: 'on-demand', publish: true, overridden: true } } },
+    }, { now: NOW, prefs: { repo: 'web' }, post: () => ({ status: 200, body: { ok: true } }) });
+    open.push(g);
+    await g.go('#reviews');
+    expect(g.$('#reviews')?.textContent).toContain('Review mode · web');
+    expect([...g.$$('#f-repo option')].map(o => o.textContent)).toContain('web');
+    expect(g.$('#reviews')?.textContent).toContain('Review (publish)');
+    const toggle = g.$('#reviews input[aria-label="Publish reviews"]') as unknown as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    toggle.checked = false;
+    toggle.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
+    await g.settle();
+    expect(g.posts().some(p => p.body === JSON.stringify({ kind: 'review-mode', payload: { mode: 'on-demand', publish: false, repo: 'web' } }))).toBe(true);
   });
   it('rows open the PR in its review tool; only dismiss and re-draft act here; no count on the tab', async () => {
     const g = await loadGlass(GLASS_PAGE, fleet(), { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
@@ -114,7 +132,7 @@ describe('the Reviews tab', () => {
     expect(rows.map((r) => r.querySelector('td')?.textContent)).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
     expect(rows[1]!.textContent).toContain('drafted');
     expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Dismiss']);
-    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Draft review', 'Dismiss']);
+    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Review (draft)', 'Dismiss']);
     expect(rows[3]!.querySelectorAll('button')).toHaveLength(0);
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
@@ -186,6 +204,11 @@ describe('review requests on /requests', () => {
       expect(pendingIds('chore')).toHaveLength(1);
       expect(latestRound(readReview('review:acme/web#7')!)?.state).toBe('drafting');
       expect((await send(base, token, 'review-mode', { mode: 'post' })).status).toBe(400);
+      expect((await send(base, token, 'review-mode', { mode: 'auto-review', repo: 'web', publish: true })).status).toBe(200);
+      expect(loadConfig().reviews.perRepo.web).toMatchObject({ mode: 'auto-review', publish: true });
+      expect(loadConfig().reviews.mode).toBe('on-demand');
+      expect((await send(base, token, 'review-mode', { mode: 'notify', repo: 'missing' })).status).toBe(400);
+      expect((await send(base, token, 'review-mode', { mode: 'notify', publish: 'yes' })).status).toBe(400);
     } finally { delete process.env.LOBSTAH_TEST_REVIEW_TOKEN; }
   });
 

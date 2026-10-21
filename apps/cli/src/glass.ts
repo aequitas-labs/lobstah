@@ -882,10 +882,11 @@ export function serveGlass(
             }
           }
           case 'review-mode': {
-            const mode = (body.payload as { mode?: unknown } | undefined)?.mode;
+            const { mode, repo, publish } = (body.payload ?? {}) as { mode?: unknown; repo?: unknown; publish?: unknown };
             if (typeof mode !== 'string') return reply(400, { ok: false, reason: 'A reviews mode is required.' });
+            if ((repo !== undefined && (typeof repo !== 'string' || !repo)) || (publish !== undefined && typeof publish !== 'boolean')) return reply(400, { ok: false, reason: 'A repo key and boolean publish setting are required.' });
             try {
-              writeReviewMode(mode);
+              writeReviewMode(mode, undefined, { repo: repo as string | undefined, publish: publish as boolean | undefined });
               return reply(200, { ok: true });
             } catch (err) {
               return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) });
@@ -894,7 +895,7 @@ export function serveGlass(
           case 'review-dismiss':
           case 'review-draft':
           case 'review-redraft': {
-            // A click on the Reviews tab. Sending happens in the review tool; these only drop or re-draft.
+            // On-demand jobs follow the repo's current draft/publish setting.
             const key = (body.payload as { key?: unknown } | undefined)?.key;
             if (typeof key !== 'string' || !key.startsWith('review:') || key.length > 200) return reply(400, { ok: false, reason: 'A review key is required.' });
             const act = body.kind === 'review-dismiss' ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);

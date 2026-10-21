@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, loadConfig } from '@lobstah/core';
+import { ensureLayout, loadConfig, reviewSettings } from '@lobstah/core';
 import { loadPickupConfig, pickupPlan } from '@lobstah/pick';
 import { pickRunning, setupReviews, writeReviewMode } from '../src/reviews-setup.js';
 import { runDoctor } from '../src/doctor.js';
@@ -22,6 +22,19 @@ afterEach(() => {
 });
 const write = (s: string) => fs.writeFileSync(path.join(home, 'config.toml'), s);
 const auth = '[reviews]\nidentity = "chris"\ntokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"\n';
+
+it('writes only the selected repo override and doctor shows its effective policy', async () => {
+  write(auth + 'enabled = true\nmode = "auto-review"\n[repos.web]\npath = "/w"\n[repos.web.reviews]\n# keep override comment\nmode = "notify"\n[repos.api]\npath = "/a"\n');
+  writeReviewMode('on-demand', undefined, { repo: 'web', publish: false });
+  const cfg = loadConfig();
+  expect(cfg.reviews).toMatchObject({ mode: 'auto-review', identity: 'chris', tokenEnv: 'LOBSTAH_TEST_REVIEW_TOKEN' });
+  expect(reviewSettings(cfg.reviews, 'web')).toMatchObject({ mode: 'on-demand', publish: false });
+  expect(reviewSettings(cfg.reviews, 'api')).toMatchObject({ mode: 'auto-review', publish: true });
+  expect(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')).toContain('# keep override comment');
+  const rows = await runDoctor();
+  expect(rows.find(r => r.check === 'reviews')?.detail).toContain('web: on-demand (draft); api: auto-review (publish COMMENT)');
+  expect(() => writeReviewMode('notify', undefined, { repo: 'missing' })).toThrow('unknown review repo');
+});
 
 it('writes a self-contained notify setup and installs pick after showing only enabled loops', async () => {
   write(auth);
@@ -54,7 +67,7 @@ it('mode changes preserve unrelated config, comments, token refs, and multiline 
       auth +
       '# existing auth\n',
   );
-  for (const mode of ['on-demand', 'auto', 'notify']) {
+  for (const mode of ['on-demand', 'auto-draft', 'auto-review', 'notify']) {
     writeReviewMode(mode);
     expect(loadConfig().reviews.mode).toBe(mode);
     expect(loadConfig().reviews.tokenEnv).toBe('LOBSTAH_TEST_REVIEW_TOKEN');
@@ -65,7 +78,7 @@ it('mode changes preserve unrelated config, comments, token refs, and multiline 
   expect(text).toContain('# existing auth');
   expect(loadConfig().attentionKinds).toEqual(['question', 'pr:ready']);
   const before = text;
-  expect(() => writeReviewMode('post')).toThrow('notify, on-demand, or auto');
+  expect(() => writeReviewMode('post')).toThrow('notify, on-demand, auto-draft, or auto-review');
   expect(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')).toBe(before);
 });
 
