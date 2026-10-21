@@ -87,7 +87,7 @@ export function trapStartCommands(repoPath: string, ticket: string, harness?: st
   const cd = `cd ${shellQuote(repoPath)} && `;
   const all: Array<{ harness: 'claude' | 'codex'; command: string }> = [
     { harness: 'claude', command: `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${ticket}"` },
-    { harness: 'codex', command: `${cd}codex '$lobstah:trap soak --ticket ${ticket}'` },
+    { harness: 'codex', command: `${cd}codex -c 'tui.terminal_title=[]' '$lobstah:trap soak --ticket ${ticket}'` },
   ];
   return harness === 'claude' || harness === 'codex' ? all.filter((c) => c.harness === harness) : all;
 }

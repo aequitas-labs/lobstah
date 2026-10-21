@@ -258,6 +258,8 @@ export interface LimitsConfig {
 }
 
 export interface SoakConfig {
+  /** Sign-on and first-park window for Codex throws; --timeout overrides it. */
+  codexStartSecs: number;
   /** This boat may fulfill helm-approved wharf trap-start requests. Default off. */
   acceptWharfStarts?: boolean;
   /** How long a fresh park heartbeat holds unaddressed matching bait for a soaking session. */
@@ -477,6 +479,7 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
 
 function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
+  if (!Number.isInteger(soak.codexStartSecs) || soak.codexStartSecs < 1) throw new Error('soak.codexStartSecs must be a positive whole number');
   if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
   if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm') {
     throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal" or "iterm"`);
@@ -485,6 +488,7 @@ function parseSoak(raw: unknown): SoakConfig {
 }
 
 export const DEFAULT_SOAK: SoakConfig = {
+  codexStartSecs: 600,
   acceptWharfStarts: false,
   deferSecs: 90,
   claimIdleNoticeSecs: 180,

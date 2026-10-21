@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setImmediate as yieldToWorker } from 'node:timers/promises';
-import { ensureLayout, listNotices, listTraps, loadConfig, planThrow, readRoster, unseenNotices, type TrapRegistration } from '@lobstah/core';
+import { ensureLayout, listNotices, listTraps, loadConfig, planThrow, readRoster, setRosterProfile, unseenNotices, type TrapRegistration } from '@lobstah/core';
 import { throwBatch, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -115,6 +115,15 @@ describe('man throw --all', () => {
     expect(summary.text).toContain('2 available (0 resumed, 2 cold, 0 new), 1 skipped, 1 failed — failed: crisp-tern');
     // What wakes the helm: the summary and the failed start, nothing per trap.
     expect(unseenNotices(true).map((n) => n.kind).sort()).toEqual(['trap-batch', 'trap-start-failed']);
+  });
+
+  processTest('a Codex timeout is still starting, not a failed batch member', async () => {
+    const reg = trap(1, 'amber-gull');
+    setRosterProfile(reg.trapId, { harness: 'codex' });
+    const cfg = loadConfig();
+    const results = await throwBatch({ cfg, rows: planThrow(cfg, { all: true }), adapter: fakeTerminal([], () => true), pollMs: 50, timeoutSecs: 1 });
+    expect(results).toMatchObject([{ result: 'starting', why: expect.stringContaining('ticket remains valid') }]);
+    expect(listNotices().find((n) => n.kind === 'trap-batch')!.text).toContain('0 failed, 1 still starting');
   });
 
   processTest('--new --count N starts fresh traps from the primary checkout, as one batch', async () => {

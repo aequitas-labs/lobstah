@@ -53,6 +53,8 @@ export interface TrapRegistration {
   heartbeatAt: string;
   /** Set the first time the trap actually parks. Absent = signed on but never listened. */
   firstParkedAt?: string;
+  /** A thrown session arriving after this deadline announces availability separately from its batch. */
+  startDeadline?: string;
   /** The last heartbeat of a park (the Stop hook or `soak --wait`): fresh while the trap listens. */
   parkedAt?: string;
   /** Title reminders given while titlePending stands; they stop at TITLE_REMINDERS. */
@@ -289,6 +291,7 @@ export function signOnTrap(opts: {
   link?: string;
   /** A reserved trap id (a redeemed ticket): the worktree must anchor it, or anchor nothing yet. */
   trapId?: string;
+  startDeadline?: string;
   /** The batch throw whose reservation this sign-on redeems. */
   batch?: string;
   ttlMs: number;
@@ -342,6 +345,7 @@ export function signOnTrap(opts: {
     link: link !== undefined && linkMismatch(link, window) === undefined ? link : undefined,
     claimed: prior?.claimed,
     ...(createdWorktree ? { createdWorktree } : {}),
+    ...(opts.startDeadline ? { startDeadline: opts.startDeadline } : sameSession && prior.startDeadline ? { startDeadline: prior.startDeadline } : {}),
     ...(opts.batch ? { batch: opts.batch } : sameSession && prior.batch ? { batch: prior.batch } : {}),
     // The same session keeps the title it confirmed or was asked to apply.
     ...(sameSession && prior.titleSet ? { titleSet: prior.titleSet, titleSetAt: prior.titleSetAt } : {}),
@@ -513,7 +517,7 @@ export function heartbeatTrap(
       text: `trap ${trapLabel(next)} is available — listening (${next.harness}, ${next.repo ?? 'no repo'}); address work with \`--for ${next.name ?? `wt:${trapId}`}\``,
       refId: trapId,
       repo: reg.repo,
-      ...(reg.batch ? { quiet: true } : {}),
+      ...(reg.batch && (!reg.startDeadline || Date.now() <= Date.parse(reg.startDeadline)) ? { quiet: true } : {}),
     });
   }
   return next;

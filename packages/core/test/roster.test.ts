@@ -135,6 +135,10 @@ describe('planThrow', () => {
     const [row] = planThrow(loadConfig(), { all: true }, { codexHome });
     expect(row).toMatchObject({ action: 'cold' });
     expect(row!.why).toContain('Codex Desktop');
+    fs.writeFileSync(rollout, '{"type":"session_meta","payload":{"source":"vscode","originator":"codex-tui"}}\n');
+    const [extension] = planThrow(loadConfig(), { all: true }, { codexHome });
+    expect(extension).toMatchObject({ action: 'cold' });
+    expect(extension!.why).toContain('VS Code extension');
   });
 
   it('an unconfigured repo, a foreign anchor, and a pre-roster worktree are unresolved', () => {

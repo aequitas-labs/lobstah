@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { setImmediate as yieldToWorker } from 'node:timers/promises';
 import {
   ensureLayout,
+  expireReservations,
   listNotices,
   listTraps,
   loadConfig,
@@ -24,7 +25,7 @@ import {
   type ThrowPlanRow,
   type TrapRegistration,
 } from '@lobstah/core';
-import { freshProfile, harnessCommand, launchShellText, nextStartMode, startCommand, startMode, throwTrap, trapForRepo, throwNew, trapWritableDirs, ThrowTimeoutError, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
+import { freshProfile, harnessCommand, launchShellText, nextStartMode, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, trapWritableDirs, ThrowTimeoutError, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { trapRows } from '../src/trap-list.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -243,6 +244,30 @@ describe('man throw <name>', () => {
     expect(lobstah(reg.worktree, 'soak', '--ticket', ticket, '--session', OTHER, '--harness', 'claude').status).not.toBe(0);
   });
 
+  processTest('a timed-out Codex launch keeps its ticket, fences retries, and accepts late first park', async () => {
+    const reg = stowedTrap();
+    stow(reg, true);
+    setRosterProfile(reg.trapId, { harness: 'codex' });
+    const cfg = loadConfig();
+    cfg.soak.codexStartSecs = 1;
+    const seen: TerminalLaunch[] = [];
+    let launchText = '';
+    await expect(throwTrap({ address: 'amber-gull', cfg, batch: 'late-codex', adapter: idle(seen), pollMs: 50, onLaunch: (l) => { launchText = launchedText(l); } })).rejects.toThrow(/ticket remains valid for late sign-on/);
+    expect(launchText).toContain('up to 1s');
+    const held = readReservation(reg.trapId)!;
+    expect(Date.parse(held.deadline) - Date.parse(held.reservedAt)).toBe(1000);
+    await expect(throwTrap({ address: 'amber-gull', cfg, adapter: idle(seen) })).rejects.toThrow(TrapStartingError);
+    expect(seen).toHaveLength(1);
+    expireReservations(Date.parse(held.deadline) + 1);
+    const ticket = /--ticket (\S+)/.exec(seen[0]!.argv.at(-1)!)![1]!;
+    const on = lobstah(reg.worktree, 'soak', '--ticket', ticket, '--session', OTHER, '--harness', 'codex');
+    expect(on.status, on.stderr || on.stdout).toBe(0);
+    lobstah(reg.worktree, 'soak', '--session', OTHER, '--wait', '--timeout', '1');
+    expect(readTrap(reg.trapId)).toMatchObject({ sessionId: OTHER, harness: 'codex', firstParkedAt: expect.any(String) });
+    expect(readReservation(reg.trapId)).toBeUndefined();
+    expect(listNotices().some((n) => n.kind === 'trap-available' && n.refId === reg.trapId && !n.quiet)).toBe(true);
+  });
+
   processTest('a profile naming an unsupported terminal fails before anything is reserved', async () => {
     const reg = stowedTrap();
     stow(reg, true);
@@ -259,6 +284,15 @@ describe('the start command', () => {
   const entry = { trapId: 'abcd1234', name: 'amber-gull', worktree: '/w/soak-abcd1234', harness: 'claude', sessionId: 'sess-1' } as RosterEntry;
   const row = (r: Partial<ThrowPlanRow>): ThrowPlanRow => ({ trapId: 'abcd1234', name: 'amber-gull', action: 'cold', why: '', ...r });
 
+  it('uses the configured Codex startup window unless --timeout overrides it', () => {
+    const cfg = loadConfig();
+    expect(startTimeoutSecs({ cfg }, 'codex')).toBe(600);
+    expect(startTimeoutSecs({ cfg }, 'claude')).toBe(180);
+    cfg.soak.codexStartSecs = 900;
+    expect(startTimeoutSecs({ cfg }, 'codex')).toBe(900);
+    expect(startTimeoutSecs({ cfg, timeoutSecs: 15 }, 'codex')).toBe(15);
+  });
+
   it('builds claude and codex argv from the profile', () => {
     const claude = startCommand(row({ action: 'resume', resumeFrom: '/repo', harness: 'claude', model: 'opus', config: { effort: 'high', permissionMode: 'acceptEdits', fast: 'on' } }), entry, 'T');
     expect(claude).toEqual({
@@ -269,7 +303,7 @@ describe('the start command', () => {
       mode: 'acceptEdits',
     });
     const codex = startCommand(row({ action: 'resume', resumeFrom: '/w/soak-abcd1234', harness: 'codex', model: 'gpt-5.5', config: { effort: 'high', permissionMode: 'default' } }), entry, 'T');
-    expect(codex.argv).toEqual(['codex', '-m', 'gpt-5.5', '-c', 'model_reasoning_effort="high"', 'resume', 'sess-1', '$lobstah:trap soak --ticket T']);
+    expect(codex.argv).toEqual(['codex', '-c', 'tui.terminal_title=[]', '-m', 'gpt-5.5', '-c', 'model_reasoning_effort="high"', 'resume', 'sess-1', '$lobstah:trap soak --ticket T']);
     expect(codex).toMatchObject({ unapplied: [], mode: 'default' });
     expect(startCommand(row({ harness: 'claude' }), entry, 'T')).toMatchObject({ cwd: '/w/soak-abcd1234', argv: ['claude', '--permission-mode', 'auto', '/lobstah:trap soak --ticket T'] });
   });
@@ -278,14 +312,14 @@ describe('the start command', () => {
     const base = { cwd: '/w', ticket: 'T' };
     expect(harnessCommand({ ...base, harness: 'claude' })).toMatchObject({ argv: ['claude', '--permission-mode', 'auto', '/lobstah:trap soak --ticket T'], mode: 'auto' });
     expect(harnessCommand({ ...base, harness: 'codex', writableDirs: ['/home/.lobstah', '/repo/.git'] })).toMatchObject({
-      argv: ['codex', '--approve-for-me', '-c', 'sandbox_workspace_write.network_access=true', '--add-dir', '/home/.lobstah', '--add-dir', '/repo/.git', '$lobstah:trap soak --ticket T'],
+      argv: ['codex', '-c', 'tui.terminal_title=[]', '--approve-for-me', '-c', 'sandbox_workspace_write.network_access=true', '--add-dir', '/home/.lobstah', '--add-dir', '/repo/.git', '$lobstah:trap soak --ticket T'],
       mode: 'auto',
       unapplied: [],
     });
     // The roster profile's mode, as today.
     expect(harnessCommand({ ...base, harness: 'claude', config: { permissionMode: 'plan' } }).argv).toEqual(['claude', '--permission-mode', 'plan', '/lobstah:trap soak --ticket T']);
     expect(harnessCommand({ ...base, harness: 'codex', config: { permissionMode: 'acceptEdits' } })).toMatchObject({
-      argv: ['codex', '$lobstah:trap soak --ticket T'],
+      argv: ['codex', '-c', 'tui.terminal_title=[]', '$lobstah:trap soak --ticket T'],
       unapplied: ['permissionMode=acceptEdits'],
     });
     // `man throw --bypass`, over any profile.
@@ -295,8 +329,8 @@ describe('the start command', () => {
     });
     // `bypass` is a mode a profile or the config can name.
     expect(harnessCommand({ ...base, harness: 'claude', config: { permissionMode: 'bypass' } }).argv).toEqual(['claude', '--dangerously-skip-permissions', '/lobstah:trap soak --ticket T']);
-    expect(harnessCommand({ ...base, harness: 'codex', config: { permissionMode: 'bypassPermissions' } }).argv).toEqual(['codex', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
-    expect(harnessCommand({ ...base, harness: 'codex', bypass: true, writableDirs: ['/x'] }).argv).toEqual(['codex', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
+    expect(harnessCommand({ ...base, harness: 'codex', config: { permissionMode: 'bypassPermissions' } }).argv).toEqual(['codex', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
+    expect(harnessCommand({ ...base, harness: 'codex', bypass: true, writableDirs: ['/x'] }).argv).toEqual(['codex', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
     expect([startMode(), startMode({ permissionMode: 'plan' }), startMode({ permissionMode: 'plan', bypass: 'true' }), startMode({}, true)]).toEqual([
       'auto',
       'plan',

@@ -157,6 +157,7 @@ send a continuation.
 
 | Key | Default | Meaning |
 |---|---|---|
+| `codexStartSecs` | `600` | Seconds a Codex throw waits for sign-on and first park. Positive whole number; `man throw --timeout` overrides it. Other harnesses default to 180 seconds. A Codex timeout keeps its ticket valid for late sign-on and fences a duplicate launch; `stow --wt <trap>` withdraws it before retrying. |
 | `deferSecs` | `90` | A soaking session whose park heartbeat is this fresh holds unaddressed matching bait — the daemon waits instead of spawning. Addressed bait (`--for session:<id>`) waits regardless, until the registration is gone. |
 | `claimIdleNoticeSecs` | `180` | Grace period after a trap claims a dispatch before the daemon raises a `trap-claim-idle` notice if the worker has not reported. Fresh park or tool heartbeats do not acknowledge delivery. The notice does not release the claim; the original brief is re-delivered at the trap's next park, including after it resumes under a new session id. |
 | `acceptWharfStarts` | `false` | Opt this boat into helm-authorized trap start requests from the hosted glass. The daemon starts only its configured harness in a configured repo, refuses unknown repos, and never starts an expired request. Manual hosted `soak` and `man throw --new --repo` also use the daemon broker; traps receive only dispatch-scoped tokens. |

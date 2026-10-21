@@ -64,6 +64,15 @@ describe('config precedence: descriptor > repo > global > default', () => {
     fs.writeFileSync(path.join(home, 'config.toml'), '[pet]\nopen = "browser"\n');
     expect(() => loadConfig()).toThrow('[pet].open must be');
   });
+  it('validates the Codex sign-on window', () => {
+    expect(loadConfig().soak.codexStartSecs).toBe(600);
+    fs.writeFileSync(path.join(home, 'config.toml'), '[soak]\ncodexStartSecs = 900\n');
+    expect(loadConfig().soak.codexStartSecs).toBe(900);
+    for (const value of ['0', '-1', '1.5', '"600"', 'true']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[soak]\ncodexStartSecs = ${value}\n`);
+      expect(() => loadConfig()).toThrow('codexStartSecs must be a positive whole number');
+    }
+  });
   it('defaults hosted starts off and accepts only an explicit boolean opt-in', () => {
     expect(loadConfig().soak.acceptWharfStarts).toBe(false);
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nacceptWharfStarts = true\n');
