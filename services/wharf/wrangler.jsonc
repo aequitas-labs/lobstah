@@ -1,16 +1,63 @@
+// lobstah wharf: glass.lobstah.dev (browser) and api.lobstah.dev (boats).
+// Not deployed by anything in this repo: see "Deploying" in README.md for the
+// steps a maintainer with Cloudflare access runs. No secret lives in this file.
+// Local development overrides the origins in ignored .dev.vars.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "lobstah-wharf",
+  "account_id": "73dd625ed4d46d151a0de5624ff71379",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-09",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+
+  // Two distinct origins: the glass takes cookies, the API takes bearer tokens.
+  // Cloudflare makes the DNS records for both on the first deploy.
+  "routes": [
+    { "pattern": "glass.lobstah.dev", "custom_domain": true },
+    { "pattern": "api.lobstah.dev", "custom_domain": true }
+  ],
+
   "secrets": { "required": ["AUTH_SECRET", "GITHUB_CLIENT_SECRET", "TOKEN_SECRET"] },
   "durable_objects": { "bindings": [{ "name": "ACCOUNTS", "class_name": "Account" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Account"] }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "lobstah-wharf-files", "remote": false }],
-  "d1_databases": [{ "binding": "AUTH_DB", "database_name": "lobstah-wharf-auth", "database_id": "00000000-0000-0000-0000-000000000000", "remote": false }],
-  "observability": { "enabled": false },
-  "vars": { "GLASS_ORIGIN": "", "API_ORIGIN": "", "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[]", "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120" }
-  // Secrets: AUTH_SECRET, GITHUB_CLIENT_SECRET, TOKEN_SECRET.
-  // No account identifiers, credentials, domain or deployed resources here.
+  // database_id is printed by `wrangler d1 create lobstah-wharf-auth`; the
+  // zero id stands until then and is enough for local runs and --dry-run.
+  "d1_databases": [{ "binding": "AUTH_DB", "database_name": "lobstah-wharf-auth", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations", "remote": false }],
+
+  // No request logs, as for the telemetry and site Workers.
+  "observability": {
+    "enabled": false,
+    "logs": { "enabled": false, "invocation_logs": false }
+  },
+  "logpush": false,
+
+  // GITHUB_CLIENT_ID is the OAuth app's public id, filled in once the app exists.
+  // GITHUB_ALLOWLIST holds numeric GitHub account ids (5472765: chrishsu).
+  "vars": {
+    "GLASS_ORIGIN": "https://glass.lobstah.dev", "API_ORIGIN": "https://api.lobstah.dev",
+    "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[\"5472765\"]",
+    "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120"
+  },
+  // Secrets: AUTH_SECRET, GITHUB_CLIENT_SECRET, TOKEN_SECRET (wrangler secret put).
+
+  // `wrangler dev --env local`: no routes, because wrangler dev sends every
+  // request to the first route's host and the two origins would collapse into
+  // one. Bindings do not inherit, so they repeat here. Secrets, and a dev
+  // OAuth app's client id and allowlist if wanted, go in ignored .dev.vars.
+  "env": {
+    "local": {
+      "routes": [],
+      "secrets": { "required": ["AUTH_SECRET", "GITHUB_CLIENT_SECRET", "TOKEN_SECRET"] },
+      "durable_objects": { "bindings": [{ "name": "ACCOUNTS", "class_name": "Account" }] },
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "lobstah-wharf-files", "remote": false }],
+      "d1_databases": [{ "binding": "AUTH_DB", "database_name": "lobstah-wharf-auth", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations", "remote": false }],
+      "vars": {
+        "GLASS_ORIGIN": "http://localhost:8787", "API_ORIGIN": "http://127.0.0.1:8787",
+        "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[]", "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120"
+      }
+    }
+  }
 }
