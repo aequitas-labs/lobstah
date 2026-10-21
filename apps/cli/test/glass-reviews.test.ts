@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, latestRound, observeReviewRequest, readReview } from '@lobstah/core';
+import { ensureLayout, latestRound, loadConfig, observeReviewRequest, pendingIds, readReview, REVIEW_ROUND_STATES } from '@lobstah/core';
+import { glassReviews } from '../src/reviews.js';
 import type { GlassReview } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass } from '../src/glass.js';
@@ -58,6 +59,52 @@ const fleet = () => ({
 });
 
 describe('the Reviews tab', () => {
+  it('shows every round state, cached requester avatars, automatic attribution, and the pending review link', async () => {
+    const d = { ...fleet(), reviews: REVIEW_ROUND_STATES.map((state, i) => review(20 + i, {
+      state, stands: ['requested', 'drafted', 'stale', 'failed'].includes(state),
+      asker: 'dana', askerName: 'Dana Developer', askerAvatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4',
+      automatic: true, reviewUrl: `linear://review/acme/web/pull/${20 + i}`,
+      ...(state === 'drafted' ? { staged: true, stagedReviewUrl: 'https://github.com/acme/web/pull/22#pullrequestreview-99' } : {}),
+    })) };
+    const g = await loadGlass(GLASS_PAGE, d, { now: NOW, prefs: { view: 'cards' } });
+    open.push(g);
+    await g.go('#reviews');
+    for (const state of REVIEW_ROUND_STATES) expect(g.$$('#reviews .top .badge').map((b) => b.textContent)).toContain(state);
+    expect(g.$('#reviews .rv-person img')?.getAttribute('src')).toContain('avatars.githubusercontent.com/u/7');
+    expect(g.$('#reviews .rv-person')?.textContent).toContain('Dana Developer');
+    expect(g.$('#reviews .rv-person')?.textContent).toContain('automatic');
+    expect(g.$('#reviews .rv-staged')?.getAttribute('href')).toContain('#pullrequestreview-99');
+    const first = g.$('#reviews .card') as unknown as HTMLElement;
+    first.click();
+    await g.settle();
+    expect(g.opened().at(-1)?.[0]).toContain('linear://review/');
+    expect(g.$$('#reviews button').find((b) => b.textContent === 'Dismiss')?.getAttribute('title')).toContain('Does not decline the review on GitHub');
+  });
+
+  it('offers the setup command when disabled, and notify/on-demand/auto modes without TOML editing', async () => {
+    const disabled = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviewSetup: { enabled: false, mode: 'notify', running: false } }, { now: NOW });
+    open.push(disabled);
+    await disabled.go('#reviews');
+    expect(disabled.$('#reviews')?.textContent).toContain('lobstah setup reviews');
+    const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviewSetup: { enabled: true, mode: 'notify', identity: 'chris', running: true } }, { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
+    open.push(g);
+    await g.go('#reviews');
+    expect(g.$$('#reviews button').some((b) => b.textContent === 'Draft review')).toBe(false);
+    const select = g.$('#reviews select') as unknown as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(['notify', 'on-demand', 'auto']);
+    select.value = 'on-demand';
+    select.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
+    await g.settle();
+    expect(g.posts().some((p) => p.body === JSON.stringify({ kind: 'review-mode', payload: { mode: 'on-demand' } }))).toBe(true);
+  });
+
+  it('a workflow request names the PR author and uses the configured review tool', () => {
+    observeReviewRequest({
+      pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', authorName: 'Dana Developer', authorAvatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4', headSha: 'aaaaaaa1' },
+      round: { id: 'RRE_7', requestedAt: ago(60), requestedBy: 'github-actions' },
+    });
+    expect(glassReviews({ 'acme/web': 'linear-app' })[0]).toMatchObject({ asker: 'dana', askerName: 'Dana Developer', automatic: true, reviewUrl: 'linear://review/acme/web/pull/7' });
+  });
   it('rows open the PR in its review tool; only dismiss and re-draft act here; no count on the tab', async () => {
     const g = await loadGlass(GLASS_PAGE, fleet(), { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g);
@@ -65,9 +112,9 @@ describe('the Reviews tab', () => {
     expect(g.$('#tabs a[data-tab="reviews"]')?.textContent).toBe('Reviews');
     const rows = g.$$('#reviews tr.rowhead');
     expect(rows.map((r) => r.querySelector('td')?.textContent)).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
-    expect(rows[1]!.textContent).toContain('ready to send');
-    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['dismiss']);
-    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['re-draft', 'dismiss']);
+    expect(rows[1]!.textContent).toContain('drafted');
+    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Dismiss']);
+    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Draft review', 'Dismiss']);
     expect(rows[3]!.querySelectorAll('button')).toHaveLength(0);
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
@@ -76,7 +123,7 @@ describe('the Reviews tab', () => {
     await g.settle();
     const sent = g.posts().find((p) => p.url === '/requests')!;
     expect(sent.headers['x-lobstah-token']).toBe('tok');
-    expect(JSON.parse(sent.body)).toEqual({ kind: 'review-redraft', payload: { key: 'review:acme/web#9' } });
+    expect(JSON.parse(sent.body)).toEqual({ kind: 'review-draft', payload: { key: 'review:acme/web#9' } });
   });
 
   it('card mode shows the same reviews as cards, and On Deck lists the ones waiting on you', async () => {
@@ -122,8 +169,24 @@ describe('review requests on /requests', () => {
 
   it('refuses the review kinds without the page token, and has no post or edit', async () => {
     const { base, token } = await start();
-    for (const kind of ['review-dismiss', 'review-redraft']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
+    for (const kind of ['review-dismiss', 'review-redraft', 'review-draft', 'review-mode']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
     for (const kind of ['review-post', 'review-edit']) expect((await send(base, token, kind, { key: 'review:acme/web#7' })).status).toBe(400);
+  });
+
+  it('the mode switch writes config and the Draft action starts a requested round only on demand', async () => {
+    process.env.LOBSTAH_TEST_REVIEW_TOKEN = 'fixture';
+    try {
+      fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "notify"\nidentity = "chris"\ntokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"\n[repos.web]\npath = "/w"\n');
+      observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1', repoKey: 'web' }, round: { id: 'RRE_7', requestedAt: ago(60) } });
+      const { base, token } = await start();
+      expect((await send(base, token, 'review-draft', { key: 'review:acme/web#7' })).status).toBe(409);
+      expect((await send(base, token, 'review-mode', { mode: 'on-demand' })).status).toBe(200);
+      expect(loadConfig().reviews.mode).toBe('on-demand');
+      expect((await send(base, token, 'review-draft', { key: 'review:acme/web#7' })).status).toBe(200);
+      expect(pendingIds('chore')).toHaveLength(1);
+      expect(latestRound(readReview('review:acme/web#7')!)?.state).toBe('drafting');
+      expect((await send(base, token, 'review-mode', { mode: 'post' })).status).toBe(400);
+    } finally { delete process.env.LOBSTAH_TEST_REVIEW_TOKEN; }
   });
 
   it('dismisses an unstaged round, and refuses what the round cannot do', async () => {

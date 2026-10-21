@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { ensureLayout, listWatches, loadConfig, readWatch } from '@lobstah/core';
+import { ensureLayout, listWatches, loadConfig, lobstahHome, readWatch } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 import { PickupState } from './state.js';
 import { GithubSource } from './sources/github.js';
@@ -11,13 +13,15 @@ import type { ReportNotification } from './loops/report.js';
 import { reconcileLoop } from './loops/reconcile.js';
 import { mergeLoop } from './loops/merge.js';
 import { reviewsLoop } from './loops/reviews.js';
+import type { GhGraphql } from './loops/reviews.js';
 import { handleStreamLine, watchLoop } from './loops/watch.js';
 import type { MergePolicy, MergeSource, Source } from './types.js';
 
 export { readMergeView, readPickupMap } from './merge-view.js';
 export type { MergeView, MergeViewPr } from './merge-view.js';
-export { githubRepoFromOrigin, loadPickupConfig } from './config.js';
+export { githubRepoFromOrigin, loadPickupConfig, pickupPlan } from './config.js';
 export { dismissReviewRound, postReview, redraftReviewRound, stageReview } from './reviews-post.js';
+export { draftReviewOnDemand } from './loops/reviews.js';
 export type { PostBy, PostResult } from './reviews-post.js';
 export type { PickupConfig } from './config.js';
 
@@ -118,6 +122,7 @@ export async function cycle(
   pools: string[] = [],
   /** The review-request search (`[reviews]`), when [pickup.github] gives it an identity. */
   reviews?: () => Promise<void>,
+  watches = true,
 ): Promise<void> {
   for (const source of sources) {
     // A guard per loop: reconcile is the safety net for a report that never
@@ -149,13 +154,13 @@ export async function cycle(
     }
   }
   try {
-    await watchLoop(pollSecs, log, notify);
+    if (watches) await watchLoop(pollSecs, log, notify);
   } catch (err) {
     log(`watches: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
-export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<void> {
+export async function runPickup(mode: 'once' | 'daemon' = 'daemon', opts: { reviewRun?: GhGraphql } = {}): Promise<void> {
   ensureLayout();
   const cfg = loadPickupConfig();
   const state = new PickupState();
@@ -165,25 +170,24 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
   const merges: Array<{ source: MergeSource; policy: MergePolicy }> = [];
   for (const ghCfg of cfg.github) {
     const gh = new GithubSource(ghCfg);
-    sources.push(gh);
-    merges.push({ source: gh, policy: ghCfg.merge });
+    if (ghCfg.issues !== false || ghCfg.prFeedback !== false) sources.push(gh);
+    if (ghCfg.merge.enabled) merges.push({ source: gh, policy: ghCfg.merge });
   }
   if (cfg.linear) sources.push(new LinearSource(cfg.linear));
   if (sources.length === 0) {
     // Registered watches are also a reason to run — watch-only mode.
-    if (listWatches().length === 0) {
+    if ((!cfg.watches || listWatches().length === 0) && !cfg.reviews && merges.length === 0) {
       throw new Error('no [pickup.github], [pickup.linear], or registered watches — nothing to poll');
     }
-    log('no tracker sources configured — watch-only mode');
+    log(`no tracker sources configured — review requests${cfg.watches ? ' and registered watches' : ''} only`);
   }
 
   const notify = makeNotifier(cfg.notifyCommand, log);
   // Review requests search as [pickup.github]'s identity, with its token.
-  const gh = cfg.github[0];
-  const reviews = gh ? () => reviewsLoop(gh.identity, gh.token, log) : undefined;
-  if (!gh && loadConfig().reviews.enabled) log('reviews: [reviews].enabled needs [pickup.github] for its identity and token — not searching');
+  const gh = cfg.reviews;
+  const reviews = gh ? () => reviewsLoop(gh.identity, gh.token, log, { run: opts.reviewRun }) : undefined;
   if (mode === 'once') {
-    await cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, reviews);
+    await cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, reviews, cfg.watches);
     return;
   }
   log(`polling every ${cfg.pollSecs}s — no webhooks, no inbound surface`);
@@ -192,8 +196,9 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon'): Promise<voi
   const flight = new SingleFlight();
   const streamChildren = new Map<string, ChildProcess>();
   while (true) {
-    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, reviews));
-    syncStreams(streamChildren, flight, log, notify);
+    fs.writeFileSync(path.join(lobstahHome(), 'pick.json'), JSON.stringify({ pid: process.pid, heartbeat: new Date().toISOString(), pollSecs: cfg.pollSecs }));
+    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, reviews, cfg.watches));
+    if (cfg.watches) syncStreams(streamChildren, flight, log, notify);
     await new Promise((r) => setTimeout(r, cfg.pollSecs * 1000));
   }
 }

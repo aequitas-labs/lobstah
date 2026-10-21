@@ -70,8 +70,9 @@ import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import type { TendAttention } from './tend.js';
-import { dismissReviewRound, readMergeView, redraftReviewRound } from '@lobstah/pick';
+import { dismissReviewRound, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { glassReviews } from './reviews.js';
+import { reviewSetupView, writeReviewMode } from './reviews-setup.js';
 import { buildTendReport, landedCatches } from './tend.js';
 import { todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
@@ -128,6 +129,8 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['report-viewed', 1024],
   ['review-dismiss', 1024],
   ['review-redraft', 1024],
+  ['review-draft', 1024],
+  ['review-mode', 1024],
   ['pr-ack', 256 * 1024],
 ]);
 
@@ -687,6 +690,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     ...attention,
     reports: reportRows(),
     reviews: glassReviews(reviewTools(cfg)),
+    reviewSetup: reviewSetupView(),
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
@@ -877,12 +881,23 @@ export function serveGlass(
               return reply(500, { ok: false, reason: 'The view could not be stored.' });
             }
           }
+          case 'review-mode': {
+            const mode = (body.payload as { mode?: unknown } | undefined)?.mode;
+            if (typeof mode !== 'string') return reply(400, { ok: false, reason: 'A reviews mode is required.' });
+            try {
+              writeReviewMode(mode);
+              return reply(200, { ok: true });
+            } catch (err) {
+              return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) });
+            }
+          }
           case 'review-dismiss':
+          case 'review-draft':
           case 'review-redraft': {
             // A click on the Reviews tab. Sending happens in the review tool; these only drop or re-draft.
             const key = (body.payload as { key?: unknown } | undefined)?.key;
             if (typeof key !== 'string' || !key.startsWith('review:') || key.length > 200) return reply(400, { ok: false, reason: 'A review key is required.' });
-            const act = body.kind === 'review-dismiss' ? dismissReviewRound(key, 'glass') : redraftReviewRound(key);
+            const act = body.kind === 'review-dismiss' ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);
             void act.then(
               (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),
               () => reply(500, { ok: false, reason: 'The review could not be changed.' }),

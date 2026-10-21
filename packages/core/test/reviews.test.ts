@@ -55,7 +55,7 @@ function seen(over: { id?: string; head?: string; number?: number; skip?: string
 describe('[reviews] config', () => {
   it('is off by default, with the planned defaults', () => {
     const cfg = loadConfig().reviews;
-    expect(cfg).toMatchObject({ enabled: false, repos: 'configured', work: 'trap', post: 'draft', trapWaitSecs: 600, maxPerDay: 20 });
+    expect(cfg).toMatchObject({ enabled: false, mode: 'notify', repos: 'configured', work: 'off', post: 'draft', trapWaitSecs: 600, maxPerDay: 20 });
     expect(cfg.limits).toEqual({ wallClockSecs: 900, maxTurns: 40 });
   });
 
@@ -178,7 +178,7 @@ describe('drafts', () => {
     item.pr.headSha = 'bbbbbbb2';
     writeReview(item);
     redraftReview('review:acme/web#7', T0);
-    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested' });
+    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested', draftStarts: ['x'] });
     expect(redraftReview('review:acme/web#9')).toBe('no review item review:acme/web#9');
   });
 });

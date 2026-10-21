@@ -327,6 +327,7 @@ outside `~/.lobstah/worktrees`: `lobstah cull`, the retention cull,
 | Key | Default | Meaning |
 |---|---|---|
 | `pollSecs` | `45` | Poll cadence. Outbound only — no webhooks, ever. |
+| `watches` | off for reviews-only; on otherwise | Poll registered watches and their follow-up jobs. Reviews-only setups do not start unrelated watch work; explicit `true` opts in. |
 | `liveComment` | `true` | Keep one editable, marked status comment per dispatch. Routine edits are capped at once per minute; human-needed and terminal transitions still post a fresh notification comment. Falls back to transition comments if editing is unavailable. |
 | `pools` | `[]` | Pool names (`["codeclaw"]`). An issue dispatch for repo R runs in the first listed `[pools.<name>]` whose `repo` is R. Review rounds are follow-ups and keep their chain's worktree rule. |
 
@@ -357,7 +358,7 @@ secret:
 Two modes. **Single-repo**: name the forge repo explicitly. **Multi-repo**:
 omit `repo`/`key` and the `[repos.*]` table becomes the source of truth —
 every repo with `pickup = true` and a GitHub `origin` is polled, its lobstah
-key reused as the routing key. Opt-in is per repo, never implied.
+key reused as the routing key. Opt-in is per repo, never implied. With no repo opted in, the identity/token can still serve reviews; no tracker pickup runs.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -366,9 +367,10 @@ key reused as the routing key. Opt-in is per repo, never implied.
 | `key` | single-repo mode | Lobstah repo key for dispatches and rebase chores. |
 | `startLabel` | `lobstah` | Label + assignee + open = pickup. |
 | `claimedLabel` | `lobstah:claimed` | Applied on claim. |
+| `issues`, `feedback` | explicit opt-ins | Enable issue or PR-feedback pickup independently. Setting either makes unspecified loops off. Legacy configs with neither retain both loops on, with a doctor/pre-install warning. `prFeedback` remains an alias for `feedback`. |
 
 `[pickup.github.overrides.<key>]` — multi-repo per-repo overrides:
-`startLabel`, `claimedLabel`, and a nested `merge` table layered over
+`startLabel`, `claimedLabel`, `issues`, `feedback`, and a nested `merge` table layered over
 `[pickup.github.merge]`.
 
 ### `[pickup.github.merge]` — off by default
@@ -386,25 +388,28 @@ See [pickup.md](pickup.md) for the loop semantics these keys drive.
 
 ## `[reviews]` — review requests (`lobstah pick`), off by default
 
-When someone asks `[pickup.github].identity` for a review, `lobstah pick`
+Run `lobstah setup reviews` (optional `--identity <login>`) to derive the GitHub login, write a self-contained notify configuration, enable review notifications, and install pick. It refuses to install reviews-only polling while issue/feedback pickup is also enabled.
+
+When someone asks `[reviews].identity` for a review, `lobstah pick`
 files a review item ([pickup.md](pickup.md), "Review requests"). It searches
-as that identity, with its token. Any key except `enabled`, `repos` and
-`maxPerDay` can be overridden per repo under `[repos.<key>.reviews]`.
+as that identity, with its token source, independently of `[pickup.github]`. Identity defaults to `gh api user`; the token source defaults to `gh auth token`. Existing pickup credentials remain a fallback. Settings such as cost bounds and skip rules can be overridden per repo under `[repos.<key>.reviews]`.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | Opt-in. Off means no search call at all. |
 | `repos` | `"configured"` | `"configured"`: only PRs in a `[repos.*]` origin. `"any"`: every repo the token can see. |
-| `work` | `"trap"` | Who drafts the review: `"off"`, `"trap"` (a free trap of that repo, then headless after `trapWaitSecs`), or `"headless"`. |
-| `post` | `"draft"` | `"draft"`: stage the draft as the identity's pending review on the PR, to edit and send from the review tool. `"auto"`: post the draft as a comment-only review once drafted. lobstah never approves or requests changes. |
+| `mode` | `"notify"` | `"notify"`: items/glass/pet only; `"on-demand"`: the glass Draft review button starts a round; `"auto"`: new requests get trap review jobs. |
+| `identity` | `gh api user` | The reviewer login. |
+| `tokenCommand`, `tokenFile`, `tokenEnv` | `gh auth token` | Token sources, using the same precedence as pickup. |
+| `work` | legacy | `"off"` maps to on-demand, `"trap"`/`"headless"` map to auto; explicit mode wins. |
+| `post` | legacy | Accepted for compatibility; all automatic and on-demand drafts stay pending for the person to send. Pick never submits or approves a review. |
 | `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
 | `maxPerDay` | `20` | Review jobs started per day. Past it, items file with no job. |
 | `skipAuthors`, `skipLabels` | `[]` | Requests on PRs by these authors or with these labels file an item but start no job. |
 
-The `review` attention kind is not in the default `attentionKinds`; add it to
-let review items walk in `man tend`, the glass, and the pet.
+Enabling reviews adds `review` to the default attention kinds. An explicit `attentionKinds` list is respected; setup includes `review` in that list.
 
 ## `[permissions]` — the Claude Code auto-mode profile
 

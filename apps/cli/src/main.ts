@@ -3357,6 +3357,10 @@ async function mainCli(): Promise<void> {
     case 'pick': {
       const kind = cmd as 'daemon' | 'pick';
       if (pos[0] === 'install') {
+        if (kind === 'pick') {
+          const { loadPickupConfig, pickupPlan } = await import('@lobstah/pick');
+          for (const line of pickupPlan(loadPickupConfig())) console.log(line);
+        }
         const res = installService(kind);
         console.log(toonKV({ service: kind, file: res.file, loaded: res.loaded, detail: res.detail }));
         break;
@@ -3774,6 +3778,12 @@ wallClockSecs      = 3600
         }),
       );
       console.log(toonHelp(['lobstah permissions apply   (add lobstah\'s auto-mode profile to your Claude Code settings; shows the diff and asks)']));
+      break;
+    }
+    case 'setup': {
+      if (pos[0] !== 'reviews') throw new UsageError(usageFor('setup')!);
+      const { setupReviews } = await import('./reviews-setup.js');
+      await setupReviews(opt('--identity'));
       break;
     }
     case '__pool-warm': {

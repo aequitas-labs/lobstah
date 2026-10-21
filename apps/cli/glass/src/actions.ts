@@ -433,7 +433,7 @@ export async function requestTrap(repo: string, harness: string): Promise<string
   return undefined;
 }
 
-export type ReviewRequestKind = 'review-dismiss' | 'review-redraft';
+export type ReviewRequestKind = 'review-dismiss' | 'review-redraft' | 'review-draft' | 'review-mode';
 
 /**
  * A Reviews-tab action (Dismiss, Re-draft): one same-origin POST

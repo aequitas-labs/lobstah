@@ -80,7 +80,7 @@ describe('the checker for commands in the guides', () => {
   });
 
   it('names a command, a subverb or a flag the CLI does not have', () => {
-    expect(wrongWith('lobstah setup')).toBe('no command "setup"');
+    expect(wrongWith('lobstah unknown-command')).toBe('no command "unknown-command"');
     expect(wrongWith('lobstah man steer')).toBe('no command "man steer"');
     expect(wrongWith('lobstah daemon enable')).toBe('"daemon" has no subverb enable');
     expect(wrongWith('lobstah init --dry-run')).toBe('"init" has no flag --dry-run');

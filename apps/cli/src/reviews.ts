@@ -29,6 +29,10 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
   for (const item of listReviews()) {
     const r = latestRound(item);
     if (!r) continue;
+    const automatic = r.requestedAutomatically || /(?:\[bot\]$|^github-actions$)/i.test(r.requestedBy ?? '');
+    const asker = automatic ? item.pr.author : (r.requestedBy ?? item.pr.author);
+    const name = automatic ? item.pr.authorName : (r.requestedByName ?? (asker === item.pr.author ? item.pr.authorName : undefined));
+    const avatar = automatic ? item.pr.authorAvatarUrl : (r.requestedByAvatarUrl ?? (asker === item.pr.author ? item.pr.authorAvatarUrl : undefined));
     out.push({
       key: item.key,
       url: item.pr.url,
@@ -37,6 +41,11 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       number: item.pr.number,
       title: item.pr.title,
       author: item.pr.author,
+      asker,
+      ...(name ? { askerName: name } : {}),
+      ...(avatar ? { askerAvatarUrl: avatar } : {}),
+      ...(automatic ? { automatic: true } : {}),
+      ...(r.staged ? { stagedReviewUrl: `${item.pr.url}#pullrequestreview-${r.staged.reviewId}` } : {}),
       ...(item.pr.repoKey ? { repoKey: item.pr.repoKey } : {}),
       ...(r.requestedBy ? { requestedBy: r.requestedBy } : {}),
       requestedAt: r.requestedAt,

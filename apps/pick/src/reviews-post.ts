@@ -65,7 +65,8 @@ function context(key: string, opts: Opts): { r: ReviewRound; token: () => string
   const item = readReview(key);
   const r = item && latestRound(item);
   if (!item || !r) return `no review item ${key}`;
-  const token = opts.token ?? loadPickupConfig().github[0]?.token;
+  const config = opts.token ? undefined : loadPickupConfig();
+  const token = opts.token ?? config?.reviews?.token ?? config?.githubIdentity?.token;
   if (!token) return 'reviews need [pickup.github] for its identity and token';
   return { r, token, f: opts.fetch ?? (fetch as FetchLike), at: new Date(opts.now ?? Date.now()).toISOString(), base: `/repos/${item.pr.owner}/${item.pr.repo}/pulls/${item.pr.number}/reviews` };
 }

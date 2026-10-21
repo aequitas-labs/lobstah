@@ -204,7 +204,7 @@ key = "monolith"
     expect(cfg.github[0]!.repo).toBe('acme/monolith');
   });
 
-  it('multi-repo mode with no opted-in repos is a startup error', () => {
+  it('loads review-search credentials without opting any repo into pickup', () => {
     write(`[repos.widgets]
 path = "~/src/widgets"
 trunk = "main"
@@ -214,7 +214,19 @@ origin = "git@github.com:acme/widgets.git"
 tokenEnv = "LOBSTAH_TEST_TOKEN"
 identity = "acme-bot"
 `);
-    expect(() => loadPickupConfig()).toThrow(/pickup = true/);
+    const cfg = loadPickupConfig();
+    expect(cfg.github).toEqual([]);
+    expect(cfg.githubIdentity?.identity).toBe('acme-bot');
+    expect(cfg.githubIdentity?.token()).toBe('tok');
+  });
+
+  it('independently disables issue and PR-feedback pickup, preserving existing defaults', () => {
+    write('[pickup.github]\nidentity = "bot"\ntokenEnv = "LOBSTAH_TEST_TOKEN"\nrepo = "acme/web"\nkey = "web"\nissues = false\nprFeedback = false\n');
+    expect(loadPickupConfig().github[0]).toMatchObject({ issues: false, prFeedback: false });
+    write('[pickup.github]\nidentity = "bot"\ntokenEnv = "LOBSTAH_TEST_TOKEN"\nrepo = "acme/web"\nkey = "web"\n');
+    expect(loadPickupConfig().github[0]).toMatchObject({ issues: true, prFeedback: true });
+    fs.appendFileSync(path.join(dir, 'config.toml'), 'issues = true\n');
+    expect(loadPickupConfig().github[0]).toMatchObject({ issues: true, prFeedback: false });
   });
 
   it('pickup = true without a usable GitHub origin is a startup error', () => {

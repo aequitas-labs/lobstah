@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, laneDirs } from '@lobstah/core';
 import { GithubSource, guardFeedback } from '../src/sources/github.js';
+import type { GithubConfig } from '../src/sources/github.js';
 import { lobstahWrote, markedNote, marker } from '../src/types.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -22,7 +23,7 @@ afterEach(() => {
 const IDENTITY = 'octoclaw';
 const UUID = '11111111-1111-1111-1111-111111111111';
 
-function source(): GithubSource {
+function source(over: Partial<GithubConfig> = {}): GithubSource {
   return new GithubSource({
     repo: 'o/r',
     key: 'demo',
@@ -30,6 +31,7 @@ function source(): GithubSource {
     token: () => 't',
     startLabel: 'lobstah',
     claimedLabel: 'lobstah-claimed',
+    ...over,
   });
 }
 
@@ -84,6 +86,12 @@ function stubApi(prs: PrFixture[]): void {
 }
 
 describe('post-PR feedback pickup', () => {
+  it('disabled issue and PR-feedback pickup makes no API call', async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    expect(await source({ issues: false, prFeedback: false }).poll()).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it('a COMMENTED review with a body is feedback, keyed by its id', async () => {
     stubApi([
       {

@@ -148,13 +148,13 @@ describe('posting from the reviews loop', () => {
     expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', staged: { reviewId: '99' } });
   });
 
-  it('post = "auto" posts a fresh draft once, as COMMENT', async () => {
+  it('legacy post = "auto" stages a pending draft once and never submits it', async () => {
     config('auto');
     drafted();
     const calls: Call[] = [];
     for (let i = 0; i < 2; i++) await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
-    expect(posts(calls).map((c) => c.body!.event)).toEqual(['COMMENT']);
-    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'posted', by: 'auto' });
+    expect(posts(calls).map((c) => c.body!.event)).toEqual([undefined]);
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', staged: { reviewId: '99' } });
   });
 
   it('post = "auto" never posts a stale draft, and does not retry a failed post', async () => {
@@ -170,7 +170,7 @@ describe('posting from the reviews loop', () => {
     await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls, [], 422) });
     await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
     expect(posts(calls)).toHaveLength(1);
-    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', reason: expect.stringContaining('post failed') });
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', reason: expect.stringContaining('stage failed') });
   });
 });
 

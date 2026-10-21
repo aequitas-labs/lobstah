@@ -23,7 +23,8 @@ import {
   readKeptWorktrees,
 } from '@lobstah/core';
 import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
-import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
+import { githubRepoFromOrigin, loadPickupConfig, pickupPlan } from '@lobstah/pick';
+import { pickRunning } from './reviews-setup.js';
 import { planPressureCull } from './cull.js';
 import { parkedSummary } from './parked-view.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
@@ -298,15 +299,17 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
 
   for (const row of githubRows(githubRepos(cfg.repos))) push(row.check, row.status, row.detail);
 
-  if (parsed.pickup) {
+  if (parsed.pickup || cfg.reviews.enabled) {
     try {
       const pk = loadPickupConfig();
-      const sources = [...pk.github.map((g) => `gh:${g.repo}→${g.key}`), ...(pk.linear ? ['linear'] : [])];
-      push('pickup', sources.length > 0 ? 'ok' : 'warn', sources.join(', ') || 'section present but no sources');
+      push('pickup', pk.github.some((g) => g.issues || g.prFeedback) ? 'warn' : 'ok', pickupPlan(pk).join('; '));
+      if (cfg.reviews.enabled) push('reviews', pickRunning(now) ? 'ok' : 'warn', `${pk.reviews?.identity ?? 'unknown identity'}; mode ${cfg.reviews.mode}; pick ${pickRunning(now) ? 'running' : 'not running — lobstah setup reviews'}`);
     } catch (err) {
       push('pickup', 'fail', err instanceof Error ? err.message : String(err));
+      if (cfg.reviews.enabled) push('reviews', 'fail', err instanceof Error ? err.message : String(err));
     }
   }
+  if (!cfg.reviews.enabled) push('reviews', 'skip', 'not set up — lobstah setup reviews');
 
   const hb = executorPath();
   const workSlots = slotUsage('work');

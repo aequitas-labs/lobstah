@@ -32,7 +32,9 @@ describe('review attention in tend', () => {
   it('walks only when [reviews] is on and attentionKinds lists review', () => {
     request(7);
     fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\n');
-    expect(reviewKeys()).toEqual([]); // not in the default kinds
+    expect(reviewKeys()).toEqual(['review:acme/web#7']); // enabling reviews includes their notifications by default
+    fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["question"]\n[reviews]\nenabled = true\n');
+    expect(reviewKeys()).toEqual([]); // an explicit attention list is respected
     fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["review"]\n[reviews]\nenabled = true\n');
     expect(reviewKeys()).toEqual(['review:acme/web#7']);
     fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["review"]\n[reviews]\nenabled = false\n');

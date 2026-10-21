@@ -270,7 +270,7 @@ When the search stops returning a PR (the request was withdrawn, the
 person reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
 truncated search (more than 50 results) withdraws nothing.
 
-**Drafting.** With `[reviews].work` other than `"off"`, a requested round in
+**Drafting.** `[reviews].mode = "notify"` starts no jobs. `"on-demand"` enables the glass Draft review action for requested, stale, or failed rounds. `"auto"` starts a review job for each requested round in
 a configured repo gets a review job: a chore-lane dispatch with the
 `prReview` brief, `readOnly` (the runner pushes nothing, opens no PR, and
 checkpoints nothing), and the `[reviews]` cost bounds. With `work = "trap"`
@@ -304,10 +304,9 @@ sends it, with whatever event they choose. When the request then disappears from
 search, pick reads that review once: submitted marks the round `posted` (by
 `review tool`), deleted dismisses it, still pending withdraws it.
 
-With `"auto"`, a fresh draft is posted at once as a comment-only review
-(`event: COMMENT`). `lobstah reviews post <key>` sends a staged review as a
+Pick always leaves drafts pending, including legacy `post = "auto"` setups. Manual drafting respects `maxPerDay`, including retries of the same round. `lobstah reviews post <key>` explicitly sends a staged review as a
 comment-only review too. Neither path takes an event argument, so lobstah
-itself never approves or requests changes. A stale draft is never staged or
+itself never approves or requests changes. The glass shows requester names/avatars cached from the same authenticated search; workflow requests show the PR author with an automatic badge. Cards and rows open the configured review tool; drafted rounds link to their pending review. Dismiss removes the round from attention and deletes only its staged pending draft, without declining the request on GitHub. A stale draft is never staged or
 posted on its own, and posts by hand only with `--stale`, which adds a line
 saying the PR has moved. Each round is staged at most once and posted at
 most once: `staged.json` and `posted.json` in the round's directory are

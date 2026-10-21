@@ -18,6 +18,8 @@ export const REVIEW_WORK = ['off', 'trap', 'headless'] as const;
 export type ReviewWork = (typeof REVIEW_WORK)[number];
 export const REVIEW_POST = ['draft', 'auto'] as const;
 export type ReviewPost = (typeof REVIEW_POST)[number];
+export const REVIEW_MODES = ['notify', 'on-demand', 'auto'] as const;
+export type ReviewMode = (typeof REVIEW_MODES)[number];
 
 /** The settings a repo can override under `[repos.<key>.reviews]`. */
 export interface ReviewSettings {
@@ -36,6 +38,11 @@ export interface ReviewSettings {
 }
 
 export interface ReviewsConfig extends ReviewSettings {
+  mode: ReviewMode;
+  identity?: string;
+  tokenCommand?: string;
+  tokenEnv?: string;
+  tokenFile?: string;
   /** Opt-in. Off means no search call at all. */
   enabled: boolean;
   /** `configured`: only PRs in a `[repos.*]` origin. `any`: every repo the token can see. */
@@ -48,8 +55,9 @@ export interface ReviewsConfig extends ReviewSettings {
 
 export const DEFAULT_REVIEWS: ReviewsConfig = {
   enabled: false,
+  mode: 'notify',
   repos: 'configured',
-  work: 'trap',
+  work: 'off',
   post: 'draft',
   limits: { wallClockSecs: 900, maxTurns: 40 },
   trapWaitSecs: 600,
@@ -93,6 +101,7 @@ export function parseReviews(raw: unknown, reposRaw: Record<string, Record<strin
   const r = (raw ?? {}) as Record<string, unknown>;
   if (typeof r !== 'object' || Array.isArray(r)) throw new Error('[reviews] must be a table');
   const base = parseSettings(r, '[reviews]');
+  const mode = r.mode !== undefined ? oneOf(r.mode, REVIEW_MODES, '[reviews].mode') : r.work === 'off' ? 'on-demand' : (r.work !== undefined || r.post !== undefined) ? 'auto' : 'notify';
   const perRepo: Record<string, Partial<ReviewSettings>> = {};
   for (const [key, repo] of Object.entries(reposRaw)) {
     if (repo.reviews !== undefined) perRepo[key] = parseSettings(repo.reviews as Record<string, unknown>, `[repos.${key}.reviews]`);
@@ -100,6 +109,10 @@ export function parseReviews(raw: unknown, reposRaw: Record<string, Record<strin
   return {
     ...DEFAULT_REVIEWS,
     ...base,
+    mode,
+    work: mode === 'auto' ? (base.work && base.work !== 'off' ? base.work : 'trap') : 'off',
+    post: 'draft',
+    ...Object.fromEntries(['identity', 'tokenCommand', 'tokenEnv', 'tokenFile'].filter((k) => r[k] !== undefined).map((k) => [k, String(r[k])])),
     limits: { ...DEFAULT_REVIEWS.limits, ...base.limits },
     enabled: r.enabled === undefined ? false : Boolean(r.enabled),
     repos: r.repos === undefined ? 'configured' : oneOf(r.repos, ['configured', 'any'] as const, '[reviews].repos'),
@@ -111,8 +124,8 @@ export function parseReviews(raw: unknown, reposRaw: Record<string, Record<strin
 /** The settings for one repo: its overrides over `[reviews]`. */
 export function reviewSettings(cfg: ReviewsConfig, repoKey?: string): ReviewSettings {
   const o = (repoKey && cfg.perRepo[repoKey]) || {};
-  const { enabled: _e, repos: _r, maxPerDay: _m, perRepo: _p, ...base } = cfg;
-  return { ...base, ...o, limits: { ...base.limits, ...o.limits } };
+  const { enabled: _e, mode: _mode, identity: _i, tokenCommand: _c, tokenEnv: _v, tokenFile: _f, repos: _r, maxPerDay: _m, perRepo: _p, ...base } = cfg;
+  return { ...base, ...o, work: cfg.mode === 'auto' ? (o.work ?? base.work) : 'off', post: 'draft', limits: { ...base.limits, ...o.limits } };
 }
 
 // ── The item store ─────────────────────────────────────────────────────────
@@ -125,12 +138,19 @@ export interface ReviewRound {
   id: string;
   requestedAt: string;
   requestedBy?: string;
+  requestedByName?: string;
+  requestedByAvatarUrl?: string;
+  requestedAutomatically?: boolean;
+  /** A manual draft may be staged, but is never automatically submitted. */
+  draftOnly?: boolean;
   /** The head the round reviews. */
   headSha: string;
   state: ReviewRoundState;
   /** The review job's dispatch id, and when it started (the daily cap counts these). */
   dispatch?: string;
   dispatchedAt?: string;
+  /** Start receipts survive redrafts so retries still count against the daily cap. */
+  draftStarts?: string[];
   draftedAt?: string;
   postedAt?: string;
   postedReviewId?: string;
@@ -159,6 +179,8 @@ export interface ReviewPr {
   url: string;
   title: string;
   author: string;
+  authorName?: string;
+  authorAvatarUrl?: string;
   /** The PR's head as last observed. */
   headSha: string;
   labels?: string[];
@@ -244,7 +266,7 @@ export function latestRound(item: ReviewItem): ReviewRound | undefined {
 
 export interface ReviewRequestSeen {
   pr: ReviewPr;
-  round: { id: string; requestedAt: string; requestedBy?: string };
+  round: Pick<ReviewRound, 'id' | 'requestedAt' | 'requestedBy' | 'requestedByName' | 'requestedByAvatarUrl' | 'requestedAutomatically'>;
   /** A skip rule matched: the round files, and no job starts. */
   skip?: string;
 }
@@ -259,9 +281,10 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
   const key = reviewKey(seen.pr.owner, seen.pr.repo, seen.pr.number);
   const at = new Date(now).toISOString();
   const prior = readReview(key);
-  const item: ReviewItem = prior ? { ...prior, pr: seen.pr, rounds: [...prior.rounds] } : { key, pr: seen.pr, rounds: [], updatedAt: at };
+  const item: ReviewItem = prior ? { ...prior, pr: seen.pr, rounds: prior.rounds.map((r) => ({ ...r })) } : { key, pr: seen.pr, rounds: [], updatedAt: at };
   const known = item.rounds.find((r) => r.id === seen.round.id);
   if (known) {
+    Object.assign(known, seen.round);
     const latest = latestRound(item)!;
     if (latest === known && known.headSha !== seen.pr.headSha) {
       if (known.state === 'requested') known.headSha = seen.pr.headSha;
@@ -282,9 +305,7 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     }
   }
   item.rounds.push({
-    id: seen.round.id,
-    requestedAt: seen.round.requestedAt,
-    ...(seen.round.requestedBy ? { requestedBy: seen.round.requestedBy } : {}),
+    ...seen.round,
     headSha: seen.pr.headSha,
     state: 'requested',
     ...(seen.skip ? { reason: seen.skip } : {}),
@@ -403,7 +424,7 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   if (!item || !r) return `no review item ${key}`;
   if (r.state !== 'stale' && r.state !== 'failed') return `${key}: the newest round is ${r.state}; only a stale or failed round re-drafts`;
   const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, ...rest } = r;
-  item.rounds[item.rounds.length - 1] = { ...rest, state: 'requested', headSha: item.pr.headSha };
+  item.rounds[item.rounds.length - 1] = { ...rest, ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 }
 

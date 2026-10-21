@@ -303,6 +303,11 @@ export interface GlassReview {
   /** The configured repo key, when the PR is in one. */
   repoKey?: string;
   requestedBy?: string;
+  asker?: string;
+  askerName?: string;
+  askerAvatarUrl?: string;
+  automatic?: boolean;
+  stagedReviewUrl?: string;
   requestedAt: string;
   state: ReviewRoundState;
   /** The newest round waits on the person (it is in the review attention kind's standing set). */
@@ -459,6 +464,7 @@ export interface GlassSnapshot {
   reports: GlassReport[];
   /** Review requests ([reviews]); absent on a hosted grounds. */
   reviews?: GlassReview[];
+  reviewSetup?: { enabled: boolean; mode: import('./reviews.js').ReviewMode; identity?: string; running: boolean };
   /** The helms' open to-dos, every grounds; the deck lists them. */
   todos?: TodoView[];
   /** A short note when to-dos sit past `[helm].todoStaleDays`. */

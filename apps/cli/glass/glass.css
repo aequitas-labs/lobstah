@@ -1741,6 +1741,75 @@ a.lob {
   color: var(--dim);
   white-space: nowrap;
 }
+.rv-person {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rv-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.rv-controls select {
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font: inherit;
+}
+.rv-person img {
+  border-radius: 50%;
+  flex: 0 0 24px;
+}
+.rv-asker {
+  margin-top: 10px;
+}
+.rv-card .top {
+  align-items: flex-start;
+}
+.rv-card .top > b {
+  white-space: normal;
+}
+.rv-reason {
+  margin-top: 6px;
+  color: var(--dim);
+}
+.rv-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.rv-actions [role='alert'] {
+  white-space: normal;
+}
+.rv-staged {
+  font-size: 12px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --line: #d6dce5;
+    --line-hover: #b9c4d3;
+    --row-hover: #edf2f7;
+    --inset: #f1f4f8;
+    --seg-on: #dce9fa;
+    --scrim: rgba(26, 36, 52, 0.32);
+    --fg: #182230;
+    --dim: #58677a;
+    --ok: #177c3e;
+    --warn: #946200;
+    --bad: #b73525;
+    --link: #176292;
+    --pr-merged-fg: #6638a1;
+  }
+}
 /* A narrow window wraps the tabs rather than pushing the page sideways. */
 @media (max-width: 600px) {
   .tabs {

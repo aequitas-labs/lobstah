@@ -1,5 +1,5 @@
 import * as fs from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { parse } from 'smol-toml';
 import * as os from 'node:os';
 import { configPath, loadConfig } from '@lobstah/core';
@@ -11,9 +11,15 @@ import type { LinearConfig } from './sources/linear.js';
 export interface PickupConfig {
   pollSecs: number;
   liveComment: boolean;
+  /** Reviews-only setups do not run unrelated registered watch jobs. */
+  watches: boolean;
   /** `[hooks.pickupNotify].command`: exec'd on every verb transition with LOBSTAH_* env vars; never blocks the loop. */
   notifyCommand?: string;
   github: Array<GithubConfig & { merge: MergePolicy }>;
+  /** Review search credentials, independent of any opted-in pickup repo. */
+  githubIdentity?: { identity: string; token: () => string };
+  reviews?: { identity: string; token: () => string };
+  legacyGithubDefaults?: boolean;
   linear?: LinearConfig;
   /**
    * Worktree pools issue dispatches run in (`[pickup].pools`): an issue for
@@ -87,6 +93,21 @@ export function pickupPool(pools: string[], repoKey: string): string | undefined
   return pools.find((name) => cfg[name]?.repo === repoKey);
 }
 
+/** The exact loops an installed pick process will run, before it is started. */
+export function pickupPlan(cfg: PickupConfig = loadPickupConfig()): string[] {
+  const lines = Object.keys(loadConfig().repos).map((key) => {
+    const gh = cfg.github.find((g) => g.key === key);
+    return `${key}: issues ${gh && gh.issues !== false ? 'ON' : 'off'}, PR feedback ${gh && gh.prFeedback !== false ? 'ON' : 'off'}, merge ${gh?.merge.enabled ? 'ON' : 'off'}`;
+  });
+  for (const gh of cfg.github) if (!loadConfig().repos[gh.key]) lines.push(`${gh.key} (${gh.repo}): issues ${gh.issues === false ? 'off' : 'ON'}, PR feedback ${gh.prFeedback === false ? 'off' : 'ON'}, merge ${gh.merge.enabled ? 'ON' : 'off'}`);
+  if (cfg.linear) lines.push('Linear: issue pickup ON');
+  lines.push(cfg.reviews ? `review requests: ${cfg.reviews.identity}, mode ${loadConfig().reviews.mode}` : 'review requests: off');
+  lines.push(`registered watch polling: ${cfg.watches ? 'ON' : 'off'}`);
+  if (cfg.legacyGithubDefaults && cfg.github.length) lines.push('WARNING: legacy GitHub defaults enable issue and PR-feedback pickup; set issues and feedback explicitly');
+  else if (cfg.github.some((g) => g.issues || g.prFeedback)) lines.push('WARNING: enabled issue/PR-feedback pickup can dispatch jobs and report status on PRs');
+  return lines;
+}
+
 /** Pickup reads its own [pickup.*] sections from the shared config file. */
 export function loadPickupConfig(): PickupConfig {
   const file = configPath();
@@ -95,6 +116,7 @@ export function loadPickupConfig(): PickupConfig {
   const out: PickupConfig = {
     pollSecs: Number(p.pollSecs ?? 45),
     liveComment: p.liveComment === undefined ? true : Boolean(p.liveComment),
+    watches: true,
     notifyCommand: loadConfig().hooks.pickupNotify?.command,
     github: [],
     pools: parsePickupPools(p.pools),
@@ -106,9 +128,19 @@ export function loadPickupConfig(): PickupConfig {
     token(); // fail at startup, not mid-loop
     const identity = String(gh.identity ?? '');
     if (!identity) throw new Error('pickup.github requires identity');
+    out.githubIdentity = { identity, token };
+    const explicit = gh.issues !== undefined || gh.feedback !== undefined || gh.prFeedback !== undefined;
+    out.legacyGithubDefaults = !explicit;
+    const enabled = (value: unknown, label: string, fallback = !explicit): boolean => {
+      if (value === undefined) return fallback;
+      if (typeof value !== 'boolean') throw new Error(`${label} must be a boolean`);
+      return value;
+    };
     const shared = {
       identity,
       token,
+      issues: enabled(gh.issues, 'pickup.github.issues'),
+      prFeedback: enabled(gh.feedback ?? gh.prFeedback, 'pickup.github.feedback'),
       startLabel: String(gh.startLabel ?? 'lobstah'),
       claimedLabel: String(gh.claimedLabel ?? 'lobstah:claimed'),
     };
@@ -134,17 +166,28 @@ export function loadPickupConfig(): PickupConfig {
           ...shared,
           repo: forgeRepo,
           key,
+          issues: enabled(o.issues, `pickup.github.overrides.${key}.issues`, shared.issues),
+          prFeedback: enabled(o.feedback ?? o.prFeedback, `pickup.github.overrides.${key}.feedback`, shared.prFeedback),
           startLabel: o.startLabel ? String(o.startLabel) : shared.startLabel,
           claimedLabel: o.claimedLabel ? String(o.claimedLabel) : shared.claimedLabel,
           merge: { ...mergeBase, ...((o.merge as Partial<MergePolicy>) ?? {}) },
         });
       }
-      if (out.github.length === 0) {
-        throw new Error(
-          'pickup.github has no repo — multi-repo mode needs at least one [repos.<key>] with pickup = true and a GitHub origin',
-        );
-      }
     }
+  }
+
+  const reviews = loadConfig().reviews;
+  if (reviews.enabled) {
+    const ownToken = reviews.tokenCommand || reviews.tokenEnv || reviews.tokenFile;
+    const token = ownToken ? resolveTokenSource({ ...reviews }, 'reviews') : out.githubIdentity?.token ?? resolveTokenSource({ tokenCommand: 'gh auth token' }, 'reviews');
+    let identity = reviews.identity ?? out.githubIdentity?.identity;
+    if (!identity) {
+      const me = spawnSync('gh', ['api', 'user', '--jq', '.login'], { encoding: 'utf8', timeout: 30_000, env: { ...process.env, GH_TOKEN: token() } });
+      identity = me.status === 0 ? me.stdout?.trim() : undefined;
+      if (!identity) throw new Error('reviews: cannot derive GitHub login; run gh auth login or set [reviews].identity');
+    }
+    token();
+    out.reviews = { identity, token };
   }
 
   const ln = p.linear as Record<string, unknown> | undefined;
@@ -166,5 +209,7 @@ export function loadPickupConfig(): PickupConfig {
     };
   }
 
+  if (p.watches !== undefined && typeof p.watches !== 'boolean') throw new Error('pickup.watches must be a boolean');
+  out.watches = p.watches === undefined ? !(out.reviews && !out.linear && !out.github.some((g) => g.issues || g.prFeedback || g.merge.enabled)) : p.watches;
   return out;
 }

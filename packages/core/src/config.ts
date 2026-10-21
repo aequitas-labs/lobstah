@@ -633,7 +633,7 @@ export function loadConfig(): Config {
     hooks: parseHooks(raw.hooks),
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
     readySettleSecs,
-    attentionKinds: parseAttentionKinds(raw.attentionKinds),
+    attentionKinds: parseAttentionKinds(raw.attentionKinds ?? ((raw.reviews as { enabled?: boolean } | undefined)?.enabled ? [...DEFAULT_ATTENTION_KINDS, 'review'] : undefined)),
     reviews: withConfigPath(() => parseReviews(raw.reviews, reposRaw)),
     permissions: withConfigPath(() => parsePermissions(raw.permissions)),
   };
