@@ -4,7 +4,20 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { DecisionError, addGrant, ensureLayout, listGrants, readDecision, readDecisionDetail, signOnTrap, unhandled } from '@lobstah/core';
+import {
+  DecisionError,
+  addGrant,
+  claimBait,
+  enqueue,
+  ensureLayout,
+  listGrants,
+  readDecision,
+  readDecisionDetail,
+  signOnTrap,
+  standingDecisions,
+  trapBySession,
+  unhandled,
+} from '@lobstah/core';
 import { askPermission, callRequests, confirm, patchPaths, personOnly, rosterConfigPatch } from '../src/grants-cli.js';
 import { answerKey } from '../src/decision-answer.js';
 import { harnessCommand } from '../src/throw.js';
@@ -55,7 +68,36 @@ afterEach(() => {
 
 describe('lobstah hook permission-request', () => {
   const ask = (session: string, command: string) =>
-    run(['hook', 'permission-request'], { session_id: session, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command } });
+    run(['hook', 'permission-request'], {
+      session_id: session,
+      hook_event_name: 'PermissionRequest',
+      tool_name: 'Bash',
+      tool_input: { command },
+    });
+
+  it('files a Codex cmd request as a permission card, and its always grant covers different arguments', () => {
+    trap('codex-trap', 'codex');
+    enqueue({ id: 'd-codex', repo: 'web', brief: 'push the plan' });
+    expect(claimBait(trapBySession('codex-trap')!)?.id).toBe('d-codex');
+    const command = 'ume push .temp/plan.html --session f6cc416c --project p --gate plan --title "Plan"';
+    const input = { session_id: 'codex-trap', tool_name: 'functions.exec_command', tool_input: { cmd: command } };
+    expect(run(['hook', 'permission-request'], input).stdout).toBe('');
+    expect(run(['hook', 'permission-request'], input).stdout).toBe('');
+    const cards = standingDecisions();
+    expect(cards).toHaveLength(1);
+    const c = cards[0]!;
+    expect(c.title).toBe('Allow: ume push');
+    expect(c.optionNotes?.['Allow always']).toBe('`ume push …` (any arguments) for Codex traps');
+    expect(readDecisionDetail(c.key)).toContain(command);
+    answerKey(c.key, { option: 'Allow always', by: 'glass' });
+    expect(listGrants().grants).toMatchObject([{ command: 'ume push', match: 'prefix', mode: 'always', harness: 'codex', by: 'glass' }]);
+    const next = run(['hook', 'permission-request'], {
+      ...input,
+      tool_input: { cmd: 'ume push other.html --session other --gate verify' },
+    });
+    expect(JSON.parse(next.stdout)).toEqual(ALLOW);
+    expect(standingDecisions()).toHaveLength(0);
+  });
 
   it("allows a trap's granted command, and nothing else", () => {
     trap('codex-trap', 'codex');
@@ -70,7 +112,7 @@ describe('lobstah hook permission-request', () => {
     }
   });
 
-  it('answers only for traps: the helm and a person\'s own session keep their normal approval', () => {
+  it("answers only for traps: the helm and a person's own session keep their normal approval", () => {
     addGrant({ command: 'wrangler deploy', mode: 'always', by: 'glass' });
     expect(ask('someone-else', 'wrangler deploy').stdout).toBe('');
   });
@@ -85,7 +127,11 @@ describe('lobstah hook permission-request', () => {
   });
 
   it('never fails the harness: bad input prints nothing and exits 0', () => {
-    const res = spawnSync(process.execPath, [cli, 'hook', 'permission-request'], { encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home }, input: 'not json' });
+    const res = spawnSync(process.execPath, [cli, 'hook', 'permission-request'], {
+      encoding: 'utf8',
+      env: { ...process.env, LOBSTAH_HOME: home },
+      input: 'not json',
+    });
     expect(res.status).toBe(0);
     expect(res.stdout).toBe('');
   });
@@ -129,13 +175,18 @@ describe('the calls a grant is checked against', () => {
 describe('a permission card', () => {
   function card() {
     const t = trap('codex-trap', 'codex');
-    return askPermission({ dispatch: 'd-1', lane: 'work', ask: { command: 'wrangler deploy', harness: 'codex', trap: t.name }, note: 'The deploy was refused.' });
+    return askPermission({
+      dispatch: 'd-1',
+      lane: 'work',
+      ask: { command: 'wrangler deploy', harness: 'codex', trap: t.name },
+      note: 'The deploy was refused.',
+    });
   }
 
   it('offers Allow once, Allow always and No, and shows the exact command', () => {
     const c = card();
     expect(c.options).toEqual(['Allow once', 'Allow always', 'No']);
-    expect(c.title).toBe('Allow run: wrangler deploy');
+    expect(c.title).toBe('Allow: wrangler deploy');
     expect(readDecision(c.key)?.permission).toMatchObject({ command: 'wrangler deploy', harness: 'codex' });
   });
 
@@ -143,7 +194,15 @@ describe('a permission card', () => {
     const c = card();
     answerKey(c.key, { option: 'Allow once', by: 'glass' });
     const [g] = listGrants().grants;
-    expect(g).toMatchObject({ command: 'wrangler deploy', match: 'exact', mode: 'once', harness: 'codex', by: 'glass', trap: c.permission!.trap, dispatch: 'd-1' });
+    expect(g).toMatchObject({
+      command: 'wrangler deploy',
+      match: 'exact',
+      mode: 'once',
+      harness: 'codex',
+      by: 'glass',
+      trap: c.permission!.trap,
+      dispatch: 'd-1',
+    });
     const [msg] = unhandled('d-1', 'work');
     expect(msg!.text).toContain(g!.id);
     expect(msg!.text).toContain('Run the command again exactly as shown');
@@ -171,11 +230,17 @@ describe('a permission card', () => {
     expect(c.optionNotes).toEqual({ 'Allow always': 'apps/…/apply-exterior.sh in any homebase worktree' });
     expect(readDecisionDetail(c.key)).toContain('`apps/exterior-model-gen/ops/deploy/apply-exterior.sh` in any homebase worktree');
     answerKey(c.key, { option: 'Allow always', by: 'glass' });
-    expect(listGrants().grants[0]).toMatchObject({ path: 'apps/exterior-model-gen/ops/deploy/apply-exterior.sh', repo: 'homebase', mode: 'always' });
+    expect(listGrants().grants[0]).toMatchObject({
+      path: 'apps/exterior-model-gen/ops/deploy/apply-exterior.sh',
+      repo: 'homebase',
+      mode: 'always',
+    });
     const cmd = askPermission({ dispatch: 'd-1', lane: 'work', ask: { command: `cd ${wt}/bao && fastlane`, harness: 'claude' } });
     expect(cmd.optionNotes).toEqual({ 'Allow always': 'this command in any homebase worktree' });
-    expect(askPermission({ dispatch: 'd-1', lane: 'work', ask: { path: '/etc/hosts', harness: 'claude' } }).optionNotes).toEqual({ 'Allow always': 'this exact path' });
-    expect(card().optionNotes).toEqual({ 'Allow always': 'this exact command, from any trap' });
+    expect(askPermission({ dispatch: 'd-1', lane: 'work', ask: { path: '/etc/hosts', harness: 'claude' } }).optionNotes).toEqual({
+      'Allow always': 'this exact path',
+    });
+    expect(card().optionNotes).toEqual({ 'Allow always': '`wrangler deploy …` (any arguments) for Codex traps' });
   });
 
   it('cannot be allowed from the command line, which the helm uses; No can be said anywhere', () => {
@@ -188,7 +253,7 @@ describe('a permission card', () => {
   });
 });
 
-describe('a grant is a person\'s act', () => {
+describe("a grant is a person's act", () => {
   it('refuses inside an agent session, and without a terminal', () => {
     expect(() => personOnly('lobstah grant', { CLAUDECODE: '1' }, true)).toThrow(/not an agent session/);
     expect(() => personOnly('lobstah grant', { CODEX_THREAD_ID: 't' }, true)).toThrow(/not an agent session/);
@@ -196,12 +261,12 @@ describe('a grant is a person\'s act', () => {
     expect(() => personOnly('lobstah grant', {}, true)).not.toThrow();
     const res = run(['grant', 'npm', 'publish'], undefined);
     expect(res.status).toBe(1);
-    expect(res.stdout + res.stderr).toMatch(/needs a terminal/);
+    expect(res.stdout + res.stderr).toMatch(/no terminal to confirm; re-run with --yes/);
     expect(listGrants().grants).toEqual([]);
   });
 });
 
-describe('bypass is a person\'s choice', () => {
+describe("bypass is a person's choice", () => {
   it('man throw --bypass refuses inside an agent session and without a terminal', () => {
     const { name } = trap('11111111-2222-4333-8444-555555555555', 'claude');
     for (const env of [{ CLAUDECODE: '1' }, { CODEX_THREAD_ID: 't' }]) {
@@ -233,12 +298,18 @@ describe('bypass is a person\'s choice', () => {
     expect(run(['man', 'roster', 'set', name, '--config', 'permissionMode='], undefined).status).toBe(0);
   });
 
-  it('a person at a terminal saves bypass in the roster; clearing it is anyone\'s', () => {
-    expect(rosterConfigPatch(['permissionMode=bypass', 'effort=high'], {}, true)).toEqual({ config: { permissionMode: 'bypassPermissions', effort: 'high' }, bypass: true });
+  it("a person at a terminal saves bypass in the roster; clearing it is anyone's", () => {
+    expect(rosterConfigPatch(['permissionMode=bypass', 'effort=high'], {}, true)).toEqual({
+      config: { permissionMode: 'bypassPermissions', effort: 'high' },
+      bypass: true,
+    });
     expect(rosterConfigPatch(['bypass=true'], {}, true).bypass).toBe(true);
     expect(() => rosterConfigPatch(['permissionMode=bypass'], { CLAUDECODE: '1' }, true)).toThrow(/not an agent session/);
     expect(() => rosterConfigPatch(['permissionMode=bypassPermissions'], {}, false)).toThrow(/needs a terminal/);
-    expect(rosterConfigPatch(['permissionMode=', 'bypass='], { CLAUDECODE: '1' }, false)).toEqual({ config: { permissionMode: null, bypass: null }, bypass: false });
+    expect(rosterConfigPatch(['permissionMode=', 'bypass='], { CLAUDECODE: '1' }, false)).toEqual({
+      config: { permissionMode: null, bypass: null },
+      bypass: false,
+    });
     expect(rosterConfigPatch(['permissionMode=auto'], { CLAUDECODE: '1' }, false).bypass).toBe(false);
   });
 });
@@ -264,10 +335,12 @@ describe('the y/N prompt', () => {
   /** A terminal's stdin as Node leaves it: non-blocking, so EAGAIN until the person types a line. */
   const terminal = (line: string | Error, waits = 2) => {
     let calls = 0;
+    let offset = 0;
     return (buf: Buffer) => {
       if (calls++ < waits) throw Object.assign(new Error('EAGAIN: resource temporarily unavailable, read'), { code: 'EAGAIN' });
       if (line instanceof Error) throw line;
-      return buf.write(line);
+      if (offset >= line.length) return 0;
+      return buf.write(line[offset++]!);
     };
   };
   const ask = (read: (buf: Buffer) => number) => {
@@ -284,13 +357,15 @@ describe('the y/N prompt', () => {
     expect(ask(terminal('YES\n', 5))).toBe(true);
   });
 
-  it('n, an empty line, and end of input are no', () => {
+  it('n and an empty line are no; EOF without a terminal is an error', () => {
     expect(ask(terminal('n\n'))).toBe(false);
     expect(ask(terminal('\n'))).toBe(false);
-    expect(ask(terminal(''))).toBe(false);
+    expect(() => ask(terminal(''))).toThrow(/no terminal to confirm; re-run with --yes/);
   });
 
   it('a read that fails is an error, never a silent no', () => {
-    expect(() => ask(terminal(Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' })))).toThrow(/could not read your answer: EIO/);
+    expect(() => ask(terminal(Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' })))).toThrow(
+      /could not read your answer: EIO/,
+    );
   });
 });

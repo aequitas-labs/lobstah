@@ -12,6 +12,7 @@ import {
   ensureLayout,
   listNotices,
   listRequests,
+  listGrants,
   readDecisionAnswer,
   reserveTrap,
   shellQuote,
@@ -23,6 +24,8 @@ import type { GlassSnapshot } from '@lobstah/core';
 import { REQUEST_KIND_MAX_BYTES, buildGlassSnapshot, requestBodyCap, serveGlass } from '../src/glass.js';
 import { buildTendReport } from '../src/tend.js';
 import { listAcks } from '../src/acks.js';
+import { askPermission } from '../src/grants-cli.js';
+import { glassDecisions } from '../src/decisions.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -57,6 +60,26 @@ const post = (body: unknown, headers: Record<string, string> = {}, method = 'POS
     ...(method === 'POST' ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}),
   });
 
+it('a glass Allow always answer persists a Codex prefix grant', async () => {
+  const command = 'ume push .temp/plan.html --session f6cc416c --project p --gate plan --title "Plan"';
+  const card = askPermission({ dispatch: 'codex-work', lane: 'work', ask: { command, harness: 'codex' } });
+  expect(glassDecisions().find((d) => d.key === card.key)?.permission).toBe(true);
+  const response = await post({ kind: 'decision-answer', payload: { key: card.key, option: 'Allow always', files: [] } });
+  expect(response.status).toBe(201);
+  expect(listGrants().grants).toMatchObject([{ command: 'ume push', match: 'prefix', mode: 'always', harness: 'codex', by: 'glass' }]);
+});
+
+it('refuses a permission answer without a button option, including typed allowances', async () => {
+  const card = askPermission({ dispatch: 'codex-work', lane: 'work', ask: { command: 'ume push plan.html', harness: 'codex' } });
+  for (const payload of [{}, { text: 'why?' }, { text: 'allow always: ume push' }, { option: '', text: 'Allow once' }]) {
+    const response = await post({ kind: 'decision-answer', payload: { key: card.key, ...payload, files: [] } });
+    expect(response.status).toBe(400);
+    expect((await response.json()).reason).toContain('choose Allow once, Allow always, or No');
+    expect(readDecisionAnswer(card.key)).toBeUndefined();
+    expect(listGrants().grants).toEqual([]);
+  }
+});
+
 /** A raw request with a chosen Host header: what a rebound DNS name would send. */
 const withHost = (url: string, host: string, method = 'GET', body?: string, headers: Record<string, string> = {}): Promise<{ status?: number; text: string }> =>
   new Promise((resolve, reject) => {
@@ -86,8 +109,18 @@ describe('glass /requests', () => {
     const trapResponse = await post(trapRequest({ repo: 'web', harness: 'codex' }));
     expect(trapResponse.status).toBe(201);
     const { id: trapId } = (await trapResponse.json()) as { id: string };
-    expect(listRequests().map((r) => [r.kind, r.id])).toEqual(expect.arrayContaining([['decision-answer', answerId], ['trap-request', trapId]]));
-    expect(listNotices(50).map((n) => [n.kind, n.refId])).toEqual(expect.arrayContaining([['decision-answer', answerId], ['trap-request', trapId]]));
+    expect(listRequests().map((r) => [r.kind, r.id])).toEqual(
+      expect.arrayContaining([
+        ['decision-answer', answerId],
+        ['trap-request', trapId],
+      ]),
+    );
+    expect(listNotices(50).map((n) => [n.kind, n.refId])).toEqual(
+      expect.arrayContaining([
+        ['decision-answer', answerId],
+        ['trap-request', trapId],
+      ]),
+    );
   });
 
   it("keeps every answer's option, text and pasted files in answer.json, which the answer read returns", async () => {
@@ -96,10 +129,20 @@ describe('glass /requests', () => {
       { payload: { text: '9378307785' }, want: { text: '9378307785' } },
       { payload: { option: 'v2', text: 'and pin the version' }, want: { option: 'v2', text: 'and pin the version' } },
       { payload: { option: 'v1' }, want: { option: 'v1' } },
-      { payload: { text: 'see the screenshot', files: [{ name: 'shot.png', data: png.toString('base64') }] }, want: { text: 'see the screenshot' } },
+      {
+        payload: { text: 'see the screenshot', files: [{ name: 'shot.png', data: png.toString('base64') }] },
+        want: { text: 'see the screenshot' },
+      },
     ];
     for (const { payload, want } of cases) {
-      const { meta } = askDecision({ title: 'Which version?', options: ['v1', 'v2'], dispatch: 'd-1', lane: 'work', askedBy: 'worker', maxBytes: 1024 * 1024 });
+      const { meta } = askDecision({
+        title: 'Which version?',
+        options: ['v1', 'v2'],
+        dispatch: 'd-1',
+        lane: 'work',
+        askedBy: 'worker',
+        maxBytes: 1024 * 1024,
+      });
       const res = await post({ kind: 'decision-answer', payload: { key: meta.key, files: [], ...payload } });
       expect(res.status).toBe(201);
       const marker = JSON.parse(fs.readFileSync(path.join(home, 'decisions', meta.key.slice('decision:'.length), 'answer.json'), 'utf8'));
@@ -132,7 +175,15 @@ describe('glass /requests', () => {
     expect((await post(good, { 'x-lobstah-token': '' })).status).toBe(403);
     expect((await post(good, { 'x-lobstah-token': 'wrong' })).status).toBe(403);
     expect((await post(good, { Origin: 'http://evil.example' })).status).toBe(403);
-    expect((await withHost('/requests', 'evil.example', 'POST', JSON.stringify(good), { Origin: base, 'content-type': 'application/json', 'x-lobstah-token': token })).status).toBe(403);
+    expect(
+      (
+        await withHost('/requests', 'evil.example', 'POST', JSON.stringify(good), {
+          Origin: base,
+          'content-type': 'application/json',
+          'x-lobstah-token': token,
+        })
+      ).status,
+    ).toBe(403);
     expect((await post(undefined, {}, 'GET')).status).toBe(405);
     expect(listRequests()).toEqual([]);
     expect(listNotices(50)).toEqual([]);
@@ -171,7 +222,10 @@ describe('glass /requests', () => {
     // The shared cap: base64 of eight files at limits.attachmentMaxBytes, the answer text, and 64 KB.
     const expected = (attachment: number) => Math.ceil((attachment * 4) / 3) * 8 + 20_000 * 4 + 64 * 1024;
     expect(requestBodyCap()).toBe(expected(25 * 1024 * 1024));
-    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.web]\npath = '${repoDir}'\ntrunk = 'main'\n\n[limits]\nattachmentMaxBytes = 1024\n`);
+    fs.writeFileSync(
+      path.join(home, 'config.toml'),
+      `[repos.web]\npath = '${repoDir}'\ntrunk = 'main'\n\n[limits]\nattachmentMaxBytes = 1024\n`,
+    );
     const cap = requestBodyCap();
     expect(cap).toBe(expected(1024));
     expect(REQUEST_KIND_MAX_BYTES.get('trap-request')).toBe(4096);
@@ -240,7 +294,12 @@ describe('glass /requests', () => {
     expect(buildGlassSnapshot().traps.find((t) => t.trapId === reservation.trapId)?.starting?.commands).toBeUndefined();
     const own = (await (await fetch(`${base}/data`)).json()) as GlassSnapshot;
     const commands = own.traps.find((t) => t.trapId === reservation.trapId)?.starting?.commands;
-    expect(commands).toEqual([{ harness: 'claude', command: `cd ${shellQuote(repoDir)} && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${ticket}"` }]);
+    expect(commands).toEqual([
+      {
+        harness: 'claude',
+        command: `cd ${shellQuote(repoDir)} && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${ticket}"`,
+      },
+    ]);
     const rebound = await withHost('/data', 'evil.example');
     expect(rebound.status).toBe(200);
     expect(rebound.text).not.toContain(ticket);

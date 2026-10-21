@@ -1100,7 +1100,7 @@ async function mainCli(): Promise<void> {
         const [, address, onOff] = pos;
         if (!address || (onOff !== 'on' && onOff !== 'off')) throw new UsageError(usageFor('trap')!);
         const { bypassCommand } = await import('./grants-cli.js');
-        bypassCommand(address, onOff === 'on');
+        bypassCommand(address, onOff === 'on', has('--yes'));
         break;
       }
       throw new UsageError(usageFor('trap')!);
@@ -1115,6 +1115,7 @@ async function mainCli(): Promise<void> {
         ...(file !== undefined ? { path: file } : { command }),
         prefix: has('--prefix'),
         once: has('--once'),
+        yes: has('--yes'),
         harness: opt('--harness'),
         expires: opt('--expires'),
         trap: opt('--trap'),

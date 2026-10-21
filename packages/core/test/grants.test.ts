@@ -3,7 +3,21 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { GrantError, ONCE_TTL_MS, addGrant, checkoutRoots, grantActive, grantCovers, grantsDir, listGrants, normaliseCommand, readLedger, revokeGrant, useGrant } from '../src/index.js';
+import {
+  GrantError,
+  ONCE_TTL_MS,
+  addGrant,
+  checkoutRoots,
+  commandGrantScope,
+  grantActive,
+  grantCovers,
+  grantsDir,
+  listGrants,
+  normaliseCommand,
+  readLedger,
+  revokeGrant,
+  useGrant,
+} from '../src/index.js';
 import type { CheckoutRoot, Grant, GrantRequest } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -19,6 +33,39 @@ afterEach(() => {
 
 const bash = (command: string, extra: Partial<GrantRequest> = {}): GrantRequest => ({ harness: 'claude', tool: 'Bash', command, ...extra });
 const grant = (over: Partial<Grant>): Grant => ({ id: 'g-1', at: '2026-10-15T00:00:00Z', by: 'glass', harness: 'any', mode: 'always', uses: 0, ...over });
+
+describe('permission card command scopes', () => {
+  it.each([
+    ['ume push .temp/plan.html --session f6cc416c --project p --gate plan --title "A plan"', 'ume push'],
+    ['git push origin task-branch', 'git push'],
+    ['pnpm test --runInBand', 'pnpm test'],
+    ['pnpm run test --reporter verbose', 'pnpm run test'],
+    ['ume intents list session', 'ume intents list'],
+    ['npx wrangler deploy --dry-run --outdir tmp', 'npx wrangler deploy --dry-run'],
+  ])('offers %s as the reusable scope %s', (command, prefix) => {
+    expect(commandGrantScope(command)).toEqual({ command: prefix, match: 'prefix' });
+  });
+
+  it.each([
+    'ume push plan.html; echo extra',
+    'ume push plan.html && echo extra',
+    'ume push plan.html | cat',
+    'ume push plan.html > out',
+    'ume push $(cat file)',
+    'ume push `cat file`',
+    'ume push plan.html\necho extra',
+    'sh -c "ume push plan.html"',
+    'python script.py',
+    './deploy.sh --env prod',
+    'npx unknown deploy --env prod',
+    'npx wrangler deploy --env prod --dry-run',
+    'lobstah grant --prefix ume push',
+    'pnpm exec node -e "doSomething()"',
+    'lobstah trap bypass some-trap on',
+  ])('keeps ambiguous or narrow calls exact: %s', (command) => {
+    expect(commandGrantScope(command)).toEqual({ command, match: 'exact' });
+  });
+});
 
 describe('what a grant covers', () => {
   it('an exact command covers that command and nothing else', () => {
@@ -44,6 +91,19 @@ describe('what a grant covers', () => {
     ]) {
       expect(grantCovers(g, bash(joined)), joined).toBe(false);
     }
+  });
+
+  it('a dry-run prefix refuses later dry-run flag variants that could override it', () => {
+    const command = 'npx wrangler deploy --dry-run';
+    const g = grant({ command, match: 'prefix' });
+    expect(grantCovers(g, bash(command))).toBe(true);
+    expect(grantCovers(g, bash(`${command} --outdir tmp`))).toBe(true);
+    for (const extra of ['--dry-run=false', '--no-dry-run', '--dry-run false', '--dryRun=false', '--noDryRun', '--dry-run=true', '"--dry-run=false"']) {
+      expect(grantCovers(g, bash(`${command} --outdir tmp ${extra}`)), extra).toBe(false);
+    }
+    // Exact approval of an explicit command still means that exact command.
+    const explicit = `${command} --no-dry-run`;
+    expect(grantCovers(grant({ command: explicit, match: 'exact' }), bash(explicit))).toBe(true);
   });
 
   it('keeps to its harness and its trap', () => {
@@ -162,12 +222,20 @@ describe('always-grants follow the repo, not one worktree', () => {
     }
     git(main, 'worktree', 'add', '-q', '-b', 'a', wtA);
     git(main, 'worktree', 'add', '-q', '-b', 'b', wtB);
-    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.homebase]\npath = ${JSON.stringify(main)}\n\n[repos.other]\npath = ${JSON.stringify(other)}\n`);
+    fs.writeFileSync(
+      path.join(home, 'config.toml'),
+      `[repos.homebase]\npath = ${JSON.stringify(main)}\n\n[repos.other]\npath = ${JSON.stringify(other)}\n`,
+    );
     roots = checkoutRoots();
   });
 
   it('knows every checkout of each configured repo', () => {
-    expect(roots.filter((r) => r.repo === 'homebase').map((r) => r.root).sort()).toEqual([main, wtA, wtB].sort());
+    expect(
+      roots
+        .filter((r) => r.repo === 'homebase')
+        .map((r) => r.root)
+        .sort(),
+    ).toEqual([main, wtA, wtB].sort());
   });
 
   it('stores an always path grant relative to the repo root, and allows it in any worktree or the main checkout', () => {
@@ -224,7 +292,11 @@ describe('always-grants follow the repo, not one worktree', () => {
   });
 
   it('stores an always command normalised and allows it from any worktree', () => {
-    const g = addGrant({ command: `cd ${wtA}/bao/ios && bundle exec fastlane ios signing`, mode: 'always', by: 'glass' }, new Date(), roots);
+    const g = addGrant(
+      { command: `cd ${wtA}/bao/ios && bundle exec fastlane ios signing`, mode: 'always', by: 'glass' },
+      new Date(),
+      roots,
+    );
     expect(g.command).toBe('cd {repo:homebase}/bao/ios && bundle exec fastlane ios signing');
     expect(grantCovers(g, bash(`cd ${wtB}/bao/ios && bundle exec fastlane ios signing`), roots)).toBe(true);
     expect(grantCovers(g, bash(`cd ${main}/bao/ios && bundle exec fastlane ios signing`), roots)).toBe(true);

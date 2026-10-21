@@ -32,6 +32,7 @@ export function answerKey(key: string, req: AnswerRequest): { decision: Decision
     // A permission card: only the glass may allow. An allow writes the grant and tells the trap.
     const asked = readDecision(key);
     if (asked?.permission) {
+      if (!req.option) throw new DecisionError('choose Allow once, Allow always, or No on the permission card; a text reply cannot grant permission', 400);
       try {
         permissionAnswerAllowed(asked, req.option, req.by);
       } catch (err) {

@@ -149,6 +149,31 @@ describe('glass: the decisions list', () => {
 });
 
 describe('glass: the decision modal', () => {
+  it.each(['Allow once', 'Allow always', 'No'])('permission cards show only buttons and send %s explicitly', async (option) => {
+    const d = fleet();
+    d.decisions[0] = {
+      ...d.decisions[0]!,
+      title: 'Allow: ume push',
+      detail: '```\nume push plan.html --project demo --gate plan\n```',
+      options: ['Allow once', 'Allow always', 'No'],
+      optionNotes: { 'Allow always': 'ume push … (any arguments) for Codex traps' },
+      permission: true,
+      attachments: [],
+    };
+    const g = await page(d, { post: ok });
+    await show(g, KEY);
+    const c = card(g, KEY)!;
+    expect(text(c.querySelector('.mdpage'))).toContain('ume push plan.html --project demo --gate plan');
+    expect(text(c.querySelector('.dnote'))).toContain('ume push … (any arguments) for Codex traps');
+    expect([...c.querySelectorAll('.dopt .dlabel')].map(text)).toEqual(['Allow once', 'Allow always', 'No']);
+    expect(c.querySelector('textarea, input, .dattach, .dsend')).toBeNull();
+    expect(text(c.querySelector('.dlegend'))).not.toContain('write');
+    await key(g, '4', c);
+    expect(answers(g)).toEqual([]);
+    await click(g, [...c.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === option));
+    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option, files: [] } });
+  });
+
   it('opening an already-read card still sends a guarded view so it can stop the pet', async () => {
     const d = fleet();
     d.decisions[0]!.viewedAt = ago(60_000);

@@ -387,6 +387,8 @@ export interface GlassDecision {
   options: string[];
   /** A short note shown on an option, by label. */
   optionNotes?: Record<string, string>;
+  /** Permission cards accept only an explicit option, with no free-form inputs. */
+  permission?: boolean;
   attachments: Attachment[];
   dispatch?: string;
   lane?: Lane;

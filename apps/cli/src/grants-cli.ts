@@ -3,6 +3,7 @@ import {
   PERMISSION_OPTIONS,
   addGrant,
   alwaysScope,
+  commandGrantScope,
   askDecision,
   checkoutRoots,
   grantCovers,
@@ -10,9 +11,11 @@ import {
   loadConfig,
   parseUntil,
   revokeGrant,
+  readSessionClaim,
   rosterByAddress,
   setRosterProfile,
   sendMessage,
+  standingDecisions,
   trapBySession,
   toonKV,
   toonTable,
@@ -38,10 +41,21 @@ const AGENT_ENV = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOI
  * agent from granting itself; the harness checks, which see the agent run
  * the command, are the other half.
  */
-export function personOnly(action: string, env: NodeJS.ProcessEnv = process.env, tty = !!process.stdin.isTTY && !!process.stdout.isTTY): void {
-  const agent = agentSession(env);
-  if (agent) throw new GrantError(`${action} is for a person, not an agent session (${agent} is set). Grant in the glass, or run it in your own terminal.`);
+export function personOnly(
+  action: string,
+  env: NodeJS.ProcessEnv = process.env,
+  tty = !!process.stdin.isTTY && !!process.stdout.isTTY,
+): void {
+  refuseAgentSession(action, env);
   if (!tty) throw new GrantError(`${action} needs a terminal: a person grants, at a terminal or in the glass.`);
+}
+
+function refuseAgentSession(action: string, env: NodeJS.ProcessEnv = process.env): void {
+  const agent = agentSession(env);
+  if (agent)
+    throw new GrantError(
+      `${action} is for a person, not an agent session (${agent} is set). Grant in the glass, or run it in your own terminal.`,
+    );
 }
 
 /** The harness variable that marks this shell as an agent's, if any. */
@@ -53,14 +67,23 @@ export function agentSession(env: NodeJS.ProcessEnv = process.env): string | und
  * One line of the person's answer from stdin. Reading `process.stdin` at all
  * (even `isTTY`) leaves a terminal's stdin non-blocking, so a read gets
  * EAGAIN until a line is typed: that means "not yet", never "no". End of
- * input is an empty answer; any other read error is an error, not a no.
+ * input without an answer or a terminal is an error; other read errors
+ * also fail explicitly, never as a silent no.
  */
 export function readAnswer(read: (buf: Buffer) => number = (buf) => fs.readSync(0, buf, 0, buf.length, null)): string {
-  const buf = Buffer.alloc(256);
+  const buf = Buffer.alloc(1);
+  let answer = '';
   for (;;) {
     try {
-      return buf.subarray(0, read(buf)).toString('utf8');
+      if (read(buf) === 0) {
+        if (!answer.trim() && !process.stdin.isTTY) throw new GrantError('no terminal to confirm; re-run with --yes');
+        return answer;
+      }
+      const char = buf.toString('utf8');
+      if (char === '\n') return answer;
+      answer += char;
     } catch (err) {
+      if (err instanceof GrantError) throw err;
       if ((err as NodeJS.ErrnoException).code !== 'EAGAIN') throw new GrantError(`could not read your answer: ${(err as Error).message}`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
@@ -98,7 +121,10 @@ function shortPath(rel: string): string {
  * any checkout of its repo, the command from any of its repos' checkouts, or
  * the exact thing where no repo holds it.
  */
-export function alwaysScopeText(ask: Pick<PermissionAsk, 'command' | 'path'>, roots: readonly CheckoutRoot[] = checkoutRoots()): { short: string; long: string } {
+export function alwaysScopeText(
+  ask: Pick<PermissionAsk, 'command' | 'path'>,
+  roots: readonly CheckoutRoot[] = checkoutRoots(),
+): { short: string; long: string } {
   if (ask.command !== undefined) {
     const { command, repos } = alwaysScope({ command: ask.command }, roots) as { command: string; repos: string[] };
     if (repos.length === 0) return { short: 'this exact command, from any trap', long: 'this exact command, from any trap' };
@@ -110,7 +136,22 @@ export function alwaysScopeText(ask: Pick<PermissionAsk, 'command' | 'path'>, ro
   }
   const scoped = alwaysScope({ path: ask.path! }, roots) as { path: string; repo?: string };
   if (scoped.repo === undefined) return { short: 'this exact path', long: `exactly \`${scoped.path}\`` };
-  return { short: `${shortPath(scoped.path)} in any ${scoped.repo} worktree`, long: `\`${scoped.path}\` in any ${scoped.repo} worktree or checkout` };
+  return {
+    short: `${shortPath(scoped.path)} in any ${scoped.repo} worktree`,
+    long: `\`${scoped.path}\` in any ${scoped.repo} worktree or checkout`,
+  };
+}
+
+function permissionScopeText(ask: PermissionAsk): { short: string; long: string } {
+  if (ask.command !== undefined) {
+    const scope = commandGrantScope(ask.command);
+    if (scope.match === 'prefix') {
+      const who = ask.harness === 'any' ? 'traps' : `${ask.harness === 'codex' ? 'Codex' : 'Claude Code'} traps`;
+      const text = `\`${scope.command} …\` (any arguments) for ${who}`;
+      return { short: text, long: text };
+    }
+  }
+  return alwaysScopeText(ask);
 }
 
 /** `lobstah grant <command> [--prefix] [--once] [--harness] [--expires] [--path <p>] [--trap <name>]`. */
@@ -122,15 +163,16 @@ export function grantCommand(opts: {
   harness?: string;
   expires?: string;
   trap?: string;
+  yes?: boolean;
 }): void {
-  personOnly('lobstah grant');
+  refuseAgentSession('lobstah grant');
   const mode: GrantMode = opts.once ? 'once' : 'always';
   const harness = harnessOf(opts.harness);
   const expiresAt = opts.expires !== undefined ? parseUntil(opts.expires) : undefined;
   const shown = opts.path !== undefined ? `writes to ${opts.path}` : `\`${opts.command}\`${opts.prefix ? ' and the same command with more arguments' : ''}`;
   const scope = mode === 'always' ? alwaysScopeText(opts.path !== undefined ? { path: opts.path } : { command: opts.command }).short : '';
   const warn = mode === 'always' ? `every trap may run it without asking (${scope}), until you revoke it` : 'one trap may run it once';
-  if (!confirm(`Allow ${shown} (${harness === 'any' ? 'Claude Code and Codex' : harness}); ${warn}?`)) {
+  if (!opts.yes && !confirm(`Allow ${shown} (${harness === 'any' ? 'Claude Code and Codex' : harness}); ${warn}?`)) {
     console.log('not granted');
     return;
   }
@@ -142,7 +184,17 @@ export function grantCommand(opts: {
     ...(opts.trap ? { trap: opts.trap } : {}),
     ...(expiresAt ? { expiresAt } : {}),
   });
-  console.log(toonKV({ granted: g.id, what: what(g), mode: g.mode, harness: g.harness, ...(g.trap ? { trap: g.trap } : {}), ...(g.expiresAt ? { expires: g.expiresAt } : {}), by: g.by }));
+  console.log(
+    toonKV({
+      granted: g.id,
+      what: what(g),
+      mode: g.mode,
+      harness: g.harness,
+      ...(g.trap ? { trap: g.trap } : {}),
+      ...(g.expiresAt ? { expires: g.expiresAt } : {}),
+      by: g.by,
+    }),
+  );
 }
 
 /** `lobstah grants [--all] [--json]`: what a person has granted, with who, when and how often used. */
@@ -199,13 +251,14 @@ export function patchPaths(patch: string): string[] {
  * for a write. A call is covered only when every request is.
  */
 export function callRequests(call: CallInput, trap: string | undefined, cwd: string): GrantRequest[] {
-  const base = { harness: call.harness, tool: call.tool, ...(trap ? { trap } : {}) };
-  const raw = call.input.command;
-  if (call.tool === 'Bash' || call.tool === 'shell' || call.tool === 'exec_command') {
+  const tool = call.tool.split('.').at(-1);
+  const base = { harness: call.harness, tool: tool!, ...(trap ? { trap } : {}) };
+  const raw = call.input.command ?? call.input.cmd;
+  if (tool === 'Bash' || tool === 'shell' || tool === 'exec_command') {
     const command = Array.isArray(raw) ? raw.map(String).join(' ') : typeof raw === 'string' ? raw : undefined;
     return command ? [{ ...base, command }] : [];
   }
-  if (call.tool === 'apply_patch') {
+  if (tool === 'apply_patch') {
     const patch = typeof raw === 'string' ? raw : typeof call.input.patch === 'string' ? (call.input.patch as string) : '';
     return patchPaths(patch).map((p) => ({ ...base, path: p.startsWith('/') ? p : `${cwd}/${p}` }));
   }
@@ -274,17 +327,51 @@ export function grantCheckHook(): void {
  * plugins. With a grant that covers a trap's call it allows it: in Codex
  * before the approval reviewer, in Claude Code where a permission prompt
  * would show (the mod covers auto mode). Otherwise it prints nothing, and
- * the normal approval flow goes on.
+ * the normal approval flow goes on. An uncovered call from an assigned trap
+ * also files a permission card, so its glass answer writes a real grant.
  */
 export function permissionRequestHook(): void {
   try {
     const h = readStdinJson();
     if (!h || typeof h.tool_name !== 'string' || typeof h.tool_input !== 'object' || h.tool_input === null) return;
-    const ids = checkCall(
-      { harness: 'codex', tool: h.tool_name, input: h.tool_input as Record<string, unknown>, ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}) },
-      typeof h.cwd === 'string' ? h.cwd : process.cwd(),
-    );
-    if (ids) console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } }));
+    const call: CallInput = {
+      harness: 'codex',
+      tool: h.tool_name,
+      input: h.tool_input as Record<string, unknown>,
+      ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}),
+    };
+    const cwd = typeof h.cwd === 'string' ? h.cwd : process.cwd();
+    const ids = checkCall(call, cwd);
+    if (ids) {
+      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } }));
+      return;
+    }
+    const trap = call.session ? trapBySession(call.session) : undefined;
+    if (!trap?.claimed) return;
+    const lane = (['work', 'chore'] as const).find((lane) => readSessionClaim(trap.claimed!, lane)?.by === `wt:${trap.trapId}`);
+    if (!lane) return;
+    const harness = trap.harness === 'claude' ? 'claude' : 'codex';
+    for (const request of callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd)) {
+      if (listGrants().grants.some((g) => grantCovers(g, request))) continue;
+      const duplicate = standingDecisions().some(
+        (d) =>
+          d.dispatch === trap.claimed &&
+          d.permission?.harness === harness &&
+          d.permission.command === request.command &&
+          d.permission.path === request.path,
+      );
+      if (!duplicate)
+        askPermission({
+          dispatch: trap.claimed,
+          lane,
+          repo: trap.repo,
+          ask: {
+            ...(request.command !== undefined ? { command: request.command } : { path: request.path! }),
+            harness,
+            trap: trap.name ?? trap.trapId,
+          },
+        });
+    }
   } catch {
     /* no decision: the normal approval flow */
   }
@@ -294,8 +381,9 @@ export function permissionRequestHook(): void {
 export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string }): DecisionMeta {
   const target = opts.ask.command !== undefined ? opts.ask.command : opts.ask.path!;
   const kind = opts.ask.command !== undefined ? 'run' : 'write to';
-  const scope = alwaysScopeText(opts.ask);
-  const title = `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
+  const scope = permissionScopeText(opts.ask);
+  const title =
+    opts.ask.command !== undefined ? `Allow: ${commandGrantScope(target).command}` : `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
   const detail = [
     opts.note ? `${opts.note}\n` : '',
     `The trap asks to ${kind} exactly this${opts.ask.harness === 'any' ? '' : ` (${opts.ask.harness === 'claude' ? 'Claude Code' : 'Codex'})`}:`,
@@ -305,7 +393,7 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
     '```',
     '',
     `- **Allow once**: this trap may ${kind} it once, within the hour.`,
-    `- **Allow always**: any trap may ${kind} ${scope.long} without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
+    `- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
     '- **No**: the trap is told not to.',
   ].join('\n');
   return askDecision({
@@ -345,12 +433,22 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
   const lane: Lane = decision.lane ?? 'work';
   const target = ask.command !== undefined ? `\`${ask.command}\`` : `writes to ${ask.path}`;
   if (answer.by !== 'glass' || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
-    if (answer.option === 'No') sendMessage(decision.dispatch, lane, `Chris answered No to ${target}. Do not run it. Carry on without it, or report what you need instead.`, 'glass');
+    if (answer.option === 'No')
+      sendMessage(
+        decision.dispatch,
+        lane,
+        `Chris answered No to ${target}. Do not run it. Carry on without it, or report what you need instead.`,
+        'glass',
+      );
     return undefined;
   }
   const once = answer.option === 'Allow once';
   const g = addGrant({
-    ...(ask.command !== undefined ? { command: ask.command, match: 'exact' as const } : { path: ask.path! }),
+    ...(ask.command !== undefined
+      ? once
+        ? { command: ask.command, match: 'exact' as const }
+        : commandGrantScope(ask.command)
+      : { path: ask.path! }),
     mode: once ? 'once' : 'always',
     harness: ask.harness,
     by: 'glass',
@@ -397,13 +495,13 @@ export const BYPASS_WARNING =
  * --dangerously-bypass-approvals-and-sandbox). A person's choice, at a
  * terminal: an agent cannot turn it on for itself.
  */
-export function bypassCommand(address: string, on: boolean): void {
-  if (on) personOnly('lobstah trap bypass');
+export function bypassCommand(address: string, on: boolean, yes = false): void {
+  if (on) refuseAgentSession('lobstah trap bypass');
   const entry = rosterByAddress(address);
   if (!entry) throw new GrantError(`no roster record for ${address}: a trap joins the roster when it signs on`);
   if (on) {
     console.log(`warning: ${BYPASS_WARNING}`);
-    if (!confirm(`Start ${entry.name} with no permission checks from its next start?`)) {
+    if (!yes && !confirm(`Start ${entry.name} with no permission checks from its next start?`)) {
       console.log('unchanged');
       return;
     }
@@ -417,4 +515,3 @@ export function bypassCommand(address: string, on: boolean): void {
     }),
   );
 }
-

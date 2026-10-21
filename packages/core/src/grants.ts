@@ -187,6 +187,38 @@ export function grantActive(g: Grant, now = Date.now()): boolean {
 /** Shell syntax that runs a second command or redirects output. */
 const SHELL_JOINERS = /[;&|`\n\r<>]|\$\(/;
 
+/** A useful card scope for recognised CLIs; shells, scripts and ambiguous syntax stay exact. */
+export function commandGrantScope(raw: string): { command: string; match: 'exact' | 'prefix' } {
+  const command = raw.trim();
+  const exact = { command, match: 'exact' as const };
+  if (SHELL_JOINERS.test(command)) return exact;
+  const words = command.split(/\s+/);
+  if (
+    words[0] === 'lobstah' &&
+    (['grant', 'permissions'].includes(words[1] ?? '') || (words[1] === 'trap' && ['grant', 'bypass'].includes(words[2] ?? '')))
+  )
+    return exact;
+  let count = 2;
+  if (words[0] === 'npx' || words[0] === 'pnpx') {
+    if (!['wrangler', 'vitest', 'playwright', 'tsc'].includes(words[1] ?? '')) return exact;
+    count = words[1] === 'tsc' ? 2 : 3;
+  } else if (!['ume', 'git', 'pnpm', 'npm', 'yarn', 'bun', 'wrangler', 'gh', 'lobstah'].includes(words[0]!)) return exact;
+  if ((words[0] === 'pnpm' || words[0] === 'npm' || words[0] === 'bun') && ['run', 'exec', 'dlx'].includes(words[1] ?? '')) count = 3;
+  if ((words[0] === 'git' && ['remote', 'worktree', 'submodule', 'stash'].includes(words[1] ?? '')) || words[0] === 'gh') count = 3;
+  if (words[0] === 'ume' && ['intents', 'work', 'theme', 'sdk', 'hooks', 'local', 'skill', 'agent'].includes(words[1] ?? '')) count = 3;
+  if (['exec', 'dlx'].includes(words[1] ?? '') && ['node', 'python', 'python3', 'sh', 'bash', 'zsh', 'ruby', 'perl', 'deno', 'tsx', 'ts-node'].includes(words[2] ?? '')) return exact;
+  if (words.length < count || words.slice(0, count).some((w) => !/^[A-Za-z0-9_.-]+$/.test(w) || w.startsWith('-'))) return exact;
+  // A dry run must never become permission to perform the operation for real.
+  if (words.includes('--dry-run')) {
+    if (words[count] !== '--dry-run') return exact;
+    count++;
+  }
+  const prefix = words.slice(0, count).join(' ');
+  // Prefix matching is literal: don't propose a scope that cannot cover this call.
+  if (command !== prefix && !command.startsWith(`${prefix} `)) return exact;
+  return { command: prefix, match: 'prefix' };
+}
+
 function normalisePath(p: string): string {
   const resolved = path.resolve(p);
   return p.endsWith('/') || p.endsWith(path.sep) ? `${resolved}${path.sep}` : resolved;
@@ -224,7 +256,10 @@ export function grantCovers(g: Grant, req: GrantRequest, roots: readonly Checkou
     }
     if (cmd === want) return true;
     if (g.match !== 'prefix' || !cmd.startsWith(`${want} `)) return false;
-    return !SHELL_JOINERS.test(cmd.slice(want.length));
+    const rest = cmd.slice(want.length);
+    // Boolean flag parsers may let a later flag negate the granted dry run.
+    if (/(?:^|\s)--dry-run(?:\s|$)/.test(want) && /--(?:no-?)?dry[-_]?run\b/i.test(rest)) return false;
+    return !SHELL_JOINERS.test(rest);
   }
   if (g.path !== undefined) {
     if (!(WRITE_TOOLS as readonly string[]).includes(req.tool) || !req.path) return false;
