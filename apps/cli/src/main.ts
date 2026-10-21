@@ -1126,6 +1126,11 @@ async function mainCli(): Promise<void> {
       grantsCommand({ all: has('--all'), json: has('--json') });
       break;
     }
+    case 'permissions': {
+      const { permissionsCommand } = await import('./permissions.js');
+      await permissionsCommand(pos[0], { yes: has('--yes') });
+      break;
+    }
     case 'revoke': {
       if (!pos[0]) throw new UsageError(usageFor('revoke')!);
       const { revokeCommand } = await import('./grants-cli.js');
@@ -3767,6 +3772,7 @@ wallClockSecs      = 3600
           initialized: true,
         }),
       );
+      console.log(toonHelp(['lobstah permissions apply   (add lobstah\'s auto-mode profile to your Claude Code settings; shows the diff and asks)']));
       break;
     }
     case '__pool-warm': {

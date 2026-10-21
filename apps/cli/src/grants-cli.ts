@@ -39,13 +39,18 @@ const AGENT_ENV = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOI
  * the command, are the other half.
  */
 export function personOnly(action: string, env: NodeJS.ProcessEnv = process.env, tty = !!process.stdin.isTTY && !!process.stdout.isTTY): void {
-  const agent = AGENT_ENV.find((k) => env[k] !== undefined);
+  const agent = agentSession(env);
   if (agent) throw new GrantError(`${action} is for a person, not an agent session (${agent} is set). Grant in the glass, or run it in your own terminal.`);
   if (!tty) throw new GrantError(`${action} needs a terminal: a person grants, at a terminal or in the glass.`);
 }
 
+/** The harness variable that marks this shell as an agent's, if any. */
+export function agentSession(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return AGENT_ENV.find((k) => env[k] !== undefined);
+}
+
 /** Ask the person to confirm at the terminal. */
-function confirm(question: string): boolean {
+export function confirm(question: string): boolean {
   process.stdout.write(`${question} [y/N] `);
   const buf = Buffer.alloc(256);
   let n = 0;
