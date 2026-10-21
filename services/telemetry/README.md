@@ -108,6 +108,9 @@ Chris approved the initial deployment directly. Version
 `f2e14ef8-c4ea-4750-aece-714c08291da4` was deployed at
 `2026-10-14T04:16:01.879Z`. Outside checks returned 200 with zero counts for
 all three badges and public `/v1/stats`; posting `{}` to `/v1/daily` returned 400. No valid daily test payload was sent to production.
+On 2026-10-21 the receiver moved from the aequitas labs account to the lobstah
+account with the `lobstah.dev` zone. Version `49783c36-e81e-4087-a833-786b83771591`
+was deployed there at 22:53Z after copying the database; the same checks passed.
 
 Use the **lobstah** account (`cdde311c7a0f2943ec259f0548460a85`). This
 machine's separate Wrangler sign-in is selected by
