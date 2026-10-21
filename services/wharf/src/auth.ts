@@ -1,5 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { bearer } from 'better-auth/plugins';
+import { glassPage } from './glass-page.js';
 import { boatDevice } from './device.js';
 import { ApiError, digest, identifier, requireThat } from './protocol.js';
 
@@ -81,6 +82,8 @@ export async function authRequest(request: Request, env: Env, api: boolean): Pro
   const { glass } = authOrigins(env); const url = new URL(request.url);
   const route = url.pathname.slice(api ? '/v1/auth/'.length : '/api/auth/'.length);
   requireThat((api ? tokenRoutes : browserRoutes).has(route), 404, 'auth route not found');
+  // Only browser GET presentation changes; OAuth POSTs and callbacks stay with Better Auth.
+  if (!api && request.method === 'GET' && ['error', 'sign-in/social'].includes(route)) return glassPage();
   if (!api && ['device', 'wharf/approve', 'device/deny'].includes(route)) {
     const person = await personSession(env, request.headers);
     if (route === 'device' || route === 'device/deny') {

@@ -106,7 +106,7 @@ it('boat approval shows the resolved name and allows only requested or lower acc
   expect(g.writes[0]).toMatchObject({ path: '/api/auth/wharf/approve', body: { userCode: 'test-code', name: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], permissions: ['work', 'read'] } });
 });
 it('an expired cookie clears stale account details and asks for GitHub sign-in', async () => {
-  const g = await page(); g.unauthenticated(); await g.poll(); expect(g.doc.body.textContent).toContain('sign in with GitHub'); expect(g.doc.querySelector('nav')).toBeNull(); expect(g.doc.body.textContent).not.toContain('Choose the next catch');
+  const g = await page(); g.unauthenticated(); await g.poll(); expect(g.doc.body.textContent).toContain('Continue with GitHub'); expect(g.doc.querySelector('nav')).toBeNull(); expect(g.doc.body.textContent).not.toContain('Choose the next catch');
 });
 it('sign-out stops polling instead of restoring account details on the next interval', async () => {
   const g = await page(); await g.click('sign out'); const reads = g.reads.length; await g.poll();
@@ -146,9 +146,9 @@ it('keeps the URL on the open item, returns it to the view on close, and follows
   expect(g.doc.querySelector('[role=dialog]')).toBeNull(); expect(g.doc.body.textContent).toContain('last check-in');
 });
 it('carries a link through sign-in: the item waits behind the sign-in button and returns as the callback', async () => {
-  const g = await page('/#decision/card', true); expect(g.doc.body.textContent).toContain('sign in with GitHub'); expect(g.doc.querySelector('[role=dialog]')).toBeNull();
+  const g = await page('/#decision/card', true); expect(g.doc.body.textContent).toContain('Continue with GitHub'); expect(g.doc.querySelector('[role=dialog]')).toBeNull();
   expect(g.window.location.hash).toBe('#decision/card');
-  await g.click('sign in with GitHub'); expect(g.writes[0]).toMatchObject({ path: '/api/auth/sign-in/social', body: { provider: 'github', callbackURL: 'https://glass.test/#decision/card' } });
+  await g.click('Continue with GitHub'); expect(g.writes[0]).toMatchObject({ path: '/api/auth/sign-in/social', body: { provider: 'github', callbackURL: 'https://glass.test/#decision/card' } });
 });
 it('reads a view or one item from the hash and nothing else', () => {
   expect(parseRoute('#job/abc_DEF-1')).toEqual({ tab: 'jobs', item: { kind: 'job', id: 'abc_DEF-1' } });
