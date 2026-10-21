@@ -305,7 +305,8 @@ prints one `hooks claude` and one `hooks codex` row for each harness whose
 lobstah plugin is installed (`skip` otherwise). The row starts with the
 readiness of each role: the helm needs `Stop` and `SessionStart`; a trap
 needs all four (`helm ready, trap not ready (needs PostToolUse)`). Then, for
-each hook (`Stop`, `SessionStart`, `PostToolUse`, `SessionEnd`), it says:
+each lifecycle hook (`Stop`, `SessionStart`, `PostToolUse`, `SessionEnd`),
+plus Codex's `UserPromptSubmit` and `PermissionRequest` when declared, it says:
 
 - **installed**: the plugin's `hooks/hooks.json` declares it (`missing`
   otherwise), and whether the harness has it turned off (`installed but

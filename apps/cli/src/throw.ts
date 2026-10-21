@@ -33,6 +33,7 @@ import {
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
+import { codexTrapHookArgs } from './codex-startup.js';
 
 /** One terminal tab to open: a directory, an environment, and a command line. */
 export interface TerminalLaunch {
@@ -293,6 +294,7 @@ async function launchAndWait(
 ): Promise<ThrowResult> {
   const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
   try {
+    if (w.launched.harness === 'codex') w.command.argv.splice(1, 0, ...codexTrapHookArgs());
     await w.adapter.launch(w.command);
   } catch (err) {
     giveUp(w.trapId, w.label, w.repo, w.retry, w.started, err instanceof Error ? err.message : String(err));

@@ -13,7 +13,7 @@ import { liveWatcher } from './watchers.js';
 
 /** One lobstah hook in one harness, as `lobstah doctor` reports it. */
 export interface HookReadiness {
-  hook: LobstahHook;
+  hook: CodexHook;
   /** The plugin declares it. */
   installed: boolean;
   /**
@@ -50,7 +50,7 @@ const readJson = (file: string): unknown => {
   }
 };
 
-interface HookHandler {
+export interface HookHandler {
   type?: string;
   command?: string;
   commandWindows?: string;
@@ -76,8 +76,12 @@ function lobstahHandler(groups: HookGroups[string] | undefined): [number, number
   return undefined;
 }
 
+/** Extra plugin events also participate in Codex's blocking startup review. */
+export type CodexHook = LobstahHook | 'UserPromptSubmit' | 'PermissionRequest';
+export const CODEX_EXTRA_HOOKS = ['UserPromptSubmit', 'PermissionRequest'] as const;
+
 /** Codex's snake_case event label, as its hook trust keys use it. */
-const snake = (hook: LobstahHook) => hook.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+const snake = (hook: CodexHook) => hook.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
 
 const sortKeys = (v: unknown): unknown =>
   Array.isArray(v)
@@ -96,7 +100,7 @@ const sortKeys = (v: unknown): unknown =>
  * `{ event_name, matcher?, hooks: [handler] }`, with the handler's timeout
  * normalized (SessionEnd: default 1, at most 3; others: default 600).
  */
-export function codexHookHash(hook: LobstahHook, matcher: string | undefined, h: HookHandler): string {
+export function codexHookHash(hook: CodexHook, matcher: string | undefined, h: HookHandler): string {
   const timeout =
     hook === 'SessionEnd' ? Math.min(3, Math.max(1, h.timeout ?? 1)) : Math.max(1, h.timeout ?? 600);
   const handler: Record<string, unknown> = { type: 'command', command: h.command, timeout, async: h.async ?? false };
@@ -131,7 +135,8 @@ export function codexHooks(opts: Opts = {}): HarnessHooks {
   const features = (cfg.features ?? {}) as Record<string, unknown>;
   const declared = pluginHooks(plugin.root);
   const runs = readHookRuns();
-  const hooks = LOBSTAH_HOOKS.map((hook): HookReadiness => {
+  const events: CodexHook[] = [...LOBSTAH_HOOKS, ...CODEX_EXTRA_HOOKS.filter((h) => declared?.[h]?.length)];
+  const hooks = events.map((hook): HookReadiness => {
     const at = lobstahHandler(declared?.[hook]);
     const entry = at ? state[`lobstah@lobstah:hooks/hooks.json:${snake(hook)}:${at[0]}:${at[1]}`] : undefined;
     const group = at ? declared![hook]![at[0]]! : undefined;
@@ -194,10 +199,10 @@ export const ROLE_HOOKS: Record<'helm' | 'trap', readonly LobstahHook[]> = {
   trap: LOBSTAH_HOOKS,
 };
 
-const list = (hooks: readonly LobstahHook[]) => (hooks.length === 1 ? hooks[0]! : `${hooks.slice(0, -1).join(', ')} and ${hooks.at(-1)}`);
+const list = (hooks: readonly CodexHook[]) => (hooks.length === 1 ? hooks[0]! : `${hooks.slice(0, -1).join(', ')} and ${hooks.at(-1)}`);
 
 /** The hooks of `need` that cannot run: missing, untrusted, or off. */
-function notReady(h: HarnessHooks, need: readonly LobstahHook[]): LobstahHook[] {
+function notReady(h: HarnessHooks, need: readonly CodexHook[]): CodexHook[] {
   return need.filter((n) => {
     const x = h.hooks.find((y) => y.hook === n);
     return !!h.allOff || !x || !x.installed || !x.enabled || x.trusted === 'untrusted' || x.trusted === 'changed';
@@ -217,7 +222,8 @@ export function hookRow(h: HarnessHooks, now = Date.now()): { check: string; sta
   const parts = h.hooks.map((x) => {
     const trust = x.trusted === 'n/a' ? 'trust n/a' : x.trusted === 'changed' ? 'changed since trusted' : x.trusted;
     const state = !x.installed ? 'missing' : [x.enabled ? 'installed' : 'installed but disabled', trust].join(', ');
-    return `${x.hook}: ${state}, ${x.lastRun ? `last run ${ago(x.lastRun, now)}` : 'never run'}`;
+    const run = (LOBSTAH_HOOKS as readonly string[]).includes(x.hook) ? `, ${x.lastRun ? `last run ${ago(x.lastRun, now)}` : 'never run'}` : '';
+    return `${x.hook}: ${state}${run}`;
   });
   const missing = h.hooks.filter((x) => !x.installed).map((x) => x.hook);
   const untrusted = h.hooks.filter((x) => x.installed && (x.trusted === 'untrusted' || x.trusted === 'changed')).map((x) => x.hook);
@@ -233,7 +239,8 @@ export function hookRow(h: HarnessHooks, now = Date.now()): { check: string; sta
   }
   const healthy = remedies.length === 0;
   const roles = (['helm', 'trap'] as const).map((role) => {
-    const blocked = notReady(h, ROLE_HOOKS[role]);
+    const startup = h.harness === 'codex' ? h.hooks.filter((x) => (CODEX_EXTRA_HOOKS as readonly string[]).includes(x.hook)).map((x) => x.hook) : [];
+    const blocked = notReady(h, [...ROLE_HOOKS[role], ...startup]);
     return `${role} ${blocked.length ? `not ready (needs ${list(blocked)})` : 'ready'}`;
   });
   return {
