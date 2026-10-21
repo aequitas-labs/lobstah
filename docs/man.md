@@ -1185,7 +1185,8 @@ lobstah stow --wt amber-gull            # withdraw a reservation no session has 
 
 `man throw --new` (the helm's) picks a two-word name and a `wt:` id for each
 fresh trap before any session exists and writes a **starting** reservation
-(`soaking/<id>.starting`) with a deadline (`--timeout`, default 180 seconds).
+(`soaking/<id>.starting`) with a deadline (`--timeout`; Codex defaults to
+`[soak].codexStartSecs`, 600 seconds, and other harnesses to 180 seconds).
 `dispatch --for <name>` works on it at once: the work waits, as it does for
 any addressed trap. `man tend` and the glass show the trap as `starting`.
 
@@ -1196,7 +1197,7 @@ command in a new tab in the repo's primary checkout:
 
 ```bash
 cd <repo> && CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude '/lobstah:trap soak --ticket <ticket>'
-cd <repo> && codex '$lobstah:trap soak --ticket <ticket>'
+cd <repo> && codex -c 'tui.terminal_title=[]' '$lobstah:trap soak --ticket <ticket>'
 ```
 
 The session's soak redeems the ticket, from `--ticket` or from the
@@ -1207,9 +1208,11 @@ reservation. The ticket then redeems nothing. A spent ticket left in
 the session that redeemed it. A session that already mans a trap cannot
 redeem a ticket.
 
-A throw that sees no sign-on by its deadline withdraws the reservation and
-posts `trap-start-failed`. A reservation found unredeemed at its deadline by
-the daemon (one throw did not wait for) **fails** the same way: the glass
+A Codex throw that sees no sign-on by its deadline keeps its ticket valid
+and fences a second launch. Check its terminal or withdraw it before retrying.
+Other harnesses withdraw the reservation and post `trap-start-failed`. The
+daemon marks an unredeemed reservation past its deadline as **failed**
+while retaining its ticket for late sign-on: the glass
 shows the trap as `start failed` with the reason, and work addressed to it
 stays queued. `lobstah stow --wt <name>` withdraws a reservation; its
 addressed work is then orphaned bait and the helm gets a `bait-orphaned`
@@ -1325,9 +1328,11 @@ launched twice. Otherwise:
    prompt redeems the ticket, so the session signs on as the same trap.
    Every start names its permission mode (see **Permission mode** below).
 4. It returns when the trap has signed on and parked, and prints whether it
-   resumed or started cold, and why. Past `--timeout` (default 180 seconds)
-   it withdraws the reservation, so a late session cannot take the trap,
-   posts `trap-start-failed`, and leaves the roster unchanged.
+   resumed or started cold, and why. Codex uses `[soak].codexStartSecs`
+   (default 600 seconds); other harnesses use 180 seconds. `--timeout`
+   overrides either. A Codex timeout keeps its ticket and reservation for
+   late sign-on; other harnesses withdraw the reservation and post
+   `trap-start-failed`. Late first park announces the trap as available.
 
 **Permission mode.** A thrown trap starts in auto mode, cold or resumed,
 fresh or rostered:
@@ -1376,7 +1381,8 @@ so a live Codex trap shows the mode its throw started it in.
 (`--grounds`, else the caller's helm grounds, else every repo); `--repo`
 narrows to one repo; `--new --count N` starts N fresh ones. Every launch runs
 at once, with no limit, and the batch waits for all of them. It prints one
-row per trap: `resumed`, `cold`, or `new` (with why), `skipped` (live,
+row per trap: `resumed`, `cold`, or `new` (with why), `starting` (a Codex
+timeout still awaiting sign-on or first park), `skipped` (live,
 starting, or unresolved, with why), or `failed` (with why). One trap failing
 does not stop the others, and the command exits 1 when any failed.
 
