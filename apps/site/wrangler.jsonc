@@ -4,7 +4,7 @@
 // Cloudflare access runs. No secret lives in this file.
 {
   "name": "lobstah-site",
-  // The lobstah Cloudflare account, which holds the lobstah.dev zone.
+  // The Cloudflare account that serves lobstah.dev.
   "account_id": "cdde311c7a0f2943ec259f0548460a85",
   "main": "worker.js",
   "compatibility_date": "2026-10-06",
