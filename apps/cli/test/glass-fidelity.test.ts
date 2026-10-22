@@ -16,6 +16,10 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * through every tab in both views, the filters, every modal, the lobs, and
  * the preview lob; every visible section is compared after each step.
  *
+ * Runtime helm chat controls and their mode text are removed before comparing;
+ * helm-chat.test.ts covers their actual HTTP round-trip. Browser preference
+ * hint text and the settings title are normalized to their pre-toggle form.
+ *
  * The comparison is canonical, and each normalization is a documented
  * difference of the Preact page, not a visible one:
  * - event handlers are listeners, not on* attributes, so on* attributes
@@ -73,7 +77,7 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
-  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
+  for (const el of g.$$('.mobile-nav, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
 }
 const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
 /** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */
@@ -133,6 +137,17 @@ const STACK_NUMBER = /^#\d+$/;
 function foldPrTitles(el: Element): Node {
   const copy = el.cloneNode(true) as Element;
   const doc = el.ownerDocument;
+  // Transparent branding and dark-only native controls are intentional changes.
+  for (const img of copy.querySelectorAll('img.glass-brand')) img.replaceWith(doc.createTextNode('🦞✨'));
+  for (const n of copy.querySelectorAll('[data-helm-chat]')) n.remove();
+  if (copy.querySelector('.settings')) {
+    const title = copy.querySelector('h3');
+    if (title) title.textContent = '⚙ settings';
+    const hints = copy.querySelectorAll('.settings .hint');
+    if (hints[0]) hints[0].textContent = 'cards or table';
+    if (hints[1]) hints[1].textContent = 'crawling lobsters';
+  }
+  for (const n of copy.querySelectorAll('.chip.click .dim')) n.textContent = (n.textContent ?? '').replace(/ · chat (full|brief)$/, '');
   for (const n of copy.querySelectorAll('.prack')) n.remove();
   // Intentional worker UI additions have functional coverage separately.
   // Keep comparing the unrelated UI against the frozen pre-metadata page.
@@ -361,11 +376,11 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
-          .filter((el) => !el.matches('.prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *'))
+          .filter((el) => !el.matches('.glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);
-            const props = Array.from({ length: cs.length }, (_, k) => cs.item(k)).sort();
+            const props = Array.from({ length: cs.length }, (_, k) => cs.item(k)).filter((p) => p !== 'color-scheme').sort();
             out.push(`${label} ${i} ${el.tagName}.${el.className} ` + props.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';'));
           });
       };

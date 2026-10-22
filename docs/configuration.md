@@ -179,6 +179,7 @@ send a continuation.
 | `idleWorkingNoticeSecs` | `60` | Explicitly idle trap whose last report is working: wake the helm with its full note. A live session-owned background wait exempts it. Tool activity or a new report clears it; reminders use the same backoff. `0` disables. |
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
 | `todoStaleDays` | `3` | Open helm todos (`lobstah todo`) older than this many days add one note to `man tend`. `0` disables. |
+| `chat` | `"full"` | Default chat detail: `"full"` or `"brief"`. Brief mode points at cards instead of repeating detail and keeps routine wakes quiet. `lobstah man chat brief\|full [--grounds <name>]` or glass Settings overrides it for that grounds' signed-on helm, effective next turn, without a restart or config edit. The override stays with the seat on re-sign/takeover and ends when relieved. |
 
 ## `[wait]` — quiet helm and trap waiters
 

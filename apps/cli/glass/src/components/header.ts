@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import logo from '../../../../../docs/assets/favicon.png';
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_TABS } from '../../../src/glass-diff.js';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../../src/glass-diff.js';
@@ -14,6 +16,7 @@ const TAB_LABEL: Record<GlassTab, string> = {
   prs: 'PRs',
   reviews: 'Reviews',
   reports: 'Reports',
+  todos: 'TODOs',
   notices: 'Notices',
   stats: 'Stats',
 };
@@ -42,7 +45,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
-        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
+        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds} · chat ${h.chat ?? 'full'}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
     ),
   ];
 }
@@ -99,6 +102,63 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
   </div>`;
 }
 
+/** A disclosure with ordinary navigation links: Tab works without menu-specific keys. */
+function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unread: number }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLElement>(null);
+  const close = () => {
+    setOpen(false);
+    toggle.current?.focus();
+  };
+  useLayoutEffect(() => {
+    if (open) menu.current?.querySelector<HTMLAnchorElement>(`a[data-tab="${tab}"]`)?.focus();
+  }, [open]);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const outside = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) close();
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        close();
+      }
+    };
+    const resize = () => {
+      if (window.innerWidth >= 640) setOpen(false);
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', key, true);
+    window.addEventListener('hashchange', close);
+    window.addEventListener('resize', resize);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', key, true);
+      window.removeEventListener('hashchange', close);
+      window.removeEventListener('resize', resize);
+    };
+  }, [open]);
+  const badge = (t: GlassTab) => {
+    const count = t === 'deck' ? unread : t === 'reviews' ? (d?.reviews ?? []).filter((r) => r.stands || r.notification).length : 0;
+    return (
+      count > 0 &&
+      html`<span class="dbadge" aria-label=${t === 'deck' ? `${count} new decision${count === 1 ? '' : 's'}` : 'reviews in inbox'}>${count}</span>`
+    );
+  };
+  const links = (mobile = false) =>
+    GLASS_TABS.map(
+      (t) =>
+        html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${mobile && t === tab ? 'page' : undefined} onClick=${mobile ? close : undefined}>${TAB_LABEL[t]}${badge(t)}</a>`,
+    );
+  return [
+    html`<nav class="tabs" id="tabs" aria-label="Spyglass views">${links()}</nav>`,
+    html`<div class="mobile-nav" ref=${root}><div class="mobile-nav-header"><span class="mobile-current">${TAB_LABEL[tab]}${badge(tab)}</span>${tab !== 'deck' && unread > 0 && html`<a class="mobile-unread" href="#deck" aria-label=${`On deck: ${unread} new decisions`}>On deck${badge('deck')}</a>`}<button ref=${toggle} type="button" class="nav-toggle" aria-label="Sections" aria-expanded=${open} aria-controls="mobile-sections" onClick=${() => (open ? close() : setOpen(true))}><span aria-hidden="true">☰</span></button></div>${open && html`<nav ref=${menu} id="mobile-sections" class="mobile-sections" aria-label="Spyglass sections">${links(true)}</nav>`}</div>`,
+  ];
+}
+
 export function Header({
   d,
   inp,
@@ -116,18 +176,16 @@ export function Header({
   unread?: number;
 }) {
   return [
-    html`<div class="headerline"><h1>🦞✨ spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
+    html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
-    html`<nav class="tabs" id="tabs" aria-label="Spyglass views">${GLASS_TABS.map(
-      (t) =>
-        html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined}>${TAB_LABEL[t]}${t === 'reviews' && (d?.reviews ?? []).filter((r) => r.stands || r.notification).length > 0 && html`<span class="dbadge" aria-label="reviews in inbox">${d?.reviews?.filter((r) => r.stands || r.notification).length}</span>`}${t === 'deck' && unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new decision${unread === 1 ? '' : 's'}`}>${unread}</span>`}</a>`,
-    )}</nav>`,
+    html`<${Navigation} d=${d} tab=${tab} unread=${unread} />`,
     controls(d, tab, st),
   ];
 }
 
 export const Footer = ({ d }: { d: GlassSnapshot | undefined }) =>
   d && [
-    '🦞✨ lobstah v' + d.version + ' · ',
+    html`<img class="glass-brand" src=${logo} alt="" />`,
+    ' lobstah v' + d.version + ' · ',
     html`<a href=${d.repoUrl} target="_blank">${d.repoUrl.replace('https://github.com/', '')}</a>`,
   ];

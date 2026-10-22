@@ -4,13 +4,15 @@ import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
 
-it('keeps the emoji brand in header/footer and the embedded pet sprite and star only on the crawler', async () => {
+it('uses the transparent lobster-and-star brand and keeps the animated sprite only on the crawler', async () => {
   // This fixture has no asset server: both pieces must travel in the page.
   const g = await loadGlass(GLASS_PAGE, FIXTURES.empty!(), { now: NOW, search: '?lob' });
   const embedded = (name: string) => 'data:image/png;base64,' + fs.readFileSync(new URL(`../../../docs/assets/${name}`, import.meta.url)).toString('base64');
   try {
-    expect(g.$('h1')?.textContent).toMatch(/^🦞✨ spyglass/);
-    expect(g.$('#foot')?.textContent).toMatch(/^🦞✨ lobstah v/);
+    expect(g.$('h1')?.textContent?.trim()).toMatch(/^spyglass/);
+    for (const mark of g.$$('h1 .glass-brand, #foot .glass-brand')) expect(mark.getAttribute('src')).toBe(embedded('favicon.png'));
+    expect(g.$$('h1 .glass-brand, #foot .glass-brand')).toHaveLength(2);
+    expect(g.$('#foot')?.textContent?.trim()).toMatch(/^lobstah v/);
     expect(g.$('h1 .pet-art, #foot .pet-art')).toBeNull();
     expect(g.$$('#lobs .lob')).toHaveLength(1);
     expect(g.$$('.pet-art')).toHaveLength(1);

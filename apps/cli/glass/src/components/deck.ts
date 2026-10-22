@@ -27,6 +27,7 @@ import { reportMeta } from './reports.js';
 import { PrAck } from './prs.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
+import { Todos } from './todos.js';
 import type { DecisionDraft } from '../store.js';
 
 /**
@@ -138,23 +139,6 @@ function deckPrs(inp: DeckInputs, view: View) {
   return html`<section><h2><a href="#prs">PRs →</a></h2>${body}${more(inp.stacks.length - shown.length, 'prs')}</section>`;
 }
 
-/**
- * The helm's Todos: a section only when there are some. One compact
- * checklist in every view — table and cards alike, never a card per Todo.
- * Each row is a read-only checkbox, the full wrapped text, then its age; a
- * stale one carries a badge, and the stale note heads the section. A Todo
- * done today stays, checked green and struck through, until the 04:00 day
- * boundary. The helm closes them from its CLI.
- */
-function deckTodos(inp: DeckInputs) {
-  if (!inp.todos.length) return null;
-  const grounds = new Set(inp.todos.map((t) => t.grounds)).size > 1;
-  return html`<section class="todos"><h2>Todos</h2>${inp.todoNote && html`<div class="dim">${LinkedText(inp.todoNote)}</div>`}<ul class="todo-checklist">${inp.todos.map(
-    (t) =>
-      html`<li key=${`todo:${t.grounds}:${t.id}`} class=${t.done ? 'todo-check done' : 'todo-check'}><input type="checkbox" checked=${!!t.done} disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${t.done ? 'Done today; it drops off when the day rolls over (04:00)' : `Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${t.done ? html`<s>${LinkedText(t.text)}</s>` : LinkedText(t.text)}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${Age(t.createdAt)} ago</span>${!t.done && t.stale && html` <span class="badge warn">stale</span>`}</div></li>`,
-  )}</ul></section>`;
-}
-
 export function Deck({
   inp,
   goals = [],
@@ -225,6 +209,6 @@ export function Deck({
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}${deckTodos(inp)}${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', 4, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
   ];
 }

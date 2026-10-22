@@ -1,12 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Config } from './config.js';
+import { loadConfig, type Config, type HelmChat } from './config.js';
 import { displayGrounds, storageGrounds } from './grounds-name.js';
 import { readHold } from './disk.js';
 import type { Notice } from './notices.js';
 import { dispatchProgress } from './dispatch-progress.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import type { WindowRef } from './window.js';
+import { withDirLock } from './dir-lock.js';
 import { listWatches } from './watch.js';
 import { readRequest } from './requests.js';
 import { cancelRequested } from './queue.js';
@@ -28,6 +29,10 @@ const isOpenRequest = (id: string): boolean => {
  * One file per grounds is the enforcement — the data model cannot hold two.
  */
 export interface HelmRegistration {
+  /** Runtime chat override for these grounds, retained on re-sign or takeover. */
+  chat?: HelmChat;
+  /** One-shot mode announcement for a toggle made while the helm is active. */
+  chatPending?: HelmChat;
   sessionId: string;
   grounds: string;
   /** The repo keys this helm oversees, resolved from config at sign-on. */
@@ -92,12 +97,48 @@ function atomicWrite(file: string, content: string): void {
   atomicRenameSync(tmp, file);
 }
 
+/** Seat updates also race the waiter's heartbeat in other processes. */
+function withHelmLock<T>(grounds: string, action: () => T): T {
+  fs.mkdirSync(helmDir(), { recursive: true });
+  return withDirLock(`${helmPath(grounds)}.lock`, action, {
+    staleMs: 5000, waitMs: 5000,
+    busy: () => new Error(`helm seat "${grounds}" is busy; try again`),
+  });
+}
+
 export function readHelm(grounds: string): HelmRegistration | undefined {
   try {
     return JSON.parse(fs.readFileSync(helmPath(grounds), 'utf8')) as HelmRegistration;
   } catch {
     return undefined;
   }
+}
+
+/** Old seats and seats without an override use the configured default. */
+export function helmChat(reg: HelmRegistration | undefined, cfg = loadConfig()): HelmChat {
+  return reg?.chat ?? cfg.helm.chat;
+}
+
+export function setHelmChat(grounds: string, chat: HelmChat): HelmRegistration {
+  return withHelmLock(grounds, () => {
+    if (chat !== 'full' && chat !== 'brief') throw new Error('chat must be "full" or "brief"');
+    const reg = readHelm(grounds);
+    if (!reg) throw new Error(`no helm signed on for grounds "${grounds}"`);
+    const next = { ...reg, chat, ...(helmChat(reg) !== chat ? { chatPending: chat } : {}) };
+    atomicWrite(helmPath(grounds), JSON.stringify(next, null, 2));
+    return next;
+  });
+}
+
+/** Announce a runtime change once, including full, so earlier brief context can be retired. */
+export function consumeHelmChatChange(grounds: string): HelmChat | undefined {
+  return withHelmLock(grounds, () => {
+    const reg = readHelm(grounds);
+    if (!reg?.chatPending) return undefined;
+    const { chatPending, ...next } = reg;
+    atomicWrite(helmPath(grounds), JSON.stringify(next, null, 2));
+    return chatPending;
+  });
 }
 
 export function listHelms(): HelmRegistration[] {
@@ -174,63 +215,71 @@ export function takeHelm(opts: {
   now?: number;
   identity?: { harness?: string; cwd?: string; host?: string; label?: string; window?: WindowRef };
 }): TakeHelmResult {
-  const now = opts.now ?? Date.now();
-  const existing = readHelm(opts.grounds.name);
-  if (existing && existing.sessionId !== opts.sessionId) {
-    const fresh = now - (Date.parse(existing.heartbeatAt) || 0) <= opts.ttlMs;
-    if (fresh && !opts.take) return { held: existing };
-    atomicWrite(
-      path.join(relievedDir(), `${existing.sessionId}.json`),
-      JSON.stringify(
-        {
-          sessionId: existing.sessionId,
-          grounds: opts.grounds.name,
-          by: opts.sessionId,
-          at: new Date(now).toISOString(),
-        } satisfies RelievedNotice,
-        null,
-        2,
-      ),
-    );
-  }
-  const iso = new Date(now).toISOString();
-  const same = existing?.sessionId === opts.sessionId;
-  const live = existing !== undefined && now - (Date.parse(existing.heartbeatAt) || 0) <= opts.ttlMs;
-  const reg: HelmRegistration = {
-    sessionId: opts.sessionId,
-    grounds: opts.grounds.name,
-    repos: opts.grounds.repos,
-    signedOnAt: same ? existing.signedOnAt : iso,
-    heartbeatAt: iso,
-    // A new helm on empty grounds starts its cursor now: a notice delivered
-    // to nobody while no helm was signed on is not news. A take from a live
-    // helm, or the same session signing on again, keeps the cursor, so
-    // nothing in flight is dropped.
-    wakesFrom: same || live ? existing!.wakesFrom : iso,
-    // Identity refreshes on every sign-on; a re-sign without one keeps what
-    // the registration already knows.
-    harness: opts.identity?.harness ?? (same ? existing.harness : undefined),
-    model: sessionWorker(opts.sessionId, opts.identity?.harness ?? (same ? existing.harness : undefined)).model,
-    config: sessionWorker(opts.sessionId).config,
-    observedAt: sessionWorker(opts.sessionId).observedAt,
-    cwd: opts.identity?.cwd ?? (same ? existing.cwd : undefined),
-    host: opts.identity?.host ?? (same ? existing.host : undefined),
-    label: opts.identity?.label ?? (same ? existing.label : undefined),
-    window: opts.identity?.window ?? (same ? existing.window : undefined),
-    tookFrom:
-      existing && existing.sessionId !== opts.sessionId
-        ? { sessionId: existing.sessionId, at: iso }
-        : existing?.tookFrom,
-  };
-  atomicWrite(helmPath(opts.grounds.name), JSON.stringify(reg, null, 2));
-  return { ok: reg };
+  return withHelmLock(opts.grounds.name, () => {
+    const now = opts.now ?? Date.now();
+    const existing = readHelm(opts.grounds.name);
+    if (existing && existing.sessionId !== opts.sessionId) {
+      const fresh = now - (Date.parse(existing.heartbeatAt) || 0) <= opts.ttlMs;
+      if (fresh && !opts.take) return { held: existing };
+      atomicWrite(
+        path.join(relievedDir(), `${existing.sessionId}.json`),
+        JSON.stringify(
+          {
+            sessionId: existing.sessionId,
+            grounds: opts.grounds.name,
+            by: opts.sessionId,
+            at: new Date(now).toISOString(),
+          } satisfies RelievedNotice,
+          null,
+          2,
+        ),
+      );
+    }
+    const iso = new Date(now).toISOString();
+    const same = existing?.sessionId === opts.sessionId;
+    const live = existing !== undefined && now - (Date.parse(existing.heartbeatAt) || 0) <= opts.ttlMs;
+    const reg: HelmRegistration = {
+      chat: existing?.chat,
+      chatPending: existing?.chatPending,
+      sessionId: opts.sessionId,
+      grounds: opts.grounds.name,
+      repos: opts.grounds.repos,
+      signedOnAt: same ? existing.signedOnAt : iso,
+      heartbeatAt: iso,
+      // A new helm on empty grounds starts its cursor now: a notice delivered
+      // to nobody while no helm was signed on is not news. A take from a live
+      // helm, or the same session signing on again, keeps the cursor, so
+      // nothing in flight is dropped.
+      wakesFrom: same || live ? existing!.wakesFrom : iso,
+      // Identity refreshes on every sign-on; a re-sign without one keeps what
+      // the registration already knows.
+      harness: opts.identity?.harness ?? (same ? existing.harness : undefined),
+      model: sessionWorker(opts.sessionId, opts.identity?.harness ?? (same ? existing.harness : undefined)).model,
+      config: sessionWorker(opts.sessionId).config,
+      observedAt: sessionWorker(opts.sessionId).observedAt,
+      cwd: opts.identity?.cwd ?? (same ? existing.cwd : undefined),
+      host: opts.identity?.host ?? (same ? existing.host : undefined),
+      label: opts.identity?.label ?? (same ? existing.label : undefined),
+      window: opts.identity?.window ?? (same ? existing.window : undefined),
+      tookFrom:
+        existing && existing.sessionId !== opts.sessionId
+          ? { sessionId: existing.sessionId, at: iso }
+          : existing?.tookFrom,
+    };
+    atomicWrite(helmPath(opts.grounds.name), JSON.stringify(reg, null, 2));
+    return { ok: reg };
+  });
 }
 
 export function updateHelmWorker(session: string, observation: WorkerMetadata): void {
-  for (const reg of listHelms().filter((h) => h.sessionId === session)) {
-    const next = workerMetadata({ ...observation, harness: reg.harness ?? observation.harness });
-    if (reg.model === next.model && reg.observedAt === next.observedAt && reg.harness === next.harness && JSON.stringify(reg.config) === JSON.stringify(next.config)) continue;
-    atomicWrite(helmPath(reg.grounds), JSON.stringify({ ...reg, harness: next.harness ?? undefined, model: next.model, config: next.config, observedAt: next.observedAt }, null, 2));
+  for (const seat of listHelms().filter((h) => h.sessionId === session)) {
+    withHelmLock(seat.grounds, () => {
+      const reg = readHelm(seat.grounds);
+      if (!reg || reg.sessionId !== session) return;
+      const next = workerMetadata({ ...observation, harness: reg.harness ?? observation.harness });
+      if (reg.model === next.model && reg.observedAt === next.observedAt && reg.harness === next.harness && JSON.stringify(reg.config) === JSON.stringify(next.config)) return;
+      atomicWrite(helmPath(reg.grounds), JSON.stringify({ ...reg, harness: next.harness ?? undefined, model: next.model, config: next.config, observedAt: next.observedAt }, null, 2));
+    });
   }
 }
 
@@ -287,8 +336,11 @@ export function relieveHelm(sessionId: string): string[] {
   const relieved: string[] = [];
   for (const h of listHelms()) {
     if (h.sessionId !== sessionId) continue;
-    fs.rmSync(helmPath(h.grounds), { force: true });
-    relieved.push(h.grounds);
+    withHelmLock(h.grounds, () => {
+      if (readHelm(h.grounds)?.sessionId !== sessionId) return;
+      fs.rmSync(helmPath(h.grounds), { force: true });
+      relieved.push(h.grounds);
+    });
   }
   // Stepping down voluntarily clears any stand-down notice left for us.
   fs.rmSync(path.join(relievedDir(), `${sessionId}.json`), { force: true });
@@ -296,12 +348,16 @@ export function relieveHelm(sessionId: string): string[] {
 }
 
 export function heartbeatHelm(sessionId: string, opts: { parked?: boolean } = {}): HelmRegistration | undefined {
-  const reg = helmOf(sessionId);
-  if (!reg) return undefined;
-  const now = new Date().toISOString();
-  const next = { ...reg, heartbeatAt: now, ...(opts.parked ? { parkedAt: now } : {}) };
-  atomicWrite(helmPath(reg.grounds), JSON.stringify(next, null, 2));
-  return next;
+  const seat = helmOf(sessionId);
+  if (!seat) return undefined;
+  return withHelmLock(seat.grounds, () => {
+    const reg = readHelm(seat.grounds);
+    if (!reg || reg.sessionId !== sessionId) return undefined;
+    const now = new Date().toISOString();
+    const next = { ...reg, heartbeatAt: now, ...(opts.parked ? { parkedAt: now } : {}) };
+    atomicWrite(helmPath(reg.grounds), JSON.stringify(next, null, 2));
+    return next;
+  });
 }
 
 /** Read and remove this session's stand-down notice, if one waits. */

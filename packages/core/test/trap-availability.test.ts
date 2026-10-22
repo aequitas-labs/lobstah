@@ -59,6 +59,15 @@ describe('trap availability and selection', () => {
     expect(selectRepoTrap(loadConfig(), 'r', 'codex', NOW + 3600_000).action).toBe('wait');
   });
 
+  it('prefers a listening free trap and skips failed return candidates', () => {
+    const unparked = trap('amber-gull');
+    const listening = trap('zippy-crab', 'codex');
+    heartbeatTrap(listening.trapId, { parked: true });
+    expect(selectRepoTrap(loadConfig(), 'r', undefined, NOW)).toMatchObject({ action: 'reuse', registration: { trapId: listening.trapId } });
+    stowTrap(unparked.trapId); stowTrap(listening.trapId);
+    expect(selectRepoTrap(loadConfig(), 'r', undefined, NOW, new Set([unparked.trapId]))).toMatchObject({ action: 'return', row: { trapId: listening.trapId } });
+  });
+
   it('returns a safely stowed trap before creating, otherwise creates below capacity', () => {
     expect(selectRepoTrap(loadConfig(), 'r', undefined, NOW).action).toBe('new');
     const r = trap('amber-gull');

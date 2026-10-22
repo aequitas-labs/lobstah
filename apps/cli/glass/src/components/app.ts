@@ -21,6 +21,7 @@ import { Reviews } from './reviews.js';
 import { Stats } from './stats.js';
 import { SessionGrants } from './session-grants.js';
 import { Traps } from './traps.js';
+import { Todos } from './todos.js';
 
 /**
  * The whole page as a pure function of the store. Only the active tab's
@@ -46,12 +47,14 @@ export function App({ state }: { state: GlassState }) {
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} more=${more('prs')} />`;
     if (t === 'reports') return html`<${Reports} inp=${inp.reports} />`;
     if (t === 'reviews') return html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`;
+    if (t === 'todos') return html`<${Todos} todos=${inp.deck.todos} note=${inp.deck.todoNote} />`;
     if (t === 'stats') return html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`;
     return html`<${Notices} inp=${inp.notices} more=${more('notices')} />`;
   };
   const onOverlay = (e: Event) => {
     if (e.target === e.currentTarget) closeModal();
   };
+  // Each modal owns its controls: retain them on polls, reset them when switching cards.
   return [
     html`<${Header} d=${d} inp=${inp} tab=${tab} st=${state.prefs} stale=${state.stale} unread=${unread.length} />`,
     GLASS_TABS.map(
@@ -61,7 +64,7 @@ export function App({ state }: { state: GlassState }) {
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
     html`<${LightboxView} box=${state.lightbox} />`,
-    html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
+    html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
     d &&
       html`<${DecisionModal} open=${state.decisionModal} order=${modalOrder()} drafts=${state.drafts} extensions=${d.answerLimits?.extensions ?? []} />`,
     d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`,

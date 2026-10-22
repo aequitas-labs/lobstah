@@ -451,6 +451,14 @@ export type ReviewRequestKind =
  * undefined on success; a fresh snapshot follows at once.
  */
 export async function reviewRequest(kind: ReviewRequestKind, payload: Record<string, unknown>): Promise<string | undefined> {
+  return glassRequest(kind, payload);
+}
+
+export async function changeHelmChat(grounds: string, chat: 'full' | 'brief'): Promise<string | undefined> {
+  return glassRequest('helm-chat', { grounds, chat });
+}
+
+async function glassRequest(kind: string, payload: Record<string, unknown>): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
   if (!token) return 'The glass has no page token yet.';
   try {

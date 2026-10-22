@@ -145,8 +145,9 @@ reads every `lobstah` command, flag, skill, package and tool name out of
 
 ## Deploying
 
-Nothing in this repo deploys the site: no script, no CI job. A maintainer with
-access to the `aequitas labs` Cloudflare account runs it by hand.
+Deployed by the maintainers with `wrangler deploy`; no script or CI job deploys
+the site. `wrangler.jsonc` names the Cloudflare account, so a sign-in that sees
+several accounts still deploys to the right one.
 
 The site is a Cloudflare Worker that serves the built folder as static files
 at `lobstah.dev`. `wrangler.jsonc` holds all of it. A deploy builds the site
@@ -155,15 +156,11 @@ twice. The Worker (`worker.js`) answers both names and sends
 `www.lobstah.dev` to `lobstah.dev`; Cloudflare makes the DNS records for both
 when the Worker is first deployed.
 
-On a machine where wrangler is signed in to more than one Cloudflare account,
-name the sign-in to use. Without `XDG_CONFIG_HOME`, wrangler uses its default
-sign-in, which may be another account:
-
 ```bash
 cd apps/site
-XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" npx wrangler@4 whoami    # check the account first
-XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" npx wrangler@4 deploy --dry-run   # build and check, upload nothing
-XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" npx wrangler@4 deploy
+npx wrangler@4 whoami            # check the account first
+npx wrangler@4 deploy --dry-run  # build and check, upload nothing
+npx wrangler@4 deploy
 ```
 
 ## Limits the tests hold

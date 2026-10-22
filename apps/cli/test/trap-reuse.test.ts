@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimBait, enqueue, ensureLayout, heartbeatTrap, loadConfig, queuedDescriptor, readTrap, signOnTrap, stowTrap, sweepGhostTraps, takeHelm } from '@lobstah/core';
+import { appendStatus, claimBait, enqueue, ensureLayout, heartbeatTrap, loadConfig, queuedDescriptor, listReservations, readTrap, signOnTrap, stowTrap, sweepGhostTraps, takeHelm } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { charter, TRAP_REUSE_RULE } from '../src/charter.js';
 import { trapForRepo } from '../src/throw.js';
@@ -13,9 +13,9 @@ import { removeTempDir } from '../../../test/temp-dir.js';
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const HELM = 'helm-session';
 let home: string;
-function run(args: string[], input?: object) {
+function run(args: string[], input?: object, timeout = 20_000) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE') && !k.startsWith('CODEX')));
-  return spawnSync(process.execPath, [cli, ...args], { cwd: home, env: { ...env, LOBSTAH_HOME: home }, input: input ? JSON.stringify(input) : '', encoding: 'utf8', timeout: 20_000 });
+  return spawnSync(process.execPath, [cli, ...args], { cwd: home, env: { ...env, LOBSTAH_HOME: home }, input: input ? JSON.stringify(input) : '', encoding: 'utf8', timeout });
 }
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-cli-reuse-'));
@@ -38,19 +38,39 @@ function dispatch(id = 'job', extra: string[] = []) {
 }
 
 describe('reuse-first CLI and summaries', () => {
-  it('selects a free live trap without launching and reserves it for sequential dispatches', async () => {
+  it('queues immediately and lets free traps bind work only when they claim', async () => {
     const a = trap('amber-gull');
     const b = trap('kind-crab');
     const choose = await trapForRepo({ cfg: loadConfig(), repo: 'r', adapter: () => { throw new Error('must not launch'); } });
     expect(choose).toMatchObject({ action: 'reused', registration: { trapId: a.trapId } });
     const first = dispatch(); expect(first.status, first.stderr).toBe(0);
-    expect(first.stdout).toContain('trapAction: reused');
-    expect(queuedDescriptor('job', 'work')?.for).toBe(`wt:${a.trapId}`);
+    expect(first.stdout).toContain('id: job');
+    expect(queuedDescriptor('job', 'work')).toMatchObject({ trapAny: true });
+    expect(queuedDescriptor('job', 'work')?.for).toBeUndefined();
+    expect(claimBait(a)?.id).toBe('job');
     const second = dispatch('job2'); expect(second.status, second.stderr).toBe(0);
-    expect(queuedDescriptor('job2', 'work')?.for).toBe(`wt:${b.trapId}`);
+    expect(queuedDescriptor('job2', 'work')?.for).toBeUndefined();
+    expect(claimBait(b)?.id).toBe('job2');
     const third = dispatch('job3'); expect(third.status, third.stderr).toBe(0);
-    expect(third.stdout).toContain('all 2 r traps are busy');
+    expect(third.stdout).toContain('id: job3');
     expect(queuedDescriptor('job3', 'work')).toMatchObject({ trapAny: true });
+  });
+
+  it('returns the queued id with stdin closed even when only a stowed trap exists', () => {
+    const r = trap('early-pebble'); stowTrap(r.trapId);
+    // A regression must never open the user's terminal while testing the CLI.
+    const bin = path.join(home, 'bin'); fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'osascript'), '#!/bin/sh\nexit 79\n', { mode: 0o755 });
+    const saved = process.env.PATH;
+    process.env.PATH = bin + path.delimiter + saved;
+    try {
+      const out = run(['dispatch', '--repo', 'r', '--trap-any', '--brief-text', 'work', '--id', 'immediate', '--session', HELM], undefined, 5_000);
+      expect(out.error).toBeUndefined(); expect(out.status, out.stdout + out.stderr).toBe(0);
+      expect(out.stdout).toContain('id: immediate');
+      expect(queuedDescriptor('immediate', 'work')).toMatchObject({ trapAny: true });
+      expect(queuedDescriptor('immediate', 'work')?.for).toBeUndefined();
+      expect(listReservations()).toEqual([]);
+    } finally { process.env.PATH = saved; }
   });
 
   it('at capacity queues with harness restriction and status shows the queue reason', () => {
@@ -60,7 +80,7 @@ describe('reuse-first CLI and summaries', () => {
     }
     const out = dispatch('job', ['--harness', 'codex']);
     expect(out.status, out.stderr).toBe(0);
-    expect(out.stdout).toContain('trapAction: waiting');
+    expect(out.stdout).toContain('first free suitable trap');
     expect(queuedDescriptor('job', 'work')).toMatchObject({ trapAny: true, harness: 'codex' });
     expect(run(['status', 'job']).stdout).toContain('all 2 r traps are busy');
   });

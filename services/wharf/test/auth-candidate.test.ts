@@ -230,3 +230,19 @@ it('denial and concurrent redemption never issue a person session or two boat cr
   expect(replies.map((r) => r.status).sort()).toEqual([200, 400]);
   expect(replies.every((r) => !r.headers.has('set-cookie') && !r.headers.has('set-auth-token'))).toBe(true);
 });
+
+
+it('uses the branded glass shell for auth entry and errors while callbacks keep their redirects', async () => {
+  for (const path of ['/api/auth/sign-in/social', '/api/auth/error?error=invite_required', '/api/auth/error?error=state_not_found']) {
+    const page = await SELF.fetch('https://glass.test' + path);
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    expect(page.headers.get('cache-control')).toBe('no-store');
+    expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+    expect(await page.text()).toContain('Continue with GitHub');
+  }
+  const callback = await SELF.fetch('https://glass.test/api/auth/callback/github', { redirect: 'manual' });
+  expect(callback.status).toBe(302);
+  expect(callback.headers.get('location')).toContain('/api/auth/error?error=state_not_found');
+  expect((await SELF.fetch('https://state.test/v1/auth/error')).status).toBe(404);
+});

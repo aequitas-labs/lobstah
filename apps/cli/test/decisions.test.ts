@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -27,6 +27,7 @@ import {
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { applyCull, planCull } from '../src/cull.js';
 import { buildGlassSnapshot, serveAttachment, serveGlass } from '../src/glass.js';
+import { decisionFromHash } from '../src/glass-diff.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
@@ -55,6 +56,7 @@ beforeEach(() => {
   fs.mkdirSync(src);
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
@@ -77,6 +79,22 @@ function question(note = 'which schema?') {
 }
 
 describe('man ask', () => {
+  it.each([
+    { config: undefined, env: undefined, port: 4949 },
+    { config: 5888, env: undefined, port: 5888 },
+    { config: 5888, env: '6767', port: 6767 },
+  ])('prints a clickable decision URL using glass port $port', ({ config, env, port }) => {
+    vi.stubEnv('LOBSTAH_GLASS_PORT', env);
+    if (config !== undefined) fs.writeFileSync(path.join(home, 'config.toml'), `[glass]\nport = ${config}\n`);
+    const res = lobstah('man', 'ask', '--title', 'Which schema?');
+    expect(res.status, res.stderr).toBe(0);
+    const key = keyOf(res.stdout)!;
+    const url = /^url: (.+)$/m.exec(res.stdout)?.[1];
+    expect(url).toBe(`http://127.0.0.1:${port}/#decision/${encodeURIComponent(key)}`);
+    expect(decisionFromHash(new URL(url!).hash)).toBe(key);
+    expect(res.stdout).toContain(`[card](${url})`);
+  });
+
   it('stores the record: title, detail, options, attachments, the dispatch, who asked, and when', () => {
     question();
     const res = lobstah(

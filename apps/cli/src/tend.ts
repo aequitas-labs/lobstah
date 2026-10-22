@@ -25,6 +25,7 @@ import {
   laneDirs,
   lastEventAt,
   helmLabel,
+  helmChat,
   listHelms,
   listNotices,
   listTraps,
@@ -593,7 +594,7 @@ export interface TendReport {
   /** Addressed bait waiting for its trap — sticky, never the daemon's. */
   awaiting: TendAwaiting[];
   notices: TendNotice[];
-  helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number; worker?: string }>;
+  helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number; worker?: string; chat: 'full' | 'brief' }>;
   merge?: MergeView;
   stacks: GlassStack[];
   /** Dispatches parked on `paused`, oldest first: what each waits on, and for how long. They hold no slot. */
@@ -1007,6 +1008,7 @@ export function buildTendReport(now = Date.now()): TendReport {
   }
   const todoNote = todoStaleLine(todos);
   const helms = listHelms().map((h) => ({
+    chat: helmChat(h, cfg),
     grounds: displayGrounds(h.grounds, cfg),
     man: helmLabel(h),
     session: h.sessionId.slice(0, 8),
@@ -1257,7 +1259,7 @@ export function renderTend(r: TendReport): string {
     lines.push('');
     lines.push(
       toonKV({
-        helm: r.helms.map((h) => `${h.grounds}=${h.man} [${h.session}] ${h.worker ?? ''} (${h.heartbeatAgeSecs}s ago)`).join(', '),
+        helm: r.helms.map((h) => `${h.grounds}=${h.man} [${h.session}] ${h.worker ?? ''} (chat: ${h.chat}; ${h.heartbeatAgeSecs}s ago)`).join(', '),
       }),
     );
   }

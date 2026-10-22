@@ -433,6 +433,8 @@ export interface DaemonHooks {
   spawnPoolWarm?: (name: string) => void;
   /** Dispatch-owned PR observer and repairer, provided by the CLI daemon entry. */
   prWatches?: (now: number, log: (message: string) => void) => void;
+  /** CLI-owned asynchronous trap startup; never waits for sign-on in the tick. */
+  trapStarts?: (cfg: Config, now: number, log: (message: string) => void) => void;
   /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
   hostedStart?: () => Promise<void>;
   hostedPoll?: () => Promise<void>;
@@ -586,7 +588,9 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   }
   // A reserved trap whose session never signed on by its deadline fails
   // with a notice; its addressed work stays queued.
-  for (const r of expireReservations()) log(`trap ${trapLabel(r)} did not start — ${r.reason}`);
+  for (const r of expireReservations(now)) log(`trap ${trapLabel(r)} did not start — ${r.reason}`);
+  try { hooks.trapStarts?.(cfg, now, log); }
+  catch (err) { log(`trap starts: ${err instanceof Error ? err.message : String(err)}`); }
   // Addressed bait is sticky — never the daemon's; orphans surface as helm
   // notices instead of headless spawns. Unaddressed work defers briefly to a
   // trap that is parked right now. Daemon repairs are the sole addressed
