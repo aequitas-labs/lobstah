@@ -1,3 +1,4 @@
+import logo from '../../../../docs/assets/favicon.png';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { acked, html, Session, when } from './common.js';
 import { Boats } from './boats.js';
@@ -233,7 +234,7 @@ export function App() {
           html`<button class=${'card' + (d.ack ? ' acked' : '')} onClick=${() => setModal({ kind, id: d.id })}><div class="top"><b>${LinkedText(d.title)}</b><span class="badge">${kind === 'decision' ? (d.answer ? 'answered' : 'needs decision') : d.ack ? 'report · read' : 'report'}</span></div><div class="meta">${d.author} · ${when(d.at)}${acked(d.ack)}</div></button>`,
       );
   if (signedOut || !snapshot) return html`<${AuthScreen} state=${authState} authenticate=${authenticate} notice=${notice} />`;
-  return html`<div class="headerline"><h1>🦞✨ spyglass <span class="dim">wharf</span></h1>${!signedOut && html`<button class="btn" onClick=${signOut}>sign out</button>`}</div>
+  return html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass <span class="dim">wharf</span></h1>${!signedOut && html`<button class="btn" onClick=${signOut}>sign out</button>`}</div>
     <div class="chips"><span class="chip">helm ${snapshot && !error ? (snapshot.helmLive ? 'live' : 'unknown / no live lease') : 'unknown'}</span><span class="chip dim">polling · 15s · ${jobs.length} jobs</span></div>
     ${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}
     ${
@@ -254,5 +255,5 @@ export function App() {
         if (e.target === e.currentTarget) setModal(undefined);
       }}><section class="modal" role="dialog" aria-modal="true" aria-label=${selectedDoc?.title ?? found?.id ?? 'details'} tabindex="-1" onKeyDown=${keydown}><button class="btn x" aria-label="close details" onClick=${() => setModal(undefined)}>×</button>${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}<h3>${LinkedText(selectedDoc?.title ?? found?.id ?? `${modal.kind} ${modal.id}`)}</h3>${!found && html`<div class="dim">No ${modal.kind} with this id is listed on this wharf for your account. It may have been withdrawn or removed.</div>`}${selectedDoc && selectedDoc.kind !== 'review' && html`<${Document} key=${selectedDoc.id} doc=${selectedDoc} action=${action} />`}${selectedDoc?.kind === 'review' && html`<${ReviewActions} key=${selectedDoc.id + ':' + (selectedDoc.review?.state ?? '')} doc=${selectedDoc} action=${action} />`}${selectedJob && html`<${Job} key=${selectedJob.id} job=${selectedJob} workers=${snapshot.workers} action=${action} />`}${selectedWorker && html`<div class="sub">${selectedWorker.harness ?? 'unknown harness'} · ${LinkedText(selectedWorker.repoRemote)}</div><${Session} worker=${selectedWorker} />`}</section></div>`
     }
-    <footer>🦞✨ lobstah · wharf · PR watches and repair run on your boats</footer>`;
+    <footer><span><img class="glass-brand" src=${logo} alt="" /> lobstah · wharf · PR watches and repair run on your boats</span></footer>`;
 }

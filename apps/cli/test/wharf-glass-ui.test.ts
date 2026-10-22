@@ -1,4 +1,5 @@
 import { Window } from 'happy-dom';
+import * as fs from 'node:fs';
 import { afterEach, expect, it } from 'vitest';
 import { GLASS_SCRIPT, GLASS_CSS } from '../../../services/wharf/src/glass-page.generated.js';
 import { snapshot, jobs, detail, markdown } from './fixtures/wharf-glass.js';
@@ -224,4 +225,12 @@ it('links bare http(s) URLs in cards, notes, briefs, messages and options as tex
   const modal = g.doc.querySelector('[role=dialog]')!;
   expect(links(modal.querySelector('pre'))).toEqual([ext(LOCAL)]); expect(modal.querySelector('pre')!.textContent).toContain('<b>keep</b> `https://code.example` as code.');
   expect(links(modal).map((l) => l[0])).toEqual(expect.arrayContaining([LOCAL, PR])); expect(modal.querySelector("a[href^='javascript:']")).toBeNull();
+});
+
+it('uses the transparent lobster-and-star mark for main glass branding', async () => {
+  const g = await page();
+  const canonical = 'data:image/png;base64,' + fs.readFileSync(new URL('../../../docs/assets/favicon.png', import.meta.url)).toString('base64');
+  const logos = g.doc.querySelectorAll('h1 .glass-brand, footer .glass-brand');
+  expect(logos).toHaveLength(2);
+  for (const logo of logos) expect(logo.getAttribute('src')).toBe(canonical);
 });

@@ -137,6 +137,8 @@ const STACK_NUMBER = /^#\d+$/;
 function foldPrTitles(el: Element): Node {
   const copy = el.cloneNode(true) as Element;
   const doc = el.ownerDocument;
+  // Transparent branding and dark-only native controls are intentional changes.
+  for (const img of copy.querySelectorAll('img.glass-brand')) img.replaceWith(doc.createTextNode('🦞✨'));
   for (const n of copy.querySelectorAll('[data-helm-chat]')) n.remove();
   if (copy.querySelector('.settings')) {
     const title = copy.querySelector('h3');
@@ -374,11 +376,11 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
-          .filter((el) => !el.matches('.prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *'))
+          .filter((el) => !el.matches('.glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);
-            const props = Array.from({ length: cs.length }, (_, k) => cs.item(k)).sort();
+            const props = Array.from({ length: cs.length }, (_, k) => cs.item(k)).filter((p) => p !== 'color-scheme').sort();
             out.push(`${label} ${i} ${el.tagName}.${el.className} ` + props.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';'));
           });
       };
