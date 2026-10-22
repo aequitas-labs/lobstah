@@ -109,7 +109,7 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
       seen.push(launch);
       meanwhile?.();
       const ticket = /--ticket (\S+)/.exec(launch.argv.at(-1)!)![1]!;
-      const on = lobstah(launch.cwd, 'soak', '--ticket', ticket, '--session', session, '--harness', 'claude');
+      const on = lobstah(launch.cwd, 'soak', '--ticket', ticket, '--session', session, '--harness', launch.argv[0]!);
       expect(on.status, on.stderr || on.stdout).toBe(0);
       const park = lobstah(launch.cwd, 'soak', '--session', session, '--wait', '--timeout', '2');
       waitOut.push(park.stdout);
@@ -119,14 +119,64 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
 const idle = (seen: TerminalLaunch[]) => (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (l) => void seen.push(l) });
 
 describe('man throw <name>', () => {
+  for (const action of ['cold', 'resume'] as const) {
+    processTest(`uses repo+harness permission defaults for a ${action} throw and its displayed mode`, async () => {
+      const reg = stowedTrap(); stow(reg, true);
+      fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness]\npermissionMode = "default"\n[harness.claude]\npermissionMode = "plan"\n[harness.codex]\npermissionMode = "bypass"\n[repos.r.harness]\npermissionMode = "auto"\n[repos.r.harness.claude]\npermissionMode = "acceptEdits"\n');
+      if (action === 'resume') claudeTranscript(reg.worktree, SESSION);
+      const [plan] = planThrow(loadConfig(), { names: ['amber-gull'] });
+      expect(plan).toMatchObject({ action, harness: 'claude', config: { permissionMode: 'acceptEdits' } });
+      const seen: TerminalLaunch[] = [];
+      const result = await throwTrap({ address: 'amber-gull', cfg: loadConfig(), adapter: fakeTerminal(action === 'resume' ? SESSION : OTHER, seen), pollMs: 50, timeoutSecs: 30 });
+      expect(result.mode).toBe('acceptEdits');
+      expect(seen[0]!.argv).toContain('acceptEdits');
+      expect(readRoster(reg.trapId)?.startMode).toBe('acceptEdits');
+      expect(lobstah(primary, 'man', 'roster').stdout).toContain(',acceptEdits,');
+      expect(lobstah(primary, 'man', 'tend').stdout).toContain('acceptEdits');
+      stow(result.registration, true);
+      setRosterProfile(reg.trapId, { config: { permissionMode: 'plan' } });
+      const entry = readRoster(reg.trapId)!;
+      const [profiled] = planThrow(loadConfig(), { names: [entry.name] });
+      expect(profiled!.config?.permissionMode).toBe('plan');
+      expect(nextStartMode(loadConfig(), entry)).toBe('plan');
+      expect(startCommand(profiled!, entry, 'T', true).mode).toBe('bypassPermissions');
+    });
+  }
+
+  processTest('uses the new trap harness and roster harness override before resolving mode; profile and bypass win', async () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness]\npermissionMode = "plan"\n[harness.codex]\npermissionMode = "bypass"\n[harness.claude]\npermissionMode = "auto"\n');
+    const seen: TerminalLaunch[] = [];
+    const result = await throwNew({ cfg: loadConfig(), repo: 'r', harness: 'codex', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(result.mode).toBe('bypassPermissions');
+    expect(seen[0]!.argv).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(result.registration.harness).toBe('codex');
+    expect(lobstah(primary, 'man', 'tend').stdout).toContain('bypassPermissions');
+    stow(result.registration, true);
+    setRosterProfile(result.registration.trapId, { harness: 'claude' });
+    let entry = readRoster(result.registration.trapId)!;
+    expect(nextStartMode(loadConfig(), entry)).toBe('auto');
+    expect(planThrow(loadConfig(), { names: [entry.name] })[0]).toMatchObject({ harness: 'claude', config: { permissionMode: 'auto' } });
+    expect(trapRows().find((row) => row.trap === `wt:${entry.trapId}`)?.worker).toMatch(/ · auto$/);
+    expect(lobstah(primary, 'man', 'roster').stdout).toContain(',auto,');
+    setRosterProfile(entry.trapId, { config: { permissionMode: 'default' } });
+    entry = readRoster(entry.trapId)!;
+    const [plan] = planThrow(loadConfig(), { names: [entry.name] });
+    expect(nextStartMode(loadConfig(), entry)).toBe('default');
+    expect(plan!.config?.permissionMode).toBe('default');
+    expect(startCommand(plan!, entry, 'T', true)).toMatchObject({ mode: 'bypassPermissions' });
+  });
+
   processTest('trap-any brings back the same stowed trap instead of creating another checkout', async () => {
     const reg = stowedTrap();
     stow(reg);
     claudeTranscript(reg.worktree, SESSION);
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.claude]\npermissionMode = "default"\n[harness.codex]\npermissionMode = "bypass"\n');
     const seen: TerminalLaunch[] = [];
     const choice = await trapForRepo({ cfg: loadConfig(), repo: 'r', adapter: fakeTerminal(SESSION, seen), timeoutSecs: 30 });
     expect(choice).toMatchObject({ action: 'resumed', registration: { trapId: reg.trapId, worktree: reg.worktree } });
     expect(seen).toHaveLength(1);
+    expect(seen[0]!.argv).toContain('default');
+    expect(seen[0]!.argv).not.toContain('--dangerously-skip-permissions');
     expect(listTraps()).toHaveLength(1);
   });
 
@@ -344,11 +394,11 @@ describe('the start command', () => {
   it('takes the configured mode: the roster profile, then the repo, then [harness], then auto', () => {
     const cfg = (global?: string, repo?: string) =>
       ({ harness: global ? { permissionMode: global } : {}, repos: { r: { path: '/r', trunk: 'main', ...(repo ? { harness: { permissionMode: repo } } : {}) } } }) as unknown as Config;
-    expect(nextStartMode(cfg(), { repo: 'r' })).toBe('auto');
-    expect(nextStartMode(cfg('bypass'), { repo: 'r' })).toBe('bypassPermissions');
-    expect(nextStartMode(cfg('bypass', 'auto'), { repo: 'r' })).toBe('auto');
-    expect(nextStartMode(cfg('bypass', 'auto'), { repo: 'other' })).toBe('bypassPermissions');
-    expect(nextStartMode(cfg('bypass'), { repo: 'r', profile: { config: { permissionMode: 'plan' } } })).toBe('plan');
+    expect(nextStartMode(cfg(), { repo: 'r', harness: 'claude' })).toBe('auto');
+    expect(nextStartMode(cfg('bypass'), { repo: 'r', harness: 'claude' })).toBe('bypassPermissions');
+    expect(nextStartMode(cfg('bypass', 'auto'), { repo: 'r', harness: 'claude' })).toBe('auto');
+    expect(nextStartMode(cfg('bypass', 'auto'), { repo: 'other', harness: 'claude' })).toBe('bypassPermissions');
+    expect(nextStartMode(cfg('bypass'), { repo: 'r', harness: 'claude', profile: { config: { permissionMode: 'plan' } } })).toBe('plan');
     expect(freshProfile(cfg('bypass'), 'r')).toMatchObject({ config: { permissionMode: 'bypassPermissions' } });
     expect(freshProfile(cfg(), 'r').config).toBeUndefined();
   });

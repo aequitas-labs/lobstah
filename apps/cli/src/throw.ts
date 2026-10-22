@@ -109,8 +109,8 @@ export interface StartCommand extends TerminalLaunch {
 
 /**
  * The permission mode a throw starts a trap in: `man throw --bypass`, then
- * the config it starts with (a roster profile over `[harness].permissionMode`
- * of the repo, then of the config; see planThrow and freshProfile),
+ * the config it starts with (a roster profile over repo and harness-specific
+ * defaults; see planThrow and freshProfile),
  * otherwise auto. `bypass` is `bypassPermissions`.
  */
 export function startMode(config?: Record<string, string>, bypass?: boolean): string {
@@ -119,8 +119,8 @@ export function startMode(config?: Record<string, string>, bypass?: boolean): st
 }
 
 /** The mode a rostered trap's next throw starts in, without --bypass. */
-export function nextStartMode(cfg: Pick<Config, 'repos' | 'harness'>, entry: Pick<RosterEntry, 'repo' | 'profile'>): string {
-  const configured = configPermissionMode(cfg, entry.repo);
+export function nextStartMode(cfg: Pick<Config, 'repos' | 'harness'>, entry: Pick<RosterEntry, 'repo' | 'profile' | 'harness'>): string {
+  const configured = configPermissionMode(cfg, entry.repo, entry.profile?.harness ?? entry.harness);
   return startMode({ ...(configured ? { permissionMode: configured } : {}), ...entry.profile?.config });
 }
 
@@ -415,7 +415,7 @@ export function freshProfile(cfg: Config, repoKey: string, harnessFlag?: string)
   const harness = harnessFlag ?? repo.default ?? cfg.harness.default ?? 'claude';
   const { model } = modelForHarness(harness, repo.model ?? cfg.harness.model);
   const effort = repo.effort ?? cfg.harness.effort;
-  const permissionMode = configPermissionMode(cfg, repoKey);
+  const permissionMode = configPermissionMode(cfg, repoKey, harness);
   const config = { ...(effort ? { effort } : {}), ...(permissionMode ? { permissionMode } : {}) };
   return { harness, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}) };
 }

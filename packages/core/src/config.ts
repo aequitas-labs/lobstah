@@ -10,16 +10,18 @@ import { parseReviews } from './reviews.js';
 import { validCacheGlob } from './cache-paths.js';
 import type { ReviewsConfig } from './reviews.js';
 
-export interface HarnessDefaults {
+export interface HarnessPermissionDefaults {
+  /** A trap's starting mode; roster profile settings and man throw --bypass take precedence. */
+  permissionMode?: string;
+}
+
+export interface HarnessDefaults extends HarnessPermissionDefaults {
   default?: string;
   model?: string;
   effort?: string;
-  /**
-   * The permission mode a thrown trap starts in: `auto` (the default),
-   * `bypass`, or another Claude Code mode. A roster profile and
-   * `man throw --bypass` come first.
-   */
-  permissionMode?: string;
+  /** Permission defaults for traps launched with this harness. */
+  claude?: HarnessPermissionDefaults;
+  codex?: HarnessPermissionDefaults;
 }
 
 /** Permission modes a throw can start a trap in; `bypass` is `bypassPermissions`. */
@@ -31,18 +33,31 @@ export function normalizePermissionMode(mode: string | undefined | null): string
   return mode === 'bypass' ? 'bypassPermissions' : mode;
 }
 
-function parseHarness(raw: unknown, where: string): HarnessDefaults | undefined {
+/** Every permission default uses the same supported mode names, at global and repo scopes. */
+function parsePermissionDefaults(raw: unknown, where: string): HarnessPermissionDefaults | undefined {
   if (raw === undefined) return undefined;
-  const h = raw as HarnessDefaults;
-  if (h.permissionMode !== undefined && !(TRAP_PERMISSION_MODES as readonly string[]).includes(String(h.permissionMode))) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${where} must be a table`);
+  const h = raw as HarnessPermissionDefaults;
+  if (h.permissionMode !== undefined && (typeof h.permissionMode !== 'string' || !(TRAP_PERMISSION_MODES as readonly string[]).includes(h.permissionMode))) {
     throw new Error(`${where}.permissionMode must be one of ${TRAP_PERMISSION_MODES.join(', ')}`);
   }
   return h;
 }
 
-/** The configured permission mode a repo's thrown traps start in: the repo's, else the global one. */
-export function configPermissionMode(cfg: Pick<Config, 'repos' | 'harness'>, repoKey: string | undefined): string | undefined {
-  return normalizePermissionMode((repoKey ? cfg.repos[repoKey]?.harness?.permissionMode : undefined) ?? cfg.harness.permissionMode);
+function parseHarness(raw: unknown, where: string): HarnessDefaults | undefined {
+  const defaults = parsePermissionDefaults(raw, where) as HarnessDefaults | undefined;
+  if (defaults) for (const harness of ['claude', 'codex'] as const) {
+    parsePermissionDefaults(defaults[harness], `${where.slice(0, -1)}.${harness}]`);
+  }
+  return defaults;
+}
+
+/** Repo+harness, repo, global+harness, then global; the caller supplies auto when all are unset. */
+export function configPermissionMode(cfg: Pick<Config, 'repos' | 'harness'>, repoKey: string | undefined, harness?: string): string | undefined {
+  const repo = repoKey ? cfg.repos[repoKey]?.harness : undefined;
+  const name = harness === 'claude' || harness === 'codex' ? harness : undefined;
+  return normalizePermissionMode((name ? repo?.[name]?.permissionMode : undefined) ?? repo?.permissionMode ??
+    (name ? cfg.harness[name]?.permissionMode : undefined) ?? cfg.harness.permissionMode);
 }
 
 export interface RepoConfig {

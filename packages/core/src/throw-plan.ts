@@ -240,13 +240,13 @@ function unrecordedAnchors(known: Set<string>): ThrowPlanRow[] {
 
 /**
  * The config a throw starts the trap with: what it last signed on with, the
- * configured `[harness].permissionMode` (the repo's, else the global), then
+ * configured permission mode for its launch harness (repo before global), then
  * its saved profile. The permission mode it was last seen in is left out: a
  * throw starts in auto unless the profile or the config names a mode.
  */
 function startConfig(entry: RosterEntry, cfg: Config): { config?: Record<string, string> } {
   const { permissionMode: _seen, ...last } = entry.config ?? {};
-  const configured = configPermissionMode(cfg, entry.repo);
+  const configured = configPermissionMode(cfg, entry.repo, entry.profile?.harness ?? entry.harness);
   const config = { ...last, ...(configured ? { permissionMode: configured } : {}), ...entry.profile?.config };
   return Object.keys(config).length ? { config } : {};
 }

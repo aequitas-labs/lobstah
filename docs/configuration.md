@@ -39,20 +39,35 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 `[repos.<key>.harness]` — per-repo harness defaults: `default` (`claude` \|
 `codex`), `model`, `effort`, `permissionMode`.
 
-`permissionMode` is the mode a thrown trap of the repo starts in, cold,
-resumed, or fresh: `auto` (the default when unset), `bypass` (also
-`bypassPermissions`), or another Claude Code mode (`default`, `acceptEdits`,
-`plan`, `dontAsk`). Auto is Claude Code `--permission-mode auto` and Codex
-`--approve-for-me`; bypass is Claude Code `--dangerously-skip-permissions` and
-Codex `--dangerously-bypass-approvals-and-sandbox`. A trap's roster profile
-and `man throw --bypass` come first. Any other value is a config error.
+`permissionMode` is the mode a thrown trap starts in, cold, resumed, or
+fresh: `auto` (the default when unset), `bypass` (also `bypassPermissions`),
+or another Claude Code mode (`default`, `acceptEdits`, `plan`, `dontAsk`).
+Set it in `[harness]` or `[repos.<key>.harness]` for either harness, or in
+`[harness.codex]`, `[harness.claude]`, `[repos.<key>.harness.codex]` or
+`[repos.<key>.harness.claude]` for one harness. Precedence, highest first:
+`man throw --bypass`, roster profile `permissionMode`, repo + harness, repo,
+global + harness, global, then `auto`. A roster harness override selects
+that harness's defaults. Auto is Claude Code `--permission-mode auto` and
+Codex `--approve-for-me`; bypass is Claude Code
+`--dangerously-skip-permissions` and Codex
+`--dangerously-bypass-approvals-and-sandbox`. Any other value is a config
+error, including in a harness-specific table.
 
 ```toml
 [harness]
-permissionMode = "bypass"   # every repo's traps start with no permission checks
+permissionMode = "auto"       # fallback for every repo and harness
+
+[harness.codex]
+permissionMode = "bypass"
+
+[harness.claude]
+permissionMode = "auto"
 
 [repos.web.harness]
-permissionMode = "auto"     # except web's
+permissionMode = "default"    # web overrides both global harness defaults
+
+[repos.web.harness.codex]
+permissionMode = "auto"       # web's Codex traps override the repo default
 ```
 
 `effort` reaches both harnesses: Claude as its effort level (`low`, `medium`,

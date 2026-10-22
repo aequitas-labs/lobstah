@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, loadConfig, resolveDispatch } from '../src/index.js';
+import { configPermissionMode, ensureLayout, loadConfig, resolveDispatch, TRAP_PERMISSION_MODES } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -35,6 +35,40 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('resolves repo+harness, repo, global+harness and global permission defaults in order', () => {
+    const file = path.join(home, 'config.toml');
+    fs.writeFileSync(file, '[repos.myapp]\npath = "/tmp/app"\n');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'codex')).toBeUndefined();
+    fs.appendFileSync(file, '[harness]\npermissionMode = "default"\n');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'codex')).toBe('default');
+    fs.appendFileSync(file, '[harness.codex]\npermissionMode = "plan"\n[harness.claude]\npermissionMode = "auto"\n');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'codex')).toBe('plan');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'claude')).toBe('auto');
+    fs.appendFileSync(file, '[repos.myapp.harness]\npermissionMode = "acceptEdits"\n');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'codex')).toBe('acceptEdits');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'claude')).toBe('acceptEdits');
+    fs.appendFileSync(file, '[repos.myapp.harness.codex]\npermissionMode = "bypass"\n');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'codex')).toBe('bypassPermissions');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'claude')).toBe('acceptEdits');
+    expect(configPermissionMode(loadConfig(), 'missing', 'codex')).toBe('plan');
+    expect(configPermissionMode(loadConfig(), 'myapp', 'other')).toBe('acceptEdits');
+  });
+
+  it('validates every permission scope against the same list, even for an unused harness', () => {
+    const scopes = ['harness', 'harness.codex', 'harness.claude', 'repos.myapp.harness', 'repos.myapp.harness.codex', 'repos.myapp.harness.claude'];
+    for (const scope of scopes) {
+      for (const mode of TRAP_PERMISSION_MODES) {
+        fs.writeFileSync(path.join(home, 'config.toml'), `[${scope}]\npermissionMode = "${mode}"\n`);
+        expect(() => loadConfig(), `${scope}: ${mode}`).not.toThrow();
+      }
+      for (const value of ['"sometimes"', '""', '42', 'true', '["auto"]']) {
+        fs.writeFileSync(path.join(home, 'config.toml'), `[${scope}]\npermissionMode = ${value}\n`);
+        expect(() => loadConfig(), `${scope}: ${value}`).toThrow(`[${scope}].permissionMode must be one of`);
+      }
+    }
+    fs.writeFileSync(path.join(home, 'config.toml'), '[harness]\ncodex = "bypass"\n');
+    expect(() => loadConfig()).toThrow('[harness.codex] must be a table');
+  });
   it('defaults and validates the brief todo cap and quiet goals interval', () => {
     expect(loadConfig().helm.briefTodoLimit).toBe(5);
     expect(loadConfig().helm.goalsNudgeSecs).toBe(7200);
