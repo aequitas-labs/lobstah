@@ -70,6 +70,17 @@ function wharf(calls: Call[], opts: { create?: 'ok' | 'taken'; requests?: unknow
 }
 
 describe('review documents on wharf grounds', () => {
+  it.each([undefined, { login: 'maya', name: 'Maya Maintainer' }])('publishes the real asker after a bot request', async (humanRequester) => {
+    request();
+    const item = readReview(KEY)!;
+    Object.assign(item.rounds[0]!, { requestedBy: 'github-actions[bot]', requestedAutomatically: true, humanRequester, wharf: { doc: DOC, mine: true } });
+    writeReview(item);
+    const calls: Call[] = [];
+    await publishReviewDocs(() => {}, { backend: wharf(calls) });
+    const asker = humanRequester?.login ?? 'dana';
+    expect((calls[0]!.body as { text: string }).text).toContain(`${asker} asked for this review.`);
+    expect(calls[1]!.body).toMatchObject({ review: { requestedBy: asker } });
+  });
   it('the boat that creates the round document drafts it; a boat that gets a 409 drafts nothing', async () => {
     request();
     const calls: Call[] = [];

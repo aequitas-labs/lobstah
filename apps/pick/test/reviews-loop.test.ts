@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, ensureLayout, latestRound, listReviews, pendingIds, readReview, recordGitHubRateLimit } from '@lobstah/core';
+import { addWatch, ensureLayout, latestRound, listReviews, pendingIds, readReview, recordGitHubRateLimit, reviewAsker } from '@lobstah/core';
 import { runPickup } from '../src/run.js';
 import { REVIEW_SEARCH, reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
@@ -33,7 +33,7 @@ interface Pr {
   head?: string;
   requester?: string;
   automatic?: boolean;
-  requests?: Array<{ id: string; at: string; to: string; team?: boolean }>;
+  requests?: Array<{ id: string; at: string; to: string; team?: boolean; actor?: { login: string; __typename?: string; name?: string; avatarUrl?: string } }>;
 }
 
 function node(pr: Pr) {
@@ -50,7 +50,7 @@ function node(pr: Pr) {
       nodes: (pr.requests ?? [{ id: `RRE_${pr.number}`, at: '2026-10-15T09:00:00Z', to: ME }]).map((r) => ({
         id: r.id,
         createdAt: r.at,
-        actor: { login: pr.requester ?? 'dana', __typename: pr.automatic ? 'Bot' : 'User', name: pr.automatic ? undefined : 'Dana Developer', avatarUrl: 'https://avatars.githubusercontent.com/u/8?v=4' },
+        actor: r.actor ?? { login: pr.requester ?? 'dana', __typename: pr.automatic ? 'Bot' : 'User', name: pr.automatic ? undefined : 'Dana Developer', avatarUrl: 'https://avatars.githubusercontent.com/u/8?v=4' },
         requestedReviewer: r.team ? { __typename: 'Team' } : { __typename: 'User', login: r.to },
       })),
     },
@@ -71,6 +71,38 @@ const config = (...extra: string[]) => fs.writeFileSync(path.join(home, 'config.
 const tok = () => 'token';
 
 describe('the reviews loop', () => {
+  it.each([
+    { requester: 'github-actions', automatic: false },
+    { requester: 'github-actions[bot]', automatic: false },
+    { requester: 'approval-gate[bot]', automatic: false },
+    { requester: 'approval-gate', automatic: true },
+  ])('attributes a bot-only request to the PR author: $requester', async (requester) => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1, ...requester }], []) });
+    const item = readReview('review:acme/web#1')!;
+    expect(reviewAsker(item, latestRound(item)!)).toEqual({ login: 'dana', name: 'Dana Developer', avatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4' });
+    expect(latestRound(item)).toMatchObject({ id: 'RRE_1', requestedBy: requester.requester, requestedAutomatically: true });
+  });
+
+  it('keeps the latest human requester for this reviewer when a bot re-requests, across later polls', async () => {
+    config();
+    const requests = [
+      { id: 'old-human', at: '2026-10-15T07:00:00Z', to: ME, actor: { login: 'alex', __typename: 'User' } },
+      { id: 'human', at: '2026-10-15T08:00:00Z', to: ME, actor: { login: 'maya', __typename: 'User', name: 'Maya Maintainer', avatarUrl: 'https://avatars.githubusercontent.com/u/9?v=4' } },
+      { id: 'unrelated-human', at: '2026-10-15T08:30:00Z', to: 'someone-else', actor: { login: 'other', __typename: 'User' } },
+      { id: 'bot', at: '2026-10-15T09:00:00Z', to: ME, actor: { login: 'github-actions', __typename: 'Bot' } },
+    ];
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1, requests }], []) });
+    let item = readReview('review:acme/web#1')!;
+    expect(latestRound(item)).toMatchObject({ id: 'bot', requestedAutomatically: true, humanRequester: { login: 'maya' } });
+    expect(reviewAsker(item, latestRound(item)!)).toEqual({ login: 'maya', name: 'Maya Maintainer', avatarUrl: 'https://avatars.githubusercontent.com/u/9?v=4' });
+    // Older human events can fall outside the timeline window on subsequent polls.
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1, requests: [requests[3]!] }], []) });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1, requests: [{ ...requests[3]!, id: 'bot-again', at: '2026-10-15T10:00:00Z' }] }], []) });
+    item = readReview('review:acme/web#1')!;
+    expect(latestRound(item)!.id).toBe('bot-again');
+    expect(reviewAsker(item, latestRound(item)!)).toMatchObject({ login: 'maya' });
+  });
   it('new requests remain silent across polls, with no notification callbacks', async () => {
     config(); const notify = vi.fn();
     for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []), notify });

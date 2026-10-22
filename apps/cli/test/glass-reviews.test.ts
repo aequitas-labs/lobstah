@@ -129,6 +129,17 @@ describe('the Reviews tab', () => {
     });
     expect(glassReviews({ 'acme/web': 'linear-app' })[0]).toMatchObject({ asker: 'dana', askerName: 'Dana Developer', automatic: true, reviewUrl: 'linear://review/acme/web/pull/7' });
   });
+  it.each(['cards', 'table'])('renders the earlier human requester after a bot re-request in %s', async (view) => {
+    const pr = { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' };
+    observeReviewRequest({ pr, round: { id: 'human', requestedAt: ago(120), requestedBy: 'maya', requestedByName: 'Maya Maintainer', requestedByAvatarUrl: 'https://avatars.githubusercontent.com/u/9?v=4' } });
+    observeReviewRequest({ pr, round: { id: 'bot', requestedAt: ago(60), requestedBy: 'github-actions', requestedAutomatically: true } });
+    const page = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviews: glassReviews() }, { now: NOW, hash: '#reviews', prefs: { view } });
+    open.push(page);
+    expect(page.$('.rv-person')?.textContent).toContain('Maya Maintainer');
+    expect(page.$('.rv-person')?.textContent).not.toContain('github-actions');
+    expect(page.$('.rv-person img')?.getAttribute('src')).toBe('https://avatars.githubusercontent.com/u/9?v=4');
+    expect(page.$('.rv-person .badge')?.getAttribute('title')).toBe('A bot re-requested this review');
+  });
   it('the repo filter scopes the settings chip and row labels use each repo policy', async () => {
     const g = await loadGlass(GLASS_PAGE, {
       ...fleet(), repos: ['web'],
