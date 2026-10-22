@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.1 — 2026-10-22
+
+### Review asks name the person
+
+A review request that an automation re-requests (for example an approval-gate
+workflow running as `github-actions[bot]`) is now attributed to the most recent
+human who asked, or else the PR author. CLI rows, the glass, hosted review
+content, polling logs and draft-review briefs all use the same attribution; the
+raw bot actor stays as provenance. (#280)
+
+### Goals and todos stay in helm context
+
+The helm's session brief carries today's goals and a capped todo list after
+start and compaction, so goals can be checked off as they land. The brief also
+states the rule of thumb: todos are for the helm or the user over the next few
+days; anything longer, or work someone else could pick up, goes to the issue
+tracker. The glass daily-goals checklist aligns its numbers, checkboxes and
+text. (#279, #278)
+
+### Build caches cleared on sign-off and under disk pressure
+
+Repos can list `cacheDirs` (globs inside the worktree, such as
+`apps/*/.next/cache`). lobstah clears them when a trap stows or its dispatch
+finishes, and, when free space drops below `limits.cacheMinFreeGB` (default
+50), clears idle traps' caches largest first before refusing new traps. Tracked
+files and working traps are never touched. (#281)
+
 ## 0.8.0 — 2026-10-22
 
 ### Session grants
