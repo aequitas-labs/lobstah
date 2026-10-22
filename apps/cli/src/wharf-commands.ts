@@ -123,13 +123,12 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), repo, repoRemote: wharfRepoIdentity(config, repo), brief, lane: opts.has('--chore') ? 'chore' : 'work',
         ...(targetBoat ? { boat: targetBoat } : {}),
         for: opts.opt('--for')?.replace(/^wt:/, ''), followUp: opts.opt('--follow-up'), harness: opts.opt('--harness'), model: opts.opt('--model'), effort: opts.opt('--effort') }, key()));
-      resetWaitBackoff();
       break;
     }
     case 'ls': print(await backend.list()); break;
     case 'status': print(await backend.request(`dispatches/${id()}`)); break;
     case 'cancel': print(await backend.request(`dispatches/${id()}/cancel`, {}, key())); break;
-    case 'send': noFiles(); await backend.send(pos[0] ?? '', pos.slice(1).join(' '), key()); resetWaitBackoff(); print({ sent: true }); break;
+    case 'send': noFiles(); await backend.send(pos[0] ?? '', pos.slice(1).join(' '), key()); print({ sent: true }); break;
     case 'inbox': print(await backend.messages(pos[0] ?? '')); break; // Explicit receipt, never implicit acknowledgement.
     case 'report': {
       const verb = pos[1]; if (!verb || !isVerb(verb)) throw new Error('report requires one of the six verbs');

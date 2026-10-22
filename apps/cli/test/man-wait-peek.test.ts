@@ -153,3 +153,18 @@ describe('man wait: a trap start wakes once', () => {
     expect(woke.stdout).not.toContain('trap-signed-on');
   });
 });
+
+it('a quiet lifecycle digest does not reset an expired wait or stick its empty count', () => {
+  const sid = 'digest-helm';
+  fs.writeFileSync(path.join(home, 'config.toml'), '[repos.r]\npath = "."\n');
+  takeHelm({ sessionId: sid, grounds: { name: 'home', repos: ['r'] }, ttlMs: 60_000 });
+  postNotice({ kind: 'trap-stowed', text: 'routine lifecycle', repo: 'r' });
+  for (let i = 0; i < 4; i++) {
+    const result = lobstah('man', 'wait', '--session', sid, '--timeout', '0.01');
+    expect(result.status, result.stderr).toBe(3);
+    expect(result.stdout).toContain('routine lifecycle');
+    expect(result.stdout).toContain(`emptyTimeouts: ${i + 1}`);
+  }
+  expect(new IdleWait(sid, DEFAULT_WAIT).emptyCount).toBe(4);
+  expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(3600);
+}, 15_000);

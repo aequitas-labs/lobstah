@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
+import { withDirLock } from './dir-lock.js';
 import type { WaitConfig } from './config.js';
 
 const fileFor = (key: string) => path.join(lobstahHome(), 'wait-backoff', `${key}.json`);
@@ -35,7 +36,7 @@ export function injectedPrompt(prompt: unknown): boolean {
   return rest.trim() === '';
 }
 
-/** A prompt/event resets its session; a dispatch/send resets all local waiters. */
+/** Explicit activity reset. Delivery resets its own session; routine storage writes do not. */
 export function resetWaitBackoff(session?: string): void {
   write(session ? resetKey(session) : 'activity', randomUUID());
 }
@@ -49,13 +50,20 @@ export function waitTimeoutSecs(emptyTimeouts: number, config: WaitConfig): numb
   return Math.min(config.maxTimeoutSecs, config.baseTimeoutSecs * 2 ** Math.min(exponent, 52));
 }
 
-type History = { generation: string; emptyTimeouts: number };
+type History = { generation: string; emptyTimeouts: number; wakeKeys?: string[] };
+const validCount = (h: History | undefined) => h && Number.isSafeInteger(h.emptyTimeouts) && h.emptyTimeouts >= 0 ? h.emptyTimeouts : 0;
+function withHistory<T>(session: string, action: () => T): T {
+  const lock = fileFor(sessionKey(session)) + '.lock';
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  return withDirLock(lock, action, { staleMs: 30_000, waitMs: 2000, busy: () => new Error('wait history is busy') });
+}
 
 /** Poll this deadline as usual: backoff never changes the event polling cadence. */
 export class IdleWait {
   private epoch: string;
   private started: number;
   private emptyTimeouts = 0;
+  private completed = false;
   private config: WaitConfig;
   readonly probe: boolean;
   constructor(private session: string | undefined, config: WaitConfig, timeout?: string, now = Date.now()) {
@@ -66,9 +74,9 @@ export class IdleWait {
     this.epoch = generation(session);
     this.started = now;
     const history = session ? read<History>(sessionKey(session)) : undefined;
-    if (history?.generation === this.epoch && Number.isSafeInteger(history.emptyTimeouts) && history.emptyTimeouts >= 0)
-      this.emptyTimeouts = history.emptyTimeouts;
+    if (history?.generation === this.epoch) this.emptyTimeouts = validCount(history);
   }
+  get emptyCount(): number { return this.emptyTimeouts; }
   get timeoutSecs(): number { return this.probe ? 0 : waitTimeoutSecs(this.emptyTimeouts, this.config); }
   /** A reset while armed shortens a backed-off wait to a fresh base wait. */
   remainingMs(now = Date.now()): number {
@@ -79,8 +87,32 @@ export class IdleWait {
   expired(now = Date.now()): boolean { return this.remainingMs(now) === 0; }
   timedOut(now = Date.now()): void {
     // Probes and a waiter overtaken by a reset cannot advance the history.
-    if (!this.session || this.probe || generation(this.session) !== this.epoch || !this.expired(now)) return;
-    write(sessionKey(this.session), { generation: this.epoch, emptyTimeouts: this.emptyTimeouts + 1 } satisfies History);
+    if (!this.session || this.probe || this.completed || generation(this.session) !== this.epoch || !this.expired(now)) return;
+    withHistory(this.session, () => {
+      if (generation(this.session) !== this.epoch) return;
+      const history = read<History>(sessionKey(this.session!));
+      const prior = history?.generation === this.epoch ? validCount(history) : 0;
+      this.emptyTimeouts = Math.min(Number.MAX_SAFE_INTEGER, Math.max(this.emptyTimeouts, prior) + 1);
+      this.completed = true;
+      write(sessionKey(this.session!), { generation: this.epoch, emptyTimeouts: this.emptyTimeouts, wakeKeys: history?.wakeKeys } satisfies History);
+    });
   }
-  woke(): void { if (this.session) resetWaitBackoff(this.session); }
+  /** Stable delivery keys make reminders and repeated digest peeks inert. */
+  woke(keys?: readonly string[]): boolean {
+    if (!this.session || keys?.length === 0) return false;
+    return withHistory(this.session, () => {
+      const history = read<History>(sessionKey(this.session!));
+      const seen = new Set(history?.wakeKeys ?? []);
+      const hashes = keys?.map(key => createHash('sha256').update(key).digest('hex'));
+      if (hashes?.every(key => seen.has(key))) return false;
+      hashes?.forEach(key => seen.add(key));
+      resetWaitBackoff(this.session);
+      this.epoch = generation(this.session);
+      this.emptyTimeouts = 0;
+      this.started = Date.now();
+      this.completed = false;
+      write(sessionKey(this.session!), { generation: this.epoch, emptyTimeouts: 0, wakeKeys: [...seen] } satisfies History);
+      return true;
+    });
+  }
 }
