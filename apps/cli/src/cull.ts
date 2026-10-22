@@ -34,6 +34,8 @@ import {
   removeGhostWorktree,
   foldCatches,
   recordRosterRevision,
+  planTrapCaches,
+  recoverTrapCaches,
 } from '@lobstah/core';
 import type { CatchRef, FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
@@ -455,9 +457,13 @@ export function applyCull(items: CullItem[]): void {
  * reports the change in free space on the worktrees volume.
  */
 export function runCull(days: number, apply: boolean, freeBytes: FreeBytesReader = statfsFreeBytes, now = Date.now()): string {
-  const plan = planCull(days, now, { measure: !apply });
   const lines: string[] = [];
+  // Under pressure, disposable caches come before removing whole worktrees, including a manual --apply.
+  if (apply) recoverTrapCaches(loadConfig(), worktreesDir(), freeBytes, (message) => lines.push(message));
+  const plan = planCull(days, now, { measure: !apply });
   if (!apply) {
+    const caches = planTrapCaches();
+    if (caches.length > 0) lines.push(`caches: ${formatGB(caches.reduce((bytes, cache) => bytes + cache.bytes, 0))} clearable in ${caches.length} idle trap(s)`);
     lines.push(toonTable('cull', plan.map((i) => ({ kind: i.kind, id: i.id, ageDays: i.ageDays, bytes: i.bytes })), ['kind', 'id', 'ageDays', 'bytes']));
     const total = plan.reduce((sum, item) => sum + item.bytes, 0);
     lines.push(toonKV({ totalBytes: total, total: formatGB(total) }));

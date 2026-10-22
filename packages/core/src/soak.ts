@@ -19,6 +19,8 @@ import { protectTrapRevision, removeGhostWorktree } from './worktree-safety.js';
 import { readRoster, recordRosterDeparture, recordRosterSignOn } from './roster.js';
 import { readReservation } from './trap-start.js';
 import { DEFAULT_SOAK } from './config.js';
+import { clearFinishedTrapCaches, repoCachesConfigured } from './cache-cleanup.js';
+import { withTrapCacheLock } from './cache-paths.js';
 import { sessionWorker } from './session-workers.js';
 import { workerLabel, workerMetadata } from './worker-metadata.js';
 import type { WorkerConfig, WorkerMetadata } from './worker-metadata.js';
@@ -438,6 +440,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   fs.rmSync(regPath(trapId), { force: true });
   fs.rmSync(beatPath(trapId), { force: true });
   fs.rmSync(prProbePath(trapId), { force: true });
+  clearFinishedTrapCaches(reg, 'signed off');
   postNotice({
     kind: 'trap-stowed',
     text: `trap ${trapLabel(reg)} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
@@ -629,6 +632,16 @@ export function releaseCatch(reg: TrapRegistration): { requeued?: string; finali
  * nothing more. Claiming stamps the delivery receipt into evidence.
  */
 export function claimBait(reg: TrapRegistration): { id: string; lane: Lane; descriptor: Descriptor } | null {
+  // Opted-in traps cannot claim new work while their caches are being removed.
+  if (repoCachesConfigured(reg.repo))
+    return withTrapCacheLock(reg.trapId, () => {
+      const current = readTrap(reg.trapId);
+      return current ? claimTrapBait(current) : null;
+    });
+  return claimTrapBait(reg);
+}
+
+function claimTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descriptor: Descriptor } | null {
   if (hasOpenCatch(reg)) return null;
   const mine = `wt:${reg.trapId}`;
   const addressed = (d: Descriptor): boolean =>

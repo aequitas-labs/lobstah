@@ -51,6 +51,8 @@ export * from './resume.js';
 export * from './glass.js';
 export * from './models.js';
 export * from './disk.js';
+export * from './cache-cleanup.js';
+export * from './cache-paths.js';
 export * from './worktrees.js';
 export * from './worktree-safety.js';
 export * from './roster.js';

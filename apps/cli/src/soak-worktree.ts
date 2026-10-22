@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
   GB,
+  loadConfig,
+  recoverTrapCaches,
   formatGB,
   newTrapId,
   statfsFreeBytes,
@@ -45,6 +47,7 @@ export async function createSoakWorktree(opts: {
   /** A reserved trap's id; the worktree and branch are named after it. */
   trapId?: string;
 }): Promise<SoakWorktree> {
+  recoverTrapCaches(loadConfig(), worktreesDir(), opts.freeBytes ?? statfsFreeBytes);
   const need = opts.minFreeGB * GB;
   if (need > 0) {
     let free: number | undefined;

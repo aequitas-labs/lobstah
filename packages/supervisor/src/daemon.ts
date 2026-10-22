@@ -12,6 +12,7 @@ import {
   cancelRequested,
   claimNext,
   clearHold,
+  recoverTrapCaches,
   formatGB,
   GB,
   lastCullPassAt,
@@ -501,6 +502,7 @@ function liftHold(log: (m: string) => void, text: string): void {
  * it clears. A failed read never blocks claiming.
  */
 export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
+  recoverTrapCaches(cfg, worktreesDir(), hooks.freeBytes ?? statfsFreeBytes, log);
   const need = (cfg.limits.minFreeGB ?? 0) * GB;
   if (!(need > 0)) {
     liftHold(log, 'free-space hold cleared: [limits].minFreeGB is off');
@@ -621,7 +623,8 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     slotUsage(lane).headless < (lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent);
   const roomy = (['chore', 'work'] as Lane[]).some((lane) => hasHeadlessSlot(lane) && claimable(lane, skipFor(lane)))
     ? spaceGuard(cfg, hooks, log)
-    : (liftHold(log, 'free-space hold cleared: no headless slot has claimable work'), true);
+    : (recoverTrapCaches(cfg, worktreesDir(), hooks.freeBytes ?? statfsFreeBytes, log),
+      liftHold(log, 'free-space hold cleared: no headless slot has claimable work'), true);
 
   for (const lane of ['chore', 'work'] as Lane[]) {
     const ceiling = lane === 'work' ? cfg.limits.maxConcurrent : cfg.limits.choreConcurrent;
