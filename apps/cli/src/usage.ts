@@ -323,10 +323,10 @@ claimed helm this requires --session <helm-id>.`,
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
 --waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No.`,
   goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
+Goals should start with a verb and have a specific, measurable end.
 set replaces today's lines; add appends one; rm removes the displayed line number. Edits are allowed all day.
 done <n> checks off a goal without removing it; undo <n> unchecks it. recap saves a markdown recap, retaining task markers.
-recap-data prints retained dispatch, PR, card and optional closed todo facts for yesterday (or <date>).
-Files: ~/.lobstah/goals/<grounds>/<date>.md; editable by hand. Writes are helm-gated.`,
+recap-data prints retained dispatch, PR, card and optional closed todo facts for yesterday (or <date>). Files: ~/.lobstah/goals/<grounds>/<date>.md; editable by hand. Writes are helm-gated.`,
   stats: `Catches: dispatches that finished done. catchesToday counts the local day;
 totalCatches counts all time. Both live in stats.json, which cull folds into
 before deleting, so they survive it; so does a per-local-day count (400 days),

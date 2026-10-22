@@ -78,6 +78,7 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
 
 ## Rules
 
+- Before setting goals proposed in chat or on the glass, check that each starts with a verb and has a specific, measurable end (number, PR/issue, URL or named state). If all pass, set them as given. Otherwise, use `lobstah man ask` to show originals beside proposed rewordings, with Use rewording, Keep originals and Edit options; run `lobstah goals set` only after the person chooses.
 - Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.
   `lobstah dispatch --repo <key> --trap-any --brief <file>` selects in that order;
   at the repo's `traps` cap it waits for a suitable free trap. `man throw --new`
