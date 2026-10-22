@@ -1,5 +1,10 @@
 import {
   GrantError,
+  listTraps,
+  listHelms,
+  sessionGuarded,
+  toolHosts,
+  validateSessionGrant,
   PERMISSION_OPTIONS,
   addGrant,
   alwaysScope,
@@ -21,7 +26,17 @@ import {
   toonTable,
   useGrant,
 } from '@lobstah/core';
-import type { CheckoutRoot, DecisionAnswer, DecisionMeta, Grant, GrantHarness, GrantMode, GrantRequest, Lane, PermissionAsk } from '@lobstah/core';
+import type {
+  CheckoutRoot,
+  DecisionAnswer,
+  DecisionMeta,
+  Grant,
+  GrantHarness,
+  GrantMode,
+  GrantRequest,
+  Lane,
+  PermissionAsk,
+} from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 
@@ -33,7 +48,14 @@ import * as os from 'node:os';
  */
 
 /** Environment variables a harness sets in the shells its agent runs. */
-const AGENT_ENV = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CODEX_THREAD_ID', 'CODEX_SANDBOX', 'CODEX_MANAGED_BY_NPM_SESSION'];
+const AGENT_ENV = [
+  'CLAUDECODE',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CODEX_THREAD_ID',
+  'CODEX_SANDBOX',
+  'CODEX_MANAGED_BY_NPM_SESSION',
+];
 
 /**
  * A grant is a person's act. Refuse when the command runs without a terminal
@@ -104,7 +126,8 @@ function harnessOf(v: string | undefined): GrantHarness {
   return v;
 }
 
-function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo'>): string {
+function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo' | 'tools' | 'session'>): string {
+  if (g.tools) return `${g.tools}${g.command ? ` (${g.command} …)` : ''} for session ${g.session}`;
   if (g.path !== undefined) return g.repo !== undefined ? `write ${g.path} in any ${g.repo} checkout` : `write ${g.path}`;
   return g.match === 'prefix' ? `${g.command} …` : g.command!;
 }
@@ -169,7 +192,10 @@ export function grantCommand(opts: {
   const mode: GrantMode = opts.once ? 'once' : 'always';
   const harness = harnessOf(opts.harness);
   const expiresAt = opts.expires !== undefined ? parseUntil(opts.expires) : undefined;
-  const shown = opts.path !== undefined ? `writes to ${opts.path}` : `\`${opts.command}\`${opts.prefix ? ' and the same command with more arguments' : ''}`;
+  const shown =
+    opts.path !== undefined
+      ? `writes to ${opts.path}`
+      : `\`${opts.command}\`${opts.prefix ? ' and the same command with more arguments' : ''}`;
   const scope = mode === 'always' ? alwaysScopeText(opts.path !== undefined ? { path: opts.path } : { command: opts.command }).short : '';
   const warn = mode === 'always' ? `every trap may run it without asking (${scope}), until you revoke it` : 'one trap may run it once';
   if (!opts.yes && !confirm(`Allow ${shown} (${harness === 'any' ? 'Claude Code and Codex' : harness}); ${warn}?`)) {
@@ -214,13 +240,30 @@ export function grantsCommand(opts: { all: boolean; json: boolean }): void {
         mode: g.mode,
         harness: g.harness,
         trap: g.trap ?? '',
+        session: g.session ?? '',
+        hosts: g.hosts?.join(', ') ?? '',
+        audit: g.audit?.map((a) => `${a.at} ${a.tool}${a.hosts?.length ? ` ${a.hosts.join(',')}` : ''}`).join(' | ') ?? '',
         by: g.by,
         at: g.at,
         uses: g.uses,
         expires: g.expiresAt ?? '',
         ...(opts.all ? { revoked: g.revokedAt ?? '' } : {}),
       })),
-      ['id', 'what', 'mode', 'harness', 'trap', 'by', 'at', 'uses', 'expires', ...(opts.all ? ['revoked'] : [])],
+      [
+        'id',
+        'what',
+        'mode',
+        'harness',
+        'trap',
+        'session',
+        'hosts',
+        'by',
+        'at',
+        'uses',
+        'expires',
+        'audit',
+        ...(opts.all ? ['revoked'] : []),
+      ],
     ),
   );
 }
@@ -237,6 +280,7 @@ interface CallInput {
   tool: string;
   input: Record<string, unknown>;
   session?: string;
+  callId?: string;
 }
 
 /** The files an `apply_patch` call touches, from its patch text. */
@@ -273,9 +317,27 @@ export function callRequests(call: CallInput, trap: string | undefined, cwd: str
  * request the call makes must be covered; each covering grant's use is
  * recorded. Returns the grant ids that covered it, or nothing.
  */
-export function checkCall(call: CallInput, cwd: string): string[] | undefined {
+export function checkCall(call: CallInput, cwd: string, sessionOnly = false): string[] | undefined {
   const trap = call.session ? trapBySession(call.session) : undefined;
-  if (!trap) return undefined;
+  if (call.session) {
+    const raw = call.input.command ?? call.input.cmd;
+    const command = typeof raw === 'string' ? raw : Array.isArray(raw) ? raw.map(String).join(' ') : undefined;
+    const knownHarness = trap?.harness ?? listHelms().find((h) => h.sessionId === call.session)?.harness;
+    const req: GrantRequest = {
+      harness: knownHarness === 'claude' || knownHarness === 'codex' ? knownHarness : call.harness,
+      tool: call.tool,
+      session: call.session,
+      input: call.input,
+      cwd,
+      ...(command ? { command } : {}),
+    };
+    const paths = callRequests(call, trap?.name, cwd);
+    const grant = paths.some((p) => sessionGuarded({ ...req, ...p }))
+      ? undefined
+      : useGrant(req, { session: call.session, callId: call.callId });
+    if (grant?.mode === 'session') return [grant.id];
+  }
+  if (sessionOnly || !trap) return undefined;
   // The trap's own harness, as it signed on: the hook entry is shared by both plugins.
   const harness = trap.harness === 'codex' ? 'codex' : trap.harness === 'claude' ? 'claude' : call.harness;
   const requests = callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd);
@@ -313,7 +375,13 @@ export function grantCheckHook(): void {
     const q = readStdinJson();
     if (!q || typeof q.tool !== 'string' || typeof q.input !== 'object' || q.input === null) return void console.log('{}');
     const ids = checkCall(
-      { harness: 'claude', tool: q.tool, input: q.input as Record<string, unknown>, ...(typeof q.session === 'string' ? { session: q.session } : {}) },
+      {
+        harness: 'claude',
+        tool: q.tool,
+        input: q.input as Record<string, unknown>,
+        ...(typeof q.callId === 'string' ? { callId: q.callId } : {}),
+        ...(typeof q.session === 'string' ? { session: q.session } : {}),
+      },
       typeof q.cwd === 'string' ? q.cwd : process.cwd(),
     );
     console.log(JSON.stringify(ids ? { grants: ids } : {}));
@@ -330,27 +398,69 @@ export function grantCheckHook(): void {
  * the normal approval flow goes on. An uncovered call from an assigned trap
  * also files a permission card, so its glass answer writes a real grant.
  */
-export function permissionRequestHook(): void {
+export function permissionRequestHook(preToolUse = false, preHarness: 'claude' | 'codex' = 'claude'): void {
   try {
     const h = readStdinJson();
     if (!h || typeof h.tool_name !== 'string' || typeof h.tool_input !== 'object' || h.tool_input === null) return;
     const call: CallInput = {
-      harness: 'codex',
+      harness: preToolUse ? (typeof h.turn_id === 'string' ? 'codex' : preHarness) : 'codex',
       tool: h.tool_name,
+      ...(typeof h.tool_use_id === 'string' ? { callId: h.tool_use_id } : {}),
       input: h.tool_input as Record<string, unknown>,
       ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}),
     };
     const cwd = typeof h.cwd === 'string' ? h.cwd : process.cwd();
-    const ids = checkCall(call, cwd);
+    const ids = checkCall(call, cwd, preToolUse);
     if (ids) {
-      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } }));
+      console.log(
+        JSON.stringify({
+          hookSpecificOutput: preToolUse
+            ? { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: `lobstah grant ${ids.join(', ')}` }
+            : { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
+        }),
+      );
       return;
     }
     const trap = call.session ? trapBySession(call.session) : undefined;
-    if (!trap?.claimed) return;
+    if (preToolUse) return;
+    if (!trap?.claimed) {
+      if (
+        call.session &&
+        listHelms().some((h) => h.sessionId === call.session) &&
+        !standingDecisions().some(
+          (d) => d.permission?.sessionGrant?.session === call.session && d.permission?.sessionGrant?.tools === toolFamily(call.tool),
+        )
+      ) {
+        requestSessionGrant({
+          session: call.session,
+          tools: toolFamily(call.tool),
+          reason: 'The helm needs permission for this tool family',
+          ...(call.tool === 'Bash' && typeof call.input.command === 'string'
+            ? { command: commandGrantScope(call.input.command).command }
+            : {}),
+          hosts: toolHosts(call.input).hosts,
+        });
+      }
+      return;
+    }
     const lane = (['work', 'chore'] as const).find((lane) => readSessionClaim(trap.claimed!, lane)?.by === `wt:${trap.trapId}`);
     if (!lane) return;
     const harness = trap.harness === 'claude' ? 'claude' : 'codex';
+    if (!callRequests(call, trap.name, cwd).length && call.session) {
+      const tools = toolFamily(call.tool);
+      if (
+        !standingDecisions().some(
+          (d) => d.permission?.sessionGrant?.session === call.session && d.permission?.sessionGrant?.tools === tools,
+        )
+      )
+        requestSessionGrant({
+          session: call.session,
+          tools,
+          hosts: toolHosts(call.input).hosts,
+          reason: 'This tool call needs permission',
+        });
+      return;
+    }
     for (const request of callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd)) {
       if (listGrants().grants.some((g) => grantCovers(g, request))) continue;
       const duplicate = standingDecisions().some(
@@ -368,6 +478,8 @@ export function permissionRequestHook(): void {
           ask: {
             ...(request.command !== undefined ? { command: request.command } : { path: request.path! }),
             harness,
+            session: call.session,
+            tool: call.tool,
             trap: trap.name ?? trap.trapId,
           },
         });
@@ -379,9 +491,26 @@ export function permissionRequestHook(): void {
 
 /** File a trap's permission request as a card with Allow once, Allow always and No. */
 export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string }): DecisionMeta {
+  const session = opts.ask.session ?? listTraps().find((t) => t.name === opts.ask.trap || t.trapId === opts.ask.trap)?.sessionId;
+  if (session) opts.ask = { ...opts.ask, session, tool: opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write') };
   const target = opts.ask.command !== undefined ? opts.ask.command : opts.ask.path!;
   const kind = opts.ask.command !== undefined ? 'run' : 'write to';
   const scope = permissionScopeText(opts.ask);
+  let family = !!session;
+  if (family && opts.ask.command) {
+    try {
+      validateSessionGrant({
+        mode: 'session',
+        session,
+        tools: 'Bash',
+        command: commandGrantScope(opts.ask.command).command,
+        match: 'prefix',
+        by: 'request',
+      });
+    } catch {
+      family = false;
+    }
+  }
   const title =
     opts.ask.command !== undefined ? `Allow: ${commandGrantScope(target).command}` : `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
   const detail = [
@@ -394,12 +523,17 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
     '',
     `- **Allow once**: this trap may ${kind} it once, within the hour.`,
     `- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
+    ...(family
+      ? [
+          `- **${TOOL_FAMILY_OPTION}**: tool \`${toolFamily(opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write'))}\` for session \`${session}\` only, with the shown command prefix when applicable; expires automatically.`,
+        ]
+      : []),
     '- **No**: the trap is told not to.',
   ].join('\n');
   return askDecision({
     title: title.length > 200 ? `${title.slice(0, 199)}…` : title,
     detailText: detail,
-    options: [...PERMISSION_OPTIONS],
+    options: [...PERMISSION_OPTIONS.slice(0, 2), ...(family ? [TOOL_FAMILY_OPTION] : []), 'No'],
     optionNotes: { 'Allow always': scope.short },
     dispatch: opts.dispatch,
     lane: opts.lane,
@@ -417,8 +551,10 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
  */
 export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: 'glass' | 'cli'): void {
   if (!decision.permission || by === 'glass') return;
-  if (option === 'Allow once' || option === 'Allow always') {
-    throw new GrantError('a permission is granted in the glass, or by a person with `lobstah grant` at a terminal; `man answer` can only say No');
+  if (option?.startsWith('Allow')) {
+    throw new GrantError(
+      'a permission is granted in the glass, or by a person with `lobstah grant` at a terminal; `man answer` can only say No',
+    );
   }
 }
 
@@ -429,7 +565,41 @@ export function permissionAnswerAllowed(decision: DecisionMeta, option: string |
  */
 export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAnswer): Grant | undefined {
   const ask = decision.permission;
-  if (!ask || !decision.dispatch) return undefined;
+  if (!ask) return undefined;
+  if (answer.by === 'glass' && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
+    const r = ask.sessionGrant;
+    const duration = answer.option === 'Allow for 1h' ? 3600_000 : r.durationMs;
+    return addGrant({
+      mode: 'session',
+      session: r.session,
+      tools: r.tools,
+      hosts: r.hosts,
+      reason: r.reason,
+      ...(r.command ? { command: r.command, match: 'prefix' } : {}),
+      by: 'glass',
+      expiresAt: new Date(Date.now() + duration).toISOString(),
+    });
+  }
+  if (answer.by === 'glass' && answer.option === TOOL_FAMILY_OPTION && ask.session) {
+    const grant = addGrant({
+      mode: 'session',
+      session: ask.session,
+      tools: toolFamily(ask.tool ?? (ask.command ? 'Bash' : 'Write')),
+      ...(ask.command ? { command: commandGrantScope(ask.command).command, match: 'prefix' } : {}),
+      by: 'glass',
+      harness: ask.harness,
+      reason: 'Allowed this tool family on the permission card',
+    });
+    if (decision.dispatch)
+      sendMessage(
+        decision.dispatch,
+        decision.lane ?? 'work',
+        `Chris allowed this tool family for 15 minutes: grant ${grant.id}. Retry the call; lobstah grants shows its scope and expiry.`,
+        'glass',
+      );
+    return grant;
+  }
+  if (!decision.dispatch) return undefined;
   const lane: Lane = decision.lane ?? 'work';
   const target = ask.command !== undefined ? `\`${ask.command}\`` : `writes to ${ask.path}`;
   if (answer.by !== 'glass' || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
@@ -460,7 +630,9 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
     lane,
     `Chris allowed ${target} ${once ? 'once' : `always (${what(g)})`} in the glass: grant ${g.id}. ` +
       '`lobstah grants` shows it. ' +
-      (ask.command !== undefined ? `Run the command again exactly as shown, with nothing added before or after it: ${ask.command}` : `Make the write to ${ask.path} again.`),
+      (ask.command !== undefined
+        ? `Run the command again exactly as shown, with nothing added before or after it: ${ask.command}`
+        : `Make the write to ${ask.path} again.`),
     'glass',
   );
   return g;
@@ -472,7 +644,11 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
  * `bypass=true`) is a person's choice at a terminal, as for `trap bypass`:
  * it refuses in an agent session, the helm's too. Clearing it is anyone's.
  */
-export function rosterConfigPatch(pairs: string[], env: NodeJS.ProcessEnv = process.env, tty?: boolean): { config: Record<string, string | null>; bypass: boolean } {
+export function rosterConfigPatch(
+  pairs: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  tty?: boolean,
+): { config: Record<string, string | null>; bypass: boolean } {
   const config: Record<string, string | null> = {};
   for (const pair of pairs) {
     const eq = pair.indexOf('=');
@@ -480,7 +656,8 @@ export function rosterConfigPatch(pairs: string[], env: NodeJS.ProcessEnv = proc
     config[pair.slice(0, eq)] = pair.slice(eq + 1) || null;
   }
   if (config.permissionMode === 'bypass') config.permissionMode = 'bypassPermissions';
-  const bypass = config.permissionMode === 'bypassPermissions' || (config.bypass !== undefined && config.bypass !== null && config.bypass !== 'false');
+  const bypass =
+    config.permissionMode === 'bypassPermissions' || (config.bypass !== undefined && config.bypass !== null && config.bypass !== 'false');
   if (bypass) personOnly('man roster set --config permissionMode=bypass', env, tty);
   return { config, bypass };
 }
@@ -511,7 +688,103 @@ export function bypassCommand(address: string, on: boolean, yes = false): void {
     toonKV({
       trap: entry.name,
       bypass: on,
-      next: on ? `lobstah man throw ${entry.name} starts it with no permission checks; a session running now keeps its mode` : 'its next start runs with the normal permission checks',
+      next: on
+        ? `lobstah man throw ${entry.name} starts it with no permission checks; a session running now keeps its mode`
+        : 'its next start runs with the normal permission checks',
     }),
   );
+}
+
+export const TOOL_FAMILY_OPTION = 'Allow this tool family for 15 min';
+export const toolFamily = (tool: string): string =>
+  tool.startsWith('mcp__') && tool.lastIndexOf('__') > 4 ? `${tool.slice(0, tool.lastIndexOf('__'))}__*` : tool;
+
+export function sessionDuration(raw = '15m'): number {
+  const m = /^(\d+)(m|h)$/.exec(raw);
+  const ms = m ? Number(m[1]) * (m[2] === 'h' ? 3600_000 : 60_000) : 0;
+  if (ms <= 0 || ms > 4 * 3600_000) throw new GrantError('--for must be 1m to 4h');
+  return ms;
+}
+
+function sessionTarget(opts: { session?: string; trap?: string; grounds?: string }): string {
+  if ([opts.session, opts.trap, opts.grounds].filter(Boolean).length !== 1)
+    throw new GrantError('choose exactly one --session, --trap, or --grounds');
+  const roster = opts.trap ? rosterByAddress(opts.trap) : undefined;
+  const session =
+    opts.session ??
+    (opts.trap
+      ? listTraps().find((t) => t.name === opts.trap || t.trapId === roster?.trapId)?.sessionId
+      : listHelms().find((h) => h.grounds === opts.grounds)?.sessionId);
+  if (!session || !/^[A-Za-z0-9_-]{1,200}$/.test(session)) throw new GrantError('no live session for that target');
+  return session;
+}
+
+type SessionOptions = {
+  session?: string;
+  trap?: string;
+  grounds?: string;
+  tools: string;
+  hosts?: string[];
+  duration?: string;
+  reason: string;
+  command?: string;
+};
+
+/** Asking is agent-safe: this writes a decision, never a grant. */
+export function requestSessionGrant(opts: SessionOptions): DecisionMeta {
+  const session = sessionTarget(opts);
+  const durationMs = sessionDuration(opts.duration);
+  validateSessionGrant({
+    mode: 'session',
+    session,
+    tools: opts.tools,
+    hosts: opts.hosts,
+    ...(opts.command ? { command: opts.command, match: 'prefix' } : {}),
+    by: 'request',
+    expiresAt: new Date(Date.now() + durationMs).toISOString(),
+  });
+  if (!opts.tools || !/^[A-Za-z0-9_.*-]{1,200}$/.test(opts.tools) || !/[A-Za-z0-9]/.test(opts.tools))
+    throw new GrantError('an exact tool name or tool glob is required');
+  if (opts.tools === 'Bash' && !opts.command) throw new GrantError('Bash session grants require a command prefix');
+  if (opts.command && /[;&|<>`$\n\r]/.test(opts.command)) throw new GrantError('a session Bash prefix cannot contain shell syntax');
+  if (!opts.reason.trim()) throw new GrantError('--reason is required');
+  const duration = opts.duration ?? '15m';
+  return askDecision({
+    title: `Allow ${opts.tools} for ${duration}?`.slice(0, 200),
+    detailText: `Session: \`${session}\`\n\nTools: \`${opts.tools}\`\n\n${opts.command ? `Bash prefix: \`${opts.command}\`\n\n` : ''}Hosts: \`${(opts.hosts ?? []).join(', ') || 'not pinned'}\`\n\n${opts.reason}\n\nExpires automatically. Revoke at any time in the glass. Clicks and screenshots have no URL and ride this window.`,
+    options: [...new Set([`Allow for ${duration}`, 'Allow for 1h', 'Deny'])],
+    askedBy: 'worker',
+    permission: {
+      harness: 'any',
+      session,
+      tool: opts.tools,
+      sessionGrant: {
+        session,
+        tools: opts.tools,
+        hosts: opts.hosts,
+        durationMs,
+        reason: opts.reason,
+        ...(opts.command ? { command: opts.command } : {}),
+      },
+    },
+    maxBytes: loadConfig().limits.attachmentMaxBytes,
+  }).meta;
+}
+
+export function sessionGrantCommand(opts: SessionOptions & { yes?: boolean }): void {
+  personOnly('lobstah grant --session');
+  const session = sessionTarget(opts);
+  const durationMs = sessionDuration(opts.duration);
+  if (!opts.yes && !confirm(`Allow ${opts.tools} for session ${session}, for ${opts.duration ?? '15m'}?`)) return;
+  const grant = addGrant({
+    mode: 'session',
+    session,
+    tools: opts.tools,
+    hosts: opts.hosts,
+    reason: opts.reason,
+    ...(opts.command ? { command: opts.command, match: 'prefix' } : {}),
+    by: localPerson(),
+    expiresAt: new Date(Date.now() + durationMs).toISOString(),
+  });
+  console.log(toonKV({ granted: grant.id, session, tools: grant.tools, expires: grant.expiresAt }));
 }

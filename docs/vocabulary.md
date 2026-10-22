@@ -598,3 +598,8 @@ registry that decides what parses).
 | `1` | Error: the command was well-formed but could not do its job. |
 | `2` | Usage mistake: unknown command, flag, or subverb. The error names the offender and prints the command's usage card. Flags in a free-text tail (a `send` message, a `report` note) are never validated — prose may contain anything. |
 | `3` | `man wait --timeout` elapsed with nothing to report. Its own code so `while lobstah man wait` loops still terminate on timeout while `2` stays unambiguous. |
+
+
+### Session grants
+
+`lobstah grant request --session <id>` (or `--trap <name>`, `--grounds <name>`) `--tools 'mcp__browser__*' [--hosts a,b] [--for 15m] --reason "why"` asks in glass; it never grants. Chris chooses Allow for the requested duration, Allow for 1h, or Deny. A real terminal can use `lobstah grant --session <id> --tools <name|glob>` with the same options and confirmation. Windows start at approval, default to 15m, and cannot exceed 4h. Bash requires `--command '<prefix>'` and keeps the existing no-joiner/no-redirect rules. URL hosts are pinned exactly when present; URL-less clicks/screenshots ride the session window. Grant/config/settings edits and self-grant commands are excluded. The existing permission card also offers a 15-minute tool-family window for its asking session. `lobstah grants` and the glass show expiry, use count and the latest 20 tool/time/host records (no typed text or URL paths/queries); Revoke takes effect immediately. Hooks request an allow; harness restrictions still apply.

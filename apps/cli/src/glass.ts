@@ -8,6 +8,8 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   awaitingReply,
+  listGrants,
+  revokeGrant,
   latestRound,
   readReview,
   acknowledgeReview,
@@ -135,6 +137,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['helm-chat', 1024],
   ['decision-viewed', 1024],
   ['report-viewed', 1024],
+  ['grant-revoke', 1024],
   ['review-dismiss', 1024],
   ...['review-skip', 'review-seen', 'review-approve', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
   ['review-redraft', 1024],
@@ -701,6 +704,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     reports: reportRows(),
     reviews: glassReviews(reviewTools(cfg)),
     reviewSetup: reviewSetupView(),
+    sessionGrants: listGrants().grants.filter(g => g.mode === 'session').map(({ callIds: _ids, ...g }) => g),
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
@@ -906,6 +910,12 @@ export function serveGlass(
             } catch {
               return reply(500, { ok: false, reason: 'The view could not be stored.' });
             }
+          }
+          case 'grant-revoke': {
+            const id = (body.payload as { id?: unknown } | undefined)?.id;
+            if (typeof id !== 'string' || !/^g-[a-f0-9]+$/.test(id)) return reply(400, { ok: false, reason: 'A grant id is required.' });
+            try { revokeGrant(id, 'glass'); return reply(200, { ok: true }); }
+            catch (err) { return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) }); }
           }
           case 'review-mode': {
             const { mode, repo, publish } = (body.payload ?? {}) as { mode?: unknown; repo?: unknown; publish?: unknown };

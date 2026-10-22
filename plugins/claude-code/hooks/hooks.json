@@ -1,5 +1,5 @@
 {
-  "description": "At turn end, block with standing attention or the command to arm a watcher while work is in flight; allow the stop when a watcher is live. `lobstah hook stop --park` waits in the hook. Each hook runs `lobstah hook <event>`, which detects the session's role (helm, trap, or neither). Inert unless the helm or trap is signed on or the directory opts in. SessionStart announces the session id; SessionEnd stows a soaking session. PostToolUse runs `lobstah hook post-tool-use`: a soaking session's liveness and activity, throttled, inert elsewhere. PermissionRequest runs `lobstah hook permission-request`: a call a person granted (`lobstah grant`, or Allow on a glass card) runs without the prompt; inert for anything not granted and outside traps. The mod in grants.mjs answers Claude Code's tool.check the same way, which auto mode honours.",
+  "description": "Lobstah lifecycle and grant hooks. Session grants match one helm or trap session and a time-limited tool scope. Legacy command/path grants remain trap-only. PreToolUse and PermissionRequest consult the ledger; Claude Code also loads the tool.check mod. Expired or revoked grants do not match. Harness deny rules and organization limits still apply.",
   "modules": [
     "./grants.mjs"
   ],
@@ -65,6 +65,17 @@
           {
             "type": "command",
             "command": "lobstah hook session-end",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lobstah hook pre-tool-use",
             "timeout": 10
           }
         ]

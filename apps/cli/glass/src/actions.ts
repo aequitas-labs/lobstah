@@ -434,6 +434,7 @@ export async function requestTrap(repo: string, harness: string): Promise<string
 }
 
 export type ReviewRequestKind =
+  | 'grant-revoke'
   | 'review-seen'
   | 'review-skip'
   | 'review-approve'

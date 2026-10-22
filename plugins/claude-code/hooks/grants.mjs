@@ -1,16 +1,6 @@
-// lobstah grants in Claude Code: a mod that lets a trap make a call a person
-// has granted (`lobstah grant` at a terminal, or Allow on a glass card)
-// without a permission prompt or the auto-mode classifier.
-//
-// It changes nothing Claude Code has already decided: a call the rules
-// allow runs, and a call a deny rule, a tool's own check or the mode refuses
-// stays refused. Only a call that would be put to someone (a prompt, the
-// classifier) is checked against the grants ledger, by `lobstah hook
-// grant-check`, which answers for signed-on traps only. A covered call is
-// allowed and its grant's use recorded; anything else goes on as before.
-//
-// A mod reaches files, processes and the environment only through `$`
-// (the mods API), never Node's own modules.
+// Consult lobstah grants for tool.check requests. Session windows cover the
+// exact session and tool scope; legacy command/path grants remain trap-only.
+// Explicit denials and organization ceilings stand. Use only the mods API.
 
 /** The grants ledger, where lobstah keeps it. */
 async function ledgerPath($) {
@@ -41,7 +31,7 @@ async function check($, e, next) {
     if (verdict.decision !== 'ask' || (verdict.ceiling && verdict.ceiling !== 'allow')) return verdict;
     // A query runs nothing; only a real call may use a grant.
     if (!e.tool_use_id || !(await $.fs.exists(await ledgerPath($)))) return verdict;
-    const grants = await grantCheck($, { tool: e.tool, input: e.input, session: await $.session.id(), cwd: await $.session.cwd() });
+    const grants = await grantCheck($, { tool: e.tool, input: e.input, session: await $.session.id(), cwd: await $.session.cwd(), callId: e.tool_use_id });
     return grants.length ? { decision: 'allow', reason: `allowed by lobstah grant ${grants.join(', ')}` } : verdict;
   } catch {
     return verdict;
@@ -49,9 +39,5 @@ async function check($, e, next) {
 }
 
 export function register(on) {
-  on('tool.check', { tool: 'Bash' }, check);
-  on('tool.check', { tool: 'Write' }, check);
-  on('tool.check', { tool: 'Edit' }, check);
-  on('tool.check', { tool: 'MultiEdit' }, check);
-  on('tool.check', { tool: 'NotebookEdit' }, check);
+  on('tool.check', {}, check);
 }

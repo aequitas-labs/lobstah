@@ -945,10 +945,10 @@ async function mainCli(): Promise<void> {
   // The grant hooks: the Claude Code mod's question and Codex's
   // PermissionRequest. Before any layout or parsing work; they never fail,
   // and an error means no grant.
-  if (cmd === 'hook' && (args[0] === 'grant-check' || args[0] === 'permission-request')) {
+  if (cmd === 'hook' && (args[0] === 'grant-check' || args[0] === 'permission-request' || args[0] === 'pre-tool-use')) {
     const { grantCheckHook, permissionRequestHook } = await import('./grants-cli.js');
     if (args[0] === 'grant-check') grantCheckHook();
-    else permissionRequestHook();
+    else permissionRequestHook(args[0] === 'pre-tool-use', args.includes('codex') ? 'codex' : 'claude');
     return;
   }
   // `trap grant|grants|revoke` are the long names of `grant|grants|revoke`.
@@ -1118,7 +1118,14 @@ async function mainCli(): Promise<void> {
       throw new UsageError(usageFor('trap')!);
     }
     case 'grant': {
-      const { grantCommand } = await import('./grants-cli.js');
+      const { grantCommand, requestSessionGrant, sessionGrantCommand } = await import('./grants-cli.js');
+      if (pos[0] === 'request' || opt('--tools') !== undefined || opt('--session') !== undefined) {
+        if (opt('--path') !== undefined || has('--once') || opt('--expires') !== undefined || opt('--harness') !== undefined) throw new UsageError('session grants use --tools, --for and optional --command; legacy grant flags do not apply');
+        const options = { session: opt('--session'), trap: opt('--trap'), grounds: opt('--grounds'), tools: opt('--tools') ?? '', hosts: opt('--hosts')?.split(',').map(x => x.trim()), duration: opt('--for'), reason: opt('--reason') ?? '', command: opt('--command') ?? (pos[0] === 'request' ? pos.slice(1).join(' ') || undefined : pos.join(' ') || undefined) };
+        if (pos[0] === 'request') console.log(toonKV({ decision: requestSessionGrant(options).key }));
+        else sessionGrantCommand({ ...options, yes: has('--yes') });
+        break;
+      }
       const command = pos.join(' ').trim();
       const file = opt('--path');
       if ((command === '') === (file === undefined)) throw new UsageError(`grant takes one command, or --path <file>\n\n${usageFor('grant')!}`);
