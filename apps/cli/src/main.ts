@@ -100,6 +100,7 @@ import {
   TRAP_ANCHOR_FILE,
   worktreesDir,
   sendTrapMessage,
+  sendSelfWake,
   unhandledTrapMessages,
   releaseSignedOff,
   recentlySignedOff,
@@ -309,6 +310,8 @@ work (humans and agents):
                                   next note wakes man wait as a reply;
                                   --no-reply expects none
   inbox <uuid>                    read and acknowledge pending messages
+  inbox self "<message>" [--attach <file>] [--dispatch <id>]
+                                  wake only your trap's own active dispatch
                                   (workers: check at natural checkpoints)
   attach <uuid> [--print] [--force]
                                   open the dispatch's own harness session in
@@ -1645,8 +1648,17 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'inbox': {
+      if (pos[0] === 'self') {
+        if (pos.length !== 2) throw new UsageError('inbox self takes one quoted message and no recipient');
+        const envSession = callerSession(undefined);
+        const caller = callerSession(opt('--session'));
+        if (envSession && caller && envSession.id !== caller.id) throw new UsageError('self-wake session conflicts with the calling harness');
+        console.log(toonKV(sendSelfWake({ cwd: process.cwd(), sessionId: caller?.id, dispatch: opt('--dispatch'), text: pos[1]!, files: values('--attach'), maxAttachmentBytes: loadConfig().limits.attachmentMaxBytes })));
+        break;
+      }
       const id = pos[0];
       if (!id) throw new Error('inbox requires a dispatch id');
+      if (pos.length !== 1) throw new UsageError('inbox takes one dispatch id');
       const lane = findLane(id);
       const msgs = unhandled(id, lane);
       if (msgs.length === 0) {

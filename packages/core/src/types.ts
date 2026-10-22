@@ -145,6 +145,8 @@ export interface Evidence {
 }
 
 export type EventType =
+  /** A trap's own background completion; information, never a human answer. */
+  | 'self'
   | 'session'
   | 'turn-start'
   | 'turn-end'

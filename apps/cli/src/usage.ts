@@ -63,7 +63,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   focus: { flags: {}, positionals: '<trap>' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
-  inbox: { flags: {}, positionals: '<uuid>' },
+  inbox: { flags: { '--session': { value: '<id>' }, '--dispatch': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true } }, flagSubverbs: { '--session': ['self'], '--dispatch': ['self'], '--attach': ['self'] }, positionals: '<uuid>|self "<message>"', maxPositionals: 2 },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
     flags: {
@@ -297,7 +297,10 @@ as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
 choose the follow-up's worker, harness, or model, use dispatch --follow-up with
 --for, --harness, or --model. --attach copies files. A claimed helm requires
 --session <helm-id>. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR.`,
-  inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
+  inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).
+self queues information only to your signed-on trap's active dispatch, without the helm send privilege.
+--dispatch binds a background callback to this catch; a different catch refuses.
+One self-wake per trap per 30s, 8 KiB including attachment pointers; up to four files within the attachment limit.`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
   swap: `Hand an active dispatch to a fresh session — same worktree and brief plus a

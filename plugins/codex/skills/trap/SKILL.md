@@ -110,8 +110,8 @@ naming a dispatch id. Then:
 - A failing check that passes only when a person approves is a human gate.
   Do not change code for it. Name it on your report with
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.
-- For ume: use the ume skill's non-blocking push; Codex cannot run the await
-  as a tracked background task. End the turn while it runs.
+- Long waits may run in a supervised background task: `(ume await <key> > <payload> 2>&1; lobstah inbox self "await exited" --attach <payload> --dispatch <id>)`.
+  The callback runs on failure too; retain the task/error handle and inspect the payload; self-wakes are information, not human approval (one per 30s, 8 KiB).
 - After sign-on and after every completion or report, run one foreground
   `lobstah soak --wait --timeout 600` if no waiter is already active, never
   with a shell `&`. The Stop hook blocks in park mode with standing work;
