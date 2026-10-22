@@ -4,7 +4,6 @@ import type { Descriptor, Lane } from './types.js';
 import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './paths.js';
 import { appendStatus } from './status.js';
 import { observeLocalCatch } from './catch-context.js';
-import { resetWaitBackoff } from './wait-backoff.js';
 
 function atomicWrite(file: string, content: string): void {
   const tmp = uniqueTempPath(file);
@@ -27,7 +26,6 @@ export function enqueue(d: Descriptor, lane: Lane = 'work'): void {
     queuedAt: d.queuedAt ?? new Date().toISOString(),
   };
   atomicWrite(path.join(laneDirs(lane).queue, `${d.id}.json`), JSON.stringify(descriptor, null, 2));
-  resetWaitBackoff();
 }
 
 /** A file's mtime, or undefined when it is gone (claimed or removed meanwhile). */

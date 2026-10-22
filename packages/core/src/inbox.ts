@@ -5,7 +5,6 @@ import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './
 import { postNotice } from './notices.js';
 import { listSignedOff, readTrap, releaseSignedOff, trapLabel } from './soak.js';
 import { trapNameForId } from './trap-names.js';
-import { resetWaitBackoff } from './wait-backoff.js';
 
 export interface InboxMessage {
   file: string;
@@ -41,7 +40,6 @@ export function sendMessage(id: string, lane: Lane, text: string, from?: string,
   }
   fs.writeFileSync(tmp, text);
   atomicRenameSync(tmp, path.join(dir, name));
-  resetWaitBackoff();
   return name;
 }
 

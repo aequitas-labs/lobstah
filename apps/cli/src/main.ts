@@ -249,6 +249,7 @@ import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReporte
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
+import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
 import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, startMode, throwBatch, throwTrap } from './throw.js';
 import { trapSummary } from './trap-list.js';
@@ -2534,8 +2535,8 @@ async function mainCli(): Promise<void> {
         const consume = !has('--peek');
         // A watcher delivery is a report through the newest event it printed.
         // Reminders can be older than the cursor, so never move it backwards.
-        const delivered = (...times: string[]) => {
-          if (consume) idle.woke();
+        const delivered = (keys: string[], ...times: string[]) => {
+          if (consume) idle.woke(keys);
           if (!consume || !callerHelm) return;
           const through = Math.max(0, ...times.map((at) => Date.parse(at) || 0));
           if (through > (Date.parse(readCursor(callerHelm.grounds) ?? '') || 0))
@@ -2571,7 +2572,7 @@ async function mainCli(): Promise<void> {
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
           if (standingNotices.length > 0) emitNotices(standingNotices, sid);
           if (standingReplies.length > 0) emitReplies(standingReplies, sid);
-          delivered(
+          delivered(helmWakeKeys({ events: standing, watches: standingWatches, notices: standingNotices, replies: standingReplies }),
             ...standing.map((e) => e.entry.at),
             ...standingWatches.flatMap((a) => a.events.map((e) => e.at)),
             ...standingNotices.map((n) => n.at),
@@ -2611,20 +2612,20 @@ async function mainCli(): Promise<void> {
           if (fresh.length > 0 || replies.length > 0) {
             if (fresh.length > 0) emit(fresh);
             if (replies.length > 0) emitReplies(replies, sid);
-            delivered(...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at));
+            delivered(helmWakeKeys({ events: fresh, replies }), ...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at));
             return;
           }
           runDueManWatches(); // no pick running? this loop is the poller
           const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
           if (watched.length > 0) {
             emitWatchAttention(watched, sid);
-            delivered(...watched.flatMap((a) => a.events.map((e) => e.at)));
+            delivered(helmWakeKeys({ watches: watched }), ...watched.flatMap((a) => a.events.map((e) => e.at)));
             return;
           }
           const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
           if (freshNotices.length > 0) {
             emitNotices(freshNotices, sid);
-            delivered(...freshNotices.map((n) => n.at));
+            delivered(helmWakeKeys({ notices: freshNotices }), ...freshNotices.map((n) => n.at));
             return;
           }
         }
@@ -2635,9 +2636,9 @@ async function mainCli(): Promise<void> {
         // timeout instead of being marked delivered to nobody. Silent when
         // nothing changed — the loop should not train its reader to skim.
         const digest = peekDigest();
-        if (digest.changed) idle.woke();
-        else idle.timedOut();
-        console.log(toonKV({ timeout: true, waitedSecs: idle.timeoutSecs }));
+        const waitedSecs = idle.timeoutSecs;
+        if (!idle.woke(digestWakeKeys(digest))) idle.timedOut();
+        console.log(toonKV({ timeout: true, waitedSecs, emptyTimeouts: idle.emptyCount }));
         const flags = `${sid ? ` --session ${sid}` : ''}${groundsName ? ` --grounds ${displayGrounds(groundsName, loadConfig())}` : ''}`;
         console.log(
           toonHelp([
@@ -2802,7 +2803,7 @@ async function mainCli(): Promise<void> {
           return [trapSummary(cfgHaul, helm?.repos), ...pauses].filter(Boolean).join('\n');
         };
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
-          if (helm) resetWaitBackoff(helm.sessionId);
+          if (helm) new IdleWait(helm.sessionId, cfgHaul.wait).woke(digestWakeKeys(d));
           advanceCursor(helm!.grounds, d.now);
           emit(
             `Fleet report for grounds "${displayGrounds(helm!.grounds, cfgHaul)}":\n${renderDigest(d)}\n${trapsAtStop()}\n` +
@@ -2819,7 +2820,7 @@ async function mainCli(): Promise<void> {
             noticeWakes(helm),
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
-            if (helm) resetWaitBackoff(helm.sessionId);
+            if (helm) new IdleWait(helm.sessionId, cfgHaul.wait).woke(helmWakeKeys({ notices: idleNotices }));
             emit(
               [
                 'Fleet notices need a decision:',
@@ -2864,7 +2865,7 @@ async function mainCli(): Promise<void> {
           const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0;
           const unanswered = blocking ? dueUnanswered(true, remindMs, Date.now(), matchHelm) : [];
           if (blocking) {
-            resetWaitBackoff(hook.session_id);
+            new IdleWait(hook.session_id, cfgHaul.wait).woke(helmWakeKeys({ events: evs, watches: watched, notices, replies }));
             emit(
               [
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
@@ -2934,7 +2935,7 @@ async function mainCli(): Promise<void> {
           if (d) blockDigest(d);
           break; // timeout — allow the stop; tier 1 covers the horizon
         }
-        idle.woke();
+        idle.woke(helmWakeKeys({ events: evs, watches: watched, notices: fleetNotices, replies }));
         const lines = [
           ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),

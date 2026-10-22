@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_WAIT, IdleWait, enqueue, ensureLayout, injectedPrompt, loadConfig, resetWaitBackoff, sendMessage, waitTimeoutSecs } from '../src/index.js';
+import { DEFAULT_WAIT, IdleWait, appendStatus, enqueue, ensureLayout, heartbeatTrap, injectedPrompt, loadConfig, resetWaitBackoff, sendMessage, signOnTrap, waitTimeoutSecs } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -66,13 +66,61 @@ describe('idle waiter history', () => {
     expect(new IdleWait('trap', DEFAULT_WAIT).timeoutSecs).toBe(14400);
   });
 
-  it.each(['prompt', 'dispatch', 'send'] as const)('%s resets already-armed waits and survives a late timeout write', (trigger) => {
+  it('keeps all 16 empty timeouts despite heartbeat-like activity, routine progress and queue writes', () => {
+    const worktree = path.join(home, 'worker'); fs.mkdirSync(worktree);
+    const result = signOnTrap({ worktree, cwd: worktree, sessionId: 'worker', harness: 'claude', ttlMs: 60_000 });
+    if (!('ok' in result)) throw new Error('held');
+    const timeouts: number[] = [];
+    for (let i = 0; i < 16; i++) {
+      const wait = new IdleWait('helm', DEFAULT_WAIT, '900', 0);
+      timeouts.push(wait.timeoutSecs);
+      heartbeatTrap(result.ok.trapId, { parked: true });
+      enqueue({ id: `routine-${i}`, repo: 'r', brief: 'scheduled work' }, 'chore');
+      appendStatus(`routine-${i}`, 'chore', 'working', 'still working');
+      wait.timedOut(wait.timeoutSecs * 1000);
+    }
+    expect(timeouts).toEqual([900, 900, 900, 1800, 3600, 7200, ...Array(10).fill(14400)]);
+    expect(new IdleWait('helm', DEFAULT_WAIT).emptyCount).toBe(16);
+  });
+
+  it('resets for new event delivery, ignores unchanged re-fires, and resumes growth after reset', () => {
+    quiet('helm');
+    expect(new IdleWait('helm', DEFAULT_WAIT).woke(['decision-answer:one'])).toBe(true);
+    expect(new IdleWait('helm', DEFAULT_WAIT).timeoutSecs).toBe(900);
+    quiet('helm', 3);
+    const reminder = new IdleWait('helm', DEFAULT_WAIT);
+    expect(reminder.woke(['decision-answer:one'])).toBe(false);
+    expect(reminder.timeoutSecs).toBe(1800);
+    expect(reminder.woke(['needs-decision:new'])).toBe(true);
+    quiet('helm', 4);
+    expect(new IdleWait('helm', DEFAULT_WAIT).timeoutSecs).toBe(3600);
+  });
+
+  it('counts late timeout writers without clobbering newer counts or counting one wait twice', () => {
+    const a = new IdleWait('helm', DEFAULT_WAIT, undefined, 0);
+    const b = new IdleWait('helm', DEFAULT_WAIT, undefined, 0);
+    a.timedOut(900_000); b.timedOut(900_000); a.timedOut(900_000);
+    expect(new IdleWait('helm', DEFAULT_WAIT).emptyCount).toBe(2);
+    quiet('helm', 1);
+    expect(new IdleWait('helm', DEFAULT_WAIT).timeoutSecs).toBe(1800);
+  });
+
+  it('a message resets its recipient on delivery, not unrelated waiters on storage', () => {
+    quiet('helm'); quiet('trap');
+    sendMessage('work', 'work', 'please review', 'human');
+    expect(new IdleWait('helm', DEFAULT_WAIT).timeoutSecs).toBe(14400);
+    expect(new IdleWait('trap', DEFAULT_WAIT).timeoutSecs).toBe(14400);
+    new IdleWait('trap', DEFAULT_WAIT).woke(['inbox:work:001']);
+    expect(new IdleWait('trap', DEFAULT_WAIT).timeoutSecs).toBe(900);
+    expect(new IdleWait('helm', DEFAULT_WAIT).timeoutSecs).toBe(14400);
+  });
+
+  it.each(['prompt', 'global'] as const)('%s resets already-armed waits and survives a late timeout write', (trigger) => {
     quiet('helm'); quiet('trap');
     const old = new IdleWait('helm', DEFAULT_WAIT, undefined, 0);
     expect(old.timeoutSecs).toBe(14400);
     if (trigger === 'prompt') resetWaitBackoff('helm');
-    if (trigger === 'dispatch') enqueue({ id: 'work', repo: 'r', brief: 'b' });
-    if (trigger === 'send') sendMessage('work', 'work', 'next');
+    if (trigger === 'global') resetWaitBackoff();
     // The old invocation must not overwrite the reset on completion.
     old.timedOut(14_400_000);
     expect(new IdleWait('helm', DEFAULT_WAIT).timeoutSecs).toBe(900);
