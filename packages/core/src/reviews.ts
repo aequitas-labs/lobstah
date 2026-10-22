@@ -156,6 +156,12 @@ export type ReviewVerdict = (typeof REVIEW_VERDICTS)[number];
 export interface BlockingFinding { path: string; line: number; body: string }
 export interface ReviewNotification { kind: 'draft-ready' | 'needs-you' | 'published'; at: string; text: string }
 
+export interface ReviewPerson {
+  login: string;
+  name?: string;
+  avatarUrl?: string;
+}
+
 /** Stable row target shared by notifications, the pet, and the glass. */
 export const reviewHash = (key: string): string => `#review-${encodeURIComponent(key)}`;
 
@@ -167,6 +173,8 @@ export interface ReviewRound {
   requestedByName?: string;
   requestedByAvatarUrl?: string;
   requestedAutomatically?: boolean;
+  /** Most recent human who requested this reviewer, before any bot re-request. */
+  humanRequester?: ReviewPerson;
   /** Compatibility receipt: a draft-only job must not be automatically submitted. */
   draftOnly?: boolean;
   /** Whether this job was explicitly started with publishing enabled. */
@@ -299,9 +307,25 @@ export function latestRound(item: ReviewItem): ReviewRound | undefined {
   return item.rounds.at(-1);
 }
 
+export function isReviewBot(login: string | undefined, actorType?: string): boolean {
+  return actorType === 'Bot' || /(?:\[bot\]$|^github-actions$)/i.test(login ?? '');
+}
+
+/** Shared attribution for local/hosted views and review jobs, including cached rounds. */
+export function reviewAsker(item: ReviewItem, round: ReviewRound): ReviewPerson {
+  const humanRound = [round, ...item.rounds.filter((candidate) => candidate.requestedAt <= round.requestedAt).reverse()]
+    .find((candidate) => candidate.humanRequester || (candidate.requestedBy && !candidate.requestedAutomatically && !isReviewBot(candidate.requestedBy)));
+  const asker: ReviewPerson = humanRound?.humanRequester ?? (humanRound?.requestedBy
+    ? { login: humanRound.requestedBy, name: humanRound.requestedByName, avatarUrl: humanRound.requestedByAvatarUrl }
+    : { login: item.pr.author });
+  return asker.login === item.pr.author
+    ? { ...asker, name: asker.name ?? item.pr.authorName, avatarUrl: asker.avatarUrl ?? item.pr.authorAvatarUrl }
+    : asker;
+}
+
 export interface ReviewRequestSeen {
   pr: ReviewPr;
-  round: Pick<ReviewRound, 'id' | 'requestedAt' | 'requestedBy' | 'requestedByName' | 'requestedByAvatarUrl' | 'requestedAutomatically'>;
+  round: Pick<ReviewRound, 'id' | 'requestedAt' | 'requestedBy' | 'requestedByName' | 'requestedByAvatarUrl' | 'requestedAutomatically' | 'humanRequester'>;
   /** A skip rule matched: the round files, and no job starts. */
   skip?: string;
 }
@@ -456,7 +480,7 @@ export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identi
   const { owner, repo, number, url, title, author } = item.pr;
   const ref = `${number} --repo ${owner}/${repo}`;
   return [
-    `Draft a review of ${url} ("${title}" by ${author}) at head ${round.headSha}. ${round.requestedBy ?? 'Someone'} asked ${opts.identity} for this review. You write the draft; you do not post it.`,
+    `Draft a review of ${url} ("${title}" by ${author}) at head ${round.headSha}. ${reviewAsker(item, round).login || 'Someone'} asked ${opts.identity} for this review. You write the draft; you do not post it.`,
     '',
     `1. Read the PR: \`gh pr view ${ref} --comments\` and \`gh pr diff ${ref}\`.`,
     `2. For context beyond the diff, make a throwaway checkout of the PR head at exactly ${opts.checkout}: \`git fetch origin pull/${number}/head\`, then \`git worktree add --detach ${opts.checkout} FETCH_HEAD\`. Use no other path; lobstah removes it when the job ends. Never switch, commit to, or push this checkout's own branch.`,

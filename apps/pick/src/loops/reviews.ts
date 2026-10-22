@@ -10,6 +10,8 @@ import {
   githubBlockedUntil,
   lastEventAt,
   latestRound,
+  isReviewBot,
+  reviewAsker,
   listReviews,
   loadConfig,
   observeReviewRequest,
@@ -231,11 +233,12 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
     const nwo = pr.repository?.nameWithOwner;
     const [owner, repo] = nwo?.split('/') ?? [];
     if (!nwo || !owner || !repo || !pr.number || !pr.url || !pr.headRefOid || !inScope(nwo)) continue;
-    const request = (pr.timelineItems?.nodes ?? [])
+    const requests = (pr.timelineItems?.nodes ?? [])
       .filter((e) => e.id && e.createdAt && e.requestedReviewer?.__typename === 'User' && e.requestedReviewer.login?.toLowerCase() === me)
-      .sort((a, b) => a.createdAt!.localeCompare(b.createdAt!))
-      .at(-1);
+      .sort((a, b) => a.createdAt!.localeCompare(b.createdAt!));
+    const request = requests.at(-1);
     if (!request) continue; // a team request only
+    const humanRequester = requests.filter((event) => event.actor?.login && !isReviewBot(event.actor.login, event.actor.__typename)).at(-1)?.actor;
     const repoKey = repos.get(nwo.toLowerCase());
     const author = pr.author?.login ?? '';
     const labels = (pr.labels?.nodes ?? []).map((l) => l.name ?? '').filter(Boolean);
@@ -263,14 +266,15 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
           ...(request.actor?.login ? { requestedBy: request.actor.login } : {}),
           ...(request.actor?.name ? { requestedByName: request.actor.name } : {}),
           ...(request.actor?.avatarUrl ? { requestedByAvatarUrl: request.actor.avatarUrl } : {}),
-          requestedAutomatically: request.actor?.__typename === 'Bot' || /(?:\[bot\]$|^github-actions$)/i.test(request.actor?.login ?? ''),
+          requestedAutomatically: isReviewBot(request.actor?.login, request.actor?.__typename),
+          ...(humanRequester?.login ? { humanRequester: { login: humanRequester.login, name: humanRequester.name, avatarUrl: humanRequester.avatarUrl } } : {}),
         },
         ...(skip ? { skip } : {}),
       },
       now,
     );
     seen.add(item.key);
-    if (opened) log(`${item.key}: review requested${request.actor?.login ? ` by ${request.actor.login}` : ''}${skip ? ` (${skip})` : ''}`);
+    if (opened) log(`${item.key}: review requested by ${reviewAsker(item, latestRound(item)!).login}${skip ? ` (${skip})` : ''}`);
   }
   // A truncated search cannot say a request is gone.
   if ((search.issueCount ?? nodes.length) > nodes.length) return undefined;

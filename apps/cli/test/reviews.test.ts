@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, executorPath, observeReviewRequest } from '@lobstah/core';
+import { ensureLayout, executorPath, observeReviewRequest, reviewBrief } from '@lobstah/core';
 import { buildTendReport } from '../src/tend.js';
-import { reviewRows } from '../src/reviews.js';
+import { reviewRows, glassReviews } from '../src/reviews.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -43,6 +43,22 @@ describe('review attention in tend', () => {
 });
 
 describe('lobstah reviews', () => {
+  it.each(['github-actions', 'github-actions[bot]', 'approval-gate[bot]'])('uses the author consistently for a cached bot request from %s', (bot) => {
+    const { item } = observeReviewRequest({
+      pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', authorName: 'Dana Developer', authorAvatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4', headSha: 'aaaaaaa1' },
+      round: { id: 'bot', requestedAt: '2026-10-15T09:00:00Z', requestedBy: bot },
+    });
+    expect(reviewRows()[0]!.requestedBy).toBe('dana');
+    expect(glassReviews()[0]).toMatchObject({ requestedBy: 'dana', asker: 'dana', askerName: 'Dana Developer', askerAvatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4', automatic: true });
+    expect(reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd', outDir: '/out', checkout: '/checkout' })).toContain('dana asked chris');
+  });
+  it('preserves a human requester in CLI and glass data after an automated re-request', () => {
+    const pr = { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' };
+    observeReviewRequest({ pr, round: { id: 'human', requestedAt: '2026-10-15T08:00:00Z', requestedBy: 'maya', requestedByName: 'Maya Maintainer' } });
+    observeReviewRequest({ pr, round: { id: 'bot', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'workflow', requestedAutomatically: true } });
+    expect(reviewRows()[0]!.requestedBy).toBe('maya');
+    expect(glassReviews()[0]).toMatchObject({ requestedBy: 'maya', asker: 'maya', askerName: 'Maya Maintainer', automatic: true });
+  });
   it('lists open rounds; --all adds closed ones', () => {
     request(7);
     request(8);

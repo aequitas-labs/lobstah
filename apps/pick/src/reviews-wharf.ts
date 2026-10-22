@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { BackendError, backendScopes, latestRound, listReviews, loadConfig, prReviewUrl, reviewStands, wharfFor, writeReview } from '@lobstah/core';
+import { BackendError, backendScopes, latestRound, listReviews, loadConfig, prReviewUrl, reviewStands, wharfFor, writeReview, reviewAsker } from '@lobstah/core';
 import type { BackendScope, ReviewItem, ReviewRound, WharfHumanRequest } from '@lobstah/core';
 import { dismissReviewRound } from './reviews-post.js';
 
@@ -82,14 +82,14 @@ function meta(item: ReviewItem, r: ReviewRound) {
     state: r.state,
     stands: reviewStands(r),
     headSha: r.headSha,
-    ...(r.requestedBy ? { requestedBy: r.requestedBy } : {}),
+    requestedBy: reviewAsker(item, r).login,
     ...(r.reason ? { reason: r.reason.slice(0, 500) } : {}),
   };
 }
 
 /** What the document shows: where the round is. The draft itself waits on the PR, as the person's pending review. */
 function content(item: ReviewItem, r: ReviewRound): { markdown: string } {
-  const asked = r.requestedBy ? `${r.requestedBy} asked for this review.` : 'A review was requested.';
+  const asked = `${reviewAsker(item, r).login} asked for this review.`;
   const where = r.staged ? 'The draft is your pending review on the PR: open it in your review tool to edit and send it.' : `It is ${r.state}${r.reason ? `: ${r.reason}` : ''}.`;
   return { markdown: `${asked} ${where}\n\n${reviewLink(item)}\n` };
 }

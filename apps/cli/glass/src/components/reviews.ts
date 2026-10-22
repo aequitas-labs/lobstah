@@ -61,7 +61,7 @@ const findings = (r: GlassReview) =>
 const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?? r.requestedBy ?? r.author}>
   ${r.askerAvatarUrl && html`<img src=${r.askerAvatarUrl} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" />`}
   <span>${r.askerName ?? r.asker ?? r.requestedBy ?? r.author}</span>
-  ${r.automatic && html`<span class="badge dim" title="A workflow requested this review; showing the PR author">automatic</span>`}
+  ${r.automatic && html`<span class="badge dim" title="A bot re-requested this review">automatic</span>`}
 </span>`;
 
 const staged = (r: GlassReview) =>
