@@ -20,6 +20,7 @@ import { Reports } from './reports.js';
 import { Reviews } from './reviews.js';
 import { Stats } from './stats.js';
 import { Traps } from './traps.js';
+import { Todos } from './todos.js';
 
 /**
  * The whole page as a pure function of the store. Only the active tab's
@@ -45,6 +46,7 @@ export function App({ state }: { state: GlassState }) {
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} more=${more('prs')} />`;
     if (t === 'reports') return html`<${Reports} inp=${inp.reports} />`;
     if (t === 'reviews') return html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`;
+    if (t === 'todos') return html`<${Todos} todos=${inp.deck.todos} note=${inp.deck.todoNote} />`;
     if (t === 'stats') return html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`;
     return html`<${Notices} inp=${inp.notices} more=${more('notices')} />`;
   };

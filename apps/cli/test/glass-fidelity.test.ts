@@ -77,7 +77,7 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
-  for (const el of g.$$('#tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
+  for (const el of g.$$('.mobile-nav, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
 }
 const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
 /** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */

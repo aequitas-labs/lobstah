@@ -1817,12 +1817,64 @@ a.lob {
     --pr-merged-fg: #6638a1;
   }
 }
-/* A narrow window wraps the tabs rather than pushing the page sideways. */
-@media (max-width: 600px) {
+/* Desktop keeps its tabs; phones use a compact navigation disclosure. */
+.mobile-nav {
+  display: none;
+}
+@media (max-width: 639px) {
   .tabs {
-    flex-wrap: wrap;
+    display: none;
   }
-  .tabs a {
-    white-space: nowrap;
+  .mobile-nav {
+    display: block;
+    position: relative;
+    margin: 8px 0 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .mobile-nav-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+  }
+  .mobile-current {
+    flex: 1;
+    font-weight: bold;
+  }
+  .nav-toggle,
+  .mobile-unread,
+  .mobile-sections a {
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .nav-toggle {
+    justify-content: center;
+    font-size: 22px;
+  }
+  .mobile-sections {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    padding: 8px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px var(--scrim);
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .mobile-sections a {
+    padding: 0 12px;
+    border-radius: 4px;
+    color: var(--dim);
+  }
+  .mobile-sections a.on {
+    color: var(--fg);
+    background: var(--bg);
   }
 }
