@@ -5,7 +5,17 @@ button.card {
   text-align: left;
 }
 
-/* Auth uses the shared glass palette and type, with one clear GitHub action. */
+/* Auth always uses the glass dark palette, including on light system themes. */
+body:has(.auth-shell) {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --card: #161b22;
+  --line: #2b3240;
+  --fg: #dbe2ea;
+  --dim: #8b96a5;
+  --link: #6cb2e2;
+  --lobstah: #eb6644;
+}
 .auth-shell {
   width: min(1080px, 100%);
   margin: 0 auto;
@@ -20,17 +30,11 @@ button.card {
   padding: 20px 0;
 }
 .auth-brand img {
-  border-radius: 16px;
   flex: 0 0 64px;
 }
 .auth-brand b {
-  display: block;
   font-size: 21px;
   letter-spacing: -0.8px;
-}
-.auth-brand span {
-  color: var(--dim);
-  font-size: 12px;
 }
 .auth-main {
   flex: 1;
@@ -40,71 +44,55 @@ button.card {
   align-items: center;
   padding: 54px 0 78px;
 }
-.auth-eyebrow {
-  color: var(--dim);
-  font-size: 11px;
-  letter-spacing: 1.5px;
-  margin: 0 0 20px;
-}
 .auth-intro h1 {
   font-size: clamp(44px, 5.5vw, 68px);
   line-height: 1.08;
   letter-spacing: -3.5px;
   font-weight: 600;
-  margin: 0 0 26px;
+  margin: 0 0 34px;
 }
 .auth-intro h1 span {
   color: var(--lobstah);
 }
-.auth-lede {
-  font-size: 18px;
-  line-height: 1.7;
-  color: var(--dim);
-}
 .auth-features {
   list-style: none;
   padding: 0;
-  margin: 34px 0 0;
+  margin: 0;
   color: var(--fg);
 }
 .auth-features li {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
+  line-height: 1.8;
 }
-.auth-features span {
-  color: var(--dim);
-  font-size: 11px;
-  margin-right: 14px;
+.auth-features img,
+.auth-buoy,
+.auth-crawl {
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+.auth-buoy {
+  position: relative;
+}
+.auth-buoy img {
+  position: absolute;
+  inset: 0;
+}
+.auth-crawl svg {
+  display: block;
+  width: 64px;
+  height: 64px;
 }
 .auth-card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 16px;
   min-width: 0;
-  overflow: hidden;
-}
-.auth-card-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 17px 24px;
-  border-bottom: 1px solid var(--line);
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: var(--dim);
-}
-.auth-dot {
-  width: 7px;
-  height: 7px;
-  background: var(--lobstah);
-  border-radius: 50%;
-}
-.auth-private {
-  margin-left: auto;
-  letter-spacing: 0;
-  border: 1px solid var(--line);
-  padding: 3px 7px;
-  border-radius: 20px;
 }
 .auth-card-body {
   padding: 36px 32px 28px;
@@ -115,19 +103,13 @@ button.card {
   font-size: 29px;
   line-height: 1.25;
   color: var(--fg);
-  margin: 0 0 15px;
+  margin: 0 0 28px;
   overflow-wrap: anywhere;
-}
-.auth-card .auth-eyebrow {
-  color: var(--link);
-  margin-bottom: 12px;
-  font-size: 10px;
 }
 .auth-detail {
   color: var(--dim);
   line-height: 1.8;
-  min-height: 48px;
-  margin: 0 0 28px;
+  margin: -10px 0 28px;
 }
 .auth-github {
   width: 100%;
@@ -151,9 +133,6 @@ button.card {
 .auth-github:disabled {
   cursor: progress;
 }
-.auth-github > span:last-child:not(:first-of-type) {
-  margin-left: auto;
-}
 .github-mark {
   flex: 0 0 20px;
 }
@@ -163,29 +142,15 @@ button.card {
 }
 .auth-access {
   border-top: 1px solid var(--line);
-  margin-top: 28px;
+  margin: 28px 0 0;
   padding-top: 22px;
   font-size: 11px;
   line-height: 1.8;
   color: var(--dim);
 }
-.auth-access b {
-  color: var(--fg);
-  font-weight: 500;
-}
-.auth-access p {
-  margin: 9px 0 0;
-}
-.auth-notice {
-  color: var(--ok);
-  line-height: 1.8;
-}
 .auth-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
   color: var(--dim);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.8;
   padding: 20px 0 12px;
   border-top: 1px solid var(--line);
@@ -204,45 +169,19 @@ button.card {
   .auth-intro h1 {
     font-size: 43px;
     letter-spacing: -2px;
-    margin-bottom: 12px;
-  }
-  .auth-intro .auth-eyebrow {
-    font-size: 10px;
-    margin-bottom: 12px;
-  }
-  .auth-lede {
-    font-size: 13px;
-    margin-bottom: 26px;
-  }
-  .auth-lede br {
-    display: none;
+    margin-bottom: 20px;
   }
   .auth-features {
-    display: none;
+    margin-bottom: 28px;
+  }
+  .auth-features li {
+    gap: 12px;
   }
   .auth-card-body {
     padding: 28px 22px 24px;
   }
   .auth-card h2 {
     font-size: 26px;
-  }
-  .auth-footer {
-    flex-direction: column;
-    gap: 4px;
-  }
-}
-
-/* Use the current glass light palette without changing signed-in pages. */
-@media (prefers-color-scheme: light) {
-  body:has(.auth-shell) {
-    --bg: #f5f7fa;
-    --card: #ffffff;
-    --line: #d6dce5;
-    --fg: #182230;
-    --dim: #58677a;
-    --ok: #177c3e;
-    --link: #176292;
-    --lobstah: #b94826;
   }
 }
 #auth-title:focus {

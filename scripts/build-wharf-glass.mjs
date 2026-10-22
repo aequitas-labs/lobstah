@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export async function buildWharfGlass() {
   const js = await esbuild.build({ entryPoints: [resolve(root, 'services/wharf/glass/src/main.ts')], bundle: true,
+    loader: { '.png': 'dataurl', '.webp': 'dataurl', '.svg': 'text' },
     format: 'iife', platform: 'browser', target: 'es2020', minify: true, write: false, legalComments: 'none' });
   const styles = ['apps/cli/glass/glass.css', 'services/wharf/glass/glass.css'].map((p) => readFileSync(resolve(root, p), 'utf8').replace(/\r\n/g, '\n')).join('\n');
   const css = await esbuild.transform(styles, { loader: 'css', minifyWhitespace: true, legalComments: 'none' });
