@@ -315,6 +315,10 @@ export interface HelmConfig {
   armGraceSecs: number;
   /** Open helm to-dos older than this many days earn a short note in `man tend`; 0 disables. */
   todoStaleDays: number;
+  /** Maximum open todos listed in the session-start brief; 0 lists only the remainder count. */
+  briefTodoLimit: number;
+  /** Minimum seconds between quiet-timeout goals reminders per helm session; 0 disables. */
+  goalsNudgeSecs: number;
 }
 
 export interface WaitConfig {
@@ -511,6 +515,8 @@ export const DEFAULT_HELM: HelmConfig = {
   reportSecs: 900,
   armGraceSecs: 5,
   todoStaleDays: 3,
+  briefTodoLimit: 5,
+  goalsNudgeSecs: 7200,
 };
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
@@ -562,6 +568,10 @@ export function loadConfig(): Config {
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
   if (helm.chat !== 'full' && helm.chat !== 'brief') throw new Error('[helm].chat must be "full" or "brief"');
+  for (const key of ['briefTodoLimit', 'goalsNudgeSecs'] as const) {
+    if (typeof helm[key] !== 'number' || !Number.isSafeInteger(helm[key]) || helm[key] < 0)
+      throw new Error(`[helm].${key} must be a non-negative whole number in ${configPath()}`);
+  }
   const wait = { ...DEFAULT_WAIT, ...((raw.wait as Partial<WaitConfig>) ?? {}) };
   for (const key of ['baseTimeoutSecs', 'baseRepeats', 'maxTimeoutSecs'] as const) {
     if (typeof wait[key] !== 'number' || !Number.isSafeInteger(wait[key]) || wait[key] <= 0)

@@ -260,7 +260,7 @@ import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
-import { todoTable, todoViews } from './todo.js';
+import { quietGoalsNudge, todoTable, todoViews } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
@@ -2643,6 +2643,10 @@ async function mainCli(): Promise<void> {
         // timeout instead of being marked delivered to nobody. Silent when
         // nothing changed — the loop should not train its reader to skim.
         const digest = peekDigest();
+        if (digest.changed && callerHelm) {
+          const nudge = quietGoalsNudge(callerHelm.grounds, callerHelm.sessionId);
+          if (nudge) console.log(nudge);
+        }
         const waitedSecs = idle.timeoutSecs;
         if (!idle.woke(digestWakeKeys(digest))) idle.timedOut();
         console.log(toonKV({ timeout: true, waitedSecs, emptyTimeouts: idle.emptyCount }));

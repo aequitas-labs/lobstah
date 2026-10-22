@@ -33,6 +33,8 @@ export interface HelmRegistration {
   chat?: HelmChat;
   /** One-shot mode announcement for a toggle made while the helm is active. */
   chatPending?: HelmChat;
+  /** Last quiet-timeout goals reminder for this session, reset at the goals-day boundary. */
+  goalsNudge?: { date: string; at: string };
   sessionId: string;
   grounds: string;
   /** The repo keys this helm oversees, resolved from config at sign-on. */
@@ -152,6 +154,19 @@ export function listHelms(): HelmRegistration[] {
   }
 }
 
+/** Atomically reserve one goals reminder; a displaced session cannot consume the new helm's allowance. */
+export function claimHelmGoalsNudge(grounds: string, sessionId: string, date: string, intervalSecs: number, now = Date.now()): boolean {
+  if (intervalSecs <= 0) return false;
+  return withHelmLock(grounds, () => {
+    const reg = readHelm(grounds);
+    if (!reg || reg.sessionId !== sessionId) return false;
+    if (reg.goalsNudge?.date === date && now - Date.parse(reg.goalsNudge.at) < intervalSecs * 1000) return false;
+    const next: HelmRegistration = { ...reg, goalsNudge: { date, at: new Date(now).toISOString() } };
+    atomicWrite(helmPath(grounds), JSON.stringify(next, null, 2));
+    return true;
+  });
+}
+
 /** The helm registration held by this session, if any. */
 export function helmOf(sessionId: string): HelmRegistration | undefined {
   return listHelms().find((h) => h.sessionId === sessionId);
@@ -241,6 +256,7 @@ export function takeHelm(opts: {
     const reg: HelmRegistration = {
       chat: existing?.chat,
       chatPending: existing?.chatPending,
+      goalsNudge: same ? existing.goalsNudge : undefined,
       sessionId: opts.sessionId,
       grounds: opts.grounds.name,
       repos: opts.grounds.repos,

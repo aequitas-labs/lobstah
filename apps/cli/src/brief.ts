@@ -15,7 +15,7 @@ import {
 import { charter } from './charter.js';
 import { inspectSoakSite } from './soak-site.js';
 import { buildTendReport } from './tend.js';
-import { todoContext } from './todo.js';
+import { goalsContext, todoContext } from './todo.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 
 const SOAK_WHERE = '(in a linked worktree; from a primary checkout it creates one)';
@@ -95,13 +95,15 @@ export async function buildBriefContext(sessionId: string, cwd?: string): Promis
   const helmReg = helmOf(sessionId);
   if (helmReg) {
     heartbeatHelm(helmReg.sessionId);
-    // The to-dos ride with the charter, so a restart or compaction drops neither.
+    // Goals and capped to-dos ride with the charter through restart or compaction.
     const todos = todoContext(helmReg.grounds);
+    const goals = goalsContext(helmReg.grounds);
     return (
       `lobstah: session id ${sessionId} — you hold the helm for grounds "${displayGrounds(helmReg.grounds, loadConfig())}" ` +
       `(\`lobstah man relieve --session ${sessionId}\` steps down).${fleet}\n\n` +
       charter({ name: helmReg.grounds, repos: helmReg.repos }) +
-      (todos ? `\n\n${todos}` : '')
+      (todos ? `\n\n${todos}` : '') +
+      (goals ? `\n\n${goals}` : '')
     );
   }
   const workerTrap = trapBySession(sessionId);

@@ -12,9 +12,12 @@ import {
   closeRequest,
   enqueue,
   ensureLayout,
+  goalDate,
   noticeStands,
   listNotices,
   postNotice,
+  readHelm,
+  setGoals,
   writeRequest,
   DEFAULT_WAIT,
   IdleWait,
@@ -168,3 +171,33 @@ it('a quiet lifecycle digest does not reset an expired wait or stick its empty c
   expect(new IdleWait(sid, DEFAULT_WAIT).emptyCount).toBe(4);
   expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(3600);
 }, 15_000);
+
+it('only timeout digests nudge open goals, with the cooldown surviving separate CLI waits', () => {
+  const sid = 'goals-digest-helm';
+  fs.writeFileSync(path.join(home, 'config.toml'), '[repos.r]\npath = "."\n');
+  takeHelm({ sessionId: sid, grounds: { name: 'home', repos: ['r'] }, ttlMs: 60_000 });
+  setGoals('home', goalDate(), ['[x] Ship it', 'bao on app store']);
+  const wait = () => lobstah('man', 'wait', '--session', sid, '--timeout', '0.01');
+  const quiet = wait();
+  expect(quiet.status, quiet.stderr).toBe(3);
+  expect(quiet.stdout).not.toMatch(/^goals /m); // no digest
+  expect(readHelm('home')?.goalsNudge).toBeUndefined();
+  postNotice({ kind: 'trap-available', text: 'an event', repo: 'r' });
+  const event = wait();
+  expect(event.status, event.stderr).toBe(0);
+  expect(event.stdout).not.toMatch(/^goals /m);
+  expect(readHelm('home')?.goalsNudge).toBeUndefined();
+  postNotice({ kind: 'trap-stowed', text: 'quiet lifecycle', repo: 'r' });
+  const peek = lobstah('man', 'wait', '--session', sid, '--peek');
+  expect(peek.stdout).toContain('quiet lifecycle');
+  expect(peek.stdout).not.toMatch(/^goals /m);
+  expect(readHelm('home')?.goalsNudge).toBeUndefined();
+  const first = wait();
+  expect(first.status, first.stderr).toBe(3);
+  expect(first.stdout).toContain('quiet lifecycle');
+  expect(first.stdout).toMatch(/^goals 1\/2 · open: 2\. bao on app store$/m);
+  const again = wait();
+  expect(again.status, again.stderr).toBe(3);
+  expect(again.stdout).toContain('quiet lifecycle');
+  expect(again.stdout).not.toMatch(/^goals /m);
+}, 20_000);
