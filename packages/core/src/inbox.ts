@@ -5,6 +5,7 @@ import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './
 import { postNotice } from './notices.js';
 import { listSignedOff, readTrap, releaseSignedOff, trapLabel } from './soak.js';
 import { trapNameForId } from './trap-names.js';
+import { withDirLock } from './dir-lock.js';
 
 export interface InboxMessage {
   file: string;
@@ -24,23 +25,33 @@ function inboxDir(id: string, lane: Lane): string {
   return path.join(laneDirs(lane).inbox, id);
 }
 
-/** Queue a message. The sidecar lands before its sequenced message. */
-export function sendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = []): string {
+function withInboxLock<T>(id: string, lane: Lane, action: () => T): T {
   const dir = inboxDir(id, lane);
   fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
-  const existing = fs.readdirSync(dir).filter((f) => f.endsWith('.msg')).length;
-  const handled = fs.readdirSync(path.join(dir, 'handled')).filter((f) => f.endsWith('.msg')).length;
-  const name = `${String(existing + handled + 1).padStart(3, '0')}.msg`;
-  const tmp = uniqueTempPath(path.join(dir, name));
-  if (from !== undefined || attachments.length > 0) {
-    const meta: MessageMeta = { from: from ?? 'unknown', at: new Date().toISOString(), ...(attachments.length ? { attachments } : {}) };
-    const metaTmp = `${tmp}.meta`;
-    fs.writeFileSync(metaTmp, JSON.stringify(meta, null, 2));
-    atomicRenameSync(metaTmp, path.join(dir, metaName(name)));
-  }
-  fs.writeFileSync(tmp, text);
-  atomicRenameSync(tmp, path.join(dir, name));
-  return name;
+  return withDirLock(path.join(dir, '.write.lock'), action, {
+    staleMs: 5000, waitMs: 5000, busy: () => new Error('inbox is busy; try again'),
+  });
+}
+
+/** Queue a message. The sidecar lands before its sequenced message. */
+export function sendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = []): string {
+  return withInboxLock(id, lane, () => {
+    const dir = inboxDir(id, lane);
+    fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
+    const existing = fs.readdirSync(dir).filter((f) => f.endsWith('.msg')).length;
+    const handled = fs.readdirSync(path.join(dir, 'handled')).filter((f) => f.endsWith('.msg')).length;
+    const name = `${String(existing + handled + 1).padStart(3, '0')}.msg`;
+    const tmp = uniqueTempPath(path.join(dir, name));
+    if (from !== undefined || attachments.length > 0) {
+      const meta: MessageMeta = { from: from ?? 'unknown', at: new Date().toISOString(), ...(attachments.length ? { attachments } : {}) };
+      const metaTmp = `${tmp}.meta`;
+      fs.writeFileSync(metaTmp, JSON.stringify(meta, null, 2));
+      atomicRenameSync(metaTmp, path.join(dir, metaName(name)));
+    }
+    fs.writeFileSync(tmp, text);
+    atomicRenameSync(tmp, path.join(dir, name));
+    return name;
+  });
 }
 
 export function readMessageMeta(id: string, lane: Lane, file: string, handled = false): MessageMeta | undefined {
@@ -77,15 +88,15 @@ export function messageMetas(id: string, lane: Lane): MessageMeta[] {
 
 /**
  * When a question standing since `since` (its status entry's at) was
- * answered: the newest message with provenance sent after it, else
- * undefined. Any sender counts — every inbound message to a dispatch is an
- * instruction from someone acting for the human; a record without a
+ * answered: the newest external message with provenance sent after it, else
+ * undefined. A trap's self-wake is information, never an answer from the human.
+ * A record without a
  * sidecar never does. Uses the sidecar's at, never file mtime.
  */
 export function answeredAt(id: string, lane: Lane, since: string): string | undefined {
   const t = Date.parse(since) || 0;
   return messageMetas(id, lane)
-    .filter((m) => (Date.parse(m.at) || 0) > t)
+    .filter((m) => m.from !== 'self' && (Date.parse(m.at) || 0) > t)
     .map((m) => m.at)
     .sort()
     .at(-1);
@@ -101,14 +112,16 @@ export function unhandled(id: string, lane: Lane): InboxMessage[] {
 
 /** Acknowledge by rename into handled/ — a side effect that cannot be faked. */
 export function acknowledge(id: string, lane: Lane, file: string): void {
-  const dir = inboxDir(id, lane);
-  fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
-  fs.renameSync(path.join(dir, file), path.join(dir, 'handled', file));
-  try {
-    fs.renameSync(path.join(dir, metaName(file)), path.join(dir, 'handled', metaName(file)));
-  } catch {
-    // Legacy messages have no sidecar.
-  }
+  withInboxLock(id, lane, () => {
+    const dir = inboxDir(id, lane);
+    fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
+    fs.renameSync(path.join(dir, file), path.join(dir, 'handled', file));
+    try {
+      fs.renameSync(path.join(dir, metaName(file)), path.join(dir, 'handled', metaName(file)));
+    } catch {
+      // Legacy messages have no sidecar.
+    }
+  });
 }
 
 /**

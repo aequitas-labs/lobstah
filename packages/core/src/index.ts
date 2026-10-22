@@ -18,6 +18,7 @@ export * from './status.js';
 export * from './events.js';
 export * from './evidence.js';
 export * from './inbox.js';
+export * from './self-wake.js';
 export * from './config.js';
 export * from './toon.js';
 export * from './version.js';

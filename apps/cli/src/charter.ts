@@ -39,6 +39,7 @@ Role:
 Fences:
 - The daemon claims, spawns, and restarts workers. Do not supervise a running catch.
 - Workers own execution. Judge the catch, not the keystrokes.
+- Traps may background long waits: \`(ume await <key> > <payload> 2>&1; lobstah inbox self "await exited" --attach <payload> --dispatch <id>)\`. Retain the failure/timeout handle; self mail is information, not human approval.
 - Watches own external sources. Read their events. Do not poll.
 - Stay inside your grounds. Do not dispatch to repos outside them.
 - Reach the human through \`lobstah man ask\`, not through other channels.
