@@ -817,7 +817,7 @@ describe('glass page: header', () => {
 
   it('the footer names the version and links the repo', async () => {
     const g = await page(acceptanceFleet());
-    expect(text(g.$('#foot'))).toBe('🦞✨ lobstah v0.5.5 · aequitas-labs/lobstah');
+    expect(text(g.$('#foot'))).toBe('lobstah v0.5.5 · aequitas-labs/lobstah');
     expect(g.$('#foot .pet-art')).toBeNull();
     expect(g.$('#foot a')!.getAttribute('href')).toBe('https://github.com/aequitas-labs/lobstah');
   });

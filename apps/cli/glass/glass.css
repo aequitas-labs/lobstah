@@ -4,6 +4,7 @@
  * rules below refer to them instead of repeating literals.
  */
 :root {
+  color-scheme: dark;
   /* palette */
   --bg: #0e1116;
   --card: #161b22;
@@ -21,7 +22,7 @@
   --link: #6cb2e2;
   /* text on a filled badge */
   --on-fill: #fff;
-  /* GitHub's dark-mode PR state colors (light: merged #8250df, open #1f883d, draft #6e7781, closed #cf222e) */
+  /* GitHub's dark-mode PR state colors */
   --pr-merged: #8957e5;
   --pr-merged-fg: #ab7df8;
   --pr-open: #238636;
@@ -1798,25 +1799,6 @@ a.lob {
 .rv-staged {
   font-size: 12px;
 }
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f5f7fa;
-    --card: #ffffff;
-    --line: #d6dce5;
-    --line-hover: #b9c4d3;
-    --row-hover: #edf2f7;
-    --inset: #f1f4f8;
-    --seg-on: #dce9fa;
-    --scrim: rgba(26, 36, 52, 0.32);
-    --fg: #182230;
-    --dim: #58677a;
-    --ok: #177c3e;
-    --warn: #946200;
-    --bad: #b73525;
-    --link: #176292;
-    --pr-merged-fg: #6638a1;
-  }
-}
 /* Desktop keeps its tabs; phones use a compact navigation disclosure. */
 .mobile-nav {
   display: none;
@@ -1877,4 +1859,17 @@ a.lob {
     color: var(--fg);
     background: var(--bg);
   }
+}
+
+/* The same transparent lobster-and-star mark in both glasses. */
+.glass-brand {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+footer .glass-brand {
+  width: 18px;
+  height: 18px;
 }

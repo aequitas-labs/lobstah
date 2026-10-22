@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import logo from '../../../../../docs/assets/favicon.png';
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_TABS } from '../../../src/glass-diff.js';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../../src/glass-diff.js';
@@ -175,7 +176,7 @@ export function Header({
   unread?: number;
 }) {
   return [
-    html`<div class="headerline"><h1>🦞✨ spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
+    html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
     html`<${Navigation} d=${d} tab=${tab} unread=${unread} />`,
     controls(d, tab, st),
@@ -184,6 +185,7 @@ export function Header({
 
 export const Footer = ({ d }: { d: GlassSnapshot | undefined }) =>
   d && [
-    '🦞✨ lobstah v' + d.version + ' · ',
+    html`<img class="glass-brand" src=${logo} alt="" />`,
+    ' lobstah v' + d.version + ' · ',
     html`<a href=${d.repoUrl} target="_blank">${d.repoUrl.replace('https://github.com/', '')}</a>`,
   ];
