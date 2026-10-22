@@ -280,7 +280,7 @@ export const PROSE: Record<string, string> = {
   setup: `\`setup reviews\` derives your GitHub login (or --identity), writes a self-contained notify configuration,
 enables review notifications, and installs pick. Refuses installation while unrelated issue or PR-feedback pickup is enabled.`,
   dispatch: `Queue work; prints id. Claimed helm: --session <helm-id>. --attach copies files. --for <name>, wt:<name>, wt:<id> is sticky; session:<id> resolves to its trap.
---trap-any: free live → return stowed → new below the repo's traps cap; at capacity waits, never headless.
+--trap-any: queues immediately; daemon prefers free listeners, then starts stowed/new traps within the repo's cap. Never headless.
 --pool: warm headless worktree, exclusive with --for/--trap-any. --pr: push to that open PR, open none. Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,

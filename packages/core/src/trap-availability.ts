@@ -74,14 +74,14 @@ export type TrapSelection =
   | { action: 'new' | 'wait'; why: string };
 
 /** Reuse a fresh free registration, then a safely returnable roster entry, then capacity for a new trap. */
-export function selectRepoTrap(cfg: Config, repo: string, harness?: string, now = Date.now()): TrapSelection {
+export function selectRepoTrap(cfg: Config, repo: string, harness?: string, now = Date.now(), failedStarts: ReadonlySet<string> = new Set()): TrapSelection {
   if (!cfg.repos[repo]) throw new Error(`no repo "${repo}" is configured`);
   const live = listTraps().filter((r) => r.repo === repo && (!harness || r.harness === harness) &&
     now - trapLastSeen(r) <= cfg.soak.ttlSecs * 1000 && trapAvailability(r, now).state === 'free')
-    .sort((a, b) => (a.name ?? a.trapId).localeCompare(b.name ?? b.trapId));
+    .sort((a, b) => Number(!!b.firstParkedAt) - Number(!!a.firstParkedAt) || (a.name ?? a.trapId).localeCompare(b.name ?? b.trapId));
   if (live[0]) return { action: 'reuse', registration: live[0], why: `free live ${repo} trap${harness ? ` (${harness})` : ''}` };
   const rows = planThrow(cfg, { repo }, { now });
-  const returning = rows.find((r) => (r.action === 'resume' || r.action === 'cold') && (!harness || r.harness === harness));
+  const returning = rows.find((r) => !failedStarts.has(r.trapId) && (r.action === 'resume' || r.action === 'cold') && (!harness || r.harness === harness));
   if (returning) return { action: 'return', row: returning, why: `no suitable free live trap; ${returning.why}` };
   const count = repoTrapCount(cfg, repo);
   if (count.limit !== undefined && count.used >= count.limit) return { action: 'wait', why: trapCapacityReason(cfg, repo, harness, now) };
