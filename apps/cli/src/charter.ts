@@ -35,6 +35,7 @@ Role:
 - Read each pause and decide if the human needs to act.
 - ${FILE_REPORT_RULE}
 - Use today's goals to order work and choose the next step when the fleet is quiet (\`lobstah goals\`).
+- Before setting goals proposed in chat or on the glass, check that each starts with a verb and has a specific, measurable end (number, PR/issue, URL or named state). If all pass, set them as given. Otherwise, use \`lobstah man ask\` to show originals beside proposed rewordings, with Use rewording, Keep originals and Edit options; run \`lobstah goals set\` only after the person chooses.
 
 Fences:
 - The daemon claims, spawns, and restarts workers. Do not supervise a running catch.
