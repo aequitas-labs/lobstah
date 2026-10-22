@@ -5,46 +5,129 @@ is one SQLite Durable Object; R2 holds evidence files. Briefs, messages, reports
 and explicitly uploaded evidence go to the chosen wharf. Checkouts, harness
 credentials and local env are not automatically uploaded. Local files remain the default.
 This service has not been deployed. GitHub admission and boat approval APIs are
-implemented; the hosted glass UI follows in the next slice. There is no domain,
-billing, second runtime, socket, alarm or background timer.
+implemented; the hosted glass UI follows in the next slice. There is no billing,
+second runtime, socket, alarm or background timer.
 
 ## Local development and tests
 
 Use Node 24 and pnpm. `pnpm --filter @lobstah/wharf test` runs in the
 Workers runtime with local SQLite and R2. Test credentials are test-only fixtures.
-For local HTTP development, supply secrets in ignored `services/wharf/.dev.vars`
-and run `pnpm --filter @lobstah/wharf exec wrangler dev --local`.
+For local HTTP development, supply secrets in ignored `services/wharf/.dev.vars`,
+apply the schema with `wrangler d1 migrations apply lobstah-wharf-auth --local --env local`
+and run `pnpm --filter @lobstah/wharf exec wrangler dev --env local --local`: the
+glass is `http://localhost:8787`, the API `http://127.0.0.1:8787`.
 Never use real credentials in tests or pass secrets in process arguments.
 
-## Settings for a maintainer's eventual deployment
+## Deploying
 
-Choose the service address outside the repository. Provision an R2 bucket, replace
-the placeholder bucket name in wrangler.jsonc, and use the `v1` SQLite migration.
-Provision a separate D1 database for authentication, replace its placeholder ID,
-and apply `migrations/0001_auth.sql`. Coordination still uses the account's SQLite
-Durable Object; core does not import this service or Better Auth.
-There are no real Cloudflare account ids or resource ids in the repository.
+Deployed by the maintainers with `wrangler deploy`; no script or CI job deploys
+the wharf. `wrangler.jsonc` holds the deployment, including the Cloudflare
+account; there is no secret in it.
 
-Three secrets are required:
+| Name | Kind | Value or source |
+| --- | --- | --- |
+| `GLASS_ORIGIN` | var | `https://glass.lobstah.dev`: the browser, cookie sessions |
+| `API_ORIGIN` | var | `https://api.lobstah.dev`: boats and agents, bearer tokens only |
+| `GITHUB_CLIENT_ID` | var | the GitHub OAuth app's public client ID |
+| `GITHUB_ALLOWLIST` | var | JSON array of numeric GitHub account IDs as strings (`gh api user --jq .id`) |
+| `MAX_*`, `REQUESTS_PER_MINUTE` | var | abuse caps, below |
+| `AUTH_SECRET` | secret | random, at least 32 characters: Better Auth signing and the encryption of stored GitHub tokens |
+| `TOKEN_SECRET` | secret | random, separate: signs retryable dispatch capabilities. Rotating it stops old claim responses from being rebuilt; issued token hashes stay valid until their leases end |
+| `GITHUB_CLIENT_SECRET` | secret | the GitHub OAuth app's client secret |
+| `ACCOUNTS` | Durable Object | SQLite class `Account`, migration `v1`, made by the first deploy |
+| `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/` |
+| `FILES` | R2 | `lobstah-wharf-files`, evidence files |
 
-- `AUTH_SECRET`: a high-entropy Better Auth signing/encryption secret (at least
-  32 characters). GitHub provider tokens are encrypted at rest in D1.
-- `GITHUB_CLIENT_SECRET`: the GitHub OAuth application's secret. Configure its
-  callback to `<GLASS_ORIGIN>/api/auth/callback/github`.
-- `TOKEN_SECRET`: a separate high-entropy signing secret for retryable dispatch
-  capabilities. Rotating it invalidates reconstruction of an old claim response;
-  existing token hashes remain valid until their leases expire.
+The two origins must differ. The Worker answers only those two hosts; the
+first deploy makes their DNS records. Admission matches only the numeric IDs in
+`GITHUB_ALLOWLIST`, never a login or email: a sign-in from anyone else is
+refused before a person is stored, and every session and device redemption
+checks again. Each random auth user ID owns exactly one account; there is no
+team or account selector.
 
-Keep secrets outside git and logs. Use Cloudflare's secret settings at deployment;
-this build requires no login, resource creation or deployment.
+The GitHub OAuth app (an OAuth app, not a GitHub App) is registered under the
+`aequitas-labs` organization: Settings → Developer settings → OAuth Apps → New
+OAuth App, with homepage `https://glass.lobstah.dev` and authorization callback
+`https://glass.lobstah.dev/api/auth/callback/github`. Leave device flow off; the
+wharf runs its own. Sign-in asks GitHub for `read:user` and `user:email`.
+Local development needs a second OAuth app whose callback is
+`http://localhost:8787/api/auth/callback/github`.
 
-Set `GLASS_ORIGIN` and `API_ORIGIN` to distinct exact HTTPS origins (loopback HTTP
-is allowed for local tests), `GITHUB_CLIENT_ID` to the OAuth application's public
-ID, and `GITHUB_ALLOWLIST` to a JSON array of stable numeric GitHub account IDs,
-represented as strings. Admission never matches a mutable login or email.
-Non-invited sign-ins are refused before storing/linking a person; every existing
-person session and device redemption rechecks admission. Each random auth user
-ID owns exactly one account. There is no team or account selector in authentication.
+Work in `services/wharf`. R2 must be enabled on the account in the dashboard
+first. Secrets go in on standard input, never as arguments:
+
+```bash
+npx wrangler whoami
+npx wrangler r2 bucket create lobstah-wharf-files
+npx wrangler d1 create lobstah-wharf-auth
+npx wrangler d1 migrations apply lobstah-wharf-auth --remote
+openssl rand -base64 48 | npx wrangler secret put AUTH_SECRET
+openssl rand -base64 48 | npx wrangler secret put TOKEN_SECRET
+npx wrangler secret put GITHUB_CLIENT_SECRET
+pnpm build && npx wrangler deploy --dry-run
+pnpm build && npx wrangler deploy
+```
+
+Put the `database_id` that `d1 create` prints and the OAuth app's client ID into
+`wrangler.jsonc` before the migration. `secret put` creates the Worker, asking
+first at a terminal, when it does not exist yet. Coordination uses each
+account's SQLite Durable Object; core does not import this service or Better Auth.
+
+### Boats
+
+Sign in at `https://glass.lobstah.dev` first. The CLI names the account, and the
+account is the random ID of the signed-in person: open
+`https://glass.lobstah.dev/api/auth/get-session` in that browser and copy
+`user.id`. Then name the wharf in `~/.lobstah/config.toml` on each boat:
+
+```toml
+[wharves.lobstah]
+url = "https://api.lobstah.dev"
+account = "<user.id from get-session>"
+tokenEnv = "LOBSTAH_WHARF_TOKEN"
+```
+
+`tokenEnv` names an override variable; leave it unset to use the saved login.
+A repo belongs to one grounds, and with no `[grounds.*]` configured every repo
+sits in the implicit `home` grounds. Configuring any grounds replaces it, so
+list every repo you still want steered. A configured `home` is a new grounds:
+the implicit one's helm seat, goals and todo stay behind. Choose one:
+
+- Move the whole fleet to the wharf: one grounds that lists every repo.
+
+  ```toml
+  [grounds.home]
+  repos = ["<every configured repo>"]
+  wharf = "lobstah"
+  ```
+
+- Move some repos: a local grounds for the rest and a wharf grounds for the
+  moved ones, each repo in exactly one.
+
+  ```toml
+  [grounds.home]
+  repos = ["<repos that stay local>"]
+
+  [grounds.away]
+  repos = ["<repos steered from the phone>"]
+  wharf = "lobstah"
+  ```
+
+The examples below use `away`; with the first option, use `home`. On the
+machine that holds the helm:
+
+```bash
+lobstah wharf login --grounds away --helm
+lobstah wharf whoami --grounds away
+lobstah man helm --grounds away --session <id>
+```
+
+`login` prints a URL and code; open it on the phone or any signed-in browser,
+check the boat name and access, and approve. Boats that only fish log in
+without `--helm` (or with `--work-only`) and sign on with
+`lobstah soak --grounds away --repo <repo> --wait`.
+
+### Sign-in, login and limits
 
 Better Auth is pinned to **1.7.6**, published 2026-09-24, more than two weeks before
 this choice. Its GitHub provider, native D1 store and device-code state machine

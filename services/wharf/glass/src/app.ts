@@ -4,7 +4,9 @@ import { Boats } from './boats.js';
 import { Document, Job, ReviewActions } from './details.js';
 import { safeHref } from '../../../../apps/cli/src/glass-markdown.js';
 import { DeviceApproval } from './device.js';
-import { json } from './api.js';
+import { HttpError, json } from './api.js';
+import { AuthScreen, authDestination, authEntry } from './auth-screen.js';
+import type { AuthState } from './auth-screen.js';
 import { requestState } from './model.js';
 import { glassWake } from './wake.js';
 import { parseRoute, routeHash, TABS } from './route.js';
@@ -19,9 +21,15 @@ export function App() {
     [tab, setTab] = useState<Tab>(() => parseRoute(location.hash).tab);
   const [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
-    [signedOut, setSignedOut] = useState(false);
+    [signedOut, setSignedOut] = useState(!!authEntry(location));
+  const [authState, setAuthState] = useState<AuthState>(() => authEntry(location) ?? 'checking');
+  const authBusy = useRef(false),
+    hadSession = useRef(false);
   useEffect(() => {
-    if (snapshot || signedOut) void setDecisionBadge(snapshot?.documents.filter((d) => d.kind === 'decision' && d.published && !d.withdrawn && !d.answer).length ?? 0);
+    if (snapshot || signedOut)
+      void setDecisionBadge(
+        snapshot?.documents.filter((d) => d.kind === 'decision' && d.published && !d.withdrawn && !d.answer).length ?? 0,
+      );
   }, [snapshot, signedOut]);
   // The open item comes from the URL (a link from the pet lands on it) and is written back to it.
   const [modal, setItem] = useState<Item | undefined>(() => parseRoute(location.hash).item);
@@ -30,7 +38,7 @@ export function App() {
     history.replaceState(null, '', routeHash({ tab, item }));
   };
   const generation = useRef(0);
-  const loggedOut = useRef(false);
+  const loggedOut = useRef(!!authEntry(location));
   const wake = useRef<ReturnType<typeof glassWake>>();
   const busy = useRef(false),
     live = useRef(true);
@@ -40,6 +48,8 @@ export function App() {
     try {
       const [s, j] = await Promise.all([json<Snapshot>('/api/glass'), json<DispatchView[]>('/api/glass/dispatches')]);
       if (live.current && generation.current === request) {
+        hadSession.current = true;
+        document.title = 'lobstah spyglass';
         setSnapshot(s);
         setJobs(j);
         setError('');
@@ -49,21 +59,27 @@ export function App() {
       if (!live.current || generation.current !== request) return;
       const message = (e as Error).message;
       setError(message);
-      if (message.startsWith('Sign in')) {
+      if (e instanceof HttpError && (e.status === 401 || e.status === 403)) {
+        setAuthState(e.status === 403 ? 'denied' : hadSession.current ? 'expired' : 'signin');
         loggedOut.current = true;
         wake.current?.close();
         setSignedOut(true);
         setSnapshot(undefined);
         setJobs([]);
-      }
+      } else if (!snapshot) setAuthState('error');
     }
   };
   useEffect(() => {
     live.current = true;
     void refresh();
-    wake.current = glassWake(() => { if (!loggedOut.current && live.current) void refresh(); });
-    wake.current.connect();
-    const timer = setInterval(() => { void refresh(); if (!loggedOut.current) wake.current?.connect(); }, 15000);
+    wake.current = glassWake(() => {
+      if (!loggedOut.current && live.current) void refresh();
+    });
+    if (!loggedOut.current) wake.current.connect();
+    const timer = setInterval(() => {
+      void refresh();
+      if (!loggedOut.current) wake.current?.connect();
+    }, 15000);
     // A link opened in this page, or the back button: follow the URL.
     const follow = () => {
       const route = parseRoute(location.hash);
@@ -103,11 +119,22 @@ export function App() {
     }
   };
   const authenticate = async () => {
+    if (authBusy.current) return;
+    authBusy.current = true;
+    setAuthState('connecting');
     try {
-      const result = await json<{ url: string }>('/api/auth/sign-in/social', { provider: 'github', callbackURL: location.href });
+      const destination = authDestination(location);
+      const failure = new URL('/api/auth/error', location.origin);
+      failure.searchParams.set('returnTo', destination.pathname + destination.search + destination.hash);
+      const result = await json<{ url: string }>('/api/auth/sign-in/social', {
+        provider: 'github',
+        callbackURL: destination.href,
+        errorCallbackURL: failure.href,
+      });
       location.assign(result.url);
     } catch (e) {
-      notify((e as Error).message, true);
+      setAuthState(e instanceof HttpError && e.status === 403 ? 'denied' : 'error');
+      authBusy.current = false;
     }
   };
   const signOut = async () => {
@@ -117,6 +144,8 @@ export function App() {
     try {
       await json('/api/auth/sign-out', {});
       setSignedOut(true);
+      setAuthState('signed-out');
+      setError('');
       setSnapshot(undefined);
       setJobs([]);
       setModal(undefined);
@@ -137,7 +166,8 @@ export function App() {
       setJobs([]);
       setModal(undefined);
       setSignedOut(true);
-      notify('account data deleted');
+      setAuthState('signed-out');
+      notify('Your account data was deleted.');
     } catch (e) {
       loggedOut.current = false;
       notify((e as Error).message, true);
@@ -155,7 +185,10 @@ export function App() {
   useEffect(() => {
     if (!selectedDoc || selectedDoc.ack || acking.current.has(selectedDoc.id)) return;
     acking.current.add(selectedDoc.id);
-    json(`/api/glass/documents/${selectedDoc.id}/ack`, {}).then(() => refresh(), () => {});
+    json(`/api/glass/documents/${selectedDoc.id}/ack`, {}).then(
+      () => refresh(),
+      () => {},
+    );
   }, [selectedDoc?.id, selectedDoc?.kind, !!selectedDoc?.ack]);
   useEffect(() => {
     if (!modal) return;
@@ -199,14 +232,13 @@ export function App() {
         (d) =>
           html`<button class=${'card' + (d.ack ? ' acked' : '')} onClick=${() => setModal({ kind, id: d.id })}><div class="top"><b>${LinkedText(d.title)}</b><span class="badge">${kind === 'decision' ? (d.answer ? 'answered' : 'needs decision') : d.ack ? 'report · read' : 'report'}</span></div><div class="meta">${d.author} · ${when(d.at)}${acked(d.ack)}</div></button>`,
       );
+  if (signedOut || !snapshot) return html`<${AuthScreen} state=${authState} authenticate=${authenticate} notice=${notice} />`;
   return html`<div class="headerline"><h1>🦞✨ spyglass <span class="dim">wharf</span></h1>${!signedOut && html`<button class="btn" onClick=${signOut}>sign out</button>`}</div>
     <div class="chips"><span class="chip">helm ${snapshot && !error ? (snapshot.helmLive ? 'live' : 'unknown / no live lease') : 'unknown'}</span><span class="chip dim">polling · 15s · ${jobs.length} jobs</span></div>
     ${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}
     ${
-      signedOut
-        ? html`<button class="btn" onClick=${authenticate}>sign in with GitHub</button><div class="dim">Invite-only. Sign-in does not take a helm seat.</div>`
-        : snapshot &&
-          html`<nav class="tabs" aria-label="Spyglass views">${TABS.map((t) => html`<a href=${'#' + t} class=${tab === t ? 'on' : ''} onClick=${() => setTab(t)}>${t}</a>`)}</nav>
+      snapshot &&
+      html`<nav class="tabs" aria-label="Spyglass views">${TABS.map((t) => html`<a href=${'#' + t} class=${tab === t ? 'on' : ''} onClick=${() => setTab(t)}>${t}</a>`)}</nav>
       ${tab === 'deck' && html`<h2>Decisions</h2><div class="cards">${cards('decision')}</div><h2>Human requests</h2>${snapshot.requests.map((r) => html`<div class="msg"><b>${r.kind}</b> · ${r.dispatch ?? r.boat} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`)}`}
       ${tab === 'jobs' && html`<div class="cards">${jobs.map((j) => html`<button class=${'card' + (j.ack ? ' acked' : '')} onClick=${() => setModal({ kind: 'job', id: j.id })}><div class="top"><b>${LinkedText(j.brief.split('\n')[0])}</b><span class="badge">${j.status?.verb ?? j.state}</span></div><div class="meta">${j.repo} · ${j.boatName ?? snapshot.boats.find((b) => b.id === j.claimedBoat)?.name ?? j.claimedBoat ?? 'unclaimed'}${acked(j.ack)}</div><div class="note">${LinkedText(j.status?.note ?? j.unservable?.note)}</div></button>`)}</div>`}
       ${tab === 'traps' && html`<div class="cards">${snapshot.workers.map((w) => html`<button class="card" onClick=${() => setModal({ kind: 'trap', id: w.id })}><div class="top"><b>${w.id}</b><span class="badge">${w.harness ?? 'unknown harness'}</span></div><div class="meta">${w.boatName} · ${when(w.lastCheckIn)}</div><div class="note">${w.current ? 'job ' + w.current : 'no current job'} · ${LinkedText(w.repoRemote)}</div></button>`)}</div>`}

@@ -1,3 +1,12 @@
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 /** Browser transport never reads, accepts or stores a boat/dispatch credential. */
 export async function json<T>(path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST', key?: string): Promise<T> {
   const response = await fetch(path, {
@@ -9,7 +18,8 @@ export async function json<T>(path: string, body?: unknown, method = body === un
   });
   const value = await response.json();
   if (!response.ok)
-    throw new Error(
+    throw new HttpError(
+      response.status,
       response.status === 401
         ? 'Sign in with GitHub to see your grounds.'
         : (value.error ?? value.message ?? `Request failed (${response.status})`),
