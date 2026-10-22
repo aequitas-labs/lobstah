@@ -1,0 +1,404 @@
+[
+  {
+    "width": 1280,
+    "errors": [],
+    "scrollWidth": 1280,
+    "scheme": "dark",
+    "listColumns": "23.4844px 1180.72px",
+    "rows": [
+      {
+        "rowTop": 215.921875,
+        "labelTop": 215.921875,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 215.921875,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 216.921875
+          },
+          {
+            "left": 88.375,
+            "top": 216.921875
+          }
+        ],
+        "checked": true,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 234.765625,
+        "labelTop": 234.765625,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 234.765625,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 235.765625
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 253.609375,
+        "labelTop": 253.609375,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 253.609375,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 254.609375
+          },
+          {
+            "left": 1238.90625,
+            "top": 254.609375
+          },
+          {
+            "left": 88.375,
+            "top": 273.453125
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 291.296875,
+        "labelTop": 291.296875,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 291.296875,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 292.296875
+          },
+          {
+            "left": 88.375,
+            "top": 292.296875
+          }
+        ],
+        "checked": true,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 310.140625,
+        "labelTop": 310.140625,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 310.140625,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 311.140625
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 328.984375,
+        "labelTop": 328.984375,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 328.984375,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 329.984375
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 347.828125,
+        "labelTop": 347.828125,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 347.828125,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 348.828125
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 366.671875,
+        "labelTop": 366.671875,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 366.671875,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 367.671875
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 385.515625,
+        "labelTop": 385.515625,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 385.515625,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 386.515625
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 404.359375,
+        "labelTop": 404.359375,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 404.359375,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 405.359375
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "errors": [],
+    "scrollWidth": 390,
+    "scheme": "dark",
+    "listColumns": "23.4844px 290.719px",
+    "rows": [
+      {
+        "rowTop": 319.609375,
+        "labelTop": 319.609375,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 319.609375,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 320.609375
+          },
+          {
+            "left": 88.375,
+            "top": 320.609375
+          }
+        ],
+        "checked": true,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 338.453125,
+        "labelTop": 338.453125,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 338.453125,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 339.453125
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 357.296875,
+        "labelTop": 357.296875,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 357.296875,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 358.296875
+          },
+          {
+            "left": 354.484375,
+            "top": 358.296875
+          },
+          {
+            "left": 88.375,
+            "top": 377.140625
+          },
+          {
+            "left": 338.828125,
+            "top": 377.140625
+          },
+          {
+            "left": 88.375,
+            "top": 395.984375
+          },
+          {
+            "left": 354.484375,
+            "top": 395.984375
+          },
+          {
+            "left": 88.375,
+            "top": 414.828125
+          },
+          {
+            "left": 338.828125,
+            "top": 414.828125
+          },
+          {
+            "left": 88.375,
+            "top": 433.671875
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 451.515625,
+        "labelTop": 451.515625,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 451.515625,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 452.515625
+          },
+          {
+            "left": 88.375,
+            "top": 452.515625
+          }
+        ],
+        "checked": true,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 470.359375,
+        "labelTop": 470.359375,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 470.359375,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 471.359375
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 489.203125,
+        "labelTop": 489.203125,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 489.203125,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 490.203125
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 508.046875,
+        "labelTop": 508.046875,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 508.046875,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 509.046875
+          },
+          {
+            "left": 315.359375,
+            "top": 509.046875
+          },
+          {
+            "left": 88.375,
+            "top": 527.890625
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 545.734375,
+        "labelTop": 545.734375,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 545.734375,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 546.734375
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 564.578125,
+        "labelTop": 564.578125,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 564.578125,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 565.578125
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      },
+      {
+        "rowTop": 583.421875,
+        "labelTop": 583.421875,
+        "checkboxLeft": 66.28125,
+        "textLeft": 88.375,
+        "textTop": 583.421875,
+        "lines": [
+          {
+            "left": 88.375,
+            "top": 584.421875
+          }
+        ],
+        "checked": false,
+        "number": "counter(goal) \".\"",
+        "columns": "subgrid [] [] []"
+      }
+    ]
+  }
+]
