@@ -20,10 +20,9 @@ Never use real credentials in tests or pass secrets in process arguments.
 
 ## Deploying
 
-Nothing in this repo deploys the wharf: no script, no CI job. A maintainer with
-access to the `lobstah` Cloudflare account (`cdde311c7a0f2943ec259f0548460a85`,
-the account that serves `lobstah.dev`) runs it by hand. `wrangler.jsonc` holds
-the deployment; there is no secret in it.
+Deployed by the maintainers with `wrangler deploy`; no script or CI job deploys
+the wharf. `wrangler.jsonc` holds the deployment, including the Cloudflare
+account; there is no secret in it.
 
 | Name | Kind | Value or source |
 | --- | --- | --- |
@@ -54,12 +53,10 @@ wharf runs its own. Sign-in asks GitHub for `read:user` and `user:email`.
 Local development needs a second OAuth app whose callback is
 `http://localhost:8787/api/auth/callback/github`.
 
-Name the Cloudflare sign-in to use, as for the site, and work in `services/wharf`.
-R2 must be enabled on the account in the dashboard first. Secrets go in on
-standard input, never as arguments:
+Work in `services/wharf`. R2 must be enabled on the account in the dashboard
+first. Secrets go in on standard input, never as arguments:
 
 ```bash
-export XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare"
 npx wrangler whoami
 npx wrangler r2 bucket create lobstah-wharf-files
 npx wrangler d1 create lobstah-wharf-auth
