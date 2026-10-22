@@ -249,7 +249,8 @@ import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReporte
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
-import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, startMode, throwBatch, throwTrap, trapForRepo } from './throw.js';
+import { createTrapDispatchScheduler } from './trap-dispatch.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, startMode, throwBatch, throwTrap } from './throw.js';
 import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
@@ -279,9 +280,9 @@ work (humans and agents):
                                   --for addresses the work to a signed-on
                                   worktree (sticky: waits for that trap,
                                   never falls back headless; session:<id>
-                                  resolves to its trap). --trap-any reuses a
-                                  free trap, returns a roster trap, then creates
-                                  below the repo's traps cap; at capacity waits.
+                                  resolves to its trap). --trap-any queues at once;
+                                  the daemon reuses free traps, then starts
+                                  stowed or new traps within the repo's cap.
                                   --pool runs it in a
                                   warm worktree of [pools.<name>]: reset to a
                                   fresh branch, new session
@@ -1189,23 +1190,21 @@ async function mainCli(): Promise<void> {
       if (prTarget !== undefined) d.pr = resolvePrTarget(repo, prTarget);
       const lane: Lane = has('--chore') ? 'chore' : 'work';
       const caller = callerSession(opt('--session'));
-      let selected: Awaited<ReturnType<typeof trapForRepo>> | undefined;
       if (has('--trap-any')) {
         gateHelm(caller);
         const cfg = loadConfig();
         const helm = caller?.id ? helmOf(caller.id) : undefined;
         if (helm && !helm.repos.includes(repo)) throw new Error(`repo ${repo} is outside grounds ${helm.grounds}`);
         if (d.harness && d.harness !== 'claude' && d.harness !== 'codex') throw new UsageError('--harness takes claude or codex');
-        selected = await trapForRepo({ cfg, repo, harness: d.harness, by: caller?.id });
-        if (selected.registration) d.for = `wt:${selected.registration.trapId}`;
-        else d.trapAny = true;
+        if (!cfg.repos[repo]) throw new Error(`no repo "${repo}" is configured`);
+        d.trapAny = true;
       }
       const warnings = startDispatch(d, lane, values('--attach'), caller);
       if (!d.pr && !d.followUp) {
         for (const url of briefPrMentions(d.brief, repo))
           warnings.push(`the brief names ${url}, but this dispatch will open its own draft PR; to push to that PR instead, dispatch with --pr ${url}`);
       }
-      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(selected ? { trapAction: selected.action, reason: selected.why } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
+      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
@@ -3479,6 +3478,7 @@ async function mainCli(): Promise<void> {
             hostedBroker = await startWharfBroker(daemonBrokerOptions(loadConfig));
           },
           hostedPoll: async () => { await hostedBroker?.broker.poll(); },
+          trapStarts: createTrapDispatchScheduler(),
           culler: cliCuller,
           prWatches: (now, log) => {
             syncPrWatches(now);
