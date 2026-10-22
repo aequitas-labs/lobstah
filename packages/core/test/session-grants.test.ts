@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +10,7 @@ beforeEach(() => {
   process.env.LOBSTAH_HOME = home;
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   delete process.env.LOBSTAH_HOME;
   fs.rmSync(home, { recursive: true, force: true });
 });
@@ -80,11 +81,39 @@ it.each([
   const g = grant({ tools: 'Write', hosts: [] });
   expect(grantCovers(g, request('Write', { file_path: file, content: 'data' }))).toBe(false);
 });
-it('resolves symlinks before allowing a file write', () => {
-  const target = path.join(home, '.claude');
+it.each(['.claude/settings.json', '.codex/config.toml', '.ClAuDe/SeTtInGs.JsOn', 'grants/ledger.jsonl', 'config.toml'])(
+  'resolves symlinks before allowing a file write to %s',
+  (name) => {
+    const g = grant({ tools: 'Write', hosts: [] });
+    const target = path.join(home, name);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    if (!fs.existsSync(target)) fs.writeFileSync(target, '{}');
+    fs.symlinkSync(target, path.join(home, 'innocent'), 'file');
+    expect(grantCovers(g, request('Write', { file_path: 'innocent', content: 'data' }))).toBe(false);
+  },
+);
+it.each([
+  ['CLAUDE_CONFIG_DIR', 'settings.local.json'],
+  ['CODEX_HOME', 'rules/new-rule'],
+])('resolves directory links and missing descendants under %s', (variable, name) => {
+  const target = path.join(home, 'custom-settings');
   fs.mkdirSync(target);
-  fs.writeFileSync(path.join(target, 'settings.json'), '{}');
-  fs.symlinkSync(path.join(target, 'settings.json'), path.join(home, 'innocent'));
+  vi.stubEnv(variable!, target);
+  fs.symlinkSync(target, path.join(home, 'alias'), process.platform === 'win32' ? 'junction' : 'dir');
+  const g = grant({ tools: 'Write', hosts: [] });
+  expect(grantCovers(g, request('Write', { file_path: path.join('alias', name!), content: 'data' }))).toBe(false);
+  expect(grantCovers(g, request('Write', { file_path: path.join('alias', 'notes.txt'), content: 'data' }))).toBe(true);
+});
+it('allows symlink writes to an ordinary file', () => {
+  fs.writeFileSync(path.join(home, 'notes.txt'), 'notes');
+  fs.symlinkSync(path.join(home, 'notes.txt'), path.join(home, 'innocent'), 'file');
+  const g = grant({ tools: 'Write', hosts: [] });
+  expect(grantCovers(g, request('Write', { file_path: 'innocent', content: 'data' }))).toBe(true);
+});
+it.each(['.claude/settings.json', '.codex/config.toml'])('refuses a dangling file link to %s', (name) => {
+  const target = path.join(home, name);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.symlinkSync(path.relative(home, target), path.join(home, 'innocent'), 'file');
   const g = grant({ tools: 'Write', hosts: [] });
   expect(grantCovers(g, request('Write', { file_path: 'innocent', content: 'data' }))).toBe(false);
 });

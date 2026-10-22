@@ -34,7 +34,9 @@ afterEach(() => {
 const lobstah = (...args: string[]) =>
   spawnSync(process.execPath, [cli, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LOBSTAH_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, CLAUDE_CODE_SESSION_ID: '' },
+    // A bare Windows spawn finds gh.exe, not the gh.cmd fixture. Keep the
+    // machine's PATH out so it cannot fall through to a real, networked gh.
+    env: { ...process.env, LOBSTAH_HOME: home, PATH: bin, CLAUDE_CODE_SESSION_ID: '' },
     timeout: 20_000,
   });
 const queued = () =>
@@ -64,15 +66,18 @@ describe('resolvePrTarget', () => {
 describe('dispatch --pr', () => {
   it('writes the PR into the descriptor, so the runner keeps it and opens none', () => {
     const r = lobstah('dispatch', '--repo', 'web', '--brief-text', '# Fix the repair loop\n\nPush the fix to #241.', '--pr', '241');
+    expect(r.error, r.stderr).toBeUndefined();
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain('pr: https://github.com/acme/web/pull/241');
-    // The fake gh is a .cmd on Windows, which spawnSync cannot run without a shell (the real gh.exe can): there the URL alone is recorded.
+    // Windows cannot execute the .cmd fixture without a shell: gh is
+    // unavailable there, so the descriptor records the URL alone.
     const pr = process.platform === 'win32' ? { url: 'https://github.com/acme/web/pull/241' } : { url: 'https://github.com/acme/web/pull/241', headRefName: 'fix-loop' };
     expect(queued()).toEqual([expect.objectContaining({ pr })]);
   });
 
   it('warns when the brief names a PR of the repo but --pr is not given', () => {
     const r = lobstah('dispatch', '--repo', 'web', '--brief-text', 'Push the fix to https://github.com/acme/web/pull/241.');
+    expect(r.error, r.stderr).toBeUndefined();
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain('dispatch with --pr https://github.com/acme/web/pull/241');
     expect(queued()[0]!.pr).toBeUndefined();

@@ -479,17 +479,31 @@ export function sessionGuarded(req: GrantRequest): boolean {
   if (req.cwd && path.resolve(req.cwd) === path.resolve(lobstahHome()) && /\bconfig\.toml\b/.test(text)) return true;
   if (/mcp__lobstah__.*(?:grant|config)/i.test(req.tool)) return true;
   {
-    const real = (p: string) => {
+    // Compare native realpaths in one form: Windows can return backslashes,
+    // mixed case, and expanded 8.3 names even when the request used slashes.
+    const normalize = (p: string) => {
+      const slashes = p.replace(/\\/g, '/');
+      return process.platform === 'win32' ? slashes.toLowerCase() : slashes;
+    };
+    const real = (p: string, links = 0): string | undefined => {
+      if (links > 64) return undefined;
       let head = path.resolve(p);
       const tail: string[] = [];
       while (!fs.existsSync(head) && path.dirname(head) !== head) {
+        // existsSync follows links: a dangling file link is still a write
+        // target, even though its destination has not been created yet.
+        try {
+          if (fs.lstatSync(head).isSymbolicLink()) return real(path.resolve(path.dirname(head), fs.readlinkSync(head), ...tail), links + 1);
+        } catch {
+          /* a missing path component */
+        }
         tail.unshift(path.basename(head));
         head = path.dirname(head);
       }
       try {
-        return path.join(fs.realpathSync(head), ...tail);
+        return normalize(path.join(fs.realpathSync.native(head), ...tail));
       } catch {
-        return path.resolve(p);
+        return normalize(path.resolve(p));
       }
     };
     const settingsRoots = [
@@ -497,39 +511,31 @@ export function sessionGuarded(req: GrantRequest): boolean {
       process.env.CODEX_HOME ?? path.join(process.env.HOME ?? '', '.codex'),
     ]
       .filter(Boolean)
-      .map(real);
+      .map((p) => real(p));
     const settingsNames = ['settings.json', 'settings.local.json', 'config.toml', 'hooks.json', 'hooks', 'rules'];
+    const store = real(grantsDir());
+    const home = real(lobstahHome());
+    if (!store || !home || settingsRoots.some((root) => !root)) return true;
     // Relative paths resolve in the caller's cwd; symlink targets count too.
     for (const raw of [
       ...strings.filter((v) => !v.includes('\n')),
       ...strings.flatMap((v) => v.split(/\s+/).map((t) => t.replace(/^["']|["']$/g, ''))),
     ]) {
       if (!raw.trim()) continue;
-      let file = path.resolve(req.cwd ?? process.cwd(), raw.replace(/^~(?=\/)/, process.env.HOME ?? ''));
-      let head = file;
-      const tail: string[] = [];
-      while (!fs.existsSync(head) && path.dirname(head) !== head) {
-        tail.unshift(path.basename(head));
-        head = path.dirname(head);
-      }
-      try {
-        file = path.join(fs.realpathSync(head), ...tail);
-      } catch {
-        /* use absolute path */
-      }
+      const file = real(path.resolve(req.cwd ?? process.cwd(), raw.replace(/^~(?=\/)/, process.env.HOME ?? '')));
+      if (!file) return true;
       if (
         settingsRoots.some(
-          (root) =>
-            file === root ||
-            settingsNames.some((name) => file === path.join(root, name) || file.startsWith(path.join(root, name) + path.sep)),
+          (root) => file === root || settingsNames.some((name) => file === `${root}/${name}` || file.startsWith(`${root}/${name}/`)),
         )
       )
         return true;
       if (
-        file === real(lobstahHome()) ||
-        file.startsWith(real(grantsDir()) + path.sep) ||
-        file === path.join(real(lobstahHome()), 'config.toml') ||
-        /[/]\.(?:claude|codex)[/](?:settings(?:\.local)?\.json|config\.toml|hooks(?:\.json|[/])|rules[/])/.test(file)
+        file === home ||
+        file === store ||
+        file.startsWith(store + '/') ||
+        file === `${home}/config.toml` ||
+        /[/]\.(?:claude|codex)[/](?:settings(?:\.local)?\.json|config\.toml|hooks(?:\.json|[/])|rules[/])/i.test(file)
       )
         return true;
     }
