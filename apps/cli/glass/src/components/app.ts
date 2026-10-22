@@ -41,13 +41,14 @@ export function App({ state }: { state: GlassState }) {
   const page = (t: GlassTab): Children => {
     if (!inp || t !== tab) return null;
     if (t === 'deck')
-      return html`<${SessionGrants} grants=${d?.sessionGrants ?? []} /><${Deck} inp=${inp.deck} goals=${d?.goals} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`;
+      return html`<${Deck} inp=${inp.deck} goals=${d?.goals} grants=${d?.sessionGrants ?? []} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`;
     if (t === 'dispatches') return html`<${Dispatches} inp=${inp.dispatches} more=${more('dispatches')} />`;
-    if (t === 'traps') return html`<${Traps} inp=${inp.traps} />`;
+    if (t === 'traps') return html`<${Traps} inp=${inp.traps} grants=${d?.sessionGrants ?? []} />`;
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} more=${more('prs')} />`;
     if (t === 'reports') return html`<${Reports} inp=${inp.reports} />`;
     if (t === 'reviews') return html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`;
     if (t === 'todos') return html`<${Todos} todos=${inp.deck.todos} note=${inp.deck.todoNote} />`;
+    if (t === 'grants') return html`<${SessionGrants} grants=${d?.sessionGrants ?? []} />`;
     if (t === 'stats') return html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`;
     return html`<${Notices} inp=${inp.notices} more=${more('notices')} />`;
   };

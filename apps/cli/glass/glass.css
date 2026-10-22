@@ -1873,3 +1873,31 @@ footer .glass-brand {
   width: 18px;
   height: 18px;
 }
+
+.grant-chip {
+  white-space: nowrap;
+  margin-inline: 6px;
+}
+.grant-scope {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.session-grants .card .top > b {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.grant-audit {
+  padding: 0;
+  list-style: none;
+}
+.grant-audit li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.grant-audit code {
+  overflow-wrap: anywhere;
+}

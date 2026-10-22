@@ -1,4 +1,4 @@
-import type { GlassPr, GlassSnapshot, GlassStack, WorkerMetadata } from '@lobstah/core';
+import type { GlassPr, GlassSnapshot, GlassStack, WorkerMetadata, Grant } from '@lobstah/core';
 import { DECK_TRAPS_MAX, LANDED_MAX, REPORTS_MAX, catchCount, goalLine, prBadgeClass, reportPageUrl } from '../../../src/glass-diff.js';
 import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
@@ -23,6 +23,7 @@ import {
   trapNowText,
   windowAction,
 } from './common.js';
+import { GrantChip } from './session-grants.js';
 import { reportMeta } from './reports.js';
 import { PrAck } from './prs.js';
 import { DeckDecisions } from './decisions.js';
@@ -142,6 +143,7 @@ function deckPrs(inp: DeckInputs, view: View) {
 export function Deck({
   inp,
   goals = [],
+  grants = [],
   drafts,
   focus,
   viewedHere,
@@ -149,6 +151,7 @@ export function Deck({
 }: {
   inp: DeckInputs;
   goals?: GlassSnapshot['goals'];
+  grants?: Grant[];
   drafts: Record<string, DecisionDraft>;
   focus: string | null;
   viewedHere: Record<string, true>;
@@ -192,7 +195,14 @@ export function Deck({
       : t.starting
         ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
         : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim', worker: t.live ? t : undefined },
-    meta: [t.repo || '', ' · ', html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`, ' · ', trapNow(t)],
+    meta: [
+      html`<${GrantChip} session=${t.sessionId} grants=${grants} />`,
+      t.repo || '',
+      ' · ',
+      html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`,
+      ' · ',
+      trapNow(t),
+    ],
     metaText: `${t.repo || ''} · 🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
     action: windowAction(t),
     extra: startCommands(t),

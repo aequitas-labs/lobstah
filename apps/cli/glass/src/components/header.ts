@@ -5,6 +5,7 @@ import { GLASS_TABS } from '../../../src/glass-diff.js';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../../src/glass-diff.js';
 import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
+import { GrantChip } from './session-grants.js';
 import { Age, Harness, opener } from './common.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
@@ -16,6 +17,7 @@ const TAB_LABEL: Record<GlassTab, string> = {
   prs: 'PRs',
   reviews: 'Reviews',
   reports: 'Reports',
+  grants: 'Grants',
   todos: 'TODOs',
   notices: 'Notices',
   stats: 'Stats',
@@ -45,7 +47,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
-        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds} · chat ${h.chat ?? 'full'}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span></span>`,
+        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds} · chat ${h.chat ?? 'full'}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span><${GrantChip} session=${h.sessionId} grants=${d.sessionGrants} /></span>`,
     ),
   ];
 }
@@ -79,7 +81,7 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
   const repos = d ? repoList(d) : [];
   const kinds = d ? kindList(d) : [];
   // The Stats tab has nothing to filter.
-  return html`<div class="controls" style=${tab === 'stats' ? 'display:none' : undefined}>
+  return html`<div class="controls" style=${tab === 'stats' || tab === 'grants' ? 'display:none' : undefined}>
     <select id="f-lane" style=${d && only('dispatches')} value=${st.lane} onChange=${(e: Event) => setPrefs({ lane: value(e) })}>
       <option value="">all lanes</option>
       <option value="work">work</option>
