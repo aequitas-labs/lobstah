@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.8.0 — 2026-10-22
+
+### Session grants
+
+`lobstah grant request --session <id>|--trap <name>|--grounds <name> --tools
+'<name|glob>' [--hosts a,b] [--for 15m] --reason '...'` asks the glass for a
+trust window for exactly one helm or trap session, browser and MCP tools
+included. The card offers Allow for the requested time, Allow for 1h, or Deny.
+Windows default to 15 minutes, cap at 4 hours, and never carry over to a
+replacement session. Hostname pins must match every URL a call names; Bash needs
+a command prefix and keeps the shell-joiner, redirect and dry-run guards.
+Agents can't grant themselves, and grants never cover lobstah's own config,
+the grant store or Claude/Codex settings, symlinks included. Permission cards
+add **Allow this tool family for 15 min**. Active grants live on a new
+**Grants** page with Revoke and a use log; a "grant · 12m left" chip marks the
+helm or trap they cover. (#272)
+
+### Reviews without pickup
+
+`[reviews]` resolves its own GitHub identity, so review requests can run
+without issue or PR-feedback pickup. The Reviews tab is the inbox: requests
+land silently with a count, open the repo's review tool, and new drafts carry a
+verdict (`approve`, `comment` or `request_changes`) that publishing checks
+against the live PR head. `lobstah setup reviews` writes notify mode. (#269)
+
+### Codex traps start and resume cleanly
+
+Codex traps keep lobstah's terminal title, wait out the **Hooks need review**
+prompt (`[soak].codexStartSecs`, default 600), start app-owned threads fresh,
+and resume in their own worktree with an explicit `--cd`. (#265, #266)
+
+### Grants and prompts
+
+y/N prompts wait for a full answer and accept piped input; `grant` and `trap
+bypass` take `--yes`. Codex permission hooks honor saved grants, and "Allow
+always" records a reusable scope such as `ume push …`. Permission cards only
+offer Allow once, Allow always or No. (#264, #267)
+
+### `dispatch --trap-any` returns at once
+
+It queues the work and prints the id right away; the daemon starts a stowed or
+new trap in the background, and a failed start moves on to another eligible
+trap. (#275)
+
+### Quieter `man wait`
+
+The wait's backoff now resets only for news it hasn't seen: routine writes,
+progress, quiet lifecycle notices and repeated reminders no longer pull it back
+to 15 minutes. The timeout line shows the count of empty waits. (#277)
+
+### Glass
+
+The glass is dark in every OS theme. On deck shows at most five TODOs, with
+`More (N)` opening a full TODOs page, and phones get a compact menu instead of
+tabs. `lobstah man chat brief|full` switches the helm between brief and full
+chat at runtime, and card pointers are clickable links. (#270, #273, #274)
+
+### Wharf groundwork
+
+The wharf is configured for `glass.lobstah.dev` and `api.lobstah.dev`, with a
+new GitHub sign-in screen. It is not deployed yet. (#268, #271)
+
 ## 0.7.11 — 2026-10-21
 
 ### Lock races no longer crash `man wait`
