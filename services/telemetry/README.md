@@ -102,54 +102,39 @@ the Worker.
 The wharf's local Workers test runtime also exercises the receiver's migrations
 and schema-2 retry transaction against native D1 (`test/telemetry.test.ts`).
 
-## Deployment (aequitas labs)
+## Deployment
 
-Chris approved the initial deployment directly. Version
-`f2e14ef8-c4ea-4750-aece-714c08291da4` was deployed at
-`2026-10-14T04:16:01.879Z`. Outside checks returned 200 with zero counts for
-all three badges and public `/v1/stats`; posting `{}` to `/v1/daily` returned 400. No valid daily test payload was sent to production.
-
-Use the **aequitas labs** account (`73dd625ed4d46d151a0de5624ff71379`). This
-machine's separate Wrangler sign-in is selected by
-`XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare"` on **every** Wrangler
-command; omitting it selects a different company's account. Do not log in or
-log out, or inspect the saved credentials. Confirm the account first.
-
-The database `lobstah-telemetry` is already created (ENAM):
-`fb7a04cd-d62a-414d-b990-84fbe5593de0`. Migrations `0001_init.sql` and
-`0002_daily_catches.sql` are applied.
-Do not create another database. Rate limiter namespaces `1531` and `1532`
-are account-local positive integers reserved for this receiver, not resource
-ids. Logs, invocation logs and Logpush stay off. No secret is required.
+Deployed by the maintainers with `wrangler deploy`; nothing in CI deploys it.
+`wrangler.jsonc` names the account and the `lobstah-telemetry` database, so do
+not create another database. Rate limiter namespaces `1531` and `1532` are
+account-local positive integers reserved for this receiver, not resource ids.
+Logs, invocation logs and Logpush stay off. No secret is required.
 
 From the repository root:
 
 ```sh
-XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" WRANGLER_SEND_METRICS=false npx --yes wrangler@4.150.0 whoami
-XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" WRANGLER_SEND_METRICS=false npx --yes wrangler@4.150.0 d1 migrations apply lobstah-telemetry --remote --config services/telemetry/wrangler.jsonc
-# Only after explicit deployment approval:
-XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" WRANGLER_SEND_METRICS=false npx --yes wrangler@4.150.0 deploy --config services/telemetry/wrangler.jsonc
+npx wrangler@4 whoami
+npx wrangler@4 d1 migrations apply lobstah-telemetry --remote --config services/telemetry/wrangler.jsonc
+npx wrangler@4 deploy --config services/telemetry/wrangler.jsonc
 ```
 
 The config attaches only `t.lobstah.dev` as a custom domain; workers.dev and
-preview URLs are disabled. No other DNS or zone settings should change.
-After deployment check all three badges return zero, `/v1/stats` returns only
-zero aggregates without a token, and `POST /v1/daily` with `{}` returns 400.
-Never submit a valid test payload to the production database.
+preview URLs are disabled. After a deployment, check that all three badges and
+`/v1/stats` answer 200 without a token and that `POST /v1/daily` with `{}`
+returns 400. Never submit a valid test payload to the production database.
 
-For a later code rollback, choose a known-good version from
-`wrangler deployments list`, then run (with the same account selector):
+For a code rollback, choose a known-good version from `wrangler deployments
+list`, then run:
 
 ```sh
-XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" WRANGLER_SEND_METRICS=false npx --yes wrangler@4.150.0 deployments list --config services/telemetry/wrangler.jsonc
-XDG_CONFIG_HOME="$HOME/.config/lobstah-cloudflare" WRANGLER_SEND_METRICS=false npx --yes wrangler@4.150.0 rollback <known-good-version-id> --config services/telemetry/wrangler.jsonc
+npx wrangler@4 deployments list --config services/telemetry/wrangler.jsonc
+npx wrangler@4 rollback <known-good-version-id> --config services/telemetry/wrangler.jsonc
 ```
 
-Rollback does not revert D1 migrations or routing. On the first deployment
-there is no previous version: to take the receiver offline, remove only its
-`t.lobstah.dev` route from this config and redeploy with the same account
-selector. Keep the database and retention cron so installation-linked rows
-still expire. Do not delete the database.
+Rollback does not revert D1 migrations or routing. To take the receiver
+offline, remove only its `t.lobstah.dev` route from the config and redeploy.
+Keep the database and retention cron so installation-linked rows still expire.
+Do not delete the database.
 
 Sending stays off: changing `TELEMETRY_ENDPOINT` to
 `https://t.lobstah.dev/v1/daily` requires a separate decision and release.
