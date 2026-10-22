@@ -6,6 +6,9 @@ import { ageLabel } from './activity.js';
 import { recordCatch } from './stats.js';
 import { parsePrRef } from './pr.js';
 import { observeLocalCatch } from './catch-context.js';
+import { readSessionClaim, readTrap } from './soak.js';
+import { withTrapCacheLock } from './cache-paths.js';
+import { clearFinishedTrapCaches, repoCachesConfigured } from './cache-cleanup.js';
 
 export function isVerb(v: string): v is Verb {
   return (VERBS as readonly string[]).includes(v);
@@ -94,7 +97,13 @@ export function appendStatus(
   if (verb === 'done') {
     try { observeLocalCatch(id, lane, 'finish'); } catch { /* Unknown is better than failing a report. */ }
   }
-  fs.appendFileSync(statusPath(id, lane), `${JSON.stringify(entry)}\n`);
+  const claim = readSessionClaim(id, lane);
+  const trap = claim?.by.startsWith('wt:') ? readTrap(claim.by.slice(3)) : undefined;
+  const write = (): void => { fs.appendFileSync(statusPath(id, lane), `${JSON.stringify(entry)}\n`); };
+  // Resuming a paused trap must wait for an in-progress cache removal, never race it as working.
+  if (trap && repoCachesConfigured(trap.repo)) withTrapCacheLock(trap.trapId, write);
+  else write();
+  if (trap && trap.claimed === id && (verb === 'done' || verb === 'failed')) clearFinishedTrapCaches(trap, verb);
   if (verb === 'done') {
     try {
       recordCatch(id, lane);

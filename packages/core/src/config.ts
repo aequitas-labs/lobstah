@@ -7,6 +7,7 @@ import type { Descriptor, DispatchLimits } from './types.js';
 import { lobstahHome } from './paths.js';
 import { validReviewTool } from './pr-review.js';
 import { parseReviews } from './reviews.js';
+import { validCacheGlob } from './cache-paths.js';
 import type { ReviewsConfig } from './reviews.js';
 
 export interface HarnessDefaults {
@@ -53,6 +54,8 @@ export interface RepoConfig {
   origin?: string;
   trunk: string;
   setup?: string[];
+  /** Disposable build-cache globs relative to each trap worktree; absent disables cache cleanup. */
+  cacheDirs?: string[];
   env?: Record<string, string>;
   harness?: HarnessDefaults;
   /** Opt this repo into tracker pickup (multi-repo [pickup.github] mode). */
@@ -243,6 +246,8 @@ export interface LimitsConfig {
    * claims work that creates a worktree. 0 turns the guard off.
    */
   minFreeGB: number;
+  /** Clear idle trap caches below this free-space threshold in GB; 0 disables pressure cleanup. */
+  cacheMinFreeGB: number;
   /**
    * A follow-up reuses the worktree of the newest dispatch in its chain when
    * that worktree is clean and no other dispatch is using it. false
@@ -533,6 +538,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   attachmentMaxBytes: 25 * 1024 * 1024,
   retentionDays: 0,
   minFreeGB: 0,
+  cacheMinFreeGB: 50,
   reuseWorktree: true,
   releaseOnMerge: false,
 };
@@ -557,6 +563,9 @@ function expandHome(p: string): string {
 export function loadConfig(): Config {
   const file = configPath();
   const raw = fs.existsSync(file) ? (parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
+  const cacheMinFreeGB = (raw.limits as Partial<LimitsConfig> | undefined)?.cacheMinFreeGB ?? DEFAULT_LIMITS.cacheMinFreeGB;
+  if (typeof cacheMinFreeGB !== 'number' || !Number.isFinite(cacheMinFreeGB) || cacheMinFreeGB < 0)
+    throw new Error('[limits].cacheMinFreeGB must be a non-negative number');
   const petOpen = (raw.pet as Partial<PetConfig> | undefined)?.open ?? 'tab';
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
@@ -589,6 +598,9 @@ export function loadConfig(): Config {
   refuseMoved(raw, reposRaw);
   const repos: Record<string, RepoConfig> = {};
   for (const [key, r] of Object.entries(reposRaw)) {
+    // Cache globs are deletion inputs: reject traversal and non-string lists before loading the repo.
+    if (r.cacheDirs !== undefined && (!Array.isArray(r.cacheDirs) || r.cacheDirs.some((glob) => typeof glob !== 'string' || !validCacheGlob(glob))))
+      throw new Error(`[repos.${key}].cacheDirs must be relative globs inside the worktree, without .. or absolute paths`);
     if (r.traps !== undefined && (typeof r.traps !== 'number' || !Number.isSafeInteger(r.traps) || r.traps < 0)) {
       throw new Error(`[repos.${key}].traps must be a non-negative whole number`);
     }
@@ -600,6 +612,7 @@ export function loadConfig(): Config {
       origin: r.origin ? String(r.origin) : undefined,
       trunk: String(r.trunk ?? 'main'),
       setup: Array.isArray(r.setup) ? r.setup.map(String) : undefined,
+      cacheDirs: r.cacheDirs as string[] | undefined,
       env: (r.env as Record<string, string>) ?? undefined,
       harness: parseHarness(r.harness, `[repos.${key}.harness]`),
       pickup: r.pickup === undefined ? undefined : Boolean(r.pickup),

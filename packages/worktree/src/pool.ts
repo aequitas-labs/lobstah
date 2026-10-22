@@ -18,6 +18,7 @@ import {
   readSlotMeta,
   readSlotOut,
   readPoolWarmState,
+  recoverTrapCaches,
   readWorktreeLock,
   releaseWorktreeLock,
   statfsFreeBytes,
@@ -273,6 +274,7 @@ export async function warmPool(name: string, opts: WarmOptions = {}): Promise<bo
       const meta = readSlotMeta(name, slot);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(poolsRoot(), { recursive: true });
+        recoverTrapCaches(cfg, poolsRoot(), read, log);
         let free = Infinity;
         try {
           free = need > 0 ? read(poolsRoot()) : Infinity;

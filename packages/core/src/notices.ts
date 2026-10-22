@@ -41,6 +41,7 @@ export type NoticeKind =
   | 'rate-limit-recovered'
   | 'disk-held'
   | 'disk-cleared'
+  | 'caches-cleared'
   | 'worktree-released'
   | 'push-failed'
   | 'repair-stopped'
