@@ -337,7 +337,8 @@ sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
 add "<text>" records one in free text; done <id> and drop <id> close it; ls (or bare) lists open
 ones (--all adds closed). Open todos show in man tend, man report, the glass, and the helm's
 context at every session start; a done one stays in tend and the glass, checked, until the
-04:00 day boundary. Reserved for the helm; a trap gets none.`,
+04:00 day boundary. Reserved for the helm; a trap gets none.
+Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,

@@ -91,6 +91,7 @@ getting woken instead of asking:
                             grounds; \`todo done <id>\`, \`todo drop <id>\`,
                             \`todo ls\`. Re-injected at every session start;
                             tend notes the stale ones
+                            Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.
   lobstah man ask           put a question the helm cannot decide to the human:
                             [<dispatch-id>] --title, --detail <f.md>,
                             --option (0-6), --attach. The glass shows it as a
