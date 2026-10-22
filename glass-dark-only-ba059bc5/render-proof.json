@@ -1,0 +1,154 @@
+[
+  {
+    "surface": "local",
+    "hash": "#dispatches",
+    "osLight": true,
+    "scheme": "dark",
+    "background": "rgb(14, 17, 22)",
+    "width": 390,
+    "scrollWidth": 390,
+    "logos": [
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      },
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      }
+    ]
+  },
+  {
+    "surface": "local",
+    "hash": "#deck",
+    "osLight": true,
+    "scheme": "dark",
+    "background": "rgb(14, 17, 22)",
+    "width": 1280,
+    "scrollWidth": 1280,
+    "logos": [
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      },
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      }
+    ]
+  },
+  {
+    "surface": "local",
+    "hash": "#deck",
+    "osLight": true,
+    "scheme": "dark",
+    "background": "rgb(14, 17, 22)",
+    "width": 390,
+    "scrollWidth": 390,
+    "logos": [
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      },
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      }
+    ]
+  },
+  {
+    "surface": "local",
+    "hash": "#dispatches",
+    "osLight": true,
+    "scheme": "dark",
+    "background": "rgb(14, 17, 22)",
+    "width": 1280,
+    "scrollWidth": 1280,
+    "logos": [
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      },
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      }
+    ]
+  },
+  {
+    "surface": "wharf",
+    "hash": "#jobs",
+    "osLight": true,
+    "scheme": "dark",
+    "background": "rgb(14, 17, 22)",
+    "width": 390,
+    "scrollWidth": 390,
+    "logos": [
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      },
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      }
+    ]
+  },
+  {
+    "surface": "wharf",
+    "hash": "#jobs",
+    "osLight": true,
+    "scheme": "dark",
+    "background": "rgb(14, 17, 22)",
+    "width": 1280,
+    "scrollWidth": 1280,
+    "logos": [
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      },
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      }
+    ]
+  },
+  {
+    "surface": "wharf",
+    "hash": "#deck",
+    "osLight": true,
+    "scheme": "dark",
+    "background": "rgb(14, 17, 22)",
+    "width": 390,
+    "scrollWidth": 390,
+    "logos": [
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      },
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      }
+    ]
+  },
+  {
+    "surface": "wharf",
+    "hash": "#deck",
+    "osLight": true,
+    "scheme": "dark",
+    "background": "rgb(14, 17, 22)",
+    "width": 1280,
+    "scrollWidth": 1280,
+    "logos": [
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      },
+      {
+        "loaded": true,
+        "src": "data:image/png;base64,iVBORw0K"
+      }
+    ]
+  }
+]

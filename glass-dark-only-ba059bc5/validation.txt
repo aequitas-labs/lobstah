@@ -1,0 +1,9 @@
+Final rebased head: 452bc5afe943f1c4a2c5cdd1a95970e6ddac596d
+Base includes merged #268: e1526290b0132ee838bc31fb831f186ac1d713ec
+
+pnpm build: PASS
+pnpm lint: PASS
+pnpm exec vitest run --maxWorkers 4 --minWorkers 4: 2320 tests / 213 suites PASS
+pnpm --filter @lobstah/wharf test: 74 tests / 7 suites PASS
+
+Playwright CLI 1.64.1: eight screenshots of the actual built pages with deterministic repository fixtures, --color-scheme light, 1280x900 and 390x844, full page. Separate loopback preview ports; no live fleet/account data used. See capture-commands.txt and render-proof.json. All 49 pre-existing dark tokens unchanged; #268 auth app preserved except main branding.
