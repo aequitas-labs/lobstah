@@ -378,10 +378,47 @@ export async function recoverWorktree(repo: RepoConfig, id: string): Promise<str
   );
 }
 
-/** Run the repo's `setup` commands in `dir` and record that they ran. */
+/**
+ * The environment `setup` commands run in. No person is at their terminal,
+ * so a tool must not stop at a prompt: pnpm asks before it purges a
+ * node_modules it would rebuild, and without a TTY it aborts instead
+ * (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY). The repo's own env wins.
+ */
+export function setupEnv(repo: RepoConfig): NodeJS.ProcessEnv {
+  return { ...process.env, npm_config_confirm_modules_purge: 'false', ...(repo.env ?? {}) };
+}
+
+/** A `setup` command that exited non-zero, with the end of what it printed. */
+export class SetupCommandError extends Error {
+  constructor(
+    readonly command: string,
+    readonly exitCode: number | undefined,
+    /** The last lines it printed on stdout (where pnpm reports its errors) and stderr, on one line. */
+    readonly outputTail: string,
+  ) {
+    super(`setup command \`${command}\` failed${exitCode !== undefined ? ` (exit ${exitCode})` : ''}${outputTail ? `: ${outputTail}` : ''}`);
+    this.name = 'SetupCommandError';
+  }
+}
+
+/** The last few lines a failed command printed on each stream, joined on one line. */
+function outputTail(stdout: string, stderr: string): string {
+  const last = (text: string) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-3);
+  const tail = [...last(stdout), ...last(stderr)].join(' / ');
+  return tail.length > 600 ? `…${tail.slice(-600)}` : tail;
+}
+
+/** Run the repo's `setup` commands in `dir`, with stdin closed, and record that they ran. */
 export async function runSetup(repo: RepoConfig, dir: string): Promise<void> {
   for (const cmd of repo.setup ?? []) {
-    await shell(cmd, { cwd: dir, env: { ...process.env, ...(repo.env ?? {}) } });
+    const child = shell(cmd, { cwd: dir, env: setupEnv(repo) });
+    child.child.stdin?.end();
+    try {
+      await child;
+    } catch (err) {
+      const e = err as { code?: unknown; stdout?: string; stderr?: string };
+      throw new SetupCommandError(cmd, typeof e.code === 'number' ? e.code : undefined, outputTail(e.stdout ?? '', e.stderr ?? ''));
+    }
   }
   recordSetup(repo, dir);
 }

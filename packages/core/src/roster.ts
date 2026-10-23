@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import type { TrapRegistration } from './soak.js';
 import type { WindowRef } from './window.js';
+import type { HarnessProcess } from './harness-process.js';
 import type { TrapRevision } from './worktree-safety.js';
 import { releaseTrapName, trapIdForName } from './trap-names.js';
 
@@ -68,6 +69,8 @@ export interface RosterEntry {
   /** Navigation hints from the last sign-on. Never liveness evidence. */
   window?: WindowRef;
   link?: string;
+  /** The harness process of the last sign-on: a throw does not resume a Codex thread it still holds. */
+  harnessProcess?: HarnessProcess;
   firstSignedOnAt: string;
   signedOnAt: string;
   state: RosterState;
@@ -211,6 +214,7 @@ export function recordRosterSignOn(
   setOrDrop(entry, 'createdWorktree', reg.createdWorktree || undefined);
   setOrDrop(entry, 'window', reg.window);
   setOrDrop(entry, 'link', reg.link);
+  setOrDrop(entry, 'harnessProcess', reg.harnessProcess);
   // A throw names the mode; the same session soaking again keeps it.
   setOrDrop(entry, 'startMode', opts.startMode ?? (prior?.sessionId === reg.sessionId ? prior.startMode : undefined));
   setOrDrop(entry, 'model', seen.model);
