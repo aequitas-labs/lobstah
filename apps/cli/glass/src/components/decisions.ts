@@ -21,6 +21,7 @@ import type { DecisionDraft } from '../store.js';
 import { Age, ImageThumb, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
+import { PermissionsProposalCard } from './permissions-proposal.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -263,10 +264,18 @@ export function DecisionModal({
         <b class="dtitle">${titleOf(c)}</b>
         <span class="dmeta dim">${source(c)}${source(c).length ? ' · ' : ''}${Age(c.at)} ago</span>
       </div>
-      ${c.kind === 'decision' && c.detail.trim() && html`<${Markdown} text=${c.detail} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`}
-      ${c.kind === 'decision' && attachments(c.key, c.attachments)}
-      ${draft?.sent ? html`<div class="danswered ok">answered · ${draft.sent}</div>` : answerForm(c, draft, extensions.join(','))}
-      ${legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && c.permission)}`,
+      ${
+        c.kind === 'decision' && c.permissionsProposal
+          ? html`<${PermissionsProposalCard} card=${c} draft=${draft} />`
+          : [
+              c.kind === 'decision' &&
+                c.detail.trim() &&
+                html`<${Markdown} text=${c.detail} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`,
+              c.kind === 'decision' && attachments(c.key, c.attachments),
+              draft?.sent ? html`<div class="danswered ok">answered · ${draft.sent}</div>` : answerForm(c, draft, extensions.join(',')),
+              legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && c.permission),
+            ]
+      }`,
     c.key,
   );
 }

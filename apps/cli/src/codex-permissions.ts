@@ -57,6 +57,7 @@ export function codexBasePolicy(home = lobstahHome(), worktrees = worktreesDir()
 export function codexBaseRules(): CodexRule[] {
   const person = "A person's own act, at their terminal or in lobstah's glass; an agent never runs it.";
   return [
+    { decision: 'allow', pattern: ['lobstah', 'permissions', 'propose'], justification: 'The helm may propose a change; only the person in the glass can approve applying it.' },
     { decision: 'forbidden', pattern: ['lobstah', 'grant'], justification: `Granting agent permissions: ${person}` },
     { decision: 'forbidden', pattern: ['lobstah', 'trap', ['grant', 'bypass']], justification: `Granting agent permissions: ${person}` },
     { decision: 'forbidden', pattern: ['lobstah', 'permissions', ['apply', 'remove']], justification: `Changing lobstah's agent permission profile: ${person}` },

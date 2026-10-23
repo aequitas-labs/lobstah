@@ -494,6 +494,24 @@ entries. `lobstah doctor` reports whether the profile is applied and current.
 There is one Claude Code user settings file, so there is one `[permissions]`
 table rather than one per grounds.
 
+### Propose a permission change
+
+The claimed helm can propose narrow allow-list changes without applying them:
+
+```sh
+lobstah permissions propose --reason "Routine review updates" --codex-allow 'gh pr edit' --claude-allow 'Bash(pnpm exec eslint *)'
+```
+
+Repeat either allow flag for more rules; `--codex-remove` and `--claude-remove`
+remove existing allow rules. Codex prefixes also accept JSON argv arrays.
+Forbidden commands, shell/environment wrappers and broad runner prefixes are
+refused before a card is filed; existing duplicate rules are skipped.
+The card shows the reason, exact diff and destination files. Approve applies
+with backups, Reject changes nothing, and Edit lets you untick rules and
+review the resulting diff. Changed settings require a fresh proposal.
+Only the dedicated glass action can approve; CLI and ordinary decision
+answers cannot. `apply`, `remove` and grants remain person-only actions.
+
 ## Environment
 
 | Variable | Meaning |

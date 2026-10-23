@@ -31,6 +31,7 @@ export function answerKey(key: string, req: AnswerRequest): { decision: Decision
   if (key.startsWith('decision:')) {
     // A permission card: only the glass may allow. An allow writes the grant and tells the trap.
     const asked = readDecision(key);
+    if (asked?.permissionsProposal) throw new DecisionError('Permissions proposals can only be answered through their dedicated glass action; CLI and ordinary decision answers cannot apply them.', 403);
     if (asked?.permission) {
       if (!req.option) throw new DecisionError('choose an option on the permission card; a text reply cannot grant permission', 400);
       try {

@@ -48,6 +48,21 @@ export interface PermissionAsk {
 /** The options of a permission card, in order. */
 export const PERMISSION_OPTIONS = ['Allow once', 'Allow always', 'No'] as const;
 
+/** Exact allow-list changes; approval may only select a subset of these stored rules. */
+export type PermissionRuleChange =
+  | { id: string; harness: 'codex'; action: 'add' | 'remove'; rule: string[] }
+  | { id: string; harness: 'claude'; action: 'add' | 'remove'; rule: string };
+
+/** A helm proposal, reviewed through its dedicated glass action rather than a generic answer. */
+export interface PermissionsProposal {
+  reason: string;
+  rules: PermissionRuleChange[];
+  diff: string;
+  diffHash: string;
+  reviewedState: string;
+  targets: string[];
+}
+
 export interface DecisionMeta {
   /** `decision:<rid>`. */
   key: string;
@@ -72,6 +87,7 @@ export interface DecisionMeta {
   askedAt: string;
   /** Set on a trap's permission request: what it asked to run or write. */
   permission?: PermissionAsk;
+  permissionsProposal?: PermissionsProposal;
   /** Changes with every ask; an ack holds only while it matches. */
   stateHash: string;
 }
@@ -330,6 +346,7 @@ export interface AskOptions {
   replace?: string;
   /** A trap's permission request. */
   permission?: PermissionAsk;
+  permissionsProposal?: PermissionsProposal;
   /** Per-file limit for attachments (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -412,6 +429,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     askedBy: opts.askedBy,
     askedAt,
     ...(opts.permission ? { permission: opts.permission } : {}),
+    ...(opts.permissionsProposal ? { permissionsProposal: opts.permissionsProposal } : {}),
     stateHash: createHash('sha1').update(`${key}\n${askedAt}\n${title}`).digest('hex').slice(0, 16),
   };
   writeAtomic(path.join(dir, DETAIL_MD), detail);

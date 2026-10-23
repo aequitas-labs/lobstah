@@ -10,6 +10,7 @@ import type { WaitingView } from './status.js';
 import type { Watch } from './watch.js';
 import type { ActivityView } from './activity.js';
 import type { TodoView } from './todos.js';
+import type { PermissionsProposal } from './decisions.js';
 
 /**
  * The spyglass's data contract: the JSON `lobstah glass` serves at /data.
@@ -403,6 +404,7 @@ export interface GlassDecision {
   optionNotes?: Record<string, string>;
   /** Permission cards accept only an explicit option, with no free-form inputs. */
   permission?: boolean;
+  permissionsProposal?: PermissionsProposal;
   attachments: Attachment[];
   dispatch?: string;
   lane?: Lane;

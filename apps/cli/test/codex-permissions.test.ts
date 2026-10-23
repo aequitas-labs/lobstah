@@ -100,7 +100,7 @@ describe('the Codex plan', () => {
       seen.push(command.join(' '));
       return { status: 0, stdout: '{"decision":"forbidden"}', stderr: '' };
     });
-    expect(seen).toEqual(['lobstah grant', 'lobstah trap grant', 'lobstah permissions apply', 'gh pr merge', 'vercel env pull', 'wrangler dev']);
+    expect(seen).toEqual(['lobstah permissions propose', 'lobstah grant', 'lobstah trap grant', 'lobstah permissions apply', 'gh pr merge', 'vercel env pull', 'wrangler dev']);
   });
 });
 

@@ -78,6 +78,7 @@ import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
 import { answerKey, viewKey } from './decision-answer.js';
+import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { glassReviews } from './reviews.js';
@@ -137,6 +138,8 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
   ['helm-chat', 1024],
   ['decision-viewed', 1024],
+  ['permissions-proposal-preview', 8192],
+  ['permissions-proposal-answer', 8192],
   ['report-viewed', 1024],
   ['grant-revoke', 1024],
   ['review-dismiss', 1024],
@@ -893,6 +896,21 @@ export function serveGlass(
             } catch (err) {
               if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });
               return reply(500, { ok: false, reason: 'The answer could not be stored.' });
+            }
+          }
+          case 'permissions-proposal-preview':
+          case 'permissions-proposal-answer': {
+            // A dedicated browser action under the existing glass Origin/page-token trust model.
+            const payload = body.payload as { key?: unknown; selected?: unknown; option?: unknown; diffHash?: unknown } | undefined;
+            if (!payload || typeof payload.key !== 'string' || !/^decision:[a-f0-9]{8}$/.test(payload.key))
+              return reply(400, { ok: false, reason: 'A permissions proposal key is required.' });
+            try {
+              if (body.kind === 'permissions-proposal-preview')
+                return reply(200, { ok: true, ...previewPermissionsProposal(payload.key, payload.selected) });
+              return reply(201, { ok: true, ...answerPermissionsProposal(payload.key, payload.option, payload.selected, payload.diffHash) });
+            } catch (error) {
+              if (error instanceof DecisionError) return reply(error.status, { ok: false, reason: error.message });
+              return reply(400, { ok: false, reason: error instanceof Error ? error.message : 'The permissions proposal could not be applied.' });
             }
           }
           case 'decision-viewed': {

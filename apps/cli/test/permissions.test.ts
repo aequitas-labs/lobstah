@@ -49,7 +49,7 @@ describe('the profile', () => {
     expect(p.environment.join('\n')).toMatch(/\/h\/\.lobstah\/worktrees\/ are the user's own development checkouts/);
     expect(p.environment.join('\n')).toMatch(/not Auto-Mode Bypass/);
     expect(p.environment.join('\n')).toMatch(/Merging to a repo's trunk, production deploys, creating or reading secrets/);
-    expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)']);
+    expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)']);
   });
 
   it('writes absolute rule paths the way Claude Code matches them, Windows drives included', () => {
@@ -119,7 +119,7 @@ describe('lobstah permissions', () => {
     const applied = JSON.parse(fs.readFileSync(file, 'utf8'));
     expect(applied.model).toBe('opus');
     expect(applied.permissions.allow[0]).toBe('Bash(npm run test *)');
-    expect(readOwned(file).allow).toHaveLength(2);
+    expect(readOwned(file).allow).toHaveLength(3);
     expect(await run(undefined)).toContain("lobstah's profile is applied and current");
     await run('remove', { yes: true });
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(USER);

@@ -159,7 +159,14 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   grants: { flags: { '--all': {}, '--json': {} }, maxPositionals: 0 },
   revoke: { flags: {}, positionals: '<grant-id>' },
-  permissions: { subverbs: ['show', 'apply', 'remove'], flags: { '--yes': {} }, flagSubverbs: { '--yes': ['apply', 'remove'] } },
+  permissions: {
+    subverbs: ['show', 'apply', 'remove', 'propose'],
+    flags: { '--yes': {}, '--session': { value: '<id>' }, '--reason': { value: '<why>' },
+      '--codex-allow': { value: '<argv-prefix>', repeatable: true }, '--codex-remove': { value: '<argv-prefix>', repeatable: true },
+      '--claude-allow': { value: '<Bash-rule>', repeatable: true }, '--claude-remove': { value: '<Bash-rule>', repeatable: true } },
+    flagSubverbs: { '--yes': ['apply', 'remove'], '--session': ['propose'], '--reason': ['propose'],
+      '--codex-allow': ['propose'], '--codex-remove': ['propose'], '--claude-allow': ['propose'], '--claude-remove': ['propose'] },
+  },
   stow: { flags: { '--session': { value: '<id>' }, '--wt': { value: '<trap>' }, '--remove': {}, '--keep': {}, '--force': {}, '--quiet': {} } },
   daemon: { subverbs: ['install', 'uninstall', 'restart', 'status'], flags: { '--interval': { value: '<ms>' }, '--force': {} }, flagSubverbs: { '--force': ['restart'] } },
   pick: { subverbs: ['once', 'install', 'uninstall', 'restart'], flags: {} },
@@ -364,13 +371,10 @@ Agents use grant request to ask in glass. Prefixes never cover shell joiners; --
   grants: `What a person has granted: id, what, once or always, harness, trap, who, when, uses.
 --all adds spent, expired and revoked grants. A trap checks a relayed approval here.`,
   revoke: `Revoke a grant by id. Anyone may take a permission away.`,
-  permissions: `lobstah's auto-mode profile: context for Claude Code's classifier and Codex's auto reviewer
-(lobstah's worktrees are the user's checkouts; the helm acting on the user's chat is not a bypass;
-merges, deploys, secrets stay human), Read/Edit on the worktrees, Codex rules forbidding lobstah's
-permission verbs, and [permissions] from config.toml. Bare (or show): the diff. apply merges into
-~/.claude/settings.json and ~/.codex (config.toml's [auto_review].extra_policy, rules/lobstah.rules),
-keeping everything else; remove takes lobstah's entries out. Both back up and ask first (--yes:
-don't ask). A person's command: refused in an agent's shell.`,
+  permissions: `Claude/Codex permission profile. Bare or show prints the diff; apply/remove back up and ask first (--yes skips the question).
+apply/remove are person-only terminal actions; they merge user settings, Codex policy and rules while keeping other settings.
+propose requires the claimed helm and --reason; the glass offers Approve, Reject and Edit, with no CLI approval path.
+Repeat --codex-allow/--codex-remove with argv prefixes, or --claude-allow/--claude-remove with narrow Bash rules.`,
   stow: `Sign off (worktree or --wt/--session): unfinished catches requeue; done/failed
 finalizes; unread messages wait the grace. Keeps the worktree; --remove removes one
 soak created unless dirty, untracked, unpushed, or without upstream (says why);
