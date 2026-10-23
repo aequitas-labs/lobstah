@@ -3219,7 +3219,8 @@ async function mainCli(): Promise<void> {
           one: has('--one') || undefined,
           name: opt('--name'),
           window,
-          harnessProcess: captureHarnessProcess(),
+          // Only a Codex trap's process is ended at stow or checked by a throw.
+          ...(resolved.harness === 'codex' ? { harnessProcess: captureHarnessProcess() } : {}),
           link: linkIgnored ? undefined : linkFlag,
           ...(reservation ? { trapId: reservation.trapId, startDeadline: reservation.deadline } : {}),
           ...(reservation?.batch ? { batch: reservation.batch } : {}),

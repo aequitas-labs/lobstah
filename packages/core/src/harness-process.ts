@@ -18,43 +18,71 @@ export type HarnessEnding = 'ended' | 'killed' | 'gone' | 'survived';
 
 const HARNESS_NAME = /^(codex|claude)(\.exe)?$/i;
 
-/** The parent pid and executable name of `pid`, or undefined when it is gone. */
-function parentAndName(pid: number): { parent: number; name: string } | undefined {
-  if (process.platform === 'win32') {
-    const raw = execFileSync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' | Select-Object ParentProcessId,Name | ConvertTo-Json -Compress`],
-      { encoding: 'utf8', timeout: 3000, windowsHide: true },
-    ).trim();
-    if (!raw) return undefined;
-    const row = JSON.parse(raw) as { ParentProcessId: number; Name: string };
-    return { parent: row.ParentProcessId, name: row.Name };
-  }
-  const raw = execFileSync('ps', ['-o', 'ppid=,comm=', '-p', String(pid)], { encoding: 'utf8', timeout: 3000 }).trim();
-  const match = /^(\d+)\s+(.+)$/.exec(raw);
-  return match ? { parent: Number(match[1]), name: path.basename(match[2]!) } : undefined;
+/** One process as the ancestor walk reads it. */
+interface ProcessRow {
+  parent: number;
+  name: string;
+  /** Windows lists the start time with the table; elsewhere it is read for the one process found. */
+  startedAt?: string;
 }
 
 /**
- * The nearest ancestor of this process that is a harness CLI, by executable
- * name. Only this invocation's own ancestor chain is read, never a
- * machine-wide process match.
+ * The start time PowerShell prints for a Win32_Process, the same way in the
+ * table and for one pid; `-` for a system process that reports none (an
+ * error there would fail the whole query).
  */
-export function harnessAncestorPid(from: number = process.ppid): number | undefined {
+const WIN_STARTED = "$(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { '-' })";
+
+/**
+ * The whole process table, read once: a walk that queried each hop would
+ * start a PowerShell per ancestor on Windows, seconds each.
+ */
+function processTable(): Map<number, ProcessRow> {
+  const rows = new Map<number, ProcessRow>();
+  if (process.platform === 'win32') {
+    const out = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) ${WIN_STARTED} $($_.Name)" }`],
+      { encoding: 'utf8', timeout: 15_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+    );
+    for (const line of out.split(/\r?\n/)) {
+      const m = /^(\d+) (\d+) (\S+) (.+)$/.exec(line.trim());
+      if (m) rows.set(Number(m[1]), { parent: Number(m[2]), name: m[4]!, ...(m[3] !== '-' ? { startedAt: m[3] } : {}) });
+    }
+    return rows;
+  }
+  const out = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,comm='], { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
+  for (const line of out.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+    if (m) rows.set(Number(m[1]), { parent: Number(m[2]), name: path.basename(m[3]!.trim()) });
+  }
+  return rows;
+}
+
+/** The nearest harness CLI in `from`'s ancestor chain, by executable name, from one table. */
+function walkToHarness(table: Map<number, ProcessRow>, from: number): { pid: number; row: ProcessRow } | undefined {
   let pid = from;
   for (let hop = 0; hop < 20 && pid > 1; hop++) {
-    let row: { parent: number; name: string } | undefined;
-    try {
-      row = parentAndName(pid);
-    } catch {
-      return undefined;
-    }
+    const row = table.get(pid);
     if (!row) return undefined;
-    if (HARNESS_NAME.test(row.name)) return pid;
+    if (HARNESS_NAME.test(row.name)) return { pid, row };
     if (!Number.isSafeInteger(row.parent) || row.parent === pid) return undefined;
     pid = row.parent;
   }
   return undefined;
+}
+
+/**
+ * The nearest ancestor of this process that is a harness CLI, by executable
+ * name. Only this invocation's own ancestor chain is followed, never a
+ * machine-wide process match.
+ */
+export function harnessAncestorPid(from: number = process.ppid): number | undefined {
+  try {
+    return walkToHarness(processTable(), from)?.pid;
+  } catch {
+    return undefined;
+  }
 }
 
 /** When `pid` started, as the OS reports it; undefined when it is not running (an exited, unreaped zombie included). */
@@ -63,10 +91,10 @@ export function processStartedAt(pid: number): string | undefined {
     if (process.platform === 'win32') {
       const out = execFileSync(
         'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`],
-        { encoding: 'utf8', timeout: 3000, windowsHide: true },
+        ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction SilentlyContinue | ForEach-Object { ${WIN_STARTED} }`],
+        { encoding: 'utf8', timeout: 10_000, windowsHide: true },
       ).trim();
-      return out || undefined;
+      return out && out !== '-' ? out : undefined;
     }
     const out = execFileSync('ps', ['-o', 'stat=,lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 3000, env: { ...process.env, LC_ALL: 'C' } }).trim();
     const match = /^(\S+)\s+(.+)$/.exec(out);
@@ -76,12 +104,17 @@ export function processStartedAt(pid: number): string | undefined {
   }
 }
 
-/** The harness process this sign-on runs in, when one can be found. */
+/** The harness process this sign-on runs in, when one can be found: one table read, plus one start-time read off Windows. */
 export function captureHarnessProcess(): HarnessProcess | undefined {
-  const pid = harnessAncestorPid();
-  if (pid === undefined) return undefined;
-  const startedAt = processStartedAt(pid);
-  return startedAt ? { pid, startedAt } : undefined;
+  let found: { pid: number; row: ProcessRow } | undefined;
+  try {
+    found = walkToHarness(processTable(), process.ppid);
+  } catch {
+    return undefined;
+  }
+  if (!found) return undefined;
+  const startedAt = found.row.startedAt ?? processStartedAt(found.pid);
+  return startedAt ? { pid: found.pid, startedAt } : undefined;
 }
 
 /** True while the recorded process runs: the same pid, started at the same time. */
