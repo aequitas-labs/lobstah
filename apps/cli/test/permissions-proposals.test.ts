@@ -201,3 +201,31 @@ it('Approve is one glass click when every proposed rule stays selected', async (
     expect(fs.readFileSync(path.join(codex, 'rules/lobstah.rules'), 'utf8')).toContain('# rule: forbidden lobstah permissions apply|remove');
   } finally { await page.close(); }
 });
+
+it.each([
+  { position: 1, count: 4, next: 2 },
+  { position: 3, count: 4, next: 2 },
+  { position: 0, count: 1, next: undefined },
+])('keeps the queue slot after answering a proposal at $position of $count', async ({ position, count, next }) => {
+  const { meta } = proposePermissions(input(), 'helm');
+  const keys: string[] = [];
+  const askedAt = Date.parse(meta.askedAt);
+  for (let index = 0; index < count; index++) {
+    if (index === position) continue;
+    const card = askDecision({ title: `Other decision ${index}`, options: ['Done'], askedBy: 'helm', maxBytes: 1024,
+      now: new Date(askedAt + (index < position ? -10_000 : 10_000) + index * 1000) }).meta;
+    keys[index] = card.key;
+  }
+  keys[position] = meta.key;
+  const snapshot = buildGlassSnapshot(); snapshot.focusToken = token;
+  const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now(), hash: `#decision/${encodeURIComponent(meta.key)}`, post: async (_url, request) => {
+    const response = await fetch(`${base}/requests`, { method: 'POST', headers: { ...request.headers, Origin: base }, body: request.body });
+    return { status: response.status, body: await response.json() };
+  } });
+  try {
+    (page.$('.proposal-reject') as HTMLElement).click(); await page.settle();
+    expect(readDecisionAnswer(meta.key)?.option).toBe('Reject');
+    if (next === undefined) expect(page.$('.dmodal .ddone')?.textContent).toContain('All decisions answered');
+    else expect(page.$('.dmodal')?.getAttribute('data-decision')).toBe(keys[next]);
+  } finally { await page.close(); }
+});

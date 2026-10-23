@@ -589,9 +589,9 @@ export async function sendPermissionsProposal(key: string, option: 'Approve' | '
   setDraft(key, { sending: true, error: undefined });
   try {
     await permissionsProposalRequest('permissions-proposal-answer', { key, option, selected, diffHash });
+    const previous = modalOrder();
     setDraft(key, { sending: false, sent: option === 'Approve' ? 'Permission changes applied' : 'Permission changes rejected' });
-    if (getState().decisionModal?.key === key)
-      setState({ decisionModal: nextOpen(currentCards(), getState().drafts, key) ?? { key: null } });
+    if (getState().decisionModal?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
   } catch (error) {
     setDraft(key, { sending: false, error: error instanceof Error ? error.message : 'The proposal could not be answered.' });
   }
