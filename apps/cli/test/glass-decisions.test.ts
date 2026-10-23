@@ -278,6 +278,43 @@ describe('glass: the decision modal', () => {
     expect(g.$$('#deck .drow')).toEqual([]);
   });
 
+  it('keeps the queue slot after local answers and live removals from the deck or a deep link', async () => {
+    const keys = ['decision:queue-a', 'decision:queue-b', 'decision:queue-c', 'decision:queue-d'];
+    for (const entry of ['deck', 'deep link']) for (const removal of ['answer', 'live update']) {
+      const d = fleet();
+      const attention = d.attention.find((item) => item.kind === 'decision')!;
+      const decision = d.decisions[0]!;
+      d.attention = keys.map((key, index) => ({ ...attention, key, at: ago((4 - index) * 60_000) })).reverse();
+      d.decisions = keys.map((key, index) => ({ ...decision, key, title: `Queue ${index}`, askedAt: ago((4 - index) * 60_000), detail: '', attachments: [] })).reverse();
+      const g = await page(d, { hash: entry === 'deep link' ? `#decision/${encodeURIComponent(keys[1]!)}` : '#deck', post: ok });
+      if (entry === 'deck') await show(g, keys[1]!);
+      const remove = async (closed: string, selected: string | null, position?: string) => {
+        const expectSelection = () => {
+          if (selected) {
+            expect(g.$('.dmodal')?.getAttribute('data-decision'), `${entry}, ${removal}: ${closed}`).toBe(selected);
+            expect(text(g.$('.dmodal .dpos'))).toBe(position);
+          } else expect(text(g.$('.dmodal .ddone'))).toContain('All decisions answered');
+        };
+        if (removal === 'answer') {
+          await type(g, card(g, closed)!.querySelector('textarea')!, 'Done');
+          await click(g, card(g, closed)!.querySelector('.dsend'));
+          expectSelection(); // Advance before the server's next snapshot arrives.
+        }
+        d.attention = d.attention.filter((item) => item.key !== closed);
+        d.decisions = d.decisions.filter((item) => item.key !== closed);
+        g.serve(d); await g.poll();
+        expectSelection();
+      };
+      await remove(keys[1]!, keys[2]!, '2 of 3'); // Middle: the next card takes the same slot.
+      await key(g, 'ArrowRight');
+      expect(card(g, keys[3]!)).toBeTruthy();
+      await remove(keys[3]!, keys[2]!, '2 of 2'); // Last: keep the new last, never wrap to the first.
+      await key(g, 'ArrowLeft');
+      await remove(keys[0]!, keys[2]!, '1 of 1');
+      await remove(keys[2]!, null); // Only: keep the existing empty state.
+    }
+  });
+
   it("a failed send keeps the decision and the typed text, and shows the server's reason", async () => {
     const g = await page(fleet(), { post: (url, init) => ((JSON.parse(init.body) as { kind: string }).kind === 'decision-answer' ? { status: 404, body: { ok: false, reason: 'no standing decision or question' } } : ok()) });
     await show(g, Q);
