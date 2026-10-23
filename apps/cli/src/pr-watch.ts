@@ -8,6 +8,10 @@ import {
   evidencePath,
   ghPrTitle,
   ghPrView,
+  ghPrViewDirect,
+  dispatchPrUrls,
+  githubBlockedUntil,
+  lobstahHome,
   isFailingConclusion,
   laneDirs,
   listWatches,
@@ -90,6 +94,36 @@ export function autoRegisterPrWatch(id: string, prUrl: string): Watch | undefine
     return undefined;
   }
 }
+
+/** Missing multi-PR records get one forge read, never an assumed open/draft state. */
+export function refreshMissingDispatchPrs(view: (reference: PrRef) => GhPrView = ghPrViewDirect): void {
+  if (githubBlockedUntil()) return;
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    let files: string[];
+    try { files = fs.readdirSync(laneDirs(lane).state).filter((file) => file.endsWith('.evidence')); } catch { continue; }
+    for (const file of files) {
+      const dispatchId = file.slice(0, -'.evidence'.length);
+      const evidence = readEvidence(dispatchId, lane);
+      const urls = dispatchPrUrls(evidence);
+      if (urls.length < 2) continue;
+      for (const url of urls) {
+        const reference = parsePrRef(url);
+        if (!reference || ['OPEN', 'MERGED', 'CLOSED'].includes(readPr(reference.key)?.state ?? '')) continue;
+        const attempt = `${lobstahHome()}:${reference.key}`;
+        if (missingPrRefreshes.has(attempt)) continue;
+        missingPrRefreshes.add(attempt);
+        try {
+          const observation = view(reference);
+          if (!['OPEN', 'MERGED', 'CLOSED'].includes(observation.state)) continue;
+          observePr(reference, observation, { dispatchId });
+        } catch { /* Keep unknown state unknown; a read must not guess a draft. */ }
+      }
+    }
+  }
+}
+
+/** Failed lookups are attempted only once per PR and home in this process. */
+const missingPrRefreshes = new Set<string>();
 
 /** One PR the backfill would register, retire, or give a title. */
 export interface BackfillRow {

@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { addWatch, appendStatus, ensureLayout, laneDirs, listWatches, mergeEvidence, pendingIds, readPr, readWatch, upsertPr } from '@lobstah/core';
-import type { PrEvidence } from '@lobstah/core';
-import { backfillPrWatches } from '../src/pr-watch.js';
+import type { PrEvidence, PrRef, GhPrView } from '@lobstah/core';
+import { backfillPrWatches, refreshMissingDispatchPrs } from '../src/pr-watch.js';
 import { buildTendReport } from '../src/tend.js';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { processTest } from '../../../test/process-test.js';
@@ -48,6 +48,27 @@ const files = (dir: string): string[] => {
 };
 
 describe('read commands never register PR watches', () => {
+  it('refreshes missing state once and omits a dispatch second PR that is closed and draft', () => {
+    dispatch('multi-pr');
+    mergeEvidence('multi-pr', 'work', { prUrl: url(1), prUrls: [url(1), url(2)], pr: pr(2, { draft: true, baseRefName: 'main', headRefName: 'closed-branch' }) });
+    const fetchPr = vi.fn((reference: PrRef): GhPrView => ({
+      state: reference.number === 1 ? 'MERGED' : 'CLOSED', isDraft: reference.number === 2,
+      headRefOid: `sha-${reference.number}`, baseRefName: 'main', headRefName: `branch-${reference.number}`,
+      closedAt: '2026-09-01T00:00:00Z',
+    }));
+    refreshMissingDispatchPrs(fetchPr);
+    refreshMissingDispatchPrs(fetchPr);
+    expect(fetchPr).toHaveBeenCalledTimes(2);
+    expect(readPr(key(2))).toMatchObject({ state: 'CLOSED', draft: true });
+    expect(buildTendReport().stacks).toEqual([]);
+    const snapshot = buildGlassSnapshot();
+    expect(snapshot.prs.map((record) => record.number)).toEqual([1]);
+    expect(snapshot.stacks.some((stack) => stack.numbers.includes(2) || stack.nextNumber === 2)).toBe(false);
+    expect(snapshot.dispatches.find((record) => record.id === 'multi-pr')?.prList?.map((record) => record.number)).toEqual([1]);
+    expect(snapshot.dispatches.find((record) => record.id === 'multi-pr')?.prBadge?.state).toBe('merged');
+    expect(snapshot.prs.some((record) => record.badge.state === 'draft')).toBe(false);
+    expect(listWatches()).toEqual([]);
+  });
   processTest('catch, man tend, the glass snapshot, status, ls, and prs over 20 done dispatches with PR evidence create no watch and no dispatch', () => {
     for (let n = 1; n <= 20; n++) {
       const id = `dispatch-${String(n).padStart(2, '0')}`;

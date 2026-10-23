@@ -68,7 +68,7 @@ export function deriveGlassPrs(
     // Records first; evidence only for a PR with no record yet.
     const pr: PrEvidence | undefined = record ?? latest?.pr;
     const ref = parsePrRef(url);
-    if (!ref || !pr) continue;
+    if (!ref || !pr || (pr.state !== 'OPEN' && pr.state !== 'MERGED')) continue;
     const roots = new Set(sources.map((d) => rootOf(d.id)));
     const chained = dispatches.filter((d) => roots.has(rootOf(d.id))).map((d) => d.id);
     // A record also names dispatches since culled from disk: they stay in the chain column.

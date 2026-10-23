@@ -95,6 +95,7 @@ import { worktreeView } from './worktree-view.js';
 import { backendViews, hostedAttention, hostedDecisionFrames } from './hosted-view.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
+import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import type { RepairChore } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
@@ -342,8 +343,10 @@ function evidencePrs(): Array<{ id: string; lane: Lane; pr: PrEvidence }> {
     }
     for (const f of files) {
       const id = f.slice(0, -'.evidence'.length);
-      const pr = readEvidence(id, lane).pr;
+      const evidence = readEvidence(id, lane);
+      const pr = evidence.pr;
       if (!pr) continue;
+      if ((evidence.prUrls?.length ?? 0) > 1 && !readPr(parsePrRef(pr.url)?.key ?? pr.url)?.state) continue;
       const prev = newest.get(pr.url);
       if (!prev || prev.pr.observedAt < pr.observedAt) newest.set(pr.url, { id, lane, pr });
     }
@@ -682,7 +685,8 @@ function awaitingView(id: string): Pick<TendDispatch, 'awaitingReply'> {
 
 /** Each PR of a chain with more than one, `<state> <url>` when its record exists. */
 function prsOf(chain: TendDispatch[]): string[] | undefined {
-  const urls = [...new Set(chain.flatMap((d) => d.prUrls ?? []))];
+  const urls = [...new Set(chain.flatMap((d) => d.prUrls ?? []))]
+    .filter((url) => readPr(parsePrRef(url)?.key ?? url)?.state !== 'CLOSED');
   if (urls.length < 2) return undefined;
   return urls.map((u) => {
     const ref = parsePrRef(u);
@@ -732,8 +736,10 @@ function bucketOf(uuid: string): TendDispatch['bucket'] | undefined {
   return undefined;
 }
 
-export function buildTendReport(now = Date.now()): TendReport {
+/** Fleet state with a one-time refresh for unrecorded multi-PR observations. */
+export function buildTendReport(now: number = Date.now()): TendReport {
   const cfg = loadConfig();
+  refreshMissingDispatchPrs();
 
   const heartbeat = readJson<{ heartbeat?: string }>(executorPath())?.heartbeat;
   const daemonUp = heartbeat !== undefined && now - Date.parse(heartbeat) < HEARTBEAT_STALE_MS;

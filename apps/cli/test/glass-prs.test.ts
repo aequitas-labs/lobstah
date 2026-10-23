@@ -47,7 +47,7 @@ describe('glass PR stacks', () => {
     expect(stacks.at(-1)?.numbers).toEqual([26]);
   });
 
-  it('colors PR state badges as GitHub does: merged purple, open green, draft grey, closed red', () => {
+  it('omits closed PRs and keeps badges for merged, open and draft PRs', () => {
     const rows = five();
     rows[0] = row(26, 'main', 'glass', 'MERGED');
     rows[1] = row(27, 'glass', 'evidence', 'CLOSED');
@@ -55,7 +55,7 @@ describe('glass PR stacks', () => {
     rows[3] = { ...row(32, 'kinds', 'acks'), pr: { ...row(32, 'kinds', 'acks').pr, checks: { total: 2, passed: 1, failed: 1, pending: 0 } } };
     const cls = new Map(deriveGlassPrs(rows).prs.map((p) => [p.number, prBadgeClass(p.badge)]));
     expect(cls.get(26)).toBe('pr-merged');
-    expect(cls.get(27)).toBe('pr-closed');
+    expect(cls.has(27)).toBe(false);
     expect(cls.get(29)).toBe('pr-draft');
     expect(cls.get(32)).toBe('bad'); // open with failed checks keeps its news
     expect(cls.get(33)).toBe('pr-open');
