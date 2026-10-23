@@ -143,7 +143,7 @@ describe('glass section selectors', () => {
     expect(deck.prs.map((p: { number: number }) => p.number)).toEqual([27]);
   });
 
-  it('On deck lands the newest eight catches of the last 24h, whatever the order on the wire', () => {
+  it('On deck lands the newest five catches of the last 24h, whatever the order on the wire', () => {
     const HOUR = 3600_000;
     // Ten catches in the last 24h (c0 newest, c9 oldest), one older.
     const catches = Array.from({ length: 10 }, (_, i) => ({
@@ -154,7 +154,7 @@ describe('glass section selectors', () => {
     // Shuffled on the wire: the page orders newest first itself.
     const d = { ...snapshot(), landed: [old, ...catches.slice().reverse()] };
     const deck = diff.sectionInputs(d, ui(), NOW).deck;
-    expect(deck.landed.map((c: { id: string }) => c.id)).toEqual(['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']);
+    expect(deck.landed.map((c: { id: string }) => c.id)).toEqual(['c0', 'c1', 'c2', 'c3', 'c4']);
     expect(diff.sectionInputs({ ...snapshot(), landed: [old] }, ui(), NOW).deck.landed).toEqual([]);
   });
 
