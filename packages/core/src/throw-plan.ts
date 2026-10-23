@@ -9,6 +9,7 @@ import { readReservation } from './trap-start.js';
 import { unhandledTrapMessages } from './inbox.js';
 import { gitCommonDir, protectedRevision, trapRef } from './worktree-safety.js';
 import { codexDesktopThread, codexRolloutFile } from './resume.js';
+import { harnessProcessAlive } from './harness-process.js';
 
 /**
  * `man throw --plan`: what a throw would do for each selected trap, read
@@ -128,6 +129,11 @@ function startMode(
     if (!codexRolloutFile(entry.sessionId, home)) return { action: 'cold', why: `no saved Codex rollout for thread ${sid}` };
     const desktop = codexDesktopThread(entry.sessionId, home);
     if (desktop) return { action: 'cold', why: `thread ${sid} was written by ${desktop}; the CLI does not resume desktop threads` };
+    // Codex lets one process write a thread: a resume beside the live writer
+    // fails its thread-store claim and never submits the soak prompt.
+    if (entry.harnessProcess && harnessProcessAlive(entry.harnessProcess)) {
+      return { action: 'cold', why: `thread ${sid} is still open in Codex process ${entry.harnessProcess.pid}; a resume cannot write a thread another process holds` };
+    }
     return { action: 'resume', why: `codex resume ${sid}`, from: entry.worktree };
   }
   return { action: 'cold', why: `no resume support for harness ${harness}` };

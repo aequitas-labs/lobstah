@@ -294,6 +294,20 @@ describe('man throw <name>', () => {
     expect(lobstah(reg.worktree, 'soak', '--ticket', ticket, '--session', OTHER, '--harness', 'claude').status).not.toBe(0);
   });
 
+  processTest('a failed setup names the command and what it printed in the start-failed notice', async () => {
+    const reg = stowedTrap();
+    stow(reg, true);
+    // The setup changed since the checkout last ran it, so the throw runs it again.
+    const script = path.join(tmp, 'setup-fails.cjs');
+    fs.writeFileSync(script, "console.log('ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY  Aborted removal of modules directory due to no TTY'); process.exit(1);\n");
+    fs.appendFileSync(path.join(home, 'config.toml'), `setup = ['node "${script}"']\n`);
+    const seen: TerminalLaunch[] = [];
+    await expect(throwTrap({ address: 'amber-gull', cfg: loadConfig(), adapter: idle(seen), pollMs: 50, timeoutSecs: 1 })).rejects.toThrow(/setup command .* failed \(exit 1\)/);
+    expect(seen).toHaveLength(0);
+    const notice = listNotices().find((n) => n.kind === 'trap-start-failed' && n.refId === reg.trapId);
+    expect(notice?.text).toContain('ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY');
+  });
+
   processTest('a timed-out Codex launch keeps its ticket, fences retries, and accepts late first park', async () => {
     const reg = stowedTrap();
     stow(reg, true);

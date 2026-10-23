@@ -2,12 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawn } from 'node:child_process';
 import {
   ensureLayout,
   heartbeatTrap,
   listRoster,
   loadConfig,
   planThrow,
+  processStartedAt,
   readRoster,
   recordRosterSignOn,
   rosterByAddress,
@@ -17,7 +19,7 @@ import {
   sweepGhostTraps,
   writeTrapAnchor,
 } from '../src/index.js';
-import type { TrapRegistration } from '../src/index.js';
+import type { HarnessProcess, TrapRegistration } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -139,6 +141,29 @@ describe('planThrow', () => {
     const [extension] = planThrow(loadConfig(), { all: true }, { codexHome });
     expect(extension).toMatchObject({ action: 'cold' });
     expect(extension!.why).toContain('VS Code extension');
+  });
+
+  it('a Codex trap whose last process still holds its thread starts cold; once that process is gone it resumes', async () => {
+    const thread = '01999999-8888-7777-8666-444444444444';
+    const codexHome = path.join(home, 'codex');
+    const day = path.join(codexHome, 'sessions', '2026', '10', '23');
+    fs.mkdirSync(day, { recursive: true });
+    fs.writeFileSync(path.join(day, `rollout-2026-10-23T00-00-00-${thread}.jsonl`), '{"type":"session_meta","payload":{"originator":"codex-tui"}}\n');
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    try {
+      const harnessProcess: HarnessProcess = { pid: holder.pid!, startedAt: processStartedAt(holder.pid!)! };
+      const reg = signOn('grey-tern', { harness: 'codex', sessionId: thread, harnessProcess });
+      stowTrap(reg.trapId);
+      expect(readRoster(reg.trapId)!.harnessProcess).toEqual(harnessProcess);
+      const [held] = planThrow(loadConfig(), { all: true }, { codexHome });
+      expect(held).toMatchObject({ action: 'cold' });
+      expect(held!.why).toContain(`still open in Codex process ${holder.pid}`);
+      holder.kill('SIGKILL');
+      await new Promise((resolve) => holder.once('exit', resolve));
+      expect(planThrow(loadConfig(), { all: true }, { codexHome })[0]).toMatchObject({ action: 'resume' });
+    } finally {
+      holder.kill('SIGKILL');
+    }
   });
 
   it('an unconfigured repo, a foreign anchor, and a pre-roster worktree are unresolved', () => {

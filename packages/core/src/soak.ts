@@ -10,6 +10,7 @@ import { mergeEvidence } from './evidence.js';
 import { gitPushTargets, recordPush, resolvePushTargets } from './pushes.js';
 import { postNotice } from './notices.js';
 import type { WindowRef } from './window.js';
+import type { HarnessProcess } from './harness-process.js';
 import { TERMINAL_VERBS } from './types.js';
 import { attachmentBlock } from './attachments.js';
 import { toolSummary, toolTarget, writeActivity } from './activity.js';
@@ -68,6 +69,8 @@ export interface TrapRegistration {
   titleSet?: string;
   /** Where the manning session's window lives — a companion's focus target. */
   window?: WindowRef;
+  /** The harness process the session runs in: a helm's stow ends a Codex trap's process by it. */
+  harnessProcess?: HarnessProcess;
   /** A validated deep link supplied by the session itself. */
   link?: string;
   /** The active dispatch this trap currently works, if any. */
@@ -290,6 +293,7 @@ export function signOnTrap(opts: {
   one?: boolean;
   name?: string;
   window?: WindowRef;
+  harnessProcess?: HarnessProcess;
   link?: string;
   /** A reserved trap id (a redeemed ticket): the worktree must anchor it, or anchor nothing yet. */
   trapId?: string;
@@ -325,6 +329,7 @@ export function signOnTrap(opts: {
   const iso = new Date(now).toISOString();
   const sameSession = prior?.sessionId === opts.sessionId;
   const window = opts.window ?? (sameSession ? prior.window : undefined);
+  const harnessProcess = opts.harnessProcess ?? (sameSession ? prior.harnessProcess : undefined);
   // A link, new or kept from an earlier sign-on, must fit the window.
   const link = opts.link ?? (sameSession && validSessionLink(prior?.link) ? prior.link : undefined);
   const worker = sessionWorker(opts.sessionId, opts.harness);
@@ -344,6 +349,7 @@ export function signOnTrap(opts: {
     heartbeatAt: iso,
     firstParkedAt: sameSession ? prior.firstParkedAt : undefined,
     window,
+    ...(harnessProcess ? { harnessProcess } : {}),
     link: link !== undefined && linkMismatch(link, window) === undefined ? link : undefined,
     claimed: prior?.claimed,
     ...(createdWorktree ? { createdWorktree } : {}),

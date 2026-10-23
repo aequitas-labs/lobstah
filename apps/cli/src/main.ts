@@ -116,6 +116,8 @@ import {
   displayGrounds,
   storageGrounds,
   captureWindow,
+  captureHarnessProcess,
+  endHarnessProcess,
   heartbeatHelm,
   helmChat,
   setHelmChat,
@@ -196,7 +198,7 @@ import {
   decisionDir,
   telemetryCliRun,
 } from '@lobstah/core';
-import type { Descriptor, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, Watch, WatchAttention } from '@lobstah/core';
+import type { Descriptor, HarnessEnding, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, Watch, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@lobstah/pick';
@@ -3217,6 +3219,7 @@ async function mainCli(): Promise<void> {
           one: has('--one') || undefined,
           name: opt('--name'),
           window,
+          harnessProcess: captureHarnessProcess(),
           link: linkIgnored ? undefined : linkFlag,
           ...(reservation ? { trapId: reservation.trapId, startDeadline: reservation.deadline } : {}),
           ...(reservation?.batch ? { batch: reservation.batch } : {}),
@@ -3364,6 +3367,11 @@ async function mainCli(): Promise<void> {
       const reg = stowTrap(trapId, own ? 'signed off' : 'stowed by the helm', sessionId);
       // Clear the tab name sign-on set.
       if (reg?.window) await setTerminalTitle(reg.window, '');
+      // A Codex trap stowed from outside its session: end its process. Codex
+      // lets one process write a thread, so a live one would block the resume
+      // a later throw starts. A trap stowing itself keeps its session.
+      const harnessEnding: HarnessEnding | undefined =
+        reg?.harness === 'codex' && reg.harnessProcess && !own && !sessionEnd ? await endHarnessProcess(reg.harnessProcess) : undefined;
       const released = reg ? releaseCatch(reg) : {};
       // Unread messages wait for a re-soak of this worktree within the grace
       // (a restart signs off and on again); the daemon bounces them after it.
@@ -3427,6 +3435,7 @@ async function mainCli(): Promise<void> {
           toonKV({
             ...(reg?.name ? { name: reg.name, label: trapLabel(reg) } : {}),
             ...(reg ? { stowed: `wt:${trapId}` } : { trap: `wt:${trapId}`, soaking: false }),
+            ...(harnessEnding ? { process: `${harnessEnding} (codex pid ${reg!.harnessProcess!.pid})` } : {}),
             ...(released.requeued ? { requeued: released.requeued } : {}),
             ...(released.finalized ? { finalized: released.finalized } : {}),
             ...(bounced > 0 ? { bounced: `${bounced} undelivered message(s) — returned to the helm as notices` } : {}),

@@ -28,6 +28,7 @@ export * from './pr-poll.js';
 export * from './dir-lock.js';
 export * from './watch.js';
 export * from './soak.js';
+export * from './harness-process.js';
 export * from './session-link.js';
 export * from './session-title.js';
 export * from './trap-names.js';
