@@ -1,6 +1,7 @@
 export { goalLine } from '@lobstah/core/dist/goal-line.js';
 import type {
   Attachment,
+  PermissionsProposal,
   GlassBeats,
   GlassDecision,
   GlassDispatch,
@@ -196,6 +197,7 @@ export type DecisionCard =
       options: string[];
       optionNotes?: Record<string, string>;
       permission?: boolean;
+      permissionsProposal?: PermissionsProposal;
       attachments: Attachment[];
       dispatch?: string;
       lane?: string;
@@ -231,6 +233,7 @@ export function decisionCards(
         detail: d.detail,
         options: d.options,
         ...(d.permission ? { permission: true } : {}),
+        ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
         ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
         attachments: d.attachments,
         ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),

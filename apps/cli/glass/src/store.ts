@@ -68,6 +68,12 @@ export interface DraftFile {
 
 /** One card's answer in progress, or the answer it sent. */
 export interface DecisionDraft {
+  /** Permission-proposal edits only select stored rules and carry the exact diff reviewed before approval. */
+  proposalSelection?: string[];
+  proposalEditing?: boolean;
+  proposalDiff?: string;
+  proposalDiffHash?: string;
+  proposalLoading?: boolean;
   option?: string;
   text: string;
   files: DraftFile[];

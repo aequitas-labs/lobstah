@@ -1147,6 +1147,17 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'permissions': {
+      if (pos[0] === 'propose') {
+        const { proposePermissions } = await import('./permission-proposals.js');
+        const { meta, notes } = proposePermissions({
+          reason: opt('--reason') ?? '', codexAllow: values('--codex-allow'), codexRemove: values('--codex-remove'),
+          claudeAllow: values('--claude-allow'), claudeRemove: values('--claude-remove'),
+        }, callerSession(opt('--session'))?.id);
+        const url = `${glassUrl(glassPort())}/${decisionHash(meta.key)}`;
+        console.log(toonKV({ key: meta.key, url, title: meta.title, ...(notes.length ? { note: notes.join('; ') } : {}) }));
+        console.log(toonHelp([`Point to it with [card](${url}); the answer wakes man wait as a decision-answer event`]));
+        break;
+      }
       const { permissionsCommand } = await import('./permissions.js');
       await permissionsCommand(pos[0], { yes: has('--yes') });
       break;

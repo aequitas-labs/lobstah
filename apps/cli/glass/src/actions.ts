@@ -138,6 +138,7 @@ function shownDecision() {
 export function decisionNumberKey(n: number): boolean {
   const c = shownDecision();
   if (!c || n < 1 || n > HOTKEY_MAX) return false;
+  if (c.kind === 'decision' && c.permissionsProposal) return false;
   const draft = getState().drafts[c.key];
   if (draft?.sending || draft?.sent) return false;
   const options = c.kind === 'decision' ? c.options : [];
@@ -539,4 +540,59 @@ export async function ackPrAttention(items: Array<{ key: string; stateHash: stri
         }),
       },
     });
+}
+
+/** A permissions proposal uses its own glass action; it never passes through generic decision answers. */
+async function permissionsProposalRequest(
+  kind: 'permissions-proposal-preview' | 'permissions-proposal-answer',
+  payload: Record<string, unknown>,
+): Promise<{ diff?: string; diffHash?: string }> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) throw new Error('Reload this page before answering the proposal.');
+  const response = await fetch('/requests', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
+    body: JSON.stringify({ kind, payload }),
+  });
+  const result = (await response.json()) as { ok?: boolean; reason?: string; diff?: string; diffHash?: string };
+  if (!response.ok || !result.ok) throw new Error(result.reason ?? 'The permission proposal request failed.');
+  return result;
+}
+
+/** Unticking a rule requests a new exact preview; stale preview responses cannot replace a newer selection. */
+export async function selectProposalRule(key: string, ruleId: string): Promise<void> {
+  const card = modalOrder().find((decision) => decision.key === key);
+  if (card?.kind !== 'decision' || !card.permissionsProposal) return;
+  const current = getState().drafts[key]?.proposalSelection ?? card.permissionsProposal.rules.map((rule) => rule.id);
+  const selected = current.includes(ruleId) ? current.filter((id) => id !== ruleId) : [...current, ruleId];
+  setDraft(key, { proposalSelection: selected, proposalLoading: selected.length > 0, proposalDiffHash: undefined, error: undefined });
+  if (!selected.length) return;
+  try {
+    const preview = await permissionsProposalRequest('permissions-proposal-preview', { key, selected });
+    if (JSON.stringify(getState().drafts[key]?.proposalSelection) === JSON.stringify(selected))
+      setDraft(key, { proposalDiff: preview.diff, proposalDiffHash: preview.diffHash, proposalLoading: false });
+  } catch (error) {
+    if (JSON.stringify(getState().drafts[key]?.proposalSelection) === JSON.stringify(selected))
+      setDraft(key, { proposalLoading: false, error: error instanceof Error ? error.message : 'The preview failed.' });
+  }
+}
+
+/** Approve/reject through the dedicated person-facing glass route, then advance the existing decision queue. */
+export async function sendPermissionsProposal(key: string, option: 'Approve' | 'Reject'): Promise<void> {
+  const card = modalOrder().find((decision) => decision.key === key);
+  if (card?.kind !== 'decision' || !card.permissionsProposal) return;
+  const draft = getState().drafts[key];
+  if (draft?.sending || draft?.proposalLoading) return;
+  const selected = draft?.proposalSelection ?? card.permissionsProposal.rules.map((rule) => rule.id);
+  const diffHash = draft?.proposalDiffHash ?? (draft?.proposalSelection ? undefined : card.permissionsProposal.diffHash);
+  if (option === 'Approve' && (!selected.length || !diffHash)) return;
+  setDraft(key, { sending: true, error: undefined });
+  try {
+    await permissionsProposalRequest('permissions-proposal-answer', { key, option, selected, diffHash });
+    setDraft(key, { sending: false, sent: option === 'Approve' ? 'Permission changes applied' : 'Permission changes rejected' });
+    if (getState().decisionModal?.key === key)
+      setState({ decisionModal: nextOpen(currentCards(), getState().drafts, key) ?? { key: null } });
+  } catch (error) {
+    setDraft(key, { sending: false, error: error instanceof Error ? error.message : 'The proposal could not be answered.' });
+  }
 }
