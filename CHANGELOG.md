@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.8.2 — 2026-10-23
+
+### Propose permission changes; approve them in the glass
+
+`lobstah permissions propose --codex-allow '<command prefix>' --reason "…"` (or
+`--claude-allow 'Bash(<prefix> *)'`) files one glass card with the exact profile
+diff. Approve, Reject or Edit (untick rules) there; Approve writes the rules into
+`~/.lobstah/config.toml` and applies the profile, with backups. Only the helm may
+propose. Over-broad prefixes (bare shells and interpreters, wrappers such as
+`env`/`sudo`, `rm`/`curl`/`kill`, bare package runners) and anything reaching a
+forbidden command are refused. CLI answers, `lobstah send` and ordinary decision
+answers cannot approve a proposal; agents still cannot run `permissions apply` or
+`grant`. (#288)
+
+### Per-harness trap permission defaults
+
+`[harness.codex] permissionMode` and `[harness.claude] permissionMode` set the
+mode new traps of that harness start in; a roster entry still overrides it. (#283)
+
+### Stowed Codex traps come back when thrown
+
+A stow from outside a Codex trap now ends its Codex process (interrupt, then kill
+after 5s), checked by pid and start time. Codex allows one writer per thread, so
+a live old process used to block every resume. A throw starts the trap cold while
+an old process still runs. Repo `setup` commands run unattended (no pnpm purge
+prompt, stdin closed), and a failed setup names its exit code and output tail.
+(#287)
+
+### Glass
+
+- Closing a decision keeps your place in the queue; closing the last one shows
+  the new last, not the first. (#284)
+- The deck shows up to 8 dispatches in flight and 5 landed. (#285)
+- Closed (unmerged) PRs leave stacks, PR lists and badges, and are never shown as
+  drafts. (#286)
+
+### Goals
+
+The helm checks proposed goals and suggests specific, measurable wording that
+starts with a verb before setting them. (#282)
+
 ## 0.8.1 — 2026-10-22
 
 ### Review asks name the person
