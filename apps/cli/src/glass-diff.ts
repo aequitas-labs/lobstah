@@ -34,8 +34,10 @@ import type {
 
 // On deck's Landed section: the newest LANDED_MAX catches (done or failed)
 // within the last LANDED_WINDOW_MS, whatever the report cursor says.
-export const LANDED_MAX = 8;
+export const LANDED_MAX = 5;
 export const LANDED_WINDOW_MS = 86400000;
+// On deck's in-flight section: at most INFLIGHT_MAX dispatches, then "+N more".
+export const INFLIGHT_MAX = 8;
 // On deck's traps section: at most DECK_TRAPS_MAX traps, then "+N more".
 export const DECK_TRAPS_MAX = 8;
 // On deck's reviews section: at most REVIEWS_MAX, then "+N more".

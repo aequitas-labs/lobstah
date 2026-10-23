@@ -722,15 +722,15 @@ describe('glass page: On deck', () => {
     expect(text(line)).not.toContain('ago');
   });
 
-  it('Landed · 24h: the newest eight catches, newest first, unreported badged, failed in red, nothing older', async () => {
+  it('Landed · 24h: the newest five catches, newest first, unreported badged, failed in red, nothing older', async () => {
     const g = await page(everyAttentionFleet());
     const landed = g.$$('#deck section')[2]!;
     const lines = [...landed.querySelectorAll('.deckline')];
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(5);
     expect(lines.map((l) => text(l.querySelector('b')).split(' ')[0])).toEqual(
-      Array.from({ length: 8 }, (_, i) => `1${i}aaaaaa`),
+      Array.from({ length: 5 }, (_, i) => `1${i}aaaaaa`),
     );
-    expect(lines.map((l) => !!l.querySelector('.badge.unreported'))).toEqual([true, true, true, true, false, false, false, false]);
+    expect(lines.map((l) => !!l.querySelector('.badge.unreported'))).toEqual([true, true, true, true, false]);
     expect(lines[2]!.querySelector('.badge')!.className).toBe('badge bad');
     expect(text(landed)).not.toContain('yesterday');
     expect(landed.querySelector('.deckmore')).toBeNull();
