@@ -48,23 +48,26 @@ export function receive(snapshot: GlassSnapshot): void {
     stale: false,
     modal: modal && modalLives({ snapshot, older, detail }, modal) ? modal : null,
     ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
-    // The shown decision left (answered elsewhere, withdrawn): show the oldest open one, or close.
+    // Keep the old queue slot when the shown decision leaves through a live update.
     ...(decisionModal?.key && !live.has(decisionModal.key) && !drafts[decisionModal.key]?.sent
-      ? { decisionModal: nextOpen(filteredDecisionCards(snapshot, getState().prefs), kept, decisionModal.key) }
+      ? { decisionModal: nextOpen(modalOrder(), filteredDecisionCards(snapshot, getState().prefs), kept, decisionModal.key) }
       : {}),
   });
 }
 
-/** The decision after `key` in the modal's order (oldest first), else the first; null key when none is open. */
+/** Keep the removed card's old index, clamped to the new last card; a null key shows the empty state. */
 function nextOpen(
+  previous: ReturnType<typeof decisionCards>,
   cards: ReturnType<typeof decisionCards>,
   drafts: Record<string, DecisionDraft>,
   key: string | null,
-): { key: string | null } | null {
+): { key: string | null } {
   const order = openDecisionOrder(cards, (k) => !!drafts[k]?.sent || k === key);
-  if (!order.length) return null;
-  const at = cards.find((c) => c.key === key)?.at ?? '';
-  return { key: (order.find((c) => c.at > at || (c.at === at && c.key > (key ?? ''))) ?? order[0]!).key };
+  const index = Math.max(
+    0,
+    previous.findIndex((card) => card.key === key),
+  );
+  return { key: order[Math.min(index, order.length - 1)]?.key ?? null };
 }
 
 /** The cards the page shows now. */
@@ -357,10 +360,11 @@ export async function sendAnswer(key: string): Promise<void> {
       setDraft(key, { sending: false, error: result.reason ?? `The answer was refused (${response.status}).` });
       return;
     }
+    const previous = modalOrder();
     setDraft(key, { sending: false, sent: answerSummary({ option: draft.option, text, files: files.length }) });
     // Answered in the modal: the next open decision loads, or the all-answered state.
     const open = getState().decisionModal;
-    if (open?.key === key) setState({ decisionModal: nextOpen(currentCards(), getState().drafts, key) ?? { key: null } });
+    if (open?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
   } catch {
     setDraft(key, { sending: false, error: 'The answer could not be sent.' });
   }
