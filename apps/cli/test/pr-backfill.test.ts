@@ -68,6 +68,14 @@ describe('read commands never register PR watches', () => {
     expect(snapshot.dispatches.find((record) => record.id === 'multi-pr')?.prBadge?.state).toBe('merged');
     expect(snapshot.prs.some((record) => record.badge.state === 'draft')).toBe(false);
     expect(listWatches()).toEqual([]);
+    dispatch('unknown-pr');
+    mergeEvidence('unknown-pr', 'work', { prUrl: url(3), prUrls: [url(3), url(4)], pr: pr(4, { draft: true }) });
+    const unavailable = vi.fn((): GhPrView => { throw new Error('GitHub unavailable'); });
+    refreshMissingDispatchPrs(unavailable);
+    refreshMissingDispatchPrs(unavailable);
+    expect(unavailable).toHaveBeenCalledTimes(2);
+    expect(buildTendReport().stories.find((story) => story.dispatches.some((row) => row.id === 'unknown-pr'))!.prState).toBeUndefined();
+    expect(buildGlassSnapshot().dispatches.find((row) => row.id === 'unknown-pr')?.prBadge).toBeUndefined();
   });
   processTest('catch, man tend, the glass snapshot, status, ls, and prs over 20 done dispatches with PR evidence create no watch and no dispatch', () => {
     for (let n = 1; n <= 20; n++) {

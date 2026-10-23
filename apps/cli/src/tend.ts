@@ -704,10 +704,11 @@ function prStateOf(chain: TendDispatch[]): string | undefined {
     .map((d) => parsePrRef(d.prUrl ?? d.pr?.url ?? ''))
     .filter((ref) => ref !== undefined)
     .map((ref) => readPr(ref.key))
-    .filter((pr) => pr !== undefined);
+    .filter((pr): pr is NonNullable<typeof pr> => pr !== undefined && ['OPEN', 'MERGED', 'CLOSED'].includes(pr.state));
   const record = records.sort(prNewestFirst(records))[0];
   if (record) return prBadge(record).text;
   const observed = chain
+    .filter((dispatch) => (dispatch.prUrls?.length ?? 0) < 2)
     .map((d) => d.pr)
     .filter((p): p is PrEvidence => p !== undefined)
     .sort((a, b) => b.number - a.number || b.observedAt.localeCompare(a.observedAt))[0];
