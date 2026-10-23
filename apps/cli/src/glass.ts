@@ -87,6 +87,7 @@ import { todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
+import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { startSnapshotThread } from './glass-snapshot-thread.js';
@@ -547,13 +548,16 @@ function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
   }
 }
 
-/** One disk pass, everything the page renders. Pure read. */
+/** Everything the page renders; missing multi-PR records are refreshed once. */
 /**
  * `local`: the snapshot goes to this machine's own glass page (a same-host
  * request), so starting cards may carry their start command and ticket.
  */
 export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFullSnapshot {
   const cfg = loadConfig();
+  refreshMissingDispatchPrs();
+  const prRecords = readPrs();
+  const recordsByUrl = new Map(prRecords.map((record) => [record.url, record]));
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
@@ -569,11 +573,14 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   // PR state per dispatch: the evidence badge (the shared derivation tend and
   // catch use) plus the merge view's gate verdict where pick has one.
   const dispatches: GlassDispatch[] = [...dispatchRows().map((x) => {
-    const pr = x.evidence?.pr;
+    const observation = recordsByUrl.get(x.evidence?.prUrl ?? x.evidence?.pr?.url ?? '') ??
+      ((x.evidence?.prUrls?.length ?? 0) > 1 ? undefined : x.evidence?.pr);
+    const pr = observation && ['OPEN', 'MERGED', 'CLOSED'].includes(observation.state) ? observation : undefined;
     const url = x.evidence?.prUrl ?? pr?.url;
     const open = mergeView?.open.find((p) => p.uuid === x.id || (url !== undefined && p.url === url));
     return {
       ...x,
+      ...(x.evidence ? { evidence: { ...x.evidence, pr } } : {}),
       prBadge: pr ? { ...prBadge(pr), observedAt: pr.observedAt } : undefined,
       prGate: open?.gate,
     };
@@ -585,13 +592,13 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const { prs, stacks } = deriveGlassPrs(
     dispatches.map((d) => ({ id: d.id, followUp: d.followUp, repoKey: d.repo, pr: d.evidence?.pr, prGate: d.prGate })),
     watches,
-    readPrs(),
+    prRecords,
     { readySettleSecs: cfg.readySettleSecs, now: Date.now(), trunk: (r) => prStackTrunk(cfg, r) },
   );
   // A dispatch with several PRs lists each, in stack order, with its state.
   for (const d of dispatches as GlassDispatch[]) {
     const urls = d.evidence?.prUrls;
-    if (urls && urls.length > 1) d.prList = dispatchPrList(urls, prs);
+    if (urls && urls.length > 1) d.prList = dispatchPrList(urls.filter((url) => recordsByUrl.get(url)?.state !== 'CLOSED'), prs);
   }
   const allNotices = listNotices(Number.MAX_SAFE_INTEGER);
   const live = listTraps();
