@@ -1201,10 +1201,20 @@ a.lob {
   gap: 6px;
   margin: 8px 0 6px;
 }
+/* A long label wraps inside its button; the key badge stays on the first line. */
 .btn.dopt {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
   font-size: 12px;
   padding: 3px 12px;
   color: var(--fg);
+  white-space: normal;
+  text-align: left;
+}
+.btn.dopt .dtext {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .btn.dopt.on,
 .btn.dopt.proposal-edit[aria-pressed='true'] {
@@ -1215,11 +1225,6 @@ a.lob {
 .btn.dopt .dnote {
   color: var(--dim);
   overflow-wrap: anywhere;
-}
-.dpermission .dopt {
-  max-width: 100%;
-  white-space: normal;
-  text-align: left;
 }
 .dpermission .mdpage pre.mdcode {
   white-space: pre-wrap;
@@ -1263,13 +1268,14 @@ a.lob {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Two full lines and padding; the right padding keeps text clear of the key badge. */
 .danswer {
   display: block;
   width: 100%;
-  min-height: 3.2em;
+  min-height: calc(2lh + 14px);
   max-height: 50vh;
   margin: 6px 0;
-  padding: 6px 8px;
+  padding: 6px 40px 6px 8px;
   resize: vertical;
   overflow-y: auto;
   field-sizing: content;
@@ -1295,6 +1301,7 @@ a.lob {
   background: var(--inset);
 }
 .btn.dopt .dkey {
+  flex: none;
   margin-right: 6px;
 }
 .btn.dopt.on .dkey {
@@ -1306,7 +1313,8 @@ a.lob {
 }
 .danswer-wrap .dkey-text {
   position: absolute;
-  top: 6px;
+  /* Centred on the first line: border and padding (7px), then half of a line (18.85px) less the badge (16px). */
+  top: 8px;
   right: 8px;
   pointer-events: none;
 }

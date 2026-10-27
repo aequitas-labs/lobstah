@@ -36,10 +36,11 @@ import { PermissionsProposalCard } from './permissions-proposal.js';
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
 
-/** Grow a text box with its content. */
+/** Grow a text box with its content; empty, it returns to its CSS height, which fits the placeholder. */
 const grow = (el: HTMLTextAreaElement) => {
   el.style.height = 'auto';
-  el.style.height = el.scrollHeight + 'px';
+  // scrollHeight leaves out the border, which a border-box height includes.
+  el.style.height = el.value ? el.scrollHeight + el.offsetHeight - el.clientHeight + 'px' : '';
 };
 
 function attachments(key: string, list: Attachment[]) {
@@ -71,7 +72,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
             setDraft(key, { option: o, error: undefined });
             void sendAnswer(key);
           } else toggleOption(key, o);
-        }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</button>`;
+        }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</span></button>`;
       })}</div>`,
     permission && draft?.error && html`<div class="bad derr">${draft.error}</div>`,
     !permission &&
