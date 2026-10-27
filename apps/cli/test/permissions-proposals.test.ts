@@ -12,6 +12,7 @@ import { answerKey } from '../src/decision-answer.js';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { answerPermissionsProposal, proposePermissions } from '../src/permission-proposals.js';
 import { editPermissionConfig } from '../src/permission-proposal-config.js';
+import { proposalTitle } from '../src/permission-proposal-rules.js';
 import { RULES_HEADER } from '../src/codex-permissions.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
@@ -127,6 +128,15 @@ it('Edit can untick rules, requires a matching preview, and refuses settings cha
   fs.appendFileSync(config, '\n# Someone edited the config\n');
   expect((await post('permissions-proposal-answer', { key: next.key, option: 'Approve', selected: next.permissionsProposal!.rules.map((rule) => rule.id), diffHash: next.permissionsProposal!.diffHash })).status).toBe(409);
   expect(readDecisionAnswer(next.key)).toBeUndefined();
+});
+
+it('titles a proposal by what it changes', () => {
+  const add = (id: string, rule: PermissionRuleChange['rule'], harness: 'codex' | 'claude' = 'codex'): PermissionRuleChange => ({ id, harness, action: 'add', rule } as PermissionRuleChange);
+  expect(proposalTitle([add('a', ['gh', 'pr', 'edit']), add('b', 'Bash(gh pr edit *)', 'claude')])).toBe('Allow gh pr edit for traps');
+  expect(proposalTitle([add('a', ['gh', 'pr', 'edit']), add('b', ['pnpm', 'exec', 'eslint'])])).toBe('Allow 2 commands for traps');
+  expect(proposalTitle([{ id: 'r', harness: 'claude', action: 'remove', rule: 'Bash(git status:*)' }])).toBe('Remove git status from traps');
+  expect(proposalTitle([add('a', ['gh', 'pr', 'edit']), { id: 'r', harness: 'codex', action: 'remove', rule: ['git', 'status'] }])).toBe('Change trap permissions');
+  expect(proposePermissions(input(), 'helm').meta.title).toBe('Allow gh pr edit for traps');
 });
 
 it('surgical array edits preserve comments, multiline strings, unrelated settings and removal formatting', () => {

@@ -1206,7 +1206,8 @@ a.lob {
   padding: 3px 12px;
   color: var(--fg);
 }
-.btn.dopt.on {
+.btn.dopt.on,
+.btn.dopt.proposal-edit[aria-pressed='true'] {
   background: var(--seg-on);
   border-color: var(--link);
 }
@@ -1221,6 +1222,44 @@ a.lob {
   text-align: left;
 }
 .dpermission .mdpage pre.mdcode {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A permissions proposal lists only the changing rules, one row each: sign, harness, rule. */
+.mdpage ul.proposal-changes {
+  list-style: none;
+  padding-left: 0;
+}
+.proposal-change,
+.proposal-change label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.proposal-change + .proposal-change {
+  margin-top: var(--space-1);
+}
+.proposal-change .psign {
+  flex: 0 0 1ch;
+  font-weight: 700;
+}
+.proposal-change.add .psign {
+  color: var(--ok);
+}
+.proposal-change.remove .psign {
+  color: var(--bad);
+}
+.proposal-change input {
+  align-self: center;
+  margin: 0;
+  accent-color: var(--ok);
+}
+.proposal-details summary {
+  color: var(--dim);
+  cursor: pointer;
+}
+.proposal-details pre.mdcode {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
