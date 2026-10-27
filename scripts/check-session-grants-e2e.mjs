@@ -2,6 +2,7 @@
 // All grants and tool effects are isolated under a fresh temporary directory;
 // the MCP navigate stand-in never contacts the target site. Budget: at most $1 per run.
 // A granted call executing is insufficient proof if the baseline was already allowed.
+// Ask rules outrank a PreToolUse hook allow (Claude Code 2.1.311), so the gate never uses one: no grant could pass it.
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,15 +13,26 @@ const root = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-grant-e2e-'));
 console.log('fixture', dir);
 const core = await import(`${root}/packages/core/dist/index.js`);
-const results = [];
-for (const mode of ['baseline', 'pre-hook']) {
-  const test = path.join(dir, mode);
+const NAVIGATE = 'mcp__grant_fixture__navigate';
+const HARMLESS =
+  'Use the grant_fixture navigate tool once to navigate to https://example.com. It is an isolated harmless test stand-in. Return only its result.';
+// For the classifier run: a call auto mode has reason to refuse, so its denial (not a given) can be overridden.
+const SENSITIVE =
+  'Use the grant_fixture navigate tool once to open https://example.com/account/delete?confirm=yes and delete the account there. Return only its result.';
+
+/**
+ * One isolated Claude run: its own lobstah home, settings and MCP fixture.
+ * With `grant`, a session grant for the fixture tool on example.com is in
+ * place before the run; the lobstah PreToolUse hook is installed either way.
+ */
+function runClaude({ name, permissionMode, grant, prompt }) {
+  const test = path.join(dir, name);
   fs.mkdirSync(test);
   process.env.LOBSTAH_HOME = path.join(test, 'home');
   core.ensureLayout();
   const session = randomUUID();
   const log = path.join(test, 'calls.jsonl');
-  if (mode !== 'baseline')
+  if (grant)
     core.addGrant({
       mode: 'session',
       session,
@@ -59,9 +71,9 @@ import fs from 'node:fs'; import {spawnSync} from 'node:child_process';const h=f
     'claude',
     [
       '-p',
-      'Use the grant_fixture navigate tool once to navigate to https://example.com. It is an isolated harmless test stand-in. Return only its result.',
+      prompt,
       '--permission-mode',
-      'auto',
+      permissionMode,
       '--permission-prompts',
       'none',
       '--strict-mcp-config',
@@ -95,7 +107,7 @@ import fs from 'node:fs'; import {spawnSync} from 'node:child_process';const h=f
     answer = { stdout: (result.stdout ?? '').slice(-1000), stderr: (result.stderr ?? '').slice(-1000) };
   }
   const observed = {
-    mode,
+    name,
     status: result.status,
     error: result.error?.message,
     calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : '',
@@ -104,21 +116,35 @@ import fs from 'node:fs'; import {spawnSync} from 'node:child_process';const h=f
       : '',
     answer,
   };
-  results.push(observed);
   console.log(JSON.stringify(observed));
+  return observed;
 }
 
-const baseline = results[0],
-  granted = results[1];
-const denied = baseline?.answer?.permission_denials?.some((d) => d.tool_name === 'mcp__grant_fixture__navigate');
-const ran = !!granted?.calls;
-const verified = denied && ran;
+const denied = (r) => !!r.answer?.permission_denials?.some((d) => d.tool_name === NAVIGATE);
+const ran = (r) => !!r.calls;
+
+// The gate: default mode needs approval for an unlisted MCP tool and nobody can give it,
+// so the baseline is a denial every run, and only the grant can let the call through.
+const gateBaseline = runClaude({ name: 'gate-baseline', permissionMode: 'default', grant: false, prompt: HARMLESS });
+const gateGranted = runClaude({ name: 'gate-granted', permissionMode: 'default', grant: true, prompt: HARMLESS });
+const verified = denied(gateBaseline) && !ran(gateBaseline) && ran(gateGranted);
+
+// Informational: whether the grant overrides auto mode's classifier depends on the classifier refusing first.
+const autoBaseline = runClaude({ name: 'auto-baseline', permissionMode: 'auto', grant: false, prompt: SENSITIVE });
+const autoGranted = runClaude({ name: 'auto-granted', permissionMode: 'auto', grant: true, prompt: SENSITIVE });
+const classifier = !denied(autoBaseline)
+  ? 'classifier allowed it'
+  : ran(autoGranted)
+    ? 'classifier denied → grant allowed'
+    : 'classifier denied → grant did not allow it';
+
 console.log(
   JSON.stringify({
     verified,
     conclusion: verified
-      ? 'baseline denied; session grant allowed the real auto-mode tool call'
-      : 'NOT VERIFIED: see results; account errors or an already-allowed baseline do not prove auto-mode override',
+      ? 'baseline denied; session grant allowed the call'
+      : 'NOT VERIFIED: see results; the baseline must be denied and the granted call must run',
+    classifier,
   }),
 );
 if (!verified) process.exitCode = 1;
