@@ -128,6 +128,14 @@ describe('watch backfill (explicit migration)', () => {
     expect(backfillPrWatches({ apply: true })).toEqual([]);
   });
 
+  it("registers a record-only PR only when the person authored it", () => {
+    upsertPr(pr(5, { author: 'basetim' }));
+    upsertPr(pr(6, { author: 'chrishsu' }));
+    upsertPr(pr(7));
+    expect(backfillPrWatches({ apply: true, viewer: () => 'chrishsu' })).toEqual([{ key: key(6), action: 'register', owner: 'man' }]);
+    expect(listWatches().map((w) => w.key)).toEqual([key(6)]);
+  });
+
   it('chooses the latest on-disk chain member, or man when the chain is gone', () => {
     dispatch('dispatch-a');
     dispatch('dispatch-z', 'dispatch-a');
@@ -163,11 +171,12 @@ describe('watch backfill fills PR titles', () => {
   });
 
   it('with apply, stores the fetched title without an observation, and keeps a failure on the row', () => {
-    upsertPr(pr(5, { title: undefined }));
+    upsertPr(pr(5, { title: undefined, author: 'me' }));
     upsertPr(pr(7, { title: undefined, state: 'MERGED' }));
     const before = readPr(key(5))!;
     const rows = backfillPrWatches({
       apply: true,
+      viewer: () => 'me',
       fetchTitle: (ref) => {
         if (ref.number === 7) throw new Error('gh: not found');
         return 'Fetched title';

@@ -71,7 +71,7 @@ export function cachedPrView(ref: PrRef): GhPrView | undefined {
   return cached ? { ...cached.view, fetchedAt: new Date(cached.at).toISOString() } : undefined;
 }
 
-const fields = `number url title state isDraft isCrossRepository headRefOid baseRefName baseRefOid headRefName mergeStateStatus reviewDecision createdAt mergedAt closedAt updatedAt
+const fields = `number url title author{login} state isDraft isCrossRepository headRefOid baseRefName baseRefOid headRefName mergeStateStatus reviewDecision createdAt mergedAt closedAt updatedAt
   reviews(last:100){nodes{author{login} state submittedAt} pageInfo{hasPreviousPage endCursor}}
   comments(last:1){nodes{id updatedAt} pageInfo{endCursor}}
   reviewThreads(first:100){nodes{isResolved} pageInfo{hasNextPage endCursor}}

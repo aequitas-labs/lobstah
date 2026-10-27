@@ -53,7 +53,7 @@ export function parsePrRef(s: string): PrRef | undefined {
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
-  'title,state,isDraft,isCrossRepository,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,createdAt,mergedAt,closedAt,updatedAt,reviews';
+  'title,author,state,isDraft,isCrossRepository,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,createdAt,mergedAt,closedAt,updatedAt,reviews';
 
 /** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
 export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',')
@@ -89,6 +89,8 @@ export interface GhReview {
 }
 
 export interface GhPrView {
+  /** The PR's author; decides what lobstah may watch or repair on its own. */
+  author?: { login?: string };
   createdAt?: string;
   /** When GitHub was read, preserved when a batch snapshot is replayed. */
   fetchedAt?: string;
@@ -222,6 +224,8 @@ export interface PrEvidence {
   number: number;
   /** The PR's title as last observed. Not part of the PR's state: a change is never news. */
   title?: string;
+  /** The author's GitHub login as last observed. Not part of the PR's state. */
+  author?: string;
   state: string;
   draft: boolean;
   reviewDecision: string;
@@ -326,6 +330,7 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
     url: ref.url,
     number: ref.number,
     ...(view.title ? { title: view.title } : {}),
+    ...(view.author?.login ? { author: view.author.login } : {}),
     state: view.state,
     ...(view.isCrossRepository !== undefined ? { isCrossRepository: view.isCrossRepository } : {}),
     draft: view.isDraft,

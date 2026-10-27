@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome, loadConfig, parsePrRef, PR_VIEW_FIELDS, prStackTrunk, readPrs, readWatch, cachedPrStackLink, githubBlockedUntil } from '@lobstah/core';
 import type { GhPrView, PrRef } from '@lobstah/core';
 import { addPrWatch, observePr, pollSecs } from './pr-watch.js';
+import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
 
 type LinkView = GhPrView & { number: number; url: string };
 export type FetchStackLink = (ref: PrRef, branch: string, direction: 'head' | 'base') => LinkView[];
@@ -24,10 +25,19 @@ export const ghStackLink: FetchStackLink = (ref, branch, direction) => {
  * Discover in both directions, so watch add on any member follows the chain.
  * Newly found PRs use the same preset/cadence, never a second polling loop.
  * Negative links are cached for one cadence; known links cost no extra fetch.
+ * Only the person's own PRs (and PRs a dispatch opened) join: a member
+ * someone else authored is a boundary. It gets no watch and no record, and
+ * the walk does not continue through it.
  */
-export function discoverPrStack(ref: PrRef, opts: { now?: number; fetch?: FetchStackLink; everySecs?: number } = {}): void {
+export function discoverPrStack(
+  ref: PrRef,
+  opts: { now?: number; fetch?: FetchStackLink; everySecs?: number; viewer?: () => string | undefined } = {},
+): void {
   const now = opts.now ?? Date.now(), cfg = loadConfig(), fetch = opts.fetch ?? ghStackLink;
   const everySecs = opts.everySecs ?? pollSecs();
+  let login: string | undefined | null = null;
+  const viewer = (): string | undefined => (login === null ? (login = (opts.viewer ?? (() => githubViewer(now)))()) : login);
+  const own = (pr: { author?: string; dispatches?: readonly string[] }): boolean => mayAutoWatch(prAuthorship(pr, viewer));
   const file = path.join(lobstahHome(), 'pr-stack-links.json');
   let checked: Record<string, number>;
   try { checked = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { checked = {}; }
@@ -45,7 +55,7 @@ export function discoverPrStack(ref: PrRef, opts: { now?: number; fetch?: FetchS
       const known = records.filter((r) => r.repo === p.repo && !r.isCrossRepository && r.state === 'OPEN' &&
         (direction === 'head' ? r.headRefName : r.baseRefName) === branch);
       if (known.length) {
-        known.forEach((r) => {
+        known.filter(own).forEach((r) => {
           if (!readWatch(r.key)) addPrWatch(parsePrRef(r.key)!, { everySecs });
           todo.push(r.key);
         });
@@ -62,6 +72,7 @@ export function discoverPrStack(ref: PrRef, opts: { now?: number; fetch?: FetchS
         // A branch DAG is not a stack; do not silently choose a sibling.
         if (views.length !== 1) continue;
         const view = views[0]!, found = parsePrRef(view.url)!;
+        if (!own({ author: view.author?.login, dispatches: readPrs().find((r) => r.key === found.key)?.dispatches })) continue;
         // gh pr list cannot read unresolved review threads. The normal
         // watch check supplies them; discovery must not announce readiness first.
         observePr(found, view, { now: new Date(now), discovered: true });
