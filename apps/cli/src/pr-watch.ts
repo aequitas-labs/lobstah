@@ -42,6 +42,7 @@ import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch, PrBatchRun } from
 import { githubRepoFromOrigin } from '@lobstah/pick';
 import { repoOf } from './digest.js';
 import { discoverPrStack, ghStackLink } from './pr-stack-watch.js';
+import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
 import type { FetchStackLink } from './pr-stack-watch.js';
 
 /**
@@ -144,11 +145,16 @@ export interface BackfillRow {
  * record; the only GitHub call backfill makes). A PR record takes precedence
  * over older dispatch evidence when deciding terminal state. A new watch
  * starts at cursor "0", so its first check is a baseline and forks nothing
- * (derivePrEvents).
+ * (derivePrEvents). A PR known only from its record, with no dispatch in
+ * its history, registers only when the person authored it.
  */
-export function backfillPrWatches(opts: { apply?: boolean; fetchTitle?: (ref: PrRef) => string } = {}): BackfillRow[] {
+export function backfillPrWatches(
+  opts: { apply?: boolean; fetchTitle?: (ref: PrRef) => string; viewer?: () => string | undefined } = {},
+): BackfillRow[] {
   const apply = opts.apply === true;
   const fetchTitle = opts.fetchTitle ?? ghPrTitle;
+  let login: string | undefined | null = null;
+  const viewer = (): string | undefined => (login === null ? (login = (opts.viewer ?? githubViewer)()) : login);
   const rows: BackfillRow[] = [];
   type Member = { id: string; followUp?: string; at: string };
   const members = new Map<string, Member>();
@@ -235,6 +241,9 @@ export function backfillPrWatches(opts: { apply?: boolean; fetchTitle?: (ref: Pr
       .map((id) => members.get(id))
       .filter((m): m is Member => m !== undefined)
       .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))[0];
+    // A man-owned watch from history alone covers only the person's own PRs.
+    const record = records.find((r) => r.key === key);
+    if (!owner && record && !mayAutoWatch(prAuthorship(record, viewer))) continue;
     rows.push({ key, action: 'register', owner: owner ? `dispatch:${owner.id}` : 'man' });
     if (apply) addPrWatch(ref, owner ? { forId: owner.id } : {});
   }

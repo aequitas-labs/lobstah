@@ -253,6 +253,18 @@ describe('PR watch repairs', () => {
     expect(deliverPrRepairs(() => {}, 3)).toBe(0);
   });
 
+  it("never repairs a PR someone else authored, even one a dispatch reported", () => {
+    const me = { viewer: () => 'chrishsu' };
+    upsertPr(pr({ author: 'basetim' }), OWNER);
+    upsertPr(pr({ author: 'basetim' }), OWNER);
+    expect(deliverPrRepairs(() => {}, 3, me)).toBe(0);
+    expect(queued()).toHaveLength(0);
+    expect(readPr(KEY)?.repair).toBeUndefined();
+    // The same conflict on the person's own PR is repaired.
+    upsertPr(pr({ author: 'ChrisHsu' }), OWNER);
+    expect(deliverPrRepairs(() => {}, 3, me)).toBe(1);
+  });
+
   it('does not repair a stray PR owned by a repair child of a different PR', () => {
     upsertPr(pr({ mergeStateStatus: 'CLEAN' }), OWNER);
     const child = '33333333-3333-3333-3333-333333333333';

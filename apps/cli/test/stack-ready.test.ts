@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { addWatch, appendWatchEvents, ensureLayout, listWatches, parsePrRef, prEvidence, readPrs, syncStackReadiness, upsertPr } from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
 import { discoverPrStack } from '../src/pr-stack-watch.js';
-import { observePr } from '../src/pr-watch.js';
+import { addPrWatch, observePr } from '../src/pr-watch.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildDigest, renderDigest } from '../src/digest.js';
 import { deriveGlassPrs } from '../src/glass-prs.js';
@@ -17,8 +17,10 @@ import { ackItemExists, writeAck } from '../src/acks.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
 const now = Date.parse('2026-10-07T12:00:00Z');
+/** The gh login these tests run as; every fixture PR is authored by it unless a test says otherwise. */
+const me = () => 'me';
 const view = (n: number, over: Partial<GhPrView> = {}) => ({
-  number: n, url: `https://github.com/acme/web/pull/${n}`,
+  number: n, url: `https://github.com/acme/web/pull/${n}`, author: { login: 'me' },
   state: 'OPEN', isDraft: false, isCrossRepository: false,
   headRefOid: `sha-${n}`, headRefName: `b${n}`, baseRefName: n === 1 ? 'main' : `b${n - 1}`,
   mergeStateStatus: 'CLEAN', reviewDecision: '',
@@ -35,28 +37,51 @@ describe('stack watch discovery and shared presentation', () => {
     put(start);
     const fetch = vi.fn((_ref, branch, direction) => [1, 2, 3].map((n) => view(n)).filter((v) =>
       (direction === 'head' ? v.headRefName : v.baseRefName) === branch));
-    discoverPrStack(parsePrRef(view(start).url)!, { now, fetch });
+    discoverPrStack(parsePrRef(view(start).url)!, { viewer: me, now, fetch });
     expect(readPrs().map((p) => p.number).sort()).toEqual([1, 2, 3]);
     expect(listWatches()).toHaveLength(3);
     const calls = fetch.mock.calls.map(([, branch, direction]) => `${direction}:${branch}`);
     expect(new Set(calls).size).toBe(calls.length);
-    discoverPrStack(parsePrRef(view(start).url)!, { now: now + 1000, fetch });
+    discoverPrStack(parsePrRef(view(start).url)!, { viewer: me, now: now + 1000, fetch });
     expect(fetch).toHaveBeenCalledTimes(calls.length);
+  });
+  it("stops at a member someone else authored: no watch, no record, no walk past it", () => {
+    put(2);
+    const others = { author: { login: 'basetim' } };
+    // #1 below is someone else's; #0 below it is the person's but only reachable through #1.
+    const stack = [view(0), view(1, { ...others, baseRefName: 'b0' }), view(2), view(3)];
+    const fetch = vi.fn((_ref, branch, direction) => stack.filter((v) => (direction === 'head' ? v.headRefName : v.baseRefName) === branch));
+    discoverPrStack(parsePrRef(view(2).url)!, { viewer: me, now, fetch });
+    // #2 is reached back from #3; #1 and #0 are not.
+    expect(listWatches().map((w) => w.key).sort()).toEqual(['pr:acme/web#2', 'pr:acme/web#3']);
+    expect(readPrs().map((p) => p.number).sort()).toEqual([2, 3]);
+    // A record that already exists for someone else's member gets no watch either.
+    put(1, others);
+    discoverPrStack(parsePrRef(view(2).url)!, { viewer: me, now: now + 1000, fetch });
+    expect(listWatches().map((w) => w.key).sort()).toEqual(['pr:acme/web#2', 'pr:acme/web#3']);
+  });
+  it('an explicit watch on someone else\'s PR still watches it, and its stack stays unwatched', () => {
+    const others = { author: { login: 'basetim' } };
+    put(2, others);
+    addPrWatch(parsePrRef(view(2).url)!);
+    const fetch = vi.fn((_ref, branch, direction) => [view(1, others), view(3, others)].filter((v) => (direction === 'head' ? v.headRefName : v.baseRefName) === branch));
+    discoverPrStack(parsePrRef(view(2).url)!, { viewer: me, now, fetch });
+    expect(listWatches().map((w) => [w.key, w.owner])).toEqual([['pr:acme/web#2', 'man']]);
   });
   it('ignores fork links and incomplete lookups, retries at the existing cadence', () => {
     put(2);
     const fetch = vi.fn(() => [view(1, { isCrossRepository: true })]);
-    discoverPrStack(parsePrRef(view(2).url)!, { now, fetch, everySecs: 45 });
+    discoverPrStack(parsePrRef(view(2).url)!, { viewer: me, now, fetch, everySecs: 45 });
     expect(readPrs()).toHaveLength(1); expect(listWatches()).toEqual([]);
     const calls = fetch.mock.calls.length;
-    discoverPrStack(parsePrRef(view(2).url)!, { now: now + 44000, fetch, everySecs: 45 });
+    discoverPrStack(parsePrRef(view(2).url)!, { viewer: me, now: now + 44000, fetch, everySecs: 45 });
     expect(fetch).toHaveBeenCalledTimes(calls);
-    discoverPrStack(parsePrRef(view(2).url)!, { now: now + 45000, fetch, everySecs: 45 });
+    discoverPrStack(parsePrRef(view(2).url)!, { viewer: me, now: now + 45000, fetch, everySecs: 45 });
     expect(fetch).toHaveBeenCalledTimes(calls * 2);
   });
   it('waits for discovered members to receive their normal review-thread observation', () => {
     put(1);
-    discoverPrStack(parsePrRef(view(1).url)!, { now, fetch: (_ref, branch, direction) =>
+    discoverPrStack(parsePrRef(view(1).url)!, { viewer: me, now, fetch: (_ref, branch, direction) =>
       [2, 3].map((n) => view(n)).filter((v) => (direction === 'head' ? v.headRefName : v.baseRefName) === branch) });
     expect(buildTendReport(now).stacks[0]?.readiness?.allReady).toBe(false);
     observePr(parsePrRef(view(2).url)!, view(2, { unresolvedThreads: 1 }), { now: new Date(now) });

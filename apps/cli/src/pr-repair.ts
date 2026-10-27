@@ -49,6 +49,7 @@ import type { Descriptor, GhPrView, Lane, Outcome, PrCommit, PrRecord, PrRepair,
 import { readWorkerHolds, repairHold } from './repair-holds.js';
 import { prsAbove, prsBelow } from './glass-prs.js';
 import type { RepairHold, WorkerHold } from './repair-holds.js';
+import { githubViewer, mayAutoRepair, prAuthorship } from './pr-ownership.js';
 
 export interface RepairerBeat {
   process: string;
@@ -238,6 +239,8 @@ export interface RepairOptions {
   readCommits?: (pr: PrRecord) => string | undefined;
   /** Live workers and what they hold (default: read from disk and git). */
   workerHolds?: () => WorkerHold[];
+  /** The gh-authenticated user's login (default: githubViewer). */
+  viewer?: () => string | undefined;
 }
 
 /** The watch hold on a PR, as the PR record shows it. */
@@ -333,6 +336,8 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
   const budget = Number.isFinite(cap) && cap >= 0 ? Math.floor(cap) : 3;
   let workers: WorkerHold[] | undefined;
   let records: PrRecord[] | undefined;
+  let login: string | undefined | null = null;
+  const viewer = (): string | undefined => (login === null ? (login = (opts.viewer ?? (() => githubViewer(now)))()) : login);
   let started = 0;
   for (let w of listWatches()) {
     if (started >= budget) break;
@@ -347,6 +352,8 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
     withPrLock(watch.key, () => {
       let pr = readPr(watch.key);
       if (!pr || pr.state !== 'OPEN' || pr.dispatches.length === 0 || (pr.observations ?? 0) <= 1) return;
+      // Never push to someone else's PR, even one a dispatch reported.
+      if (!mayAutoRepair(prAuthorship(pr, viewer))) return;
       pr = completedRepair(pr, now);
       // A repair's stray PR must not become a second repair chain. Its
       // ancestor chain already owns a different PR.
