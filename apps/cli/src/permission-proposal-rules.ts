@@ -127,3 +127,21 @@ export function validatePermissionProposal(input: PermissionProposalInput, curre
   if (!rules.length) throw new GrantError(`${notes.join('\n')}${notes.length ? '\n' : ''}No permission changes remain to propose.`);
   return { reason, rules, notes };
 }
+
+/** The command a rule names: a Codex argv prefix, or the command inside `Bash(...)` without its trailing wildcard. */
+export function ruleCommand(rule: PermissionRuleChange): string {
+  if (rule.harness === 'codex') return rule.rule.join(' ');
+  const inner = /^Bash\((.*)\)$/s.exec(rule.rule)?.[1];
+  return inner === undefined ? rule.rule : inner.replace(/(?::\*| \*)$/, '');
+}
+
+/** The card title says what changes: one command by name, several by count, a mix plainly. */
+export function proposalTitle(rules: readonly PermissionRuleChange[]): string {
+  const actions = new Set(rules.map((rule) => rule.action));
+  if (actions.size !== 1) return 'Change trap permissions';
+  const commands = new Set(rules.map(ruleCommand));
+  const [only] = commands;
+  const add = actions.has('add');
+  const named = commands.size === 1 && only!.length <= 120 ? only! : `${commands.size} command${commands.size === 1 ? '' : 's'}`;
+  return add ? `Allow ${named} for traps` : `Remove ${named} from traps`;
+}

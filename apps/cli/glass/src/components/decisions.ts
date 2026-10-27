@@ -266,7 +266,7 @@ export function DecisionModal({
       </div>
       ${
         c.kind === 'decision' && c.permissionsProposal
-          ? html`<${PermissionsProposalCard} card=${c} draft=${draft} />`
+          ? [html`<${PermissionsProposalCard} card=${c} draft=${draft} />`, legend(0, true)]
           : [
               c.kind === 'decision' &&
                 c.detail.trim() &&

@@ -11,7 +11,7 @@ import {
 import { claudeSettingsFile, planPermissionApplication, renderDiff, writePermissionApplication, type PermissionsApplication } from './permissions.js';
 import { codexHome, type ExecpolicyCheck } from './codex-permissions.js';
 import { editPermissionConfig } from './permission-proposal-config.js';
-import { validatePermissionProposal, type PermissionProposalInput } from './permission-proposal-rules.js';
+import { proposalTitle, validatePermissionProposal, type PermissionProposalInput } from './permission-proposal-rules.js';
 
 const permissionReviewHash = (value: string): string => createHash('sha256').update(value).digest('hex');
 const readText = (file: string): string | undefined => { try { return fs.readFileSync(file, 'utf8'); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; } };
@@ -58,7 +58,7 @@ export function proposePermissions(input: PermissionProposalInput, sessionId: st
   const validated = validatePermissionProposal(input, cfg.permissions);
   const plan = planProposal(validated.rules, env);
   const { meta } = askDecision({
-    title: 'Permissions proposal', askedBy: 'helm', grounds: helm.grounds,
+    title: proposalTitle(validated.rules), askedBy: 'helm', grounds: helm.grounds,
     options: ['Approve', 'Reject', 'Edit'], maxBytes: cfg.limits.attachmentMaxBytes,
     permissionsProposal: { reason: validated.reason, rules: validated.rules, diff: plan.diff, diffHash: permissionReviewHash(plan.diff), reviewedState: reviewedPermissionState(env), targets: plan.targets },
   });
