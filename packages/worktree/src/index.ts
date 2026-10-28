@@ -382,10 +382,12 @@ export async function recoverWorktree(repo: RepoConfig, id: string): Promise<str
  * The environment `setup` commands run in. No person is at their terminal,
  * so a tool must not stop at a prompt: pnpm asks before it purges a
  * node_modules it would rebuild, and without a TTY it aborts instead
- * (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY). The repo's own env wins.
+ * (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY). `CI=true` is what pnpm,
+ * npm and yarn read to never prompt; pnpm needs it even with the purge
+ * prompt turned off. The repo's own env wins.
  */
 export function setupEnv(repo: RepoConfig): NodeJS.ProcessEnv {
-  return { ...process.env, npm_config_confirm_modules_purge: 'false', ...(repo.env ?? {}) };
+  return { ...process.env, CI: 'true', npm_config_confirm_modules_purge: 'false', ...(repo.env ?? {}) };
 }
 
 /** A `setup` command that exited non-zero, with the end of what it printed. */

@@ -29,6 +29,12 @@ describe('repo setup runs unattended', () => {
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'seen.json'), 'utf8'))).toEqual({ purge: 'false' });
   });
 
+  it('runs the command with CI=true, so pnpm removes node_modules without a TTY', async () => {
+    const repo = repoRunning(`require('fs').writeFileSync('seen.json', JSON.stringify({ ci: process.env.CI }));`);
+    await runSetup(repo, dir);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'seen.json'), 'utf8'))).toEqual({ ci: 'true' });
+  });
+
   it('keeps a value the repo sets for itself', async () => {
     const repo = repoRunning(`require('fs').writeFileSync('seen.json', JSON.stringify({ purge: process.env.npm_config_confirm_modules_purge }));`, {
       npm_config_confirm_modules_purge: 'true',
