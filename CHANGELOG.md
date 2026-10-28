@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.8.3 — 2026-10-28
+
+### Codex traps start without the OS sandbox
+
+Codex traps in auto mode now run `--sandbox danger-full-access --ask-for-approval
+on-request` with the automatic approval reviewer and the execpolicy rules. The
+workspace-write sandbox couldn't write a linked worktree's index in the shared
+`.git`, so every commit, amend and rebase asked for approval.
+`--dangerously-bypass-approvals-and-sandbox` stays the person's bypass. (#293)
+
+### The helm keeps work moving and never blocks traps
+
+The charter and both man skills gain a short set of rules for every user: dispatch
+when a blocker clears and the next step needs no human call; work that parks gets
+a todo at once (and a card when a human must act); a stale todo gets acted on;
+a decision card is withdrawn as soon as it no longer applies. An upgrade now
+restarts a stale glass. (#294)
+
+### lobstah watches only the person's own PRs on its own
+
+Automatic PR watches and repairs now cover only PRs the person authored. Someone
+else's stack is no longer watched unless you run `watch add`. (#290)
+
+### `watch rm` records a PR's final state first
+
+`lobstah watch rm pr:…` reads the PR once and records it before removing the
+watch, so a PR closed on GitHub no longer stays `OPEN` on the glass. A failed
+read still removes the watch and warns that the record may be stale. (#296)
+
+### Glass cards
+
+The permissions proposal card looks like the other decision cards and lists only
+the changing rules, with the raw diff folded away (#291). Long decision option
+labels wrap inside the card, and the answer box shows its placeholder in WebKit
+(#292).
+
+### Checks
+
+The session-grants e2e check gates on a baseline that is always denied, so a
+grant's `allow` is the only way through (#289).
+
 ## 0.8.2 — 2026-10-23
 
 ### Propose permission changes; approve them in the glass
