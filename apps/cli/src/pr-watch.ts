@@ -458,6 +458,25 @@ export function runPrCheck(refArg: string, cursor: string | undefined, forId: st
   return JSON.stringify({ cursor: out.cursor, events, ...(out.done ? { done: true } : {}), ...(error ? { error } : {}) });
 }
 
+/**
+ * `lobstah watch rm` on a `pr:` watch: one last read records the PR's
+ * current state before the polls stop, so a PR that closed since its last
+ * poll is not left OPEN. A failed read still removes the watch; `stale`
+ * says why the record may be out of date.
+ */
+export function removePrWatch(ref: PrRef, view: (ref: PrRef) => GhPrView = ghPrView): { removed: boolean; stale?: string } {
+  const w = readWatch(ref.key);
+  if (!w) return { removed: false };
+  let stale: string | undefined;
+  try {
+    const owner = w.owner.startsWith('dispatch:') ? w.owner.slice('dispatch:'.length) : undefined;
+    observePr(ref, view(ref), { dispatchId: owner });
+  } catch (err) {
+    stale = err instanceof Error ? err.message : String(err);
+  }
+  return { removed: removeWatch(ref.key), ...(stale ? { stale } : {}) };
+}
+
 /** Poll cadence: [pickup].pollSecs, the same default as pick's. */
 export function pollSecs(): number {
   const n = Number(((rawConfig().pickup ?? {}) as Record<string, unknown>).pollSecs ?? 45);

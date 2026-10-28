@@ -19,7 +19,15 @@ import {
   runWatchCheck,
 } from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
-import { pickupOwnsReviewFeedback, runDueManWatches, stampPrEvidence, workEvents } from '../src/pr-watch.js';
+import {
+  addPrWatch,
+  observePr,
+  pickupOwnsReviewFeedback,
+  removePrWatch,
+  runDueManWatches,
+  stampPrEvidence,
+  workEvents,
+} from '../src/pr-watch.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`):
@@ -173,6 +181,25 @@ describe('evidence and routing', () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]).toMatchObject({ refId: ID, repo: 'web' });
     expect(readEvidence(ID, 'work').prUrl).toBe(URL_);
+  });
+
+  it('watch rm on a PR that closed after its last poll leaves the record CLOSED', () => {
+    observePr(ref, view('OPEN'));
+    addPrWatch(ref);
+    expect(removePrWatch(ref, () => ({ ...view('CLOSED'), closedAt: '2026-10-28T15:00:00Z' }))).toEqual({ removed: true });
+    expect(readWatch(ref.key)).toBeUndefined();
+    expect(readPr(ref.key)?.state).toBe('CLOSED');
+  });
+
+  it('watch rm still removes the watch when the last read fails, and says the record may be stale', () => {
+    observePr(ref, view('OPEN'));
+    addPrWatch(ref);
+    const out = removePrWatch(ref, () => {
+      throw new Error('HTTP 502');
+    });
+    expect(out).toEqual({ removed: true, stale: 'HTTP 502' });
+    expect(readWatch(ref.key)).toBeUndefined();
+    expect(readPr(ref.key)?.state).toBe('OPEN');
   });
 
   it('a dispatch-owned watch emits only work: failed checks, and review decisions unless pickup owns review feedback', () => {
