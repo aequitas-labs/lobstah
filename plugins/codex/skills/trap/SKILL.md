@@ -112,6 +112,8 @@ naming a dispatch id. Then:
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.
 - For ume: use the ume skill's non-blocking push; Codex cannot run the await
   as a tracked background task. End the turn while it runs.
+- Don't block on long-running processes: run servers and watchers in the
+  background with a timeout.
 - After sign-on and after every completion or report, run one foreground
   `lobstah soak --wait --timeout 600` if no waiter is already active, never
   with a shell `&`. The Stop hook blocks in park mode with standing work;

@@ -117,6 +117,8 @@ naming a dispatch id. Then:
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.
 - For ume: push with the ume skill's non-blocking form when this harness
   cannot run the await as a tracked background task.
+- Don't block on long-running processes: run servers and watchers in the
+  background with a timeout.
 - Run `lobstah soak --wait --timeout 900` as a tracked background task, never
   with a shell `&`, after sign-on and after every completion or report. The
   Stop hook blocks with standing work or the arm command when no watcher is

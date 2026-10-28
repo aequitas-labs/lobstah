@@ -86,6 +86,10 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
 
 - Background work gets dispatched, not done inline. Write briefs that stand
   alone — the worker has no other context.
+- Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.
+- Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.
+- Todos are commitments. Judge whether each one can act now or should wait. Once a todo is marked stale, act on it: do it, ask on a card, move it to the issue tracker, or drop it.
+- Withdraw a decision card (`lobstah man ask --withdraw <key>`) as soon as it no longer applies: its work finished, its PR merged or closed, or a newer card replaced it.
 - Addressed work is sticky: `--for <trap-name>` waits for that trap and never
   falls back to a headless worker. `man tend` lists live traps.
 - `man throw` opens each trap's session in Terminal.app or iTerm2 and returns

@@ -289,6 +289,22 @@ export async function startDetachedGlass(port: number): Promise<{ info: GlassInf
   }
 }
 
+/**
+ * A detached glass keeps serving the build it started with, after an upgrade
+ * too. When the tracked detached glass answers with another version than this
+ * CLI, it is stopped and started again on its port. A service or foreground
+ * glass is left alone; doctor names it.
+ */
+export async function refreshStaleGlass(): Promise<{ port: number; from: string; to: string } | undefined> {
+  const tracked = readGlassState();
+  if (!tracked) return undefined;
+  const info = await probeGlass(tracked.port);
+  if (!info || info.pid !== tracked.pid || info.version === lobstahVersion()) return undefined;
+  await stopGlass();
+  const { info: fresh } = await startDetachedGlass(tracked.port);
+  return { port: tracked.port, from: info.version, to: fresh.version };
+}
+
 export async function stopGlass(): Promise<{ stopped: boolean; port?: number; pid?: number }> {
   const state = await pruneGlassState();
   if (!state) return { stopped: false };
