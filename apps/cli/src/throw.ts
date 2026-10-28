@@ -1,6 +1,5 @@
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   dropReservation,
@@ -13,7 +12,6 @@ import {
   readTrap,
   readTrapAnchor,
   reserveTrap,
-  lobstahHome,
   configPermissionMode,
   normalizePermissionMode,
   rosterByAddress,
@@ -130,11 +128,13 @@ export function nextStartMode(cfg: Pick<Config, 'repos' | 'harness'>, entry: Pic
  * become the harness's own flags; a config key with no flag is returned as
  * unapplied. Every start names its permission mode (see startMode).
  *
- * Codex auto is `--approve-for-me`: approvals on request, routed to Codex's
- * automatic reviewer, in the workspace-write sandbox, which is the nearest
- * thing to Claude Code's auto mode. A trap pushes, opens PRs and reports,
- * so the sandbox gets the network and `writableDirs` (lobstah's home, the
- * repo's git directory) besides the worktree.
+ * Codex auto runs with no OS sandbox (`danger-full-access`); approvals are
+ * on request and go to Codex's automatic reviewer (`auto_review`, the
+ * reviewer `--approve-for-me` picks), the nearest thing to Claude Code's
+ * auto mode. A sandbox stopped a trap committing in its linked worktree,
+ * whose index lives in the repo's shared git directory. The execpolicy
+ * rules in `$CODEX_HOME/rules` still apply: `prompt` goes to the reviewer
+ * and `forbidden` is refused.
  */
 export function harnessCommand(opts: {
   harness: string;
@@ -145,8 +145,6 @@ export function harnessCommand(opts: {
   config?: Record<string, string>;
   /** `man throw --bypass`: this start runs with no permission checks. */
   bypass?: boolean;
-  /** Codex auto: directories outside the worktree the sandbox may write. */
-  writableDirs?: string[];
 }): StartCommand {
   const unapplied: string[] = [];
   const mode = startMode(opts.config, opts.bypass);
@@ -170,10 +168,9 @@ export function harnessCommand(opts: {
     if (opts.model) argv.push('-m', opts.model);
     // No approvals and no sandbox: a person's bypass.
     if (mode === 'bypassPermissions') argv.push('--dangerously-bypass-approvals-and-sandbox');
-    else if (mode === 'auto') {
-      argv.push('--approve-for-me', '-c', 'sandbox_workspace_write.network_access=true');
-      for (const dir of opts.writableDirs ?? []) argv.push('--add-dir', dir);
-    } else if (mode !== 'default') unapplied.push(`permissionMode=${mode}`);
+    // No sandbox; approvals on request, to the automatic reviewer.
+    else if (mode === 'auto') argv.push('--sandbox', 'danger-full-access', '--ask-for-approval', 'on-request', '-c', 'approvals_reviewer="auto_review"');
+    else if (mode !== 'default') unapplied.push(`permissionMode=${mode}`);
     for (const [key, value] of Object.entries(opts.config ?? {})) {
       if (key === 'effort') argv.push('-c', `model_reasoning_effort=${JSON.stringify(value)}`);
       else if (key !== 'permissionMode' && key !== 'bypass') unapplied.push(key);
@@ -183,19 +180,6 @@ export function harnessCommand(opts: {
     return { cwd: opts.cwd, env: {}, argv, unapplied, mode };
   }
   throw new Error(`no start command for harness ${opts.harness}`);
-}
-
-/**
- * Directories a Codex trap in `cwd` writes outside its worktree: lobstah's
- * home (every report and park), ume's push ledger, and the repo's git common
- * directory (a linked worktree commits there).
- */
-export function trapWritableDirs(cwd: string): string[] {
-  const dirs = [lobstahHome(), path.resolve(cwd, process.env.UME_HOME || path.join(os.homedir(), '.ume'))];
-  const git = spawnSync('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
-  const common = git.status === 0 ? git.stdout.trim() : '';
-  if (common) dirs.push(common);
-  return dirs;
 }
 
 /**
@@ -215,7 +199,6 @@ export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: stri
     cwd,
     ticket,
     ...(bypass ? { bypass } : {}),
-    writableDirs: trapWritableDirs(cwd),
     ...(resume ? { resume: entry.sessionId } : {}),
     ...(row.model ? { model: row.model } : {}),
     ...(row.config ? { config: row.config } : {}),
@@ -452,7 +435,6 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.config ? { config: profile.config } : {}),
     ...(opts.bypass ? { bypass: true } : {}),
-    writableDirs: trapWritableDirs(repo.path),
   });
   return launchAndWait(opts, {
     trapId: reservation.trapId,

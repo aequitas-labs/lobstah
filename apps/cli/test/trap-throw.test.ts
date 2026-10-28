@@ -25,7 +25,7 @@ import {
   type ThrowPlanRow,
   type TrapRegistration,
 } from '@lobstah/core';
-import { freshProfile, harnessCommand, launchShellText, nextStartMode, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, trapWritableDirs, ThrowTimeoutError, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
+import { freshProfile, harnessCommand, launchShellText, nextStartMode, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { trapRows } from '../src/trap-list.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -377,8 +377,10 @@ describe('the start command', () => {
   it('starts every trap in auto mode by default; a roster permissionMode overrides; bypass wins', () => {
     const base = { cwd: '/w', ticket: 'T' };
     expect(harnessCommand({ ...base, harness: 'claude' })).toMatchObject({ argv: ['claude', '--permission-mode', 'auto', '/lobstah:trap soak --ticket T'], mode: 'auto' });
-    expect(harnessCommand({ ...base, harness: 'codex', writableDirs: ['/home/.lobstah', '/repo/.git'] })).toMatchObject({
-      argv: ['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '--approve-for-me', '-c', 'sandbox_workspace_write.network_access=true', '--add-dir', '/home/.lobstah', '--add-dir', '/repo/.git', '$lobstah:trap soak --ticket T'],
+    // Codex auto: no OS sandbox; approvals on request, to Codex's automatic reviewer.
+    const codexAuto: StartCommand = harnessCommand({ ...base, harness: 'codex' });
+    expect(codexAuto).toMatchObject({
+      argv: ['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '--sandbox', 'danger-full-access', '--ask-for-approval', 'on-request', '-c', 'approvals_reviewer="auto_review"', '$lobstah:trap soak --ticket T'],
       mode: 'auto',
       unapplied: [],
     });
@@ -396,7 +398,7 @@ describe('the start command', () => {
     // `bypass` is a mode a profile or the config can name.
     expect(harnessCommand({ ...base, harness: 'claude', config: { permissionMode: 'bypass' } }).argv).toEqual(['claude', '--dangerously-skip-permissions', '/lobstah:trap soak --ticket T']);
     expect(harnessCommand({ ...base, harness: 'codex', config: { permissionMode: 'bypassPermissions' } }).argv).toEqual(['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
-    expect(harnessCommand({ ...base, harness: 'codex', bypass: true, writableDirs: ['/x'] }).argv).toEqual(['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
+    expect(harnessCommand({ ...base, harness: 'codex', bypass: true }).argv).toEqual(['codex', '--cd', '/w', '-c', 'tui.terminal_title=[]', '--dangerously-bypass-approvals-and-sandbox', '$lobstah:trap soak --ticket T']);
     expect([startMode(), startMode({ permissionMode: 'plan' }), startMode({ permissionMode: 'plan', bypass: 'true' }), startMode({}, true)]).toEqual([
       'auto',
       'plan',
@@ -417,26 +419,6 @@ describe('the start command', () => {
     expect(freshProfile(cfg(), 'r').config).toBeUndefined();
   });
 
-  it('gives a Codex trap only lobstah home, ume home, and the repo git directory to write', () => {
-    const priorUmeHome = process.env.UME_HOME;
-    try {
-      delete process.env.UME_HOME;
-      const dirs = trapWritableDirs(process.cwd());
-      expect(dirs.slice(0, 2)).toEqual([lobstahHome(), path.join(os.homedir(), '.ume')]);
-      expect(dirs).toHaveLength(3);
-      expect(path.isAbsolute(dirs[2]!)).toBe(true);
-      expect(trapWritableDirs(os.tmpdir())).toEqual([lobstahHome(), path.join(os.homedir(), '.ume')]);
-      process.env.UME_HOME = path.join(tmp, 'custom-ume');
-      expect(trapWritableDirs(os.tmpdir())).toEqual([lobstahHome(), process.env.UME_HOME]);
-      process.env.UME_HOME = 'relative-ume';
-      const relative = trapWritableDirs(primary);
-      expect(relative.slice(0, 2)).toEqual([lobstahHome(), path.join(primary, 'relative-ume')]);
-      expect(fs.realpathSync.native(relative[2]!)).toBe(fs.realpathSync.native(path.join(primary, '.git')));
-    } finally {
-      if (priorUmeHome === undefined) delete process.env.UME_HOME;
-      else process.env.UME_HOME = priorUmeHome;
-    }
-  });
 
   it('quotes every word of the shell text a terminal runs', () => {
     expect(launchShellText({ cwd: "/tmp/it's here", env: { A: 'x y' }, argv: ['claude', '$lobstah:trap soak --ticket T'] })).toBe(
