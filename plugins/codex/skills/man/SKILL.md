@@ -88,6 +88,8 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
   alone — the worker has no other context.
 - Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.
 - Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.
+- Todos are commitments. When the charter resurfaces them, act on each one: do it, ask on a card, move it to the issue tracker, or drop it. Don't let a todo resurface twice untouched.
+- Withdraw a decision card (`lobstah man ask --withdraw <key>`) as soon as it no longer applies: its work finished, its PR merged or closed, or a newer card replaced it.
 - Addressed work is sticky: `--for <trap-name>` waits for that trap and never
   falls back to a headless worker. `man tend` lists live traps.
 - `man throw` opens each trap's session in Terminal.app or iTerm2 and returns

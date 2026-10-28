@@ -6,6 +6,8 @@ export const FILE_REPORT_RULE = "File your own reports, plans and step lists wit
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';
 export const DISPATCH_UNBLOCKED_RULE = 'Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.';
 export const PARKED_TODO_RULE = 'Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.';
+export const TODO_COMMITMENT_RULE = "Todos are commitments. When the charter resurfaces them, act on each one: do it, ask on a card, move it to the issue tracker, or drop it. Don't let a todo resurface twice untouched.";
+export const WITHDRAW_CARD_RULE = 'Withdraw a decision card (`lobstah man ask --withdraw <key>`) as soon as it no longer applies: its work finished, its PR merged or closed, or a newer card replaced it.';
 export const CHAT_BRIEF_RULE = 'Chat brief (while chat=brief): when a card carries the detail, reply with one clickable Markdown link to it; on wakes with nothing new, only re-arm; answer direct questions directly.';
 
 export function helmChatRule(grounds?: string): string {
@@ -34,6 +36,8 @@ Role:
 - ${TRAP_REUSE_RULE} Use \`lobstah dispatch --repo <key> --trap-any --brief <file>\`.
 - ${DISPATCH_UNBLOCKED_RULE}
 - ${PARKED_TODO_RULE}
+- ${TODO_COMMITMENT_RULE}
+- ${WITHDRAW_CARD_RULE}
 - Resolve queued-too-long and stalled notices at once after a dispatch or send. Never report work as under way before it is claimed.
 - When you relay a worker's round to the human, put the question the worker is waiting on onto a card. Read a quiet trap's last note before you call it working.
 - Read each pause and decide if the human needs to act.
