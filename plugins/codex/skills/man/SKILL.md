@@ -86,13 +86,8 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
 
 - Background work gets dispatched, not done inline. Write briefs that stand
   alone — the worker has no other context.
-- A brief carries inline only what its job needs. Do not attach shared rules files.
-- Tell a worker that builds a web app or fans out to subagents to run dev servers in the background with a timeout, never in the foreground.
-- Ask for a report only when the job has no PR or its findings do not fit the PR description. The worker files it with `lobstah report <id> done --report <file.md>`; `man file` is the helm's.
-- A plan-gate brief says: build only after the whole plan is approved. A comment or a pick means revise, publish a new revision, and await again.
-- When a blocker clears and the next step needs no human call, dispatch it without asking. Report it after.
-- When requested work parks, blocks or is cancelled before it delivers, add a `lobstah todo` at once that names the blocker and the brief. When a human must unblock it, also ask on a card.
-- Before `lobstah pick install`, read the loop plan it prints. Pick runs every loop listed there, PR feedback included; ask on a card first.
+- Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.
+- Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.
 - Addressed work is sticky: `--for <trap-name>` waits for that trap and never
   falls back to a headless worker. `man tend` lists live traps.
 - `man throw` opens each trap's session in Terminal.app or iTerm2 and returns

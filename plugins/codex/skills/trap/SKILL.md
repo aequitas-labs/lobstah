@@ -95,10 +95,8 @@ naming a dispatch id. Then:
 - `report <id> done` refuses while the dispatch has unread messages: it
   prints them, marks them read, and writes nothing. Act on them, then report
   done again.
-- File a report only when it helps: the job has no PR, or its findings do
-  not fit the PR description. End with
+- A dispatch whose output is findings rather than code ends with
   `done "<one-line note>" --report <file.md>`, its images added with `--attach`.
-  `lobstah man file` is the helm's; it files under the helm, not the dispatch.
 - After you act on a message from the helm, say what you did in your next
   note. Any verb reaches the helm.
 - Before you wait on something external (a PR review or a deploy), report
@@ -114,10 +112,8 @@ naming a dispatch id. Then:
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.
 - For ume: use the ume skill's non-blocking push; Codex cannot run the await
   as a tracked background task. End the turn while it runs.
-- At a ume plan gate, build only after the whole plan is approved. A comment
-  or a pick is a review round: revise, publish a new revision, and await again.
-- Run dev servers in the background with a timeout. Never block on one, or
-  on an interactive browser check. Tell your subagents the same.
+- Don't block on long-running processes: run servers and watchers in the
+  background with a timeout.
 - After sign-on and after every completion or report, run one foreground
   `lobstah soak --wait --timeout 600` if no waiter is already active, never
   with a shell `&`. The Stop hook blocks in park mode with standing work;
