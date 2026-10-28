@@ -246,6 +246,7 @@ import {
   syncPrWatches,
   runDueManWatches,
   pollSecs,
+  removePrWatch,
   runPrCheck,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
@@ -3790,6 +3791,13 @@ async function mainCli(): Promise<void> {
       if (sub === 'rm') {
         const key = pos[1];
         if (!key) throw new Error('watch rm requires a key');
+        const prRef = parsePrRef(key);
+        if (prRef) {
+          const { removed, stale } = removePrWatch(prRef);
+          console.log(toonKV({ key: prRef.key, removed }));
+          if (stale) console.log(`warning: could not refresh ${prRef.key} before removing its watch; its record may be stale (${stale})`);
+          break;
+        }
         console.log(toonKV({ key, removed: removeWatch(key) }));
         break;
       }
