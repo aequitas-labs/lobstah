@@ -251,10 +251,11 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
     const port = glassPort();
     const info = await probeGlass(port);
     const installed = process.platform === 'win32' ? false : fs.existsSync(serviceFile('glass'));
+    const stale = info && info.version !== lobstahVersion() ? `; CLI is v${lobstahVersion()}: run lobstah glass restart` : '';
     push(
       'glass',
-      info ? 'ok' : 'warn',
-      `${installed ? 'service installed' : 'service not installed'}; ${info ? `${glassUrl(port)} answering (v${info.version})` : `${glassUrl(port)} not answering (CLI v${lobstahVersion()})`}`,
+      info && !stale ? 'ok' : 'warn',
+      `${installed ? 'service installed' : 'service not installed'}; ${info ? `${glassUrl(port)} answering (v${info.version})${stale}` : `${glassUrl(port)} not answering (CLI v${lobstahVersion()})`}`,
     );
   } catch (err) {
     push('glass', 'warn', err instanceof Error ? err.message : String(err));

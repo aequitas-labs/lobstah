@@ -228,6 +228,7 @@ import {
   glassUrl,
   probeGlass,
   readGlassState,
+  refreshStaleGlass,
   startDetachedGlass,
   stopGlass,
 } from './glass-lifecycle.js';
@@ -3503,7 +3504,12 @@ async function mainCli(): Promise<void> {
         break;
       }
       let hostedBroker: Awaited<ReturnType<typeof import('./wharf-trap-broker.js').startWharfBroker>> | undefined;
-      if (kind === 'daemon')
+      if (kind === 'daemon') {
+        // An upgrade restarts the daemon; the detached glass would keep serving the old build.
+        void refreshStaleGlass().then(
+          (r) => r && console.log(`glass restarted on ${glassUrl(r.port)}: v${r.from} → v${r.to}`),
+          (err: unknown) => console.log(`glass refresh failed: ${err instanceof Error ? err.message : String(err)}`),
+        );
         await daemon(Number(opt('--interval') ?? '5000'), console.log, {
           hostedStart: async () => {
             if (!loadConfig().wharves || !Object.keys(loadConfig().wharves!).length) return;
@@ -3522,7 +3528,7 @@ async function mainCli(): Promise<void> {
             stampRepairerBeat(now);
           },
         });
-      else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
+      } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;
     }
     case 'pet': {
@@ -3626,8 +3632,9 @@ async function mainCli(): Promise<void> {
         break;
       }
       if (has('--detach')) {
+        const refreshed = await refreshStaleGlass();
         const { info, already } = await startDetachedGlass(port);
-        console.log(toonKV(glassLines(port, info, already)));
+        console.log(toonKV({ ...glassLines(port, info, already && !refreshed), ...(refreshed ? { restarted: `v${refreshed.from} → v${refreshed.to}` } : {}) }));
         break;
       }
       const existing = await probeGlass(port);

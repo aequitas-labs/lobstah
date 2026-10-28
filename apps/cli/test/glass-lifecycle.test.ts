@@ -124,6 +124,45 @@ describe('glass process lifecycle', () => {
     });
   });
 
+  it('--detach restarts a tracked detached glass that runs another version', async () => {
+    // A separate process stands in for the old glass, so stopping it frees the port.
+    const old = spawn(
+      process.execPath,
+      ['-e', `require('http').createServer((q, s) => s.end(JSON.stringify({ service: 'lobstah-glass', version: '0.0.1', pid: process.pid }))).listen(${port}, '127.0.0.1')`],
+      { stdio: 'ignore' },
+    );
+    try {
+      let info = await probeGlass(port);
+      for (let i = 0; !info && i < 50; i++) info = await new Promise((r) => setTimeout(r, 100)).then(() => probeGlass(port));
+      expect(info).toMatchObject({ version: '0.0.1', pid: old.pid });
+      const file = path.join(home, 'state', 'glass.json');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ pid: old.pid, port, version: '0.0.1', startedAt: new Date().toISOString() }));
+      const detach = await runAsync('glass', '--detach');
+      const fresh = await track(port);
+      expect(detach.status, detach.stderr).toBe(0);
+      expect(detach.stdout).toContain(`restarted: v0.0.1 → v${fresh!.version}`);
+      expect(detach.stdout).not.toContain('already');
+      expect(fresh!.pid).not.toBe(old.pid);
+      expect(readGlassState()?.pid).toBe(fresh!.pid);
+    } finally {
+      await stopChildren([old]);
+    }
+  });
+
+  it('doctor warns when the glass runs another version than the CLI', async () => {
+    const server = http.createServer((_req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ service: 'lobstah-glass', version: '0.0.1', pid: process.pid }));
+    });
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    try {
+      expect((await runAsync('doctor')).stdout).toMatch(/glass,warn,.*answering \(v0\.0\.1\); CLI is v.*: run lobstah glass restart/);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('uses the configured port unless the environment overrides it', () => {
     expect(glassPort()).toBe(port);
     process.env.LOBSTAH_GLASS_PORT = String(port === 65535 ? port - 1 : port + 1);

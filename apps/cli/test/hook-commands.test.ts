@@ -8,7 +8,7 @@ import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, s
   noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop, baitBrief } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
-import { charter, FILE_REPORT_RULE, HELM_REMINDER } from '../src/charter.js';
+import { BRIEF_SCOPE_RULE, charter, DISPATCH_UNBLOCKED_RULE, FILE_REPORT_RULE, HELM_REMINDER, PARKED_TODO_RULE } from '../src/charter.js';
 import { attentionNow } from '@lobstah/supervisor';
 import { DEFAULT_WAIT, IdleWait } from '@lobstah/core';
 
@@ -182,6 +182,16 @@ describe('lobstah hook user-prompt-submit', () => {
       const skill = fs.readFileSync(fileURLToPath(new URL(`../../../plugins/${plugin}/skills/man/SKILL.md`, import.meta.url)), 'utf8');
       expect(skill).toContain(FILE_REPORT_RULE);
       expect(skill.split('## Working set')[1]?.split('## Rules')[0]).toContain('lobstah man file <file.md> [--attach <img>] [--title <t>]');
+    }
+  });
+
+  it('the charter Role and both man skills carry the brief, unblocked-dispatch and parked-work rules', () => {
+    const role = charter({ name: 'fleet', repos: ['web'] }).split('Role:')[1]?.split('Fences:')[0];
+    for (const rule of [BRIEF_SCOPE_RULE, DISPATCH_UNBLOCKED_RULE, PARKED_TODO_RULE]) {
+      expect(role).toContain(rule);
+      for (const plugin of ['claude-code', 'codex']) {
+        expect(fs.readFileSync(fileURLToPath(new URL(`../../../plugins/${plugin}/skills/man/SKILL.md`, import.meta.url)), 'utf8')).toContain(rule);
+      }
     }
   });
 
