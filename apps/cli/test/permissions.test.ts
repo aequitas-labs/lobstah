@@ -44,12 +44,12 @@ const USER = {
 };
 
 describe('the profile', () => {
-  it('names lobstah worktrees as dev checkouts, the helm acting on the chat as no bypass, and human-only actions; allows Read/Edit there', () => {
+  it('names lobstah worktrees as dev checkouts and the helm acting on the chat as no bypass, adds no restriction; allows Read/Edit there', () => {
     const p = baseProfile('/h/.lobstah', '/h/.lobstah/worktrees');
     expect(p.environment.join('\n')).toMatch(/\/h\/\.lobstah\/worktrees\/ are the user's own development checkouts/);
     expect(p.environment.join('\n')).toMatch(/not Auto-Mode Bypass/);
-    expect(p.environment.join('\n')).toMatch(/Merging to a repo's trunk, production deploys, creating or reading secrets/);
-    expect(p.environment.join('\n')).toMatch(/the user's own answer on a lobstah glass decision card, authorizes them\. .*stored in \/h\/\.lobstah\/decisions\/<key>\/answer\.json/);
+    expect(p.environment).toHaveLength(2);
+    expect(p.deny).toEqual([]);
     expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)']);
   });
 
@@ -93,6 +93,15 @@ describe('merging into Claude Code settings', () => {
     expect(planProfile(edited, profile({ environment: [newer] }), first.owned).settings).toEqual({ autoMode: { environment: ['$defaults', 'mine', newer] } });
     // Without an owned entry under that heading, the same text is the user's and never claimed.
     expect(planProfile(edited, profile({ environment: [next] })).owned.environment).toEqual([]);
+  });
+
+  it('a re-apply retires the old human-only entry, hand-edited text included, and keeps the rest', () => {
+    const base = baseProfile('/h/.lobstah', '/h/.lobstah/worktrees');
+    const owned = { environment: ['$defaults', ...base.environment, '**lobstah human-only actions**: recorded text'], allow: base.allow, deny: [] };
+    const settings = { model: 'opus', permissions: { allow: [...base.allow] }, autoMode: { environment: ['$defaults', ...base.environment, '**lobstah human-only actions**: hand-edited text', 'mine'] } };
+    const plan = planProfile(settings, base, owned);
+    expect(plan.changes).toEqual([{ op: '-', at: 'autoMode.environment', entry: '**lobstah human-only actions**: hand-edited text' }]);
+    expect(plan.settings).toEqual({ ...settings, autoMode: { environment: ['$defaults', ...base.environment, 'mine'] } });
   });
 
   it("leaves an existing environment list's choice about $defaults alone, and keeps $defaults while the user's entries remain", () => {

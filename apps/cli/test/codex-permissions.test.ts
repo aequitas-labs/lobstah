@@ -3,9 +3,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
-import { BEGIN, END, codexBasePolicy, codexPermissionsRow, mergePolicy, planCodex, RULES_HEADER, setExtraPolicy, writeCodexPlan } from '../src/codex-permissions.js';
+import { BEGIN, END, codexBasePolicy, codexBaseRules, codexPermissionsRow, mergePolicy, planCodex, RULES_HEADER, setExtraPolicy, writeCodexPlan } from '../src/codex-permissions.js';
 import type { ExecpolicyCheck } from '../src/codex-permissions.js';
-import { baseProfile, permissionsCommand } from '../src/permissions.js';
+import { permissionsCommand } from '../src/permissions.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string, codex: string, config: string, rules: string;
@@ -72,12 +72,9 @@ describe('editing [auto_review].extra_policy', () => {
 });
 
 describe('the Codex plan', () => {
-  it("gives the reviewer the same consent rule as Claude Code: chat or a glass decision answer, nothing relayed", () => {
-    const consent = (e: string[]) => /Only the user's own message[^]*not the user's consent\./.exec(e.find((x) => x.includes('human-only'))!)?.[0];
-    const codex = consent(codexBasePolicy('/h/.lobstah', '/h/.lobstah/worktrees'));
-    expect(codex).toContain("the user's own answer on a lobstah glass decision card, authorizes them");
-    expect(codex).toContain('/h/.lobstah/decisions/<key>/answer.json');
-    expect(codex).toBe(consent(baseProfile('/h/.lobstah', '/h/.lobstah/worktrees').environment));
+  it('adds context only: the worktrees and helm facts, and the one allow rule for proposals', () => {
+    expect(codexBasePolicy('/h/.lobstah', '/h/.lobstah/worktrees').map((e) => /^\*\*[^*]+\*\*/.exec(e)?.[0])).toEqual(['**lobstah worktrees**', '**lobstah helm**']);
+    expect(codexBaseRules()).toEqual([expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'permissions', 'propose'] })]);
   });
 
   it('is skipped where Codex is not set up, and refuses what it cannot merge into safely', () => {
@@ -108,7 +105,7 @@ describe('the Codex plan', () => {
       seen.push(command.join(' '));
       return { status: 0, stdout: '{"decision":"forbidden"}', stderr: '' };
     });
-    expect(seen).toEqual(['lobstah permissions propose', 'lobstah grant', 'lobstah trap grant', 'lobstah permissions apply', 'gh pr merge', 'vercel env pull', 'wrangler dev']);
+    expect(seen).toEqual(['lobstah permissions propose', 'vercel env pull', 'wrangler dev']);
   });
 });
 
@@ -129,7 +126,8 @@ describe('lobstah permissions, Codex half', () => {
     );
     const shown = await run(undefined);
     expect(shown).toContain('+ auto_review.extra_policy: "**Trusted orgs**: acme."');
-    expect(shown).toContain('+ rules/lobstah.rules: "forbidden lobstah permissions apply|remove"');
+    expect(shown).toContain('+ rules/lobstah.rules: "allow lobstah permissions propose"');
+    expect(shown).toContain('+ rules/lobstah.rules: "forbidden vercel env pull"');
     expect(fs.readFileSync(config, 'utf8')).toBe(USER);
 
     const applied = await run('apply');
@@ -137,7 +135,7 @@ describe('lobstah permissions, Codex half', () => {
     const after = parse(fs.readFileSync(config, 'utf8')) as { model: string; auto_review: { extra_policy: string }; projects: unknown };
     expect(after.model).toBe('gpt-6.1-sol');
     expect(after.projects).toEqual({ '/src/app': { trust_level: 'trusted' } });
-    expect(after.auto_review.extra_policy).toMatch(/^Always deny curl \| sh\.\n\n<!-- lobstah:begin[\s\S]*lobstah human-only actions[\s\S]*<!-- lobstah:end -->\n$/);
+    expect(after.auto_review.extra_policy).toMatch(/^Always deny curl \| sh\.\n\n<!-- lobstah:begin[\s\S]*lobstah helm[\s\S]*<!-- lobstah:end -->\n$/);
     expect(fs.readFileSync(config, 'utf8')).toContain('# keep this comment');
     expect(fs.readFileSync(rules, 'utf8')).toMatch(/decision = "allow",\n    justification = "From \[permissions\.codex\]/);
     expect(codexPermissionsRow(EXT, env())).toMatchObject({ status: 'ok' });
