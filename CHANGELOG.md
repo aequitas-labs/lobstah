@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.4 — 2026-10-29
+
+### The permission profile adds context, never restrictions
+
+`lobstah permissions apply` no longer writes a list of "human-only actions" into
+Claude Code's `autoMode.environment` or Codex's auto-review policy, and the Codex
+rules file no longer forbids lobstah's permission commands or prompts on
+`gh pr merge`. Claude Code's classifier and Codex's reviewer keep their own safety
+policies. lobstah only adds context that removes friction: its worktrees are the
+person's trusted checkouts, the helm acts on the person's request, and a glass
+decision answer is the person's own answer. Both profiles now read that context
+from one place. Re-applying retires the old entries, including hand-edited copies
+under lobstah's headings. (#298)
+
+### Repo setup runs non-interactively
+
+Repo setup commands run with `CI=true`, so `pnpm install` no longer fails without
+a TTY when a trap is thrown. (#297)
+
 ## 0.8.3 — 2026-10-28
 
 ### Codex traps start without the OS sandbox
