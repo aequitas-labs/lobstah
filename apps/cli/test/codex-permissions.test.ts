@@ -3,9 +3,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
-import { BEGIN, END, codexPermissionsRow, mergePolicy, planCodex, RULES_HEADER, setExtraPolicy, writeCodexPlan } from '../src/codex-permissions.js';
+import { BEGIN, END, codexBaseRules, codexPermissionsRow, mergePolicy, planCodex, RULES_HEADER, setExtraPolicy, writeCodexPlan } from '../src/codex-permissions.js';
 import type { ExecpolicyCheck } from '../src/codex-permissions.js';
-import { permissionsCommand } from '../src/permissions.js';
+import { baseProfile, permissionsCommand } from '../src/permissions.js';
+import { lobstahContext } from '../src/permission-context.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string, codex: string, config: string, rules: string;
@@ -72,6 +73,13 @@ describe('editing [auto_review].extra_policy', () => {
 });
 
 describe('the Codex plan', () => {
+  it('adds context only, the same entries Claude Code gets, and the one allow rule for proposals', () => {
+    expect(lobstahContext('/h/w', 4949).map((e) => /^\*\*[^*]+\*\*/.exec(e)?.[0])).toEqual(['**lobstah worktrees**', '**lobstah helm**', '**lobstah glass**']);
+    expect(baseProfile('/h/w', 4949).environment).toEqual(lobstahContext('/h/w', 4949));
+    expect(planCodex(EXT, false, env())!.changes.filter((c) => c.at === 'auto_review.extra_policy').map((c) => c.entry)).toEqual([...lobstahContext(), ...EXT.environment]);
+    expect(codexBaseRules()).toEqual([expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'permissions', 'propose'] })]);
+  });
+
   it('is skipped where Codex is not set up, and refuses what it cannot merge into safely', () => {
     expect(planCodex(EXT, false, { CODEX_HOME: path.join(home, 'none') })).toBeUndefined();
     fs.writeFileSync(rules, 'prefix_rule(pattern = ["ls"])\n');
@@ -100,7 +108,7 @@ describe('the Codex plan', () => {
       seen.push(command.join(' '));
       return { status: 0, stdout: '{"decision":"forbidden"}', stderr: '' };
     });
-    expect(seen).toEqual(['lobstah permissions propose', 'lobstah grant', 'lobstah trap grant', 'lobstah permissions apply', 'gh pr merge', 'vercel env pull', 'wrangler dev']);
+    expect(seen).toEqual(['lobstah permissions propose', 'vercel env pull', 'wrangler dev']);
   });
 });
 
@@ -121,7 +129,8 @@ describe('lobstah permissions, Codex half', () => {
     );
     const shown = await run(undefined);
     expect(shown).toContain('+ auto_review.extra_policy: "**Trusted orgs**: acme."');
-    expect(shown).toContain('+ rules/lobstah.rules: "forbidden lobstah permissions apply|remove"');
+    expect(shown).toContain('+ rules/lobstah.rules: "allow lobstah permissions propose"');
+    expect(shown).toContain('+ rules/lobstah.rules: "forbidden vercel env pull"');
     expect(fs.readFileSync(config, 'utf8')).toBe(USER);
 
     const applied = await run('apply');
@@ -129,7 +138,7 @@ describe('lobstah permissions, Codex half', () => {
     const after = parse(fs.readFileSync(config, 'utf8')) as { model: string; auto_review: { extra_policy: string }; projects: unknown };
     expect(after.model).toBe('gpt-6.1-sol');
     expect(after.projects).toEqual({ '/src/app': { trust_level: 'trusted' } });
-    expect(after.auto_review.extra_policy).toMatch(/^Always deny curl \| sh\.\n\n<!-- lobstah:begin[\s\S]*lobstah human-only actions[\s\S]*<!-- lobstah:end -->\n$/);
+    expect(after.auto_review.extra_policy).toMatch(/^Always deny curl \| sh\.\n\n<!-- lobstah:begin[\s\S]*lobstah helm[\s\S]*<!-- lobstah:end -->\n$/);
     expect(fs.readFileSync(config, 'utf8')).toContain('# keep this comment');
     expect(fs.readFileSync(rules, 'utf8')).toMatch(/decision = "allow",\n    justification = "From \[permissions\.codex\]/);
     expect(codexPermissionsRow(EXT, env())).toMatchObject({ status: 'ok' });

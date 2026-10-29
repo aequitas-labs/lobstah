@@ -44,11 +44,13 @@ const USER = {
 };
 
 describe('the profile', () => {
-  it('names lobstah worktrees as dev checkouts, the helm acting on the chat as no bypass, and human-only actions; allows Read/Edit there', () => {
-    const p = baseProfile('/h/.lobstah', '/h/.lobstah/worktrees');
+  it('names lobstah worktrees as dev checkouts, the helm acting on the chat as no bypass, and a glass answer as the user\'s own; adds no restriction; allows Read/Edit there', () => {
+    const p = baseProfile('/h/.lobstah/worktrees', 4949);
     expect(p.environment.join('\n')).toMatch(/\/h\/\.lobstah\/worktrees\/ are the user's own development checkouts/);
     expect(p.environment.join('\n')).toMatch(/not Auto-Mode Bypass/);
-    expect(p.environment.join('\n')).toMatch(/Merging to a repo's trunk, production deploys, creating or reading secrets/);
+    expect(p.environment.join('\n')).toMatch(/glass \(127\.0\.0\.1:4949\) is the user's own UI on this machine\. A `decision-answer` event with `from: glass`/);
+    expect(p.environment).toHaveLength(3);
+    expect(p.deny).toEqual([]);
     expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)']);
   });
 
@@ -77,6 +79,30 @@ describe('merging into Claude Code settings', () => {
     const second = planProfile(first.settings, profile({ allow: ['A'] }), first.owned);
     expect(second.changes).toEqual([{ op: '-', at: 'permissions.allow', entry: 'B' }]);
     expect(planProfile(second.settings, profile({ allow: ['A'] }), second.owned).changes).toEqual([]);
+  });
+
+  it('owns an entry rewritten in place under the heading of one it owned: never duplicated, and removed with the profile', () => {
+    const old = '**lobstah rule**: old text';
+    const next = '**lobstah rule**: new text';
+    const first = planProfile({}, profile({ environment: [old] }));
+    const edited = { autoMode: { environment: ['$defaults', next, 'mine'] } };
+    const reapplied = planProfile(edited, profile({ environment: [next] }), first.owned);
+    expect(reapplied.changes).toEqual([]);
+    expect(reapplied.owned.environment).toEqual(['$defaults', next]);
+    expect(planProfile(edited, EMPTY_PROFILE, first.owned).settings).toEqual({ autoMode: { environment: ['$defaults', 'mine'] } });
+    const newer = '**lobstah rule**: newer text';
+    expect(planProfile(edited, profile({ environment: [newer] }), first.owned).settings).toEqual({ autoMode: { environment: ['$defaults', 'mine', newer] } });
+    // Without an owned entry under that heading, the same text is the user's and never claimed.
+    expect(planProfile(edited, profile({ environment: [next] })).owned.environment).toEqual([]);
+  });
+
+  it('a re-apply retires the old human-only entry, hand-edited text included, and keeps the rest', () => {
+    const base = baseProfile('/h/.lobstah/worktrees', 4949);
+    const owned = { environment: ['$defaults', ...base.environment, '**lobstah human-only actions**: recorded text'], allow: base.allow, deny: [] };
+    const settings = { model: 'opus', permissions: { allow: [...base.allow] }, autoMode: { environment: ['$defaults', ...base.environment, '**lobstah human-only actions**: hand-edited text', 'mine'] } };
+    const plan = planProfile(settings, base, owned);
+    expect(plan.changes).toEqual([{ op: '-', at: 'autoMode.environment', entry: '**lobstah human-only actions**: hand-edited text' }]);
+    expect(plan.settings).toEqual({ ...settings, autoMode: { environment: ['$defaults', ...base.environment, 'mine'] } });
   });
 
   it("leaves an existing environment list's choice about $defaults alone, and keeps $defaults while the user's entries remain", () => {
@@ -144,7 +170,7 @@ describe('doctor', () => {
   });
 
   it('desired is the base profile plus config, each entry once', () => {
-    const base = baseProfile('/h', '/h/worktrees');
+    const base = baseProfile('/h/worktrees');
     expect(desiredProfile({ ...NO_EXT, allow: [base.allow[0]!, 'X'] }, base).allow).toEqual([...base.allow, 'X']);
   });
 });

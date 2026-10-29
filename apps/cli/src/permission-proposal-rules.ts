@@ -22,6 +22,8 @@ export interface ValidatedPermissionRules {
 const WRAPPERS = new Set(['env', 'sudo', 'command', 'exec', 'xargs', 'nice', 'nohup', 'timeout', 'doas']);
 const INTERPRETERS = new Set(['python', 'python3', 'node', 'bash', 'sh', 'zsh', 'fish', 'dash', 'powershell', 'pwsh', 'cmd', 'ruby', 'perl']);
 const BROAD_COMMANDS = new Set(['rm', 'curl', 'kill', 'killall', 'pkill']);
+/** lobstah's own permission controls: a proposal never allows them. */
+const PERMISSION_CONTROLS: Array<Array<string | string[]>> = [['lobstah', 'grant'], ['lobstah', 'trap', ['grant', 'bypass']], ['lobstah', 'permissions', ['apply', 'remove']]];
 const executableName = (word: string): string => word.split(/[\\/]/).at(-1)!.toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
 
 /** Parse argv data; removals only name existing rules and are never executed. */
@@ -87,7 +89,7 @@ export function validatePermissionPrefix(prefix: string[], current: PermissionsC
   if (executable === 'npx') validatePermissionPrefix(prefix.slice(1), current);
   else if (['pnpm', 'npm', 'yarn', 'bun'].includes(executable) && ['exec', 'dlx', 'x'].includes(prefix[1] ?? ''))
     validatePermissionPrefix(prefix.slice(2), current);
-  const forbidden = [...codexBaseRules().filter((rule) => rule.decision === 'forbidden').map((rule) => rule.pattern), ...current.codex.forbidden];
+  const forbidden = [...PERMISSION_CONTROLS, ...current.codex.forbidden];
   if (forbidden.some((rule) => overlapsForbidden(prefix, rule)) || current.deny.some((rule) => overlapsClaudeDeny(prefix, rule)))
     throw new GrantError('That rule would allow a forbidden command in the current permission profile.');
 }

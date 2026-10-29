@@ -207,8 +207,7 @@ it('Approve is one glass click when every proposed rule stays selected', async (
     (page.$('.proposal-approve') as HTMLElement).click(); await page.settle();
     expect(readDecisionAnswer(meta.key)?.option).toBe('Approve');
     expect(page.posts().filter((request) => JSON.parse(request.body).kind === 'permissions-proposal-answer')).toHaveLength(1);
-    expect(fs.readFileSync(path.join(codex, 'rules/lobstah.rules'), 'utf8')).toContain('# rule: forbidden lobstah grant');
-    expect(fs.readFileSync(path.join(codex, 'rules/lobstah.rules'), 'utf8')).toContain('# rule: forbidden lobstah permissions apply|remove');
+    expect(fs.readFileSync(path.join(codex, 'rules/lobstah.rules'), 'utf8')).toContain('# rule: allow lobstah permissions propose');
   } finally { await page.close(); }
 });
 
