@@ -104,7 +104,13 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
   </div>`;
 }
 
-/** A disclosure with ordinary navigation links: Tab works without menu-specific keys. */
+/** Always in the bar. The other tabs join them where the screen fits every tab on one line (glass.css), else sit behind More. */
+const PINNED: readonly GlassTab[] = ['deck', 'reviews'];
+const MORE_TABS = GLASS_TABS.filter((t) => !PINNED.includes(t));
+/** glass.css's breakpoint: from this width every tab is inline and More is hidden. */
+const ALL_TABS_FIT = '(min-width: 900px)';
+
+/** The tab bar, and More: a disclosure with ordinary navigation links, so Tab works without menu-specific keys. */
 function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unread: number }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -115,7 +121,10 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
     toggle.current?.focus();
   };
   useLayoutEffect(() => {
-    if (open) menu.current?.querySelector<HTMLAnchorElement>(`a[data-tab="${tab}"]`)?.focus();
+    if (open)
+      (
+        menu.current?.querySelector<HTMLAnchorElement>(`a[data-tab="${tab}"]`) ?? menu.current?.querySelector<HTMLAnchorElement>('a')
+      )?.focus();
   }, [open]);
   useLayoutEffect(() => {
     if (!open) return;
@@ -130,7 +139,7 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
       }
     };
     const resize = () => {
-      if (window.innerWidth >= 640) setOpen(false);
+      if (window.matchMedia(ALL_TABS_FIT).matches) setOpen(false);
     };
     document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', key, true);
@@ -150,15 +159,15 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
       html`<span class="dbadge" aria-label=${t === 'deck' ? `${count} new decision${count === 1 ? '' : 's'}` : 'reviews in inbox'}>${count}</span>`
     );
   };
-  const links = (mobile = false) =>
-    GLASS_TABS.map(
-      (t) =>
-        html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${mobile && t === tab ? 'page' : undefined} onClick=${mobile ? close : undefined}>${TAB_LABEL[t]}${badge(t)}</a>`,
-    );
-  return [
-    html`<nav class="tabs" id="tabs" aria-label="Spyglass views">${links()}</nav>`,
-    html`<div class="mobile-nav" ref=${root}><div class="mobile-nav-header"><span class="mobile-current">${TAB_LABEL[tab]}${badge(tab)}</span>${tab !== 'deck' && unread > 0 && html`<a class="mobile-unread" href="#deck" aria-label=${`On deck: ${unread} new decisions`}>On deck${badge('deck')}</a>`}<button ref=${toggle} type="button" class="nav-toggle" aria-label="Sections" aria-expanded=${open} aria-controls="mobile-sections" onClick=${() => (open ? close() : setOpen(true))}><span aria-hidden="true">☰</span></button></div>${open && html`<nav ref=${menu} id="mobile-sections" class="mobile-sections" aria-label="Spyglass sections">${links(true)}</nav>`}</div>`,
-  ];
+  const link = (t: GlassTab, inMenu = false) =>
+    html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${inMenu && t === tab ? 'page' : undefined} onClick=${inMenu ? close : undefined}>${TAB_LABEL[t]}${badge(t)}</a>`;
+  // With the active tab behind More, More carries the active tab's underline.
+  const here = MORE_TABS.includes(tab);
+  return html`<div class="navbar" ref=${root}>
+    <nav class="tabs" id="tabs" aria-label="Spyglass views">${GLASS_TABS.map((t) => link(t))}</nav>
+    <button ref=${toggle} type="button" class=${here ? 'nav-toggle on' : 'nav-toggle'} aria-label="More" aria-expanded=${open} aria-controls="more-sections" onClick=${() => (open ? close() : setOpen(true))}><span aria-hidden="true">☰</span></button>
+    ${open && html`<nav ref=${menu} id="more-sections" class="more-sections" aria-label="Spyglass sections">${MORE_TABS.map((t) => link(t, true))}</nav>`}
+  </div>`;
 }
 
 export function Header({
