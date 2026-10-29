@@ -88,7 +88,7 @@ it.each(['table', 'cards'])(
     expect(dom.$('#overlay')?.classList.contains('open')).toBe(false);
     (dom.$('.nav-toggle') as unknown as HTMLElement).click();
     await dom.settle();
-    expect(dom.$('#mobile-sections a[data-tab="grants"]')?.textContent).toBe('Grants');
+    expect(dom.$('#more-sections a[data-tab="grants"]')?.textContent).toBe('Grants');
     d.sessionGrants = d.sessionGrants.map((g) => ({ ...g, revokedAt: new Date(NOW).toISOString() }));
     dom.serve(d);
     await dom.poll();

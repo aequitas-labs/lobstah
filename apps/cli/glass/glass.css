@@ -148,20 +148,95 @@ h2 {
   height: 14px;
   accent-color: var(--link);
 }
-.tabs {
+/* The tab bar: On deck and Reviews always; the other tabs inline from 900px, where all ten
+   fit on one line (about 840px with two-digit badges), else behind More at the bar's right. */
+.navbar {
   display: flex;
-  gap: var(--space-1);
+  align-items: stretch;
+  position: relative;
   border-bottom: 1px solid var(--line);
   margin: 8px 0 10px;
 }
-.tabs a {
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+.tabs a,
+.nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
   color: var(--dim);
   padding: 6px 11px;
   border-bottom: 2px solid transparent;
 }
-.tabs a.on {
+.tabs a.on,
+.nav-toggle.on {
   color: var(--fg);
   border-color: var(--link);
+}
+.nav-toggle {
+  display: none;
+  background: none;
+  border-top: 0;
+  border-inline: 0;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.nav-toggle:hover {
+  color: var(--fg);
+}
+@media (max-width: 899px) {
+  .tabs a:not([data-tab='deck'], [data-tab='reviews']) {
+    display: none;
+  }
+  .nav-toggle {
+    display: inline-flex;
+  }
+}
+.more-sections {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--scrim);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.more-sections a {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+  color: var(--dim);
+}
+.more-sections a.on {
+  color: var(--fg);
+  background: var(--bg);
+}
+@media (max-width: 639px) {
+  .tabs a,
+  .nav-toggle,
+  .more-sections a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .more-sections {
+    left: 0;
+  }
 }
 .tabpage {
   display: none;
@@ -1868,68 +1943,6 @@ a.lob {
 .rv-staged {
   font-size: 12px;
 }
-/* Desktop keeps its tabs; phones use a compact navigation disclosure. */
-.mobile-nav {
-  display: none;
-}
-@media (max-width: 639px) {
-  .tabs {
-    display: none;
-  }
-  .mobile-nav {
-    display: block;
-    position: relative;
-    margin: 8px 0 10px;
-    border-bottom: 1px solid var(--line);
-  }
-  .mobile-nav-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-height: 48px;
-  }
-  .mobile-current {
-    flex: 1;
-    font-weight: bold;
-  }
-  .nav-toggle,
-  .mobile-unread,
-  .mobile-sections a {
-    min-height: 44px;
-    min-width: 44px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .nav-toggle {
-    justify-content: center;
-    font-size: 22px;
-  }
-  .mobile-sections {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    z-index: 20;
-    padding: 8px;
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px var(--scrim);
-    max-height: 70vh;
-    overflow-y: auto;
-  }
-  .mobile-sections a {
-    padding: 0 12px;
-    border-radius: 4px;
-    color: var(--dim);
-  }
-  .mobile-sections a.on {
-    color: var(--fg);
-    background: var(--bg);
-  }
-}
-
 /* The same transparent lobster-and-star mark in both glasses. */
 .glass-brand {
   width: 24px;

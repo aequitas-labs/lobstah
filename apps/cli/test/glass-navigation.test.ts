@@ -59,34 +59,38 @@ describe('TODO preview and page', () => {
   });
 });
 
-describe('mobile navigation disclosure', () => {
-  it('opens with focus, lists every section and badge, navigates and restores focus', async () => {
+describe('the tab bar and More', () => {
+  it('keeps On deck and Reviews in the bar; More lists the rest, opens with focus, navigates, restores focus and marks where you are', async () => {
     const { g } = await page();
-    expect(g.$('.nav-toggle')?.getAttribute('aria-expanded')).toBe('false');
-    expect(g.$('.mobile-current .dbadge')?.textContent).toBe('1');
+    expect(g.$('#tabs a[data-tab="deck"] .dbadge')?.textContent).toBe('1');
+    const toggle = g.$('.nav-toggle')!;
+    expect(toggle.getAttribute('aria-label')).toBe('More');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.classList.contains('on')).toBe(false);
     await click(g, '.nav-toggle');
     expect(g.$('.nav-toggle')?.getAttribute('aria-expanded')).toBe('true');
-    expect(g.$$('#mobile-sections a').map((a) => a.getAttribute('data-tab'))).toEqual([...GLASS_TABS]);
-    expect(g.document.activeElement?.getAttribute('data-tab')).toBe('deck');
-    expect(g.$('#mobile-sections [data-tab="deck"] .dbadge')?.textContent).toBe('1');
-    await click(g, '#mobile-sections [data-tab="todos"]');
+    expect(g.$$('#more-sections a').map((a) => a.getAttribute('data-tab'))).toEqual(GLASS_TABS.filter((t) => t !== 'deck' && t !== 'reviews'));
+    expect(g.document.activeElement?.getAttribute('data-tab')).toBe('dispatches');
+    await click(g, '#more-sections [data-tab="todos"]');
     expect(g.window.location.hash).toBe('#todos');
-    expect(g.$('#mobile-sections')).toBeNull();
-    expect(g.$('.mobile-current')?.textContent).toBe('TODOs');
-    expect(g.$('.mobile-unread .dbadge')?.textContent).toBe('1');
-    expect(g.document.activeElement?.className).toBe('nav-toggle');
+    expect(g.$('#more-sections')).toBeNull();
+    expect(g.document.activeElement?.classList.contains('nav-toggle')).toBe(true);
+    expect(g.$('.nav-toggle')?.classList.contains('on')).toBe(true);
+    await click(g, '.nav-toggle');
+    expect(g.$('#more-sections a[aria-current="page"]')?.getAttribute('data-tab')).toBe('todos');
+    expect(g.document.activeElement?.getAttribute('data-tab')).toBe('todos');
   });
 
   it('handles Escape immediately when focus first enters the menu', async () => {
     const { g } = await page();
     // The menu's first focus happens during commit, before deferred effects run.
     g.document.addEventListener('focusin', (e) => {
-      if ((e.target as Element).closest?.('#mobile-sections'))
+      if ((e.target as Element).closest?.('#more-sections'))
         setTimeout(() => g.document.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 0);
     });
     await click(g, '.nav-toggle');
     expect(g.$('.nav-toggle')?.getAttribute('aria-expanded')).toBe('false');
-    expect(g.document.activeElement?.className).toBe('nav-toggle');
+    expect(g.document.activeElement?.classList.contains('nav-toggle')).toBe(true);
   });
 
   it('closes with Escape, an outside tap, the toggle, or a hash change', async () => {
@@ -99,8 +103,8 @@ describe('mobile navigation disclosure', () => {
       if (action === 'hash') await g.go('#traps');
       await g.settle();
       expect(g.$('.nav-toggle')?.getAttribute('aria-expanded')).toBe('false');
-      expect(g.$('#mobile-sections')).toBeNull();
-      expect(g.document.activeElement?.className).toBe('nav-toggle');
+      expect(g.$('#more-sections')).toBeNull();
+      expect(g.document.activeElement?.classList.contains('nav-toggle')).toBe(true);
     }
   });
 });
