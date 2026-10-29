@@ -6,6 +6,7 @@ import type { PermissionsConfig } from '@lobstah/core';
 import type { DoctorRow } from './doctor.js';
 import { codexHome, planCodex, writeCodexPlan } from './codex-permissions.js';
 import type { CodexPlan, ExecpolicyCheck } from './codex-permissions.js';
+import { lobstahContext } from './permission-context.js';
 
 /**
  * lobstah's Claude Code auto-mode profile. Traps and the helm run Claude Code
@@ -42,14 +43,11 @@ export function rulePath(p: string, platform = process.platform): string {
   return `/${posix.replace(/\/+$/, '')}`;
 }
 
-/** The generic profile: no user data beyond where lobstah keeps its worktrees. */
-export function baseProfile(home = lobstahHome(), worktrees = worktreesDir()): Profile {
+/** The generic profile: no user data beyond where lobstah keeps its worktrees and serves its glass. */
+export function baseProfile(worktrees = worktreesDir(), glassPort?: number): Profile {
   const glob = `${rulePath(worktrees)}/**`;
   return {
-    environment: [
-      `**lobstah worktrees**: Directories under ${worktrees}/ are the user's own development checkouts of their configured repos, created by lobstah (the user's local agent orchestrator) for its worker sessions ("traps"). A session working in one of them is in its trusted repo: reading, editing, building, testing, committing, and pushing a non-trunk branch there is ordinary project-scope work, not scope escalation into another repo.`,
-      `**lobstah helm**: A session holding the lobstah helm (it ran \`lobstah man helm\`) orchestrates traps for the user. When the user asks in that session's own chat for a step a trap could not finish, the helm doing it is following the user's instruction, not Auto-Mode Bypass. The step is still judged on its own terms by every other rule.`,
-    ],
+    environment: lobstahContext(worktrees, glassPort),
     allow: [`Read(${glob})`, `Edit(${glob})`, 'Bash(lobstah permissions propose *)'],
     deny: [],
   };

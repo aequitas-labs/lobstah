@@ -44,11 +44,12 @@ const USER = {
 };
 
 describe('the profile', () => {
-  it('names lobstah worktrees as dev checkouts and the helm acting on the chat as no bypass, adds no restriction; allows Read/Edit there', () => {
-    const p = baseProfile('/h/.lobstah', '/h/.lobstah/worktrees');
+  it('names lobstah worktrees as dev checkouts, the helm acting on the chat as no bypass, and a glass answer as the user\'s own; adds no restriction; allows Read/Edit there', () => {
+    const p = baseProfile('/h/.lobstah/worktrees', 4949);
     expect(p.environment.join('\n')).toMatch(/\/h\/\.lobstah\/worktrees\/ are the user's own development checkouts/);
     expect(p.environment.join('\n')).toMatch(/not Auto-Mode Bypass/);
-    expect(p.environment).toHaveLength(2);
+    expect(p.environment.join('\n')).toMatch(/glass \(127\.0\.0\.1:4949\) is the user's own UI on this machine\. A `decision-answer` event with `from: glass`/);
+    expect(p.environment).toHaveLength(3);
     expect(p.deny).toEqual([]);
     expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)']);
   });
@@ -96,7 +97,7 @@ describe('merging into Claude Code settings', () => {
   });
 
   it('a re-apply retires the old human-only entry, hand-edited text included, and keeps the rest', () => {
-    const base = baseProfile('/h/.lobstah', '/h/.lobstah/worktrees');
+    const base = baseProfile('/h/.lobstah/worktrees', 4949);
     const owned = { environment: ['$defaults', ...base.environment, '**lobstah human-only actions**: recorded text'], allow: base.allow, deny: [] };
     const settings = { model: 'opus', permissions: { allow: [...base.allow] }, autoMode: { environment: ['$defaults', ...base.environment, '**lobstah human-only actions**: hand-edited text', 'mine'] } };
     const plan = planProfile(settings, base, owned);
@@ -169,7 +170,7 @@ describe('doctor', () => {
   });
 
   it('desired is the base profile plus config, each entry once', () => {
-    const base = baseProfile('/h', '/h/worktrees');
+    const base = baseProfile('/h/worktrees');
     expect(desiredProfile({ ...NO_EXT, allow: [base.allow[0]!, 'X'] }, base).allow).toEqual([...base.allow, 'X']);
   });
 });

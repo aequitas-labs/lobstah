@@ -3,9 +3,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
-import { BEGIN, END, codexBasePolicy, codexBaseRules, codexPermissionsRow, mergePolicy, planCodex, RULES_HEADER, setExtraPolicy, writeCodexPlan } from '../src/codex-permissions.js';
+import { BEGIN, END, codexBaseRules, codexPermissionsRow, mergePolicy, planCodex, RULES_HEADER, setExtraPolicy, writeCodexPlan } from '../src/codex-permissions.js';
 import type { ExecpolicyCheck } from '../src/codex-permissions.js';
-import { permissionsCommand } from '../src/permissions.js';
+import { baseProfile, permissionsCommand } from '../src/permissions.js';
+import { lobstahContext } from '../src/permission-context.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string, codex: string, config: string, rules: string;
@@ -72,8 +73,10 @@ describe('editing [auto_review].extra_policy', () => {
 });
 
 describe('the Codex plan', () => {
-  it('adds context only: the worktrees and helm facts, and the one allow rule for proposals', () => {
-    expect(codexBasePolicy('/h/.lobstah', '/h/.lobstah/worktrees').map((e) => /^\*\*[^*]+\*\*/.exec(e)?.[0])).toEqual(['**lobstah worktrees**', '**lobstah helm**']);
+  it('adds context only, the same entries Claude Code gets, and the one allow rule for proposals', () => {
+    expect(lobstahContext('/h/w', 4949).map((e) => /^\*\*[^*]+\*\*/.exec(e)?.[0])).toEqual(['**lobstah worktrees**', '**lobstah helm**', '**lobstah glass**']);
+    expect(baseProfile('/h/w', 4949).environment).toEqual(lobstahContext('/h/w', 4949));
+    expect(planCodex(EXT, false, env())!.changes.filter((c) => c.at === 'auto_review.extra_policy').map((c) => c.entry)).toEqual([...lobstahContext(), ...EXT.environment]);
     expect(codexBaseRules()).toEqual([expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'permissions', 'propose'] })]);
   });
 

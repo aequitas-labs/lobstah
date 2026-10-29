@@ -4,10 +4,11 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { parse, stringify } from 'smol-toml';
-import { atomicRenameSync, configPath, lobstahHome, uniqueTempPath, worktreesDir } from '@lobstah/core';
+import { atomicRenameSync, configPath, lobstahHome, uniqueTempPath } from '@lobstah/core';
 import type { CodexRulesConfig, PermissionsConfig } from '@lobstah/core';
 import type { Change } from './permissions.js';
 import type { DoctorRow } from './doctor.js';
+import { lobstahContext } from './permission-context.js';
 
 /**
  * The Codex half of lobstah's permission profile. Codex has no classifier
@@ -42,14 +43,6 @@ export interface CodexRule {
 /** `$CODEX_HOME`, else `~/.codex`. */
 export function codexHome(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
   return env.CODEX_HOME ?? path.join(home, '.codex');
-}
-
-/** The Codex reviewer's context: the same two facts as the Claude profile, in the reviewer's terms. */
-export function codexBasePolicy(home = lobstahHome(), worktrees = worktreesDir()): string[] {
-  return [
-    `**lobstah worktrees**: Directories under ${worktrees}/ are the user's own development checkouts of their configured repos, created by lobstah (the user's local agent orchestrator) for its worker sessions ("traps"). Building, testing, committing, and pushing a non-trunk branch from one of them is ordinary project work.`,
-    `**lobstah helm**: A session holding the lobstah helm (it ran \`lobstah man helm\`) orchestrates traps for the user. When the user asks in that session's own chat for a step a trap could not finish, the helm doing it follows the user's instruction; it is not a workaround of an earlier denial. Judge the step itself as usual.`,
-  ];
 }
 
 /** Only friction removed: Codex's own reviewer keeps its safety policy. */
@@ -226,7 +219,7 @@ export function planCodex(ext: PermissionsConfig, remove: boolean, env: NodeJS.P
   if (review !== undefined && !scan((before ?? '').split('\n')).some((l) => l.header === 'auto_review')) {
     throw new Error(`auto_review in ${configFile} is set with a dotted key or an inline table; move it into an [auto_review] table and run this again`);
   }
-  const entries = remove ? [] : [...new Set([...codexBasePolicy(), ...ext.environment])];
+  const entries = remove ? [] : [...new Set([...lobstahContext(), ...ext.environment])];
   const policy = mergePolicy(current as string | undefined, entries);
   const after = policy === current ? (before ?? '') : setExtraPolicy(before ?? '', policy);
   const rulesBefore = readText(rulesFile);

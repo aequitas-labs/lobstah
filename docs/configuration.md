@@ -444,7 +444,8 @@ settings and `--settings`.
 The base profile only adds context for Claude Code's classifier, never a
 restriction; the classifier keeps its own safety policy:
 - lobstah's worktrees are your development checkouts;
-- the helm doing what you asked in its chat is not a bypass.
+- the helm doing what you asked in its chat is not a bypass;
+- an answer you give on a glass card is your own, like a chat message.
 
 It also allows `Read` and `Edit` on `<lobstah home>/worktrees/**`.
 `[permissions]` adds to it:
@@ -467,7 +468,7 @@ allow     = [["wrangler", "dev"]]
 | `codex.forbidden`, `codex.prompt`, `codex.allow` | Codex command rules, each an argv prefix (`["gh", "pr", "merge"]`). A Codex `allow` runs the command outside Codex's sandbox, so these are never translated from the Claude rules. |
 
 **Codex.** Codex has its own home: `$CODEX_HOME`, else `~/.codex`. When it exists, the same verbs also change two things there:
-- **The auto reviewer's added policy.** This is `[auto_review].extra_policy` in `config.toml`, which Codex's reviewer reads alongside its own policy. lobstah writes a block between `<!-- lobstah:begin … -->` and `<!-- lobstah:end -->` holding the same two facts and `environment`.
+- **The auto reviewer's added policy.** This is `[auto_review].extra_policy` in `config.toml`, which Codex's reviewer reads alongside its own policy. lobstah writes a block between `<!-- lobstah:begin … -->` and `<!-- lobstah:end -->` holding the same context entries and `environment`.
   - Text outside the markers is yours and stays.
   - lobstah edits only the key's own lines, keeping comments, key order and the string's quoting. It parses the file before and after; anything else changing refuses the write.
 - **`rules/lobstah.rules`.** This file is wholly lobstah's. It holds the base rules plus `[permissions.codex]`:
