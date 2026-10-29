@@ -3,9 +3,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
-import { BEGIN, END, codexPermissionsRow, mergePolicy, planCodex, RULES_HEADER, setExtraPolicy, writeCodexPlan } from '../src/codex-permissions.js';
+import { BEGIN, END, codexBasePolicy, codexPermissionsRow, mergePolicy, planCodex, RULES_HEADER, setExtraPolicy, writeCodexPlan } from '../src/codex-permissions.js';
 import type { ExecpolicyCheck } from '../src/codex-permissions.js';
-import { permissionsCommand } from '../src/permissions.js';
+import { baseProfile, permissionsCommand } from '../src/permissions.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string, codex: string, config: string, rules: string;
@@ -72,6 +72,14 @@ describe('editing [auto_review].extra_policy', () => {
 });
 
 describe('the Codex plan', () => {
+  it("gives the reviewer the same consent rule as Claude Code: chat or a glass decision answer, nothing relayed", () => {
+    const consent = (e: string[]) => /Only the user's own message[^]*not the user's consent\./.exec(e.find((x) => x.includes('human-only'))!)?.[0];
+    const codex = consent(codexBasePolicy('/h/.lobstah', '/h/.lobstah/worktrees'));
+    expect(codex).toContain("the user's own answer on a lobstah glass decision card, authorizes them");
+    expect(codex).toContain('/h/.lobstah/decisions/<key>/answer.json');
+    expect(codex).toBe(consent(baseProfile('/h/.lobstah', '/h/.lobstah/worktrees').environment));
+  });
+
   it('is skipped where Codex is not set up, and refuses what it cannot merge into safely', () => {
     expect(planCodex(EXT, false, { CODEX_HOME: path.join(home, 'none') })).toBeUndefined();
     fs.writeFileSync(rules, 'prefix_rule(pattern = ["ls"])\n');

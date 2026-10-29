@@ -49,6 +49,7 @@ describe('the profile', () => {
     expect(p.environment.join('\n')).toMatch(/\/h\/\.lobstah\/worktrees\/ are the user's own development checkouts/);
     expect(p.environment.join('\n')).toMatch(/not Auto-Mode Bypass/);
     expect(p.environment.join('\n')).toMatch(/Merging to a repo's trunk, production deploys, creating or reading secrets/);
+    expect(p.environment.join('\n')).toMatch(/the user's own answer on a lobstah glass decision card, authorizes them\. .*stored in \/h\/\.lobstah\/decisions\/<key>\/answer\.json/);
     expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)']);
   });
 
@@ -77,6 +78,21 @@ describe('merging into Claude Code settings', () => {
     const second = planProfile(first.settings, profile({ allow: ['A'] }), first.owned);
     expect(second.changes).toEqual([{ op: '-', at: 'permissions.allow', entry: 'B' }]);
     expect(planProfile(second.settings, profile({ allow: ['A'] }), second.owned).changes).toEqual([]);
+  });
+
+  it('owns an entry rewritten in place under the heading of one it owned: never duplicated, and removed with the profile', () => {
+    const old = '**lobstah rule**: old text';
+    const next = '**lobstah rule**: new text';
+    const first = planProfile({}, profile({ environment: [old] }));
+    const edited = { autoMode: { environment: ['$defaults', next, 'mine'] } };
+    const reapplied = planProfile(edited, profile({ environment: [next] }), first.owned);
+    expect(reapplied.changes).toEqual([]);
+    expect(reapplied.owned.environment).toEqual(['$defaults', next]);
+    expect(planProfile(edited, EMPTY_PROFILE, first.owned).settings).toEqual({ autoMode: { environment: ['$defaults', 'mine'] } });
+    const newer = '**lobstah rule**: newer text';
+    expect(planProfile(edited, profile({ environment: [newer] }), first.owned).settings).toEqual({ autoMode: { environment: ['$defaults', 'mine', newer] } });
+    // Without an owned entry under that heading, the same text is the user's and never claimed.
+    expect(planProfile(edited, profile({ environment: [next] })).owned.environment).toEqual([]);
   });
 
   it("leaves an existing environment list's choice about $defaults alone, and keeps $defaults while the user's entries remain", () => {
