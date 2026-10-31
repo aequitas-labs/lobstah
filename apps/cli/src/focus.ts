@@ -104,7 +104,7 @@ export async function focusRegistration(
     return { focused: false, reason: 'Invalid recorded bundle id.' };
   if (win?.tmuxPane !== undefined && (typeof win.tmuxPane !== 'string' || control(win.tmuxPane) || !TMUX_RE.test(win.tmuxPane)))
     return { focused: false, reason: 'Invalid recorded tmux pane.' };
-  if (win?.tmuxSocket !== undefined && (typeof win.tmuxSocket !== 'string' || !SOCKET_RE.test(win.tmuxSocket) || path.normalize(win.tmuxSocket) !== win.tmuxSocket))
+  if (win?.tmuxSocket !== undefined && (typeof win.tmuxSocket !== 'string' || !SOCKET_RE.test(win.tmuxSocket) || path.posix.normalize(win.tmuxSocket) !== win.tmuxSocket))
     return { focused: false, reason: 'Invalid recorded tmux socket.' };
   if (win?.kittyWindow !== undefined && (typeof win.kittyWindow !== 'string' || control(win.kittyWindow) || !PANE_RE.test(win.kittyWindow)))
     return { focused: false, reason: 'Invalid recorded kitty window.' };
