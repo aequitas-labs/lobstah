@@ -66,6 +66,77 @@ export interface WharfHumanRequest {
   outcome?: string;
   waitingForHelm?: boolean;
 }
+/**
+ * Every family of card the glass shows, local or hosted. One card is one
+ * item: a decision, a worker's raw question at one status, a permission
+ * request, a job's progress, a landing, a PR or stack, a review, a report,
+ * a notice or watch, a trap, a boat, or a person's request.
+ */
+export const GLASS_CARD_FAMILIES = ['decision', 'question', 'permission', 'dispatch', 'landed', 'pr', 'stack', 'review', 'report', 'notice', 'trap', 'boat', 'request'] as const;
+export type GlassCardFamily = (typeof GLASS_CARD_FAMILIES)[number];
+/** Where a card's state is authoritative: the wharf's own records, or one boat's local glass. */
+export type GlassCardSource = 'wharf' | `boat:${string}`;
+/**
+ * What a person can do from a card, as the card offers it. A card only names
+ * an action; each one commits through its own authorized path, and a person
+ * seeing a card (`seen`) never answers, grants or dismisses anything.
+ */
+export type GlassCardAction =
+  | { kind: 'answer'; option: string }
+  | { kind: 'answer-text' }
+  | { kind: 'allow-once' }
+  | { kind: 'allow-always' }
+  | { kind: 'deny' }
+  | { kind: 'seen' }
+  | { kind: 'message-helm' }
+  | { kind: 'cancel' }
+  | { kind: 'review-dismiss' };
+export interface GlassCardLink { label: string; url: string }
+/** A card that no longer stands: who or what ended it, and how. */
+export interface GlassCardTerminal {
+  state: 'answered' | 'withdrawn' | 'resolved' | 'landed' | 'cancelled' | 'expired' | 'fulfilled';
+  at: string;
+  by?: string;
+  outcome?: string;
+}
+/** The glass page a card opens to, with its full detail and files. */
+export interface GlassCardItem { kind: 'decision' | 'report' | 'review' | 'job' | 'trap'; id: string }
+/** What a source says about one card: the boat's published form, and the wharf's own. */
+export interface GlassCardInput {
+  family: GlassCardFamily;
+  /** The source's own stable key for the item (a tend key, a record id). */
+  key: string;
+  /** Changes exactly when what the card stands on changes. */
+  stateHash: string;
+  /** When the source observed this state. */
+  sourceAt: string;
+  title: string;
+  summary?: string;
+  grounds?: string;
+  links?: GlassCardLink[];
+  actions?: GlassCardAction[];
+  /** Progress with no current human action. It updates its card; it does not ask for attention. */
+  quiet?: boolean;
+  /** A person saw this exact state, as the source records it. */
+  seen?: WharfAck;
+  terminal?: GlassCardTerminal;
+}
+/**
+ * The wharf's canonical card. Identity is source + family + key; `id` names
+ * it in links. `revision` advances each time `stateHash` changes, so an
+ * action or a projection can say exactly which state it was about.
+ */
+export interface GlassCard extends GlassCardInput {
+  id: string;
+  source: GlassCardSource;
+  revision: number;
+  /** When the wharf stored this revision. */
+  observedAt: string;
+  links: GlassCardLink[];
+  actions: GlassCardAction[];
+  /** A wharf record's own page in the glass. Boat cards open as the card itself. */
+  item?: GlassCardItem;
+}
 export interface BackendLocation { kind: 'wharf'; url: string; account: string; tokenEnv: string }
 export interface CoordinationBackend {
   enqueue(input: DispatchInput, key: string): Promise<DispatchInput>;

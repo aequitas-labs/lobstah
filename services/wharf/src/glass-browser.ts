@@ -18,8 +18,8 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
   const headers = new Headers({ Cookie: request.headers.get('Cookie') ?? '' });
   const person = await personSession(env, headers);
   const route = url.pathname === '/api/glass' ? 'glass' : url.pathname.slice('/api/glass/'.length);
-  const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake'].includes(route)
-    || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
+  const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake', 'cards'].includes(route)
+    || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route) || /^cards\/c\d{1,15}$/.test(route)
     || /^(documents|dispatches)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));
   const input = request.method === 'POST' && (route === 'requests'
     || /^documents\/[A-Za-z0-9_-]+\/(answer|ack)$/.test(route)
