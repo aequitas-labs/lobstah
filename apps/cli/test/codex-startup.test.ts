@@ -67,7 +67,7 @@ describe("a Codex trap's project hooks", () => {
   const sh = (cwd: string, ...a: string[]) => execFileSync('git', ['-C', cwd, ...a], { stdio: 'ignore' });
   beforeEach(() => {
     // git reports real paths; macOS temp dirs sit behind a /var symlink.
-    const base = fs.realpathSync(home);
+    const base = fs.realpathSync.native(home);
     main = path.join(base, 'repo');
     worktree = path.join(base, 'trap');
     file = path.join(main, '.codex', 'hooks.json');
@@ -104,7 +104,7 @@ describe("a Codex trap's project hooks", () => {
     fs.writeFileSync(path.join(home, 'hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'ume skill show', timeout: 10 }] }] } }));
     const userKey = `${path.join(home, 'hooks.json')}:session_start:0:0`;
     expect(codexTrapHookBlockers(worktree, { env: { CODEX_HOME: home } })).toEqual([expect.objectContaining({ key: userKey, reason: 'never trusted' })]);
-    fs.appendFileSync(config, `[hooks.state."${userKey}"]\ntrusted_hash="sha256:old"\n`);
+    fs.appendFileSync(config, `[hooks.state.${JSON.stringify(userKey)}]\ntrusted_hash="sha256:old"\n`);
     expect(codexStallReason(worktree, { env: { CODEX_HOME: home } })).toBe(`Codex is likely waiting at "Hooks need review" for ${userKey} (\`ume skill show\`, changed since it was trusted) — trust them in that session's /hooks`);
     const row = codexTrapHooksRow({ web: { path: main } }, { env: { CODEX_HOME: home } });
     expect(row).toMatchObject({ status: 'fail', detail: expect.stringContaining(`web: ${userKey}`) });

@@ -65,9 +65,11 @@ const git = (cwd: string, args: string[]): string | undefined => {
  * (observed with Codex 0.160.1), and keys its trust by that absolute path.
  */
 export function codexProjectHooksFile(cwd: string): string | undefined {
-  const common = git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])?.trim();
+  // git prints forward slashes on Windows too; path.resolve gives native ones.
+  const native = (p: string | undefined): string | undefined => (p?.trim() ? path.resolve(p.trim()) : undefined);
+  const common = native(git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
   if (!common) return undefined;
-  const root = path.basename(common) === '.git' ? path.dirname(common) : git(cwd, ['rev-parse', '--show-toplevel'])?.trim();
+  const root = path.basename(common) === '.git' ? path.dirname(common) : native(git(cwd, ['rev-parse', '--show-toplevel']));
   const file = root ? path.join(root, '.codex', 'hooks.json') : undefined;
   return file && fs.existsSync(file) ? file : undefined;
 }
