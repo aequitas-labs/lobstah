@@ -34,12 +34,17 @@ import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
 import { codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
+import { openTmuxPane, tmuxPaneTail, type TmuxPaneRef, type TmuxRunner } from './tmux-terminal.js';
 
 /** One terminal tab to open: a directory, an environment, and a command line. */
 export interface TerminalLaunch {
   cwd: string;
   env: Record<string, string>;
   argv: string[];
+  /** The trap's label: a tmux pane's title. */
+  trap?: string;
+  /** The trap's repo: which tmux window it joins. */
+  repo?: string;
 }
 
 /**
@@ -48,7 +53,8 @@ export interface TerminalLaunch {
  */
 export interface TerminalAdapter {
   app: TerminalApp;
-  launch(launch: TerminalLaunch): Promise<void>;
+  /** Opens the session; a tmux adapter says which pane it opened. */
+  launch(launch: TerminalLaunch): Promise<TmuxPaneRef | void>;
 }
 
 /** The shell text a terminal runs: `cd <dir> && VAR=value <argv>`, every word quoted. */
@@ -64,7 +70,7 @@ const execFileP = promisify(execFile);
  * text is fixed: nothing from the trap, the path, or the prompt is ever
  * spliced into it, so no AppleScript quoting is needed.
  */
-const APPLESCRIPT: Record<TerminalApp, string[]> = {
+const APPLESCRIPT: Record<Exclude<TerminalApp, 'tmux'>, string[]> = {
   terminal: ['on run argv', 'tell application "Terminal"', 'activate', 'do script (item 1 of argv)', 'end tell', 'end run'],
   iterm: [
     'on run argv',
@@ -77,8 +83,16 @@ const APPLESCRIPT: Record<TerminalApp, string[]> = {
   ],
 };
 
+/** The tmux adapter: a pane in lobstah's own tmux server (`[soak] terminal = "tmux"`). */
+export function tmuxTerminalAdapter(cfg: Config, run?: TmuxRunner): TerminalAdapter {
+  return {
+    app: 'tmux',
+    launch: (launch) => openTmuxPane(cfg, { cwd: launch.cwd, command: launchShellText(launch), trap: launch.trap, repo: launch.repo }, run),
+  };
+}
+
 /** The macOS adapter for a terminal app. */
-export function macTerminalAdapter(app: TerminalApp): TerminalAdapter {
+export function macTerminalAdapter(app: Exclude<TerminalApp, 'tmux'>): TerminalAdapter {
   return {
     app,
     async launch(launch) {
@@ -256,7 +270,8 @@ function resolveAdapter(opts: ThrowOptions, terminal: unknown, label: string, fr
   if (!isTerminalApp(terminal)) {
     throw new Error(`cannot throw ${label}: terminal "${String(terminal)}" (${from}) is not supported — use ${TERMINAL_APPS.join(' or ')}`);
   }
-  return (opts.adapter ?? macTerminalAdapter)(terminal);
+  if (opts.adapter) return opts.adapter(terminal);
+  return terminal === 'tmux' ? tmuxTerminalAdapter(opts.cfg) : macTerminalAdapter(terminal);
 }
 
 /**
@@ -292,12 +307,13 @@ async function launchAndWait(
   w: { trapId: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
 ): Promise<ThrowResult> {
   const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
+  let opened: TmuxPaneRef | undefined;
   try {
     if (w.launched.harness === 'codex') {
       // An unattended throw must not park at the interactive update picker.
       w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...codexTrapHookArgs({ cwd: w.command.cwd }));
     }
-    await w.adapter.launch(w.command);
+    opened = (await w.adapter.launch({ ...w.command, trap: w.label, ...(w.repo ? { repo: w.repo } : {}) })) || undefined;
   } catch (err) {
     giveUp(w.trapId, w.label, w.repo, w.retry, w.started, err instanceof Error ? err.message : String(err));
     throw err;
@@ -320,14 +336,17 @@ async function launchAndWait(
       };
     }
     if (Date.now() >= deadline) {
-      if (fresh) throw new (w.launched.harness === 'codex' ? ThrowPendingError : ThrowTimeoutError)(`${w.label} signed on but has not listened within ${timeoutSecs}s — it is live; check its session`);
+      // A tmux pane can be read: say what its screen shows.
+      const screen = opened ? await tmuxPaneTail(opened.tmuxPane) : undefined;
+      const shows = screen ? `; its tmux pane ${opened!.tmuxPane} shows: ${screen}` : '';
+      if (fresh) throw new (w.launched.harness === 'codex' ? ThrowPendingError : ThrowTimeoutError)(`${w.label} signed on but has not listened within ${timeoutSecs}s — it is live; check its session${shows}`);
       if (w.launched.harness === 'codex') {
         // Keep both the ticket and the fence: an already-open slow session
         // can redeem late, and retry cannot create a competing writer.
-        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${codexStallReason(w.command.cwd)}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying`);
+        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${codexStallReason(w.command.cwd)}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying${shows}`);
       }
       giveUp(w.trapId, w.label, w.repo, w.retry, w.started, `no sign-on within ${timeoutSecs}s`);
-      throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged`);
+      throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged${shows}`);
     }
     await sleep(opts.pollMs ?? 500);
   }

@@ -208,7 +208,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--repo': { value: '<key>' },
       '--harness': { value: `${HARNESS}|default` },
       '--model': { value: '<m>|default' },
-      '--terminal': { value: 'terminal|iterm|default' },
+      '--terminal': { value: 'terminal|iterm|tmux|default' },
       '--config': { value: '<key>=<value>', repeatable: true },
       '--session': { value: '<id>' },
       '--force': {},
