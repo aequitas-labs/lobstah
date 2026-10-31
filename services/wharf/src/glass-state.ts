@@ -116,6 +116,49 @@ export class GlassState {
     r.state = 'fulfilled'; r.dispatch = dispatch; r.outcome = `dispatched as ${dispatch}`;
     this.put('human_requests', r.id, r);
   }
+  /**
+   * A person's answer to a standing decision, from the glass or their Slack:
+   * human input that never takes, renews or steals a helm seat. The first
+   * answer stands; a later one is refused.
+   */
+  answerDecision(id: string, optionValue: unknown, textValue: unknown, person: string, now: number): WharfDocument {
+    const d = this.document(id);
+    requireThat(d.kind === 'decision' && d.published && !d.withdrawn && !d.answer, 409, 'decision is not standing');
+    const option = optionValue === undefined ? undefined : text(optionValue, 80), answer = textValue === undefined ? undefined : text(textValue, 20000).trim();
+    requireThat(option === undefined || d.options?.includes(option), 400, 'not a decision option'); requireThat(option || answer, 400, 'answer needs an option or text');
+    d.answer = { ...(option ? { option } : {}), ...(answer ? { text: answer } : {}), at: new Date(now).toISOString(), by: person };
+    this.put('documents', d.id, d); this.hooks.event('decision-answer', d.dispatch, d.id); return d;
+  }
+  /** Seen, by a boat with read or the person. The first ack stands. No event and no helm seat. */
+  ackDocument(id: string, by: string, now: number): WharfDocument {
+    const d = this.document(id);
+    requireThat(d.published && !d.withdrawn, 409, 'document is not published or was withdrawn');
+    if (!d.ack) { d.ack = { at: new Date(now).toISOString(), by }; this.put('documents', d.id, d); }
+    return d;
+  }
+  /**
+   * A person has seen a job's question or landing, at the status it stands
+   * on: an ack of what the job said before must not hide what it says now.
+   * No event, no helm seat, no change to the job.
+   */
+  ackDispatch(id: string, statusAt: unknown, by: string, now: number): WharfAck & { status: string } {
+    requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', id).toArray().length, 404, 'dispatch not found');
+    const last = this.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 1', id).toArray()[0];
+    const status = last ? (JSON.parse(last.data) as { at: string }).at : undefined;
+    requireThat(status && statusAt === status, 409, 'the job has no such current status; read it again before acknowledging');
+    const standing = this.dispatchAck(id, status);
+    if (standing) return standing;
+    const ack = { status, at: new Date(now).toISOString(), by };
+    this.put('dispatch_acks', id, ack); return ack;
+  }
+  /** A person's message to a job, queued for the helm to deliver, as the glass sends it. */
+  messageJob(dispatch: string, message: unknown, person: string, now: number): WharfHumanRequest {
+    requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', dispatch).toArray().length, 404, 'dispatch not found');
+    const r: WharfHumanRequest = { id: crypto.randomUUID(), kind: 'message', dispatch, text: text(message, 16000), by: person, at: new Date(now).toISOString(),
+      expiresAt: new Date(now + 600_000).toISOString(), state: 'queued' };
+    this.put('human_requests', r.id, r); this.hooks.event('human-request', r.dispatch, r.id);
+    return { ...r, waitingForHelm: !this.hooks.helmLive(now) };
+  }
   /** Every published document, withdrawn ones too: a withdrawal ends its card. */
   publishedDocuments(): WharfDocument[] { return this.list<WharfDocument>('documents').filter((d) => d.published); }
   /** Human requests as the glass shows them, with whether one waits for a helm. */
@@ -166,17 +209,7 @@ export class GlassState {
     if (c.path === 'glass' && c.method === 'GET') return ok({ boats: this.boats(), workers: this.workers(), documents: this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn),
       requests: this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })), helmLive: this.hooks.helmLive(now) });
     if (parts[0] === 'dispatches' && parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
-      // A person has seen this job's question or landing. No event, no helm seat, no change to the job.
-      const by = this.acker(actor), id = identifier(parts[1]);
-      requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', id).toArray().length, 404, 'dispatch not found');
-      const last = this.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 1', id).toArray()[0];
-      const status = last ? (JSON.parse(last.data) as { at: string }).at : undefined;
-      // Keyed on the status time: an ack of what the job said before must not hide what it says now.
-      requireThat(status && b.at === status, 409, 'the job has no such current status; read it again before acknowledging');
-      const standing = this.dispatchAck(id, status);
-      if (standing) return ok(standing);
-      const ack = { status, at: new Date(now).toISOString(), by };
-      this.put('dispatch_acks', id, ack); return ok(ack);
+      return ok(this.ackDispatch(identifier(parts[1]), b.at, this.acker(actor), now));
     }
     if (parts[0] === 'documents') {
       // Boats list decisions and reports; reviews are the hosted glass's (an older boat would refuse the kind).
@@ -219,18 +252,12 @@ export class GlassState {
         d.withdrawn = true; this.put('documents', d.id, d); this.hooks.event('decision-withdrawn', d.dispatch, d.id); return ok(d);
       }
       if (parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
-        // Seen, by a boat with read or the person. The first ack stands. No event and no helm seat.
-        const acker = this.acker(actor), by = actor.kind === 'person' && c.token.startsWith('browser:') ? 'glass' : acker; requireThat(d.published && !d.withdrawn, 409, 'document is not published or was withdrawn');
-        if (!d.ack) { d.ack = { at: new Date(now).toISOString(), by }; this.put('documents', d.id, d); }
-        return ok(d);
+        const acker = this.acker(actor);
+        return ok(this.ackDocument(d.id, actor.kind === 'person' && c.token.startsWith('browser:') ? 'glass' : acker, now));
       }
       if (parts.length === 3 && parts[2] === 'answer' && c.method === 'POST') {
-        // Human input, like the local glass: never takes, renews or steals a helm seat.
-        this.person(actor); requireThat(d.kind === 'decision' && d.published && !d.withdrawn && !d.answer, 409, 'decision is not standing');
-        const option = b.option === undefined ? undefined : text(b.option, 80), answer = b.text === undefined ? undefined : text(b.text, 20000).trim();
-        requireThat(option === undefined || d.options?.includes(option), 400, 'not a decision option'); requireThat(option || answer, 400, 'answer needs an option or text');
-        d.answer = { ...(option ? { option } : {}), ...(answer ? { text: answer } : {}), at: new Date(now).toISOString(), by: actor.id };
-        this.put('documents', d.id, d); this.hooks.event('decision-answer', d.dispatch, d.id); return ok(d);
+        this.person(actor);
+        return ok(this.answerDecision(d.id, b.option, b.text, actor.id, now));
       }
       if (parts.length === 4 && parts[2] === 'files' && c.method === 'GET') {
         const file = [d.markdown, ...d.attachments].find((f) => f?.id === identifier(parts[3])); requireThat(file, 404, 'document file not found'); return ok(file);
