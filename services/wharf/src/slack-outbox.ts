@@ -156,7 +156,8 @@ export class SlackOutbox {
   }
   private record(job: Delivery, outcome: SlackOutcome, hash: string) {
     const now = Date.now();
-    if (outcome.kind === 'sent') this.settle(job, { sent: job.want, ts: outcome.ts, sent_hash: hash, attempts: 0, next_at: now, error: null });
+    // A post names the card's message; an edit never changes which message that is.
+    if (outcome.kind === 'sent') this.settle(job, { sent: job.want, ts: job.ts ?? outcome.ts, sent_hash: hash, attempts: 0, next_at: now, error: null });
     // The message is gone: post the card again as a new message.
     else if (outcome.kind === 'gone') this.settle(job, { ts: null, sent_hash: null, next_at: now, error: 'message gone' });
     else if (outcome.kind === 'refused') this.settle(job, { next_at: NEVER, error: `refused: ${outcome.reason}` });
