@@ -110,6 +110,13 @@ tokenEnv = "LOBSTAH_WHARF_TOKEN"
 ```
 
 `tokenEnv` names an override variable; leave it unset to use the saved login.
+A person's answer to one of this boat's cards from Slack or the hosted glass
+reaches the boat as a verified receipt, applied only to the exact card state
+answered and only once. Allow once and Allow always from the wharf write the
+same grant a click in the local glass would; `remoteAnswers = false` in this
+block keeps Allow to the local glass only, while No, decision answers and seen
+still arrive.
+
 A repo belongs to one grounds, and with no `[grounds.*]` configured every repo
 sits in the implicit `home` grounds. Configuring any grounds replaces it, so
 list every repo you still want steered. A configured `home` is a new grounds:

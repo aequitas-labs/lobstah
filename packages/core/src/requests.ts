@@ -17,7 +17,8 @@ export interface LobstahRequest {
   id: string;
   kind: RequestKind;
   at: string;
-  from: 'glass' | 'cli';
+  /** `wharf`: a person's verified answer relayed by the wharf, applied by this boat. */
+  from: 'glass' | 'cli' | 'wharf';
   payload: Record<string, unknown>;
   closedAt?: string;
   outcome?: string;
@@ -106,7 +107,7 @@ export const newRequestId = (): string => randomUUID();
 export function writeRequest(
   kind: RequestKind,
   payload: Record<string, unknown>,
-  from: 'glass' | 'cli' = 'glass',
+  from: 'glass' | 'cli' | 'wharf' = 'glass',
   opts: { id?: string } = {},
 ): LobstahRequest {
   const r: LobstahRequest = { id: opts.id ?? randomUUID(), kind, at: new Date().toISOString(), from, payload };

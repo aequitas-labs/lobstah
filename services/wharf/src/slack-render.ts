@@ -68,6 +68,15 @@ function standing(card: GlassCard): string {
   if (card.seen) return `Seen by ${slackEscape(card.seen.by)}`;
   return card.quiet ? 'In progress' : 'Waiting for you';
 }
+/** Where an answer relayed to the card's boat stands: recorded is not applied, and applied is said only when the boat says so. */
+function relayed(card: GlassCard): string {
+  const r = card.relay;
+  if (!r) return '';
+  const answer = slackEscape(r.answer);
+  if (r.state === 'awaiting boat') return `${answer} recorded · awaiting its boat`;
+  if (r.state === 'applied') return `${answer} applied on its boat`;
+  return `${answer} ${r.state}${r.outcome ? `: ${slackEscape(r.outcome)}` : ''}`;
+}
 /** What a card offers, said in words, with every option's exact text under its number. */
 function offered(actions: GlassCardAction[]): string[] {
   const options = actions.flatMap((a) => (a.kind === 'answer' ? [a.option] : []));
@@ -112,10 +121,12 @@ const button = (label: string, action: string, fields: { url?: string; value?: s
 export function renderCard(card: GlassCard, glassOrigin: string, controls: CardControl[] = []): SlackMessage {
   const title = clip(card.title.replace(/\s+/g, ' ').trim() || FAMILY_LABEL[card.family], SLACK_BUDGET.title);
   const context = clip(
-    [FAMILY_LABEL[card.family], card.grounds && slackEscape(card.grounds), standing(card), !card.terminal && slackTime(card.sourceAt)].filter(Boolean).join(' · '),
+    [FAMILY_LABEL[card.family], card.grounds && slackEscape(card.grounds), standing(card), relayed(card), !card.terminal && slackTime(card.sourceAt)].filter(Boolean).join(' · '),
     SLACK_BUDGET.context,
   );
-  const ask = card.terminal ? [] : offered(card.actions);
+  // An answer awaiting its boat, or applied there, leaves nothing to ask.
+  const settled = card.relay?.state === 'awaiting boat' || card.relay?.state === 'applied';
+  const ask = card.terminal || settled ? [] : offered(card.actions);
   // What the card asks always shows in full; the summary gets the room left over.
   const asked = fitted(ask.join('\n'), SLACK_BUDGET.section);
   const room = SLACK_BUDGET.section - asked.length - (asked && card.summary ? 2 : 0);

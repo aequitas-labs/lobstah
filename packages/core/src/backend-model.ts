@@ -151,6 +151,39 @@ export interface GlassCard extends GlassCardInput {
   actions: GlassCardAction[];
   /** A wharf record's own page in the glass. Boat cards open as the card itself. */
   item?: GlassCardItem;
+  /** A boat's card a person answered away from that boat: where that answer stands. */
+  relay?: GlassCardRelay;
+}
+/**
+ * A person's answer to a boat's card, from Slack or the hosted glass: the
+ * wharf records it, and the owning boat applies it or refuses it. An answer
+ * awaiting its boat is not yet a grant or a decision.
+ */
+export interface GlassCardRelay {
+  state: 'awaiting boat' | 'applied' | 'refused' | 'expired';
+  /** What was answered, as the person saw it: an option, Allow once, seen. */
+  answer: string;
+  at: string;
+  outcome?: string;
+}
+/**
+ * The receipt a boat reads for a person's verified answer to one of its
+ * cards. It names the exact card state answered; a boat applies it only to
+ * that state, and only once.
+ */
+export interface CardAnswerReceipt {
+  id: string;
+  family: GlassCardFamily;
+  key: string;
+  stateHash: string;
+  revision: number;
+  action: GlassCardAction;
+  text?: string;
+  /** The wharf person who answered. */
+  by: string;
+  at: string;
+  state: 'pending' | 'applied' | 'refused' | 'expired';
+  outcome?: string;
 }
 export interface BackendLocation { kind: 'wharf'; url: string; account: string; tokenEnv: string }
 export interface CoordinationBackend {

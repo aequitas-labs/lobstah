@@ -407,6 +407,13 @@ export interface Config {
   watch: WatchConfig;
   grounds: Record<string, GroundsConfig>;
   wharves?: Record<string, import('./backend-model.js').BackendLocation>;
+  /**
+   * `[wharves.<name>] remoteAnswers = false`: this boat takes Allow once and
+   * Allow always only in its own glass, not from that wharf's verified
+   * answers (Slack, the hosted glass). Listed wharves only; each is on
+   * unless set false.
+   */
+  wharfRemoteAnswers?: Record<string, boolean>;
   /** Worktree pools for headless dispatches (`[pools.<name>]`). */
   pools: Record<string, PoolConfig>;
   /** `[hooks]`: the notify commands and the global brief hooks. */
@@ -652,9 +659,13 @@ export function loadConfig(): Config {
   }
   const groundsRaw = (raw.grounds ?? {}) as Record<string, Record<string, unknown>>;
   const wharves: Record<string, import('./backend-model.js').BackendLocation> = {};
+  const wharfRemoteAnswers: Record<string, boolean> = {};
   for (const [name, value] of Object.entries((raw.wharves ?? {}) as Record<string, Record<string, unknown>>)) {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new Error('invalid wharf name');
-    wharves[name] = parseBackendLocation({ ...value, kind: 'wharf' })!;
+    const { remoteAnswers, ...location } = value;
+    wharves[name] = parseBackendLocation({ ...location, kind: 'wharf' })!;
+    if (remoteAnswers !== undefined && typeof remoteAnswers !== 'boolean') throw new Error(`wharves.${name}.remoteAnswers must be true or false`);
+    wharfRemoteAnswers[name] = remoteAnswers !== false;
   }
   const grounds: Record<string, GroundsConfig> = {};
   for (const [key, g] of Object.entries(groundsRaw)) {
@@ -673,6 +684,7 @@ export function loadConfig(): Config {
     watch,
     grounds,
     wharves,
+    wharfRemoteAnswers,
     pools: parsePools(raw.pools, repos),
     hooks: parseHooks(raw.hooks),
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
