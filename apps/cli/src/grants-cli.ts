@@ -27,6 +27,7 @@ import {
   useGrant,
 } from '@lobstah/core';
 import type {
+  AnswerSource,
   CheckoutRoot,
   DecisionAnswer,
   DecisionMeta,
@@ -545,12 +546,14 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
 }
 
 /**
- * Before a permission card is answered: only the glass may allow. An answer
- * from the command line (`man answer`, which the helm runs) may say No but
- * never grants.
+ * Before a permission card is answered: only a person may allow, in the
+ * glass or through the wharf (a verified answer this boat agreed to take,
+ * checked in wharf-answers.ts before it arrives here). An answer from the
+ * command line (`man answer`, which the helm runs) may say No but never
+ * grants.
  */
-export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: 'glass' | 'cli'): void {
-  if (!decision.permission || by === 'glass') return;
+export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: AnswerSource): void {
+  if (!decision.permission || by === 'glass' || by === 'wharf') return;
   if (option?.startsWith('Allow')) {
     throw new GrantError(
       'a permission is granted in the glass, or by a person with `lobstah grant` at a terminal; `man answer` can only say No',
@@ -559,34 +562,43 @@ export function permissionAnswerAllowed(decision: DecisionMeta, option: string |
 }
 
 /**
- * After a permission card is answered in the glass: write the grant and tell
- * the trap. "Allow once" is good for the asking trap alone; "Allow always"
- * for every trap.
+ * After a permission card is answered by a person, in the glass or through
+ * the wharf: write the grant and tell the trap. "Allow once" is good for the
+ * asking trap alone; "Allow always" for every trap. A wharf answer's grant is
+ * by `wharf:<receipt>`: the same receipt finds its grant again rather than
+ * writing a second.
  */
 export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAnswer): Grant | undefined {
   const ask = decision.permission;
   if (!ask) return undefined;
-  if (answer.by === 'glass' && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
+  const person = answer.by === 'glass' || answer.by === 'wharf';
+  const grantedBy = answer.by === 'wharf' ? `wharf:${answer.receipt}` : 'glass';
+  const where = answer.by === 'wharf' ? 'through the wharf' : 'in the glass';
+  if (answer.by === 'wharf') {
+    const earlier = listGrants({ all: true }).grants.find((g) => g.by === grantedBy);
+    if (earlier) return earlier;
+  }
+  /** Every grant this answer writes names who allowed it. */
+  const grantFromAnswer = (g: Omit<Parameters<typeof addGrant>[0], 'by'>) => addGrant({ ...g, by: grantedBy });
+  if (person && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
     const r = ask.sessionGrant;
     const duration = answer.option === 'Allow for 1h' ? 3600_000 : r.durationMs;
-    return addGrant({
+    return grantFromAnswer({
       mode: 'session',
       session: r.session,
       tools: r.tools,
       hosts: r.hosts,
       reason: r.reason,
       ...(r.command ? { command: r.command, match: 'prefix' } : {}),
-      by: 'glass',
       expiresAt: new Date(Date.now() + duration).toISOString(),
     });
   }
-  if (answer.by === 'glass' && answer.option === TOOL_FAMILY_OPTION && ask.session) {
-    const grant = addGrant({
+  if (person && answer.option === TOOL_FAMILY_OPTION && ask.session) {
+    const grant = grantFromAnswer({
       mode: 'session',
       session: ask.session,
       tools: toolFamily(ask.tool ?? (ask.command ? 'Bash' : 'Write')),
       ...(ask.command ? { command: commandGrantScope(ask.command).command, match: 'prefix' } : {}),
-      by: 'glass',
       harness: ask.harness,
       reason: 'Allowed this tool family on the permission card',
     });
@@ -602,7 +614,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
   if (!decision.dispatch) return undefined;
   const lane: Lane = decision.lane ?? 'work';
   const target = ask.command !== undefined ? `\`${ask.command}\`` : `writes to ${ask.path}`;
-  if (answer.by !== 'glass' || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
+  if (!person || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
     if (answer.option === 'No')
       sendMessage(
         decision.dispatch,
@@ -613,7 +625,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
     return undefined;
   }
   const once = answer.option === 'Allow once';
-  const g = addGrant({
+  const g = grantFromAnswer({
     ...(ask.command !== undefined
       ? once
         ? { command: ask.command, match: 'exact' as const }
@@ -621,14 +633,13 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       : { path: ask.path! }),
     mode: once ? 'once' : 'always',
     harness: ask.harness,
-    by: 'glass',
     dispatch: decision.dispatch,
     ...(once && ask.trap ? { trap: ask.trap } : {}),
   });
   sendMessage(
     decision.dispatch,
     lane,
-    `Chris allowed ${target} ${once ? 'once' : `always (${what(g)})`} in the glass: grant ${g.id}. ` +
+    `Chris allowed ${target} ${once ? 'once' : `always (${what(g)})`} ${where}: grant ${g.id}. ` +
       '`lobstah grants` shows it. ' +
       (ask.command !== undefined
         ? `Run the command again exactly as shown, with nothing added before or after it: ${ask.command}`

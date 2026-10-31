@@ -144,10 +144,18 @@ export class Account extends DurableObject<Env> {
     if (this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
     return result;
   }
-  /** One action on one of the wharf's own cards, through the glass's own path. A form is asked for first when it needs words. */
+  /**
+   * One action on a card. The wharf's own cards go through the glass's own
+   * path. A boat's card gets a receipt for that boat, which alone applies it.
+   * A form is asked for first when an answer needs words.
+   */
   private cardAction(card: GlassCard, action: GlassCardAction, person: string, answer: string | undefined, now: number): SlackActionResult {
     const words = answer?.trim();
     const form = (prompt: string): SlackActionResult => ({ form: { title: card.title, prompt } });
+    if (card.source !== 'wharf') {
+      if (action.kind === 'answer-text' && !words) return form('Your answer');
+      return this.cards.answerForBoat(card, action, action.kind === 'answer-text' ? words : undefined, person, now);
+    }
     try {
       if (card.family === 'decision' && action.kind === 'answer') this.glass.answerDecision(card.key, action.option, undefined, person, now);
       else if (card.family === 'decision' && action.kind === 'answer-text') { if (!words) return form('Your answer'); this.glass.answerDecision(card.key, undefined, words, person, now); }
@@ -204,8 +212,13 @@ export class Account extends DurableObject<Env> {
       glassOrigin: env.GLASS_ORIGIN, card: (seq) => this.cards.store.get(`c${seq}`),
       // The workspace installation's own bot token, sealed at rest in D1.
       token: (team) => installationToken(env, team),
-      // In this release the wharf's own cards take their actions in Slack; a boat's cards are answered on their boat.
-      controllable: (card) => (card.source === 'wharf' ? card.actions.filter((a) => ['answer', 'answer-text', 'seen', 'message-helm'].includes(a.kind)) : []),
+      // The wharf's own cards act through the glass's paths; a boat's cards become receipts that boat applies.
+      // While an answer awaits its boat, or was applied, the card offers nothing more.
+      controllable: (card) => {
+        if (card.relay && (card.relay.state === 'awaiting boat' || card.relay.state === 'applied')) return [];
+        const kinds = card.source === 'wharf' ? ['answer', 'answer-text', 'seen', 'message-helm'] : ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen'];
+        return card.actions.filter((a) => kinds.includes(a.kind));
+      },
       // A work request's receipt replies in the thread of the message that asked, in that same DM.
       thread: (card, channel) => {
         const origin = card.source === 'wharf' && card.family === 'request' ? this.glass.requestOrigin(card.key) : undefined;
