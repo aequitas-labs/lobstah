@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { backendScopes, listNotices, loadConfig, standingDecisions, wharfFor } from '@lobstah/core';
+import { backendScopes, listNotices, loadConfig, repoKey, standingDecisions, wharfFor } from '@lobstah/core';
 import type { BackendScope, Config, DecisionMeta, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardLink, Notice, TendAttention } from '@lobstah/core';
 import { buildTendReport } from './tend.js';
 import { isHostedKey } from './hosted-view.js';
@@ -76,8 +76,10 @@ export function noticeCard(n: Notice, grounds: string, now: number): GlassCardIn
  */
 export function boatCards(cfg: Pick<Config, 'grounds' | 'wharves' | 'repos'>, attention: TendAttention[], decisions: DecisionMeta[], notices: Notice[], now: number): BoatCardSet[] {
   const scopes = backendScopes(cfg).filter((s): s is Extract<BackendScope, { kind: 'wharf' }> => s.kind === 'wharf');
+  // A PR with no local dispatch names its GitHub repo (`owner/name`); its origin says which configured repo that is.
+  const configured = (repo: string) => (cfg.repos[repo] ? repo : repoKey(cfg as Config, repo));
   const scopeOf = (repo: string | undefined, grounds?: string) =>
-    (repo ? scopes.find((s) => s.repos.includes(repo)) : undefined) ?? (grounds ? scopes.find((s) => s.grounds === grounds) : undefined);
+    (repo ? scopes.find((s) => s.repos.includes(configured(repo))) : undefined) ?? (grounds ? scopes.find((s) => s.grounds === grounds) : undefined);
   const byKey = new Map(decisions.map((d) => [d.key, d]));
   const sets = new Map<string, BoatCardSet>();
   const add = (scope: BackendScope, card: GlassCardInput) => {
