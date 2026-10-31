@@ -36,6 +36,7 @@ account; there is no secret in it.
 | `GITHUB_CLIENT_SECRET` | secret | the GitHub OAuth app's client secret |
 | `SLACK_CLIENT_ID` | var | the private Slack app's public client ID. Empty, the glass offers no Slack link |
 | `SLACK_CLIENT_SECRET` | secret, optional | the Slack app's client secret. With the client ID, a person can link their own Slack from the boat list |
+| `SLACK_SIGNING_SECRET` | secret, optional | the Slack app's signing secret. Unset, the API host answers no Slack call |
 | `ACCOUNTS` | Durable Object | SQLite class `Account`, migration `v1`, made by the first deploy |
 | `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/` |
 | `FILES` | R2 | `lobstah-wharf-files`, evidence files |
@@ -64,6 +65,14 @@ its client ID in `SLACK_CLIENT_ID` and its client secret in
 list; the install stores the workspace's bot token sealed under `AUTH_SECRET`,
 and links no one but the person who connected.
 
+For asking for work from Slack, also set Event Subscriptions' Request URL to
+`https://api.lobstah.dev/slack/events` with the bot event `message.im`, set
+Interactivity's Request URL to `https://api.lobstah.dev/slack/interactions`,
+and put the app's signing secret in `SLACK_SIGNING_SECRET`. Each call is
+checked against that secret before anything is read. A linked person's
+top-level message in their DM with the app becomes a work request for the
+helm, with a receipt in its thread; replies in that thread add to it.
+
 Work in `services/wharf`. R2 must be enabled on the account in the dashboard
 first. Secrets go in on standard input, never as arguments:
 
@@ -76,6 +85,7 @@ openssl rand -base64 48 | npx wrangler secret put AUTH_SECRET
 openssl rand -base64 48 | npx wrangler secret put TOKEN_SECRET
 npx wrangler secret put GITHUB_CLIENT_SECRET
 npx wrangler secret put SLACK_CLIENT_SECRET   # only with a Slack app
+npx wrangler secret put SLACK_SIGNING_SECRET  # only with a Slack app
 pnpm build && npx wrangler deploy --dry-run
 pnpm build && npx wrangler deploy
 ```

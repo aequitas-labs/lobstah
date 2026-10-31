@@ -31,10 +31,10 @@ function keys(b: Record<string, unknown>, allowed: string[]) {
 }
 export function dispatchInput(value: unknown): DispatchInput {
   const b = object(value);
-  keys(b, ['id', 'repo', 'repoRemote', 'brief', 'lane', 'for', 'boat', 'followUp', 'harness', 'model', 'effort']);
+  keys(b, ['id', 'repo', 'repoRemote', 'brief', 'lane', 'for', 'boat', 'followUp', 'harness', 'model', 'effort', 'request']);
   const d: DispatchInput = { id: identifier(b.id), repo: identifier(b.repo), repoRemote: repoIdentity(b.repoRemote), brief: text(b.brief, 48000) };
   if (b.lane !== undefined) { requireThat(b.lane === 'work' || b.lane === 'chore', 400, 'invalid lane'); d.lane = b.lane; }
-  for (const k of ['for', 'boat', 'followUp', 'harness', 'effort'] as const) {
+  for (const k of ['for', 'boat', 'followUp', 'harness', 'effort', 'request'] as const) {
     if (b[k] !== undefined) d[k] = identifier(b[k]);
   }
   if (b.model !== undefined) { const model = text(b.model, 128); requireThat(/^[A-Za-z0-9._-]+$/.test(model), 400, 'invalid model identifier'); d.model = model; }

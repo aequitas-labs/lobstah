@@ -1182,6 +1182,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'dispatch': {
+      if (opt('--request') !== undefined) throw new UsageError('--request names a person\'s work request on a wharf: dispatch it on that wharf\'s grounds');
       if (has('--trap-any') && (opt('--for') !== undefined || opt('--pool') !== undefined)) throw new UsageError('--trap-any cannot be combined with --for or --pool');
       const poolName = opt('--pool');
       const pool = poolName !== undefined ? loadConfig().pools[poolName] : undefined;

@@ -33,6 +33,8 @@ export interface OutboxDeps {
   card(seq: number): GlassCard | undefined;
   /** The bot token for a workspace, or nothing while the app is not installed there. */
   token(team: string): Promise<string | undefined>;
+  /** The thread a card's first post replies in, in that conversation, when it belongs to one. */
+  thread?(card: GlassCard, channel: string): string | undefined;
   /** How a drain waits between calls to one conversation. */
   pause?: (ms: number) => Promise<void>;
 }
@@ -104,7 +106,7 @@ export class SlackOutbox {
       const wait = (last.get(link.channel) ?? 0) + CONVERSATION_SPACING_MS - Date.now();
       if (wait > 0) await (this.deps.pause ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))))(wait);
       const api = new SlackApi(token);
-      const outcome = job.ts ? await api.update(link.channel, job.ts, message) : await api.post(link.channel, message);
+      const outcome = job.ts ? await api.update(link.channel, job.ts, message) : await api.post(link.channel, message, this.deps.thread?.(card, link.channel));
       calls++; last.set(link.channel, Date.now());
       this.record(job, outcome, hash);
     }

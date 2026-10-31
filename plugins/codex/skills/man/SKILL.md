@@ -138,6 +138,7 @@ tracked background task. End the turn while the external operation runs.
 
 - Unanswered questions re-fire until answered (your `send` answers them) — a missed wake is not lost.
 - A send is answered by the worker's next note, which wakes you; use `--no-reply` for a steer that needs no answer.
+- On a wharf grounds, a `human-request` wake can be the owner asking for new work from their Slack DM with the lobstah app. Read it with `lobstah wharf requests --grounds <g>` (kind `work`; `followUps` are what they added in its thread). Dispatch it with `lobstah dispatch --grounds <g> --repo <r> --brief-text "<standalone brief>" --request <request-id>`, which fulfills it and shows them the dispatch, or ask back with `lobstah wharf request-respond <request-id> "<question>" --grounds <g>`. A `human-request-update` wake means they replied in that thread.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
 without the plugin; see docs/man.md. `lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken setup.

@@ -283,6 +283,19 @@ it('refuses hosted soak without a daemon, and dispatch without a usable remote, 
   await expect(wharfCommand('dispatch', [], opts, loadConfig())).rejects.toThrow('no usable origin remote');
   expect(fetcher).not.toHaveBeenCalled();
 });
+it('the helm answers a person’s work request: dispatch --request fulfills it, request-respond asks back', async () => {
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => Response.json(JSON.parse(String(init.body)))); vi.stubGlobal('fetch', fetcher);
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away', '--repo': 'remote', '--brief-text': 'Fix the flaky checkout', '--session': 'helm', '--request': 'slack-D1-1700000000-000100' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  expect(await wharfCommand('dispatch', [], opts, loadConfig())).toBe(true);
+  expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toMatchObject({ repo: 'remote', request: 'slack-D1-1700000000-000100' });
+  expect(await wharfCommand('wharf', ['request-respond', 'slack-D1-1700000000-000100', 'Which', 'repo?'], opts, loadConfig())).toBe(true);
+  expect(fetcher.mock.calls[1][0]).toContain('/requests/slack-D1-1700000000-000100/respond');
+  expect(JSON.parse(String(fetcher.mock.calls[1][1].body))).toEqual({ text: 'Which repo?' });
+  expect(parseArgs('wharf', ['request-respond', 'r', 'text', '--grounds', 'away'])?.error).toBeUndefined();
+  expect(parseArgs('dispatch', ['--request', 'r', '--repo', 'remote'])?.error).toBeUndefined();
+});
 it('wharf recover prints only its submitted recovery, without listing recoveries or falling through the outer switch', async () => {
   const recovery = { verb: 'done', note: 'preserved result' };
   const file = path.join(home, 'recovery.json'); fs.writeFileSync(file, JSON.stringify(recovery));
