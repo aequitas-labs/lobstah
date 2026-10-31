@@ -32,7 +32,7 @@ const HARNESS = 'claude|codex';
 export const COMMANDS: Record<string, CommandSpec> = {
   setup: { subverbs: ['reviews'], flags: { '--identity': { value: '<github-login>' } }, maxPositionals: 1 },
   wharf: {
-    subverbs: ['login', 'logout', 'whoami', 'requests', 'request-receipt', 'request-execute', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries'],
+    subverbs: ['login', 'logout', 'whoami', 'requests', 'request-receipt', 'request-execute', 'request-respond', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries'],
     flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--name': { value: '<boat>' }, '--helm': {}, '--work-only': {}, '--credential-file': { value: '<file|->' }, '--timeout': { value: '<seconds>' } },
     positionals: '<action> [<id>] [<file>|<message-id>]',
   },
@@ -48,6 +48,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--model': { value: '<m>' },
       '--effort': { value: '<e>' },
       '--follow-up': { value: '<uuid>' },
+      '--request': { value: '<id>' },
       '--pr': { value: '<url|number>' },
       '--attach': { value: '<file>', repeatable: true },
       '--for': { value: '<name>|wt:<trap>' },

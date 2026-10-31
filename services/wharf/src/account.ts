@@ -9,6 +9,7 @@ import { Cards } from './cards.js';
 import { SlackOutbox } from './slack-outbox.js';
 import { installationToken } from './slack-install.js';
 import type { SlackLink } from './slack-install.js';
+import type { SlackMessageIn } from './slack-ingress.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
@@ -103,6 +104,21 @@ export class Account extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => this.outbox.link(person, link, this.cards.store.list(now).filter((c) => !c.terminal), now));
     if (this.outbox.due(now)) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
   }
+  /**
+   * Private binding only: a verified DM message from this account's linked
+   * person. It is recorded, and its receipt queued, before Slack hears back.
+   */
+  async slackMessage(person: string, message: SlackMessageIn): Promise<{ request?: string; ignored?: string }> {
+    const result = this.ctx.storage.transactionSync(() => {
+      requireThat(!this.get('deleted'), 410, 'account deleted');
+      const now = Date.now(); this.expire(now); this.capacity();
+      const recorded = this.glass.slackMessage(message, person, now);
+      this.cards.project(now);
+      return recorded;
+    });
+    if (this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
+    return result;
+  }
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(`
@@ -144,6 +160,11 @@ export class Account extends DurableObject<Env> {
       glassOrigin: env.GLASS_ORIGIN, card: (seq) => this.cards.store.get(`c${seq}`),
       // The workspace installation's own bot token, sealed at rest in D1.
       token: (team) => installationToken(env, team),
+      // A work request's receipt replies in the thread of the message that asked, in that same DM.
+      thread: (card, channel) => {
+        const origin = card.source === 'wharf' && card.family === 'request' ? this.glass.requestOrigin(card.key) : undefined;
+        return origin?.channel === channel ? origin.ts : undefined;
+      },
     });
   }
   private get(key: string): string | undefined {
@@ -378,6 +399,8 @@ export class Account extends DurableObject<Env> {
       if (d.boat) requireThat(this.targetBoat(d), 404, 'target boat not found');
       requireThat(!this.ctx.storage.sql.exec('SELECT id FROM dispatches WHERE id=?', d.id).toArray().length, 409, 'dispatch already exists');
       if (d.followUp) this.dispatch(d.followUp);
+      // A dispatch that answers a person's work request fulfills it in the same transaction.
+      if (d.request) this.glass.fulfillWork(d.request, d.id, now);
       this.ctx.storage.sql.exec("INSERT INTO dispatches(id,data,state) VALUES (?,?,'queued')", d.id, JSON.stringify(d)); this.event('queued', d.id); return ok(d);
     }
     if (c.path === 'dispatches' && c.method === 'GET') {

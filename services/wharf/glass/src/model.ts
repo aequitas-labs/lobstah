@@ -43,6 +43,7 @@ export function resume(worker: Worker): string | undefined {
   if (worker.harness === 'codex') return `codex resume ${worker.session}`;
 }
 export function requestState(r: WharfHumanRequest): string {
+  if (r.kind === 'work' && r.response && (r.state === 'queued' || r.state === 'received')) return 'the helm replied: ' + r.response;
   if (r.kind.startsWith('review-')) return r.state === 'authorized' ? 'sent to the boat that drafted it · expires ' + r.expiresAt : r.state + (r.outcome ? ' · ' + r.outcome : '');
   return r.state === 'queued'
     ? r.waitingForHelm

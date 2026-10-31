@@ -4,6 +4,8 @@ export type BackendWait = 'review' | 'pr' | 'deploy' | 'person' | 'external';
 export interface DispatchInput {
   id: string; repo: string; repoRemote?: string; brief: string; lane?: 'work' | 'chore';
   for?: string; boat?: string; followUp?: string; harness?: string; model?: string; effort?: string;
+  /** The person's work request this dispatch answers: dispatching fulfills it. */
+  request?: string;
 }
 export interface ReportInput {
   verb: BackendVerb; note?: string; waitingOn?: BackendWait; link?: string; until?: string;
@@ -58,8 +60,21 @@ export interface WharfDocumentSummary {
 }
 /** What a person asks of a review document; the boat that published it carries it out. Sending happens in the review tool. */
 export const WHARF_REVIEW_REQUEST_KINDS = ['review-dismiss'] as const;
+/**
+ * Where a person's request for new work came from: their message in their
+ * private chat with the wharf's Slack app. The thread it starts continues it.
+ */
+export interface WharfRequestOrigin { team: string; user: string; channel: string; ts: string }
 export interface WharfHumanRequest {
-  id: string; kind: 'message' | 'trap-request' | (typeof WHARF_REVIEW_REQUEST_KINDS)[number]; dispatch?: string; text?: string; boat?: string; repo?: string;
+  /**
+   * `work` is a person asking the helm for new work. The helm reads it,
+   * answers it (`response`) or dispatches it; it never runs by itself.
+   */
+  id: string; kind: 'message' | 'trap-request' | 'work' | (typeof WHARF_REVIEW_REQUEST_KINDS)[number]; dispatch?: string; text?: string; boat?: string; repo?: string;
+  /** kind work: the Slack message it came from, what the person added in its thread, and the helm's reply. */
+  origin?: WharfRequestOrigin;
+  followUps?: Array<{ text: string; at: string; source?: string }>;
+  response?: string;
   /** Review requests: the review document. */
   document?: string;
   at: string; expiresAt: string; state: 'queued' | 'received' | 'authorized' | 'fulfilled' | 'expired'; by: string;

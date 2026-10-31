@@ -24,7 +24,7 @@ const DEFAULT_WAIT_MS = 60_000;
 /** Posts and edits one bot's messages. Holds the token for one call; never stores or logs it. */
 export class SlackApi {
   constructor(private token: string, private fetcher: typeof fetch = fetch) {}
-  post(channel: string, message: SlackMessage): Promise<SlackOutcome> { return this.call('chat.postMessage', { channel, ...message }); }
+  post(channel: string, message: SlackMessage, threadTs?: string): Promise<SlackOutcome> { return this.call('chat.postMessage', { channel, ...(threadTs ? { thread_ts: threadTs } : {}), ...message }); }
   update(channel: string, ts: string, message: SlackMessage): Promise<SlackOutcome> { return this.call('chat.update', { channel, ts, ...message }); }
   private async call(method: string, body: Record<string, unknown>): Promise<SlackOutcome> {
     let response: Response;

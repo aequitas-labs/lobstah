@@ -4,6 +4,10 @@ import { identifier, object, repoIdentity, requireThat, text } from './protocol.
 import { cardSchema, cardTables } from './cards.js';
 import { slackSchema, slackTables } from './slack-outbox.js';
 import type { Actor, Command } from './account.js';
+import type { SlackMessageIn } from './slack-ingress.js';
+
+/** A person's request for work waits this long for the helm: a sleeping boat can still take it. */
+export const WORK_REQUEST_MS = 7 * 86400_000;
 
 export const glassSchema = `
   CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -75,6 +79,42 @@ export class GlassState {
       const r = JSON.parse(row.data) as WharfHumanRequest; r.state = 'expired'; this.put('human_requests', row.id, r);
       if (!r.kind.startsWith('review-')) this.hooks.event('human-request-expired', r.dispatch, r.id);
     }
+  }
+  /**
+   * A linked person's message in their DM with the app. A top-level message
+   * asks for new work: one request per Slack message, so a retried delivery
+   * finds the same request. A reply in that request's thread adds to it; a
+   * reply under anything else (a card's message) is not a request and does
+   * nothing. The helm is woken; nothing runs until it acts.
+   */
+  slackMessage(m: SlackMessageIn, person: string, now: number): { request?: string; ignored?: string } {
+    const top = m.threadTs ?? m.ts;
+    const id = `slack-${m.channel}-${top.replace('.', '-')}`;
+    const r = this.get<WharfHumanRequest>('human_requests', id);
+    const at = new Date(now).toISOString();
+    if (!m.threadTs) {
+      if (r) return { request: id };
+      const request: WharfHumanRequest = { id, kind: 'work', by: person, at, expiresAt: new Date(now + WORK_REQUEST_MS).toISOString(), state: 'queued',
+        text: m.text, origin: { team: m.team, user: m.user, channel: m.channel, ts: m.ts } };
+      this.put('human_requests', id, request); this.hooks.event('human-request', undefined, id);
+      return { request: id };
+    }
+    if (!r || r.kind !== 'work' || !['queued', 'received'].includes(r.state) || Date.parse(r.expiresAt) <= now) return { ignored: 'not an open request thread' };
+    if (r.followUps?.some((f) => f.source === m.ts)) return { request: id };
+    r.followUps = [...(r.followUps ?? []), { text: m.text, at, source: m.ts }].slice(-20);
+    this.put('human_requests', id, r); this.hooks.event('human-request-update', undefined, id);
+    return { request: id };
+  }
+  /** The Slack message a work request came from, for its receipt to reply in that thread. */
+  requestOrigin(id: string): WharfHumanRequest['origin'] {
+    return this.get<WharfHumanRequest>('human_requests', id)?.origin;
+  }
+  /** The helm dispatched a work request: it is fulfilled by that dispatch, once. */
+  fulfillWork(id: string, dispatch: string, now: number) {
+    const r = this.get<WharfHumanRequest>('human_requests', identifier(id));
+    requireThat(r && r.kind === 'work' && ['queued', 'received'].includes(r.state) && Date.parse(r.expiresAt) > now, 409, 'no open work request to dispatch');
+    r.state = 'fulfilled'; r.dispatch = dispatch; r.outcome = `dispatched as ${dispatch}`;
+    this.put('human_requests', r.id, r);
   }
   /** Every published document, withdrawn ones too: a withdrawal ends its card. */
   publishedDocuments(): WharfDocument[] { return this.list<WharfDocument>('documents').filter((d) => d.published); }
@@ -235,8 +275,16 @@ export class GlassState {
         this.hooks.helm(c, actor, now); requireThat(r.state === 'queued' && Date.parse(r.expiresAt) > now, 409, 'request already received or expired');
         r.state = 'received'; this.put('human_requests', r.id, r); this.hooks.event('human-request-received', r.dispatch, r.id); return ok(r);
       }
+      if (parts.length === 3 && parts[2] === 'respond' && c.method === 'POST') {
+        // The helm answers a work request without dispatching it: a question back, or why not. It stays open.
+        this.hooks.helm(c, actor, now);
+        requireThat(r.kind === 'work' && ['queued', 'received'].includes(r.state) && Date.parse(r.expiresAt) > now, 409, 'no open work request to respond to');
+        r.response = text(b.text, 2000).trim(); requireThat(r.response, 400, 'response needs text');
+        r.state = 'received'; this.put('human_requests', r.id, r); return ok(r);
+      }
       if (parts.length === 3 && parts[2] === 'execute' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(r.state === 'received' && Date.parse(r.expiresAt) > now, 409, 'receipt a live request first');
+        requireThat(r.kind !== 'work', 409, 'a work request is fulfilled by dispatching it with --request, or answered with respond');
         if (r.kind === 'trap-request') {
           r.state = 'authorized'; this.put('human_requests', r.id, r); this.hooks.event('trap-start-authorized', undefined, r.id); return ok(r);
         }
