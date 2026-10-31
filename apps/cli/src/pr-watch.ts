@@ -96,6 +96,24 @@ export function autoRegisterPrWatch(id: string, prUrl: string): Watch | undefine
   }
 }
 
+/**
+ * A wharf job's `report --pr` registers the PR's watch on the boat that
+ * reported it, so its draft, review, checks, conflict and ready states
+ * stand as attention here and, through this boat's cards, on the wharf.
+ * The job lives on the wharf, not in this boat's lanes, so the helm owns
+ * the watch: it observes, and forks no local repair. Idempotent; never
+ * throws — a report must not fail over observation.
+ */
+export function registerWharfPrWatch(prUrl: string): Watch | undefined {
+  try {
+    const ref = parsePrRef(prUrl);
+    if (!ref || readWatch(ref.key)) return undefined;
+    return addPrWatch(ref);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Missing multi-PR records get one forge read, never an assumed open/draft state. */
 export function refreshMissingDispatchPrs(view: (reference: PrRef) => GhPrView = ghPrViewDirect): void {
   if (githubBlockedUntil()) return;

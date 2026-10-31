@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { agentEnvironment, appendStatus, backendScope, claimNext, enqueue, ensureLayout, glassOrigin, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, readStatsStore, WharfBackend } from '@lobstah/core';
+import { agentEnvironment, appendStatus, backendScope, claimNext, enqueue, ensureLayout, glassOrigin, groundsErrors, listWatches, loadConfig, refreshHostedViews, readHostedViews, readStatsStore, WharfBackend } from '@lobstah/core';
 import { hostedGlassLink } from '../src/hosted-view.js';
 import { ackItemExists } from '../src/acks.js';
 import { commandScope, wharfCommand } from '../src/wharf-commands.js';
@@ -366,6 +366,20 @@ it('accepted wharf completion retries update only local catch counters, never te
   expect(readStatsStore()).toMatchObject({ totalCatches: 1, utc: { catches: 1, usage: { withHelm: 1, onWharf: 1 } } });
   expect(fs.existsSync(path.join(home, 'telemetry.json'))).toBe(false);
   expect(fetcher.mock.calls).toHaveLength(2);
+});
+it('a wharf report with --pr watches that PR on this boat, owned by the helm, once; a refused report watches nothing', async () => {
+  let refuse = false;
+  vi.stubGlobal('fetch', vi.fn(async () => (refuse ? Response.json({ error: 'dispatch no longer active' }, { status: 409 }) : Response.json({}))));
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  const report = (prs: string[], key: string) => wharfCommand('report', ['job', 'done', 'Finished'],
+    { opt: (f: string) => ({ '--grounds': 'away', '--request-key': key } as Record<string, string>)[f], has: (f: string) => ['--grounds', '--request-key'].includes(f), values: (f: string) => (f === '--pr' ? prs : []) }, loadConfig());
+  expect(await report(['https://github.com/test/repo/pull/7', 'https://example.test/not-a-pr'], 'first')).toBe(true);
+  expect(listWatches().map((w) => ({ key: w.key, owner: w.owner, brief: w.brief }))).toEqual([{ key: 'pr:test/repo#7', owner: 'man', brief: undefined }]);
+  await report(['https://github.com/test/repo/pull/7'], 'again');
+  expect(listWatches()).toHaveLength(1);
+  refuse = true;
+  await expect(report(['https://github.com/test/repo/pull/8'], 'refused')).rejects.toThrow();
+  expect(listWatches().map((w) => w.key)).toEqual(['pr:test/repo#7']);
 });
 it('worker reports upload only their dispatch files and human-request CLI verbs carry the helm lease', async () => {
   const markdown = path.join(home, 'report.md'); fs.writeFileSync(markdown, '# Evidence');
