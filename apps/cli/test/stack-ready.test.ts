@@ -113,6 +113,7 @@ describe('stack watch discovery and shared presentation', () => {
     // Same key: the pet updates its one lobster; a new stateHash walks it again.
     expect(next).toEqual([expect.objectContaining({ kind: 'stack-ready', key: first[0]!.key, note: expect.stringMatching(/^Stack updated · #3 added — stack ready to merge: acme\/web #1 → #2 → #3/) })]);
     expect(next[0]!.stateHash).not.toBe(first[0]!.stateHash);
+    expect(deriveGlassPrs([], [], readPrs()).stacks[0]?.nextNumber).toBe(1);
   });
   it('shows partial-ready progress in one quiet item in tend, digest and glass', () => {
     put(1); put(2); put(3, { isDraft: true });

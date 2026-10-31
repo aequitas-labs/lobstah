@@ -136,8 +136,8 @@ export function deriveGlassPrs(
     visit(root);
     // A cyclic or ambiguous relation must never drop a PR from the list.
     for (const p of members) if (!ordered.includes(p)) ordered.push(p);
-    const eligible = ordered.find((p) => p.state === 'OPEN' &&
-      (p.baseRefName === (stackOptions.trunk?.(p.forgeRepo) ?? 'main') || parent.get(p.key)?.state === 'MERGED'));
+    // A stack on any base: the first open PR with no open PR below it is next.
+    const eligible = ordered.find((p) => p.state === 'OPEN' && parent.get(p.key)?.state !== 'OPEN');
     ordered.forEach((p, i) => {
       p.stackId = id;
       p.floor = root.baseRefName ?? '?';
