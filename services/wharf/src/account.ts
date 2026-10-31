@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { ReportInput, BackendEvent, DispatchInput, DispatchView } from '../../../packages/core/src/backend-model.js';
+import type { ReportInput, BackendEvent, DispatchInput, DispatchView, GlassCard, GlassCardAction } from '../../../packages/core/src/backend-model.js';
 import { ApiError, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
@@ -12,6 +12,8 @@ import type { SlackLink } from './slack-install.js';
 import type { SlackMessageIn } from './slack-ingress.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
+/** What a Slack action came to: done, a form to ask for words first, or why not, said to the person. */
+export type SlackActionResult = { done: true } | { form: { title: string; prompt: string } } | { refused: string };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
 type BoatRow = { id: string; name: string; hash: string; revoked: number };
 type WorkerRow = { id: string; boat: string; repo: string; seen: number };
@@ -119,6 +121,48 @@ export class Account extends DurableObject<Env> {
     if (this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
     return result;
   }
+  /**
+   * Private binding only: the linked person pressed a button on a card's
+   * Slack message, or sent its answer form. The handle must be theirs, live,
+   * and for the card's current state; the action then goes through the same
+   * path as the glass, and the first valid answer stands.
+   */
+  async slackAction(person: string, handle: string, answer?: string): Promise<SlackActionResult> {
+    const result = this.ctx.storage.transactionSync((): SlackActionResult => {
+      requireThat(!this.get('deleted'), 410, 'account deleted');
+      const now = Date.now(); this.expire(now);
+      const pressed = this.outbox.pressed(person, handle, now);
+      if ('refused' in pressed) {
+        // An older message shows the card as it now stands.
+        if (pressed.card) this.outbox.refresh(person, pressed.card, now);
+        return { refused: pressed.refused === 'expired' ? 'This button expired. Open the card again from its newest message or the glass.' : 'This card changed since. Its message now shows where it stands.' };
+      }
+      const done = this.cardAction(pressed.card, pressed.action, person, answer, now);
+      this.cards.project(now);
+      return done;
+    });
+    if (this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
+    return result;
+  }
+  /** One action on one of the wharf's own cards, through the glass's own path. A form is asked for first when it needs words. */
+  private cardAction(card: GlassCard, action: GlassCardAction, person: string, answer: string | undefined, now: number): SlackActionResult {
+    const words = answer?.trim();
+    const form = (prompt: string): SlackActionResult => ({ form: { title: card.title, prompt } });
+    try {
+      if (card.family === 'decision' && action.kind === 'answer') this.glass.answerDecision(card.key, action.option, undefined, person, now);
+      else if (card.family === 'decision' && action.kind === 'answer-text') { if (!words) return form('Your answer'); this.glass.answerDecision(card.key, undefined, words, person, now); }
+      else if ((card.family === 'decision' || card.family === 'report') && action.kind === 'seen') this.glass.ackDocument(card.key, 'slack', now);
+      else if ((card.family === 'question' || card.family === 'landed') && action.kind === 'seen') this.glass.ackDispatch(card.key.split('@')[0]!, card.sourceAt, 'slack', now);
+      else if ((card.family === 'question' || card.family === 'dispatch') && action.kind === 'message-helm') {
+        if (!words) return form('Your message to the helm');
+        this.glass.messageJob(card.key.split('@')[0]!, words, person, now);
+      } else return { refused: 'Answer this card in the glass.' };
+    } catch (e) {
+      if (e instanceof ApiError && e.status < 500) return { refused: e.message };
+      throw e;
+    }
+    return { done: true };
+  }
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(`
@@ -160,6 +204,8 @@ export class Account extends DurableObject<Env> {
       glassOrigin: env.GLASS_ORIGIN, card: (seq) => this.cards.store.get(`c${seq}`),
       // The workspace installation's own bot token, sealed at rest in D1.
       token: (team) => installationToken(env, team),
+      // In this release the wharf's own cards take their actions in Slack; a boat's cards are answered on their boat.
+      controllable: (card) => (card.source === 'wharf' ? card.actions.filter((a) => ['answer', 'answer-text', 'seen', 'message-helm'].includes(a.kind)) : []),
       // A work request's receipt replies in the thread of the message that asked, in that same DM.
       thread: (card, channel) => {
         const origin = card.source === 'wharf' && card.family === 'request' ? this.glass.requestOrigin(card.key) : undefined;

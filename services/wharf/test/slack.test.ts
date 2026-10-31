@@ -63,7 +63,9 @@ it('answer in glass first: the same private Slack message closes, showing the wi
   expect(posted[0]).toMatchObject({ method: 'chat.postMessage', body: { channel: 'D1', unfurl_links: false, unfurl_media: false } });
   const card = (await (await call('cards')).json<GlassCard[]>()).find((c) => c.family === 'decision')!;
   expect(blockText(posted[0]!)).toContain('1. Keep the cache\n2. Drop the cache');
-  expect(posted[0]!.body.blocks.at(-1)!.elements![0]).toMatchObject({ text: { text: 'Answer in glass' }, url: `https://glass.test/#card/${card.id}` });
+  // Its options are buttons on the message; the glass is one tap away, and opening it there is seeing it.
+  expect(posted[0]!.body.blocks.at(-2)!.elements!.map((e) => (e.text as { text: string }).text)).toEqual(['Keep the cache', 'Drop the cache', 'Answer…']);
+  expect(posted[0]!.body.blocks.at(-1)!.elements![0]).toMatchObject({ text: { text: 'Open in glass' }, url: `https://glass.test/#card/${card.id}`, value: expect.stringMatching(/^h[0-9a-f]{32}$/) });
   const ts = (await sql('SELECT ts FROM slack_deliveries WHERE card=?', Number(card.id.slice(1))))[0]!.ts;
 
   // The answer is made in the glass. Nothing is clicked in Slack for its card to close.

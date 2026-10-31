@@ -1,6 +1,7 @@
-import type { GlassCard } from '../../../packages/core/src/backend-model.js';
+import type { GlassCard, GlassCardAction } from '../../../packages/core/src/backend-model.js';
 import { digest } from './protocol.js';
 import { renderCard } from './slack-render.js';
+import type { CardControl } from './slack-render.js';
 import { SlackApi } from './slack-api.js';
 import type { SlackOutcome } from './slack-api.js';
 
@@ -15,8 +16,12 @@ export const slackSchema = `
   CREATE TABLE IF NOT EXISTS slack_links (person TEXT PRIMARY KEY, team TEXT NOT NULL, user TEXT NOT NULL, channel TEXT NOT NULL, linked_at TEXT NOT NULL, revoked_at TEXT);
   CREATE TABLE IF NOT EXISTS slack_deliveries (card INTEGER NOT NULL, person TEXT NOT NULL, want INTEGER NOT NULL, sent INTEGER NOT NULL DEFAULT 0, ts TEXT, sent_hash TEXT,
     attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, error TEXT, PRIMARY KEY(card, person));
+  CREATE TABLE IF NOT EXISTS slack_actions (handle TEXT PRIMARY KEY, person TEXT NOT NULL, card INTEGER NOT NULL, revision INTEGER NOT NULL, action TEXT NOT NULL, expires INTEGER NOT NULL);
+  CREATE INDEX IF NOT EXISTS slack_action_card ON slack_actions(person, card, revision);
 `;
-export const slackTables = ['slack_links', 'slack_deliveries'];
+export const slackTables = ['slack_links', 'slack_deliveries', 'slack_actions'];
+/** A button's handle is good this long: past it, the click asks the person to open the card again. */
+export const ACTION_HANDLE_MS = 86400_000;
 /** At most this many Slack calls per drain; the next command drains the rest. */
 export const DRAIN_CALLS = 20;
 /** Slack allows about one message a second in a conversation. */
@@ -33,6 +38,8 @@ export interface OutboxDeps {
   card(seq: number): GlassCard | undefined;
   /** The bot token for a workspace, or nothing while the app is not installed there. */
   token(team: string): Promise<string | undefined>;
+  /** The actions a card offers that can be taken from its Slack message. */
+  controllable(card: GlassCard): GlassCardAction[];
   /** The thread a card's first post replies in, in that conversation, when it belongs to one. */
   thread?(card: GlassCard, channel: string): string | undefined;
   /** How a drain waits between calls to one conversation. */
@@ -78,6 +85,42 @@ export class SlackOutbox {
     this.sql.exec('INSERT OR REPLACE INTO slack_links VALUES (?,?,?,?,?,NULL)', person, link.team, link.slackUser, link.channel, link.linkedAt);
     this.mark(standing, now, person);
   }
+  /**
+   * The buttons a person's message of a card carries: one opaque handle per
+   * action, bound here to that person, card, revision and exact action. A
+   * handle still good for at least an hour is reused, so an unchanged card
+   * renders the same message; an ended card carries none.
+   */
+  private controls(person: string, card: GlassCard, now: number): CardControl[] {
+    if (card.terminal) return [];
+    this.sql.exec('DELETE FROM slack_actions WHERE expires<?', now);
+    const seq = seqOf(card);
+    return this.deps.controllable(card).map((action) => {
+      const key = JSON.stringify(action);
+      const kept = this.sql.exec<{ handle: string }>('SELECT handle FROM slack_actions WHERE person=? AND card=? AND revision=? AND action=? AND expires>?',
+        person, seq, card.revision, key, now + 3_600_000).toArray()[0];
+      if (kept) return { action, handle: kept.handle };
+      const handle = `h${crypto.randomUUID().replace(/-/g, '')}`;
+      this.sql.exec('INSERT INTO slack_actions VALUES (?,?,?,?,?,?)', handle, person, seq, card.revision, key, now + ACTION_HANDLE_MS);
+      return { action, handle };
+    });
+  }
+  /**
+   * What a pressed button names, checked: this person's handle, unexpired,
+   * for the card's current revision. A click on an older message gets the
+   * card as it now stands, never an action on a state it did not show.
+   */
+  pressed(person: string, handle: string, now: number): { card: GlassCard; action: GlassCardAction } | { refused: 'expired' | 'stale'; card?: GlassCard } {
+    const row = this.sql.exec<{ person: string; card: number; revision: number; action: string; expires: number }>('SELECT * FROM slack_actions WHERE handle=?', handle).toArray()[0];
+    if (!row || row.person !== person || row.expires <= now) return { refused: 'expired' };
+    const card = this.deps.card(row.card);
+    if (!card || card.revision !== row.revision || card.terminal) return { refused: 'stale', ...(card ? { card } : {}) };
+    return { card, action: JSON.parse(row.action) };
+  }
+  /** Show a person's card again, whatever their message of it last said. */
+  refresh(person: string, card: GlassCard, now: number) {
+    this.sql.exec('UPDATE slack_deliveries SET want=want+1, next_at=min(next_at,?) WHERE card=? AND person=? AND next_at<>?', now, seqOf(card), person, NEVER);
+  }
   /** Whether a drain has anything to do now. */
   due(now: number): boolean {
     return this.sql.exec('SELECT 1 FROM slack_deliveries WHERE want>sent AND next_at<=? LIMIT 1', now).toArray().length > 0;
@@ -100,7 +143,7 @@ export class SlackOutbox {
       if (!job.ts && card.terminal) { this.settle(job, { sent: job.want, error: null }); continue; }
       const token = await this.deps.token(link.team);
       if (!token) { this.settle(job, { next_at: Date.now() + 300_000, error: 'not installed' }); continue; }
-      const message = renderCard(card, this.deps.glassOrigin);
+      const message = renderCard(card, this.deps.glassOrigin, this.controls(job.person, card, Date.now()));
       const hash = await digest(JSON.stringify(message));
       if (job.ts && hash === job.sent_hash) { this.settle(job, { sent: job.want, error: null }); continue; }
       const wait = (last.get(link.channel) ?? 0) + CONVERSATION_SPACING_MS - Date.now();
