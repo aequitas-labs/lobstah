@@ -6,7 +6,7 @@ export default defineConfig({
       // Test-only fixtures, not credentials for any running/deployed service.
       GLASS_ORIGIN: 'https://glass.test', API_ORIGIN: 'https://state.test', GITHUB_CLIENT_ID: 'stub-client',
       GITHUB_ALLOWLIST: '["123","456"]', AUTH_SECRET: 'test-only-auth-secret-not-a-real-credential-32bytes', GITHUB_CLIENT_SECRET: 'stub-secret',
-      TOKEN_SECRET: 'test-only-token-signing-secret-not-for-deployment', SLACK_BOT_TOKEN: 'xoxb-test-only-not-a-real-token',
+      TOKEN_SECRET: 'test-only-token-signing-secret-not-for-deployment', SLACK_CLIENT_ID: 'stub-slack-client', SLACK_CLIENT_SECRET: 'stub-slack-secret',
     } } })],
   test: {
     include: ['test/**/*.test.ts'],

@@ -34,7 +34,8 @@ account; there is no secret in it.
 | `AUTH_SECRET` | secret | random, at least 32 characters: Better Auth signing and the encryption of stored GitHub tokens |
 | `TOKEN_SECRET` | secret | random, separate: signs retryable dispatch capabilities. Rotating it stops old claim responses from being rebuilt; issued token hashes stay valid until their leases end |
 | `GITHUB_CLIENT_SECRET` | secret | the GitHub OAuth app's client secret |
-| `SLACK_BOT_TOKEN` | secret, optional | the private Slack app's bot token (`xoxb-…`). Unset, cards are kept and nothing is sent to Slack |
+| `SLACK_CLIENT_ID` | var | the private Slack app's public client ID. Empty, the glass offers no Slack link |
+| `SLACK_CLIENT_SECRET` | secret, optional | the Slack app's client secret. With the client ID, a person can link their own Slack from the boat list |
 | `ACCOUNTS` | Durable Object | SQLite class `Account`, migration `v1`, made by the first deploy |
 | `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/` |
 | `FILES` | R2 | `lobstah-wharf-files`, evidence files |
@@ -54,6 +55,15 @@ wharf runs its own. Sign-in asks GitHub for `read:user` and `user:email`.
 Local development needs a second OAuth app whose callback is
 `http://localhost:8787/api/auth/callback/github`.
 
+The Slack app is optional and private to one workspace: at api.slack.com,
+create an app, keep distribution off, and under OAuth & Permissions add the
+redirect URL `https://glass.lobstah.dev/api/slack/oauth` and the bot scopes
+`chat:write`, `im:write` and `im:history`. Turn on App Home's Messages tab. Put
+its client ID in `SLACK_CLIENT_ID` and its client secret in
+`SLACK_CLIENT_SECRET`. Each person then links their own Slack from the boat
+list; the install stores the workspace's bot token sealed under `AUTH_SECRET`,
+and links no one but the person who connected.
+
 Work in `services/wharf`. R2 must be enabled on the account in the dashboard
 first. Secrets go in on standard input, never as arguments:
 
@@ -65,6 +75,7 @@ npx wrangler d1 migrations apply lobstah-wharf-auth --remote
 openssl rand -base64 48 | npx wrangler secret put AUTH_SECRET
 openssl rand -base64 48 | npx wrangler secret put TOKEN_SECRET
 npx wrangler secret put GITHUB_CLIENT_SECRET
+npx wrangler secret put SLACK_CLIENT_SECRET   # only with a Slack app
 pnpm build && npx wrangler deploy --dry-run
 pnpm build && npx wrangler deploy
 ```

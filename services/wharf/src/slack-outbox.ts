@@ -54,14 +54,27 @@ export class SlackOutbox {
    * delivery of each card falls due. A card that ended before it was ever
    * shown is not posted.
    */
-  mark(cards: GlassCard[], now: number) {
-    const people = this.sql.exec<{ person: string }>('SELECT person FROM slack_links WHERE revoked_at IS NULL').toArray();
+  mark(cards: GlassCard[], now: number, only?: string) {
+    const people = this.sql.exec<{ person: string }>('SELECT person FROM slack_links WHERE revoked_at IS NULL').toArray().filter((p) => !only || p.person === only);
     if (!people.length) return;
     for (const card of cards) for (const { person } of people) {
       const seq = seqOf(card);
       const updated = this.sql.exec(`UPDATE slack_deliveries SET want=want+1, next_at=CASE WHEN next_at=? THEN next_at ELSE min(next_at,?) END WHERE card=? AND person=?`, NEVER, now, seq, person).rowsWritten;
       if (!updated && !card.terminal) this.sql.exec('INSERT INTO slack_deliveries(card,person,want,next_at) VALUES (?,?,1,?)', seq, person, now);
     }
+  }
+  /**
+   * A person's link as it now stands. A new link shows them every standing
+   * card; one in another conversation starts over there, since the old
+   * messages cannot be edited from it. Unlinking stops their deliveries.
+   */
+  link(person: string, link: { team: string; slackUser: string; channel: string; linkedAt: string } | null, standing: GlassCard[], now: number) {
+    if (!link) { this.sql.exec('UPDATE slack_links SET revoked_at=? WHERE person=? AND revoked_at IS NULL', new Date(now).toISOString(), person); return; }
+    const before = this.sql.exec<Link>('SELECT * FROM slack_links WHERE person=?', person).toArray()[0];
+    if (before && before.channel !== link.channel) this.sql.exec('DELETE FROM slack_deliveries WHERE person=?', person);
+    else this.sql.exec('UPDATE slack_deliveries SET next_at=?, error=NULL, attempts=0 WHERE person=?', now, person);
+    this.sql.exec('INSERT OR REPLACE INTO slack_links VALUES (?,?,?,?,?,NULL)', person, link.team, link.slackUser, link.channel, link.linkedAt);
+    this.mark(standing, now, person);
   }
   /** Whether a drain has anything to do now. */
   due(now: number): boolean {
