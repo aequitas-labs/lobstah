@@ -60,6 +60,46 @@ it('requires its cookie, not an API bearer, and derives the account rather than 
   expect((await browser('accounts/b/dispatches')).status).toBe(404);
   expect((await SELF.fetch(`https://state.test/v1/accounts/${account}/dispatches`, { headers: { Cookie: cookie } })).status).toBe(401);
 });
+it('links this person’s own Slack once per connect, shows their standing cards there, and disconnects', async () => {
+  await job();
+  expect(await (await browser('slack')).json()).toEqual({ configured: true });
+  expect((await browser('slack/connect', {}, 'POST', { Origin: 'https://evil.test' })).status).toBe(403);
+  const start = new URL((await (await browser('slack/connect', {})).json<{ url: string }>()).url);
+  expect(start.origin + start.pathname).toBe('https://slack.com/oauth/v2/authorize');
+  expect(Object.fromEntries(start.searchParams)).toMatchObject({ client_id: 'stub-slack-client', scope: 'chat:write,im:write,im:history', redirect_uri: 'https://glass.test/api/slack/oauth' });
+  const state = start.searchParams.get('state')!;
+  const slackCalls: string[] = [];
+  const real = globalThis.fetch;
+  const outbound = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (!url.startsWith('https://slack.com/api/')) return real(input, init);
+    const method = url.slice('https://slack.com/api/'.length); slackCalls.push(method);
+    if (method === 'oauth.v2.access') {
+      expect(Object.fromEntries(new URLSearchParams(String(init?.body)))).toMatchObject({ client_id: 'stub-slack-client', client_secret: 'stub-slack-secret', code: 'granted' });
+      return Response.json({ ok: true, access_token: 'xoxb-installed', token_type: 'bot', scope: 'chat:write,im:write,im:history', bot_user_id: 'B9', team: { id: 'T9' }, authed_user: { id: 'U9' } });
+    }
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer xoxb-installed');
+    if (method === 'conversations.open') return Response.json({ ok: true, channel: { id: 'D9' } });
+    return Response.json({ ok: true, ts: '9.000001' });
+  });
+  try {
+    const back = await SELF.fetch(`https://glass.test/api/slack/oauth?code=granted&state=${state}`, { redirect: 'manual', headers: { Cookie: cookie } });
+    expect(back.status).toBe(302); expect(back.headers.get('Location')).toBe('https://glass.test/#boats');
+    expect(await (await browser('slack')).json()).toMatchObject({ configured: true, link: { team: 'T9', slackUser: 'U9' } });
+    // The token is sealed at rest, never stored as sent.
+    const stored = await env.AUTH_DB.prepare('SELECT botToken FROM slackInstallation WHERE team=?').bind('T9').first<{ botToken: string }>();
+    expect(stored!.botToken).toMatch(/^v1\./); expect(stored!.botToken).not.toContain('xoxb-installed');
+    // Linking shows the standing cards: the job's progress card is posted to the opened DM.
+    await env.ACCOUNTS.getByName(account).deliverSlack();
+    expect(slackCalls).toContain('chat.postMessage');
+    // A state is good once.
+    const again = await SELF.fetch(`https://glass.test/api/slack/oauth?code=granted&state=${state}`, { redirect: 'manual', headers: { Cookie: cookie } });
+    expect(new URL(again.headers.get('Location')!).searchParams.get('slack_error')).toContain('expired or was already used');
+    expect((await browser('slack/disconnect', {})).status).toBe(200);
+    expect(await (await browser('slack')).json()).toEqual({ configured: true });
+    expect(await sql(`SELECT revoked_at IS NOT NULL AS revoked FROM slack_links WHERE person='${account}'`)).toEqual([{ revoked: 1 }]);
+  } finally { outbound.mockRestore(); }
+});
 it('reads cards with the glass cookie, by list or by id, and nothing else under cards', async () => {
   await job();
   const list = await browser('cards'); expect(list.status).toBe(200);

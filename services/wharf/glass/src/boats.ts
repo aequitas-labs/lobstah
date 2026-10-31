@@ -3,6 +3,7 @@ import { html, value, when } from './common.js';
 import type { Action } from './common.js';
 import type { Boat } from './model.js';
 import { LinkedText } from '../../../../apps/cli/glass/src/components/links.js';
+import { SlackLinkSection } from './slack.js';
 export function Boats({ boats, action, deleteAccount }: { boats: Boat[]; action: Action; deleteAccount: () => Promise<void> }) {
   const [confirmation, setConfirmation] = useState(''),
     [repo, setRepo] = useState('');
@@ -28,5 +29,6 @@ export function Boats({ boats, action, deleteAccount }: { boats: Boat[]; action:
         }}><label>repo remote <input aria-label="trap request repo" value=${repo} maxLength="256" onInput=${(e: Event) => setRepo(value(e))} /></label><button class="btn" disabled=${!repo}>queue trap request</button><div class="dim">Waits for helm; only opted-in boats can fulfill it. Expires in 10 minutes.</div></form>`
       }</div>`,
   )}</div>
+    <${SlackLinkSection} />
     <div class="sec">account</div>${confirmation === 'account' ? html`<div class="bad">Delete this account's jobs, messages, files, boats and sign-in data? This cannot be undone.<button class="btn" onClick=${deleteAccount}>confirm delete account</button><button class="btn" onClick=${() => setConfirmation('')}>keep account</button></div>` : html`<button class="btn" onClick=${() => setConfirmation('account')}>delete account…</button>`}`;
 }

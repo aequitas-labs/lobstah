@@ -38,7 +38,7 @@
   // GITHUB_ALLOWLIST holds numeric GitHub account ids (5472765: chrishsu).
   "vars": {
     "GLASS_ORIGIN": "https://glass.lobstah.dev", "API_ORIGIN": "https://api.lobstah.dev",
-    "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[\"5472765\"]",
+    "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[\"5472765\"]", "SLACK_CLIENT_ID": "",
     "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120"
   },
   // Secrets: AUTH_SECRET, GITHUB_CLIENT_SECRET, TOKEN_SECRET (wrangler secret put).
@@ -56,7 +56,7 @@
       "d1_databases": [{ "binding": "AUTH_DB", "database_name": "lobstah-wharf-auth", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations", "remote": false }],
       "vars": {
         "GLASS_ORIGIN": "http://localhost:8787", "API_ORIGIN": "http://127.0.0.1:8787",
-        "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[]", "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120"
+        "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[]", "SLACK_CLIENT_ID": "", "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120"
       }
     }
   }

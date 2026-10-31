@@ -7,6 +7,8 @@ import { personSessionLive } from './auth.js';
 import { GlassState, glassSchema, glassTables } from './glass-state.js';
 import { Cards } from './cards.js';
 import { SlackOutbox } from './slack-outbox.js';
+import { installationToken } from './slack-install.js';
+import type { SlackLink } from './slack-install.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
@@ -95,6 +97,12 @@ export class Account extends DurableObject<Env> {
   }
   /** Private binding only: deliver what is due now, and wait for it. */
   async deliverSlack(): Promise<void> { await this.outbox.drain(); }
+  /** Private binding only: a person's Slack link as D1 now holds it, or none. Changes no card. */
+  async linkSlack(person: string, link: SlackLink | null): Promise<void> {
+    const now = Date.now();
+    this.ctx.storage.transactionSync(() => this.outbox.link(person, link, this.cards.store.list(now).filter((c) => !c.terminal), now));
+    if (this.outbox.due(now)) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
+  }
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(`
@@ -134,8 +142,8 @@ export class Account extends DurableObject<Env> {
     });
     this.outbox = new SlackOutbox(ctx.storage.sql, {
       glassOrigin: env.GLASS_ORIGIN, card: (seq) => this.cards.store.get(`c${seq}`),
-      // One private workspace's bot token, until installing by OAuth arrives with the signed Slack ingress.
-      token: async () => (env as Env & { SLACK_BOT_TOKEN?: string }).SLACK_BOT_TOKEN || undefined,
+      // The workspace installation's own bot token, sealed at rest in D1.
+      token: (team) => installationToken(env, team),
     });
   }
   private get(key: string): string | undefined {

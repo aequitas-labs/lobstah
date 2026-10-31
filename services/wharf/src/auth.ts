@@ -71,6 +71,10 @@ export async function deletePersonData(env: Env, account: string, token: string,
     env.AUTH_DB.prepare('DELETE FROM session WHERE userId=?').bind(account),
     env.AUTH_DB.prepare('DELETE FROM account WHERE userId=?').bind(account),
     env.AUTH_DB.prepare("DELETE FROM deviceCode WHERE userId=? OR json_extract(requestData,'$.account')=?").bind(account, account),
+    // The person's Slack link and connect states go too, and an install they made: its bot token is theirs to remove.
+    env.AUTH_DB.prepare('DELETE FROM slackLink WHERE person=?').bind(account),
+    env.AUTH_DB.prepare('DELETE FROM slackConnect WHERE person=?').bind(account),
+    env.AUTH_DB.prepare('DELETE FROM slackInstallation WHERE installedBy=?').bind(account),
     env.AUTH_DB.prepare('DELETE FROM user WHERE id=?').bind(account),
   ]);
 }
