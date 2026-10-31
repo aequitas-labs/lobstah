@@ -103,6 +103,17 @@ describe('stack watch discovery and shared presentation', () => {
     expect(glass.stacks).toHaveLength(1);
     expect(glass.stacks[0]?.readiness).toMatchObject({ ready: 3, total: 3, allReady: true });
   });
+  it('walks one item for a v12 stack, and a PR added to it re-walks that item, naming the PR', () => {
+    put(1, { baseRefName: 'v12' }); put(2); syncStackReadiness(undefined, now);
+    const walking = () => buildTendReport(now).attention.filter((a) => !a.quiet && !a.acked);
+    const first = walking();
+    expect(first).toEqual([expect.objectContaining({ kind: 'stack-ready', key: 'stack:pr:acme/web#1' })]);
+    put(3); syncStackReadiness(undefined, now);
+    const next = walking();
+    // Same key: the pet updates its one lobster; a new stateHash walks it again.
+    expect(next).toEqual([expect.objectContaining({ kind: 'stack-ready', key: first[0]!.key, note: expect.stringMatching(/^Stack updated · #3 added — stack ready to merge: acme\/web #1 → #2 → #3/) })]);
+    expect(next[0]!.stateHash).not.toBe(first[0]!.stateHash);
+  });
   it('shows partial-ready progress in one quiet item in tend, digest and glass', () => {
     put(1); put(2); put(3, { isDraft: true });
     const report = buildTendReport(now);

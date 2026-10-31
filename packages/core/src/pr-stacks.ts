@@ -25,32 +25,32 @@ export function stackReadyEnabled(cfg: Pick<Config, 'attentionKinds'>): boolean 
   return cfg.attentionKinds.includes('pr:ready') || cfg.attentionKinds.includes('stack-ready');
 }
 
-/** No forge calls: an unambiguous same-repo chain rooted on trunk, not a branch DAG. */
+/**
+ * No forge calls: an unambiguous same-repo chain, not a branch DAG. A stack's
+ * bottom may target any branch (`main`, `v12`, a feature branch); it only
+ * continues an open PR below when it is that PR's sole open child. A branch
+ * several open PRs target (a long-lived `v12` with its own PR to `main`)
+ * roots each of their chains.
+ */
 export function derivePrStacks(
   records: readonly PrEvidence[],
-  opts: { trunk?: (repo: string) => string; readySettleSecs?: number; now?: number } = {},
+  opts: { readySettleSecs?: number; now?: number } = {},
 ): PrStack[] {
   const now = opts.now ?? Date.now();
   const valid = records.filter((p) => !p.isCrossRepository && p.headRefName && p.baseRefName && parsePrRef(p.url));
   const repo = (p: PrEvidence) => { const r = parsePrRef(p.url)!; return `${r.owner}/${r.repo}`; };
   const inRepo = (p: PrEvidence, q: PrEvidence) => repo(p).toLowerCase() === repo(q).toLowerCase();
+  const openChildren = (p: PrEvidence): PrEvidence[] =>
+    valid.filter((q) => q.state === 'OPEN' && inRepo(q, p) && q.baseRefName === p.headRefName);
+  // A retargeted base is still a merged ancestor's head: no open PR has it.
+  const continuesParent = (p: PrEvidence): boolean =>
+    valid.some((q) => q.state === 'OPEN' && inRepo(q, p) && q.headRefName === p.baseRefName && openChildren(q).length === 1);
   const out: PrStack[] = [];
-  for (const bottom of valid.filter((p) => p.state === 'OPEN')) {
-    const trunk = opts.trunk?.(repo(bottom)) ?? 'main';
-    // During GitHub retargeting, a merged ancestor may still be the base.
-    let floor = bottom;
-    const seen = new Set([floor.url]);
-    while (floor.baseRefName !== trunk) {
-      const parents = valid.filter((p) => inRepo(p, floor) && p.headRefName === floor.baseRefName);
-      if (parents.length !== 1 || parents[0]!.state !== 'MERGED' || seen.has(parents[0]!.url)) break;
-      floor = parents[0]!;
-      seen.add(floor.url);
-    }
-    if (floor.baseRefName !== trunk) continue;
+  for (const bottom of valid.filter((p) => p.state === 'OPEN' && !continuesParent(p))) {
     const members = [bottom];
     for (;;) {
       const top = members.at(-1)!;
-      const children = valid.filter((p) => p.state === 'OPEN' && inRepo(p, top) && p.baseRefName === top.headRefName);
+      const children = openChildren(top);
       if (children.length !== 1 || members.some((p) => p.url === children[0]!.url)) break;
       members.push(children[0]!);
     }
@@ -99,12 +99,30 @@ interface StackEpoch {
   notified?: boolean;
   /** Legacy duplicates collapse silently until the next real transition. */
   silent?: boolean;
+  /** Member keys the stack's latest ready notification named. */
+  announced?: string[];
+  /**
+   * Member keys the notification before it named: present once a change to
+   * the stack replaced a ready notification, so its text says what changed.
+   */
+  priorMembers?: string[];
 }
 const stateFile = () => path.join(lobstahHome(), 'pr-stacks.json');
 export function readStackEpochs(): Record<string, StackEpoch> {
   try { return JSON.parse(fs.readFileSync(stateFile(), 'utf8')); } catch { return {}; }
 }
 const headsOf = (s: PrStack) => Object.fromEntries(s.members.map((p) => [parsePrRef(p.url)!.key, p.headSha]));
+/**
+ * A stack's text with what changed since its previous ready notification:
+ * the PRs added, else the stack's range, e.g. "Stack updated · #2560 added".
+ * A waiting stack, or one notified only once, keeps its plain text.
+ */
+export function stackText(s: Pick<PrStack, 'members' | 'allReady' | 'text'>, epoch?: Pick<StackEpoch, 'priorMembers'>): string {
+  if (!s.allReady || !epoch?.priorMembers) return s.text;
+  const added = s.members.filter((p) => !epoch.priorMembers!.includes(parsePrRef(p.url)!.key)).map((p) => `#${p.number}`);
+  const change = added.length ? `${added.join(', ')} added` : `#${s.members[0]!.number}–#${s.members.at(-1)!.number}`;
+  return `Stack updated · ${change} — ${s.text}`;
+}
 export const stackStateHash = (s: Pick<PrStack, 'id'>, epoch = 0) => createHash('sha1').update(JSON.stringify([s.id, epoch])).digest('hex').slice(0, 16);
 
 /** Membership, not branches/heads/watch owners, connects successive observations. */
@@ -117,7 +135,7 @@ export function identifyPrStacks(stacks: PrStack[], state = readStackEpochs()): 
     })).filter((x) => x.overlap > 0).sort((a, b) => b.overlap - a.overlap || a.old.at.localeCompare(b.old.at) || a.id.localeCompare(b.id));
     const id = matches[0]?.old.version === 2 ? matches[0].id : s.id;
     used.add(id);
-    return { ...s, id, legacy: matches.some((m) => m.old.version !== 2) };
+    return { ...s, id, text: stackText(s, state[id]), legacy: matches.some((m) => m.old.version !== 2) };
   });
 }
 
@@ -127,7 +145,9 @@ export function syncStackReadiness(cfg = loadConfig(), now = Date.now()): void {
   // Reuse the existing cross-process PR lock for the small aggregate file.
   withPrLock('pr:lobstah/stack-state#0', () => {
     const state = readStackEpochs();
-    const stacks = identifyPrStacks(derivePrStacks(records, { trunk: (r) => prStackTrunk(cfg, r), readySettleSecs: cfg.readySettleSecs, now }), state);
+    const derived = derivePrStacks(records, { readySettleSecs: cfg.readySettleSecs, now });
+    // Identified stacks carry the old epoch's text; this pass writes the next one's.
+    const stacks = identifyPrStacks(derived, state).map((s, i) => ({ ...s, text: derived[i]!.text }));
     const notices = listNotices(Number.MAX_SAFE_INTEGER).filter((n) => n.kind === 'stack-ready');
     const kept = new Set<string>();
     for (const s of stacks) {
@@ -148,8 +168,12 @@ export function syncStackReadiness(cfg = loadConfig(), now = Date.now()): void {
         notified: migrating ? s.allReady : changed || (!s.allReady && !settlingOnly) ? false : old?.notified,
         silent: migrating || (!changed && (s.allReady || settlingOnly) && !!old?.silent) };
       const wake = s.allReady && !next.notified && !migrating;
+      // A wake after an earlier notification replaces it: the new text names the change.
+      next.priorMembers = wake ? old?.announced : old?.priorMembers;
+      if (s.allReady) next.announced = Object.keys(heads);
+      else if (old?.announced) next.announced = old.announced;
       const current = previous.at(-1);
-      const fields = { kind: 'stack-ready' as const, text: s.text, refId: s.id, url: s.members.at(-1)!.url,
+      const fields = { kind: 'stack-ready' as const, text: stackText(s, next), refId: s.id, url: s.members.at(-1)!.url,
         stateHash: stackStateHash(s, epoch), repo: repoKey(cfg, s.repo),
         quiet: migrating || !s.allReady || !stackReadyEnabled(cfg) || (!wake && (!current || !!current.quiet)) };
       // Update the existing item without moving its delivery cursor. Only a
