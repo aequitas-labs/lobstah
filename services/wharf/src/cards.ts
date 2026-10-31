@@ -279,13 +279,18 @@ export class CardStore {
   }
 }
 
-type Hooks = { read: (actor: Actor) => void; publish: (actor: Actor) => void };
+/** `changed` hears every card that moved, inside the same transaction: where cards are shown follows. */
+type Hooks = { read: (actor: Actor) => void; publish: (actor: Actor) => void; changed: (cards: GlassCard[], now: number) => void };
 /** The account's card routes: read the cards, and a boat's restatement of its own. */
 export class Cards {
   readonly store: CardStore;
   constructor(sql: SqlStorage, private records: CardRecords, private hooks: Hooks) { this.store = new CardStore(sql); }
   /** Bring the wharf's own cards up to date with its records. Runs inside every command's transaction. */
-  project(now: number): GlassCard[] { return this.store.replace('wharf', wharfCards(this.records, now), now); }
+  project(now: number): GlassCard[] {
+    const changed = this.store.replace('wharf', wharfCards(this.records, now), now);
+    if (changed.length) this.hooks.changed(changed, now);
+    return changed;
+  }
   execute(c: Command, actor: Actor, now: number): { status: number; value: unknown } | undefined {
     const parts = c.path.split('/');
     if (parts[0] !== 'cards') return undefined;
@@ -303,6 +308,7 @@ export class Cards {
       const cards = b.cards.map(boatCardInput);
       requireThat(new Set(cards.map((x) => `${x.family}\n${x.key}`)).size === cards.length, 400, 'duplicate card');
       const changed = this.store.replace(`boat:${actor.id}`, cards, now);
+      if (changed.length) this.hooks.changed(changed, now);
       return { status: 200, value: { changed: changed.length } };
     }
     return undefined;

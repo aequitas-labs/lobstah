@@ -6,6 +6,7 @@ import type { Permission } from './permissions.js';
 import { personSessionLive } from './auth.js';
 import { GlassState, glassSchema, glassTables } from './glass-state.js';
 import { Cards } from './cards.js';
+import { SlackOutbox } from './slack-outbox.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
@@ -19,10 +20,11 @@ export type Command = { account: string; helm: boolean; personId?: string; token
 const LEASE_MS = 90_000;
 const HELM_MS = 120_000;
 
-/** One account's only coordination authority. No alarms, timers or socket pings. */
+/** One account's only coordination authority. No alarms, timers or socket pings: Slack deliveries drain after each command. */
 export class Account extends DurableObject<Env> {
   private glass: GlassState;
   private cards: Cards;
+  private outbox: SlackOutbox;
   private hintPending = false;
   /** Fetch is only for the private upgrade binding: normal state uses RPC. */
   async fetch(request: Request): Promise<Response> {
@@ -86,8 +88,13 @@ export class Account extends DurableObject<Env> {
     } catch (e) {
       if (e instanceof ApiError) return { status: e.status, value: { error: e.message } };
       throw e;
+    } finally {
+      // After the command commits, its card changes go out. A failed drain leaves them due for the next command.
+      if (!this.get('deleted') && this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
     }
   }
+  /** Private binding only: deliver what is due now, and wait for it. */
+  async deliverSlack(): Promise<void> { await this.outbox.drain(); }
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(`
@@ -123,6 +130,12 @@ export class Account extends DurableObject<Env> {
       read: (a) => this.requirePermission(a, 'read'),
       // Work-only boats run traps, so they hold permission requests: either layer may restate its own cards.
       publish: (a) => requireThat(a.kind === 'boat' && (permits(a.permissions, 'read') || permits(a.permissions, 'work')), 403, 'boat credential required'),
+      changed: (cards, now) => this.outbox.mark(cards, now),
+    });
+    this.outbox = new SlackOutbox(ctx.storage.sql, {
+      glassOrigin: env.GLASS_ORIGIN, card: (seq) => this.cards.store.get(`c${seq}`),
+      // One private workspace's bot token, until installing by OAuth arrives with the signed Slack ingress.
+      token: async () => (env as Env & { SLACK_BOT_TOKEN?: string }).SLACK_BOT_TOKEN || undefined,
     });
   }
   private get(key: string): string | undefined {

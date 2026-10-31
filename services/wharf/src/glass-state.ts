@@ -2,6 +2,7 @@ import { WHARF_REVIEW_REQUEST_KINDS } from '../../../packages/core/src/backend-m
 import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, repoIdentity, requireThat, text } from './protocol.js';
 import { cardSchema, cardTables } from './cards.js';
+import { slackSchema, slackTables } from './slack-outbox.js';
 import type { Actor, Command } from './account.js';
 
 export const glassSchema = `
@@ -10,8 +11,9 @@ export const glassSchema = `
   CREATE TABLE IF NOT EXISTS worker_details (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS dispatch_acks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   ${cardSchema}
+  ${slackSchema}
 `;
-export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks', ...cardTables];
+export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks', ...cardTables, ...slackTables];
 type Result = { status: number; value: unknown };
 type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
 /** Pure synchronous SQL operations inside the account's auth/idempotency transaction. */
