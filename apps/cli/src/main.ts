@@ -3517,7 +3517,11 @@ async function mainCli(): Promise<void> {
             const { startWharfBroker, daemonBrokerOptions } = await import('./wharf-trap-broker.js');
             hostedBroker = await startWharfBroker(daemonBrokerOptions(loadConfig));
           },
-          hostedPoll: async () => { await hostedBroker?.broker.poll(); },
+          hostedPoll: async () => {
+            await hostedBroker?.broker.poll();
+            // This boat's own glass cards, for the grounds bound to a wharf.
+            await (await import('./wharf-cards.js')).publishBoatCards(Date.now(), console.log);
+          },
           trapStarts: createTrapDispatchScheduler(),
           culler: cliCuller,
           prWatches: (now, log) => {
