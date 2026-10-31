@@ -80,3 +80,16 @@ it('remoteAnswers is on for each listed wharf unless that boat sets it false', a
   fs.writeFileSync(path.join(home, 'config.toml'), wharf("remoteAnswers = 'no'"));
   expect(() => loadConfig()).toThrow('remoteAnswers must be true or false');
 });
+
+it('Allow always through the wharf grants exactly what a glass click grants, scope for scope', async () => {
+  const { answerKey } = await import('../src/decision-answer.js');
+  const scope = (g: Record<string, unknown>) => Object.fromEntries(Object.entries(g).filter(([k]) => !['id', 'at', 'by', 'uses'].includes(k)));
+  const byGlass = card();
+  answerKey(byGlass.key, { option: 'Allow always', by: 'glass' });
+  const glassGrant = listGrants().grants[0]!;
+  const viaWharf = card();
+  applyReceipt(on, 'cloud', receipt(viaWharf, { kind: 'allow-always' }), shown(viaWharf));
+  const wharfGrant = listGrants().grants.find((g) => g.by.startsWith('wharf:'))!;
+  expect(glassGrant.by).toBe('glass');
+  expect(scope(wharfGrant as unknown as Record<string, unknown>)).toEqual(scope(glassGrant as unknown as Record<string, unknown>));
+});

@@ -85,13 +85,13 @@ function offered(actions: GlassCardAction[]): string[] {
   if (actions.some((a) => a.kind === 'allow-once' || a.kind === 'allow-always' || a.kind === 'deny')) lines.push('Allow once, Allow always or No.');
   return lines;
 }
+/** Actions a card offers that its Slack message does not take: they are named, and done in the glass. */
+const GLASS_ONLY: Partial<Record<GlassCardAction['kind'], string>> = { 'message-helm': 'message the helm', cancel: 'cancel the job', 'review-dismiss': 'dismiss the review' };
+function inGlass(actions: GlassCardAction[], controls: CardControl[]): string {
+  const names = actions.flatMap((a) => (GLASS_ONLY[a.kind] && !controls.some((c) => c.action.kind === a.kind) ? [GLASS_ONLY[a.kind]!] : []));
+  return names.length ? `In the glass you can also ${names.join(', ')}.` : '';
+}
 
-/**
- * One card as one Slack message. The same card renders the same message, so
- * a delivery can tell whether its last post still matches. A standing card
- * names what it asks and links to the glass, where it is answered; an ended
- * card shows how it ended and offers nothing.
- */
 /** A card action this message can take, and the opaque handle its button carries. The handle alone means nothing outside the wharf. */
 export interface CardControl { action: GlassCardAction; handle: string }
 /** How a control's button reads. An option longer than a button keeps its meaning in the body, under its number. */
@@ -126,7 +126,8 @@ export function renderCard(card: GlassCard, glassOrigin: string, controls: CardC
   );
   // An answer awaiting its boat, or applied there, leaves nothing to ask.
   const settled = card.relay?.state === 'awaiting boat' || card.relay?.state === 'applied';
-  const ask = card.terminal || settled ? [] : offered(card.actions);
+  // A control not taken here is named as the glass's, never left unsaid.
+  const ask = card.terminal || settled ? [] : [...offered(card.actions), inGlass(card.actions, controls)].filter(Boolean);
   // What the card asks always shows in full; the summary gets the room left over.
   const asked = fitted(ask.join('\n'), SLACK_BUDGET.section);
   const room = SLACK_BUDGET.section - asked.length - (asked && card.summary ? 2 : 0);
@@ -152,6 +153,7 @@ export function renderCard(card: GlassCard, glassOrigin: string, controls: CardC
     ...(section ? [{ type: 'section' as const, text: { type: 'mrkdwn' as const, text: section } }] : []),
     ...rows.slice(0, SLACK_BUDGET.blocks - 3).map((elements): SlackBlock => ({ type: 'actions', elements })),
   ];
-  const fallback = clip(`${FAMILY_LABEL[card.family]}: ${title} · ${card.terminal ? card.terminal.state : card.quiet ? 'in progress' : 'waiting for you'}`, SLACK_BUDGET.fallback);
+  // The fallback is what a notification shows, and Slack reads it as mrkdwn: escaped like any other card text.
+  const fallback = clip(`${FAMILY_LABEL[card.family]}: ${slackEscape(title)} · ${card.terminal ? card.terminal.state : card.quiet ? 'in progress' : 'waiting for you'}`, SLACK_BUDGET.fallback);
   return { text: fallback, blocks, unfurl_links: false, unfurl_media: false };
 }
