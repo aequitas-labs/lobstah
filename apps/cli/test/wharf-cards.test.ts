@@ -11,7 +11,7 @@ import { removeTempDir } from '../../../test/temp-dir.js';
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
 const at = new Date(NOW - 60_000).toISOString();
 const cfg = {
-  repos: { local: { path: '/x/local' }, remote: { path: '/x/remote' } },
+  repos: { local: { path: '/x/local' }, remote: { path: '/x/remote', origin: 'git@github.com:test/remote.git' } },
   grounds: { home: { repos: ['local'] }, away: { repos: ['remote'], wharf: 'cloud' } },
   wharves: { cloud: { kind: 'wharf', url: 'https://wharf.invalid', account: 'person', tokenEnv: 'LOBSTAH_TEST_CARDS_TOKEN' } },
 } as unknown as Config;
@@ -33,11 +33,13 @@ it('only cards of repos in a grounds bound to a wharf leave the boat, and each p
     // The wharf's own items are its cards already.
     item({ kind: 'landed', key: `work:srv-${'a'.repeat(40)}`, repo: 'remote', wharf: 'cloud', grounds: 'away' }),
     item({ kind: 'pr:ready', key: 'pr:github.com/test/local#9', repo: 'local', prUrl: 'https://github.com/test/local/pull/9' }),
+    // A PR with no local dispatch names its GitHub repo; the configured origin places it.
+    item({ kind: 'pr:checks', key: 'pr:github.com/test/remote#8', repo: 'test/remote', prUrl: 'https://github.com/test/remote/pull/8' }),
   ];
   const sets = boatCards(cfg, attention, [permission, localAsk], [notice('n1', 'remote'), notice('n2', 'local'), notice('n3')], NOW);
   expect(sets.map((s) => s.wharf)).toEqual(['cloud']);
   const cards = sets[0]!.cards;
-  expect(cards.map((c) => `${c.family}:${c.key}`).sort()).toEqual(['notice:notice:n1', 'notice:watch:w1', 'permission:decision:grant1', 'pr:pr:github.com/test/remote#7']);
+  expect(cards.map((c) => `${c.family}:${c.key}`).sort()).toEqual(['notice:notice:n1', 'notice:watch:w1', 'permission:decision:grant1', 'pr:pr:github.com/test/remote#7', 'pr:pr:github.com/test/remote#8']);
   expect(cards.find((c) => c.family === 'permission')).toMatchObject({
     grounds: 'away', title: 'Allow git push', actions: [{ kind: 'allow-once' }, { kind: 'allow-always' }, { kind: 'deny' }],
     summary: 'Run: git push origin HEAD\ntrap early-pebble · claude · remote\nAllow always: git push in every lobstah checkout',
