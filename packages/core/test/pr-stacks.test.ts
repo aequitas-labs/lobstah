@@ -84,6 +84,16 @@ describe('stack detection and readiness', () => {
     const other = [row(20, { headRefName: 'c20', baseRefName: 'v12' }), row(21, { headRefName: 'c21', baseRefName: 'c20' })];
     expect(numbers(derivePrStacks([v12, row(1, { baseRefName: 'v12' }), row(2), ...other]))).toEqual([[1, 2], [20, 21]]);
   });
+  it("never puts v12's own PR under a chain: one open stack on v12, with merged PRs behind it", () => {
+    const v12 = row(10, { headRefName: 'v12', baseRefName: 'main' });
+    const merged = row(5, { headRefName: 'done', baseRefName: 'v12', state: 'MERGED' });
+    const stacks = derivePrStacks([v12, merged, row(1, { baseRefName: 'v12' }), row(2)]);
+    expect(stacks.map((s) => s.members.map((p) => p.number))).toEqual([[1, 2]]);
+    expect(stacks[0]!.text).toContain('acme/web #1 → #2');
+    // A closed attempt on a stack member's branch does not make it long-lived.
+    const closed = row(7, { headRefName: 'b7', baseRefName: 'b1', state: 'CLOSED' });
+    expect(derivePrStacks([row(1), closed, row(2), row(3)]).map((s) => s.members.map((p) => p.number))).toEqual([[1, 2, 3]]);
+  });
   it('keeps a chain whose base is another open PR whole, not split at that PR', () => {
     const feature = row(1, { headRefName: 'feature', baseRefName: 'main' });
     const stacks = derivePrStacks([feature, row(2, { baseRefName: 'feature' }), row(3, { baseRefName: 'b2' })]);

@@ -27,10 +27,10 @@ export function stackReadyEnabled(cfg: Pick<Config, 'attentionKinds'>): boolean 
 
 /**
  * No forge calls: an unambiguous same-repo chain, not a branch DAG. A stack's
- * bottom may target any branch (`main`, `v12`, a feature branch); it only
- * continues an open PR below when it is that PR's sole open child. A branch
- * several open PRs target (a long-lived `v12` with its own PR to `main`)
- * roots each of their chains.
+ * bottom may target any branch (`main`, `v12`, a feature branch). A PR whose
+ * head more than one open or merged PR has targeted is a long-lived base
+ * (`v12` with its own PR to `main`), never a stack member: each PR on it
+ * roots its own chain. A stack member's branch carries only the PR above it.
  */
 export function derivePrStacks(
   records: readonly PrEvidence[],
@@ -42,14 +42,18 @@ export function derivePrStacks(
   const inRepo = (p: PrEvidence, q: PrEvidence) => repo(p).toLowerCase() === repo(q).toLowerCase();
   const openChildren = (p: PrEvidence): PrEvidence[] =>
     valid.filter((q) => q.state === 'OPEN' && inRepo(q, p) && q.baseRefName === p.headRefName);
+  // Closed PRs are abandoned attempts; merged ones mean work lands on this head.
+  const longLived = (p: PrEvidence): boolean =>
+    valid.filter((q) => q.state !== 'CLOSED' && inRepo(q, p) && q.baseRefName === p.headRefName).length > 1;
   // A retargeted base is still a merged ancestor's head: no open PR has it.
   const continuesParent = (p: PrEvidence): boolean =>
-    valid.some((q) => q.state === 'OPEN' && inRepo(q, p) && q.headRefName === p.baseRefName && openChildren(q).length === 1);
+    valid.some((q) => q.state === 'OPEN' && inRepo(q, p) && q.headRefName === p.baseRefName && !longLived(q));
   const out: PrStack[] = [];
   for (const bottom of valid.filter((p) => p.state === 'OPEN' && !continuesParent(p))) {
     const members = [bottom];
     for (;;) {
       const top = members.at(-1)!;
+      if (longLived(top)) break;
       const children = openChildren(top);
       if (children.length !== 1 || members.some((p) => p.url === children[0]!.url)) break;
       members.push(children[0]!);
