@@ -25,6 +25,7 @@ import {
 } from '@lobstah/core';
 import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig, pickupPlan } from '@lobstah/pick';
+import { codexTrapHooksRow } from './codex-startup.js';
 import { pickRunning } from './reviews-setup.js';
 import { planPressureCull } from './cull.js';
 import { parkedSummary } from './parked-view.js';
@@ -396,6 +397,12 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   for (const h of [claudeHooks(), codexHooks()]) {
     const row = hookRow(h, now);
     push(row.check, row.status, row.detail);
+  }
+  try {
+    const trapHooks = codexTrapHooksRow(loadConfig().repos);
+    push(trapHooks.check, trapHooks.status, trapHooks.detail);
+  } catch {
+    // an unloadable config is already its own row
   }
   const listeners = listenerRow(now);
   push(listeners.check, listeners.status, listeners.detail);
