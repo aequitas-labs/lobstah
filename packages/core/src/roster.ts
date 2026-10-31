@@ -22,7 +22,7 @@ import { releaseTrapName, trapIdForName } from './trap-names.js';
 export const ROSTER_VERSION = 1;
 
 /** Terminal apps a thrown trap can open in. */
-export const TERMINAL_APPS = ['terminal', 'iterm'] as const;
+export const TERMINAL_APPS = ['terminal', 'iterm', 'tmux'] as const;
 export type TerminalApp = (typeof TERMINAL_APPS)[number];
 
 /**
@@ -300,12 +300,12 @@ export function setRosterProfile(trapId: string, patch: ProfilePatch, now = Date
   return writeEntry(next);
 }
 
-/** Whether a value names a terminal app (`terminal`, `iterm`). */
+/** Whether a value names a terminal app (`terminal`, `iterm`, `tmux`). */
 export function isTerminalApp(value: unknown): value is TerminalApp {
   return typeof value === 'string' && (TERMINAL_APPS as readonly string[]).includes(value);
 }
 
 /** The display name of a terminal app. */
 export function terminalAppName(app: TerminalApp): string {
-  return app === 'iterm' ? 'iTerm2' : 'Terminal.app';
+  return app === 'iterm' ? 'iTerm2' : app === 'tmux' ? 'tmux' : 'Terminal.app';
 }

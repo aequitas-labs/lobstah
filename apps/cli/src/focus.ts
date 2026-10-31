@@ -4,15 +4,19 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { linkMismatch, loadConfig, readTrap, trapIdAt, trapLastSeen, validSessionLink } from '@lobstah/core';
 import type { TrapRegistration } from '@lobstah/core';
+import { TMUX_SOCKET } from './tmux-terminal.js';
 
 const exec = promisify(execFile);
-export type FocusStep = 'link' | 'iterm' | 'terminal' | 'vscode' | 'app';
+export type FocusStep = 'link' | 'iterm' | 'tmux' | 'terminal' | 'vscode' | 'app';
 export type FocusResult = { focused: true; step: FocusStep; message: string } | { focused: false; reason: string };
 export type FileRunner = (file: string, args: string[]) => Promise<void>;
+/** Runs a command and returns its stdout. */
+export type FileReader = (file: string, args: string[]) => Promise<string>;
 
 const runFile: FileRunner = async (file, args) => {
   await exec(file, args, { timeout: 5000, maxBuffer: 64 * 1024 });
 };
+const readFile: FileReader = async (file, args) => (await exec(file, args, { timeout: 5000, maxBuffer: 64 * 1024 })).stdout;
 
 const ITERM_SCRIPT = `on run argv
   set targetId to item 1 of argv
@@ -53,7 +57,8 @@ end run`;
 const BUNDLE_RE = /^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)+$/;
 const TTY_RE = /^ttys[0-9]{3,5}$/;
 const ITERM_RE = /^w[0-9]+t[0-9]+p[0-9]+:([A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12})$/;
-const TMUX_RE = /^%[1-9][0-9]*$/;
+const TMUX_RE = /^%(0|[1-9][0-9]*)$/;
+const SOCKET_RE = /^\/[^\x00-\x1f\x7f]+$/;
 const PANE_RE = /^[1-9][0-9]*$/;
 const VSCODE_RE = /(?:VSCode|Cursor|windsurf)/;
 const control = (value: string): boolean => /[\x00-\x1f\x7f]/.test(value);
@@ -71,10 +76,11 @@ function safeWorktree(reg: TrapRegistration): boolean {
 /** One common focus ladder for the CLI and the glass. Registration fields are untrusted. */
 export async function focusRegistration(
   reg: TrapRegistration,
-  options: { platform?: NodeJS.Platform; run?: FileRunner } = {},
+  options: { platform?: NodeJS.Platform; run?: FileRunner; read?: FileReader } = {},
 ): Promise<FocusResult> {
   const platform = options.platform ?? process.platform;
   const run = options.run ?? runFile;
+  const read = options.read ?? readFile;
   const attempt = async (file: string, args: string[], step: FocusStep, message: string): Promise<FocusResult | undefined> => {
     try {
       await run(file, args);
@@ -98,6 +104,8 @@ export async function focusRegistration(
     return { focused: false, reason: 'Invalid recorded bundle id.' };
   if (win?.tmuxPane !== undefined && (typeof win.tmuxPane !== 'string' || control(win.tmuxPane) || !TMUX_RE.test(win.tmuxPane)))
     return { focused: false, reason: 'Invalid recorded tmux pane.' };
+  if (win?.tmuxSocket !== undefined && (typeof win.tmuxSocket !== 'string' || !SOCKET_RE.test(win.tmuxSocket) || path.normalize(win.tmuxSocket) !== win.tmuxSocket))
+    return { focused: false, reason: 'Invalid recorded tmux socket.' };
   if (win?.kittyWindow !== undefined && (typeof win.kittyWindow !== 'string' || control(win.kittyWindow) || !PANE_RE.test(win.kittyWindow)))
     return { focused: false, reason: 'Invalid recorded kitty window.' };
   if (win?.weztermPane !== undefined && (typeof win.weztermPane !== 'string' || control(win.weztermPane) || !PANE_RE.test(win.weztermPane)))
@@ -120,13 +128,35 @@ export async function focusRegistration(
     const result = await attempt('osascript', ['-e', ITERM_SCRIPT, '--', iterm[1]!], 'iterm', 'Focused the iTerm2 session.');
     if (result) return result;
   }
+  if (typeof win.tmuxPane === 'string') {
+    // The pane's own server: the socket recorded at sign-on, else lobstah's.
+    const server = win.tmuxSocket ? ['-S', win.tmuxSocket] : ['-L', TMUX_SOCKET];
+    const pane = win.tmuxPane;
+    const selected = await attempt('tmux', [...server, 'select-window', '-t', pane, ';', 'select-pane', '-t', pane, ';',
+      'if-shell', '-F', '-t', pane, '#{window_zoomed_flag}', '', `resize-pane -Z -t ${pane}`], 'tmux', 'Selected the trap\'s tmux pane.');
+    if (selected) {
+      let clients: string[] = [];
+      try {
+        clients = (await read('tmux', [...server, 'list-clients', '-t', pane, '-F', '#{client_tty}'])).split('\n').map((t) => t.replace(/^\/dev\//, '')).filter((t) => TTY_RE.test(t));
+      } catch {
+        // No client attached: nothing to raise.
+      }
+      for (const tty of clients) {
+        const raised = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', tty], 'tmux', 'Selected the trap\'s tmux pane and raised its Terminal window.');
+        if (raised) return raised;
+      }
+      const attach = win.tmuxSocket ? `tmux -S ${win.tmuxSocket} attach` : `tmux -L ${TMUX_SOCKET} attach`;
+      return { focused: false, reason: `Selected the trap's tmux pane, but no Terminal window shows it — run \`${attach}\`.` };
+    }
+  }
   if (win.termProgram === 'Apple_Terminal' && typeof win.tty === 'string' && TTY_RE.test(win.tty)) {
     const result = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', win.tty], 'terminal', 'Focused the Terminal tab.');
     if (result) return result;
   }
-  // tmux, kitty and WezTerm are intentionally skipped until selecting the
-  // recorded pane can be verified on this machine.
-  const bundle = typeof win.bundleId === 'string' && BUNDLE_RE.test(win.bundleId) ? win.bundleId : undefined;
+  // kitty and WezTerm are intentionally skipped until selecting the recorded
+  // pane can be verified on this machine. A tmux pane's bundle id is the
+  // app that started its server, not where the pane shows: never use it.
+  const bundle = typeof win.bundleId === 'string' && BUNDLE_RE.test(win.bundleId) && win.termProgram !== 'tmux' ? win.bundleId : undefined;
   if (bundle && VSCODE_RE.test(bundle) && safeWorktree(reg)) {
     const result = await attempt('open', ['-b', bundle, reg.worktree], 'vscode', 'Opened the trap worktree in its editor.');
     if (result) return result;
@@ -145,7 +175,7 @@ export function liveTrap(trapId: string): TrapRegistration | undefined {
   return Date.now() - trapLastSeen(reg) <= loadConfig().soak.ttlSecs * 1000 ? reg : undefined;
 }
 
-export async function focusTrap(trapId: string, options: { platform?: NodeJS.Platform; run?: FileRunner } = {}): Promise<FocusResult> {
+export async function focusTrap(trapId: string, options: { platform?: NodeJS.Platform; run?: FileRunner; read?: FileReader } = {}): Promise<FocusResult> {
   const reg = liveTrap(trapId);
   return reg ? focusRegistration(reg, options) : { focused: false, reason: 'Trap is not live.' };
 }

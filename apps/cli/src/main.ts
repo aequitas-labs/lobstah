@@ -2327,7 +2327,7 @@ async function mainCli(): Promise<void> {
         const harness = clear(opt('--harness'));
         if (harness && harness !== 'claude' && harness !== 'codex') throw new UsageError('--harness takes claude, codex, or default');
         const terminal = clear(opt('--terminal'));
-        if (terminal && !isTerminalApp(terminal)) throw new UsageError('--terminal takes terminal, iterm, or default');
+        if (terminal && !isTerminalApp(terminal)) throw new UsageError('--terminal takes terminal, iterm, tmux, or default');
         let config: Record<string, string | null>;
         const { rosterConfigPatch, BYPASS_WARNING } = await import('./grants-cli.js');
         try {
