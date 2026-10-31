@@ -41,6 +41,18 @@ describe('stack detection and readiness', () => {
     expect(readyNotices()[0]!.refId).toBe(id);
     expect(unseenNotices(true)).toEqual([]);
   });
+  it('a PR added to a notified stack replaces its notice once, naming the added PR', () => {
+    [1, 2].forEach((n) => upsertPr(row(n, { baseRefName: n === 1 ? 'v12' : 'b1' }))); sync();
+    expect(unseenNotices(true)).toEqual([expect.objectContaining({ text: expect.stringMatching(/^stack ready to merge: acme\/web #1 → #2/) })]);
+    upsertPr(row(3, { draft: true })); sync();
+    upsertPr(row(3)); sync(); sync();
+    expect(readyNotices()).toHaveLength(1);
+    expect(unseenNotices(true)).toEqual([expect.objectContaining({ text: expect.stringMatching(/^Stack updated · #3 added — stack ready to merge: acme\/web #1 → #2 → #3/) })]);
+    // A member that turns unready and back names the stack's range instead.
+    upsertPr(row(2, { mergeStateStatus: 'DIRTY' })); sync(); upsertPr(row(2)); sync();
+    expect(readyNotices()).toHaveLength(1);
+    expect(unseenNotices(true)).toEqual([expect.objectContaining({ text: expect.stringMatching(/^Stack updated · #1–#3 — stack ready/) })]);
+  });
   it('supersedes the ready notice immediately on growth, waking only after the new member is ready', () => {
     [1, 2].forEach((n) => upsertPr(row(n))); sync(); unseenNotices(true);
     const id = readyNotices()[0]!.refId;
@@ -59,12 +71,33 @@ describe('stack detection and readiness', () => {
     expect(readyNotices()[0]!.refId).toBe(id);
     expect(unseenNotices(true)).toEqual([]);
   });
-  it('never joins across repos, forks, ambiguous siblings, or non-trunk floors', () => {
+  it('never joins across repos, forks, or ambiguous siblings', () => {
     expect(derivePrStacks([row(1), row(2, { url: 'https://github.com/elsewhere/web/pull/2' })])).toEqual([]);
     expect(derivePrStacks([row(1), row(2, { isCrossRepository: true })])).toEqual([]);
     expect(derivePrStacks([row(1), row(2), row(9, { baseRefName: 'b1' })])).toEqual([]);
-    expect(derivePrStacks([row(1, { baseRefName: 'release' }), row(2)])).toEqual([]);
-    expect(derivePrStacks([row(1, { baseRefName: 'master' }), row(2)], { trunk: () => 'master' })).toHaveLength(1);
+  });
+  it('recognises a stack on any base branch, such as v12', () => {
+    const numbers = (stacks: ReturnType<typeof derivePrStacks>) => stacks.map((s) => s.members.map((p) => p.number));
+    expect(numbers(derivePrStacks([row(1, { baseRefName: 'v12' }), row(2), row(3)]))).toEqual([[1, 2, 3]]);
+    // v12's own open PR to main has several stacks on it: each roots its own chain.
+    const v12 = row(10, { headRefName: 'v12', baseRefName: 'main' });
+    const other = [row(20, { headRefName: 'c20', baseRefName: 'v12' }), row(21, { headRefName: 'c21', baseRefName: 'c20' })];
+    expect(numbers(derivePrStacks([v12, row(1, { baseRefName: 'v12' }), row(2), ...other]))).toEqual([[1, 2], [20, 21]]);
+  });
+  it("never puts v12's own PR under a chain: one open stack on v12, with merged PRs behind it", () => {
+    const v12 = row(10, { headRefName: 'v12', baseRefName: 'main' });
+    const merged = row(5, { headRefName: 'done', baseRefName: 'v12', state: 'MERGED' });
+    const stacks = derivePrStacks([v12, merged, row(1, { baseRefName: 'v12' }), row(2)]);
+    expect(stacks.map((s) => s.members.map((p) => p.number))).toEqual([[1, 2]]);
+    expect(stacks[0]!.text).toContain('acme/web #1 → #2');
+    // A closed attempt on a stack member's branch does not make it long-lived.
+    const closed = row(7, { headRefName: 'b7', baseRefName: 'b1', state: 'CLOSED' });
+    expect(derivePrStacks([row(1), closed, row(2), row(3)]).map((s) => s.members.map((p) => p.number))).toEqual([[1, 2, 3]]);
+  });
+  it('keeps a chain whose base is another open PR whole, not split at that PR', () => {
+    const feature = row(1, { headRefName: 'feature', baseRefName: 'main' });
+    const stacks = derivePrStacks([feature, row(2, { baseRefName: 'feature' }), row(3, { baseRefName: 'b2' })]);
+    expect(stacks.map((s) => s.members.map((p) => p.number))).toEqual([[1, 2, 3]]);
   });
   it('uses the same ready rule, unknown checks and human gates never guessed green', () => {
     const bad = row(3, { draft: true });

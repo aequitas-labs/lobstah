@@ -60,7 +60,6 @@ import {
   parkedDispatches,
   isFinished,
   derivePrStacks,
-  prStackTrunk,
   readStackEpochs,
   stackReadyEnabled,
   stackStateHash,
@@ -387,7 +386,7 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
   );
   const out: TendAttention[] = [];
   const stacks = identifyPrStacks(derivePrStacks(observed.map((x) => x.pr), {
-    trunk: (repo) => prStackTrunk(cfg, repo), readySettleSecs: cfg.readySettleSecs, now,
+    readySettleSecs: cfg.readySettleSecs, now,
   }));
   const epochs = readStackEpochs();
   for (const { id, lane, pr, dispatch } of observed) {
@@ -947,7 +946,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     legacy.map(({ id, pr }) => ({ id, pr })),
     [],
     records,
-    { readySettleSecs: cfg.readySettleSecs, now, trunk: (r) => prStackTrunk(cfg, r) },
+    { readySettleSecs: cfg.readySettleSecs, now },
   ).stacks.filter((s) => s.open);
   attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now), ...hostedAttention(cfg, now).filter(a => a.kind !== 'review'));
   attention.push(...dispatchProgress(now, cfg).map((p): TendAttention => ({
