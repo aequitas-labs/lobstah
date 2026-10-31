@@ -33,7 +33,7 @@ import {
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
-import { codexTrapHookArgs } from './codex-startup.js';
+import { codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
 
 /** One terminal tab to open: a directory, an environment, and a command line. */
 export interface TerminalLaunch {
@@ -275,6 +275,17 @@ function giveUp(trapId: string, label: string, repo: string | undefined, retry: 
   });
 }
 
+/**
+ * Why a Codex trap may not have signed on: the hooks that would hold it at
+ * "Hooks need review" before its first prompt, or that none would.
+ */
+export function codexStallReason(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): string {
+  const blockers = codexTrapHookBlockers(cwd, opts);
+  if (blockers.length === 0) return 'no hook would hold it at Codex\'s hook review';
+  const named = blockers.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ');
+  return `Codex is likely waiting at "Hooks need review" for ${named} — trust them in that session's /hooks`;
+}
+
 /** Open the command, then wait until the trap signed on after `started` and parked. */
 async function launchAndWait(
   opts: ThrowOptions,
@@ -284,7 +295,7 @@ async function launchAndWait(
   try {
     if (w.launched.harness === 'codex') {
       // An unattended throw must not park at the interactive update picker.
-      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...codexTrapHookArgs());
+      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...codexTrapHookArgs({ cwd: w.command.cwd }));
     }
     await w.adapter.launch(w.command);
   } catch (err) {
@@ -313,7 +324,7 @@ async function launchAndWait(
       if (w.launched.harness === 'codex') {
         // Keep both the ticket and the fence: an already-open slow session
         // can redeem late, and retry cannot create a competing writer.
-        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying`);
+        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${codexStallReason(w.command.cwd)}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying`);
       }
       giveUp(w.trapId, w.label, w.repo, w.retry, w.started, `no sign-on within ${timeoutSecs}s`);
       throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged`);
