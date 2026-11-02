@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { displayGrounds, groundsList, lobstahHome } from '@lobstah/core';
-import type { Config } from '@lobstah/core';
+import { displayGrounds, groundsList, lobstahHome, tryDirLock } from '@lobstah/core';
+import type { Config, DirLock } from '@lobstah/core';
 
 const exec = promisify(execFile);
 
@@ -15,8 +15,10 @@ export const TMUX_SESSION = 'lobstah';
 /** Runs one tmux command on lobstah's server and returns its stdout. */
 export type TmuxRunner = (args: string[]) => Promise<string>;
 
-/** One window of lobstah's session: its name and how many panes it holds. */
+/** One window of lobstah's session: its id, its name and how many panes it holds. */
 export interface TmuxWindow {
+  /** tmux's own `@N` id: unique even when two windows share a name. */
+  id: string;
   name: string;
   panes: number;
 }
@@ -84,7 +86,7 @@ export function tmuxRunner(socket = TMUX_SOCKET): TmuxRunner {
 export async function listTmuxWindows(run: TmuxRunner): Promise<TmuxWindow[] | undefined> {
   let out: string;
   try {
-    out = await run(['list-windows', '-t', `=${TMUX_SESSION}`, '-F', '#{window_name}\t#{window_panes}']);
+    out = await run(['list-windows', '-t', `=${TMUX_SESSION}`, '-F', '#{window_id}\t#{window_name}\t#{window_panes}']);
   } catch {
     return undefined;
   }
@@ -92,8 +94,8 @@ export async function listTmuxWindows(run: TmuxRunner): Promise<TmuxWindow[] | u
     .split('\n')
     .filter(Boolean)
     .map((line) => {
-      const [name = '', panes = '0'] = line.split('\t');
-      return { name, panes: Number(panes) || 0 };
+      const [id = '', name = '', panes = '0'] = line.split('\t');
+      return { id, name, panes: Number(panes) || 0 };
     });
 }
 
@@ -121,11 +123,44 @@ export function tmuxWindowFor(cfg: Config, repo: string | undefined, windows: re
   return windowName(repo ?? 'traps');
 }
 
+/** A placement holds the lock for a few tmux calls; one older than this has a dead holder. */
+const PLACEMENT_STALE_MS = 30_000;
+/** How long a throw waits for other throws to place their panes. */
+const PLACEMENT_WAIT_MS = 30_000;
+
+/** The lock file serialising pane placement across every lobstah process: the CLI and the daemon both throw. */
+export function tmuxPlacementLockFile(): string {
+  return path.join(lobstahHome(), 'tmux-placement.lock');
+}
+
+/**
+ * Run `place` holding the placement lock, so two throws at once never both
+ * see no session, both create the same repo window, or overfill a `page-N`
+ * window.
+ */
+async function withPlacementLock<T>(place: () => Promise<T>, waitMs = PLACEMENT_WAIT_MS): Promise<T> {
+  const file = tmuxPlacementLockFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const deadline = Date.now() + waitMs;
+  let held: DirLock | undefined;
+  while (!(held = tryDirLock(file, { staleMs: PLACEMENT_STALE_MS }))) {
+    if (Date.now() >= deadline) throw new Error('another throw is still placing its tmux pane; try again');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  try {
+    return await place();
+  } finally {
+    held.release();
+  }
+}
+
 /**
  * Open a trap's command in a pane of lobstah's tmux session and tile its
  * window. It never takes focus: a person attaches with `tmux -L lobstah
  * attach`, on any Desktop. The command runs in a login shell, as in a new
- * Terminal window, and the pane is titled with the trap's name.
+ * Terminal window, and the pane is titled with the trap's name. Placement
+ * holds a lock across processes. Once the pane exists, tiling and titling
+ * are cosmetic: a failure there never fails the launch of a running trap.
  */
 export async function openTmuxPane(
   cfg: Config,
@@ -134,19 +169,23 @@ export async function openTmuxPane(
   shell = process.env.SHELL || '/bin/zsh',
 ): Promise<TmuxPaneRef> {
   ensureTmuxConfig();
-  const windows = await listTmuxWindows(run);
-  const window = tmuxWindowFor(cfg, launch.repo, windows ?? []);
   const program = [shell, '-l', '-c', launch.command];
   const placed = ['-c', launch.cwd, '-P', '-F', '#{pane_id}'];
-  const out = !windows
-    ? await run(['new-session', '-d', '-s', TMUX_SESSION, '-n', window, '-x', '240', '-y', '66', ...placed, ...program])
-    : windows.some((w) => w.name === window)
-      ? await run(['split-window', '-d', '-t', `=${TMUX_SESSION}:=${window}`, ...placed, ...program])
-      : await run(['new-window', '-d', '-t', `=${TMUX_SESSION}:`, '-n', window, ...placed, ...program]);
-  const pane = out.trim();
-  await run(['select-layout', '-t', `=${TMUX_SESSION}:=${window}`, 'tiled']);
-  if (launch.trap) await run(['select-pane', '-t', pane, '-T', launch.trap]);
-  return { tmuxPane: pane };
+  return withPlacementLock(async () => {
+    const windows = await listTmuxWindows(run);
+    const name = tmuxWindowFor(cfg, launch.repo, windows ?? []);
+    const window = windows?.find((w) => w.name === name);
+    const out = !windows
+      ? await run(['new-session', '-d', '-s', TMUX_SESSION, '-n', name, '-x', '240', '-y', '66', ...placed, ...program])
+      : window
+        ? await run(['split-window', '-d', '-t', window.id, ...placed, ...program])
+        : await run(['new-window', '-d', '-t', `=${TMUX_SESSION}:`, '-n', name, ...placed, ...program]);
+    const pane = out.trim();
+    // Tiled before the lock is released, so the next split has room. A pane id targets its own window.
+    await run(['select-layout', '-t', pane, 'tiled']).catch(() => undefined);
+    if (launch.trap) await run(['select-pane', '-t', pane, '-T', launch.trap]).catch(() => undefined);
+    return { tmuxPane: pane };
+  });
 }
 
 /** The last non-blank lines on a pane's screen, or undefined when it cannot be read. */
