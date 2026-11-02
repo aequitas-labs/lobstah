@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, writeTrapAnchor } from '@lobstah/core';
 import type { TrapRegistration, WindowRef } from '@lobstah/core';
-import { focusRegistration, focusTrap, tmuxAttachCommand } from '../src/focus.js';
+import { execFileSync } from 'node:child_process';
+import { focusRegistration, focusTrap, tmuxAttachCommand, trapPaneScreen } from '../src/focus.js';
 import type { FileReader, FileRunner } from '../src/focus.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -32,6 +33,9 @@ const calls = () => {
   const run: FileRunner = async (file, args) => { seen.push([file, args]); };
   return { seen, run };
 };
+const hasTmux = (() => {
+  try { execFileSync('tmux', ['-V'], { stdio: 'ignore' }); return true; } catch { return false; }
+})();
 const ITERM = 'w0t2p0:11111111-2222-3333-4444-555555555555';
 
 describe('safe window focus ladder', () => {
@@ -136,6 +140,43 @@ describe('safe window focus ladder', () => {
         const result = await focusRegistration(reg(window), { ...glass, run, read: async () => '' });
         expect(result).toMatchObject({ focused: false });
         expect(seen.filter(([file]) => file === 'osascript')).toHaveLength(0);
+      }
+    });
+  });
+
+  describe('a trap pane screen', () => {
+    it('reads only a validated pane, on the recorded server', async () => {
+      const seen: string[][] = [];
+      const read: FileReader = async (_file, args) => { seen.push(args); return 'hello\n\n\n'; };
+      expect(await trapPaneScreen(reg({ tmuxPane: '%3' }), read)).toBe('hello');
+      expect(seen[0]).toEqual(['-L', 'lobstah', 'capture-pane', '-p', '-t', '%3']);
+      expect(await trapPaneScreen(reg({ tmuxPane: '%3', tmuxSocket: '/tmp/s' }), read)).toBe('hello');
+      expect(seen[1]?.slice(0, 2)).toEqual(['-S', '/tmp/s']);
+      seen.length = 0;
+      expect(await trapPaneScreen(reg(undefined), read)).toBeUndefined();
+      expect(await trapPaneScreen(reg({ tmuxPane: '%3;id' }), read)).toBeUndefined();
+      expect(await trapPaneScreen(reg({ tmuxPane: '%3', tmuxSocket: 'relative' }), read)).toBeUndefined();
+      expect(seen).toEqual([]);
+    });
+
+    it('is undefined when tmux cannot read it', async () => {
+      expect(await trapPaneScreen(reg({ tmuxPane: '%3' }), async () => { throw new Error('no pane'); })).toBeUndefined();
+    });
+
+    it.skipIf(!hasTmux)('reads a real pane on a private server', async () => {
+      const socket = path.join(home, 's');
+      const tmux = (...args: string[]) => execFileSync('tmux', ['-S', socket, '-f', '/dev/null', ...args], { encoding: 'utf8' });
+      try {
+        tmux('new-session', '-d', '-s', 'private', "printf 'trap screen'; sleep 30");
+        const pane = tmux('list-panes', '-t', 'private', '-F', '#{pane_id}').trim();
+        let screen: string | undefined;
+        for (let i = 0; i < 50 && !screen?.includes('trap screen'); i++) {
+          screen = await trapPaneScreen(reg({ tmuxPane: pane, tmuxSocket: socket }));
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        expect(screen).toContain('trap screen');
+      } finally {
+        tmux('kill-server');
       }
     });
   });

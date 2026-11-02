@@ -42,6 +42,8 @@ import {
   validSessionLink,
   linkMismatch,
   trapLabel,
+  sendTrapMessage,
+  postNotice,
   trapNamer,
   trapIdForName,
   TRAP_ADDRESS_RE,
@@ -94,7 +96,7 @@ import { startSnapshotThread } from './glass-snapshot-thread.js';
 import { briefTitle, olderPage, pollBody } from './glass-poll.js';
 import { GlassPresence, PAGE_ID_RE, showSecretMatches, validShowHash } from './glass-presence.js';
 import type { PollBody } from './glass-poll.js';
-import { focusRegistration, liveTrap, machineName, tmuxAttachCommand } from './focus.js';
+import { focusRegistration, liveTrap, machineName, tmuxAttachCommand, trapPaneScreen } from './focus.js';
 import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
@@ -133,9 +135,12 @@ export function requestBodyCap(): number {
 }
 
 /** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
+/** The longest message the glass sends a trap: well above a typed note, and well under its request cap. */
+const TRAP_MESSAGE_MAX_CHARS = 8000;
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
   ['helm-chat', 1024],
+  ['trap-message', 16384],
   ['decision-viewed', 1024],
   ['permissions-proposal-preview', 8192],
   ['permissions-proposal-answer', 8192],
@@ -792,6 +797,7 @@ export function serveGlass(
   port: number,
   options: {
     focus?: (reg: TrapRegistration) => Promise<FocusResult>;
+    paneScreen?: (reg: TrapRegistration) => Promise<string | undefined>;
     snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot;
     presence?: GlassPresence;
   } = {},
@@ -887,6 +893,18 @@ export function serveGlass(
               if (err instanceof Error && err.message.startsWith('no helm signed on')) return reply(409, { ok: false, reason: 'No helm is signed on for these grounds.' });
               return reply(500, { ok: false, reason: 'The helm chat setting could not be stored.' });
             }
+          }
+          case 'trap-message': {
+            const { trap, text } = (body.payload ?? {}) as { trap?: unknown; text?: unknown };
+            if (typeof trap !== 'string' || typeof text !== 'string' || !text.trim() || text.length > TRAP_MESSAGE_MAX_CHARS) {
+              return reply(400, { ok: false, reason: 'A trap and a message are required' });
+            }
+            const reg = liveTrap(trap);
+            if (!reg) return reply(409, { ok: false, reason: 'Trap is not live' });
+            sendTrapMessage(reg.trapId, 'glass', text.trim());
+            // The helm steers, so it should be able to see a person did too. Quiet: it shows in tend and wakes nothing.
+            postNotice({ kind: 'trap-glass-message', text: `trap ${trapLabel(reg)} was sent a message from the glass`, refId: reg.trapId, repo: reg.repo });
+            return reply(200, { ok: true });
           }
           case 'decision-answer': {
             try {
@@ -1107,6 +1125,31 @@ export function serveGlass(
       void (options.focus ?? ((trap: TrapRegistration) => focusRegistration(trap, { openTerminal: true })))(reg)
         .then((result) => reply(result.focused ? 200 : 409, result))
         .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
+      return;
+    }
+    if (req.url?.startsWith('/api/pane/')) {
+      // A POST with the page token, never a GET: browsers omit Origin on a same-origin GET, and a screen can hold secrets.
+      res.setHeader('cache-control', 'no-store');
+      const reply = (status: number, result: { screen?: string; reason?: string }) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      };
+      if (req.method !== 'POST') return reply(405, { reason: 'POST required' });
+      if (
+        !authorized(req, 'x-lobstah-focus-token') ||
+        (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
+        req.headers['transfer-encoding'] !== undefined
+      ) {
+        return reply(403, { reason: 'Pane request was not authorized' });
+      }
+      const trapId = req.url.slice('/api/pane/'.length);
+      if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { reason: 'Invalid trap id' });
+      const reg = liveTrap(trapId);
+      if (!reg) return reply(409, { reason: 'Trap is not live' });
+      void (options.paneScreen ?? trapPaneScreen)(reg)
+        .then((screen) => (screen === undefined ? reply(404, { reason: 'The pane could not be read' }) : reply(200, { screen })))
+        .catch(() => reply(500, { reason: 'The pane could not be read' }));
       return;
     }
     if (req.url === '/api/version' && req.method === 'GET') {

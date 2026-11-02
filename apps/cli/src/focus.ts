@@ -227,6 +227,24 @@ export async function focusRegistration(
   return { focused: false, reason: 'No recorded window could be focused' };
 }
 
+/**
+ * The text on a live trap's tmux pane, or undefined when it has no readable
+ * pane. This can show whatever is on screen, secrets included, so callers
+ * keep it out of snapshots and logs. `capture-pane -p` sends no escape codes.
+ */
+export async function trapPaneScreen(reg: TrapRegistration, read: FileReader = readFile): Promise<string | undefined> {
+  const pane = reg.window?.tmuxPane;
+  const socket = reg.window?.tmuxSocket;
+  if (typeof pane !== 'string' || !TMUX_RE.test(pane)) return undefined;
+  if (socket !== undefined && (typeof socket !== 'string' || !SOCKET_RE.test(socket) || path.posix.normalize(socket) !== socket)) return undefined;
+  const server = socket ? ['-S', socket] : ['-L', TMUX_SOCKET];
+  try {
+    return (await read('tmux', [...server, 'capture-pane', '-p', '-t', pane])).trimEnd();
+  } catch {
+    return undefined;
+  }
+}
+
 export function liveTrap(trapId: string): TrapRegistration | undefined {
   if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return undefined;
   const reg = readTrap(trapId);

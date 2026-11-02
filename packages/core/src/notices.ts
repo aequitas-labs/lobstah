@@ -28,6 +28,7 @@ export type NoticeKind =
   | 'trap-starting'
   | 'trap-start-failed'
   | 'trap-request'
+  | 'trap-glass-message'
   | 'decision-answer'
   | 'bait-orphaned'
   | 'message-bounced'
@@ -57,7 +58,7 @@ export type NoticeKind =
  * can also be posted `quiet` on its own (a trap that ghosted while idle, a
  * trap available as part of a batch).
  */
-export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening', 'trap-starting', 'trap-signed-on', 'trap-stowed', 'pool-returned'];
+export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-glass-message', 'trap-listening', 'trap-starting', 'trap-signed-on', 'trap-stowed', 'pool-returned'];
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */

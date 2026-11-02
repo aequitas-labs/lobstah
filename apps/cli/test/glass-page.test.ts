@@ -285,6 +285,40 @@ describe('glass page: tabs and hash routing', () => {
     expect(writes.at(-1)).toBe('tmux -L lobstah attach -t %7');
   });
 
+  it('shows a live tmux trap its screen and a message box in the modal, on the machine only', async () => {
+    const d = acceptanceFleet();
+    d.focusToken = 'page-token';
+    d.traps[0]!.attachCommand = 'tmux -L lobstah attach -t %7';
+    const post = async (url: string, req: { body: string }) => {
+      if (url === '/api/pane/t1') return { status: 200, body: { screen: 'on the trap screen' } };
+      if (url === '/requests') {
+        expect(JSON.parse(req.body)).toEqual({ kind: 'trap-message', payload: { trap: 't1', text: 'keep going' } });
+        return { status: 200, body: { ok: true } };
+      }
+      return { status: 404, body: { reason: 'not found' } };
+    };
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
+    const g = await page(d, { hash: '#traps', post });
+    await openRow(g, '#traps', 'wt:t1');
+    await g.settle();
+    expect(text(g.$('#modalbox .trappane'))).toBe('on the trap screen');
+    const box = g.$('#modalbox .trapmessage textarea')! as HTMLTextAreaElement;
+    box.value = 'keep going';
+    box.dispatchEvent(new g.window.Event('input', { bubbles: true }));
+    await g.settle();
+    await click(g, g.$('#modalbox .trapmessage button'));
+    await g.settle();
+    expect((g.$('#modalbox .trapmessage textarea') as HTMLTextAreaElement).value).toBe('');
+
+    d.viewer = { onMachine: false, windowFocus: false, machine: 'studio' };
+    delete d.focusToken;
+    const away = await page(d, { hash: '#traps', post });
+    await openRow(away, '#traps', 'wt:t1');
+    await away.settle();
+    expect(away.$('#modalbox .trappane')).toBeNull();
+    expect(away.$('#modalbox .trapmessage')).toBeNull();
+  });
+
   it('tells an off-machine viewer where a live trap runs instead of offering open', async () => {
     const d = acceptanceFleet();
     d.viewer = { onMachine: false, windowFocus: false, machine: 'studio' };

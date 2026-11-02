@@ -850,6 +850,22 @@ a {
   max-width: 26ch;
   white-space: normal;
 }
+.trappane {
+  max-height: 40vh;
+  margin: 6px 0;
+  padding: 6px 8px;
+  overflow: auto;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font:
+    12px/1.4 ui-monospace,
+    'SFMono-Regular',
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre;
+}
 .loglines {
   color: var(--dim);
   font-size: 12px;

@@ -4,8 +4,10 @@ import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, tr
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal, changeHelmChat } from '../actions.js';
 import { useState } from 'preact/hooks';
+import { getState } from '../store.js';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
+import { TrapMessageBox, TrapPane } from './trap-reach.js';
 import { LinkedText } from './links.js';
 import {
   Age,
@@ -227,6 +229,8 @@ function trapModal(t: GlassTrap) {
       )
     : html`<div class="empty">none</div>`;
   const sessionRow = trapSessionRow(t);
+  // Both talk to this machine's server with the page token, so they exist only for a live trap on it.
+  const onMachine = t.live && getState().snapshot?.viewer?.onMachine;
   // Each catch's last note; its modal has the whole log.
   const catches = t.catches.length
     ? t.catches.map(
@@ -254,6 +258,8 @@ function trapModal(t: GlassTrap) {
           t.sessionId &&
           html`<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>`,
       ],
+    onMachine && t.attachCommand && [html`<div class="sec">Live pane</div>`, html`<${TrapPane} trapId=${t.trapId} />`],
+    onMachine && [html`<div class="sec">Message this trap</div>`, html`<${TrapMessageBox} trapId=${t.trapId} />`],
     html`<div class="sec">lifecycle (${t.notices.length})</div>`,
     lifecycle,
     html`<div class="sec">messages (${t.messages.length})</div>`,

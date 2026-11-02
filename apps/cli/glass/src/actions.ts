@@ -414,6 +414,34 @@ export async function openTrapWindow(trapId: string): Promise<void> {
   }
 }
 
+/** A live trap's pane as text, or undefined when it can't be read. It stays in the caller's component, out of the snapshot. */
+export async function readTrapPane(trapId: string): Promise<string | undefined> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) return undefined;
+  try {
+    const response = await fetch(`/api/pane/${encodeURIComponent(trapId)}`, {
+      method: 'POST',
+      headers: { 'x-lobstah-focus-token': token },
+    });
+    if (!response.ok) return undefined;
+    return ((await response.json()) as { screen?: string }).screen;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Send a live trap a message. Resolves to an error reason, or undefined on success; a fresh snapshot then shows it. */
+export async function messageTrap(trapId: string, text: string): Promise<string | undefined> {
+  const failed = await glassRequest('trap-message', { trap: trapId, text });
+  if (failed) return failed;
+  try {
+    receive((await (await fetch('/data')).json()) as GlassSnapshot);
+  } catch {
+    // the next poll shows it
+  }
+  return undefined;
+}
+
 /**
  * Ask the helm for a new trap: the server writes a trap-request and runs
  * nothing. Resolves to an error reason, or undefined on success; a fresh
