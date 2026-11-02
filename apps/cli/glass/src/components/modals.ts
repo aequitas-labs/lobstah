@@ -1,14 +1,6 @@
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
-import {
-  desktopSession,
-  dispatchReport,
-  modalItem,
-  prBadgeClass,
-  prModalView,
-  reportPageUrl,
-  trapFileUrl,
-} from '../../../src/glass-diff.js';
+import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal, changeHelmChat } from '../actions.js';
 import { useState } from 'preact/hooks';
@@ -22,6 +14,7 @@ import {
   attachmentRows,
   cmdRow,
   resumeRow,
+  trapSessionRow,
   startCommands,
   detailBody,
   NamedText,
@@ -233,6 +226,7 @@ function trapModal(t: GlassTrap) {
           html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${LinkedText(m.text)}${m.attachments?.length ? attachmentRows(m.attachments, (name) => trapFileUrl(t.trapId, name)) : ''}</div>`,
       )
     : html`<div class="empty">none</div>`;
+  const sessionRow = trapSessionRow(t);
   // Each catch's last note; its modal has the whole log.
   const catches = t.catches.length
     ? t.catches.map(
@@ -253,10 +247,11 @@ function trapModal(t: GlassTrap) {
     startCommands(t),
     !t.requested &&
       !t.starting &&
-      (t.sessionId || (t.link && desktopSession(t))) && [
+      sessionRow && [
         html`<div class="sec">open this session</div>`,
-        resumeRow(t),
-        t.sessionId &&
+        sessionRow,
+        !t.live &&
+          t.sessionId &&
           html`<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>`,
       ],
     html`<div class="sec">lifecycle (${t.notices.length})</div>`,

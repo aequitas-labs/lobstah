@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { linkMismatch, loadConfig, readTrap, trapIdAt, trapLastSeen, validSessionLink } from '@lobstah/core';
 import type { TrapRegistration } from '@lobstah/core';
 import { TMUX_SOCKET } from './tmux-terminal.js';
+import { systemBoatName } from './wharf-login.js';
 
 const exec = promisify(execFile);
 export type FocusStep = 'link' | 'iterm' | 'tmux' | 'terminal' | 'vscode' | 'app';
@@ -62,6 +63,38 @@ const SOCKET_RE = /^\/[^\x00-\x1f\x7f]+$/;
 const PANE_RE = /^[1-9][0-9]*$/;
 const VSCODE_RE = /(?:VSCode|Cursor|windsurf)/;
 const control = (value: string): boolean => /[\x00-\x1f\x7f]/.test(value);
+/** Socket paths and machine names that go into a copied command as they are, with nothing to quote. */
+const SHELL_SAFE_PATH_RE = /^\/[A-Za-z0-9_./-]+$/;
+const SSH_HOST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+let cachedMachineName: string | undefined;
+/** This machine's short name, as wharf names its boats. Read once, because it runs scutil on macOS. */
+export function machineName(): string {
+  return (cachedMachineName ??= systemBoatName());
+}
+
+/** Where a command will be pasted: on the trap's machine, or somewhere that has to reach it. */
+export interface AttachViewer {
+  onMachine: boolean;
+  machine: string;
+}
+
+/**
+ * The command that joins a live trap's tmux pane, or undefined when the trap
+ * has no pane or a recorded value can't go into a command unquoted.
+ * Registration fields are untrusted, so each one is checked here. Off the
+ * machine it's read-only and ignores size, so a small screen can't type into
+ * the trap or reflow the panes beside it.
+ */
+export function tmuxAttachCommand(win: TrapRegistration['window'], viewer: AttachViewer): string | undefined {
+  const pane = win?.tmuxPane;
+  if (typeof pane !== 'string' || !TMUX_RE.test(pane)) return undefined;
+  const socket = win?.tmuxSocket;
+  if (socket !== undefined && (typeof socket !== 'string' || !SHELL_SAFE_PATH_RE.test(socket) || path.posix.normalize(socket) !== socket)) return undefined;
+  const server = socket ? `-S ${socket}` : `-L ${TMUX_SOCKET}`;
+  if (viewer.onMachine) return `tmux ${server} attach -t ${pane}`;
+  return SSH_HOST_RE.test(viewer.machine) ? `ssh ${viewer.machine} -t tmux ${server} attach -r -t ${pane}` : undefined;
+}
 
 function safeWorktree(reg: TrapRegistration): boolean {
   const folder = reg.worktree;
@@ -76,9 +109,10 @@ function safeWorktree(reg: TrapRegistration): boolean {
 /** One common focus ladder for the CLI and the glass. Registration fields are untrusted. */
 export async function focusRegistration(
   reg: TrapRegistration,
-  options: { platform?: NodeJS.Platform; run?: FileRunner; read?: FileReader } = {},
+  options: { platform?: NodeJS.Platform; run?: FileRunner; read?: FileReader; machine?: string } = {},
 ): Promise<FocusResult> {
   const platform = options.platform ?? process.platform;
+  const machine = options.machine ?? machineName();
   const run = options.run ?? runFile;
   const read = options.read ?? readFile;
   const attempt = async (file: string, args: string[], step: FocusStep, message: string): Promise<FocusResult | undefined> => {
@@ -91,41 +125,41 @@ export async function focusRegistration(
   };
   const win = reg.window;
   if (reg.link !== undefined && !validSessionLink(reg.link))
-    return { focused: false, reason: 'Invalid recorded session link.' };
+    return { focused: false, reason: 'Invalid recorded session link' };
 
   // A registration is writable by local processes. Refuse malformed values
   // before attempting any action, even one that would use a different
   // field later in the ladder.
   if (win?.itermSession !== undefined && (typeof win.itermSession !== 'string' || control(win.itermSession) || !ITERM_RE.test(win.itermSession)))
-    return { focused: false, reason: 'Invalid recorded iTerm2 session id.' };
+    return { focused: false, reason: 'Invalid recorded iTerm2 session id' };
   if (win?.tty !== undefined && (typeof win.tty !== 'string' || control(win.tty) || !TTY_RE.test(win.tty)))
-    return { focused: false, reason: 'Invalid recorded tty.' };
+    return { focused: false, reason: 'Invalid recorded tty' };
   if (win?.bundleId !== undefined && (typeof win.bundleId !== 'string' || control(win.bundleId) || !BUNDLE_RE.test(win.bundleId)))
-    return { focused: false, reason: 'Invalid recorded bundle id.' };
+    return { focused: false, reason: 'Invalid recorded bundle id' };
   if (win?.tmuxPane !== undefined && (typeof win.tmuxPane !== 'string' || control(win.tmuxPane) || !TMUX_RE.test(win.tmuxPane)))
-    return { focused: false, reason: 'Invalid recorded tmux pane.' };
+    return { focused: false, reason: 'Invalid recorded tmux pane' };
   if (win?.tmuxSocket !== undefined && (typeof win.tmuxSocket !== 'string' || !SOCKET_RE.test(win.tmuxSocket) || path.posix.normalize(win.tmuxSocket) !== win.tmuxSocket))
-    return { focused: false, reason: 'Invalid recorded tmux socket.' };
+    return { focused: false, reason: 'Invalid recorded tmux socket' };
   if (win?.kittyWindow !== undefined && (typeof win.kittyWindow !== 'string' || control(win.kittyWindow) || !PANE_RE.test(win.kittyWindow)))
-    return { focused: false, reason: 'Invalid recorded kitty window.' };
+    return { focused: false, reason: 'Invalid recorded kitty window' };
   if (win?.weztermPane !== undefined && (typeof win.weztermPane !== 'string' || control(win.weztermPane) || !PANE_RE.test(win.weztermPane)))
-    return { focused: false, reason: 'Invalid recorded WezTerm pane.' };
+    return { focused: false, reason: 'Invalid recorded WezTerm pane' };
   if (win?.bundleId && VSCODE_RE.test(win.bundleId) && !safeWorktree(reg))
-    return { focused: false, reason: 'Recorded editor worktree does not match this trap.' };
+    return { focused: false, reason: 'Recorded editor worktree does not match this trap' };
 
   // A link that contradicts the recorded window (a vscode:// link on a
   // terminal session) is skipped: the window ladder below focuses it.
   if (validSessionLink(reg.link) && linkMismatch(reg.link, win) === undefined) {
     const opener: [string, string[]] = platform === 'darwin' ? ['open', [reg.link]] : platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', reg.link]] : ['xdg-open', [reg.link]];
-    const result = await attempt(opener[0], opener[1], 'link', 'Opened the session link.');
+    const result = await attempt(opener[0], opener[1], 'link', `Opened the session link on ${machine}`);
     if (result) return result;
   }
-  if (platform !== 'darwin') return { focused: false, reason: 'Window focus is not supported on this platform.' };
-  if (!win) return { focused: false, reason: 'This trap did not record a window.' };
+  if (platform !== 'darwin') return { focused: false, reason: 'Window focus is not supported on this platform' };
+  if (!win) return { focused: false, reason: 'This trap did not record a window' };
 
   const iterm = typeof win.itermSession === 'string' ? ITERM_RE.exec(win.itermSession) : null;
   if (iterm) {
-    const result = await attempt('osascript', ['-e', ITERM_SCRIPT, '--', iterm[1]!], 'iterm', 'Focused the iTerm2 session.');
+    const result = await attempt('osascript', ['-e', ITERM_SCRIPT, '--', iterm[1]!], 'iterm', `Focused the iTerm2 session on ${machine}`);
     if (result) return result;
   }
   if (typeof win.tmuxPane === 'string') {
@@ -142,15 +176,15 @@ export async function focusRegistration(
         // No client attached: nothing to raise.
       }
       for (const tty of clients) {
-        const raised = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', tty], 'tmux', 'Selected the trap\'s tmux pane and raised its Terminal window.');
+        const raised = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', tty], 'tmux', `Selected the trap's tmux pane and raised its Terminal window on ${machine}`);
         if (raised) return raised;
       }
       const attach = win.tmuxSocket ? `tmux -S ${win.tmuxSocket} attach` : `tmux -L ${TMUX_SOCKET} attach`;
-      return { focused: false, reason: `Selected the trap's tmux pane, but no Terminal window shows it — run \`${attach}\`.` };
+      return { focused: false, reason: `Selected the trap's tmux pane on ${machine}, but no Terminal window shows it — run \`${attach}\`` };
     }
   }
   if (win.termProgram === 'Apple_Terminal' && typeof win.tty === 'string' && TTY_RE.test(win.tty)) {
-    const result = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', win.tty], 'terminal', 'Focused the Terminal tab.');
+    const result = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', win.tty], 'terminal', `Focused the Terminal tab on ${machine}`);
     if (result) return result;
   }
   // kitty and WezTerm are intentionally skipped until selecting the recorded
@@ -158,14 +192,14 @@ export async function focusRegistration(
   // app that started its server, not where the pane shows: never use it.
   const bundle = typeof win.bundleId === 'string' && BUNDLE_RE.test(win.bundleId) && win.termProgram !== 'tmux' ? win.bundleId : undefined;
   if (bundle && VSCODE_RE.test(bundle) && safeWorktree(reg)) {
-    const result = await attempt('open', ['-b', bundle, reg.worktree], 'vscode', 'Opened the trap worktree in its editor.');
+    const result = await attempt('open', ['-b', bundle, reg.worktree], 'vscode', `Opened the trap worktree in its editor on ${machine}`);
     if (result) return result;
   }
   if (bundle) {
-    const result = await attempt('open', ['-b', bundle], 'app', 'Brought the app forward; the exact window is not known.');
+    const result = await attempt('open', ['-b', bundle], 'app', `Brought the app forward on ${machine}, the exact window is not known`);
     if (result) return result;
   }
-  return { focused: false, reason: 'No recorded window could be focused.' };
+  return { focused: false, reason: 'No recorded window could be focused' };
 }
 
 export function liveTrap(trapId: string): TrapRegistration | undefined {
@@ -175,7 +209,7 @@ export function liveTrap(trapId: string): TrapRegistration | undefined {
   return Date.now() - trapLastSeen(reg) <= loadConfig().soak.ttlSecs * 1000 ? reg : undefined;
 }
 
-export async function focusTrap(trapId: string, options: { platform?: NodeJS.Platform; run?: FileRunner; read?: FileReader } = {}): Promise<FocusResult> {
+export async function focusTrap(trapId: string, options: { platform?: NodeJS.Platform; run?: FileRunner; read?: FileReader; machine?: string } = {}): Promise<FocusResult> {
   const reg = liveTrap(trapId);
-  return reg ? focusRegistration(reg, options) : { focused: false, reason: 'Trap is not live.' };
+  return reg ? focusRegistration(reg, options) : { focused: false, reason: 'Trap is not live' };
 }

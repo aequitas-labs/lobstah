@@ -193,7 +193,7 @@ describe('glass page: tabs and hash routing', () => {
     expect(g.$('#overlay')!.className).toBe('open');
   }, 15_000);
 
-  it.each(['claude', 'codex'])('copies the %s live trap and helm resume commands', async (harness) => {
+  it.each(['claude', 'codex'])('offers no resume for a live %s trap, and copies the helm resume command', async (harness) => {
     const d = acceptanceFleet();
     d.traps[0]!.harness = harness;
     d.helms[0]!.harness = harness;
@@ -202,9 +202,8 @@ describe('glass page: tabs and hash routing', () => {
     g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
     const prefix = harness === 'codex' ? 'codex resume ' : 'claude --resume ';
     await openRow(g, '#traps', 'wt:t1');
-    const row = g.$$('#modalbox .cmd').find((el) => text(el).includes(prefix))!;
-    await click(g, row.querySelector('button'));
-    expect(writes.at(-1)).toBe(prefix + d.traps[0]!.sessionId);
+    expect(text(g.$('#modalbox'))).not.toContain(prefix);
+    expect(text(g.$('#modalbox'))).not.toContain('open this session');
     await escape(g);
     await click(g, g.$('#chips .chip.click'));
     await click(g, g.$('#modalbox .cmd button'));
@@ -221,7 +220,7 @@ describe('glass page: tabs and hash routing', () => {
     const card = async (selector: string) => {
       const open = g.$$(selector + ' a.btn.open').filter((a) => a.getAttribute('href') === trap.link);
       expect(open).toHaveLength(1);
-      expect(text(open[0])).toBe('↗ open');
+      expect(text(open[0])).toBe('↗ Open');
       expect(text(g.$(selector))).not.toContain(trap.link!);
       expect(text(g.$(selector))).not.toContain('desktop thread');
       expect(g.$$(selector + ' .cmd')).toHaveLength(0);
@@ -241,14 +240,14 @@ describe('glass page: tabs and hash routing', () => {
     expect(writes.at(-1)).toBe(trap.link);
   }, 15_000);
 
-  it('keeps the ↗ open button on a live desktop trap card and its link in the modal', async () => {
+  it('keeps the ↗ Open button on a live desktop trap card and its link in the modal', async () => {
     const d = acceptanceFleet();
-    d.focusSupported = true;
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
     d.focusToken = 'fixture-token';
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((el) => text(el).includes('wt:t1'))!;
-    expect(text(card.querySelector('.footact'))).toBe('↗ open');
+    expect(text(card.querySelector('.footact'))).toBe('↗ Open');
     expect(text(card)).not.toContain('codex://threads/live-session');
     expect(card.querySelectorAll('.cmd')).toHaveLength(0);
     await click(g, card);
@@ -272,8 +271,43 @@ describe('glass page: tabs and hash routing', () => {
     expect(text(g.$('#modalbox'))).not.toContain('codex resume');
   });
 
+  it('copies the attach command from a live tmux trap modal, and never from its card', async () => {
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
+    d.traps[0]!.attachCommand = 'tmux -L lobstah attach -t %7';
+    const g = await page(d, { hash: '#traps' });
+    const writes: string[] = [];
+    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
+    expect(text(g.$('#traps'))).not.toContain('attach -t');
+    await openRow(g, '#traps', 'wt:t1');
+    const row = g.$$('#modalbox .cmd').find((el) => text(el).includes('attach -t %7'))!;
+    await click(g, row.querySelector('button'));
+    expect(writes.at(-1)).toBe('tmux -L lobstah attach -t %7');
+  });
+
+  it('tells an off-machine viewer where a live trap runs instead of offering open', async () => {
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: false, windowFocus: false, machine: 'studio' };
+    const trap = d.traps[0]!;
+    const foot = async () => {
+      const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
+      expect(g.$$('#traps button.open')).toHaveLength(0);
+      return g.$$('#traps .card').find((c) => text(c).includes('wt:t1'))!;
+    };
+    expect(text(await foot())).toContain('Running on studio, only reachable from there');
+    trap.attachCommand = 'ssh studio -t tmux -L lobstah attach -r -t %7';
+    expect(text(await foot())).toContain('Running on studio');
+    expect(text(await foot())).not.toContain('only reachable');
+    trap.attachCommand = undefined;
+    Object.assign(trap, { harness: 'codex', link: 'codex://threads/live-session' });
+    const card = await foot();
+    expect(text(card)).toContain('Running on studio');
+    expect(card.querySelector('a[href="codex://threads/live-session"]')?.textContent).toBe('Session link');
+  });
+
   it('shows one copyable desktop link in a live trap modal', async () => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps' });
     await openRow(g, '#traps', 'wt:t1');
@@ -289,28 +323,28 @@ describe('glass page: tabs and hash routing', () => {
     expect([...t2.querySelector('.trapdot')!.classList]).toEqual(['dot', 'trapdot', 'dim']);
   });
 
-  it('shows the ↗ open button on live traps in the table, cards, deck, and modal only', async () => {
+  it('shows the ↗ Open button on live traps in the table, cards, deck, and modal only', async () => {
     const d = acceptanceFleet();
-    d.focusSupported = true;
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
     d.focusToken = 'fixture-token';
     d.traps.find((t) => t.trapId === 't2')!.sessionId = 'past-session';
     d.traps.find((t) => t.trapId === 't2')!.harness = 'codex';
     const g = await page(d, { hash: '#traps' });
     const t1 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1'))!;
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
-    expect(text(t1)).toContain('↗ open');
-    expect(text(t2)).not.toContain('↗ open');
+    expect(text(t1)).toContain('↗ Open');
+    expect(text(t2)).not.toContain('↗ Open');
     expect(text(t2)).not.toContain('codex resume past-session');
     await click(g, t1.querySelector('button'));
     expect(g.$('#overlay')!.className).toBe('');
     await click(g, t1);
-    expect(text(g.$('#modalbox'))).toContain('↗ open');
+    expect(text(g.$('#modalbox'))).toContain('↗ Open');
     await escape(g);
     await g.go('#deck');
-    expect(text(g.$('#deck'))).toContain('↗ open');
+    expect(text(g.$('#deck'))).toContain('↗ Open');
     await g.go('#traps');
     const cardPage = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
-    expect(text(cardPage.$('#traps'))).toContain('↗ open');
+    expect(text(cardPage.$('#traps'))).toContain('↗ Open');
   });
   it('opens On deck by default and follows the hash to each tab', async () => {
     const g = await page(acceptanceFleet());

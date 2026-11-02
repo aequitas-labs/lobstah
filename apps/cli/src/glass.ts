@@ -71,7 +71,7 @@ import {
   ANSWER_FILES_MAX,
   ANSWER_TEXT_MAX,
 } from '@lobstah/core';
-import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
+import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
@@ -94,7 +94,7 @@ import { startSnapshotThread } from './glass-snapshot-thread.js';
 import { briefTitle, olderPage, pollBody } from './glass-poll.js';
 import { GlassPresence, PAGE_ID_RE, showSecretMatches, validShowHash } from './glass-presence.js';
 import type { PollBody } from './glass-poll.js';
-import { focusRegistration, liveTrap } from './focus.js';
+import { focusRegistration, liveTrap, machineName, tmuxAttachCommand } from './focus.js';
 import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
@@ -647,6 +647,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
       window,
+      attachCommand: registered ? tmuxAttachCommand(window, { onMachine: !!options.local, machine: machineName() }) : undefined,
       link: validSessionLink(link) && linkMismatch(link, window) === undefined ? link : undefined,
       sessionId,
       harness,
@@ -1091,21 +1092,21 @@ export function serveGlass(
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(result));
       };
-      if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required.' });
+      if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required' });
       if (
         !authorized(req, 'x-lobstah-focus-token') ||
         (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
         req.headers['transfer-encoding'] !== undefined
       ) {
-        return reply(403, { focused: false, reason: 'Focus request was not authorized.' });
+        return reply(403, { focused: false, reason: 'Focus request was not authorized' });
       }
       const trapId = req.url.slice('/api/focus/'.length);
-      if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id.' });
+      if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id' });
       const reg = liveTrap(trapId);
-      if (!reg) return reply(409, { focused: false, reason: 'Trap is not live.' });
+      if (!reg) return reply(409, { focused: false, reason: 'Trap is not live' });
       void (options.focus ?? focusRegistration)(reg)
         .then((result) => reply(result.focused ? 200 : 409, result))
-        .catch(() => reply(500, { focused: false, reason: 'Window focus failed.' }));
+        .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
       return;
     }
     if (req.url === '/api/version' && req.method === 'GET') {
@@ -1182,7 +1183,8 @@ export function serveGlass(
       // Start commands carry a ticket: only a same-host request (this
       // machine's own page, not a rebound name) gets them.
       const local = req.headers.host === ownHost();
-      const page = `"focusToken":${JSON.stringify(focusToken)},"focusSupported":${process.platform === 'darwin'}`;
+      const viewer: GlassViewer = { onMachine: local, windowFocus: local && process.platform === 'darwin', machine: machineName() };
+      const page = `"viewer":${JSON.stringify(viewer)}${local ? `,"focusToken":${JSON.stringify(focusToken)}` : ''}`;
       const send = (p: PollBody) => {
         // The ETag covers what a person reads, not the beats: a poll where
         // only heartbeats and ages moved answers 304, and the beats header

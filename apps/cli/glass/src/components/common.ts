@@ -104,6 +104,22 @@ export const opener = (type: ModalType, key: string) => () => showModal(type, ke
 export const stop = (e: Event) => e.stopPropagation();
 
 /**
+ * A live trap seen from a page that isn't on its machine: where it runs and
+ * what can reach it, instead of a button that can't help. Presentation only:
+ * the server refuses these pages' actions whatever they show.
+ */
+function offMachineAction(t: GlassTrap, machine = 'its machine'): Children {
+  // Same machine by another name. The server can't accept actions at this address, but the page can point at the one it does.
+  if (location.hostname === 'localhost') {
+    const address = `127.0.0.1${location.port ? ':' + location.port : ''}`;
+    return html`<span class="winaction"><span class="dim">Open controls need</span> <a href=${'http://' + address} onClick=${stop}>${address}</a></span>`;
+  }
+  if (t.link)
+    return html`<span class="winaction offmachine"><span class="dim">Running on ${machine}</span> <a href=${t.link} onClick=${stop}>Session link</a></span>`;
+  return html`<span class="dim offmachine">${t.attachCommand ? `Running on ${machine}` : `Running on ${machine}, only reachable from there`}</span>`;
+}
+
+/**
  * The same live-trap action and honest result wherever a trap is shown: an
  * open button, a state note, or nothing. Resume commands and raw session
  * links with their copy controls live in the trap modal only.
@@ -115,15 +131,17 @@ export function windowAction(t: GlassTrap): Children {
   if (!t.live) {
     if (!desktop) return null;
     // The server focuses live traps only; a signed-off app session opens its stored link.
-    return html`<span class="winaction"><a class="btn open" href=${t.link} title="open this session in its app" onClick=${stop}>↗ open</a></span>`;
+    return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
   }
   const state = getState();
-  if (!state.snapshot?.focusSupported && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;
+  const viewer = state.snapshot?.viewer;
+  if (!viewer?.onMachine) return offMachineAction(t, viewer?.machine);
+  if (!viewer.windowFocus && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;
   const clicked = (e: Event) => {
     stop(e);
     void openTrapWindow(t.trapId);
   };
-  return html`<span class="winaction"><button class="btn open" title="open this trap's window" onClick=${clicked}>↗ open</button>${t.link && !desktop && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
+  return html`<span class="winaction"><button class="btn open" title="Open this trap's window" onClick=${clicked}>↗ Open</button>${t.link && !desktop && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
     state.focusResults[t.trapId] && [' ', html`<span class="dim">${state.focusResults[t.trapId]}</span>`]
   }</span>`;
 }
@@ -171,6 +189,16 @@ function CmdRow({ text, label, href }: { text: string; label?: string; href?: st
 }
 export const cmdRow = (text: string, key?: string, label?: string, href?: string) =>
   html`<${CmdRow} key=${key} text=${text} label=${label} href=${href} />`;
+
+/**
+ * How the modal offers a trap's session. A live trap never offers resume,
+ * which would start a second process on a session still in use: it offers its
+ * attach command or its desktop link, or nothing when neither exists.
+ */
+export const trapSessionRow = (t: GlassTrap): Children => {
+  if (t.live && !desktopSession(t)) return t.attachCommand ? cmdRow(t.attachCommand) : null;
+  return t.sessionId || (t.link && desktopSession(t)) ? resumeRow(t) : null;
+};
 
 export const resumeRow = (session: ResumeSession) => {
   if (desktopSession(session))

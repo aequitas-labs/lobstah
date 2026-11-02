@@ -376,21 +376,21 @@ describe('glass: short card badges stay whole', () => {
 });
 
 describe('glass: the open-window button', () => {
-  it('is a themed ↗ open button at the end of the foot line, and its click does not open the trap modal', async () => {
+  it('is a themed ↗ Open button at the end of the foot line, and its click does not open the trap modal', async () => {
     const d = everyAttentionFleet();
-    d.focusSupported = true;
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
     d.focusToken = 'fixture-token';
     for (const view of ['cards', 'table'] as const) {
       const g = await page(d, { hash: '#traps', prefs: { view } });
       const button = g.$(view === 'cards' ? '#traps .card .foot .footact button' : '#traps tr.rowhead td:last-child button')!;
-      expect(text(button)).toBe('↗ open');
+      expect(text(button)).toBe('↗ Open');
       expect(button.className).toBe('btn open');
       await click(g, button);
       expect(g.$('#overlay')!.className).toBe('');
     }
     const deck = await page(d, { prefs: { view: 'cards' } });
     const button = deck.$('#deck .card .foot .footact button')!;
-    expect(text(button)).toBe('↗ open');
+    expect(text(button)).toBe('↗ Open');
     await click(deck, button);
     expect(deck.$('#overlay')!.className).toBe('');
   });

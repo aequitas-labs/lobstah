@@ -843,6 +843,13 @@ a {
   flex-wrap: wrap;
   align-items: baseline;
 }
+/* A machine name can be long, and table cells don't wrap: keep this note inside the window column. */
+.offmachine {
+  display: inline-block;
+  min-width: 18ch;
+  max-width: 26ch;
+  white-space: normal;
+}
 .loglines {
   color: var(--dim);
   font-size: 12px;

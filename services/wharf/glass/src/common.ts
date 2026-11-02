@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../../../../apps/cli/glass/src/html.js';
 import { fileUrl } from './api.js';
-import { resume } from './model.js';
+import { attachCommand, resume } from './model.js';
 import type { WharfFile, Worker } from './model.js';
 export { html };
 export const value = (e: Event) => (e.currentTarget as HTMLInputElement).value;
@@ -27,9 +27,17 @@ export function Copy({ command }: { command: string }) {
   };
   return html`<div class="cmd"><code>${command}</code><button aria-label="copy command" title=${copied ? 'copied' : 'copy command'} onClick=${copy}>${copied ? '✓' : '⧉'}</button><span role="status">${copied ? 'copied' : error ? 'select the command to copy' : ''}</span></div>`;
 }
+/** How a worker's session is reached. A live one never offers resume, which would start a second process on a session still in use. */
 export function Session({ worker }: { worker: Worker }) {
+  const head = html`<div class="sec">session · on ${worker.boatName}</div>`;
+  if (worker.live) {
+    const attach = attachCommand(worker);
+    return attach
+      ? html`${head}<div class="sub">Running on ${worker.boatName}</div><${Copy} command=${attach} />`
+      : html`${head}<div class="sub">Running on ${worker.boatName}, only reachable from there</div>`;
+  }
   const command = resume(worker);
-  return html`<div class="sec">session · on ${worker.boatName}</div><div class="sub">Run on that boat; this page cannot open a remote window.</div>${command ? html`<${Copy} command=${command} />` : html`<div class="dim">resume command unknown</div>`}`;
+  return html`${head}<div class="sub">Run on that boat, this page can't open a remote window</div>${command ? html`<${Copy} command=${command} />` : html`<div class="dim">Resume command unknown</div>`}`;
 }
 export function Files({ files, kind, id }: { files: WharfFile[]; kind: 'documents' | 'dispatches'; id: string }) {
   return files.map(
