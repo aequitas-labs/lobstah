@@ -55,6 +55,14 @@ const TERMINAL_SCRIPT = `on run argv
   error "tab not found"
 end run`;
 
+/** Opens a new Terminal window running one command, passed as an argument so it's never spliced into the script. */
+const TERMINAL_RUN_SCRIPT = `on run argv
+  tell application "Terminal"
+    activate
+    do script (item 1 of argv)
+  end tell
+end run`;
+
 const BUNDLE_RE = /^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)+$/;
 const TTY_RE = /^ttys[0-9]{3,5}$/;
 const ITERM_RE = /^w[0-9]+t[0-9]+p[0-9]+:([A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12})$/;
@@ -106,10 +114,20 @@ function safeWorktree(reg: TrapRegistration): boolean {
   }
 }
 
+/** How a focus request runs. Only `openTerminal` changes behavior; the rest are for tests. */
+export interface FocusOptions {
+  platform?: NodeJS.Platform;
+  run?: FileRunner;
+  read?: FileReader;
+  machine?: string;
+  /** Open a Terminal window when a tmux pane has no client attached. The glass asks for this, and the CLI prints the command instead. */
+  openTerminal?: boolean;
+}
+
 /** One common focus ladder for the CLI and the glass. Registration fields are untrusted. */
 export async function focusRegistration(
   reg: TrapRegistration,
-  options: { platform?: NodeJS.Platform; run?: FileRunner; read?: FileReader; machine?: string } = {},
+  options: FocusOptions = {},
 ): Promise<FocusResult> {
   const platform = options.platform ?? process.platform;
   const machine = options.machine ?? machineName();
@@ -169,17 +187,24 @@ export async function focusRegistration(
     const selected = await attempt('tmux', [...server, 'select-window', '-t', pane, ';', 'select-pane', '-t', pane, ';',
       'if-shell', '-F', '-t', pane, '#{window_zoomed_flag}', '', `resize-pane -Z -t ${pane}`], 'tmux', 'Selected the trap\'s tmux pane.');
     if (selected) {
-      let clients: string[] = [];
+      // Undefined when tmux couldn't say: then nothing can be assumed about what's attached.
+      let clients: string[] | undefined;
       try {
-        clients = (await read('tmux', [...server, 'list-clients', '-t', pane, '-F', '#{client_tty}'])).split('\n').map((t) => t.replace(/^\/dev\//, '')).filter((t) => TTY_RE.test(t));
+        clients = (await read('tmux', [...server, 'list-clients', '-t', pane, '-F', '#{client_tty}'])).split('\n').map((t) => t.replace(/^\/dev\//, '')).filter(Boolean);
       } catch {
-        // No client attached: nothing to raise.
+        clients = undefined;
       }
-      for (const tty of clients) {
+      for (const tty of (clients ?? []).filter((t) => TTY_RE.test(t))) {
         const raised = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', tty], 'tmux', `Selected the trap's tmux pane and raised its Terminal window on ${machine}`);
         if (raised) return raised;
       }
-      const attach = win.tmuxSocket ? `tmux -S ${win.tmuxSocket} attach` : `tmux -L ${TMUX_SOCKET} attach`;
+      if (clients?.length) return { focused: true, step: 'tmux', message: `Selected the pane on ${machine}, it's open in another app` };
+      const command = tmuxAttachCommand(win, { onMachine: true, machine });
+      if (clients && command && options.openTerminal) {
+        const opened = await attempt('osascript', ['-e', TERMINAL_RUN_SCRIPT, '--', command], 'tmux', `Opened a Terminal window on ${machine}`);
+        if (opened) return opened;
+      }
+      const attach = command ?? (win.tmuxSocket ? `tmux -S ${win.tmuxSocket} attach` : `tmux -L ${TMUX_SOCKET} attach`);
       return { focused: false, reason: `Selected the trap's tmux pane on ${machine}, but no Terminal window shows it — run \`${attach}\`` };
     }
   }
