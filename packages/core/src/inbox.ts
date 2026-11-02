@@ -3,7 +3,8 @@ import * as path from 'node:path';
 import type { Attachment, Lane } from './types.js';
 import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './paths.js';
 import { postNotice } from './notices.js';
-import { listSignedOff, readTrap, releaseSignedOff, trapLabel } from './soak.js';
+import { readRoster } from './roster.js';
+import { listSignedOff, readTrap, releaseSignedOff, trapRepoLabel } from './soak.js';
 import { trapNameForId } from './trap-names.js';
 
 export interface InboxMessage {
@@ -157,7 +158,7 @@ export function bounceTrapMessages(trapId: string): number {
   for (const m of msgs) {
     postNotice({
       kind: 'message-bounced',
-      text: `message to ${trapLabel({ trapId, name: trapNameForId(trapId) })} never delivered (from ${m.from}): ${m.text}`,
+      text: `message to ${trapRepoLabel({ trapId, name: trapNameForId(trapId), repo: readRoster(trapId)?.repo })} never delivered (from ${m.from}): ${m.text}`,
       refId: trapId,
     });
     acknowledgeTrapMessage(trapId, m.file);

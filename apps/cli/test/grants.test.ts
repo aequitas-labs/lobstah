@@ -18,6 +18,7 @@ import {
   standingDecisions,
   trapBySession,
   unhandled,
+  readDecisionDetail,
 } from '@lobstah/core';
 import { askPermission, callRequests, confirm, patchPaths, personOnly, rosterConfigPatch } from '../src/grants-cli.js';
 import { answerKey } from '../src/decision-answer.js';
@@ -405,6 +406,8 @@ describe('session grants', () => {
     enqueue({ id: 'browser-job', repo: 'web', brief: 'Read the page' }); claimBait(trapBySession('browser-trap')!);
     run(['hook', 'permission-request'], { session_id: 'browser-trap', tool_name: 'mcp__browser__navigate', tool_input: { url: 'https://example.com/private' }, cwd: t.worktree });
     expect(standingDecisions()[0]?.permission?.sessionGrant).toMatchObject({ session: 'browser-trap', tools: 'mcp__browser__*', hosts: ['example.com'] });
+    expect(standingDecisions()[0]?.repo).toBe('web');
+    expect(readDecisionDetail(standingDecisions()[0]!.key)).toContain(`Trap: web · ${t.name}`);
   });
   it('custom Claude and Codex settings locations remain protected by session grants', () => {
     addGrant({ mode: 'session', session: 'settings-session', tools: 'Write', by: 'glass' });

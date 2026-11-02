@@ -20,6 +20,7 @@ import {
   isTerminalApp,
   TERMINAL_APPS,
   trapLabel,
+  withTrapRepo,
   trapRef,
   writeTrapAnchor,
   DEFAULT_TRAP_START_SECS,
@@ -463,6 +464,8 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
 /** One trap's outcome in a batch. */
 export interface BatchResult {
   trap: string;
+  /** The trap's repo: its notice shows the trap after it. */
+  repo?: string;
   result: 'resumed' | 'cold' | 'new' | 'skipped' | 'starting' | 'failed';
   why: string;
   seconds?: number;
@@ -490,8 +493,8 @@ export async function throwBatch(
       }
       jobs.push(
         throwTrap({ ...each, address: `wt:${row.trapId}` }).then(
-          (r) => ({ trap, result: r.action === 'resume' ? 'resumed' : 'cold', why: r.why, seconds: r.seconds }) as BatchResult,
-          (err: unknown) => ({ trap, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
+          (r) => ({ trap, repo: row.repo, result: r.action === 'resume' ? 'resumed' : 'cold', why: r.why, seconds: r.seconds }) as BatchResult,
+          (err: unknown) => ({ trap, repo: row.repo, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
         ),
       );
     }
@@ -500,7 +503,7 @@ export async function throwBatch(
     for (let i = 0; i < opts.count; i++) {
       jobs.push(
         throwNew({ ...each, reason: opts.reason ?? `requested batch of ${opts.count} new traps; no reusable trap at batch start`, repo: opts.repo, ...(opts.harness ? { harness: opts.harness } : {}) }).then(
-          (r) => ({ trap: r.trap, result: 'new', why: r.why, seconds: r.seconds }) as BatchResult,
+          (r) => ({ trap: r.trap, repo: opts.repo, result: 'new', why: r.why, seconds: r.seconds }) as BatchResult,
           (err: unknown) => ({ trap: `new ${opts.repo} trap ${i + 1}`, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
         ),
       );
@@ -516,8 +519,8 @@ export async function throwBatch(
       `batch throw settled: ${back} available (${count('resumed')} resumed, ${count('cold')} cold, ${count('new')} new), ` +
       `${count('skipped')} skipped, ${failed.length} failed` +
       (count('starting') ? `, ${count('starting')} still starting` : '') +
-      (failed.length ? ` — failed: ${failed.map((f) => f.trap).join(', ')}` : '') +
-      (back ? ` — available: ${results.filter((r) => r.result === 'resumed' || r.result === 'cold' || r.result === 'new').map((r) => r.trap).join(', ')}` : ''),
+      (failed.length ? ` — failed: ${failed.map((f) => withTrapRepo(f.repo, f.trap)).join(', ')}` : '') +
+      (back ? ` — available: ${results.filter((r) => r.result === 'resumed' || r.result === 'cold' || r.result === 'new').map((r) => withTrapRepo(r.repo, r.trap)).join(', ')}` : ''),
     refId: batch,
     ...('repo' in opts ? { repo: opts.repo } : {}),
     by: opts.by,

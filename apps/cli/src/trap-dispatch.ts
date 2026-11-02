@@ -1,6 +1,6 @@
 import {
   listNotices, listReservations, lobstahHome, pendingIds, postNotice, queuedAt, queuedDescriptor,
-  selectRepoTrap, trapLabel,
+  selectRepoTrap, trapRepoLabel, withTrapRepo,
 } from '@lobstah/core';
 import type { Config, Descriptor, Lane } from '@lobstah/core';
 import { throwNew, throwTrap } from './throw.js';
@@ -39,13 +39,13 @@ export function createTrapDispatchScheduler(options: Pick<ThrowOptions, 'adapter
       // a succession of new traps. A later dispatch can try starting again.
       if (choice.action === 'new' && failures.length) continue;
       running.add(key);
-      let label = choice.action === 'return' ? trapLabel(choice.row) : `new ${d.repo} trap`;
+      let label = choice.action === 'return' ? trapRepoLabel(choice.row) : `new ${d.repo} trap`;
       const trapId = choice.action === 'return' ? choice.row.trapId : undefined;
       // The async start reserves before its first await, so another group sees
       // that fence immediately. Its sign-on wait never holds the daemon tick.
       void (async () => {
         if (!queuedDescriptor(d.id, lane)) return; // A listener won before startup began.
-        const opts = { ...options, cfg, onLaunch: (launch: { trap: string }) => { label = launch.trap; } };
+        const opts = { ...options, cfg, onLaunch: (launch: { trap: string }) => { label = withTrapRepo(d.repo, launch.trap); } };
         if (choice.action === 'return') await throwTrap({ ...opts, address: `wt:${choice.row.trapId}` });
         else await throwNew({ ...opts, repo: d.repo, harness: d.harness, reason: choice.why });
         log(`trap ${label}: listening for queued ${d.repo} work`);

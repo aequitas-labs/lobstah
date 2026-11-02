@@ -1,6 +1,8 @@
 import {
   GrantError,
   listTraps,
+  trapDisplayName,
+  withTrapRepo,
   listHelms,
   sessionGuarded,
   toolHosts,
@@ -515,7 +517,7 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
     opts.ask.command !== undefined ? `Allow: ${commandGrantScope(target).command}` : `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
   const detail = [
     opts.note ? `${opts.note}\n` : '',
-    `The trap asks to ${kind} exactly this${opts.ask.harness === 'any' ? '' : ` (${opts.ask.harness === 'claude' ? 'Claude Code' : 'Codex'})`}:`,
+    `${opts.ask.trap ? withTrapRepo(opts.repo, opts.ask.trap) : 'The trap'} asks to ${kind} exactly this${opts.ask.harness === 'any' ? '' : ` (${opts.ask.harness === 'claude' ? 'Claude Code' : 'Codex'})`}:`,
     '',
     '```',
     target,
@@ -749,9 +751,11 @@ export function requestSessionGrant(opts: SessionOptions): DecisionMeta {
   if (opts.command && /[;&|<>`$\n\r]/.test(opts.command)) throw new GrantError('a session Bash prefix cannot contain shell syntax');
   if (!opts.reason.trim()) throw new GrantError('--reason is required');
   const duration = opts.duration ?? '15m';
+  const trap = listTraps().find((t) => t.sessionId === session);
   return askDecision({
     title: `Allow ${opts.tools} for ${duration}?`.slice(0, 200),
-    detailText: `Session: \`${session}\`\n\nTools: \`${opts.tools}\`\n\n${opts.command ? `Bash prefix: \`${opts.command}\`\n\n` : ''}Hosts: \`${(opts.hosts ?? []).join(', ') || 'not pinned'}\`\n\n${opts.reason}\n\nExpires automatically. Revoke at any time in the glass. Clicks and screenshots have no URL and ride this window.`,
+    ...(trap?.repo ? { repo: trap.repo } : {}),
+    detailText: `${trap ? `Trap: ${trapDisplayName(trap)}\n\n` : ''}Session: \`${session}\`\n\nTools: \`${opts.tools}\`\n\n${opts.command ? `Bash prefix: \`${opts.command}\`\n\n` : ''}Hosts: \`${(opts.hosts ?? []).join(', ') || 'not pinned'}\`\n\n${opts.reason}\n\nExpires automatically. Revoke at any time in the glass. Clicks and screenshots have no URL and ride this window.`,
     options: [...new Set([`Allow for ${duration}`, 'Allow for 1h', 'Deny'])],
     askedBy: 'worker',
     permission: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ITERM_TITLE_SCRIPT, TERMINAL_TITLE_SCRIPT, setTerminalTitle, titleCommand } from '../src/terminal-title.js';
+import { ITERM_TITLE_SCRIPT, TERMINAL_TITLE_SCRIPT, setTerminalTitle, titleCommand, trapTabTitle } from '../src/terminal-title.js';
 
 const env = {}; // the suite sets LOBSTAH_TERMINAL_TITLE=0; these calls use a fake runner
 const terminal = { termProgram: 'Apple_Terminal', tty: 'ttys007' };
@@ -25,6 +25,14 @@ describe('terminal tab titles', () => {
     });
     expect(ITERM_TITLE_SCRIPT).toContain('set name of s to newTitle');
     expect(ITERM_TITLE_SCRIPT).toContain('if (tty of s as string) is targetTty then');
+  });
+
+  it("names a trap's tab after its repo, and keeps a repo key that won't fit a title out of it", () => {
+    expect(trapTabTitle('amber-gull', 'homebase')).toBe('homebase · amber-gull');
+    expect(titleCommand(terminal, trapTabTitle('amber-gull', 'lavish-axi'), 'darwin')?.args.at(-1)).toBe('lavish-axi · amber-gull');
+    expect(trapTabTitle('amber-gull', undefined)).toBe('amber-gull');
+    expect(trapTabTitle('amber-gull', 'x" & do shell script "id')).toBe('amber-gull');
+    expect(titleCommand(terminal, 'x" · amber-gull', 'darwin')).toBeUndefined();
   });
 
   it('clears with an empty title', () => {
