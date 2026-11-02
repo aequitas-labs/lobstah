@@ -63,6 +63,37 @@ const PANE_RE = /^[1-9][0-9]*$/;
 const VSCODE_RE = /(?:VSCode|Cursor|windsurf)/;
 const control = (value: string): boolean => /[\x00-\x1f\x7f]/.test(value);
 
+/** A client that can show a pane's window: the session it is attached to, and its tty. */
+interface PaneView {
+  session: string;
+  window: string;
+  tty: string;
+}
+
+/**
+ * The clients attached to sessions holding this pane's window. Grouped
+ * sessions share windows and each has its own current one, so one pane can
+ * have several views: one already showing it comes first, then the most
+ * recently used. A bare pane target would pick by session activity instead,
+ * which can land on a session no client is attached to.
+ */
+async function paneViews(read: FileReader, server: string[], pane: string): Promise<PaneView[]> {
+  try {
+    const holders = (await read('tmux', [...server, 'list-panes', '-a', '-f', `#{==:#{pane_id},${pane}}`, '-F', '#{session_id} #{window_id}'])).split('\n').filter(Boolean).map((line) => line.split(' '));
+    const window = holders[0]?.[1];
+    if (!window) return [];
+    const sessions = new Set(holders.map(([session]) => session));
+    const clients = (await read('tmux', [...server, 'list-clients', '-F', '#{session_id} #{window_id} #{client_activity} #{client_tty}'])).split('\n').filter(Boolean).map((line) => line.split(' '));
+    return clients
+      .map(([session = '', current = '', activity = '', tty = '']) => ({ session, window, tty: tty.replace(/^\/dev\//, ''), shows: current === window, activity: Number(activity) || 0 }))
+      .filter((c) => sessions.has(c.session) && TTY_RE.test(c.tty))
+      .sort((a, b) => Number(b.shows) - Number(a.shows) || b.activity - a.activity);
+  } catch {
+    // No client attached, or no server: nothing to raise.
+    return [];
+  }
+}
+
 function safeWorktree(reg: TrapRegistration): boolean {
   const folder = reg.worktree;
   if (!path.isAbsolute(folder) || /[\x00-\x1f\x7f]/.test(folder) || path.normalize(folder) !== folder) return false;
@@ -132,19 +163,15 @@ export async function focusRegistration(
     // The pane's own server: the socket recorded at sign-on, else lobstah's.
     const server = win.tmuxSocket ? ['-S', win.tmuxSocket] : ['-L', TMUX_SOCKET];
     const pane = win.tmuxPane;
-    const selected = await attempt('tmux', [...server, 'select-window', '-t', pane, ';', 'select-pane', '-t', pane, ';',
+    const select = (window: string) => attempt('tmux', [...server, 'select-window', '-t', window, ';', 'select-pane', '-t', pane, ';',
       'if-shell', '-F', '-t', pane, '#{window_zoomed_flag}', '', `resize-pane -Z -t ${pane}`], 'tmux', 'Selected the trap\'s tmux pane.');
-    if (selected) {
-      let clients: string[] = [];
-      try {
-        clients = (await read('tmux', [...server, 'list-clients', '-t', pane, '-F', '#{client_tty}'])).split('\n').map((t) => t.replace(/^\/dev\//, '')).filter((t) => TTY_RE.test(t));
-      } catch {
-        // No client attached: nothing to raise.
-      }
-      for (const tty of clients) {
-        const raised = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', tty], 'tmux', 'Selected the trap\'s tmux pane and raised its Terminal window.');
-        if (raised) return raised;
-      }
+    const views = await paneViews(read, server, pane);
+    // Only the raised view changes window, so other views stay where they are.
+    for (const view of views) {
+      const raised = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', view.tty], 'tmux', 'Selected the trap\'s tmux pane and raised its Terminal window.');
+      if (raised && await select(`${view.session}:${view.window}`)) return raised;
+    }
+    if (await select(views[0] ? `${views[0].session}:${views[0].window}` : pane)) {
       const attach = win.tmuxSocket ? `tmux -S ${win.tmuxSocket} attach` : `tmux -L ${TMUX_SOCKET} attach`;
       return { focused: false, reason: `Selected the trap's tmux pane, but no Terminal window shows it — run \`${attach}\`.` };
     }
