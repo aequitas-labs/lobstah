@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import { loadConfig } from '@lobstah/core';
 import type { Config } from '@lobstah/core';
 import { openTmuxPane, tmuxConfigFile, tmuxPaneTail, tmuxPlacementLockFile, tmuxRunner, tmuxServerEnv, tmuxWindowFor, TMUX_CONFIG } from '../src/tmux-terminal.js';
-import type { TmuxRunner } from '../src/tmux-terminal.js';
+import type { TmuxRunner, TmuxWindow } from '../src/tmux-terminal.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -52,14 +52,25 @@ describe('which window a trap joins', () => {
   });
 });
 
+/**
+ * What tmux prints for a `-F` format to a client without a UTF-8 locale:
+ * every control character, a tab among them, becomes `_`.
+ */
+const printed = (format: string, fields: Record<string, string | number>): string =>
+  [...format.replace(/#\{(\w+)\}/g, (_, key: string) => String(fields[key] ?? ''))].map((c) => (c.charCodeAt(0) < 32 ? '_' : c)).join('');
+
+/** `list-windows` output for these windows, in the format the caller asked for. */
+const listed = (args: string[], windows: readonly { id: string; name: string; panes: number }[]): string =>
+  windows.map((w) => `${printed(args[args.indexOf('-F') + 1]!, { window_id: w.id, window_name: w.name, window_panes: w.panes })}\n`).join('');
+
 describe('opening a trap pane', () => {
-  const fake = (windows?: string) => {
+  const fake = (windows?: TmuxWindow[]) => {
     const seen: string[][] = [];
     const run: TmuxRunner = async (args) => {
       seen.push(args);
       if (args[0] === 'list-windows') {
         if (windows === undefined) throw new Error('no server running');
-        return windows;
+        return listed(args, windows);
       }
       return args.includes('-P') ? '%7\n' : '';
     };
@@ -73,10 +84,10 @@ describe('opening a trap pane', () => {
     expect(await openTmuxPane(cfg, launch, first.run, '/bin/zsh')).toEqual({ tmuxPane: '%7' });
     expect(first.seen[1]).toEqual(['new-session', '-d', '-s', 'lobstah', '-n', 'web', '-x', '240', '-y', '66', '-c', '/w', '-P', '-F', '#{pane_id}', '/bin/zsh', '-l', '-c', launch.command]);
     expect(first.seen.slice(2)).toEqual([['select-layout', '-t', '%7', 'tiled'], ['select-pane', '-t', '%7', '-T', launch.trap]]);
-    const joined = fake('@3\tweb\t2\n');
+    const joined = fake([{ id: '@3', name: 'web', panes: 2 }]);
     await openTmuxPane(cfg, launch, joined.run, '/bin/zsh');
     expect(joined.seen[1]!.slice(0, 4)).toEqual(['split-window', '-d', '-t', '@3']);
-    const added = fake('@1\tapi\t1\n');
+    const added = fake([{ id: '@1', name: 'api', panes: 1 }]);
     await openTmuxPane(cfg, launch, added.run, '/bin/zsh');
     expect(added.seen[1]!.slice(0, 5)).toEqual(['new-window', '-d', '-t', '=lobstah:', '-n']);
     expect([first, joined, added].flatMap((f) => f.seen).some((a) => a.includes('select-window') || a.includes('attach'))).toBe(false);
@@ -119,7 +130,7 @@ const fakeServer = () => {
     switch (args[0]) {
       case 'list-windows':
         if (!windows.length) throw new Error('no server running');
-        return windows.map((w) => `${w.id}\t${w.name}\t${w.panes.length}\n`).join('');
+        return listed(args, windows.map((w) => ({ ...w, panes: w.panes.length })));
       case 'new-session':
         if (windows.length) throw new Error('duplicate session: lobstah');
         return open(arg(args, '-n'));
@@ -203,29 +214,56 @@ describe.skipIf(!hasTmux)('a real tmux server', () => {
     expect(screen).toContain('second trap');
   });
 
-  it('places panes thrown from 4 processes at once in one repo window, all alive', async () => {
-    const run = tmuxRunner(socket);
-    const cliDir = fileURLToPath(new URL('..', import.meta.url));
+  /** The locales a throw meets: a person's shell, `LANG=C`, and a daemon with none set. */
+  const LOCALES: [string, NodeJS.ProcessEnv][] = [
+    ['UTF-8', { LANG: 'en_US.UTF-8' }],
+    ['C', { LANG: 'C', LC_ALL: 'C' }],
+    ['unset', {}],
+  ];
+  const localeEnv = (locale: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
+    ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'LANG' && !k.startsWith('LC_'))),
+    ...locale,
+    LOBSTAH_HOME: home,
+  });
+  /** One throw's placement in its own process, through the built openTmuxPane and tmuxRunner. */
+  const throwFromProcess = (trap: string, locale: NodeJS.ProcessEnv) => {
     const module = fileURLToPath(new URL('../dist/tmux-terminal.js', import.meta.url));
-    const child = (trap: string): string =>
-      [
-        `import { loadConfig } from '@lobstah/core';`,
-        `import { openTmuxPane, tmuxRunner } from ${JSON.stringify(module)};`,
-        `const pane = await openTmuxPane(loadConfig(), { cwd: ${JSON.stringify(home)}, command: 'sleep 30', trap: '${trap}', repo: 'web' }, tmuxRunner(${JSON.stringify(socket)}), '/bin/sh');`,
-        `console.log(pane.tmuxPane);`,
-      ].join('\n');
-    config(REPOS);
-    const exec = promisify(execFile);
-    const traps = ['amber-gull', 'misty-dune', 'quiet-wave', 'rapid-buoy'];
-    const outs = await Promise.all(
-      traps.map((t) => exec(process.execPath, ['--input-type=module', '-e', child(t)], { cwd: cliDir, env: { ...process.env, LOBSTAH_HOME: home } })),
-    );
-    socketPath = (await run(['display-message', '-p', '#{socket_path}'])).trim();
-    expect(outs.map((o) => o.stderr)).toEqual(['', '', '', '']);
-    const windows = (await run(['list-windows', '-t', '=lobstah', '-F', '#{window_name} #{window_panes}'])).trim().split('\n');
-    expect(windows).toEqual(['web 4']);
-    const panes = (await run(['list-panes', '-t', '=lobstah:=web', '-F', '#{pane_id} #{pane_dead} #{pane_title}'])).trim().split('\n');
-    expect(panes.map((p) => p.split(' ').slice(1).join(' ')).sort()).toEqual(traps.map((t) => `0 ${t}`));
-    expect(panes.map((p) => p.split(' ')[0]).sort()).toEqual(outs.map((o) => o.stdout.trim()).sort());
-  }, 30_000);
+    const script = [
+      `import { loadConfig } from '@lobstah/core';`,
+      `import { openTmuxPane, tmuxRunner } from ${JSON.stringify(module)};`,
+      `const pane = await openTmuxPane(loadConfig(), { cwd: ${JSON.stringify(home)}, command: 'sleep 30', trap: '${trap}', repo: 'web' }, tmuxRunner(${JSON.stringify(socket)}), '/bin/sh');`,
+      `console.log(pane.tmuxPane);`,
+    ].join('\n');
+    return promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], { cwd: fileURLToPath(new URL('..', import.meta.url)), env: localeEnv(locale) });
+  };
+  const traps = ['amber-gull', 'misty-dune', 'quiet-wave', 'rapid-buoy'];
+
+  describe.each(LOCALES)('with the %s locale', (_, locale) => {
+    const placed = async (outs: { stdout: string; stderr: string }[], layout: string[]) => {
+      const run = tmuxRunner(socket);
+      socketPath = (await run(['display-message', '-p', '#{socket_path}'])).trim();
+      expect(outs.map((o) => o.stderr)).toEqual(outs.map(() => ''));
+      expect((await run(['list-windows', '-t', '=lobstah', '-F', '#{window_name} #{window_panes}'])).trim().split('\n')).toEqual(layout);
+      const panes = (await run(['list-panes', '-s', '-t', '=lobstah', '-F', '#{pane_id} #{pane_dead} #{pane_title}'])).trim().split('\n');
+      expect(panes.map((p) => p.split(' ').slice(1).join(' ')).sort()).toEqual(traps.map((t) => `0 ${t}`));
+      expect(panes.map((p) => p.split(' ')[0]).sort()).toEqual(outs.map((o) => o.stdout.trim()).sort());
+    };
+
+    it('places throws one after another in one repo window', async () => {
+      config(REPOS);
+      const outs = [];
+      for (const t of traps) outs.push(await throwFromProcess(t, locale));
+      await placed(outs, ['web 4']);
+    }, 30_000);
+
+    it('places throws from 4 processes at once in one repo window', async () => {
+      config(REPOS);
+      await placed(await Promise.all(traps.map((t) => throwFromProcess(t, locale))), ['web 4']);
+    }, 30_000);
+
+    it('fills fixed pages in order under throws from 4 processes at once', async () => {
+      config(`${REPOS}[soak]\ntmuxPages = "fixed"\ntmuxPageSize = 2\n`);
+      await placed(await Promise.all(traps.map((t) => throwFromProcess(t, locale))), ['page-1 2', 'page-2 2']);
+    }, 30_000);
+  });
 });

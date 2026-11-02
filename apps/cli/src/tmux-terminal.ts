@@ -82,20 +82,30 @@ export function tmuxRunner(socket = TMUX_SOCKET): TmuxRunner {
   };
 }
 
+/**
+ * Separates `list-windows` fields. tmux prints a tab as `_` to a client
+ * without a UTF-8 locale (a daemon's, or `LANG=C`), so the separator is
+ * printable. A window id and a pane count never hold it, so a name that
+ * does still parses.
+ */
+const WINDOW_FIELD = '|';
+
 /** lobstah's windows, or undefined when its server or session is not running. */
 export async function listTmuxWindows(run: TmuxRunner): Promise<TmuxWindow[] | undefined> {
   let out: string;
   try {
-    out = await run(['list-windows', '-t', `=${TMUX_SESSION}`, '-F', '#{window_id}\t#{window_name}\t#{window_panes}']);
+    out = await run(['list-windows', '-t', `=${TMUX_SESSION}`, '-F', ['#{window_id}', '#{window_name}', '#{window_panes}'].join(WINDOW_FIELD)]);
   } catch {
     return undefined;
   }
   return out
     .split('\n')
     .filter(Boolean)
-    .map((line) => {
-      const [id = '', name = '', panes = '0'] = line.split('\t');
-      return { id, name, panes: Number(panes) || 0 };
+    .flatMap((line): TmuxWindow[] => {
+      const first = line.indexOf(WINDOW_FIELD);
+      const last = line.lastIndexOf(WINDOW_FIELD);
+      if (first < 0 || first === last) return [];
+      return [{ id: line.slice(0, first), name: line.slice(first + 1, last), panes: Number(line.slice(last + 1)) || 0 }];
     });
 }
 
