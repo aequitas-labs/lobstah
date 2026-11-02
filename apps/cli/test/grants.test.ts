@@ -16,6 +16,7 @@ import {
   readDecisionDetail,
   signOnTrap,
   standingDecisions,
+  takeHelm,
   trapBySession,
   unhandled,
   readDecisionDetail,
@@ -136,6 +137,74 @@ describe('lobstah hook permission-request', () => {
     });
     expect(res.status).toBe(0);
     expect(res.stdout).toBe('');
+  });
+
+  it('defers an uncovered Codex-shaped Linear request without a card; a later explicit request can ask a person', () => {
+    const t = trap('linear-trap', 'codex');
+    enqueue({ id: 'linear-job', repo: 'web', brief: 'Read the assigned issue' });
+    claimBait(trapBySession('linear-trap')!);
+    const input = {
+      session_id: 'linear-trap', turn_id: 'codex-turn', hook_event_name: 'PermissionRequest',
+      cwd: t.worktree, transcript_path: null, model: 'fixture-model', permission_mode: 'default',
+      tool_name: 'mcp__codex_apps__linear__get_issue', tool_input: { id: 'fixture-issue' },
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = run(['hook', 'permission-request'], input);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(standingDecisions()).toEqual([]);
+      expect(listGrants().grants).toEqual([]);
+    }
+    const request = run(['grant', 'request', '--session', 'linear-trap', '--tools', 'mcp__codex_apps__linear__*',
+      '--reason', 'Codex refused the requested call; a person must decide'], undefined, { CODEX_THREAD_ID: 'linear-trap' });
+    expect(request.status, request.stderr).toBe(0);
+    expect(standingDecisions()[0]?.permission?.sessionGrant?.session).toBe('linear-trap');
+    expect(listGrants().grants).toEqual([]);
+  });
+
+  it.each(['codex', 'claude', undefined] as const)('preserves %s helm connector behavior using its registered harness', (harness) => {
+    takeHelm({ sessionId: 'connector-helm', grounds: { name: 'home', repos: [] }, ttlMs: 60_000, identity: { harness } });
+    const result = run(['hook', 'permission-request'], {
+      session_id: 'connector-helm', tool_name: 'mcp__codex_apps__linear__get_issue', tool_input: { id: 'fixture-issue' },
+      ...(harness === 'codex' ? { turn_id: 'codex-turn' } : {}), cwd: home,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(standingDecisions()).toHaveLength(harness === 'codex' ? 0 : 1);
+  });
+
+  it('honors an existing Codex connector grant before deferring, and defers again after revocation', () => {
+    const t = trap('granted-linear-trap', 'codex');
+    enqueue({ id: 'granted-linear-job', repo: 'web', brief: 'Read the assigned issue' });
+    claimBait(trapBySession('granted-linear-trap')!);
+    const grant = addGrant({ mode: 'session', session: 'granted-linear-trap', tools: 'mcp__codex_apps__linear__*', by: 'glass' });
+    const input = {
+      session_id: 'granted-linear-trap', turn_id: 'codex-turn', hook_event_name: 'PermissionRequest',
+      cwd: t.worktree, transcript_path: null, model: 'fixture-model', permission_mode: 'default',
+      tool_name: 'mcp__codex_apps__linear__get_issue', tool_input: { id: 'fixture-issue' },
+    };
+    const allowed = run(['hook', 'permission-request'], input);
+    expect(allowed.status, allowed.stderr).toBe(0);
+    expect(JSON.parse(allowed.stdout)).toEqual(ALLOW);
+    expect(listGrants().grants[0]?.uses).toBe(1);
+    revokeGrant(grant.id, 'glass');
+    const uncovered = run(['hook', 'permission-request'], input);
+    expect(uncovered.status, uncovered.stderr).toBe(0);
+    expect(uncovered.stdout).toBe('');
+    expect(standingDecisions()).toEqual([]);
+  });
+
+  it('still files a file permission card for a Codex MCP call with a file target', () => {
+    const t = trap('file-trap', 'codex');
+    enqueue({ id: 'file-job', repo: 'web', brief: 'Write the file' });
+    claimBait(trapBySession('file-trap')!);
+    const file = path.join(t.worktree, 'fixture.txt');
+    const result = run(['hook', 'permission-request'], {
+      session_id: 'file-trap', turn_id: 'codex-turn', tool_name: 'mcp__files__write_file', tool_input: { file_path: file }, cwd: t.worktree,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(standingDecisions()[0]?.permission).toMatchObject({ path: file, harness: 'codex' });
   });
 });
 
@@ -401,8 +470,8 @@ describe('session grants', () => {
     expect(run(['hook', 'permission-request'], { ...h, tool_input: { url: 'https://evil.example/' } }).stdout).toBe('');
     expect(run(['grant', '--session', 'helm-session', '--tools', 'WebFetch', '--yes'], undefined, { CLAUDECODE: '1' }).status).not.toBe(0);
   });
-  it('a denied browser call from an assigned trap files a session request with host pins', () => {
-    const t = trap('browser-trap', 'codex');
+  it('an uncovered Claude browser call still files a session request with host pins', () => {
+    const t = trap('browser-trap', 'claude');
     enqueue({ id: 'browser-job', repo: 'web', brief: 'Read the page' }); claimBait(trapBySession('browser-trap')!);
     run(['hook', 'permission-request'], { session_id: 'browser-trap', tool_name: 'mcp__browser__navigate', tool_input: { url: 'https://example.com/private' }, cwd: t.worktree });
     expect(standingDecisions()[0]?.permission?.sessionGrant).toMatchObject({ session: 'browser-trap', tools: 'mcp__browser__*', hosts: ['example.com'] });

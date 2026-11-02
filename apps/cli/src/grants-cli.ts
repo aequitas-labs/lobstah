@@ -400,12 +400,21 @@ export function grantCheckHook(): void {
 }
 
 /**
+ * Codex runs this hook before choosing the reviewer and exposes no later
+ * refusal/human-wait hook. Uncovered MCP calls without shell/file targets
+ * must defer to native approval, rather than predicting a need for a person.
+ */
+function defersCodexConnectorApproval(call: CallInput, harness: string | undefined, cwd: string): boolean {
+  return harness === 'codex' && call.tool.startsWith('mcp__') && callRequests(call, undefined, cwd).length === 0;
+}
+
+/**
  * `lobstah hook permission-request`: the PermissionRequest hook of both
  * plugins. With a grant that covers a trap's call it allows it: in Codex
  * before the approval reviewer, in Claude Code where a permission prompt
  * would show (the mod covers auto mode). Otherwise it prints nothing, and
- * the normal approval flow goes on. An uncovered call from an assigned trap
- * also files a permission card, so its glass answer writes a real grant.
+ * the normal approval flow goes on. Uncovered Codex connector calls defer
+ * without a card; other uncovered calls keep their existing card behavior.
  */
 export function permissionRequestHook(preToolUse = false, preHarness: 'claude' | 'codex' = 'claude'): void {
   try {
@@ -432,6 +441,10 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
     }
     const trap = call.session ? trapBySession(call.session) : undefined;
     if (preToolUse) return;
+    const registeredHarness = trap?.harness
+      ?? listHelms().find((helm) => helm.sessionId === call.session)?.harness
+      ?? (typeof h.turn_id === 'string' ? 'codex' : undefined);
+    if (defersCodexConnectorApproval(call, registeredHarness, cwd)) return;
     if (!trap?.claimed) {
       if (
         call.session &&
