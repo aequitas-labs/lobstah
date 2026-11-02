@@ -406,6 +406,42 @@ describe('session grants', () => {
     run(['hook', 'permission-request'], { session_id: 'browser-trap', tool_name: 'mcp__browser__navigate', tool_input: { url: 'https://example.com/private' }, cwd: t.worktree });
     expect(standingDecisions()[0]?.permission?.sessionGrant).toMatchObject({ session: 'browser-trap', tools: 'mcp__browser__*', hosts: ['example.com'] });
   });
+  it("Allow always on a trap's tool card covers that tool in every trap and later session, with no new card", () => {
+    const claimed = (session: string): { name: string; worktree: string } => {
+      const t = trap(session, 'codex');
+      enqueue({ id: `${session}-job`, repo: 'web', brief: 'Read the issue' });
+      claimBait(trapBySession(session)!);
+      return t;
+    };
+    const linear = (session: string, cwd: string, tool = 'mcp__codex_apps__linear__get_issue') =>
+      run(['hook', 'permission-request'], { session_id: session, tool_name: tool, tool_input: { id: 'BAS-1' }, cwd });
+    const first = claimed('linear-trap');
+    expect(linear('linear-trap', first.worktree).stdout).toBe('');
+    const c = standingDecisions().find((d) => d.permission?.sessionGrant?.tools === 'mcp__codex_apps__linear__*')!;
+    expect(c.options).toEqual(['Allow for 15m', 'Allow for 1h', 'Allow always', 'Deny']);
+    expect(() => answerKey(c.key, { option: 'Allow always', by: 'cli' })).toThrow('person');
+    expect(listGrants().grants).toEqual([]);
+    answerKey(c.key, { option: 'Allow always', by: 'glass' });
+    const [g] = listGrants().grants;
+    expect(g).toMatchObject({ mode: 'always', tools: 'mcp__codex_apps__linear__*', by: 'glass' });
+    expect(g?.session).toBeUndefined();
+    expect(g?.expiresAt).toBeUndefined();
+    const later = claimed('later-trap');
+    const cards = standingDecisions().length;
+    expect(JSON.parse(linear('later-trap', later.worktree, 'mcp__codex_apps__linear__list_issues').stdout)).toEqual(ALLOW);
+    expect(JSON.parse(linear('linear-trap', first.worktree).stdout)).toEqual(ALLOW);
+    expect(standingDecisions()).toHaveLength(cards);
+    expect(listGrants().grants[0]?.uses).toBe(2);
+    expect(linear('later-trap', later.worktree, 'mcp__codex_apps__github__get_pr').stdout).toBe('');
+    expect(linear('not-a-trap', home).stdout).toBe('');
+  });
+
+  it('a standing tool grant never names a shell or file tool', () => {
+    for (const tools of ['Bash', 'exec_command', 'Write', 'apply_patch', '*', 'mcp__*__Bash'])
+      expect(() => addGrant({ mode: 'always', tools, by: 'glass' })).toThrow(/command or path|tool glob/);
+    expect(addGrant({ mode: 'always', tools: 'mcp__codex_apps__linear__*', by: 'glass' })).toMatchObject({ mode: 'always', harness: 'any' });
+  });
+
   it('custom Claude and Codex settings locations remain protected by session grants', () => {
     addGrant({ mode: 'session', session: 'settings-session', tools: 'Write', by: 'glass' });
     for (const [variable, name] of [['CLAUDE_CONFIG_DIR', 'settings.json'], ['CODEX_HOME', 'config.toml']]) {

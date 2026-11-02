@@ -127,7 +127,7 @@ function harnessOf(v: string | undefined): GrantHarness {
 }
 
 function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo' | 'tools' | 'session'>): string {
-  if (g.tools) return `${g.tools}${g.command ? ` (${g.command} …)` : ''} for session ${g.session}`;
+  if (g.tools) return `${g.tools}${g.command ? ` (${g.command} …)` : ''} ${g.session ? `for session ${g.session}` : 'in every trap'}`;
   if (g.path !== undefined) return g.repo !== undefined ? `write ${g.path} in any ${g.repo} checkout` : `write ${g.path}`;
   return g.match === 'prefix' ? `${g.command} …` : g.command!;
 }
@@ -341,7 +341,14 @@ export function checkCall(call: CallInput, cwd: string, sessionOnly = false): st
   // The trap's own harness, as it signed on: the hook entry is shared by both plugins.
   const harness = trap.harness === 'codex' ? 'codex' : trap.harness === 'claude' ? 'claude' : call.harness;
   const requests = callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd);
-  if (requests.length === 0) return undefined;
+  if (requests.length === 0) {
+    // A connector or other tool names no command or file: a standing tool grant covers it in every trap.
+    const g = useGrant(
+      { harness, tool: call.tool, input: call.input, cwd, trap: trap.name ?? trap.trapId },
+      { ...(call.session ? { session: call.session } : {}), ...(call.callId ? { callId: call.callId } : {}) },
+    );
+    return g?.mode === 'always' && g.tools !== undefined ? [g.id] : undefined;
+  }
   // Check every request before spending any: a once-grant is not spent on a call that is refused anyway.
   const { grants, intact } = listGrants();
   const roots = checkoutRoots();
@@ -566,6 +573,10 @@ export function permissionAnswerAllowed(decision: DecisionMeta, option: string |
 export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAnswer): Grant | undefined {
   const ask = decision.permission;
   if (!ask) return undefined;
+  if (answer.by === 'glass' && ask.sessionGrant && !ask.sessionGrant.command && answer.option === STANDING_TOOL_OPTION) {
+    const r = ask.sessionGrant;
+    return addGrant({ mode: 'always', tools: r.tools, hosts: r.hosts, reason: r.reason, by: 'glass' });
+  }
   if (answer.by === 'glass' && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
     const r = ask.sessionGrant;
     const duration = answer.option === 'Allow for 1h' ? 3600_000 : r.durationMs;
@@ -730,7 +741,14 @@ type SessionOptions = {
   command?: string;
 };
 
-/** Asking is agent-safe: this writes a decision, never a grant. */
+/** The card option that allows a tool glob for every trap, until revoked. */
+export const STANDING_TOOL_OPTION = 'Allow always';
+
+/**
+ * Asking is agent-safe: this writes a decision, never a grant. A trap's card
+ * for a tool glob also offers Allow always, so one answer covers every trap
+ * and later session.
+ */
 export function requestSessionGrant(opts: SessionOptions): DecisionMeta {
   const session = sessionTarget(opts);
   const durationMs = sessionDuration(opts.duration);
@@ -749,10 +767,11 @@ export function requestSessionGrant(opts: SessionOptions): DecisionMeta {
   if (opts.command && /[;&|<>`$\n\r]/.test(opts.command)) throw new GrantError('a session Bash prefix cannot contain shell syntax');
   if (!opts.reason.trim()) throw new GrantError('--reason is required');
   const duration = opts.duration ?? '15m';
+  const standing = !opts.command && listTraps().some((t) => t.sessionId === session);
   return askDecision({
     title: `Allow ${opts.tools} for ${duration}?`.slice(0, 200),
-    detailText: `Session: \`${session}\`\n\nTools: \`${opts.tools}\`\n\n${opts.command ? `Bash prefix: \`${opts.command}\`\n\n` : ''}Hosts: \`${(opts.hosts ?? []).join(', ') || 'not pinned'}\`\n\n${opts.reason}\n\nExpires automatically. Revoke at any time in the glass. Clicks and screenshots have no URL and ride this window.`,
-    options: [...new Set([`Allow for ${duration}`, 'Allow for 1h', 'Deny'])],
+    detailText: `Session: \`${session}\`\n\nTools: \`${opts.tools}\`\n\n${opts.command ? `Bash prefix: \`${opts.command}\`\n\n` : ''}Hosts: \`${(opts.hosts ?? []).join(', ') || 'not pinned'}\`\n\n${opts.reason}\n\nExpires automatically. Revoke at any time in the glass. Clicks and screenshots have no URL and ride this window.${standing ? `\n\n- **${STANDING_TOOL_OPTION}**: \`${opts.tools}\` in every trap and every later session, without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists it).` : ''}`,
+    options: [...new Set([`Allow for ${duration}`, 'Allow for 1h', ...(standing ? [STANDING_TOOL_OPTION] : []), 'Deny'])],
     askedBy: 'worker',
     permission: {
       harness: 'any',
