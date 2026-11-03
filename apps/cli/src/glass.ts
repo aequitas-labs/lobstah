@@ -39,6 +39,9 @@ import {
   trapStartCommands,
   writeRequest,
   trapLastSeen,
+  claudeTranscriptFile,
+  transcriptRemoteLink,
+  validRemoteLink,
   validSessionLink,
   viewerDevice,
   linkMismatch,
@@ -190,6 +193,15 @@ function assetPath(name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** The URL Claude emitted for this run, read from its transcript, or the one recorded by hand. Never built from a local id. */
+function trapLiveLink(t: GlassTrap): string | undefined {
+  if (validRemoteLink(t.remoteLink)) return t.remoteLink;
+  const since = t.remoteControlSince ? Date.parse(t.remoteControlSince) : NaN;
+  if (!Number.isFinite(since) || !t.sessionId) return undefined;
+  const file = claudeTranscriptFile(t.sessionId, [t.cwd, t.worktree].filter((c): c is string => !!c));
+  return file ? transcriptRemoteLink(file, since) : undefined;
 }
 
 /** Claude Code transcript: the cwd munged to '-' under ~/.claude/projects. */
@@ -652,6 +664,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       window,
       attachCommand: registered ? tmuxAttachCommand(window, { onMachine: !!options.local, machine: machineName() }) : undefined,
       link: validSessionLink(link) && linkMismatch(link, window) === undefined ? link : undefined,
+      liveLink: registered && harness === 'claude' ? trapLiveLink(t) : undefined,
       sessionId,
       harness,
       desktopThread: (harness === 'codex' && !!sessionId && !!codexDesktopThread(sessionId)) || undefined,
@@ -679,7 +692,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
             ...(() => {
               const ticket = options.local ? readReservationTicket(r.trapId) : undefined;
               const repoPath = cfg.repos[r.repo]?.path;
-              return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness) } : {};
+              return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness, r.remoteControlSince ? r.name : undefined) } : {};
             })(),
             ...(r.failedAt || Date.now() > (Date.parse(r.deadline) || 0)
               ? { failedAt: r.failedAt ?? r.deadline, reason: r.reason ?? `no session signed on by ${r.deadline}` }

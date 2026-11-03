@@ -359,6 +359,76 @@ describe('glass page: tabs and hash routing', () => {
     expect(text(command.$('#modalbox'))).not.toContain('claude --resume');
   });
 
+  describe('a live Claude link', () => {
+    const LIVE = 'https://claude.ai/code/session_01AbC';
+    const open = async (viewer: GlassSnapshot['viewer'], over: Record<string, unknown> = {}) => {
+      const d = acceptanceFleet();
+      d.viewer = viewer;
+      d.focusToken = viewer?.onMachine ? 'fixture-token' : undefined;
+      Object.assign(d.traps[0]!, { harness: 'claude', liveLink: LIVE, ...over });
+      const g = await page(d, { hash: '#traps' });
+      await openRow(g, '#traps', 'wt:t1');
+      return g;
+    };
+    const links = (g: GlassDom) => g.$$(`#modalbox a[href="${LIVE}"]`);
+
+    for (const device of ['phone', 'desktop', 'unknown'] as const) {
+      it(`opens from a ${device} off the machine, in a new tab, with where it runs`, async () => {
+        const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device });
+        const [link] = links(g);
+        expect(links(g)).toHaveLength(1);
+        expect(text(link)).toBe('Open live Claude');
+        expect(link!.getAttribute('target')).toBe('_blank');
+        expect(link!.getAttribute('rel')).toContain('noopener');
+        expect(text(g.$('#modalbox'))).toContain('Running on studio');
+        expect(text(g.$('#modalbox'))).not.toContain('only reachable');
+        expect(text(g.$('#modalbox'))).toContain('Opens in the Claude app or a browser');
+        expect(text(g.$('#modalbox'))).toContain('This glass is read-only from here');
+      });
+    }
+
+    it('keeps the rule for what else a phone sees: no attach command or desktop link beside it', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { attachCommand: 'ssh studio -t tmux -L lobstah attach -r -t %7', link: 'claude://claude.ai/local_1' });
+      expect(links(g)).toHaveLength(1);
+      expect(text(g.$('#modalbox'))).not.toContain('attach -r');
+      expect(g.$$('#modalbox a[href^="claude:"]')).toHaveLength(0);
+    });
+
+    it('sits beside the attach command for a desktop off the machine', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'desktop' }, { attachCommand: 'ssh studio -t tmux -L lobstah attach -r -t %7' });
+      expect(links(g)).toHaveLength(1);
+      expect(text(g.$('#modalbox'))).toContain('attach -r -t %7');
+    });
+
+    it('sits beside open on the machine', async () => {
+      const g = await open({ onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' });
+      expect(links(g)).toHaveLength(1);
+      expect(g.$$('#modalbox button.open')).toHaveLength(1);
+      expect(text(g.$('#modalbox'))).not.toContain('read-only');
+    });
+
+    it('shows on the trap card and the deck, not only in the modal', async () => {
+      const d = acceptanceFleet();
+      d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' };
+      Object.assign(d.traps[0]!, { harness: 'claude', liveLink: LIVE });
+      const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
+      expect(g.$$(`#traps a[href="${LIVE}"]`)).toHaveLength(1);
+    });
+
+    it('gives a signed-off trap no live link', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { live: false, liveLink: undefined });
+      expect(links(g)).toHaveLength(0);
+      expect(text(g.$('#modalbox'))).not.toContain('Opens in the Claude app');
+    });
+
+    it('offers a Codex trap on a phone no action at all', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { harness: 'codex', liveLink: undefined, link: 'codex://threads/live-session', desktopThread: true });
+      expect(g.$$('#modalbox a[href^="codex:"], #modalbox a[href^="https://chatgpt"], #modalbox button.open')).toHaveLength(0);
+      expect(text(g.$('#modalbox'))).toContain('Running on studio, only reachable from there');
+      expect(text(g.$('#modalbox'))).not.toContain('open this session');
+    });
+  });
+
   it('offers a phone no attach command in a dispatch modal', async () => {
     const d = acceptanceFleet();
     const x = d.dispatches.find((c) => !c.claimedBy?.startsWith('wt:'))!;

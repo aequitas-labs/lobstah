@@ -368,6 +368,8 @@ export interface GlassMessage {
 /** A trap: live (a registration) or historical (only receipts, mail, and notices survive). */
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   desktopThread?: boolean;
+  /** The Claude Remote Control URL Claude emitted for this live session. It opens on any device the owner is signed in on. */
+  liveLink?: string;
   /** The command that joins this live trap's tmux pane, written for where this page's viewer is. */
   attachCommand?: string;
   trapId: string;

@@ -165,6 +165,8 @@ export function harnessCommand(opts: {
   config?: Record<string, string>;
   /** `man throw --bypass`: this start runs with no permission checks. */
   bypass?: boolean;
+  /** The trap's name, to start connected to Claude Remote Control under it. */
+  remoteControl?: string;
 }): StartCommand {
   const unapplied: string[] = [];
   const mode = startMode(opts.config, opts.bypass);
@@ -179,6 +181,8 @@ export function harnessCommand(opts: {
       if (key === 'effort') argv.push('--effort', value);
       else if (key !== 'permissionMode' && key !== 'bypass') unapplied.push(key);
     }
+    // The interactive option, not `claude remote-control` server mode, which can create more sessions.
+    if (opts.remoteControl) argv.push('--remote-control', opts.remoteControl);
     argv.push(`/lobstah:trap soak --ticket ${opts.ticket}`);
     return { cwd: opts.cwd, env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }, argv, unapplied, mode };
   }
@@ -208,7 +212,7 @@ export function harnessCommand(opts: {
  * worktree explicitly. A cold start opens a new session in that worktree. Either way the first prompt redeems the
  * ticket, so the session signs on under the trap's own id and name.
  */
-export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: string, bypass?: boolean): StartCommand {
+export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: string, bypass?: boolean, remoteControl?: boolean): StartCommand {
   const resume = row.action === 'resume';
   const harness = row.harness ?? entry.harness;
   // Codex can resume a session whose saved cwd is the primary checkout.
@@ -219,6 +223,7 @@ export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: stri
     cwd,
     ticket,
     ...(bypass ? { bypass } : {}),
+    ...(remoteControl ? { remoteControl: entry.name } : {}),
     ...(resume ? { resume: entry.sessionId } : {}),
     ...(row.model ? { model: row.model } : {}),
     ...(row.config ? { config: row.config } : {}),
@@ -257,6 +262,8 @@ export interface ThrowOptions {
   reason?: string;
   /** `man throw --bypass`, a person's choice: start with no permission checks. */
   bypass?: boolean;
+  /** `man throw --remote-control`: this start connects to Claude Remote Control. */
+  remoteControl?: boolean;
 }
 
 /** Explicit CLI timeout wins; Codex gets time for plugin and model startup. */
@@ -380,7 +387,8 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
   const terminal = row.terminal ?? 'terminal';
   const adapter = resolveAdapter(opts, terminal, label, row.terminalFrom ?? 'default');
   const repo = opts.cfg.repos[entry.repo!]!;
-  const retry = `lobstah man throw ${entry.name}`;
+  if (opts.remoteControl && (row.harness ?? entry.harness) !== 'claude') throw new Error(REMOTE_CONTROL_CLAUDE_ONLY);
+  const retry = `lobstah man throw ${entry.name}${opts.remoteControl ? ' --remote-control' : ''}`;
 
   // The fence: one reservation per trap, created exclusively.
   const { ticket } = reserveTrap({
@@ -391,6 +399,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
     by: opts.by,
     returning: { trapId: entry.trapId, worktree: entry.worktree },
     startMode: startMode(row.config, opts.bypass),
+    ...(opts.remoteControl ? { remoteControl: true } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   });
 
@@ -413,7 +422,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
       // Kept as it is: branch and HEAD stay; setup reruns only when a lockfile changed.
       await prepareReuse(repo, entry.worktree);
     }
-    command = startCommand(row, entry, ticket, opts.bypass);
+    command = startCommand(row, entry, ticket, opts.bypass, opts.remoteControl);
   } catch (err) {
     giveUp(entry.trapId, label, entry.repo, retry, started, err instanceof Error ? err.message : String(err));
     throw err;
@@ -443,6 +452,13 @@ export function freshProfile(cfg: Config, repoKey: string, harnessFlag?: string)
   return { harness, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}) };
 }
 
+export const REMOTE_CONTROL_CLAUDE_ONLY = '--remote-control is for Claude traps: Codex gets a phone action only once an exact mobile link is verified';
+
+/** Whether a new trap starts connected: asked for by this throw, or `[soak] remoteControl`, on Claude only. */
+export function newTrapRemoteControl(opts: Pick<ThrowOptions, 'cfg' | 'remoteControl'>, harness: string): boolean {
+  return harness === 'claude' && (!!opts.remoteControl || opts.cfg.soak.remoteControl);
+}
+
 /**
  * `lobstah man throw --new`: start one fresh trap for a repo. It reserves a
  * new id and name, opens a session in the repo's primary checkout whose
@@ -454,6 +470,8 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
   if (!repo) throw new Error(`no repo "${opts.repo}" is configured (configured: ${Object.keys(opts.cfg.repos).join(', ') || 'none'})`);
   guardNewTraps(opts.cfg, opts.repo, 1, opts.reason);
   const profile = freshProfile(opts.cfg, opts.repo, opts.harness);
+  if (opts.remoteControl && profile.harness !== 'claude') throw new Error(REMOTE_CONTROL_CLAUDE_ONLY);
+  const remoteControl = newTrapRemoteControl(opts, profile.harness);
   const terminal = opts.cfg.soak.terminal ?? 'terminal';
   const adapter = resolveAdapter(opts, terminal, `a new ${opts.repo} trap`, opts.cfg.soak.terminal ? 'config' : 'default');
   const { reservation, ticket } = reserveTrap({
@@ -465,6 +483,7 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     creationReason: opts.reason?.trim() || `no free live or stowed ${opts.repo} trap existed at creation`,
     maxTraps: repo.traps,
     startMode: startMode(profile.config, opts.bypass),
+    ...(remoteControl ? { remoteControl } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   });
   const label = trapLabel(reservation);
@@ -475,13 +494,14 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.config ? { config: profile.config } : {}),
     ...(opts.bypass ? { bypass: true } : {}),
+    ...(remoteControl ? { remoteControl: reservation.name } : {}),
   });
   return launchAndWait(opts, {
     trapId: reservation.trapId,
     name: reservation.name,
     label,
     repo: opts.repo,
-    retry: `lobstah man throw --new --repo ${opts.repo}`,
+    retry: `lobstah man throw --new --repo ${opts.repo}${opts.remoteControl ? ' --remote-control' : ''}`,
     ticket,
     command,
     adapter,

@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import type { Descriptor, Lane, StatusEntry } from './types.js';
 import { uniqueTempPath, atomicRenameSync, laneDirs, soakingDir } from './paths.js';
 import { linkMismatch, validSessionLink } from './session-link.js';
+import { validRemoteLink } from './remote-link.js';
 import { cancelRequested, claimNext, complete, queuedDescriptor, pendingIds, requeue } from './queue.js';
 import { appendStatus, readStatusLog } from './status.js';
 import { mergeEvidence } from './evidence.js';
@@ -73,6 +74,10 @@ export interface TrapRegistration {
   harnessProcess?: HarnessProcess;
   /** A validated deep link supplied by the session itself. */
   link?: string;
+  /** This session's Claude Remote Control URL, recorded with \`soak --remote-link\`. A separate field: it opens on any device. */
+  remoteLink?: string;
+  /** Started with \`--remote-control\` at this time: the glass looks in its transcript for the URL Claude emitted since. */
+  remoteControlSince?: string;
   /** The active dispatch this trap currently works, if any. */
   claimed?: string;
   /** The batch throw that started this trap: its availability is the batch's summary, not its own wake. */
@@ -322,11 +327,14 @@ export function signOnTrap(opts: {
   creationReason?: string;
   /** The permission mode a throw started this session in. */
   startMode?: string;
+  remoteLink?: string;
+  remoteControlSince?: string;
   now?: number;
 }): SignOnResult {
   if (opts.link !== undefined && !validSessionLink(opts.link)) {
     throw new Error('invalid session link: pass a supported claude://, vscode://, or codex:// session URL');
   }
+  if (opts.remoteLink !== undefined && !validRemoteLink(opts.remoteLink)) throw new Error('invalid remote link: pass the https://claude.ai/code/… URL Claude printed');
   const now = opts.now ?? Date.now();
   const anchored = trapIdAt(opts.worktree);
   if (opts.trapId !== undefined && anchored !== undefined && anchored !== opts.trapId) {
@@ -350,6 +358,9 @@ export function signOnTrap(opts: {
   const harnessProcess = opts.harnessProcess ?? (sameSession ? prior.harnessProcess : undefined);
   // A link, new or kept from an earlier sign-on, must fit the window.
   const link = opts.link ?? (sameSession && validSessionLink(prior?.link) ? prior.link : undefined);
+  // Both belong to this session: another session's connection isn't this one's.
+  const remoteLink = opts.remoteLink ?? (sameSession ? prior.remoteLink : undefined);
+  const remoteControlSince = opts.remoteControlSince ?? (sameSession ? prior.remoteControlSince : undefined);
   const worker = sessionWorker(opts.sessionId, opts.harness);
   const reg: TrapRegistration = {
     trapId,
@@ -369,6 +380,8 @@ export function signOnTrap(opts: {
     window,
     ...(harnessProcess ? { harnessProcess } : {}),
     link: link !== undefined && linkMismatch(link, window) === undefined ? link : undefined,
+    ...(remoteLink ? { remoteLink } : {}),
+    ...(remoteControlSince ? { remoteControlSince } : {}),
     claimed: prior?.claimed,
     ...(createdWorktree ? { createdWorktree } : {}),
     ...(opts.startDeadline ? { startDeadline: opts.startDeadline } : sameSession && prior.startDeadline ? { startDeadline: prior.startDeadline } : {}),

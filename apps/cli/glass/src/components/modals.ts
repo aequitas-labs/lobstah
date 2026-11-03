@@ -20,6 +20,7 @@ import {
   NamedText,
   opener,
   TrapName,
+  liveLinkNote,
   namedText,
   prCell,
   prChecks,
@@ -247,6 +248,7 @@ function trapModal(t: GlassTrap) {
     html`<div class="sub">${sub}</div>`,
     html`<div class="sec">window</div>`,
     windowAction(t) ?? html`<span class="dim">Signed off — no window</span>`,
+    liveLinkNote(t),
     readOnlyNotice(),
     startCommands(t),
     !t.requested &&

@@ -853,6 +853,12 @@ a {
 #modalbox .offmachine {
   max-width: none;
 }
+/* A finger needs more room than a pointer. */
+@media (pointer: coarse) {
+  .btn.open {
+    padding: 8px 12px;
+  }
+}
 .loglines {
   color: var(--dim);
   font-size: 12px;

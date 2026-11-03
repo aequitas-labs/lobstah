@@ -120,6 +120,19 @@ export function readOnlyNotice(): Children {
   return getState().snapshot?.viewer?.onMachine === false && html`<div class="dim">${READ_ONLY_REASON}</div>`;
 }
 
+/** A link to the live session in Claude. It works on any device, so no viewer check. */
+const liveLinkButton = (href: string) =>
+  html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" onClick=${stop}>Open live Claude</a>`;
+
+/** What the live link does, said once in the modal: which client takes it depends on the device. */
+export function liveLinkNote(t: GlassTrap): Children {
+  return (
+    t.live &&
+    t.liveLink &&
+    html`<div class="dim">Opens in the Claude app or a browser, signed in to the same account. The trap keeps running on its machine</div>`
+  );
+}
+
 /**
  * A live trap seen from a page that isn't on its machine: where it runs and
  * what can reach it, instead of a button that can't help. Presentation only:
@@ -131,6 +144,8 @@ function offMachineAction(t: GlassTrap, machine = 'its machine'): Children {
     const address = `127.0.0.1${location.port ? ':' + location.port : ''}`;
     return html`<span class="winaction"><span class="dim">Open controls need</span> <a href=${'http://' + address} onClick=${stop}>${address}</a></span>`;
   }
+  if (t.liveLink)
+    return html`<span class="winaction offmachine"><span class="dim">Running on ${machine}</span> ${liveLinkButton(t.liveLink)}</span>`;
   return html`<span class="dim offmachine">${t.attachCommand && viewerHasTerminal() ? `Running on ${machine}` : `Running on ${machine}, only reachable from there`}</span>`;
 }
 
@@ -156,7 +171,7 @@ export function windowAction(t: GlassTrap): Children {
     stop(e);
     void openTrapWindow(t.trapId);
   };
-  return html`<span class="winaction"><button class="btn open" title="Open this trap's window" onClick=${clicked}>↗ Open</button>${t.link && !desktop && sessionLinkOpens() && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
+  return html`<span class="winaction"><button class="btn open" title="Open this trap's window" onClick=${clicked}>↗ Open</button>${t.link && !desktop && sessionLinkOpens() && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${t.liveLink && [' ', liveLinkButton(t.liveLink)]}${
     state.focusResults[t.trapId] && [' ', html`<span class="dim">${state.focusResults[t.trapId]}</span>`]
   }</span>`;
 }

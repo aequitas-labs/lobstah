@@ -185,6 +185,7 @@ import {
   codexDesktopThread,
   CODEX_DESKTOP_THREAD,
   worktreeProgress,
+  validRemoteLink,
   validSessionLink,
   linkMismatch,
   ReportError,
@@ -255,7 +256,7 @@ import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
-import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, startMode, throwBatch, throwTrap } from './throw.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, newTrapRemoteControl, nextStartMode, REMOTE_CONTROL_CLAUDE_ONLY, startMode, throwBatch, throwTrap } from './throw.js';
 import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
@@ -2139,7 +2140,7 @@ async function mainCli(): Promise<void> {
         }
         console.log(`warning: ${BYPASS_WARNING}`);
       }
-      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}) };
+      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}), ...(has('--remote-control') ? { remoteControl: true } : {}) };
       if (has('--new')) {
         // Fresh traps: --count of them, for --repo (or a glass request's repo, or the grounds' only repo).
         if (pos.length > 0 || has('--all')) throw new UsageError(`--new starts fresh traps: no names, no --all\n\n${usageFor('man:throw')!}`);
@@ -2169,7 +2170,9 @@ async function mainCli(): Promise<void> {
         guardNewTraps(cfgThrow, repoKey, count, reason);
         if (dry) {
           const profile = freshProfile(cfgThrow, repoKey, harness);
-          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>', ...(bypass ? { bypass } : {}) });
+          if (has('--remote-control') && profile.harness !== 'claude') throw new UsageError(REMOTE_CONTROL_CLAUDE_ONLY);
+          const remote = newTrapRemoteControl({ cfg: cfgThrow, remoteControl: has('--remote-control') }, profile.harness);
+          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>', ...(bypass ? { bypass } : {}), ...(remote ? { remoteControl: '<name>' } : {}) });
           console.log(toonKV({ plan: 'dry run — launches nothing', new: `${count} fresh ${repoKey} trap(s)`, reason }));
           console.log(
             toonTable(
@@ -2196,6 +2199,9 @@ async function mainCli(): Promise<void> {
         console.log(json ? JSON.stringify({ results }, null, 2) : batchText(results));
         if (results.some((r) => r.result === 'failed')) process.exitCode = 1;
         break;
+      }
+      if (has('--remote-control') && (has('--all') || opt('--repo') !== undefined)) {
+        throw new UsageError(`--remote-control connects one chosen trap: name it, or use --new\n\n${usageFor('man:throw')!}`);
       }
       if (!dry && (has('--all') || opt('--repo') !== undefined)) {
         if (pos.length > 0) throw new UsageError(`name traps, or select with --all / --repo, not both\n\n${usageFor('man:throw')!}`);
@@ -3044,6 +3050,9 @@ async function mainCli(): Promise<void> {
       if (opt('--link') !== undefined && !validSessionLink(opt('--link'))) {
         throw new UsageError('invalid --link: use a supported claude://, vscode://, or codex:// session URL');
       }
+      if (opt('--remote-link') !== undefined && !validRemoteLink(opt('--remote-link'))) {
+        throw new UsageError('invalid --remote-link: use the https://claude.ai/code/… URL Claude printed');
+      }
       const cfg = loadConfig();
       const site = inspectSoakSite(process.cwd(), cfg.repos);
       const repoFlag = opt('--repo');
@@ -3235,6 +3244,8 @@ async function mainCli(): Promise<void> {
           ...(reservation?.batch ? { batch: reservation.batch } : {}),
           ...(reservation?.creationReason ? { creationReason: reservation.creationReason } : {}),
           ...(reservation?.startMode ? { startMode: reservation.startMode } : {}),
+          ...(reservation?.remoteControlSince ? { remoteControlSince: reservation.remoteControlSince } : {}),
+          ...(opt('--remote-link') !== undefined ? { remoteLink: opt('--remote-link') } : {}),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
       } catch (err) {

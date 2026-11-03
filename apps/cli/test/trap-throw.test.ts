@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -26,8 +26,10 @@ import {
   type ThrowPlanRow,
   type TrapRegistration,
 } from '@lobstah/core';
-import { freshProfile, harnessCommand, launchShellText, nextStartMode, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
+import { freshProfile, harnessCommand, launchShellText, newTrapRemoteControl, nextStartMode, REMOTE_CONTROL_CLAUDE_ONLY, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { trapRows } from '../src/trap-list.js';
+import { buildGlassSnapshot } from '../src/glass.js';
+import type { Config } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // A throw through the real reservation, checkout, and sign-on paths. Only
@@ -386,6 +388,74 @@ describe('the start command', () => {
     expect(codex.argv).toEqual(['codex', '--cd', entry.worktree, '-c', 'tui.terminal_title=[]', '-m', 'gpt-5.5', '-c', 'model_reasoning_effort="high"', 'resume', 'sess-1', '$lobstah:trap soak --ticket T']);
     expect(codex).toMatchObject({ unapplied: [], mode: 'default' });
     expect(startCommand(row({ harness: 'claude' }), entry, 'T')).toMatchObject({ cwd: '/w/soak-abcd1234', argv: ['claude', '--permission-mode', 'auto', '/lobstah:trap soak --ticket T'] });
+  });
+
+  it('adds the interactive Remote Control option under the trap name, before the prompt, and never on Codex', () => {
+    const base = { cwd: '/w', ticket: 'T' };
+    expect(harnessCommand({ ...base, harness: 'claude', remoteControl: 'amber-gull' }).argv).toEqual(['claude', '--permission-mode', 'auto', '--remote-control', 'amber-gull', '/lobstah:trap soak --ticket T']);
+    expect(harnessCommand({ ...base, harness: 'claude' }).argv).not.toContain('--remote-control');
+    expect(harnessCommand({ ...base, harness: 'codex', remoteControl: 'amber-gull' }).argv).not.toContain('--remote-control');
+    const cfg = (remoteControl: boolean) => ({ soak: { remoteControl } }) as Config;
+    expect(newTrapRemoteControl({ cfg: cfg(false) }, 'claude')).toBe(false);
+    expect(newTrapRemoteControl({ cfg: cfg(false), remoteControl: true }, 'claude')).toBe(true);
+    expect(newTrapRemoteControl({ cfg: cfg(true) }, 'claude')).toBe(true);
+    expect(newTrapRemoteControl({ cfg: cfg(true) }, 'codex')).toBe(false);
+  });
+
+  processTest('--remote-control connects one new trap, and the glass finds the URL Claude wrote for it', async () => {
+    const claudeHome = path.join(home, 'claude-home');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeHome);
+    try {
+      const seen: TerminalLaunch[] = [];
+      const result = await throwNew({ cfg: loadConfig(), repo: 'r', remoteControl: true, reason: 'phone pilot', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+      const reg = result.registration;
+      expect(seen[0]!.argv.slice(-3, -1)).toEqual(['--remote-control', reg.name]);
+      expect(reg.remoteControlSince).toBeTruthy();
+      const live = () => buildGlassSnapshot().traps.find((t) => t.trapId === reg.trapId)!;
+      // Connected to nothing yet: no link, and the local session id isn't turned into one.
+      expect(live().liveLink).toBeUndefined();
+      const dir = path.join(claudeHome, 'projects', 'anywhere');
+      fs.mkdirSync(dir, { recursive: true });
+      const line = (url: string, ms: number) => JSON.stringify({ type: 'system', subtype: 'bridge_status', content: `/remote-control is active · Continue here, on your phone, or at ${url}`, url, isMeta: false, timestamp: new Date(ms).toISOString(), uuid: 'u' }) + '\n';
+      const since = Date.parse(reg.remoteControlSince!);
+      fs.writeFileSync(path.join(dir, `${OTHER}.jsonl`), line('https://claude.ai/code/session_old', since - 60_000));
+      expect(live().liveLink).toBeUndefined();
+      fs.appendFileSync(path.join(dir, `${OTHER}.jsonl`), line('https://claude.ai/code/session_live', since + 1000));
+      expect(live().liveLink).toBe('https://claude.ai/code/session_live');
+      stow(reg, true);
+      expect(buildGlassSnapshot().traps.find((t) => t.trapId === reg.trapId)?.liveLink).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  processTest('a new trap stays unconnected by default; [soak] remoteControl connects new Claude traps but not a returning one', async () => {
+    const seen: TerminalLaunch[] = [];
+    const first = await throwNew({ cfg: loadConfig(), repo: 'r', reason: 'default', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(seen[0]!.argv).not.toContain('--remote-control');
+    expect(first.registration.remoteControlSince).toBeUndefined();
+    stow(first.registration, true);
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nremoteControl = true\n');
+    const back = await throwTrap({ cfg: loadConfig(), address: first.registration.name!, adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(seen[1]!.argv).not.toContain('--remote-control');
+    stow(back.registration, true);
+    const again = await throwTrap({ cfg: loadConfig(), address: first.registration.name!, remoteControl: true, adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(seen[2]!.argv.slice(-3, -1)).toEqual(['--remote-control', first.registration.name]);
+    expect(again.registration.remoteControlSince).toBeTruthy();
+    stow(again.registration, true);
+    const fresh = await throwNew({ cfg: loadConfig(), repo: 'r', reason: 'after the pilot', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(seen[3]!.argv).toContain('--remote-control');
+    expect(fresh.registration.remoteControlSince).toBeTruthy();
+    stow(fresh.registration, true);
+    const codex = await throwNew({ cfg: loadConfig(), repo: 'r', harness: 'codex', reason: 'codex stays out', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(seen[4]!.argv).not.toContain('--remote-control');
+    expect(codex.registration.remoteControlSince).toBeUndefined();
+  });
+
+  it('refuses --remote-control for Codex before anything starts', async () => {
+    const seen: TerminalLaunch[] = [];
+    await expect(throwNew({ cfg: loadConfig(), repo: 'r', harness: 'codex', remoteControl: true, reason: 'no', adapter: idle(seen) })).rejects.toThrow(REMOTE_CONTROL_CLAUDE_ONLY);
+    expect(seen).toHaveLength(0);
   });
 
   it('starts every trap in auto mode by default; a roster permissionMode overrides; bypass wins', () => {
