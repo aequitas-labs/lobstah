@@ -303,6 +303,7 @@ work (humans and agents):
                                   never from the helm's wakes)
   status [<uuid>|<trap-name>]     reconciled state or live trap   (alias: buoy)
   focus <trap>                    bring a live trap's recorded window forward
+  tmux [repo]                     open a new Terminal view of the tmux trap session
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
   send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--] <message>
@@ -1179,6 +1180,12 @@ async function mainCli(): Promise<void> {
       const result = await focusTrap(trapId);
       console.log(toonKV(result.focused ? { trap: `wt:${trapId}`, focused: result.step, result: result.message } : { trap: `wt:${trapId}`, focused: false, reason: result.reason }));
       if (!result.focused) process.exitCode = 1;
+      break;
+    }
+    case 'tmux': {
+      const { openTmuxView } = await import('./tmux-view.js');
+      const result = await openTmuxView(loadConfig(), pos[0]);
+      console.log(toonKV(result.opened ? { view: result.view, window: result.window, result: 'Opened a Terminal window on this view.' } : { attach: result.attach, reason: result.reason }));
       break;
     }
     case 'dispatch': {

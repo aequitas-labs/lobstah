@@ -85,6 +85,19 @@ const APPLESCRIPT: Record<Exclude<TerminalApp, 'tmux'>, string[]> = {
   ],
 };
 
+/** Run AppleScript lines that open a terminal app on this shell text, which is the script's first argument. */
+export async function tellTerminalApp(app: Exclude<TerminalApp, 'tmux'>, script: string[], shellText: string): Promise<void> {
+  try {
+    await execFileP('osascript', [...script.flatMap((line) => ['-e', line]), shellText], { timeout: 30_000 });
+  } catch (err) {
+    const detail = ((err as { stderr?: string }).stderr ?? (err instanceof Error ? err.message : String(err))).trim();
+    throw new Error(
+      `${terminalAppName(app)} did not open a tab: ${detail}` +
+        (/not allowed|-1743|not authori[sz]ed/i.test(detail) ? ' — allow this terminal to control it in System Settings › Privacy & Security › Automation' : ''),
+    );
+  }
+}
+
 /** The tmux adapter: a pane in lobstah's own tmux server (`[soak] terminal = "tmux"`). */
 export function tmuxTerminalAdapter(cfg: Config, run?: TmuxRunner): TerminalAdapter {
   return {
@@ -99,16 +112,7 @@ export function macTerminalAdapter(app: Exclude<TerminalApp, 'tmux'>): TerminalA
     app,
     async launch(launch) {
       if (process.platform !== 'darwin') throw new Error(`${terminalAppName(app)} runs only on macOS`);
-      const args = APPLESCRIPT[app].flatMap((line) => ['-e', line]);
-      try {
-        await execFileP('osascript', [...args, launchShellText(launch)], { timeout: 30_000 });
-      } catch (err) {
-        const detail = ((err as { stderr?: string }).stderr ?? (err instanceof Error ? err.message : String(err))).trim();
-        throw new Error(
-          `${terminalAppName(app)} did not open a tab: ${detail}` +
-            (/not allowed|-1743|not authori[sz]ed/i.test(detail) ? ' — allow this terminal to control it in System Settings › Privacy & Security › Automation' : ''),
-        );
-      }
+      await tellTerminalApp(app, APPLESCRIPT[app], launchShellText(launch));
     },
   };
 }

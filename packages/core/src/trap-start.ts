@@ -76,7 +76,8 @@ export function readReservationTicket(trapId: string): string | undefined {
 
 /** A value as a POSIX shell word, for a command printed for a person to run. */
 export function shellQuote(value: string): string {
-  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+  // A leading `=` is quoted: zsh reads an unquoted `=word` as that command's path.
+  return /^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./:@%+=,-]*$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
