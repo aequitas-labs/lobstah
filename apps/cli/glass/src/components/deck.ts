@@ -198,7 +198,7 @@ export function Deck({
   });
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
-    title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
+    title: '🪤 ' + (t.repoLabel ?? t.label ?? `wt:${t.trapId}`),
     badge: t.requested
       ? { text: 'requested', tone: 'dim' }
       : t.starting
@@ -206,13 +206,11 @@ export function Deck({
         : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim', worker: t.live ? t : undefined },
     meta: [
       html`<${GrantChip} session=${t.sessionId} grants=${grants} />`,
-      t.repo || '',
-      ' · ',
       html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`,
       ' · ',
       trapNow(t),
     ],
-    metaText: `${t.repo || ''} · 🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
+    metaText: `🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
     action: windowAction(t),
     extra: startCommands(t),
     open: opener('trap', t.trapId),

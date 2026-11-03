@@ -29,7 +29,7 @@ import {
   listHelms,
   listNotices,
   listTraps,
-  trapLabel,
+  trapRepoLabel,
   trapNamer,
   nameTrapsIn,
   listWatches,
@@ -304,7 +304,7 @@ export function humanPrAttention(
   if (queued?.for?.startsWith('wt:')) {
     const trap = readTrap(queued.for.slice(3));
     if (!trap || !!trap.claimed || !trap.firstParkedAt || now - Date.parse(trap.heartbeatAt) > cfg.soak.deferSecs * 1000) {
-      return { show: true, reason: `trap ${trap ? trapLabel(trap) : queued.for} not listening` };
+      return { show: true, reason: `trap ${trap ? trapRepoLabel(trap) : queued.for} not listening` };
     }
   }
   return { show: false };
@@ -875,7 +875,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     });
     if (notListening.length) queueWait = `queued work waits: trap ${notListening.map((address) => {
       const reg = registered.find((r) => address === `wt:${r.trapId}`);
-      return reg ? trapLabel(reg) : address;
+      return reg ? trapRepoLabel(reg) : address;
     }).join(', ')} not listening`;
   }
   if (!queueWait && poolQueued.size > 0) queueWait = `queued work waits: no free worktree in pool ${[...poolQueued].join(', ')} (overflow = "queue")`;

@@ -112,7 +112,7 @@ describe('man throw --all', () => {
     expect(fresh).toHaveLength(2);
     expect(fresh.every((n) => n.quiet)).toBe(true);
     const summary = listNotices(100).find((n) => n.kind === 'trap-batch')!;
-    expect(summary.text).toContain('2 available (0 resumed, 2 cold, 0 new), 1 skipped, 1 failed — failed: crisp-tern');
+    expect(summary.text).toContain('2 available (0 resumed, 2 cold, 0 new), 1 skipped, 1 failed — failed: r · crisp-tern');
     // What wakes the helm: the summary and the failed start, nothing per trap.
     expect(unseenNotices(true).map((n) => n.kind).sort()).toEqual(['trap-batch', 'trap-start-failed']);
   });

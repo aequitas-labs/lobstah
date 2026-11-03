@@ -259,7 +259,7 @@ import { backText, batchText, freshProfile, harnessCommand, launchShellText, lau
 import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
-import { setTerminalTitle } from './terminal-title.js';
+import { setTerminalTitle, trapTabTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
@@ -3251,7 +3251,7 @@ async function mainCli(): Promise<void> {
       const reg = askTrapTitle(res.ok.trapId, res.ok.name ?? `wt:${res.ok.trapId}`) ?? res.ok;
       if (reservation) dropReservation(reservation.trapId);
       // The terminal tab carries the trap's name while it soaks.
-      const titled = reg.name ? await setTerminalTitle(reg.window, reg.name) : undefined;
+      const titled = reg.name ? await setTerminalTitle(reg.window, trapTabTitle(reg.name, reg.repo)) : undefined;
       // A command cannot move the session: a session outside the trap's
       // worktree is told to change into it.
       const inside = (() => {
