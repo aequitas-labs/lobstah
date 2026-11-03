@@ -9,7 +9,7 @@ import {
 import { wharfRepoIdentity } from './wharf-repo.js';
 import { createSoakWorktree } from './soak-worktree.js';
 import { inspectSoakSite } from './soak-site.js';
-import { freshProfile, harnessCommand, macTerminalAdapter } from './throw.js';
+import { freshProfile, harnessCommand, macTerminalAdapter, tmuxTerminalAdapter } from './throw.js';
 
 type Scope = Extract<BackendScope, { kind: 'wharf' }>;
 type Remote = Pick<WharfBackend, 'request' | 'claim'>;
@@ -199,6 +199,7 @@ export function daemonBrokerOptions(config: () => Config): BrokerOptions {
       for (const wharf of Object.values(cfg.wharves ?? {})) command.env[wharf.tokenEnv] = '';
       Object.assign(command.env, { LOBSTAH_GROUNDS: t.grounds, LOBSTAH_WHARF_AGENT: '1',
         LOBSTAH_WHARF_REPO: t.repo, LOBSTAH_WHARF_TRAP: t.trap, LOBSTAH_WHARF_REQUEST: t.request });
-      await macTerminalAdapter(cfg.soak.terminal ?? 'terminal').launch(command);
+      const terminal = cfg.soak.terminal ?? 'terminal';
+      await (terminal === 'tmux' ? tmuxTerminalAdapter(cfg) : macTerminalAdapter(terminal)).launch({ ...command, trap: t.trap, repo: t.repo });
     } };
 }

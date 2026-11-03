@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { ensureLayout, writeTrapAnchor } from '@lobstah/core';
 import type { TrapRegistration, WindowRef } from '@lobstah/core';
 import { focusRegistration, focusTrap } from '../src/focus.js';
-import type { FileRunner } from '../src/focus.js';
+import type { FileReader, FileRunner } from '../src/focus.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -35,6 +35,26 @@ const calls = () => {
 const ITERM = 'w0t2p0:11111111-2222-3333-4444-555555555555';
 
 describe('safe window focus ladder', () => {
+  it("selects and zooms a tmux trap's pane on its own server, then raises the Terminal window attached to it", async () => {
+    const { seen, run } = calls();
+    const read: FileReader = async () => '/dev/ttys021\n';
+    const win = { termProgram: 'tmux', tmuxPane: '%0', tmuxSocket: '/private/tmp/tmux-501/lobstah', bundleId: 'com.apple.Terminal' };
+    expect(await focusRegistration(reg(win), { platform: 'darwin', run, read })).toMatchObject({ focused: true, step: 'tmux' });
+    expect(seen[0]).toEqual(['tmux', ['-S', '/private/tmp/tmux-501/lobstah', 'select-window', '-t', '%0', ';', 'select-pane', '-t', '%0', ';',
+      'if-shell', '-F', '-t', '%0', '#{window_zoomed_flag}', '', 'resize-pane -Z -t %0']]);
+    expect(seen[1]?.[0]).toBe('osascript');
+    expect(seen[1]?.[1].slice(-2)).toEqual(['--', 'ttys021']);
+  });
+
+  it('says how to attach when no Terminal window shows the pane, and never opens the bundle that started the server', async () => {
+    const { seen, run } = calls();
+    const read: FileReader = async () => '';
+    const result = await focusRegistration(reg({ termProgram: 'tmux', tmuxPane: '%3', bundleId: 'com.apple.Terminal' }), { platform: 'darwin', run, read });
+    expect(result).toEqual({ focused: false, reason: "Selected the trap's tmux pane, but no Terminal window shows it — run `tmux -L lobstah attach`." });
+    expect(seen.map(([file]) => file)).toEqual(['tmux']);
+    expect(await focusRegistration(reg({ tmuxPane: '%3', tmuxSocket: 'relative/socket' }), { platform: 'darwin', run, read })).toEqual({ focused: false, reason: 'Invalid recorded tmux socket.' });
+  });
+
   it('opens a validated session link before any native window step', async () => {
     const { seen, run } = calls();
     const result = await focusRegistration(reg({ itermSession: ITERM }, 'codex://threads/a-b'), { platform: 'darwin', run });

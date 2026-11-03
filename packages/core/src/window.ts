@@ -16,6 +16,8 @@ export interface WindowRef {
   itermSession?: string;
   /** tmux pane — survives detach and reattach anywhere. */
   tmuxPane?: string;
+  /** The tmux server's socket the pane lives on (the first field of `$TMUX`). */
+  tmuxSocket?: string;
   kittyWindow?: string;
   weztermPane?: string;
   /** Claude Code's `CLAUDE_CODE_ENTRYPOINT` (`cli`, `claude-vscode`, …): which surface runs the session. */
@@ -45,6 +47,7 @@ export function captureWindow(env: NodeJS.ProcessEnv = process.env): WindowRef |
     termProgram: env.TERM_PROGRAM,
     itermSession: env.ITERM_SESSION_ID,
     tmuxPane: env.TMUX_PANE,
+    tmuxSocket: env.TMUX_PANE ? env.TMUX?.split(',')[0] || undefined : undefined,
     kittyWindow: env.KITTY_WINDOW_ID,
     weztermPane: env.WEZTERM_PANE,
     entrypoint: env.CLAUDE_CODE_ENTRYPOINT,

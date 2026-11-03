@@ -305,12 +305,25 @@ export interface SoakConfig {
    */
   signOffGraceSecs: number;
   /**
-   * The terminal app a thrown trap opens in: `terminal` (Terminal.app) or
-   * `iterm` (iTerm2). A trap's roster profile overrides it. Unset, a throw
+   * The terminal app a thrown trap opens in: `terminal` (Terminal.app),
+   * `iterm` (iTerm2), or `tmux` (a pane in lobstah's own tmux server,
+   * `tmux -L lobstah`). A trap's roster profile overrides it. Unset, a throw
    * uses the app the trap last signed on from, else Terminal.app.
    */
-  terminal?: 'terminal' | 'iterm';
+  terminal?: 'terminal' | 'iterm' | 'tmux';
+  /**
+   * With `terminal = "tmux"`, which window a trap's pane joins: one per
+   * repo (`repo`, the default), one per grounds (`grounds`), or numbered
+   * windows of `tmuxPageSize` panes each (`fixed`).
+   */
+  tmuxPages: TmuxPages;
+  /** Panes per window when `tmuxPages = "fixed"`. */
+  tmuxPageSize: number;
 }
+
+/** How lobstah's tmux server groups trap panes into windows. */
+export type TmuxPages = 'repo' | 'grounds' | 'fixed';
+export const TMUX_PAGES: readonly TmuxPages[] = ['repo', 'grounds', 'fixed'];
 
 export type HelmChat = 'full' | 'brief';
 
@@ -509,9 +522,13 @@ function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
   if (!Number.isInteger(soak.codexStartSecs) || soak.codexStartSecs < 1) throw new Error('soak.codexStartSecs must be a positive whole number');
   if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
-  if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm') {
-    throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal" or "iterm"`);
+  if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm' && soak.terminal !== 'tmux') {
+    throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal", "iterm" or "tmux"`);
   }
+  if (!TMUX_PAGES.includes(soak.tmuxPages)) {
+    throw new Error(`soak.tmuxPages: unknown paging "${String(soak.tmuxPages)}" in ${configPath()} — use ${TMUX_PAGES.map((p) => `"${p}"`).join(', ')}`);
+  }
+  if (!Number.isInteger(soak.tmuxPageSize) || soak.tmuxPageSize < 1) throw new Error('soak.tmuxPageSize must be a positive whole number');
   return soak;
 }
 
@@ -524,6 +541,8 @@ export const DEFAULT_SOAK: SoakConfig = {
   beat: true,
   pausedTtlSecs: 86400,
   signOffGraceSecs: 600,
+  tmuxPages: 'repo',
+  tmuxPageSize: 6,
 };
 
 export const DEFAULT_HELM: HelmConfig = {
