@@ -246,6 +246,20 @@ describe('the Claude Code mod', () => {
 });
 
 describe('the calls a grant is checked against', () => {
+  it('preserves native absolute file, notebook and patch targets without adding the working directory', () => {
+    const file = path.join(home, 'src', 'fixture.ts');
+    const calls = [
+      { tool: 'Write', input: { file_path: file } },
+      { tool: 'NotebookEdit', input: { notebook_path: file } },
+      { tool: 'apply_patch', input: { command: `*** Begin Patch\n*** Update File: ${file}\n@@\n-x\n+y\n*** End Patch` } },
+      { tool: 'apply_patch', input: { command: `*** Begin Patch\n*** Update File: src/old.ts\n*** Move to: ${file}\n*** End Patch` } },
+    ];
+    for (const call of calls) {
+      const requests = callRequests({ harness: 'codex', ...call }, 'kind-crab', home);
+      expect(requests.at(-1)?.path).toBe(file);
+    }
+  });
+
   it('reads the files of an apply_patch, and refuses a patch unless every file is covered', () => {
     const patch = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** Add File: .temp/b.txt\n+z\n*** End Patch';
     expect(patchPaths(patch)).toEqual(['src/a.ts', '.temp/b.txt']);

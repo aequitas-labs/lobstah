@@ -41,6 +41,7 @@ import type {
 } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 
 /**
  * Grants from the command line and the hooks: a person grants, revokes and
@@ -306,10 +307,10 @@ export function callRequests(call: CallInput, trap: string | undefined, cwd: str
   }
   if (tool === 'apply_patch') {
     const patch = typeof raw === 'string' ? raw : typeof call.input.patch === 'string' ? (call.input.patch as string) : '';
-    return patchPaths(patch).map((p) => ({ ...base, path: p.startsWith('/') ? p : `${cwd}/${p}` }));
+    return patchPaths(patch).map((p) => ({ ...base, path: path.isAbsolute(p) ? p : `${cwd}/${p}` }));
   }
   const file = call.input.file_path ?? call.input.notebook_path;
-  if (typeof file === 'string') return [{ ...base, path: file.startsWith('/') ? file : `${cwd}/${file}` }];
+  if (typeof file === 'string') return [{ ...base, path: path.isAbsolute(file) ? file : `${cwd}/${file}` }];
   return [];
 }
 
