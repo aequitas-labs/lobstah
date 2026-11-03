@@ -1,5 +1,8 @@
 import { loadConfig, worktreesDir } from '@lobstah/core';
 
+/** Helm relay commands allowed by default in both harness permission profiles. */
+export const HELM_RELAY_COMMANDS: readonly string[] = ['dispatch', 'send'];
+
 /**
  * The context lobstah gives both auto-mode reviewers: Claude Code's classifier
  * reads it from `autoMode.environment`, Codex's reviewer from lobstah's block
