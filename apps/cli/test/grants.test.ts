@@ -492,7 +492,7 @@ describe('session grants', () => {
     expect(standingDecisions()[0]?.repo).toBe('web');
     expect(readDecisionDetail(standingDecisions()[0]!.key)).toContain(`Trap: web · ${t.name}`);
   });
-  it("Allow always on a trap's tool card covers that tool in every trap and later session, with no new card", () => {
+  it("Allow always on a trap's requested tool card covers that tool in every trap and later session, with no new card", () => {
     const claimed = (session: string): { name: string; worktree: string } => {
       const t = trap(session, 'codex');
       enqueue({ id: `${session}-job`, repo: 'web', brief: 'Read the issue' });
@@ -503,6 +503,9 @@ describe('session grants', () => {
       run(['hook', 'permission-request'], { session_id: session, tool_name: tool, tool_input: { id: 'BAS-1' }, cwd });
     const first = claimed('linear-trap');
     expect(linear('linear-trap', first.worktree).stdout).toBe('');
+    expect(standingDecisions()).toEqual([]);
+    const requested = run(['grant', 'request', '--session', 'linear-trap', '--tools', 'mcp__codex_apps__linear__*', '--reason', 'Allow the requested connector family']);
+    expect(requested.status, requested.stderr).toBe(0);
     const c = standingDecisions().find((d) => d.permission?.sessionGrant?.tools === 'mcp__codex_apps__linear__*')!;
     expect(c.options).toEqual(['Allow for 15m', 'Allow for 1h', 'Allow always', 'Deny']);
     expect(() => answerKey(c.key, { option: 'Allow always', by: 'cli' })).toThrow('person');
