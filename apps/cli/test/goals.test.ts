@@ -4,9 +4,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { addTodo, askDecision, answerDecision, appendStatus, claimNext, closeTodo, complete, enqueue, ensureLayout, goalDate, goalsCardTitle, loadConfig,
+import { addTodo, askDecision, answerDecision, appendStatus, claimNext, closeTodo, complete, enqueue, ensureLayout, goalDate, GOAL_WORDING_RULE, goalsCardTitle, loadConfig,
   parsePrRef, prEvidence, setGoalDone, setGoals, statusPath, takeHelm, upsertPr, type GhPrView } from '@lobstah/core';
+import { charter, GOAL_CHECK_RULE } from '../src/charter.js';
 import { dailyGoalsContext, goalsRecapData } from '../src/goals.js';
+import { usageFor } from '../src/usage.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -61,6 +63,19 @@ it('prompt reminder crosses 04:00 once per grounds/day, across sessions and conf
   expect(dailyGoalsContext('day', cfg, after)).toBeUndefined();
   setGoals('day', '2026-10-16', ['Already written']);
   expect(dailyGoalsContext('day', cfg, new Date('2026-10-16T12:00:00Z'))).toBeUndefined();
+});
+
+it('the goal rule is one text in the charter, both man skills, goals help and the first-message prompt', () => {
+  expect(GOAL_CHECK_RULE.startsWith(GOAL_WORDING_RULE)).toBe(true);
+  expect(GOAL_CHECK_RULE).toContain('no verb or no done state');
+  expect(GOAL_CHECK_RULE).toContain('Never ask for IDs or numbers.');
+  const skills = ['claude-code', 'codex'].map((plugin) => fs.readFileSync(fileURLToPath(new URL(`../../../plugins/${plugin}/skills/man/SKILL.md`, import.meta.url)), 'utf8'));
+  const role = charter({ name: 'fleet', repos: ['r'] }).split('Role:')[1]?.split('Fences:')[0];
+  for (const text of [role, ...skills]) expect(text).toContain(GOAL_CHECK_RULE);
+  const help = usageFor('goals')!;
+  const prompt = dailyGoalsContext('day', loadConfig(), new Date('2026-10-15T12:00:00Z'))!;
+  for (const text of [help, prompt]) expect(text).toContain(GOAL_WORDING_RULE);
+  for (const text of [role, ...skills, help, prompt]) expect(text).not.toMatch(/measurable/);
 });
 
 it('an existing canonical goals card suppresses another prompt without a marker', () => {
