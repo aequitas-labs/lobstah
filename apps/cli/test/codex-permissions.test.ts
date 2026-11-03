@@ -73,11 +73,15 @@ describe('editing [auto_review].extra_policy', () => {
 });
 
 describe('the Codex plan', () => {
-  it('adds context only, the same entries Claude Code gets, and the one allow rule for proposals', () => {
+  it('adds context only, the same entries Claude Code gets, and only allow rules for proposals and helm relays', () => {
     expect(lobstahContext('/h/w', 4949).map((e) => /^\*\*[^*]+\*\*/.exec(e)?.[0])).toEqual(['**lobstah worktrees**', '**lobstah helm**', '**lobstah glass**']);
     expect(baseProfile('/h/w', 4949).environment).toEqual(lobstahContext('/h/w', 4949));
     expect(planCodex(EXT, false, env())!.changes.filter((c) => c.at === 'auto_review.extra_policy').map((c) => c.entry)).toEqual([...lobstahContext(), ...EXT.environment]);
-    expect(codexBaseRules()).toEqual([expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'permissions', 'propose'] })]);
+    expect(codexBaseRules()).toEqual([
+      expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'permissions', 'propose'] }),
+      expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'dispatch'] }),
+      expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'send'] }),
+    ]);
   });
 
   it('is skipped where Codex is not set up, and refuses what it cannot merge into safely', () => {
@@ -108,7 +112,7 @@ describe('the Codex plan', () => {
       seen.push(command.join(' '));
       return { status: 0, stdout: '{"decision":"forbidden"}', stderr: '' };
     });
-    expect(seen).toEqual(['lobstah permissions propose', 'vercel env pull', 'wrangler dev']);
+    expect(seen).toEqual(['lobstah permissions propose', 'lobstah dispatch', 'lobstah send', 'vercel env pull', 'wrangler dev']);
   });
 });
 
@@ -143,10 +147,35 @@ describe('lobstah permissions, Codex half', () => {
     expect(fs.readFileSync(rules, 'utf8')).toMatch(/decision = "allow",\n    justification = "From \[permissions\.codex\]/);
     expect(codexPermissionsRow(EXT, env())).toMatchObject({ status: 'ok' });
 
+    const currentConfig = fs.readFileSync(config, 'utf8');
+    const currentRules = fs.readFileSync(rules, 'utf8');
+    const backupDir = path.join(process.env.LOBSTAH_HOME!, 'backups');
+    const backups = fs.readdirSync(backupDir);
+    const ruleTimestamp = fs.statSync(rules).mtimeMs;
+    await run('apply');
+    expect(fs.readFileSync(config, 'utf8')).toBe(currentConfig);
+    expect(fs.readFileSync(rules, 'utf8')).toBe(currentRules);
+    expect(fs.statSync(rules).mtimeMs).toBe(ruleTimestamp);
+    expect(fs.readdirSync(backupDir)).toEqual(backups);
+
     await run('remove');
     expect(fs.readFileSync(config, 'utf8')).toBe(USER);
     expect(fs.existsSync(rules)).toBe(false);
     expect(fs.readFileSync(path.join(codex, 'rules', 'default.rules'), 'utf8')).toBe('prefix_rule(pattern = ["ls"])\n');
+  });
+
+  it.each(['dispatch', 'send'])('doctor detects a missing Codex %s rule and names the repair', (command) => {
+    const complete = planCodex(EXT, false, env())!;
+    writeCodexPlan(complete, env(), passing);
+    const outdated = complete.rules.after!.replace(new RegExp(`# rule: allow lobstah ${command}\\nprefix_rule\\([\\s\\S]*?\\n\\)\\n?`), '');
+    fs.writeFileSync(rules, outdated);
+    expect(codexPermissionsRow(EXT, env())).toMatchObject({
+      status: 'warn',
+      detail: expect.stringContaining('`lobstah permissions apply`'),
+    });
+    expect(planCodex(EXT, false, env())!.changes).toEqual([
+      { op: '+', at: 'rules/lobstah.rules', entry: `allow lobstah ${command}` },
+    ]);
   });
 
   it('doctor names a Codex half that is missing or out of date', () => {

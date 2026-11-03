@@ -447,7 +447,10 @@ restriction; the classifier keeps its own safety policy:
 - the helm doing what you asked in its chat is not a bypass;
 - an answer you give on a glass card is your own, like a chat message.
 
-It also allows `Read` and `Edit` on `<lobstah home>/worktrees/**`.
+It also allows `Read` and `Edit` on `<lobstah home>/worktrees/**`, permission
+proposals, and `lobstah dispatch` / `lobstah send` relays. Applying the profile
+adds missing allow rules, preserving existing rule order and backing up settings
+before writing. Doctor warns when the profile needs applying.
 `[permissions]` adds to it:
 
 ```toml
@@ -472,7 +475,7 @@ allow     = [["wrangler", "dev"]]
   - Text outside the markers is yours and stays.
   - lobstah edits only the key's own lines, keeping comments, key order and the string's quoting. It parses the file before and after; anything else changing refuses the write.
 - **`rules/lobstah.rules`.** This file is wholly lobstah's. It holds the base rules plus `[permissions.codex]`:
-  - allow: `lobstah permissions propose`. lobstah adds no `forbidden` or `prompt` rule of its own; Codex's reviewer keeps its own policy.
+  - allow: `lobstah permissions propose`, `lobstah dispatch`, and `lobstah send`. lobstah adds no `forbidden` or `prompt` rule of its own; Codex's reviewer keeps its own policy.
   - `codex execpolicy check` loads every rule before the file is put in place.
 
 `remove` deletes `rules/lobstah.rules` and lobstah's block. Neither verb sets `approvals_reviewer` or `approval_policy`: `man throw` already starts Codex traps with `--approve-for-me`.
