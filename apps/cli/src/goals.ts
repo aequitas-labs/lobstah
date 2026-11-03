@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { backendScopes, claimGoalsPrompt, displayGrounds, goalDate, goalsCardTitle, laneDirs, listDecisions, lobstahHome, previousGoalDate, readDecisionAnswer,
+import { backendScopes, claimGoalsPrompt, displayGrounds, goalDate, GOAL_WORDING_RULE, goalsCardTitle, laneDirs, listDecisions, lobstahHome, previousGoalDate, readDecisionAnswer,
   readDirIfPresent, readEvidence, readGoals, readPrs, readStatusLog, repoKey, resolveGrounds, storageGrounds, storedDescriptor, type Config, type DailyGoals, type Lane } from '@lobstah/core';
 
 export function visibleGoals(cfg: Config, now = new Date()): Array<Pick<DailyGoals, 'grounds' | 'date' | 'lines'>> {
@@ -17,7 +17,7 @@ export function dailyGoalsContext(grounds: string, cfg: Config, now = new Date()
   return `First message of the day (${date}, day starts at 04:00 local). After handling this message, put one card up with yesterday's recap and a draft of today's goals: ` +
     `read \`lobstah goals recap-data ${yesterday} --grounds ${grounds}\`, match the facts to yesterday's goals (done, moved, stuck, plus also done), ` +
     `save with \`lobstah goals recap ${yesterday} --file <md> --grounds ${grounds}\`, then use \`lobstah man ask --title "${goalsCardTitle(date)}" --detail <md> --grounds ${grounds}\`. ` +
-    `Propose a draft from open cards, PRs and todos. After the answer, save it with \`lobstah goals set "<line>" [...] --grounds ${grounds}\`.`;
+    `Propose a draft from open cards, PRs and todos. ${GOAL_WORDING_RULE} After the answer, save it with \`lobstah goals set "<line>" [...] --grounds ${grounds}\`.`;
 }
 
 /** Facts only. The helm, not a heuristic, matches work to the day's goals. */

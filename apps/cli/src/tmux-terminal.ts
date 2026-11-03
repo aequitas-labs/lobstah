@@ -28,7 +28,12 @@ export interface TmuxPaneRef {
   tmuxPane: string;
 }
 
-/** lobstah's tmux config, written only when the file is missing so a person's edits stay. */
+/**
+ * lobstah's tmux config, written only when the file is missing so a person's
+ * edits stay. A pane border too narrow for its title drops the title's start,
+ * so `homebase · fresh-cove` keeps the trap's name. tmux draws a border in the
+ * pane's width less 4, and the format's two spaces and `…` take 3 more.
+ */
 export const TMUX_CONFIG = `# lobstah's own tmux server (tmux -L lobstah). lobstah writes this file only when it is missing.
 set -g mouse on
 set -g focus-events on
@@ -40,7 +45,7 @@ set -g remain-on-exit failed
 set -g automatic-rename off
 set -g allow-set-title off
 set -g pane-border-status top
-set -g pane-border-format " #{pane_title} "
+set -g pane-border-format " #{=/-#{e|-:#{pane_width},7}/…:pane_title} "
 `;
 
 export function tmuxConfigFile(): string {
@@ -168,7 +173,7 @@ async function withPlacementLock<T>(place: () => Promise<T>, waitMs = PLACEMENT_
  * Open a trap's command in a pane of lobstah's tmux session and tile its
  * window. It never takes focus: a person attaches with `tmux -L lobstah
  * attach`, on any Desktop. The command runs in a login shell, as in a new
- * Terminal window, and the pane is titled with the trap's name. Placement
+ * Terminal window, and the pane gets the title it is given. Placement
  * holds a lock across processes. Once the pane exists, tiling and titling
  * are cosmetic: a failure there never fails the launch of a running trap.
  */

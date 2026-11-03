@@ -134,6 +134,8 @@ describe('man throw --all', () => {
     expect(seen[0]!.argv[0]).toBe('claude');
     const traps = listTraps();
     expect(traps).toHaveLength(2);
+    // The title a tmux pane opens with is the one sign-on sets.
+    expect(seen.map((l) => l.trap).sort()).toEqual(traps.map((t) => `r · ${t.name}`).sort());
     expect(new Set(traps.map((t) => t.trapId)).size).toBe(2);
     expect(traps.every((t) => t.worktree.includes(`soak-${t.trapId}`))).toBe(true);
     expect(listNotices(100).filter((n) => n.kind === 'trap-batch')).toHaveLength(1);

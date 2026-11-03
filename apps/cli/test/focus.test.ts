@@ -35,15 +35,52 @@ const calls = () => {
 const ITERM = 'w0t2p0:11111111-2222-3333-4444-555555555555';
 
 describe('safe window focus ladder', () => {
-  it("selects and zooms a tmux trap's pane on its own server, then raises the Terminal window attached to it", async () => {
+  /** A tmux server's answers: which sessions hold the pane's window, and its clients as `session window activity tty`. */
+  const tmuxAnswers = (holders: string[], clients: string[]): FileReader => async (_file, args) => (args.includes('list-panes') ? holders : clients).map((l) => `${l}\n`).join('');
+  const SELECT = (target: string, pane: string) => ['select-window', '-t', target, ';', 'select-pane', '-t', pane, ';', 'if-shell', '-F', '-t', pane, '#{window_zoomed_flag}', '', `resize-pane -Z -t ${pane}`];
+
+  it("raises the Terminal window attached to a tmux trap's pane, then selects and zooms it on its own server", async () => {
     const { seen, run } = calls();
-    const read: FileReader = async () => '/dev/ttys021\n';
+    const read = tmuxAnswers(['$0 @1'], ['$0 @2 100 /dev/ttys021']);
     const win = { termProgram: 'tmux', tmuxPane: '%0', tmuxSocket: '/private/tmp/tmux-501/lobstah', bundleId: 'com.apple.Terminal' };
     expect(await focusRegistration(reg(win), { platform: 'darwin', run, read })).toMatchObject({ focused: true, step: 'tmux' });
-    expect(seen[0]).toEqual(['tmux', ['-S', '/private/tmp/tmux-501/lobstah', 'select-window', '-t', '%0', ';', 'select-pane', '-t', '%0', ';',
-      'if-shell', '-F', '-t', '%0', '#{window_zoomed_flag}', '', 'resize-pane -Z -t %0']]);
-    expect(seen[1]?.[0]).toBe('osascript');
-    expect(seen[1]?.[1].slice(-2)).toEqual(['--', 'ttys021']);
+    expect(seen[0]?.[0]).toBe('osascript');
+    expect(seen[0]?.[1].slice(-2)).toEqual(['--', 'ttys021']);
+    expect(seen[1]).toEqual(['tmux', ['-S', '/private/tmp/tmux-501/lobstah', ...SELECT('$0:@1', '%0')]]);
+  });
+
+  describe('with several views of the trap session', () => {
+    const win = { termProgram: 'tmux', tmuxPane: '%4' };
+    const HOLDERS = ['$0 @1', '$1 @1', '$2 @1'];
+
+    it('uses the view already showing the window over a more recent one, and moves no other view', async () => {
+      const { seen, run } = calls();
+      const read = tmuxAnswers(HOLDERS, ['$1 @9 500 /dev/ttys001', '$2 @1 100 /dev/ttys002']);
+      expect(await focusRegistration(reg(win), { platform: 'darwin', run, read })).toMatchObject({ focused: true, step: 'tmux' });
+      expect(seen.map(([file]) => file)).toEqual(['osascript', 'tmux']);
+      expect(seen[0]?.[1].at(-1)).toBe('ttys002');
+      expect(seen[1]?.[1].slice(2, 5)).toEqual(['select-window', '-t', '$2:@1']);
+    });
+
+    it('otherwise moves the most recently used view, not a session no client is on', async () => {
+      const { seen, run } = calls();
+      const read = tmuxAnswers(HOLDERS, ['$1 @9 100 /dev/ttys001', '$2 @8 500 /dev/ttys002']);
+      await focusRegistration(reg(win), { platform: 'darwin', run, read });
+      expect(seen[0]?.[1].at(-1)).toBe('ttys002');
+      expect(seen[1]?.[1]).toEqual(['-L', 'lobstah', ...SELECT('$2:@1', '%4')]);
+    });
+
+    it('tries the next view when one is not in Terminal, and never counts a client of another session', async () => {
+      const seen: string[][] = [];
+      const run: FileRunner = async (file, args) => {
+        seen.push([file, ...args]);
+        if (file === 'osascript' && args.at(-1) === 'ttys002') throw new Error('tab not found');
+      };
+      const read = tmuxAnswers(HOLDERS, ['$7 @1 900 /dev/ttys007', '$1 @9 100 /dev/ttys001', '$2 @8 500 /dev/ttys002']);
+      expect(await focusRegistration(reg(win), { platform: 'darwin', run, read })).toMatchObject({ focused: true, step: 'tmux' });
+      expect(seen.filter(([file]) => file === 'osascript').map((c) => c.at(-1))).toEqual(['ttys002', 'ttys001']);
+      expect(seen.filter(([file]) => file === 'tmux').map((c) => c[5])).toEqual(['$1:@1']);
+    });
   });
 
   it('says how to attach when no Terminal window shows the pane, and never opens the bundle that started the server', async () => {

@@ -6,6 +6,8 @@
  * can never disagree about what actually parses.
  */
 
+import { GOAL_WORDING_RULE } from '@lobstah/core';
+
 interface FlagSpec {
   /** Value placeholder for the synopsis; absent means a boolean flag. */
   value?: string;
@@ -61,6 +63,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   stats: { flags: { '--json': {}, '--per-trap': {} }, maxPositionals: 0 },
   goals: { flags: { '--grounds': { value: '<name>' }, '--session': { value: '<id>' }, '--file': { value: '<md>' } }, flagSubverbs: { '--file': ['recap'] }, positionals: '[<date>|set <line>...|add <text>|rm <n>|done <n>|undo <n>|recap-data [<date>]|recap <date> --file <md>]' },
   focus: { flags: {}, positionals: '<trap>' },
+  tmux: { flags: {}, positionals: '[<repo>]', maxPositionals: 1 },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
@@ -297,6 +300,10 @@ wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster 
 Accepts its name or id with or without wt:. Reports the focus step, or why it could
 not focus. A session link can open on any supported platform; native window
 focus requires macOS.`,
+  tmux: `Open a new Terminal window on this Desktop with its own view of the trap
+session: it starts on that repo's window, or the first, and switches windows without
+moving other views. Closing the window ends the view, never a trap. Inside tmux or off
+macOS it prints the command to run.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
   send: `Steer a live chain, queue for pending work, or wake a finished chain
@@ -330,7 +337,7 @@ claimed helm this requires --session <helm-id>.`,
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
 --waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No.`,
   goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
-Goals should start with a verb and have a specific, measurable end.
+${GOAL_WORDING_RULE}
 set replaces today's lines; add appends one; rm removes the displayed line number. Edits are allowed all day.
 done <n> checks off a goal without removing it; undo <n> unchecks it. recap saves a markdown recap, retaining task markers.
 recap-data prints retained dispatch, PR, card and optional closed todo facts for yesterday (or <date>). Files: ~/.lobstah/goals/<grounds>/<date>.md; editable by hand. Writes are helm-gated.`,
