@@ -253,8 +253,10 @@ describe.skipIf(!hasTmux)('a real tmux server', () => {
       expect(titled).toMatchObject({ named: false, reason: expect.stringMatching(/^tmux failed:/) });
     });
 
-    it('keeps the title against every title escape a session can write', async () => {
+    it('keeps the title against every title escape a session can write', async (ctx) => {
       startServer();
+      // tmux 3.5 added allow-set-title. An older tmux has no way to refuse these escapes.
+      if (!tmux('show-options', '-gwq', 'allow-set-title')) ctx.skip();
       const go = path.join(home, 'go');
       const escapes = String.raw`printf ']0;osc-zero]2;osc-two\]1;osc-onekesc-k\wrote
 '`;
