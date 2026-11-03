@@ -33,7 +33,7 @@ import {
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
-import { codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
+import { codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
 
 /** One terminal tab to open: a directory, an environment, and a command line. */
 export interface TerminalLaunch {
@@ -222,7 +222,7 @@ export interface ThrowResult {
   seconds: number;
 }
 
-type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'terminal' | 'harness' | 'command' | 'mode'> & { timeoutSecs: number };
+type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'terminal' | 'harness' | 'command' | 'mode'> & { timeoutSecs: number; folderTrust?: string };
 
 /** What every throw takes. */
 export interface ThrowOptions {
@@ -292,10 +292,13 @@ async function launchAndWait(
   w: { trapId: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
 ): Promise<ThrowResult> {
   const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
+  let folderTrust: string | undefined;
   try {
     if (w.launched.harness === 'codex') {
+      const folder = codexTrapFolderTrust(w.command.cwd, w.trapId);
+      folderTrust = folder.detail;
       // An unattended throw must not park at the interactive update picker.
-      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...codexTrapHookArgs({ cwd: w.command.cwd }));
+      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd }));
     }
     await w.adapter.launch(w.command);
   } catch (err) {
@@ -303,7 +306,7 @@ async function launchAndWait(
     throw err;
   }
   const command = launchShellText({ ...w.command, argv: w.command.argv.map((a) => a.replace(w.ticket, '<ticket>')) });
-  opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode, timeoutSecs });
+  opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode, timeoutSecs, ...(folderTrust ? { folderTrust } : {}) });
   const deadline = w.started + timeoutSecs * 1000;
   for (;;) {
     const reg = readTrap(w.trapId);
@@ -324,7 +327,7 @@ async function launchAndWait(
       if (w.launched.harness === 'codex') {
         // Keep both the ticket and the fence: an already-open slow session
         // can redeem late, and retry cannot create a competing writer.
-        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${codexStallReason(w.command.cwd)}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying`);
+        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${folderTrust}; ${codexStallReason(w.command.cwd)}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying`);
       }
       giveUp(w.trapId, w.label, w.repo, w.retry, w.started, `no sign-on within ${timeoutSecs}s`);
       throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged`);
@@ -551,6 +554,7 @@ export function launchedText(launched: Launched, timeoutSecs = launched.timeoutS
     terminal: terminalAppName(launched.terminal),
     mode: launched.mode,
     command: launched.command,
+    ...(launched.folderTrust ? { folderTrust: launched.folderTrust } : {}),
     waiting: `for sign-on and first park (up to ${timeoutSecs}s)`,
   });
 }
