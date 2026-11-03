@@ -42,6 +42,7 @@ import {
   validSessionLink,
   linkMismatch,
   trapLabel,
+  trapRepoLabel,
   trapNamer,
   trapIdForName,
   TRAP_ADDRESS_RE,
@@ -644,6 +645,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       name,
       totalCatches: catches.get(name ?? `wt:${t.trapId}`) ?? 0,
       label: trapLabel({ trapId: t.trapId, name }),
+      repoLabel: trapRepoLabel({ trapId: t.trapId, name, repo: t.repo }),
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
       window,

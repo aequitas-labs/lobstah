@@ -232,6 +232,7 @@ describe('trap registry (worktree-anchored)', () => {
     const available = listNotices().filter((n) => n.kind === 'trap-available');
     expect(available).toHaveLength(1);
     expect(available[0]!.quiet).toBeUndefined();
+    expect(available[0]!.text).toBe(`trap web · ${reg.name} (wt:${reg.trapId}) is available — listening (claude); address work with \`--for ${reg.name}\``);
     expect(unseenNotices(true).map((n) => n.kind)).toEqual(['trap-available']);
     const worktree = path.join(home, 'wt', 'batch');
     fs.mkdirSync(worktree, { recursive: true });

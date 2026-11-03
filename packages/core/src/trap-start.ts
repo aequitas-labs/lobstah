@@ -5,7 +5,7 @@ import { uniqueTempPath, atomicRenameSync, soakingDir } from './paths.js';
 import { withDirLock } from './dir-lock.js';
 import { postNotice } from './notices.js';
 import { pendingIds, queuedDescriptor } from './queue.js';
-import { newTrapId, readTrap, listTraps, trapLabel } from './soak.js';
+import { newTrapId, readTrap, listTraps, trapLabel, trapRepoLabel } from './soak.js';
 import { listRoster } from './roster.js';
 import { reserveTrapName, trapIdForName } from './trap-names.js';
 
@@ -224,8 +224,8 @@ export function reserveTrap(opts: {
   postNotice({
     kind: 'trap-starting',
     text: opts.returning
-      ? `trap ${trapLabel(reservation)} thrown back for repo ${opts.repo} — starting, sign-on due by ${reservation.deadline}`
-      : `trap ${trapLabel(reservation)} reserved for repo ${opts.repo} — starting, sign-on due by ${reservation.deadline}; address work with \`--for ${name}\``,
+      ? `trap ${trapRepoLabel(reservation)} thrown back — starting, sign-on due by ${reservation.deadline}`
+      : `trap ${trapRepoLabel(reservation)} reserved — starting, sign-on due by ${reservation.deadline}; address work with \`--for ${name}\``,
     refId: trapId,
     repo: opts.repo,
     by: opts.by,
@@ -258,7 +258,7 @@ export function withdrawReservation(trapId: string, by?: string): TrapReservatio
   if (!r) return undefined;
   postNotice({
     kind: 'trap-stowed',
-    text: `trap ${trapLabel(r)} reservation withdrawn before sign-on — work addressed to it stays queued`,
+    text: `trap ${trapRepoLabel(r)} reservation withdrawn before sign-on — work addressed to it stays queued`,
     refId: trapId,
     repo: r.repo,
     by,
@@ -286,7 +286,7 @@ export function expireReservations(now = Date.now()): TrapReservation[] {
     postNotice({
       kind: 'trap-start-failed',
       text:
-        `trap ${trapLabel(r)} did not start: ${reason}. ` +
+        `trap ${trapRepoLabel(r)} did not start: ${reason}. ` +
         (waiting ? `${waiting} dispatch(es) addressed to it stay queued. ` : '') +
         `A session can still redeem its ticket; \`lobstah stow --wt ${r.name}\` withdraws the reservation.`,
       refId: r.trapId,
