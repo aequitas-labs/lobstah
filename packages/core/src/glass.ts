@@ -369,6 +369,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   desktopThread?: boolean;
   trapId: string;
   label?: string;
+  /** `label` after the trap's repo, for a card with no repo column. */
+  repoLabel?: string;
   /** Signed on now (the registration exists), including when its beat is stale. */
   live: boolean;
   /** Parked and recently beating; false for a stale or never-parked registration. */
