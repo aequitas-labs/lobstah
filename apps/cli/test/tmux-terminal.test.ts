@@ -258,8 +258,7 @@ describe.skipIf(!hasTmux)('a real tmux server', () => {
       // tmux 3.5 added allow-set-title. An older tmux has no way to refuse these escapes.
       if (!tmux('show-options', '-gwq', 'allow-set-title')) ctx.skip();
       const go = path.join(home, 'go');
-      const escapes = String.raw`printf ']0;osc-zero]2;osc-two\]1;osc-onekesc-k\wrote
-'`;
+      const escapes = String.raw`printf '\033]0;osc-zero\007\033]2;osc-two\033\\\033]1;osc-one\007\033kesc-k\033\\wrote\n'`;
       const pane = tmux('split-window', '-d', '-t', '=lobstah:', '-P', '-F', '#{pane_id}', `while [ ! -e '${go}' ]; do sleep 0.05; done; ${escapes}; sleep 30`);
       const name = tmux('display-message', '-p', '-t', pane, '#{window_name}');
       await setTerminalTitle({ tmuxPane: pane, tmuxSocket: titledSocket() }, 'homebase · fresh-cove', { env: {}, platform: 'darwin' });
