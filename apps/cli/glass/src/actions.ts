@@ -396,7 +396,7 @@ export function closeModal(): void {
 }
 
 /** Why an action can't run on a page viewed through another address. */
-const READ_ONLY_REASON = 'This glass is read-only from here';
+export const READ_ONLY_REASON = 'This glass is read-only from here';
 
 /** Ask the local server to focus one live trap; it accepts no path, URL, or command. */
 export async function openTrapWindow(trapId: string): Promise<void> {

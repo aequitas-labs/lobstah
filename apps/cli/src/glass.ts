@@ -77,6 +77,7 @@ import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
+import { viewerDevice } from './viewer-device.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
@@ -1185,13 +1186,13 @@ export function serveGlass(
       // Start commands carry a ticket: only a same-host request (this
       // machine's own page, not a rebound name) gets them.
       const local = req.headers.host === ownHost();
-      const viewer: GlassViewer = { onMachine: local, windowFocus: local && process.platform === 'darwin', machine: machineName() };
+      const viewer: GlassViewer = { onMachine: local, windowFocus: local && process.platform === 'darwin', machine: machineName(), device: viewerDevice(req.headers['user-agent'], req.headers['sec-ch-ua-mobile']) };
       const page = `"viewer":${JSON.stringify(viewer)}${local ? `,"focusToken":${JSON.stringify(focusToken)}` : ''}`;
       const send = (p: PollBody) => {
         // The ETag covers what a person reads, not the beats: a poll where
         // only heartbeats and ages moved answers 304, and the beats header
         // carries them either way.
-        const etag = `W/"${p.hash}.${instance}.${local ? 'l' : 'r'}"`;
+        const etag = `W/"${p.hash}.${instance}.${local ? 'l' : 'r'}.${viewer.device}"`;
         const headers = {
           'content-type': 'application/json',
           'cache-control': 'no-store',

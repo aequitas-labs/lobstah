@@ -378,7 +378,7 @@ describe('glass: short card badges stay whole', () => {
 describe('glass: the open-window button', () => {
   it('is a themed ↗ Open button at the end of the foot line, and its click does not open the trap modal', async () => {
     const d = everyAttentionFleet();
-    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     for (const view of ['cards', 'table'] as const) {
       const g = await page(d, { hash: '#traps', prefs: { view } });

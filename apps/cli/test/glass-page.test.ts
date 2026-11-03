@@ -166,6 +166,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('copies a signed-off $harness resume command in the modal only, not on $view or deck', async ({ harness, view }) => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     const trap = d.traps.find((t) => t.trapId === 't2')!;
     trap.harness = harness;
     trap.sessionId = 'past-session';
@@ -195,6 +196,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it.each(['claude', 'codex'])('offers no resume for a live %s trap, and copies the helm resume command', async (harness) => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.traps[0]!.harness = harness;
     d.helms[0]!.harness = harness;
     const g = await page(d, { hash: '#traps' });
@@ -212,6 +214,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('opens a signed-off $harness desktop link from $view and deck, and copies it in the modal only', async ({ harness, view }) => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     const trap = d.traps.find((t) => t.trapId === 't2')!;
     Object.assign(trap, { harness, sessionId: 'past-session', link: harness === 'codex' ? 'codex://threads/past-session' : 'claude://claude.ai/past-session', window: { entrypoint: 'claude-desktop' } });
     const g = await page(d, { hash: '#traps', prefs: { view } });
@@ -242,7 +245,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it('keeps the ↗ Open button on a live desktop trap card and its link in the modal', async () => {
     const d = acceptanceFleet();
-    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
@@ -257,6 +260,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it('does not offer a CLI command for live desktop traps or the helm without a link', async () => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.traps[0]!.desktopThread = true;
     d.traps[0]!.harness = 'codex';
     d.helms[0]!.desktopThread = true;
@@ -273,7 +277,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it('copies the attach command from a live tmux trap modal, and never from its card', async () => {
     const d = acceptanceFleet();
-    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.traps[0]!.attachCommand = 'tmux -L lobstah attach -t %7';
     const g = await page(d, { hash: '#traps' });
     const writes: string[] = [];
@@ -285,9 +289,9 @@ describe('glass page: tabs and hash routing', () => {
     expect(writes.at(-1)).toBe('tmux -L lobstah attach -t %7');
   });
 
-  it('tells an off-machine viewer where a live trap runs instead of offering open', async () => {
+  it('tells an off-machine desktop where a live trap runs and keeps the attach command, without a session link', async () => {
     const d = acceptanceFleet();
-    d.viewer = { onMachine: false, windowFocus: false, machine: 'studio' };
+    d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device: 'desktop' };
     const trap = d.traps[0]!;
     const foot = async () => {
       const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
@@ -298,16 +302,90 @@ describe('glass page: tabs and hash routing', () => {
     trap.attachCommand = 'ssh studio -t tmux -L lobstah attach -r -t %7';
     expect(text(await foot())).toContain('Running on studio');
     expect(text(await foot())).not.toContain('only reachable');
+    const attach = await page(d, { hash: '#traps' });
+    await openRow(attach, '#traps', 'wt:t1');
+    expect(attach.$$('#modalbox .cmd').map(text).join()).toContain('attach -r -t %7');
+    expect(text(attach.$('#modalbox'))).toContain('This glass is read-only from here');
     trap.attachCommand = undefined;
     Object.assign(trap, { harness: 'codex', link: 'codex://threads/live-session' });
     const card = await foot();
-    expect(text(card)).toContain('Running on studio');
-    expect(card.querySelector('a[href="codex://threads/live-session"]')?.textContent).toBe('Session link');
+    expect(text(card)).toContain('Running on studio, only reachable from there');
+    expect(card.querySelector('a[href^="codex:"]')).toBeNull();
+    const desktopTrap = await page(d, { hash: '#traps' });
+    await openRow(desktopTrap, '#traps', 'wt:t1');
+    expect(desktopTrap.$$('#modalbox a[href^="codex:"]')).toHaveLength(0);
+    expect(text(desktopTrap.$('#modalbox'))).not.toContain('open this session');
+  });
+
+  for (const device of ['phone', 'unknown'] as const) {
+    it(`shows a ${device} only where a trap runs, its state and the read-only notice`, async () => {
+      const d = acceptanceFleet();
+      d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device };
+      const trap = d.traps[0]!;
+      const modal = async () => {
+        const g = await page(d, { hash: '#traps' });
+        await openRow(g, '#traps', 'wt:t1');
+        const box = g.$('#modalbox');
+        expect(text(box)).toContain('Running on studio, only reachable from there');
+        expect(text(box)).toContain('live');
+        expect(text(box)).toContain('This glass is read-only from here');
+        expect(text(box)).not.toContain('open this session');
+        expect(text(box)).not.toContain('Session link');
+        expect(g.$$('#modalbox a[href^="claude:"], #modalbox a[href^="codex:"], #modalbox a[href^="vscode:"]')).toHaveLength(0);
+        expect(text(box)).not.toContain('attach -r');
+      };
+      trap.attachCommand = 'ssh studio -t tmux -L lobstah attach -r -t %7';
+      await modal();
+      trap.attachCommand = undefined;
+      for (const link of ['claude://claude.ai/local_1', 'codex://threads/live-session', 'vscode://anthropic.claude-code/open?session=abc']) {
+        Object.assign(trap, { harness: link.startsWith('codex') ? 'codex' : 'claude', link });
+        await modal();
+      }
+    });
+  }
+
+  it('offers a phone no resume command or open button for a signed-off trap, and none for a helm', async () => {
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' };
+    Object.assign(d.traps[0]!, { live: false, harness: 'codex', link: 'codex://threads/gone', sessionId: 'gone' });
+    const signedOff = await page(d, { hash: '#traps' });
+    await openRow(signedOff, '#traps', 'wt:t1');
+    expect(text(signedOff.$('#modalbox'))).toContain('Signed off — no window');
+    expect(text(signedOff.$('#modalbox'))).not.toContain('open this session');
+    expect(signedOff.$$('#modalbox a[href^="codex:"]')).toHaveLength(0);
+    Object.assign(d.traps[0]!, { harness: 'claude', link: undefined });
+    const command = await page(d, { hash: '#traps' });
+    await openRow(command, '#traps', 'wt:t1');
+    expect(text(command.$('#modalbox'))).not.toContain('claude --resume');
+  });
+
+  it('offers a phone no attach command in a dispatch modal', async () => {
+    const d = acceptanceFleet();
+    const x = d.dispatches.find((c) => !c.claimedBy?.startsWith('wt:'))!;
+    const modal = async (device: 'phone' | 'desktop') => {
+      d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device };
+      const g = await page(d, { hash: '#dispatches' });
+      await openRow(g, '#dispatches', x.id.slice(0, 8));
+      return text(g.$('#modalbox'));
+    };
+    expect(await modal('desktop')).toContain(`lobstah attach ${x.id}`);
+    expect(await modal('phone')).not.toContain('lobstah attach');
+  });
+
+  it('hides links and attach from a phone on a forward that keeps the address, and leaves open working', async () => {
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'phone' };
+    d.traps[0]!.attachCommand = 'tmux -L lobstah attach -t %7';
+    const g = await page(d, { hash: '#traps' });
+    await openRow(g, '#traps', 'wt:t1');
+    expect(g.$$('#modalbox button.open')).toHaveLength(1);
+    expect(text(g.$('#modalbox'))).not.toContain('attach -t');
+    expect(text(g.$('#modalbox'))).not.toContain('read-only');
   });
 
   it('shows one copyable desktop link in a live trap modal', async () => {
     const d = acceptanceFleet();
-    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps' });
     await openRow(g, '#traps', 'wt:t1');
@@ -325,7 +403,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it('shows the ↗ Open button on live traps in the table, cards, deck, and modal only', async () => {
     const d = acceptanceFleet();
-    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio' };
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     d.traps.find((t) => t.trapId === 't2')!.sessionId = 'past-session';
     d.traps.find((t) => t.trapId === 't2')!.harness = 'codex';
@@ -826,7 +904,9 @@ describe('glass page: On deck', () => {
 
 describe('glass page: header', () => {
   it('the helm chip names the man and opens the helm modal with its resume command', async () => {
-    const g = await page(acceptanceFleet());
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
+    const g = await page(d);
     const chip = g.$('#chips .chip.click')!;
     expect(text(chip)).toBe('⛵ claude @ web helm fleet · chat full 30s ago');
     expect(chip.querySelector('.ok')).toBeTruthy();

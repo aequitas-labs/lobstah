@@ -430,8 +430,10 @@ export interface GlassAnswerLimits {
   extensions: string[];
 }
 
+export type ViewerDevice = 'phone' | 'desktop' | 'unknown';
+
 /**
- * What the server can tell about a page's viewer, from the request's Host.
+ * What the server can tell about a page's viewer, from the request's Host and User-Agent.
  * This decides what the page offers. It authorizes nothing: every action still
  * checks Host, Origin and the page token.
  */
@@ -442,6 +444,8 @@ export interface GlassViewer {
   windowFocus: boolean;
   /** This machine's short name, for saying where its traps run. */
   machine: string;
+  /** The device asking. Commands and session links are offered only where they can work. */
+  device: ViewerDevice;
 }
 
 /** The /data payload: one disk pass, everything the page renders. */
