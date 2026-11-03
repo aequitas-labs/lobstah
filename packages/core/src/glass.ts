@@ -11,6 +11,7 @@ import type { Watch } from './watch.js';
 import type { ActivityView } from './activity.js';
 import type { TodoView } from './todos.js';
 import type { PermissionsProposal } from './decisions.js';
+import type { ViewerDevice } from './viewer-device.js';
 
 /**
  * The spyglass's data contract: the JSON `lobstah glass` serves at /data.
@@ -429,8 +430,6 @@ export interface GlassAnswerLimits {
   /** Accepted file extensions. */
   extensions: string[];
 }
-
-export type ViewerDevice = 'phone' | 'desktop' | 'unknown';
 
 /**
  * What the server can tell about a page's viewer, from the request's Host and User-Agent.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../../../../apps/cli/glass/src/html.js';
-import { viewerDevice } from '../../../../apps/cli/src/viewer-device.js';
+import { viewerDevice } from '../../../../packages/core/src/viewer-device.js';
 import { fileUrl } from './api.js';
 import { attachCommand, resume } from './model.js';
 import type { WharfFile, Worker } from './model.js';

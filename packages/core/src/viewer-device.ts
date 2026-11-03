@@ -1,4 +1,4 @@
-import type { ViewerDevice } from '@lobstah/core';
+export type ViewerDevice = 'phone' | 'desktop' | 'unknown';
 
 const PHONE_RE = /iPhone|iPad|iPod|Android|Mobile|Windows Phone/i;
 const DESKTOP_RE = /Macintosh|Windows NT|X11|CrOS|Linux/;

@@ -40,6 +40,7 @@ import {
   writeRequest,
   trapLastSeen,
   validSessionLink,
+  viewerDevice,
   linkMismatch,
   trapLabel,
   trapRepoLabel,
@@ -77,7 +78,6 @@ import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
-import { viewerDevice } from './viewer-device.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';

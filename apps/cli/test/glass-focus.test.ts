@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { ensureLayout, signOnTrap, soakingDir, stowTrap } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
-import { viewerDevice } from '../src/viewer-device.js';
+import { viewerDevice } from '../../../packages/core/src/viewer-device.js';
 
 let home: string;
 let worktree: string;
