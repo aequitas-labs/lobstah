@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   IdleWait,
+  recordHelmPass,
   reviewAttention,
   markReviewSeen,
   acknowledgeReview,
@@ -205,6 +206,7 @@ import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
+import { helmPassNotice, renderHelmPass } from './helm-pass.js';
 import { charter, HELM_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS } from './tend.js';
@@ -409,6 +411,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   Runs due watch checks itself when no pick
                                   process is. Unanswered questions re-fire
                                   every remindSecs until answered.
+  man pass [--note <text>]       record a todo/goals pass; list todos and goals
   man report [--grounds <name>] [--peek] [--json]
                                   the delta since the last report: catches
                                   landed, attention arisen, still-waiting, and
@@ -2405,6 +2408,18 @@ async function mainCli(): Promise<void> {
       if (digest.changed && !has('--peek')) advanceCursor(cursor, digest.now);
       break;
     }
+    case 'man:pass': {
+      const cfg = loadConfig();
+      const caller = callerSession(opt('--session'));
+      const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));
+      gateHelm(caller, grounds.name);
+      const now = Date.now();
+      const listing = renderHelmPass(grounds.name, now);
+      const pass = recordHelmPass(grounds.name, cfg.helm, opt('--note'), now);
+      console.log(toonKV({ pass: 'recorded', grounds: displayGrounds(grounds.name, cfg), at: pass.at, note: pass.note }));
+      console.log(listing);
+      break;
+    }
     case 'man:chat': {
       const chat = pos[0];
       if (pos.length !== 1 || (chat !== 'brief' && chat !== 'full')) throw new UsageError('usage: lobstah man chat brief|full [--grounds <name>]');
@@ -2447,6 +2462,8 @@ async function mainCli(): Promise<void> {
             `heartbeat ${ageSecs}s ago). Relieve them deliberately with \`lobstah man helm --take\`, or leave it.`,
         );
       }
+      const passNotice = helmPassNotice(grounds.name, cfg);
+      if (passNotice) console.log(passNotice);
       console.log(charter(grounds));
       console.log('');
       console.log(
@@ -2620,7 +2637,9 @@ async function mainCli(): Promise<void> {
         if (!consume) {
           // --peek is a session-start check, not a park: nothing standing
           // means return now (exit 0 — nothing timed out).
-          console.log(toonKV({ standing: 'none' }));
+          const passNotice = callerHelm ? helmPassNotice(callerHelm.grounds, cfgWait) : undefined;
+          if (passNotice) console.log(passNotice);
+          else console.log(toonKV({ standing: 'none' }));
           peekDigest();
           break;
         }
@@ -2664,6 +2683,8 @@ async function mainCli(): Promise<void> {
         // so a digest lost with a dead background task resurfaces on the next
         // timeout instead of being marked delivered to nobody. Silent when
         // nothing changed — the loop should not train its reader to skim.
+        const passNotice = callerHelm ? helmPassNotice(callerHelm.grounds, cfgWait) : undefined;
+        if (passNotice) console.log(passNotice);
         const digest = peekDigest();
         if (digest.changed && callerHelm) {
           const nudge = quietGoalsNudge(callerHelm.grounds, callerHelm.sessionId);
@@ -2821,6 +2842,14 @@ async function mainCli(): Promise<void> {
         // helm's wakes. Silent: a hook never breaks a stop with noise.
         if (!helm && liveHelms(cfgHaul.helm.ttlSecs * 1000).length > 0) break;
         if (!helm && process.env.LOBSTAH_MAN !== '1' && !fs.existsSync('.lobstah-man')) break;
+        const blockPass = (): boolean => {
+          const notice = helm ? helmPassNotice(helm.grounds, cfgHaul) : undefined;
+          if (!notice) return false;
+          emit(notice);
+          return true;
+        };
+        // A pass stands even with an empty fleet or an already armed watcher.
+        if (blockPass()) break;
         // The periodic digest: for a helm session, when the report cadence
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
@@ -2951,6 +2980,7 @@ async function mainCli(): Promise<void> {
               idle.woke();
               return;
             }
+            if (blockPass()) return;
             if (helm) heartbeatHelm(helm.sessionId, { parked: true }); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
@@ -2963,6 +2993,7 @@ async function mainCli(): Promise<void> {
           }
         }
         if (quiet()) {
+          if (blockPass()) break;
           idle.timedOut();
           const d = dueDigest();
           if (d) blockDigest(d);

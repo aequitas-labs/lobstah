@@ -7,9 +7,10 @@ export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; cre
 export const DISPATCH_UNBLOCKED_RULE = 'Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.';
 export const PARKED_TODO_RULE = 'Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.';
 export const TODO_COMMITMENT_RULE = "Todos are commitments. Judge whether each one can act now or should wait. Once a todo is marked stale, act on it: do it, ask on a card, move it to the issue tracker, or drop it.";
+export const HELM_PASS_RULE = 'A quiet timeout means a todo/goals pass, not just a re-arm: when pass-due stands, run `lobstah man pass`. For each todo: do it, card it, move it to the tracker, or drop it. For each goal: check its done state, mark it done if met, and choose the next step.';
 export const WITHDRAW_CARD_RULE = 'Withdraw a decision card (`lobstah man ask --withdraw <key>`) as soon as it no longer applies: its work finished, its PR merged or closed, or a newer card replaced it.';
 export const GOAL_CHECK_RULE = `${GOAL_WORDING_RULE} Before setting goals proposed in chat or on the glass, check each one. If all pass, set them as given. If a goal has no verb or no done state, use \`lobstah man ask\` to show originals beside proposed rewordings, with Use rewording, Keep originals and Edit options; run \`lobstah goals set\` only after the person chooses. Never ask for IDs or numbers.`;
-export const CHAT_BRIEF_RULE = 'Chat brief (while chat=brief): when a card carries the detail, reply with one clickable Markdown link to it; on wakes with nothing new, only re-arm; answer direct questions directly.';
+export const CHAT_BRIEF_RULE = 'Chat brief (while chat=brief): when a card carries the detail, reply with one clickable Markdown link to it; on wakes with nothing new, handle pass-due if it stands, then re-arm; answer direct questions directly.';
 
 export function helmChatRule(grounds?: string): string {
   return grounds !== undefined && helmChat(readHelm(grounds)) === 'brief' ? CHAT_BRIEF_RULE : '';
@@ -38,6 +39,7 @@ Role:
 - ${DISPATCH_UNBLOCKED_RULE}
 - ${PARKED_TODO_RULE}
 - ${TODO_COMMITMENT_RULE}
+- ${HELM_PASS_RULE}
 - ${WITHDRAW_CARD_RULE}
 - Resolve queued-too-long and stalled notices at once after a dispatch or send. Never report work as under way before it is claimed.
 - When you relay a worker's round to the human, put the question the worker is waiting on onto a card. Read a quiet trap's last note before you call it working.

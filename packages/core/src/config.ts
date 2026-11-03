@@ -346,8 +346,10 @@ export interface HelmConfig {
   park?: 'arm' | 'block';
   /** Arm mode: seconds the Stop hook polls for a watcher that is still starting before it blocks. */
   armGraceSecs: number;
-  /** Open helm to-dos older than this many days earn a short note in `man tend`; 0 disables. */
+  /** Open helm todos older than this many days are stale and require a pass; 0 disables staleness. */
   todoStaleDays: number;
+  /** Maximum seconds between explicit todo/goals passes; 0 disables the interval, not daily or stale passes. */
+  passIntervalSecs: number;
   /** Maximum open todos listed in the session-start brief; 0 lists only the remainder count. */
   briefTodoLimit: number;
   /** Minimum seconds between quiet-timeout goals reminders per helm session; 0 disables. */
@@ -554,6 +556,7 @@ export const DEFAULT_HELM: HelmConfig = {
   reportSecs: 900,
   armGraceSecs: 5,
   todoStaleDays: 3,
+  passIntervalSecs: 7200,
   briefTodoLimit: 5,
   goalsNudgeSecs: 7200,
 };
@@ -611,7 +614,7 @@ export function loadConfig(): Config {
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
   if (helm.chat !== 'full' && helm.chat !== 'brief') throw new Error('[helm].chat must be "full" or "brief"');
-  for (const key of ['briefTodoLimit', 'goalsNudgeSecs'] as const) {
+  for (const key of ['briefTodoLimit', 'goalsNudgeSecs', 'passIntervalSecs'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isSafeInteger(helm[key]) || helm[key] < 0)
       throw new Error(`[helm].${key} must be a non-negative whole number in ${configPath()}`);
   }

@@ -10,6 +10,7 @@ import type { WaitingView } from './status.js';
 import type { Watch } from './watch.js';
 import type { ActivityView } from './activity.js';
 import type { TodoView } from './todos.js';
+import type { HelmPassView } from './helm-pass.js';
 import type { PermissionsProposal } from './decisions.js';
 
 /**
@@ -430,6 +431,7 @@ export interface GlassAnswerLimits {
 
 /** The /data payload: one disk pass, everything the page renders. */
 export interface GlassSnapshot {
+  helmPasses?: HelmPassView[];
   goals?: Array<{ grounds: string; date: string; lines: string[] }>;
   backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;
   /** Per-server secret for the same-origin actions: focusing a trap and answering a decision. */
