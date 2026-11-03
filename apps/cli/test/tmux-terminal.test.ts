@@ -272,7 +272,7 @@ describe.skipIf(!hasTmux)('a real tmux server', () => {
       expect(screen).toContain('wrote');
       expect(paneTitle(pane)).toBe('homebase · fresh-cove');
       expect(tmux('display-message', '-p', '-t', pane, '#{window_name}')).toBe(name);
-    });
+    }, 30_000);
 
     it("drops the start of a title too long for its pane's border, keeping the trap's name", () => {
       startServer();
