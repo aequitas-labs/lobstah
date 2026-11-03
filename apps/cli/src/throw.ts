@@ -35,6 +35,7 @@ import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
 import { codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
+import { trapTabTitle } from './terminal-title.js';
 import { openTmuxPane, tmuxPaneTail, type TmuxPaneRef, type TmuxRunner } from './tmux-terminal.js';
 
 /** One terminal tab to open: a directory, an environment, and a command line. */
@@ -42,7 +43,7 @@ export interface TerminalLaunch {
   cwd: string;
   env: Record<string, string>;
   argv: string[];
-  /** The trap's label: a tmux pane's title. */
+  /** The title of the trap's tmux pane. */
   trap?: string;
   /** The trap's repo: which tmux window it joins. */
   repo?: string;
@@ -305,7 +306,7 @@ export function codexStallReason(cwd: string, opts: { env?: NodeJS.ProcessEnv; h
 /** Open the command, then wait until the trap signed on after `started` and parked. */
 async function launchAndWait(
   opts: ThrowOptions,
-  w: { trapId: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
+  w: { trapId: string; name?: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
 ): Promise<ThrowResult> {
   const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
   let opened: TmuxPaneRef | undefined;
@@ -317,7 +318,7 @@ async function launchAndWait(
       // An unattended throw must not park at the interactive update picker.
       w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd }));
     }
-    opened = (await w.adapter.launch({ ...w.command, trap: w.label, ...(w.repo ? { repo: w.repo } : {}) })) || undefined;
+    opened = (await w.adapter.launch({ ...w.command, trap: w.name ? trapTabTitle(w.name, w.repo) : w.label, ...(w.repo ? { repo: w.repo } : {}) })) || undefined;
   } catch (err) {
     giveUp(w.trapId, w.label, w.repo, w.retry, w.started, err instanceof Error ? err.message : String(err));
     throw err;
@@ -415,6 +416,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
   }
   return launchAndWait(opts, {
     trapId: entry.trapId,
+    name: entry.name,
     label,
     repo: entry.repo,
     retry,
@@ -472,6 +474,7 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
   });
   return launchAndWait(opts, {
     trapId: reservation.trapId,
+    name: reservation.name,
     label,
     repo: opts.repo,
     retry: `lobstah man throw --new --repo ${opts.repo}`,

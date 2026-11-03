@@ -3243,8 +3243,10 @@ async function mainCli(): Promise<void> {
       // The session applies its title as a sign-on step, then confirms it.
       const reg = askTrapTitle(res.ok.trapId, res.ok.name ?? `wt:${res.ok.trapId}`) ?? res.ok;
       if (reservation) dropReservation(reservation.trapId);
-      // The terminal tab carries the trap's name while it soaks.
-      const titled = reg.name ? await setTerminalTitle(reg.window, trapTabTitle(reg.name, reg.repo)) : undefined;
+      // The terminal tab or tmux pane carries the trap's name while it soaks.
+      // Every sign-on sets it, so a pane whose title a throw failed to set still gets it.
+      const shownTitle = reg.name ? trapTabTitle(reg.name, reg.repo) : undefined;
+      const titled = shownTitle ? await setTerminalTitle(reg.window, shownTitle) : undefined;
       // A command cannot move the session: a session outside the trap's
       // worktree is told to change into it.
       const inside = (() => {
@@ -3267,7 +3269,7 @@ async function mainCli(): Promise<void> {
           ...(made ? { created: true, branch: made.branch } : {}),
           ...(linkIgnored ? { link: `ignored — ${linkIgnored}` } : {}),
           ...(reservation ? { ticket: `redeemed — signed on as the reserved trap` } : {}),
-          ...(titled?.named ? { terminal: `tab named ${reg.name}` } : {}),
+          ...(titled?.named ? { terminal: `${titled.target === 'tmux' ? 'pane' : 'tab'} named ${shownTitle}` } : {}),
           ...(reg.one ? { one: true } : {}),
           ...(inside ? {} : { instruction: `cd ${reg.worktree} and work in that directory from now on` }),
           ...(reg.titlePending
