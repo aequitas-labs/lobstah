@@ -93,7 +93,7 @@ it('ignores a stale file: an exited process, a reused pid, or junk', async () =>
   }
   fs.writeFileSync(path.join(claudeHome, 'sessions', '12345.json'), '{broken');
   fs.writeFileSync(path.join(claudeHome, 'sessions', 'peer.json'), JSON.stringify({ sessionId: SESSION, pid: reused }));
-  fs.rmSync(path.join(claudeHome, 'sessions', `${reused}.json`));
+  fs.rmSync(path.join(claudeHome, 'sessions', `${reused}.json`), { force: true });
   expect(claudeSessionProcesses(SESSION, claudeHome)).toEqual([]);
   expect(claudeSessionProcesses(SESSION, path.join(home, 'no-claude-home'))).toEqual([]);
 });
