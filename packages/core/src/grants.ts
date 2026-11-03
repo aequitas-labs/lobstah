@@ -269,6 +269,7 @@ export function grantCovers(g: Grant, req: GrantRequest, roots: readonly Checkou
   if (req.session && g.session && req.session !== g.session) return false;
   if (g.harness !== 'any' && g.harness !== req.harness) return false;
   if (g.trap && g.trap !== req.trap) return false;
+  if (g.tools !== undefined && g.command === undefined && g.path === undefined) return g.mode === 'always' && standingToolCovers(g, req);
   const widen = g.mode === 'always';
   if (g.command !== undefined) {
     let cmd = req.command?.trim();
@@ -351,6 +352,32 @@ export function addGrant(input: GrantInput, now = new Date(), roots: readonly Ch
       return grant;
     });
   }
+  if (input.mode === 'always' && input.tools !== undefined && !command && !target) {
+    // A standing tool grant: one tool or tool glob, for every trap, until revoked.
+    if (!TOOL_GLOB.test(input.tools) || !/[A-Za-z0-9]/.test(input.tools)) throw new GrantError('an exact tool name or tool glob is required');
+    if (SHELL_TOOL_GLOB.test(input.tools) || [...SHELL_TOOLS, ...WRITE_TOOLS].some((t) => toolGlobMatches(input.tools!, t)))
+      throw new GrantError('a shell or file tool is granted by its command or path, not by its name');
+    const hosts = exactHosts(input.hosts ?? []);
+    const grant: Grant = {
+      id: `g-${crypto.randomBytes(4).toString('hex')}`,
+      at: now.toISOString(),
+      by: input.by,
+      harness: input.harness ?? 'any',
+      mode: 'always',
+      tools: input.tools,
+      ...(hosts.length ? { hosts: [...new Set(hosts)] } : {}),
+      ...(input.reason ? { reason: input.reason.slice(0, 1000) } : {}),
+      ...(input.dispatch ? { dispatch: input.dispatch } : {}),
+      uses: 0,
+    };
+    return withLock(() => {
+      const ledger = readLedger();
+      if (!ledger.intact) throw new GrantError(`the grants ledger is damaged (${ledger.problem}); nothing was written`);
+      const { uses: _uses, ...rest } = grant;
+      append(ledger.head, { type: 'grant', ...rest });
+      return grant;
+    });
+  }
   if (!command === !target) throw new GrantError('a grant names one command or one path');
   if (command && input.match === 'prefix' && SHELL_JOINERS.test(command)) {
     throw new GrantError('a prefix grant cannot contain shell syntax (;, &, |, a redirect or a subshell); grant the exact command instead');
@@ -425,7 +452,7 @@ export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date
       id: g.id,
       at: now.toISOString(),
       ...(opts.session ? { session: opts.session } : {}),
-      ...(g.mode === 'session'
+      ...(g.mode === 'session' || g.tools !== undefined
         ? { tool: req.tool, hosts: toolHosts(req.input ?? {}).hosts, ...(opts.callId ? { callId: opts.callId } : {}) }
         : {}),
     });
@@ -547,22 +574,58 @@ export function sessionGrantCovers(g: Grant, req: GrantRequest): boolean {
   if (!req.session || req.session !== g.session || !g.expiresAt || !grantActive(g)) return false;
   if (g.harness !== 'any' && g.harness !== req.harness) return false;
   if (!g.tools || sessionGuarded(req)) return false;
-  const pattern = g.tools
-    .split('*')
-    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('.*');
-  if (!new RegExp(`^${pattern}$`).test(req.tool)) return false;
-  if (['Bash', 'shell', 'exec_command'].includes(req.tool.split('.').at(-1)!)) {
+  if (!toolGlobMatches(g.tools, req.tool)) return false;
+  if (SHELL_TOOLS.includes(req.tool.split('.').at(-1)!)) {
     if (g.tools !== 'Bash' || !g.command || !req.command) return false;
     return grantCovers({ ...g, mode: 'once', session: undefined, trap: undefined }, { ...req, session: undefined }, []);
   }
+  return hostsCover(g, req);
+}
+
+/** The shell tools: a grant covers one only through its command. */
+const SHELL_TOOLS = ['Bash', 'shell', 'exec_command'];
+/** A tool name or glob a grant may name. */
+const TOOL_GLOB = /^[A-Za-z0-9_.*-]{1,200}$/;
+/** A tool glob that names a shell tool. */
+const SHELL_TOOL_GLOB = /(?:^|[.*_])(Bash|shell|exec_command)(?:$|[.*_])/;
+
+/** Does a tool name or glob (`*` matches anything) match the tool? */
+function toolGlobMatches(glob: string, tool: string): boolean {
+  const pattern = glob
+    .split('*')
+    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${pattern}$`).test(tool);
+}
+
+/** A grant's pinned hosts against the URLs in the call: none pinned allows any. */
+function hostsCover(g: Grant, req: GrantRequest): boolean {
   const urls = toolHosts(req.input ?? {});
-  if (
+  return !(
     g.hosts?.length &&
     (urls.invalid || urls.hosts.some((h) => !g.hosts!.includes(h)) || (/navigate|WebFetch/i.test(req.tool) && !urls.hosts.length))
-  )
-    return false;
-  return true;
+  );
+}
+
+/**
+ * A standing tool grant: a person allowed one tool or tool glob for every
+ * trap, until revoked. It covers that tool in any trap's session, never a
+ * shell or file tool (those are granted by command or path) and never a
+ * protected target.
+ */
+function standingToolCovers(g: Grant, req: GrantRequest): boolean {
+  if (!g.tools || sessionGuarded(req) || !toolGlobMatches(g.tools, req.tool)) return false;
+  const tool = req.tool.split('.').at(-1)!;
+  if (SHELL_TOOLS.includes(tool) || (WRITE_TOOLS as readonly string[]).includes(tool)) return false;
+  return hostsCover(g, req);
+}
+
+/** Exact hostnames, lowercased: no URL paths, ports or wildcards. */
+function exactHosts(raw: readonly string[]): string[] {
+  const hosts = raw.map((h) => h.trim().toLowerCase().replace(/\.$/, ''));
+  if (hosts.some((h) => !h || h.includes('*') || new URL(`https://${h}`).hostname !== h || /[/:@?#]/.test(h)))
+    throw new GrantError('hosts must be exact hostnames without URL paths or wildcards');
+  return hosts;
 }
 
 /** Validate a request without writing any grant or ledger entry. */
@@ -570,19 +633,16 @@ export function validateSessionGrant(input: GrantInput, now = new Date()): { exp
   const command = input.command?.trim();
   const target = input.path?.trim();
   if (!input.session || !/^[A-Za-z0-9_-]{1,200}$/.test(input.session)) throw new GrantError('a session grant needs exactly one session id');
-  if (!input.tools || !/^[A-Za-z0-9_.*-]{1,200}$/.test(input.tools) || !/[A-Za-z0-9]/.test(input.tools))
+  if (!input.tools || !TOOL_GLOB.test(input.tools) || !/[A-Za-z0-9]/.test(input.tools))
     throw new GrantError('an exact tool name or tool glob is required');
   if (target) throw new GrantError('a session grant cannot name a file');
   const tool = input.tools;
-  if ((tool === 'Bash' || /(?:^|[.*_])(Bash|shell|exec_command)(?:$|[.*_])/.test(tool)) && (!command || input.match !== 'prefix'))
+  if ((tool === 'Bash' || SHELL_TOOL_GLOB.test(tool)) && (!command || input.match !== 'prefix'))
     throw new GrantError('Bash session grants require a command prefix');
   if (command && (tool !== 'Bash' || input.match !== 'prefix' || SHELL_JOINERS.test(command)))
     throw new GrantError('a session Bash prefix cannot contain shell syntax');
   const expiresAt = input.expiresAt ?? new Date(now.getTime() + 15 * 60_000).toISOString();
   const ttl = Date.parse(expiresAt) - now.getTime();
   if (!Number.isFinite(ttl) || ttl <= 0 || ttl > 4 * 3600_000) throw new GrantError('session grants expire after at most 4h');
-  const hosts = (input.hosts ?? []).map((h) => h.trim().toLowerCase().replace(/\.$/, ''));
-  if (hosts.some((h) => !h || h.includes('*') || new URL(`https://${h}`).hostname !== h || /[/:@?#]/.test(h)))
-    throw new GrantError('hosts must be exact hostnames without URL paths or wildcards');
-  return { expiresAt, hosts };
+  return { expiresAt, hosts: exactHosts(input.hosts ?? []) };
 }
