@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { TRAP_NAME_RE } from '@lobstah/core';
+import { TRAP_NAME_RE, trapDisplayName } from '@lobstah/core';
 import type { WindowRef } from '@lobstah/core';
 
 const exec = promisify(execFile);
@@ -55,10 +55,20 @@ const TTY_RE = /^ttys[0-9]{3,5}$/;
 
 export type TitleTarget = 'terminal' | 'iterm';
 
+/** A repo key plain enough to sit in a tab title. */
+const TAB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** The tab title a trap may set: its name, after its repo when that is plain. */
+const TAB_TITLE_RE = new RegExp(`^(?:${TAB_REPO_RE.source.slice(1, -1)} · )?${TRAP_NAME_RE.source.slice(1, -1)}$`);
+
+/** The title a trap's terminal tab carries: `homebase · fresh-cove`. */
+export function trapTabTitle(name: string, repo: string | undefined): string {
+  return trapDisplayName({ trapId: name, name, repo: repo && TAB_REPO_RE.test(repo) ? repo : undefined });
+}
+
 /**
  * The osascript argv that sets (or, with an empty title, clears) the title
  * of the recorded window's tab. Undefined when the window is not a
- * Terminal.app or iTerm2 tab with a valid tty, or the title is not a trap name.
+ * Terminal.app or iTerm2 tab with a valid tty, or the title is not a trap's (see trapTabTitle).
  */
 export function titleCommand(
   win: WindowRef | undefined,
@@ -66,7 +76,7 @@ export function titleCommand(
   platform: NodeJS.Platform = process.platform,
 ): { target: TitleTarget; file: string; args: string[] } | undefined {
   if (platform !== 'darwin' || !win || typeof win.tty !== 'string' || !TTY_RE.test(win.tty)) return undefined;
-  if (title !== '' && !TRAP_NAME_RE.test(title)) return undefined;
+  if (title !== '' && !TAB_TITLE_RE.test(title)) return undefined;
   const target: TitleTarget | undefined =
     win.termProgram === 'Apple_Terminal' ? 'terminal' : win.termProgram === 'iTerm.app' ? 'iterm' : undefined;
   if (!target) return undefined;

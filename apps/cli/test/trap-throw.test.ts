@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'smol-toml';
 import { setImmediate as yieldToWorker } from 'node:timers/promises';
 import {
   ensureLayout,
@@ -119,6 +120,19 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
 const idle = (seen: TerminalLaunch[]) => (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (l) => void seen.push(l) });
 
 describe('man throw <name>', () => {
+  processTest('a Codex return supplies session folder trust for its soak-created checkout and reports it at launch', async () => {
+    const reg = stowedTrap(); stow(reg, true);
+    setRosterProfile(reg.trapId, { harness: 'codex' });
+    const seen: TerminalLaunch[] = [];
+    let launchNotice = '';
+    await throwTrap({ address: 'amber-gull', cfg: loadConfig(), adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30,
+      onLaunch: (launch) => { launchNotice = launchedText(launch); } });
+    const folderOverride = seen[0]!.argv.find((arg) => arg.startsWith('projects='));
+    expect(folderOverride).toBeDefined();
+    expect(parse(folderOverride!)).toEqual({ projects: { [fs.realpathSync.native(reg.worktree)]: { trust_level: 'trusted' } } });
+    expect(launchNotice).toContain('launch-only trust');
+  });
+
   for (const action of ['cold', 'resume'] as const) {
     processTest(`uses repo+harness permission defaults for a ${action} throw and its displayed mode`, async () => {
       const reg = stowedTrap(); stow(reg, true);

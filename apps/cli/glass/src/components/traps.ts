@@ -40,8 +40,10 @@ function row(t: GlassTrap, grants: Grant[]) {
 function card(t: GlassTrap, grants: Grant[]) {
   const r = trapRow(t);
   const mail = mailCell(t);
-  const meta = `${t.repo ?? (t.live ? 'addressed bait only' : 'history')}${t.sessionId ? ' · session ' + t.sessionId.slice(0, 8) : ''}`;
-  return html`<div key=${t.trapId} class=${'card' + dim(t)} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 ${t.label ?? `wt:${t.trapId}`}</b>${!t.requested && !t.starting && t.harness ? html`<${Harness} worker=${t} />` : html`<span class=${'badge' + badgeLong(badgeText(t))} title=${badgeTitle(badgeText(t))}>${badgeText(t)}</span>`}</div><div class="meta" title=${meta}>${meta}<${GrantChip} session=${t.sessionId} grants=${grants} /></div>${t.worktree && html`<div class="note" title=${t.worktree}>${t.worktree}</div>`}<div class="note" title=${trapNowText(t)}>${trapNow(t)}</div>${startCommands(t)}<div class="foot"><span>${r.listen}${t.live && [' · heartbeat ', r.hb]} · <span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>${mail && [' · ', mail]}</span><span class="footact">${windowAction(t)}</span></div></div>`;
+  const meta = [t.repo ? '' : t.live ? 'addressed bait only' : 'history', t.sessionId ? 'session ' + t.sessionId.slice(0, 8) : '']
+    .filter(Boolean)
+    .join(' · ');
+  return html`<div key=${t.trapId} class=${'card' + dim(t)} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 ${t.repoLabel ?? t.label ?? `wt:${t.trapId}`}</b>${!t.requested && !t.starting && t.harness ? html`<${Harness} worker=${t} />` : html`<span class=${'badge' + badgeLong(badgeText(t))} title=${badgeTitle(badgeText(t))}>${badgeText(t)}</span>`}</div><div class="meta" title=${meta}>${meta}<${GrantChip} session=${t.sessionId} grants=${grants} /></div>${t.worktree && html`<div class="note" title=${t.worktree}>${t.worktree}</div>`}<div class="note" title=${trapNowText(t)}>${trapNow(t)}</div>${startCommands(t)}<div class="foot"><span>${r.listen}${t.live && [' · heartbeat ', r.hb]} · <span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>${mail && [' · ', mail]}</span><span class="footact">${windowAction(t)}</span></div></div>`;
 }
 
 export function Traps({ inp, grants = [] }: { inp: SectionInputs['traps']; grants?: Grant[] }) {

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { laneDirs } from './paths.js';
 import { activeIds, pendingIds, queuedAt, storedDescriptor, cancelRequested } from './queue.js';
-import { readSessionClaim, trapByAddress, trapLabel, hasOpenCatch } from './soak.js';
+import { readSessionClaim, trapByAddress, trapRepoLabel, hasOpenCatch } from './soak.js';
 import { idleWorkingTrap } from './trap-turn.js';
 import { readStatusLog } from './status.js';
 import { readActivity, ageLabel } from './activity.js';
@@ -21,9 +21,9 @@ export function dispatchQueueReason(d: Descriptor, lane: Lane, cfg = loadConfig(
   if (d.for) {
     const trap = trapByAddress(d.for);
     if (!trap) return `addressed to trap ${d.for}, which is not signed on`;
-    if (hasOpenCatch(trap)) return `addressed to ${trapLabel(trap)}, busy on dispatch ${trap.claimed}`;
-    if (now - Date.parse(trap.heartbeatAt) > cfg.soak.ttlSecs * 1000) return `addressed to ${trapLabel(trap)}, which is no longer answering`;
-    return `addressed to ${trapLabel(trap)}, waiting for its session to take the brief`;
+    if (hasOpenCatch(trap)) return `addressed to ${trapRepoLabel(trap)}, busy on dispatch ${trap.claimed}`;
+    if (now - Date.parse(trap.heartbeatAt) > cfg.soak.ttlSecs * 1000) return `addressed to ${trapRepoLabel(trap)}, which is no longer answering`;
+    return `addressed to ${trapRepoLabel(trap)}, waiting for its session to take the brief`;
   }
   if (!cfg.repos[d.repo]) return `repo ${d.repo} is not configured`;
   if (d.trapAny) return trapCapacityReason(cfg, d.repo, d.harness, now);
@@ -74,7 +74,7 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): 
         if (cfg.helm.idleWorkingNoticeSecs > 0 && ageSecs >= cfg.helm.idleWorkingNoticeSecs) {
           out.push({ id, lane, repo: d.repo, state: 'idle-while-working', since: idle.since, ageSecs,
             thresholdSecs: cfg.helm.idleWorkingNoticeSecs, stateHash: `idle-working:${idle.since}`,
-            text: `idle-while-working ${id}: ${trapLabel(trap!)} ended its turn ${ageLabel(ageSecs * 1000)} ago while reporting working; last note: ${idle.note}. Read the note, resolve the question on a card, or ask the worker to keep working.` });
+            text: `idle-while-working ${id}: ${trapRepoLabel(trap!)} ended its turn ${ageLabel(ageSecs * 1000)} ago while reporting working; last note: ${idle.note}. Read the note, resolve the question on a card, or ask the worker to keep working.` });
         }
         continue; // Explicitly idle is not a silent execution stall.
       }

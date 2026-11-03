@@ -207,6 +207,24 @@ export function trapLabel(reg: Pick<TrapRegistration, 'trapId' | 'name'>): strin
   return reg.name ? `${reg.name} (wt:${reg.trapId})` : `wt:${reg.trapId}`;
 }
 
+/** What a trap is shown as, after its repo: `homebase · fresh-cove`. */
+export function withTrapRepo(repo: string | undefined, shown: string): string {
+  return repo ? `${repo} · ${shown}` : shown;
+}
+
+/**
+ * A trap's name where a person reads it and its repo isn't beside it:
+ * `homebase · fresh-cove`. Addresses and machine-read fields keep the bare name.
+ */
+export function trapDisplayName(reg: Pick<TrapRegistration, 'trapId' | 'name' | 'repo'>): string {
+  return withTrapRepo(reg.repo, reg.name ?? `wt:${reg.trapId}`);
+}
+
+/** `trapDisplayName` with the trap's address, for notices: `homebase · fresh-cove (wt:68c5da5f)`. */
+export function trapRepoLabel(reg: Pick<TrapRegistration, 'trapId' | 'name' | 'repo'>): string {
+  return withTrapRepo(reg.repo, trapLabel(reg));
+}
+
 /** A `wt:<id>` address in free text: a claim note, a log line, a hold reason. */
 export const TRAP_ADDRESS_RE = /\bwt:([a-z0-9][a-z0-9-]*)/g;
 
@@ -366,7 +384,7 @@ export function signOnTrap(opts: {
   if (!prior) {
     postNotice({
       kind: 'trap-signed-on',
-      text: `trap ${trapLabel(reg)} signed on (${workerLabel(reg)}, ${opts.repo ?? 'no repo'}, ${path.basename(opts.worktree)}) — address work with \`--for ${name}\``,
+      text: `trap ${trapRepoLabel(reg)} signed on (${workerLabel(reg)}, ${opts.repo ? '' : 'no repo, '}${path.basename(opts.worktree)}) — address work with \`--for ${name}\``,
       refId: trapId,
       repo: opts.repo,
       by: opts.sessionId,
@@ -449,7 +467,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   clearFinishedTrapCaches(reg, 'signed off');
   postNotice({
     kind: 'trap-stowed',
-    text: `trap ${trapLabel(reg)} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
+    text: `trap ${trapRepoLabel(reg)} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
     refId: trapId,
     repo: reg.repo,
     by,
@@ -523,7 +541,7 @@ export function heartbeatTrap(
     // A trap a batch started is announced by the batch's summary instead.
     postNotice({
       kind: 'trap-available',
-      text: `trap ${trapLabel(next)} is available — listening (${next.harness}, ${next.repo ?? 'no repo'}); address work with \`--for ${next.name ?? `wt:${trapId}`}\``,
+      text: `trap ${trapRepoLabel(next)} is available — listening (${next.harness}${next.repo ? '' : ', no repo'}); address work with \`--for ${next.name ?? `wt:${trapId}`}\``,
       refId: trapId,
       repo: reg.repo,
       ...(reg.batch && (!reg.startDeadline || Date.now() <= Date.parse(reg.startDeadline)) ? { quiet: true } : {}),
@@ -600,7 +618,7 @@ export function noticeIdleTrapClaims(now = Date.now(), graceMs = DEFAULT_SOAK.cl
       kind: 'trap-claim-idle',
       refId: bait.id,
       repo: bait.descriptor.repo,
-      text: `${trapLabel(reg)} claimed ${bait.id} ${Math.floor(age / 1000)}s ago but has not reported. The brief will be re-delivered at its next park; check that the session is awake.`,
+      text: `${trapRepoLabel(reg)} claimed ${bait.id} ${Math.floor(age / 1000)}s ago but has not reported. The brief will be re-delivered at its next park; check that the session is awake.`,
       dedupeKey: `trap-claim-idle-${bait.id}-${bait.claim.at}`,
     });
   }
@@ -755,7 +773,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
       const posted = postNotice({
         kind: 'trap-defective',
         text:
-          `trap ${trapLabel(reg)} signed on but never listened (no park in ${Math.round(ttlMs / 60000)}m) — ` +
+          `trap ${trapRepoLabel(reg)} signed on but never listened (no park in ${Math.round(ttlMs / 60000)}m) — ` +
           `likely no Stop hook. Have its session run \`lobstah soak --wait\`; its addressed bait waits meanwhile.`,
         refId: reg.trapId,
         repo: reg.repo,
@@ -795,8 +813,8 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     postNotice({
       kind: 'trap-ghosted',
       text: (pauseExpired
-        ? `trap ${trapLabel(reg)} ghosted: its pause expired (paused on ${reg.claimed!.slice(0, 8)} past --until or [soak].pausedTtlSecs, and quiet since)`
-        : `trap ${trapLabel(reg)} ghosted (went quiet mid-watch)`) + ` — registration removed${catchNote}${worktreeNote}`,
+        ? `trap ${trapRepoLabel(reg)} ghosted: its pause expired (paused on ${reg.claimed!.slice(0, 8)} past --until or [soak].pausedTtlSecs, and quiet since)`
+        : `trap ${trapRepoLabel(reg)} ghosted (went quiet mid-watch)`) + ` — registration removed${catchNote}${worktreeNote}`,
       refId: reg.trapId,
       repo: reg.repo,
       // An idle trap that went quiet is digest news; one holding a catch wakes the helm.
@@ -825,7 +843,7 @@ export function noticeOrphanedBait(now = Date.now(), graceMs = 0): void {
     postNotice({
       kind: 'bait-orphaned',
       text:
-        `dispatch ${id.slice(0, 8)} is addressed to ${to ? trapLabel({ trapId: to, name: trapNameForId(to) }) : d.for} but no such trap is signed on — it waits. ` +
+        `dispatch ${id.slice(0, 8)} is addressed to ${to ? trapRepoLabel({ trapId: to, name: trapNameForId(to), repo: d.repo }) : d.for} but no such trap is signed on — it waits. ` +
         `Decide: re-address (\`lobstah cancel ${id}\` + re-dispatch), release to the daemon (cancel + dispatch without --for), or cancel.`,
       refId: id,
       repo: d.repo,

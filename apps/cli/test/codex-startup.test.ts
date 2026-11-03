@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import { execFileSync } from 'node:child_process';
-import { codexProjectHookTrust, codexTrapHookArgs, codexTrapHookBlockers, codexTrapHooksRow } from '../src/codex-startup.js';
+import { codexProjectHookTrust, codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers, codexTrapHooksRow } from '../src/codex-startup.js';
+import { writeTrapAnchor } from '@lobstah/core';
 import { codexStallReason } from '../src/throw.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -111,6 +112,54 @@ describe("a Codex trap's project hooks", () => {
     fs.rmSync(path.join(home, 'hooks.json'));
     expect(codexTrapHooksRow({ web: { path: main } }, { env: { CODEX_HOME: home } })).toEqual({
       check: 'codex trap hooks', status: 'ok', detail: 'no hook would hold a Codex trap at hook review (lobstah supplies session trust for 1 committed project hook)',
+    });
+  });
+
+  describe('launch-only folder trust', () => {
+    const trapId = 'aabbccdd';
+    const folderTrust = () => codexTrapFolderTrust(worktree, trapId, { env: { CODEX_HOME: home } });
+    beforeEach(() => writeTrapAnchor(worktree, { trapId, createdBy: 'soak' }));
+
+    it('trusts only the matching soak-created linked checkout, without changing user config or trusting hooks', () => {
+      const before = fs.readFileSync(config, 'utf8');
+      const result = folderTrust();
+      expect(result.args[0]).toBe('-c');
+      expect(parse(result.args[1]!)).toEqual({ projects: { [fs.realpathSync.native(worktree)]: { trust_level: 'trusted' } } });
+      expect(result.detail).toContain('launch-only trust');
+      expect(fs.readFileSync(config, 'utf8')).toBe(before);
+      fs.writeFileSync(file, JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'echo unreviewed' }] }] } }));
+      expect(folderTrust().args).toEqual(result.args);
+      expect(codexTrapHookBlockers(worktree, { env: { CODEX_HOME: home } })).toHaveLength(1);
+      expect(codexTrapHookArgs({ env: { CODEX_HOME: home }, cwd: worktree }).join(' ')).not.toContain(`${file}:pre_tool_use:0:0`);
+    });
+
+    it('keeps paths with dots literal in the inline override', () => {
+      const dotted = path.join(fs.realpathSync.native(home), 'trap.v2');
+      sh(main, 'worktree', 'add', '-q', '-b', 'dotted-trap', dotted);
+      writeTrapAnchor(dotted, { trapId, createdBy: 'soak' });
+      const result = codexTrapFolderTrust(dotted, trapId, { env: { CODEX_HOME: home } });
+      expect(result.args[1]).toMatch(/^projects=\{/);
+      expect(parse(result.args[1]!)).toEqual({ projects: { [fs.realpathSync.native(dotted)]: { trust_level: 'trusted' } } });
+    });
+
+    it('does not supply trust for adopted checkouts, a mismatched trap, or a primary checkout', () => {
+      expect(codexTrapFolderTrust(worktree, 'deadbeef', { env: { CODEX_HOME: home } }).args).toEqual([]);
+      writeTrapAnchor(worktree, { trapId });
+      expect(folderTrust().args).toEqual([]);
+      expect(folderTrust().detail).toContain('Folder access / Trust this folder');
+      writeTrapAnchor(main, { trapId, createdBy: 'soak' });
+      expect(codexTrapFolderTrust(main, trapId, { env: { CODEX_HOME: home } }).args).toEqual([]);
+    });
+
+    it('preserves explicit untrusted choices for either the checkout or its primary repository', () => {
+      const before = fs.readFileSync(config, 'utf8');
+      for (const target of [worktree, main]) {
+        const restricted = `${before}\n[projects.${JSON.stringify(target)}]\ntrust_level="untrusted"\n`;
+        fs.writeFileSync(config, restricted);
+        expect(folderTrust().args).toEqual([]);
+        expect(folderTrust().detail).toContain('explicit untrusted');
+        expect(fs.readFileSync(config, 'utf8')).toBe(restricted);
+      }
     });
   });
 });
