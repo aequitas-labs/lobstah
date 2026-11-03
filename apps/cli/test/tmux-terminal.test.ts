@@ -9,6 +9,7 @@ import { loadConfig } from '@lobstah/core';
 import type { Config } from '@lobstah/core';
 import { openTmuxPane, tmuxConfigFile, tmuxPaneTail, tmuxPlacementLockFile, tmuxRunner, tmuxServerEnv, tmuxWindowFor, TMUX_CONFIG } from '../src/tmux-terminal.js';
 import type { TmuxRunner, TmuxWindow } from '../src/tmux-terminal.js';
+import { setTerminalTitle } from '../src/terminal-title.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -212,6 +213,80 @@ describe.skipIf(!hasTmux)('a real tmux server', () => {
       await new Promise((r) => setTimeout(r, 100));
     }
     expect(screen).toContain('second trap');
+  });
+
+  describe('a pane title at sign-on', () => {
+    /** Named `lobstah`, as lobstah's own socket is, in this test's own directory. */
+    const titledSocket = (): string => path.join(home, 'lobstah');
+    /** A tmux command's output line, with any spaces it starts or ends with. */
+    const tmuxLine = (...args: string[]): string => execFileSync('tmux', ['-u', '-S', titledSocket(), ...args], { encoding: 'utf8', env: { ...process.env, LANG: 'en_US.UTF-8' } }).replace(/\n$/, '');
+    const tmux = (...args: string[]): string => tmuxLine(...args).trim();
+    const paneTitle = (pane: string): string => tmux('display-message', '-p', '-t', pane, '#{pane_title}');
+    /** The server's config is lobstah's, and its first pane stands where a person is looking. */
+    const startServer = (): string => {
+      fs.writeFileSync(path.join(home, 'tmux.conf'), TMUX_CONFIG);
+      tmux('-f', path.join(home, 'tmux.conf'), 'new-session', '-d', '-s', 'lobstah', '-x', '200', '-y', '50', 'sleep 30');
+      return tmux('list-panes', '-t', '=lobstah', '-F', '#{pane_id}');
+    };
+    afterEach(() => {
+      try {
+        tmux('kill-server');
+      } catch {
+        // already gone
+      }
+    });
+
+    it('titles a pane left with the machine name, without moving the active pane', async () => {
+      const looking = startServer();
+      const pane = tmux('split-window', '-d', '-t', '=lobstah:', '-P', '-F', '#{pane_id}', 'sleep 30');
+      const untitled = paneTitle(pane);
+      const titled = await setTerminalTitle({ termProgram: 'tmux', tmuxPane: pane, tmuxSocket: titledSocket() }, 'homebase · fresh-cove', { env: {}, platform: 'darwin' });
+      expect(titled).toEqual({ named: true, target: 'tmux' });
+      expect(paneTitle(pane)).toBe('homebase · fresh-cove');
+      expect(paneTitle(pane)).not.toBe(untitled);
+      expect(tmux('display-message', '-p', '-t', '=lobstah:', '#{pane_id}')).toBe(looking);
+    });
+
+    it('says why when the pane is gone, and does not throw', async () => {
+      startServer();
+      const titled = await setTerminalTitle({ tmuxPane: '%99', tmuxSocket: titledSocket() }, 'fresh-cove', { env: {}, platform: 'darwin' });
+      expect(titled).toMatchObject({ named: false, reason: expect.stringMatching(/^tmux failed:/) });
+    });
+
+    it('keeps the title against every title escape a session can write', async () => {
+      startServer();
+      const go = path.join(home, 'go');
+      const escapes = String.raw`printf ']0;osc-zero]2;osc-two\]1;osc-onekesc-k\wrote
+'`;
+      const pane = tmux('split-window', '-d', '-t', '=lobstah:', '-P', '-F', '#{pane_id}', `while [ ! -e '${go}' ]; do sleep 0.05; done; ${escapes}; sleep 30`);
+      const name = tmux('display-message', '-p', '-t', pane, '#{window_name}');
+      await setTerminalTitle({ tmuxPane: pane, tmuxSocket: titledSocket() }, 'homebase · fresh-cove', { env: {}, platform: 'darwin' });
+      fs.writeFileSync(go, '');
+      let screen = '';
+      for (let i = 0; i < 100 && !screen.includes('wrote'); i++) {
+        screen = tmux('capture-pane', '-p', '-t', pane);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(screen).toContain('wrote');
+      expect(paneTitle(pane)).toBe('homebase · fresh-cove');
+      expect(tmux('display-message', '-p', '-t', pane, '#{window_name}')).toBe(name);
+    });
+
+    it("drops the start of a title too long for its pane's border, keeping the trap's name", () => {
+      startServer();
+      const format = tmuxLine('show-options', '-gv', 'pane-border-format');
+      const border = (width: number): string => {
+        const session = `w${width}`;
+        tmux('new-session', '-d', '-s', session, '-x', String(width), '-y', '20', 'sleep 30');
+        const pane = tmux('list-panes', '-t', `=${session}`, '-F', '#{pane_id}');
+        tmux('select-pane', '-t', pane, '-T', 'homebase · fresh-cove');
+        return tmuxLine('display-message', '-p', '-t', pane, format);
+      };
+      expect(border(80)).toBe(' homebase · fresh-cove ');
+      expect(border(28)).toBe(' homebase · fresh-cove ');
+      expect(border(27)).toBe(' …omebase · fresh-cove ');
+      expect(border(18)).toBe(' … fresh-cove ');
+    });
   });
 
   /** The locales a throw meets: a person's shell, `LANG=C`, and a daemon with none set. */

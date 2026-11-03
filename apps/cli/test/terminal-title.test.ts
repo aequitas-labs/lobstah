@@ -35,6 +35,22 @@ describe('terminal tab titles', () => {
     expect(titleCommand(terminal, 'x" · amber-gull', 'darwin')).toBeUndefined();
   });
 
+  it("titles a pane on lobstah's tmux server, and leaves any other tmux alone", () => {
+    const pane = { termProgram: 'tmux', tmuxPane: '%7', tmuxSocket: '/private/tmp/tmux-501/lobstah' };
+    expect(titleCommand(pane, 'homebase · amber-gull', 'linux')).toEqual({
+      target: 'tmux',
+      file: 'tmux',
+      args: ['-S', '/private/tmp/tmux-501/lobstah', 'select-pane', '-t', '%7', '-T', 'homebase · amber-gull'],
+    });
+    expect(titleCommand({ ...pane, tmuxSocket: '/private/tmp/tmux-501/default' }, 'amber-gull', 'darwin')).toBeUndefined();
+    expect(titleCommand({ termProgram: 'tmux', tmuxPane: '%7' }, 'amber-gull', 'darwin')).toBeUndefined();
+    expect(titleCommand({ ...pane, tmuxPane: '%7;kill-server' }, 'amber-gull', 'darwin')).toBeUndefined();
+    // tmux runs a #(...) in a title, so nothing but a trap's title reaches it.
+    expect(titleCommand(pane, '#(id) · amber-gull', 'darwin')).toBeUndefined();
+    // A stowed trap's pane still shows its session, so it keeps the title.
+    expect(titleCommand(pane, '', 'darwin')).toBeUndefined();
+  });
+
   it('clears with an empty title', () => {
     expect(titleCommand(terminal, '', 'darwin')?.args.at(-1)).toBe('');
   });
