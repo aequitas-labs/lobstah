@@ -117,6 +117,9 @@ describe('soak --remote-link', () => {
   const run = (cwd: string, session: string, harness: string, ...args: string[]) =>
     spawnSync(process.execPath, [cli, 'soak', '--session', session, '--harness', harness, ...args], { cwd, encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home } });
 
+  /** By folder name: Windows can report a temp path in another form (RUNNER~1). */
+  const trapIn = (folder: string) => buildGlassSnapshot().traps.find((t) => t.worktree !== undefined && path.basename(t.worktree) === folder)!;
+
   processTest('records the URL Claude printed, keeps it for the session, and refuses anything else', () => {
     const worktree = path.join(tmp, 'remote-wt');
     git(primary, 'worktree', 'add', '-q', '-b', 'remote-wt', worktree);
@@ -124,7 +127,7 @@ describe('soak --remote-link', () => {
     expect(run(worktree, SESSION, 'claude', '--remote-link', 'https://evil.test/code/a').status).not.toBe(0);
     const on = run(worktree, SESSION, 'claude', '--remote-link', REMOTE);
     expect(on.status, on.stderr || on.stdout).toBe(0);
-    const live = () => buildGlassSnapshot().traps.find((t) => t.worktree === worktree)!;
+    const live = () => trapIn('remote-wt');
     expect(live().liveLink).toBe(REMOTE);
     expect(run(worktree, SESSION, 'claude').status).toBe(0);
     expect(live().liveLink).toBe(REMOTE);
@@ -135,6 +138,6 @@ describe('soak --remote-link', () => {
     git(primary, 'worktree', 'add', '-q', '-b', 'codex-wt', worktree);
     const on = run(worktree, SESSION, 'codex', '--remote-link', REMOTE);
     expect(on.status, on.stderr || on.stdout).toBe(0);
-    expect(buildGlassSnapshot().traps.find((t) => t.worktree === worktree)!.liveLink).toBeUndefined();
+    expect(trapIn('codex-wt').liveLink).toBeUndefined();
   });
 });
