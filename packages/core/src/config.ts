@@ -319,8 +319,6 @@ export interface SoakConfig {
   tmuxPages: TmuxPages;
   /** Panes per window when `tmuxPages = "fixed"`. */
   tmuxPageSize: number;
-  /** Every new Claude trap starts with Claude's `--remote-control`, so a phone can reach it. Existing traps don't change. */
-  remoteControl: boolean;
 }
 
 /** How lobstah's tmux server groups trap panes into windows. */
@@ -531,7 +529,6 @@ function parseSoak(raw: unknown): SoakConfig {
     throw new Error(`soak.tmuxPages: unknown paging "${String(soak.tmuxPages)}" in ${configPath()} — use ${TMUX_PAGES.map((p) => `"${p}"`).join(', ')}`);
   }
   if (!Number.isInteger(soak.tmuxPageSize) || soak.tmuxPageSize < 1) throw new Error('soak.tmuxPageSize must be a positive whole number');
-  if (typeof soak.remoteControl !== 'boolean') throw new Error('soak.remoteControl must be true or false');
   return soak;
 }
 
@@ -546,7 +543,6 @@ export const DEFAULT_SOAK: SoakConfig = {
   signOffGraceSecs: 600,
   tmuxPages: 'repo',
   tmuxPageSize: 6,
-  remoteControl: false,
 };
 
 export const DEFAULT_HELM: HelmConfig = {

@@ -425,7 +425,7 @@ PR, and merge gate. Pure disk read.`,
   'man:throw': `Bring roster traps back, or start fresh, and wait until they listen; live/starting traps refuse.
 <trap>: one; --all: grounds; --repo: one repo; --new [--count N] [--request <id>]: fresh traps.
 --new shows reusable traps; --reason is required when any exist and never overrides the repo's traps cap.
---dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's. --remote-control: this Claude trap starts in Remote Control; [soak] remoteControl = true: all new ones.`,
+--dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's. --remote-control: this Claude trap starts in Remote Control, where Claude's own setting doesn't.`,
   'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull. set (the
 helm's) saves how a throw starts it; default or key= clears a field. forget removes a
 stowed trap's record, worktree, and protected ref (refused while it has unpushed commits).`,

@@ -262,7 +262,7 @@ export interface ThrowOptions {
   reason?: string;
   /** `man throw --bypass`, a person's choice: start with no permission checks. */
   bypass?: boolean;
-  /** `man throw --remote-control`: this start connects to Claude Remote Control. */
+  /** `man throw --remote-control`: this start connects to Claude Remote Control, for a machine without `remoteControlAtStartup`. */
   remoteControl?: boolean;
 }
 
@@ -382,6 +382,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
   const entry = rosterByAddress(opts.address);
   if (!row || !entry) throw new Error(`no roster record for ${opts.address} — \`lobstah man roster\` lists the traps a throw can bring back`);
   const label = trapLabel(entry);
+  if (row.sessionHeld) throw new Error(`not throwing ${label}: ${row.why}`);
   if (row.action === 'skip') throw new TrapStartingError(`not throwing ${label}: ${row.why}`);
   if (row.action === 'unresolved') throw new Error(`cannot throw ${label}: ${row.why}`);
   const terminal = row.terminal ?? 'terminal';
@@ -454,11 +455,6 @@ export function freshProfile(cfg: Config, repoKey: string, harnessFlag?: string)
 
 export const REMOTE_CONTROL_CLAUDE_ONLY = '--remote-control is for Claude traps: Codex gets a phone action only once an exact mobile link is verified';
 
-/** Whether a new trap starts connected: asked for by this throw, or `[soak] remoteControl`, on Claude only. */
-export function newTrapRemoteControl(opts: Pick<ThrowOptions, 'cfg' | 'remoteControl'>, harness: string): boolean {
-  return harness === 'claude' && (!!opts.remoteControl || opts.cfg.soak.remoteControl);
-}
-
 /**
  * `lobstah man throw --new`: start one fresh trap for a repo. It reserves a
  * new id and name, opens a session in the repo's primary checkout whose
@@ -471,7 +467,7 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
   guardNewTraps(opts.cfg, opts.repo, 1, opts.reason);
   const profile = freshProfile(opts.cfg, opts.repo, opts.harness);
   if (opts.remoteControl && profile.harness !== 'claude') throw new Error(REMOTE_CONTROL_CLAUDE_ONLY);
-  const remoteControl = newTrapRemoteControl(opts, profile.harness);
+  const { remoteControl } = opts;
   const terminal = opts.cfg.soak.terminal ?? 'terminal';
   const adapter = resolveAdapter(opts, terminal, `a new ${opts.repo} trap`, opts.cfg.soak.terminal ? 'config' : 'default');
   const { reservation, ticket } = reserveTrap({

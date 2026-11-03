@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'smol-toml';
 import { setImmediate as yieldToWorker } from 'node:timers/promises';
@@ -15,21 +15,22 @@ import {
   lobstahHome,
   planThrow,
   readReservation,
+  recordRosterDeparture,
   readRoster,
   readSessionClaim,
   readTrap,
   readTrapAnchor,
   setRosterProfile,
+  trapLabel,
   TrapStartingError,
   type Config,
   type RosterEntry,
   type ThrowPlanRow,
   type TrapRegistration,
 } from '@lobstah/core';
-import { freshProfile, harnessCommand, launchShellText, newTrapRemoteControl, nextStartMode, REMOTE_CONTROL_CLAUDE_ONLY, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
+import { freshProfile, harnessCommand, launchShellText, nextStartMode, REMOTE_CONTROL_CLAUDE_ONLY, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { trapRows } from '../src/trap-list.js';
 import { buildGlassSnapshot } from '../src/glass.js';
-import type { Config } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // A throw through the real reservation, checkout, and sign-on paths. Only
@@ -395,11 +396,6 @@ describe('the start command', () => {
     expect(harnessCommand({ ...base, harness: 'claude', remoteControl: 'amber-gull' }).argv).toEqual(['claude', '--permission-mode', 'auto', '--remote-control', 'amber-gull', '/lobstah:trap soak --ticket T']);
     expect(harnessCommand({ ...base, harness: 'claude' }).argv).not.toContain('--remote-control');
     expect(harnessCommand({ ...base, harness: 'codex', remoteControl: 'amber-gull' }).argv).not.toContain('--remote-control');
-    const cfg = (remoteControl: boolean) => ({ soak: { remoteControl } }) as Config;
-    expect(newTrapRemoteControl({ cfg: cfg(false) }, 'claude')).toBe(false);
-    expect(newTrapRemoteControl({ cfg: cfg(false), remoteControl: true }, 'claude')).toBe(true);
-    expect(newTrapRemoteControl({ cfg: cfg(true) }, 'claude')).toBe(true);
-    expect(newTrapRemoteControl({ cfg: cfg(true) }, 'codex')).toBe(false);
   });
 
   processTest('--remote-control connects one new trap, and the glass finds the URL Claude wrote for it', async () => {
@@ -429,27 +425,187 @@ describe('the start command', () => {
     }
   });
 
-  processTest('a new trap stays unconnected by default; [soak] remoteControl connects new Claude traps but not a returning one', async () => {
+  processTest('lobstah adds no --remote-control by itself: a throw asks for it, new or returning', async () => {
     const seen: TerminalLaunch[] = [];
     const first = await throwNew({ cfg: loadConfig(), repo: 'r', reason: 'default', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
     expect(seen[0]!.argv).not.toContain('--remote-control');
     expect(first.registration.remoteControlSince).toBeUndefined();
     stow(first.registration, true);
-    fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nremoteControl = true\n');
     const back = await throwTrap({ cfg: loadConfig(), address: first.registration.name!, adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
     expect(seen[1]!.argv).not.toContain('--remote-control');
     stow(back.registration, true);
     const again = await throwTrap({ cfg: loadConfig(), address: first.registration.name!, remoteControl: true, adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
     expect(seen[2]!.argv.slice(-3, -1)).toEqual(['--remote-control', first.registration.name]);
     expect(again.registration.remoteControlSince).toBeTruthy();
-    stow(again.registration, true);
-    const fresh = await throwNew({ cfg: loadConfig(), repo: 'r', reason: 'after the pilot', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
-    expect(seen[3]!.argv).toContain('--remote-control');
-    expect(fresh.registration.remoteControlSince).toBeTruthy();
-    stow(fresh.registration, true);
-    const codex = await throwNew({ cfg: loadConfig(), repo: 'r', harness: 'codex', reason: 'codex stays out', adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
-    expect(seen[4]!.argv).not.toContain('--remote-control');
-    expect(codex.registration.remoteControlSince).toBeUndefined();
+  });
+
+  describe('one session, one writer (the 2026-11-03 incident)', () => {
+    const ghost = (reg: TrapRegistration) => {
+      recordRosterDeparture(reg, 'ghosted', 'ghosted: went quiet mid-watch');
+      fs.rmSync(path.join(home, 'soaking', `${reg.trapId}.json`));
+    };
+    const thrown = async () => (await throwNew({ cfg: loadConfig(), repo: 'r', reason: 'incident', adapter: fakeTerminal(OTHER, []), timeoutSecs: 30 })).registration;
+    const trapFile = (trapId: string) => path.join(home, 'soaking', `${trapId}.json`);
+    const claudeFile = (sessionId: string, pid: number, pane: string, bridge: Record<string, unknown> = {}) => {
+      fs.mkdirSync(path.join(claudeHome, 'sessions'), { recursive: true });
+      fs.writeFileSync(path.join(claudeHome, 'sessions', `${pid}.json`), JSON.stringify({ pid, sessionId, tmux: `lobstah:@1.${pane}`, ...bridge }));
+    };
+    const running = async () => {
+      const child = spawn(process.execPath, ['-e', "setInterval(() => {}, 1000); console.log('up');"], { stdio: ['ignore', 'pipe', 'ignore'] });
+      await new Promise((resolve) => child.stdout!.once('data', resolve));
+      return child;
+    };
+    const ended = async (child: ChildProcess) => {
+      child.kill('SIGKILL');
+      if (child.exitCode === null && child.signalCode === null) await new Promise((resolve) => child.once('exit', resolve));
+    };
+
+    processTest('a ghosted thrown trap comes back under its own name when its session re-soaks, with no new worktree', async () => {
+      const reg = await thrown();
+      ghost(reg);
+      const worktrees = fs.readdirSync(path.join(home, 'worktrees'));
+      const res = lobstah(primary, 'soak', '--session', OTHER, '--harness', 'claude');
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stdout).toContain(`name: ${reg.name}`);
+      expect(listTraps().map((t) => t.trapId)).toEqual([reg.trapId]);
+      expect(fs.readdirSync(path.join(home, 'worktrees'))).toEqual(worktrees);
+    });
+
+    processTest('a session re-soaking in another linked worktree is sent back to its own trap, and takes no name', async () => {
+      const reg = await thrown();
+      ghost(reg);
+      const elsewhere = path.join(path.dirname(primary), 'elsewhere');
+      execFileSync('git', ['worktree', 'add', '-q', '-b', 'elsewhere', elsewhere], { cwd: primary });
+      const res = lobstah(elsewhere, 'soak', '--session', OTHER, '--harness', 'claude');
+      expect(res.status).not.toBe(0);
+      expect(res.stderr + res.stdout).toContain(`belongs to trap ${trapLabel(reg)}`);
+      expect(listTraps()).toEqual([]);
+    });
+
+    processTest('a live session can not sign on as a second trap from another linked worktree', async () => {
+      const reg = await thrown();
+      const elsewhere = path.join(path.dirname(primary), 'elsewhere2');
+      execFileSync('git', ['worktree', 'add', '-q', '-b', 'elsewhere2', elsewhere], { cwd: primary });
+      const res = lobstah(elsewhere, 'soak', '--session', OTHER, '--harness', 'claude');
+      expect(res.status).not.toBe(0);
+      expect(res.stderr + res.stdout).toContain('already mans trap');
+      expect(listTraps().map((t) => t.trapId)).toEqual([reg.trapId]);
+    });
+
+    processTest('a stow releases the session: it may volunteer elsewhere, or start again once its checkout is removed', async () => {
+      const reg = await thrown();
+      stow(reg, true);
+      const elsewhere = path.join(path.dirname(primary), 'elsewhere3');
+      execFileSync('git', ['worktree', 'add', '-q', '-b', 'elsewhere3', elsewhere], { cwd: primary });
+      const moved = lobstah(elsewhere, 'soak', '--session', OTHER, '--harness', 'claude');
+      expect(moved.status, moved.stderr).toBe(0);
+      const here = listTraps()[0]!;
+      expect(here.trapId).not.toBe(reg.trapId);
+      stow(here, true);
+      fs.rmSync(reg.worktree, { recursive: true, force: true });
+      execFileSync('git', ['worktree', 'prune'], { cwd: primary });
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+      execFileSync('git', ['worktree', 'prune'], { cwd: primary });
+      const again = lobstah(primary, 'soak', '--session', OTHER, '--harness', 'claude');
+      expect(again.status, again.stderr).toBe(0);
+      expect(listTraps()).toHaveLength(1);
+    });
+
+    processTest('a ghost whose checkout is gone is refused, not replaced with a new trap', async () => {
+      const reg = await thrown();
+      ghost(reg);
+      fs.rmSync(reg.worktree, { recursive: true, force: true });
+      const res = lobstah(primary, 'soak', '--session', OTHER, '--harness', 'claude');
+      expect(res.status).not.toBe(0);
+      expect(res.stderr + res.stdout).toContain(`lobstah man throw ${reg.name}`);
+      expect(listTraps()).toEqual([]);
+    });
+
+    processTest('throw refuses a session live in another pane and names it, with or without --remote-control; nothing launches', async () => {
+      const reg = await thrown();
+      stow(reg, true);
+      const project = path.join(claudeHome, 'projects', reg.worktree.replace(/[^A-Za-z0-9-]/g, '-'));
+      fs.mkdirSync(project, { recursive: true });
+      fs.writeFileSync(path.join(project, `${OTHER}.jsonl`), '{}\n');
+      const child = await running();
+      try {
+        claudeFile(OTHER, child.pid!, '%14');
+        const seen: TerminalLaunch[] = [];
+        for (const remoteControl of [false, true]) {
+          await expect(throwTrap({ cfg: loadConfig(), address: reg.name!, adapter: idle(seen), remoteControl, timeoutSecs: 1 })).rejects.toThrow(new RegExp(`process ${child.pid} \\(tmux pane %14\\).*kill ${child.pid}`));
+        }
+        expect(seen).toHaveLength(0);
+        expect(readReservation(reg.trapId)).toBeUndefined();
+      } finally {
+        await ended(child);
+      }
+    });
+
+    processTest('throw refuses a session another trap is registered on', async () => {
+      const reg = await thrown();
+      stow(reg, true);
+      const project = path.join(claudeHome, 'projects', reg.worktree.replace(/[^A-Za-z0-9-]/g, '-'));
+      fs.mkdirSync(project, { recursive: true });
+      fs.writeFileSync(path.join(project, `${OTHER}.jsonl`), '{}\n');
+      fs.writeFileSync(trapFile('93a6a892'), JSON.stringify({ trapId: '93a6a892', name: 'smooth-gull', worktree: path.join(home, 'x'), cwd: home, harness: 'claude', sessionId: OTHER, signedOnAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() }));
+      const seen: TerminalLaunch[] = [];
+      await expect(throwTrap({ cfg: loadConfig(), address: reg.name!, adapter: idle(seen), timeoutSecs: 1 })).rejects.toThrow('trap smooth-gull');
+      expect(seen).toHaveLength(0);
+    });
+
+    processTest('stow names a trap: with two on one session it refuses to guess, and --wt stows only that one', async () => {
+      const reg = await thrown();
+      fs.writeFileSync(trapFile('93a6a892'), JSON.stringify({ trapId: '93a6a892', name: 'smooth-gull', worktree: path.join(home, 'x'), cwd: home, harness: 'claude', sessionId: OTHER, signedOnAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() }));
+      const guess = lobstah(primary, 'stow', '--session', OTHER);
+      expect(guess.status).not.toBe(0);
+      expect(guess.stderr + guess.stdout).toContain('several traps share session');
+      expect(listTraps()).toHaveLength(2);
+      const quiet = lobstah(primary, 'stow', '--quiet', '--session', OTHER);
+      expect(quiet.status, quiet.stderr).toBe(0);
+      expect(listTraps()).toHaveLength(2);
+      const named = lobstah(primary, 'stow', '--wt', '93a6a892');
+      expect(named.status, named.stderr).toBe(0);
+      expect(listTraps().map((t) => t.trapId)).toEqual([reg.trapId]);
+    });
+
+    processTest('the glass finds each trap\'s live link from its own process, with no flag at sign-on', async () => {
+      vi.stubEnv('CLAUDE_CONFIG_DIR', claudeHome);
+      const [a, b] = [await running(), await running()];
+      try {
+        const reg = await thrown();
+        expect(reg.remoteControlSince).toBeUndefined();
+        const live = () => buildGlassSnapshot().traps.find((t) => t.trapId === reg.trapId)!;
+        const LINK = 'https://claude.ai/code/session_live';
+        // This Claude keeps no records, and the trap wasn't started connected.
+        expect(live().liveLink).toBeUndefined();
+        // Its process runs and isn't connected: a URL in the transcript can't stand in for that.
+        claudeFile(OTHER, a.pid!, '%14');
+        const dir = path.join(claudeHome, 'projects', 'anywhere');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, `${OTHER}.jsonl`), JSON.stringify({ type: 'system', subtype: 'bridge_status', url: 'https://claude.ai/code/session_old', timestamp: new Date().toISOString() }) + '\n');
+        expect(live().liveLink).toBeUndefined();
+        // Connected, then disconnected: Claude sets and clears the id.
+        claudeFile(OTHER, a.pid!, '%14', { bridgeSessionId: 'session_live' });
+        expect(live().liveLink).toBe(LINK);
+        claudeFile(OTHER, a.pid!, '%14', { bridgeSessionId: null });
+        expect(live().liveLink).toBeUndefined();
+        claudeFile(OTHER, a.pid!, '%14', { bridgeSessionId: 'session_live' });
+        // A second writer takes the link away until one ends.
+        claudeFile(OTHER, b.pid!, '%20', { bridgeSessionId: 'session_live' });
+        expect(live().liveLink).toBeUndefined();
+        expect(live().sessionWriters?.sort()).toEqual([a.pid!, b.pid!].sort());
+        await ended(b);
+        expect(live().liveLink).toBe(LINK);
+        expect(live().sessionWriters).toBeUndefined();
+        // Its process gone: nothing can open.
+        await ended(a);
+        expect(live().liveLink).toBeUndefined();
+      } finally {
+        await ended(a);
+        await ended(b);
+        vi.unstubAllEnvs();
+      }
+    });
   });
 
   it('refuses --remote-control for Codex before anything starts', async () => {

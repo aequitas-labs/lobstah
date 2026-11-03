@@ -113,6 +113,12 @@ describe('a stored link that contradicts its window', () => {
 });
 
 describe('soak --remote-link', () => {
+  beforeEach(() => {
+    process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude-home');
+  });
+  afterEach(() => {
+    delete process.env.CLAUDE_CONFIG_DIR;
+  });
   const REMOTE = 'https://claude.ai/code/session_01AbC';
   const run = (cwd: string, session: string, harness: string, ...args: string[]) =>
     spawnSync(process.execPath, [cli, 'soak', '--session', session, '--harness', harness, ...args], { cwd, encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home } });

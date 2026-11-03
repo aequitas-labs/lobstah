@@ -126,6 +126,8 @@ const liveLinkButton = (href: string) =>
 
 /** What the live link does, said once in the modal: which client takes it depends on the device. */
 export function liveLinkNote(t: GlassTrap): Children {
+  if (t.live && t.sessionWriters)
+    return html`<div class="bad">Processes ${t.sessionWriters.join(' and ')} both hold this session, so its live link is hidden. End one to get it back</div>`;
   return (
     t.live &&
     t.liveLink &&

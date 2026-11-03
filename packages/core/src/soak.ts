@@ -348,6 +348,9 @@ export function signOnTrap(opts: {
     const fresh = now - trapLastSeen(prior) <= opts.ttlMs;
     if (fresh) return { held: prior };
   }
+  // One session mans one trap: its messages, listener and stow all go by session.
+  const other = listTraps().find((r) => r.sessionId === opts.sessionId && r.trapId !== trapId);
+  if (other) throw new Error(`this session already mans trap ${trapLabel(other)} at ${other.worktree}. Sign it off with \`lobstah stow\` before it signs on as another trap.`);
   const anchor = readTrapAnchor(opts.worktree)!;
   // The roster holds the trap's canonical name: a returning trap keeps it.
   const name = reserveTrapName(trapId, opts.name ?? prior?.name ?? readRoster(trapId)?.name ?? anchor.name, undefined, opts.name !== undefined);

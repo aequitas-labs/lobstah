@@ -415,6 +415,12 @@ describe('glass page: tabs and hash routing', () => {
       expect(g.$$(`#traps a[href="${LIVE}"]`)).toHaveLength(1);
     });
 
+    it('says why when two processes hold the session, with no link to tap', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { liveLink: undefined, sessionWriters: [6882, 2669] });
+      expect(links(g)).toHaveLength(0);
+      expect(text(g.$('#modalbox'))).toContain('Processes 6882 and 2669 both hold this session');
+    });
+
     it('gives a signed-off trap no live link', async () => {
       const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { live: false, liveLink: undefined });
       expect(links(g)).toHaveLength(0);

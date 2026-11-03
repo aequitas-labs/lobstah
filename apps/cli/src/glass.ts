@@ -40,6 +40,8 @@ import {
   writeRequest,
   trapLastSeen,
   claudeTranscriptFile,
+  processRemoteLink,
+  readClaudeProcesses,
   transcriptRemoteLink,
   validRemoteLink,
   validSessionLink,
@@ -76,7 +78,7 @@ import {
   ANSWER_FILES_MAX,
   ANSWER_TEXT_MAX,
 } from '@lobstah/core';
-import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
+import type { Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
@@ -195,13 +197,29 @@ function assetPath(name: string): string | undefined {
   return undefined;
 }
 
-/** The URL Claude emitted for this run, read from its transcript, or the one recorded by hand. Never built from a local id. */
-function trapLiveLink(t: GlassTrap): string | undefined {
-  if (validRemoteLink(t.remoteLink)) return t.remoteLink;
+/**
+ * A live Claude trap's link, found per trap: its own running process, in
+ * Claude's record of it, shows whether Remote Control is connected right now.
+ * Two processes on the session would take a phone's message to two writers,
+ * so the page says so instead of offering the link. No process means nothing
+ * can open. Only a Claude that keeps no such records falls back on the URL it
+ * wrote to the transcript of a run started with --remote-control.
+ */
+function trapLiveView(t: GlassTrap, processes: ClaudeProcess[] | undefined): Pick<GlassTrap, 'liveLink' | 'sessionWriters'> {
+  if (!t.sessionId) return {};
+  const manual = validRemoteLink(t.remoteLink) ? t.remoteLink : undefined;
+  if (processes) {
+    const mine = processes.filter((p) => p.sessionId === t.sessionId);
+    if (mine.length > 1) return { sessionWriters: mine.map((p) => p.pid) };
+    const link = mine[0] ? (processRemoteLink(mine[0]) ?? manual) : undefined;
+    return link ? { liveLink: link } : {};
+  }
+  if (manual) return { liveLink: manual };
   const since = t.remoteControlSince ? Date.parse(t.remoteControlSince) : NaN;
-  if (!Number.isFinite(since) || !t.sessionId) return undefined;
+  if (!Number.isFinite(since)) return {};
   const file = claudeTranscriptFile(t.sessionId, [t.cwd, t.worktree].filter((c): c is string => !!c));
-  return file ? transcriptRemoteLink(file, since) : undefined;
+  const liveLink = file ? transcriptRemoteLink(file, since) : undefined;
+  return liveLink ? { liveLink } : {};
 }
 
 /** Claude Code transcript: the cwd munged to '-' under ~/.claude/projects. */
@@ -644,6 +662,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     if (id) seenIds.add(id);
   }
   const catches = new Map(stats.perTrap.map((t) => [t.name, t.catches]));
+  // Read once per snapshot, and only if a live Claude trap needs it.
+  let claudeRead: { processes: ClaudeProcess[] | undefined } | undefined;
+  const claudeProcesses = () => (claudeRead ??= { processes: readClaudeProcesses() }).processes;
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
@@ -664,7 +685,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       window,
       attachCommand: registered ? tmuxAttachCommand(window, { onMachine: !!options.local, machine: machineName() }) : undefined,
       link: validSessionLink(link) && linkMismatch(link, window) === undefined ? link : undefined,
-      liveLink: registered && harness === 'claude' ? trapLiveLink(t) : undefined,
+      ...(registered && harness === 'claude' ? trapLiveView(t, claudeProcesses()) : {}),
       sessionId,
       harness,
       desktopThread: (harness === 'codex' && !!sessionId && !!codexDesktopThread(sessionId)) || undefined,

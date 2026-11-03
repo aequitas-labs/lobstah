@@ -370,6 +370,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   desktopThread?: boolean;
   /** The Claude Remote Control URL Claude emitted for this live session. It opens on any device the owner is signed in on. */
   liveLink?: string;
+  /** Set when two processes hold this trap's session: the live link is withheld. */
+  sessionWriters?: number[];
   /** The command that joins this live trap's tmux pane, written for where this page's viewer is. */
   attachCommand?: string;
   trapId: string;
