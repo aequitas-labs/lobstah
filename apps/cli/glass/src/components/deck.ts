@@ -14,6 +14,7 @@ import { html } from '../html.js';
 import type { Children } from '../html.js';
 import {
   Age,
+  lastPassText,
   Harness,
   NamedText,
   WorkerAddress,
@@ -152,6 +153,7 @@ function deckPrs(inp: DeckInputs, view: View) {
 export function Deck({
   inp,
   goals = [],
+  passes = [],
   grants = [],
   drafts,
   focus,
@@ -160,6 +162,7 @@ export function Deck({
 }: {
   inp: DeckInputs;
   goals?: GlassSnapshot['goals'];
+  passes?: GlassSnapshot['helmPasses'];
   grants?: Grant[];
   drafts: Record<string, DecisionDraft>;
   focus: string | null;
@@ -219,13 +222,13 @@ export function Deck({
     shownGoals.length > 0 &&
       html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map(
         (g) =>
-          html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map(
+          html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><div class="dim">${lastPassText(passes.find((pass) => pass.grounds === g.grounds)?.lastPassAt)}</div><ol>${g.lines.map(
             (line, i) => {
               const goal = goalLine(line);
               return html`<li class=${goal.done ? 'done' : undefined}><label class="goal-check"><input type="checkbox" checked=${goal.done} disabled aria-label=${`Goal ${i + 1}: ${goal.text}`} title=${`Read-only; use lobstah goals ${goal.done ? 'undo' : 'done'} ${i + 1} --grounds ${g.grounds}`} /><span>${goal.done ? html`<s>${LinkedText(goal.text)}</s>` : LinkedText(goal.text)}</span></label></li>`;
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
   ];
 }

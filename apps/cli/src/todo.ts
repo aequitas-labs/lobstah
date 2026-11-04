@@ -13,6 +13,7 @@ import {
   staleTodos,
   todoLine,
   toonTable,
+  toonKV,
   type Todo,
   type TodoView,
   type HelmConfig,
@@ -145,4 +146,10 @@ export function quietGoalsNudge(grounds: string, sessionId: string, now = Date.n
   if (open.length === 0 || !claimHelmGoalsNudge(grounds, sessionId, date, helm.goalsNudgeSecs, now)) return undefined;
   const line = `goals ${goals.length - open.length}/${goals.length} · open: ${open.map((goal) => `${goal.number}. ${goal.text}`).join('; ')}`.replace(/\s+/g, ' ');
   return line.length <= 200 ? line : `${line.slice(0, 199)}…`;
+}
+
+/** Full open todo list shared by `todo ls` and automatic helm passes, stale first. */
+export function renderTodoList(grounds: string, now = Date.now()): string {
+  const todos = todoViews(now, grounds, { openOnly: true }).sort((a, b) => Number(b.stale) - Number(a.stale) || a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
+  return todos.length > 0 ? todoTable(todos, false) : toonKV({ todos: 'none', grounds: displayName()(grounds) });
 }

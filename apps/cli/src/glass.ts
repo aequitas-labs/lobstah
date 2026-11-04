@@ -77,6 +77,7 @@ import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
+import { helmPassViews } from './helm-pass.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
@@ -694,6 +695,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   return {
     now: new Date().toISOString(),
     goals: visibleGoals(cfg),
+    helmPasses: helmPassViews(cfg),
     version: lobstahVersion(),
     backends: backendViews(cfg),
     repoUrl: REPO_URL,

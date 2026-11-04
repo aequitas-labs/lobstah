@@ -76,3 +76,4 @@ export * from './wharf-broker.js';
 export * from './wait-backoff.js';
 export * from './goals.js';
 export * from './goal-line.js';
+export * from './helm-pass.js';

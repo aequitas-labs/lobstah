@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendStatus, claimNext, complete, enqueue, ensureLayout, loadConfig, signOnTrap, takeHelm } from '@lobstah/core';
+import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { readCursor } from '../src/reported.js';
 import { landedCatches } from '../src/tend.js';
 import { liveWatcher } from '../src/watchers.js';
@@ -19,6 +20,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-haul-arm-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  recordHelmPass('fleet', DEFAULT_HELM);
   takeHelm({ sessionId, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
 });
 afterEach(() => {

@@ -28,6 +28,11 @@ export const ageText = (iso: string | undefined | null): string => {
 /** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
 export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
 
+/** The same pass age beside goals and todos, recomputed when the glass refreshes. */
+export function lastPassText(at: string | undefined): string {
+  return at ? `last pass ${Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 60000))} min ago` : 'No pass recorded';
+}
+
 type WorkerInfo = { harness?: string | null; model?: string | null; config?: WorkerConfig; observedAt?: string };
 
 /** Only the existing harness indicator at rest; model/effort on hover or focus. */
