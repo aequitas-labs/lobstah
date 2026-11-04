@@ -28,6 +28,7 @@ export * from './pr-poll.js';
 export * from './dir-lock.js';
 export * from './heavy.js';
 export * from './heavy-hooks.js';
+export * from './heavy-reminder.js';
 export * from './watch.js';
 export * from './soak.js';
 export * from './harness-process.js';

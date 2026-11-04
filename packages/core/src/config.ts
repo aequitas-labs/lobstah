@@ -296,6 +296,8 @@ export interface HeavyRepoConfig {
   lightRefs: string[];
   /** Path prefixes: a push changing only files under these is light. */
   lightPaths: string[];
+  /** This repo's own heavy commands, which get the reminder: `pnpm test:e2e`. */
+  reminders: string[];
 }
 
 export interface SoakConfig {
@@ -574,7 +576,7 @@ function parseHeavy(raw: unknown): HeavyConfig {
   };
   const repos: Record<string, HeavyRepoConfig> = {};
   for (const [key, r] of Object.entries((heavy.repos ?? {}) as Record<string, Partial<HeavyRepoConfig>>)) {
-    repos[key] = { lightRefs: strings(r?.lightRefs, `[heavy.repos.${key}].lightRefs`), lightPaths: strings(r?.lightPaths, `[heavy.repos.${key}].lightPaths`) };
+    repos[key] = { lightRefs: strings(r?.lightRefs, `[heavy.repos.${key}].lightRefs`), lightPaths: strings(r?.lightPaths, `[heavy.repos.${key}].lightPaths`), reminders: strings(r?.reminders, `[heavy.repos.${key}].reminders`) };
   }
   heavy.repos = repos;
   return heavy;

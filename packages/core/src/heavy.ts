@@ -383,6 +383,17 @@ export function dropHeavyTickets(match: { dispatch?: string; trap?: string }, re
   });
 }
 
+/**
+ * A dispatch's or trap's tickets with a live owner. Waiting for a slot or
+ * running in one, the command is already on its way, so its silence isn't a
+ * sign of trouble.
+ */
+export function liveHeavyTickets(match: { dispatch?: string; trap?: string }, now = Date.now()): HeavyTicket[] {
+  return readLine().filter((t) =>
+    ((match.dispatch !== undefined && t.dispatch === match.dispatch) || (match.trap !== undefined && t.trap === match.trap)) &&
+    (t.state === 'waiting' ? t.deadAt === undefined && ownerAlive(t, now) : t.state !== 'cancelled' && (ownerAlive(t, now) || groupAlive(t))));
+}
+
 /** The line as it stands. Read-only: clearing the dead is left to whoever next joins or checks. */
 export function heavyView(now = Date.now(), cfg?: Config): HeavyView {
   const line = readLine();
