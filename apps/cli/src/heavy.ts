@@ -92,13 +92,24 @@ function exitCodeOf(code: number | null, signal: NodeJS.Signals | null): number 
   return n ? 128 + n : 1;
 }
 
+/**
+ * Windows finds `npx` and `pnpm` only through the shell, which joins arguments
+ * unquoted, so quote them here. An `.exe` needs no shell. Elsewhere, no shell.
+ */
+export function windowsCommand(argv: string[], platform: NodeJS.Platform = process.platform): [string, string[], boolean] {
+  if (platform !== 'win32' || /\.exe$/i.test(argv[0]!)) return [argv[0]!, argv.slice(1), false];
+  const quote = (arg: string) => (/^[\w\-./\\:=@]+$/.test(arg) ? arg : `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`);
+  return [quote(argv[0]!), argv.slice(1).map(quote), true];
+}
+
 /** Run `argv`, wired to this process. Resolves with its exit code. */
 function runChild(argv: string[], env: NodeJS.ProcessEnv, hooks: { onGroup?: (group: number) => void; onTick?: () => void } = {}): Promise<number> {
   // Its own process group, so a killed wrapper leaves a command whose load is
   // still visible to the line. A command on a terminal stays in the foreground.
   const detached = process.platform !== 'win32' && !process.stdin.isTTY;
   return new Promise((resolve) => {
-    const child = spawn(argv[0]!, argv.slice(1), { stdio: 'inherit', env, detached, shell: process.platform === 'win32', windowsHide: true });
+    const [file, args, shell] = windowsCommand(argv);
+    const child = spawn(file, args, { stdio: 'inherit', env, detached, shell, windowsHide: true });
     const forward = (signal: NodeJS.Signals) => () => {
       if (!detached || child.pid === undefined) return;
       try {

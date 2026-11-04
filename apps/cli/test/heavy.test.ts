@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { laneDirs, worktreeLockFile } from '@lobstah/core';
 import { stopChildren } from '../../../test/child-process.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { windowsCommand } from '../src/heavy.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const unix = process.platform !== 'win32';
@@ -72,6 +73,20 @@ afterEach(async () => {
   if (priorHome === undefined) delete process.env.LOBSTAH_HOME;
   else process.env.LOBSTAH_HOME = priorHome;
   removeTempDir(home);
+});
+
+describe('starting a command on Windows', () => {
+  it('runs an .exe directly, whatever its path holds', () => {
+    expect(windowsCommand(['C:\\Program Files\\node.exe', '-e', "a('b')"], 'win32')).toEqual(['C:\\Program Files\\node.exe', ['-e', "a('b')"], false]);
+  });
+
+  it('quotes what the shell would split or mangle', () => {
+    expect(windowsCommand(['npx', 'vitest', 'run', 'a b.ts', 'say "hi"'], 'win32')).toEqual(['npx', ['vitest', 'run', '"a b.ts"', '"say \\"hi\\""'], true]);
+  });
+
+  it('uses no shell elsewhere', () => {
+    expect(windowsCommand(['npx', 'a b'], 'linux')).toEqual(['npx', ['a b'], false]);
+  });
 });
 
 describe('lobstah heavy', () => {
