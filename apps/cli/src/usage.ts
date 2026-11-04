@@ -275,6 +275,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
   '__pool-warm': { flags: {}, positionals: '<pool>' },
+  '__heavy-push': { flags: { '--probe': {} }, positionals: '-- <hook> [args]' },
 };
 
 // Backend selection applies to every public command, never one global backend.
@@ -476,6 +477,7 @@ post-tool-use runs soak beat, session-end runs stow --quiet. The older commands
 stay as aliases. permission-request and grant-check allow a trap's call a grant covers.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
 itself with this verb). Not for direct use.`,
+  '__heavy-push': `Internal: the git hook shim's pre-push. Takes a heavy slot, then runs the repo's own hook.`,
   '__pool-warm': `Internal: one warm-up pass over a worktree pool (the daemon re-execs itself
 with this verb). Not for direct use.`,
 };
