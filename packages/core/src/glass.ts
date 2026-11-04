@@ -430,6 +430,24 @@ export interface GlassAnswerLimits {
 }
 
 /** The /data payload: one disk pass, everything the page renders. */
+export interface GlassHeavyTicket {
+  state: 'running' | 'over' | 'waiting';
+  command: string;
+  trap?: string;
+  dispatch?: string;
+  /** When it started running, or joined the line. */
+  since?: string;
+  /** Place among the waiters, from 1. */
+  position?: number;
+}
+
+export interface GlassHeavy {
+  slots: number;
+  running: number;
+  waiting: number;
+  tickets: GlassHeavyTicket[];
+}
+
 export interface GlassSnapshot {
   helmPasses?: HelmPassView[];
   goals?: Array<{ grounds: string; date: string; lines: string[] }>;
@@ -450,6 +468,8 @@ export interface GlassSnapshot {
   daemon?: { version?: string; heartbeat?: string };
   /** Work slots. `parked` dispatches (last report `paused`) hold none. */
   slots?: { headless: number; limit: number; traps: number; parked?: number };
+  /** The machine's heavy line. */
+  heavy?: GlassHeavy;
   helms: GlassHelm[];
   traps: GlassTrap[];
   /** Catches (dispatches finished done): today, on the server's local day, and all time. */

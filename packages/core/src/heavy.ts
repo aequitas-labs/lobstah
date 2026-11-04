@@ -6,6 +6,8 @@ import { DEFAULT_HEAVY, loadConfig } from './config.js';
 import type { Config, HeavyConfig } from './config.js';
 import { withDirLock } from './dir-lock.js';
 import { processStartedAt } from './harness-process.js';
+import type { GlassHeavy, GlassHeavyTicket } from './glass.js';
+import { postNotice } from './notices.js';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
 import type { Lane } from './types.js';
 
@@ -392,6 +394,63 @@ export function liveHeavyTickets(match: { dispatch?: string; trap?: string }, no
   return readLine().filter((t) =>
     ((match.dispatch !== undefined && t.dispatch === match.dispatch) || (match.trap !== undefined && t.trap === match.trap)) &&
     (t.state === 'waiting' ? t.deadAt === undefined && ownerAlive(t, now) : t.state !== 'cancelled' && (ownerAlive(t, now) || groupAlive(t))));
+}
+
+/**
+ * The daemon's pass: clear what the dead left when nobody is waiting to notice,
+ * and say what's worth saying. A long line is one quiet notice, once until the
+ * line empties. A command over its limit is one notice per ticket, which wakes
+ * the helm because something may be stuck. Nothing else is news.
+ */
+export function heavyDaemonPass(now = Date.now()): void {
+  const cfg = settings();
+  const line = withLine(() => settle(cfg.holdLimitMins * 60_000, now));
+  for (const t of line) {
+    if (t.state !== 'over' || t.reason) continue;
+    postNotice({
+      kind: 'heavy-over-limit',
+      text: `${heavyWho(t)}: ${t.command} passed the ${cfg.holdLimitMins} minute limit. It lost its slot and keeps running.`,
+      ...(t.dispatch ? { refId: t.dispatch } : {}),
+      ...(t.repo ? { repo: t.repo } : {}),
+      dedupeKey: `heavy-over-${t.seq}-${t.joinedAt}`,
+    });
+  }
+  const waiters = line.filter((t) => t.state === 'waiting' && t.deadAt === undefined);
+  const marker = path.join(heavyDir(), 'line-noticed');
+  if (waiters.length === 0) {
+    fs.rmSync(marker, { force: true });
+    return;
+  }
+  const waited = now - Date.parse(waiters[0]!.joinedAt);
+  if (waited < cfg.lineNoticeMins * 60_000 || fs.existsSync(marker)) return;
+  fs.writeFileSync(marker, new Date(now).toISOString());
+  postNotice({
+    kind: 'heavy-line-long',
+    text: `The heavy line is long: ${waiters.length} waiting, the oldest for ${Math.floor(waited / 60_000)} minutes.`,
+    quiet: true,
+  });
+}
+
+/** What the glass shows: the counts, and each ticket's place for its trap or worker row. */
+export function heavyGlassView(now = Date.now(), cfg?: Config): GlassHeavy {
+  const view = heavyView(now, cfg);
+  const row = (t: HeavyTicket, state: GlassHeavyTicket['state'], since: string | undefined, position?: number): GlassHeavyTicket => ({
+    state, command: t.command,
+    ...(t.trap ? { trap: t.trap } : {}),
+    ...(t.dispatch ? { dispatch: t.dispatch } : {}),
+    ...(since ? { since } : {}),
+    ...(position ? { position } : {}),
+  });
+  return {
+    slots: view.slots,
+    running: view.running.length,
+    waiting: view.waiting.length,
+    tickets: [
+      ...view.running.map((t) => row(t, 'running', t.runningAt)),
+      ...view.over.map((t) => row(t, 'over', t.runningAt)),
+      ...view.waiting.map((t, i) => row(t, 'waiting', t.joinedAt, i + 1)),
+    ],
+  };
 }
 
 /** The line as it stands. Read-only: clearing the dead is left to whoever next joins or checks. */

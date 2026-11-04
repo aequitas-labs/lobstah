@@ -143,6 +143,20 @@ describe('lobstah heavy', () => {
     expect(tickets()).toEqual([]);
   }, TEST_MS);
 
+  it('man tend shows the line while anything is in it, and only then', async () => {
+    setSlots(1);
+    const tend = () => spawnSync(process.execPath, [cli, 'man', 'tend'], { env: env(), cwd: home, encoding: 'utf8' }).stdout;
+    expect(tend()).not.toContain('heavy:');
+    const holding = path.join(home, 'holding');
+    const first = start(sleeper(30_000, holding));
+    await until(() => fs.existsSync(holding));
+    expect(tend()).toMatch(/heavy: 1 of 1 running · 0 waiting/);
+    first.child.kill('SIGTERM');
+    await first.done;
+    await until(() => tickets().length === 0);
+    expect(tend()).not.toContain('heavy:');
+  }, TEST_MS);
+
   it('a cancelled waiter exits having run nothing', async () => {
     setSlots(1);
     const marker = path.join(home, 'ran');

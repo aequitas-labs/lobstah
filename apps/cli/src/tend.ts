@@ -69,6 +69,8 @@ import {
   repoKey as forgeRepoKey,
   poolViews,
   poolWaits,
+  formatHeavyView,
+  heavyView,
 } from '@lobstah/core';
 import type {
   AttentionKind,
@@ -84,6 +86,7 @@ import type {
   TendAttention,
   TendAttentionKind,
   PoolView,
+  HeavyView,
 } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
@@ -574,6 +577,8 @@ export interface TendReport {
   goals?: ReturnType<typeof visibleGoals>;
   backends?: ReturnType<typeof backendViews>;
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
+  /** The machine's heavy line, when anything is in it. */
+  heavy?: HeavyView;
   daemon: { up: boolean; lastHeartbeat?: string };
   counts: {
     queued: number;
@@ -1022,8 +1027,16 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     heartbeatAgeSecs: Math.max(0, Math.round((now - (Date.parse(h.heartbeatAt) || 0)) / 1000)),
   }));
 
+  const heavy = (() => {
+    try {
+      return heavyView(now, cfg);
+    } catch {
+      return undefined; // the line is never worth a failed tend
+    }
+  })();
   return {
     verdict,
+    ...(heavy && heavy.running.length + heavy.over.length + heavy.waiting.length > 0 ? { heavy } : {}),
     goals: visibleGoals(cfg, new Date(now)),
     backends: backendViews(cfg),
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
@@ -1093,6 +1106,7 @@ export function renderTend(r: TendReport): string {
       ...(r.hold ? { diskHold: `${r.hold.reason} on ${r.hold.dir} (since ${r.hold.since})` } : {}),
     }),
   );
+  if (r.heavy) lines.push(formatHeavyView(r.heavy));
   if (r.queueWait) lines.push(r.queueWait);
   if (r.todoNote) lines.push(r.todoNote);
   for (const stack of r.stacks) {
