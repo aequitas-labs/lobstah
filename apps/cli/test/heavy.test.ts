@@ -148,12 +148,12 @@ describe('lobstah heavy', () => {
     const tend = () => spawnSync(process.execPath, [cli, 'man', 'tend'], { env: env(), cwd: home, encoding: 'utf8' }).stdout;
     expect(tend()).not.toContain('heavy:');
     const holding = path.join(home, 'holding');
-    const first = start(sleeper(30_000, holding));
+    const release = path.join(home, 'release');
+    const first = start(`const fs=require('fs');fs.writeFileSync(${JSON.stringify(holding)},'');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)}))clearInterval(t)},50)`);
     await until(() => fs.existsSync(holding));
     expect(tend()).toMatch(/heavy: 1 of 1 running · 0 waiting/);
-    first.child.kill('SIGTERM');
-    await first.done;
-    await until(() => tickets().length === 0);
+    fs.writeFileSync(release, '');
+    expect(await first.done).toBe(0);
     expect(tend()).not.toContain('heavy:');
   }, TEST_MS);
 
