@@ -481,6 +481,13 @@ workers (dispatched agents; injected into every brief):
                                   dispatch's report, images --attach'ed
                                   (or --attach-dir, a folder under it).
 
+heavy commands (one line per machine):
+  heavy [--bg] [--json] [-- <command>]
+                                  with no command, show the line. With one,
+                                  wait for a slot, run it, and free the slot.
+                                  The exit code is the command's. --bg returns
+                                  at once and posts the result to the inbox.
+
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--ticket <t>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
                                   volunteer this session as a worker.
@@ -1146,6 +1153,11 @@ async function mainCli(): Promise<void> {
         expires: opt('--expires'),
         trap: opt('--trap'),
       });
+      break;
+    }
+    case 'heavy': {
+      const { heavyCommand } = await import('./heavy.js');
+      await heavyCommand(pos, { bg: has('--bg'), json: has('--json') });
       break;
     }
     case 'grants': {

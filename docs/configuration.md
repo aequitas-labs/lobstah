@@ -184,6 +184,25 @@ send a continuation.
 | `terminal` | unset | The terminal app a thrown trap opens in: `terminal` (Terminal.app) or `iterm` (iTerm2). A trap's roster profile (`man roster set <trap> --terminal`) overrides it. Unset, `man throw` uses the app the trap last signed on from, else Terminal.app. `man throw` opens the trap's session there through AppleScript (macOS only); the app needs Automation permission for the terminal that runs `man throw`. |
 | `pausedTtlSecs` | `86400` (24 hours) | A trap whose catch last reported `paused` is kept out of the ghost sweep this long after the report. `report paused --until <iso|duration>` sets the expiry instead. After it, the sweep removes the trap as usual, and the notice says the pause expired. |
 
+## `[heavy]` — the machine's line for heavy commands (`lobstah heavy`)
+
+`lobstah heavy -- <command>` waits for a slot, runs the command, and frees the
+slot. One line covers every repo on the machine. Each process manages its own
+place in `~/.lobstah/heavy/`, so the line doesn't depend on the daemon. With no
+command, `lobstah heavy` shows the line.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `slots` | `"auto"` | Commands that run at once. `auto` is 1 below 14 cores, otherwise 2. Read on every check, so a change needs no restart. |
+| `workers` | `"auto"` | Test workers per run, set as `VITEST_MAX_WORKERS`, `VITEST_MAX_FORKS` and `VITEST_MAX_THREADS` unless already set. `auto` is a third of the cores, at least 2. |
+| `holdLimitMins` | `45` | Active minutes a command keeps its slot. Past this it loses the slot and keeps running. Sleep doesn't count. |
+| `lineNoticeMins` | `30` | How long the oldest waiter waits before a quiet notice. |
+
+The line never kills or fails a command. If the line itself fails, the command
+runs without a slot and prints one line. A waiter removed from the line because
+its trap or dispatch stopped exits 75 having run nothing. `--bg` returns at once
+and posts the exit code, log path and last lines to the dispatch's inbox.
+
 ## `[helm]` — the orchestrator seat (`lobstah man helm`)
 
 | Key | Default | Meaning |
