@@ -19,7 +19,7 @@ beforeEach(() => {
 afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });
 
 describe('the grounds todo/goals pass', () => {
-  it('stands without a pass today, and an explicit pass clears it even with an empty fleet', () => {
+  it('stands without a pass today, and a delivered pass clears it even with an empty fleet', () => {
     expect(helmPassStatus('fleet', CONFIG, NOW).reasons).toEqual(['daily']);
     recordHelmPass('fleet', CONFIG, 'Reviewed goals and todos', NOW);
     expect(helmPassStatus('fleet', CONFIG, NOW).reasons).toEqual([]);

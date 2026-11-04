@@ -196,18 +196,20 @@ send a continuation.
 | `idleWorkingNoticeSecs` | `60` | Explicitly idle trap whose last report is working: wake the helm with its full note. A live session-owned background wait exempts it. Tool activity or a new report clears it; reminders use the same backoff. `0` disables. |
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
 | `todoStaleDays` | `3` | Open helm todos older than this many days are stale and require a todo/goals pass. `0` disables staleness. |
-| `passIntervalSecs` | `7200` | Maximum seconds between explicit todo/goals passes. `0` disables only this interval; a new goals day or newly stale todo still makes a pass due. |
+| `passIntervalSecs` | `7200` | Maximum seconds between delivered todo/goals passes. `0` disables only this interval; a new goals day or newly stale todo still makes a pass due. |
 | `briefTodoLimit` | `5` | Maximum open todos in the session-start brief, oldest first; the remainder is counted. `0` shows only the count. |
 | `goalsNudgeSecs` | `7200` | Minimum seconds between capped goals lines on `man wait` timeout digests, per helm session; resets at the goals-day boundary. `0` disables. |
 | `chat` | `"full"` | Default chat detail: `"full"` or `"brief"`. Brief mode points at cards instead of repeating detail and keeps routine wakes quiet. `lobstah man chat brief\|full [--grounds <name>]` or glass Settings overrides it for that grounds' signed-on helm, effective next turn, without a restart or config edit. The override stays with the seat on re-sign/takeover and ends when relieved. |
 
-`lobstah man pass [--note <text>]` records a pass for the grounds and lists todos
-(stale first) and today's goals with their done state. A pass is due on the first
-helm sign-on or wait of a goals day (04:00 local), after the interval, or when a
-todo becomes stale. Quiet `man wait` timeouts lead with `pass-due` when due, and
-the Stop hook blocks until a pass is recorded. A pass acknowledges current stale
-todos without changing them; new stale versions stand again. Glass shows the
-last pass age beside goals and todos.
+A todo/goals pass is due on the first helm sign-on or wait of a goals day
+(04:00 local), after the interval, or when a todo becomes stale. When due,
+sign-on, the Stop hook, and quiet `man wait` timeouts print the full open todo
+list (stale first) and today's goals with their done states, using the same
+renderers as `lobstah todo ls` and `lobstah goals`. Showing those details records
+the pass automatically; there is no extra command. The Stop hook blocks once to
+deliver the details. Previews (`man wait --peek`), `todo ls`, and `goals` stay
+read-only. A delivery acknowledges current stale todo versions; new stale
+versions stand again. Glass shows the last pass age beside goals and todos.
 
 ## `[wait]` — quiet helm and trap waiters
 

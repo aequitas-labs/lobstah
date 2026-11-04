@@ -5,7 +5,7 @@ import { goalDate, goalsFile } from './goals.js';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
 import { listTodos, staleTodos, type Todo } from './todos.js';
 
-/** A completed todo/goals pass belongs to the grounds, surviving helm restarts and takeovers. */
+/** A delivered todo/goals pass belongs to the grounds, surviving helm restarts and takeovers. */
 export interface HelmPass {
   at: string;
   note?: string;
@@ -57,7 +57,7 @@ export function helmPassStatus(grounds: string, config: HelmConfig, now = Date.n
   return { lastPass, reasons, staleTodos: stale };
 }
 
-/** Record the pass explicitly, acknowledging current stale versions without changing any todo or goal. */
+/** Record delivery of the pass, acknowledging current stale versions without changing any todo or goal. */
 export function recordHelmPass(grounds: string, config: HelmConfig, note?: string, now = Date.now()): HelmPass {
   const record: HelmPass = {
     at: new Date(now).toISOString(),

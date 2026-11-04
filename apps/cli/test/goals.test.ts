@@ -33,15 +33,15 @@ it('CLI reads/writes goals and past recaps, and refuses a different session writ
   takeHelm({ sessionId: 'helm', grounds: { name: 'day', repos: ['r'] }, ttlMs: 60000 });
   const command = (...args: string[]) => run('goals', ...args, '--grounds', 'day', '--session', 'helm');
   expect(command('set', 'Ship it', 'Review it').status).toBe(0);
-  expect(command().stdout).toContain('1. Ship it\n2. Review it');
-  expect(command('add', 'Later').stdout).toContain('3. Later');
+  expect(command().stdout).toContain('1. [ ] Ship it\n2. [ ] Review it');
+  expect(command('add', 'Later').stdout).toContain('3. [ ] Later');
   expect(command('done', '2').stdout).toContain('2. [x] Review it');
   expect(run('goals', 'undo', '2', '--grounds', 'day', '--session', 'other').status).toBe(1);
   expect(command('undo', '2').stdout).toContain('2. [ ] Review it');
   expect(command('done', '99').status).toBe(1);
   const removed = command('rm', '2');
   expect(removed.status, removed.stderr).toBe(0);
-  expect(removed.stdout).toContain('1. Ship it\n2. Later');
+  expect(removed.stdout).toContain('1. [ ] Ship it\n2. [ ] Later');
   expect(removed.stdout).not.toContain('Review it');
   expect(command('rm', '99').status).toBe(1);
   expect(run('goals', 'set', 'No', '--grounds', 'day', '--session', 'other').status).toBe(1);

@@ -8,7 +8,7 @@ import { enqueue, addTodo, ensureLayout, goalDate, helmPassStatus, loadConfig, r
 import { buildGlassSnapshot } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
-import { HELM_PASS_RULE, charter } from '../src/charter.js';
+import { deliverHelmPass, helmPassNotice } from '../src/helm-pass.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -33,84 +33,91 @@ beforeEach(() => {
 });
 afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });
 
-it('sign-on leads with pass-due and the charter carries the shared routine', () => {
+it('sign-on delivers the full due pass without a new command or charter rule', () => {
+  addTodo('fleet', 'Check the release');
+  setGoals('fleet', goalDate(new Date(), 'UTC'), ['[x] Shipped']);
   const result = run(['man', 'helm', '--session', session]);
   expect(result.status, result.stderr).toBe(0);
   expect(result.stdout).toMatch(/^pass-due/);
-  expect(result.stdout).toContain(HELM_PASS_RULE);
-  expect(charter({ name: 'fleet', repos: [] })).toContain(HELM_PASS_RULE);
-});
-
-it('man pass lists all todos stale first, goal done states, records the note, and clears the notice', () => {
-  seat();
-  const now = Date.now();
-  addTodo('fleet', 'Newer todo', now);
-  addTodo('fleet', 'Stale todo', now - 4 * 86400000);
-  setGoals('fleet', goalDate(new Date(), 'UTC'), ['[x] Shipped', 'Review next']);
-  const result = run(['man', 'pass', '--session', session, '--note', 'Review complete']);
-  expect(result.status, result.stderr).toBe(0);
-  expect(result.stdout.indexOf('Stale todo')).toBeLessThan(result.stdout.indexOf('Newer todo'));
+  expect(result.stdout).toContain('Check the release');
   expect(result.stdout).toContain('1. [x] Shipped');
-  expect(result.stdout).toContain('2. [ ] Review next');
-  expect(readHelmPass('fleet')?.note).toBe('Review complete');
-  expect(helmPassStatus('fleet', loadConfig().helm).reasons).toEqual([]);
-  expect(run(['hook', 'stop'], { session_id: session }).stdout).toBe('');
+  expect(result.stdout).not.toContain('man pass');
+  expect(readHelmPass('fleet')).toBeDefined();
+  expect(run(['man', 'pass', '--session', session]).status).not.toBe(0);
 });
 
 for (const harness of ['claude', 'codex'] as const) {
-  it(`${harness}: Stop blocks repeatedly on pass-due with an empty fleet or live watcher until man pass`, () => {
+  it(`${harness}: Stop delivers stale-first todos and all goal states once, even with a live watcher`, () => {
     seat(harness);
-    addTodo('fleet', 'Stale reminder', Date.now() - 4 * 86400000);
+    const now = Date.now();
+    addTodo('fleet', 'Newer todo', now);
+    addTodo('fleet', 'Stale reminder', now - 4 * 86400000);
     setGoals('fleet', goalDate(new Date(), 'UTC'), ['[x] Closed goal', 'Open goal']);
     fs.writeFileSync(path.join(home, 'watchers', `${session}.json`), JSON.stringify({ sessionId: session, kind: 'man', pid: process.pid, heartbeatAt: new Date().toISOString() }));
-    for (let i = 0; i < 2; i++) {
-      const result = run(['hook', 'stop'], { session_id: session, stop_hook_active: i > 0 });
-      expect(result.status, result.stderr).toBe(0);
-      const stopped = JSON.parse(result.stdout);
-      expect(stopped.decision).toBe('block');
-      expect(stopped.reason).toMatch(/^pass-due/);
-      expect(stopped.reason).toContain(`lobstah man pass --grounds home --session ${session}`);
-      expect(stopped.reason).toContain('Stale reminder');
-      expect(stopped.reason).toContain('open goal 2: Open goal');
-      expect(stopped.reason).not.toContain('Closed goal');
-      expect(readHelmPass('fleet')).toBeUndefined();
-    }
-    expect(run(['man', 'pass', '--session', session]).status).toBe(0);
-    expect(run(['hook', 'stop'], { session_id: session }).stdout).toBe('');
+    const result = run(['hook', 'stop'], { session_id: session });
+    expect(result.status, result.stderr).toBe(0);
+    const stopped = JSON.parse(result.stdout);
+    expect(stopped.decision).toBe('block');
+    expect(stopped.reason).toMatch(/^pass-due/);
+    expect(stopped.reason.indexOf('Stale reminder')).toBeLessThan(stopped.reason.indexOf('Newer todo'));
+    expect(stopped.reason).toContain('1. [x] Closed goal');
+    expect(stopped.reason).toContain('2. [ ] Open goal');
+    expect(stopped.reason).toContain(run(['todo', 'ls', '--session', session]).stdout.trim());
+    expect(stopped.reason).toContain(run(['goals', '--session', session]).stdout.trim());
+    expect(stopped.reason).not.toContain('man pass');
+    expect(helmPassStatus('fleet', loadConfig().helm).reasons).toEqual([]);
+    expect(run(['hook', 'stop'], { session_id: session, stop_hook_active: true }).stdout).toBe('');
   });
 }
 
-it('quiet wait exits 3 with a leading pass-due notice every time, until a pass is recorded', () => {
+it('quiet wait exits 3, delivers the full due details, then clears the pass without a command', () => {
   seat();
-  for (let i = 0; i < 2; i++) {
-    const result = run(['man', 'wait', '--session', session, '--timeout', '0.01']);
-    expect(result.status, result.stderr).toBe(3);
-    expect(result.stdout).toMatch(/^pass-due/);
-    expect(result.stdout).toContain('lobstah man pass --grounds home');
-  }
-  expect(run(['man', 'pass', '--session', session]).status).toBe(0);
+  addTodo('fleet', 'Timeout todo');
+  setGoals('fleet', goalDate(new Date(), 'UTC'), ['[x] Done', 'Next']);
   const result = run(['man', 'wait', '--session', session, '--timeout', '0.01']);
-  expect(result.status).toBe(3);
-  expect(result.stdout).not.toContain('pass-due');
+  expect(result.status, result.stderr).toBe(3);
+  expect(result.stdout).toMatch(/^pass-due/);
+  expect(result.stdout).toContain(run(['todo', 'ls', '--session', session]).stdout.trim());
+  expect(result.stdout).toContain(run(['goals', '--session', session]).stdout.trim());
+  expect(readHelmPass('fleet')).toBeDefined();
+  const second = run(['man', 'wait', '--session', session, '--timeout', '0.01']);
+  expect(second.status).toBe(3);
+  expect(second.stdout).not.toContain('pass-due');
 }, 10000);
 
-it('a pass that becomes due during a blocking Stop park wakes the helm', () => {
+it('a pass that becomes due during a blocking Stop park wakes and records delivery', () => {
   seat('codex');
   fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\ntimezone = "UTC"\npassIntervalSecs = 1\n');
-  recordHelmPass('fleet', loadConfig().helm);
+  const prior = recordHelmPass('fleet', loadConfig().helm);
   enqueue({ id: 'pass-queued', repo: 'web', brief: 'keeps the park alive' });
   const result = run(['hook', 'stop', '--timeout', '3'], { session_id: session });
   expect(result.status, result.stderr).toBe(0);
   expect(JSON.parse(result.stdout)).toMatchObject({ decision: 'block', reason: expect.stringMatching(/^pass-due.*interval/) });
+  expect(readHelmPass('fleet')?.at).not.toBe(prior.at);
 }, 10000);
 
-it('does not let a foreign helm clear another grounds pass', () => {
-  fs.writeFileSync(path.join(home, 'config.toml'), '[grounds.alpha]\nrepos = []\n[grounds.beta]\nrepos = []\n');
-  takeHelm({ sessionId: session, grounds: { name: 'alpha', repos: [] }, ttlMs: 60000 });
-  takeHelm({ sessionId: 'other', grounds: { name: 'beta', repos: [] }, ttlMs: 60000 });
-  const result = run(['man', 'pass', '--session', session, '--grounds', 'beta']);
-  expect(result.status).not.toBe(0);
-  expect(readHelmPass('beta')).toBeUndefined();
+it('previews and existing todo/goals read commands never acknowledge a pass', () => {
+  seat();
+  for (const args of [['todo', 'ls'], ['goals'], ['man', 'wait', '--peek']]) {
+    const result = run([...args, '--session', session]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(readHelmPass('fleet')).toBeUndefined();
+  }
+  expect(helmPassNotice('fleet', loadConfig())).toMatch(/^pass-due/);
+  expect(readHelmPass('fleet')).toBeUndefined();
+});
+
+it('records only after successfully emitting the details, with no repeated delivery', () => {
+  seat();
+  const config = loadConfig();
+  expect(() => deliverHelmPass('fleet', config, () => { throw new Error('delivery failed'); })).toThrow('delivery failed');
+  expect(readHelmPass('fleet')).toBeUndefined();
+  const details: string[] = [];
+  expect(deliverHelmPass('fleet', config, (text) => details.push(text))).toBe(true);
+  expect(details[0]).toContain('No goals set.');
+  expect(readHelmPass('fleet')).toBeDefined();
+  expect(deliverHelmPass('fleet', config, (text) => details.push(text))).toBe(false);
+  expect(details).toHaveLength(1);
 });
 
 it('glass shows the same last pass age beside goals and todos', async () => {

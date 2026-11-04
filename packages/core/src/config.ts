@@ -348,7 +348,7 @@ export interface HelmConfig {
   armGraceSecs: number;
   /** Open helm todos older than this many days are stale and require a pass; 0 disables staleness. */
   todoStaleDays: number;
-  /** Maximum seconds between explicit todo/goals passes; 0 disables the interval, not daily or stale passes. */
+  /** Maximum seconds between delivered todo/goals passes; 0 disables the interval, not daily or stale passes. */
   passIntervalSecs: number;
   /** Maximum open todos listed in the session-start brief; 0 lists only the remainder count. */
   briefTodoLimit: number;

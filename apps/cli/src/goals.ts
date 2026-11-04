@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { backendScopes, claimGoalsPrompt, displayGrounds, goalDate, GOAL_WORDING_RULE, goalsCardTitle, laneDirs, listDecisions, lobstahHome, previousGoalDate, readDecisionAnswer,
+import { backendScopes, claimGoalsPrompt, displayGrounds, goalDate, goalLine, GOAL_WORDING_RULE, goalsCardTitle, laneDirs, listDecisions, lobstahHome, previousGoalDate, readDecisionAnswer,
   readDirIfPresent, readEvidence, readGoals, readPrs, readStatusLog, repoKey, resolveGrounds, storageGrounds, storedDescriptor, type Config, type DailyGoals, type Lane } from '@lobstah/core';
 
 export function visibleGoals(cfg: Config, now = new Date()): Array<Pick<DailyGoals, 'grounds' | 'date' | 'lines'>> {
@@ -56,4 +56,13 @@ export function goalsRecapData(grounds: string, date: string, cfg: Config) {
   return { date, timezone: cfg.helm.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, dayStartsAt: '04:00',
     goals, dispatches, prs, cards, todos: todos.filter((t) => (t.state === 'done' || t.state === 'dropped') && inDay(t.updatedAt)),
     note: 'PR firstSeenAt is when lobstah first recorded it, not its forge creation time. Only retained records are available.' };
+}
+
+/** Numbered goals and done states, shared by the existing CLI and automatic helm passes. */
+export function renderGoals(day: DailyGoals, grounds: string): string {
+  const lines = day.lines.map((line, index) => {
+    const goal = goalLine(line);
+    return `${index + 1}. [${goal.done ? 'x' : ' '}] ${goal.text}`;
+  });
+  return `# Goals for ${day.date} (${grounds})\n\n${lines.length ? lines.join('\n') : 'No goals set.'}${day.recap ? `\n\n## Recap\n\n${day.recap}` : ''}`;
 }

@@ -7,7 +7,6 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   IdleWait,
-  recordHelmPass,
   reviewAttention,
   markReviewSeen,
   acknowledgeReview,
@@ -206,7 +205,7 @@ import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
-import { helmPassNotice, renderHelmPass } from './helm-pass.js';
+import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS } from './tend.js';
@@ -266,7 +265,7 @@ import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
-import { quietGoalsNudge, todoTable, todoViews } from './todo.js';
+import { quietGoalsNudge, renderTodoList, todoTable, todoViews } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
@@ -411,7 +410,6 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   Runs due watch checks itself when no pick
                                   process is. Unanswered questions re-fire
                                   every remindSecs until answered.
-  man pass [--note <text>]       record a todo/goals pass; list todos and goals
   man report [--grounds <name>] [--peek] [--json]
                                   the delta since the last report: catches
                                   landed, attention arisen, still-waiting, and
@@ -1102,7 +1100,8 @@ async function mainCli(): Promise<void> {
           if (pos.length > 1) throw new UsageError(usageFor('goals')!);
           return readGoals(key, action ?? today);
         })();
-      console.log(`# Goals for ${day.date} (${displayGrounds(grounds.name, cfg)})\n\n${day.lines.length ? day.lines.map((s, i) => `${i + 1}. ${s}`).join('\n') : 'No goals set.'}${day.recap ? `\n\n## Recap\n\n${day.recap}` : ''}`);
+      const { renderGoals } = await import('./goals.js');
+      console.log(renderGoals(day, displayGrounds(grounds.name, cfg)));
       break;
     }
     case 'stats': {
@@ -1936,7 +1935,7 @@ async function mainCli(): Promise<void> {
         } else {
           const open = todoViews(Date.now(), grounds, { openOnly: true });
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: open }));
-          else console.log(open.length > 0 ? todoTable(open, false) : toonKV({ todos: 'none', grounds: shown }));
+          else console.log(renderTodoList(grounds));
         }
       } catch (err) {
         if (err instanceof TodoError) throw new UsageError(err.message);
@@ -2408,18 +2407,6 @@ async function mainCli(): Promise<void> {
       if (digest.changed && !has('--peek')) advanceCursor(cursor, digest.now);
       break;
     }
-    case 'man:pass': {
-      const cfg = loadConfig();
-      const caller = callerSession(opt('--session'));
-      const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));
-      gateHelm(caller, grounds.name);
-      const now = Date.now();
-      const listing = renderHelmPass(grounds.name, now);
-      const pass = recordHelmPass(grounds.name, cfg.helm, opt('--note'), now);
-      console.log(toonKV({ pass: 'recorded', grounds: displayGrounds(grounds.name, cfg), at: pass.at, note: pass.note }));
-      console.log(listing);
-      break;
-    }
     case 'man:chat': {
       const chat = pos[0];
       if (pos.length !== 1 || (chat !== 'brief' && chat !== 'full')) throw new UsageError('usage: lobstah man chat brief|full [--grounds <name>]');
@@ -2462,8 +2449,7 @@ async function mainCli(): Promise<void> {
             `heartbeat ${ageSecs}s ago). Relieve them deliberately with \`lobstah man helm --take\`, or leave it.`,
         );
       }
-      const passNotice = helmPassNotice(grounds.name, cfg);
-      if (passNotice) console.log(passNotice);
+      deliverHelmPass(grounds.name, cfg, (details) => console.log(details));
       console.log(charter(grounds));
       console.log('');
       console.log(
@@ -2683,8 +2669,7 @@ async function mainCli(): Promise<void> {
         // so a digest lost with a dead background task resurfaces on the next
         // timeout instead of being marked delivered to nobody. Silent when
         // nothing changed — the loop should not train its reader to skim.
-        const passNotice = callerHelm ? helmPassNotice(callerHelm.grounds, cfgWait) : undefined;
-        if (passNotice) console.log(passNotice);
+        if (callerHelm) deliverHelmPass(callerHelm.grounds, cfgWait, (details) => console.log(details));
         const digest = peekDigest();
         if (digest.changed && callerHelm) {
           const nudge = quietGoalsNudge(callerHelm.grounds, callerHelm.sessionId);
@@ -2843,10 +2828,7 @@ async function mainCli(): Promise<void> {
         if (!helm && liveHelms(cfgHaul.helm.ttlSecs * 1000).length > 0) break;
         if (!helm && process.env.LOBSTAH_MAN !== '1' && !fs.existsSync('.lobstah-man')) break;
         const blockPass = (): boolean => {
-          const notice = helm ? helmPassNotice(helm.grounds, cfgHaul) : undefined;
-          if (!notice) return false;
-          emit(notice);
-          return true;
+          return helm ? deliverHelmPass(helm.grounds, cfgHaul, emit) : false;
         };
         // A pass stands even with an empty fleet or an already armed watcher.
         if (blockPass()) break;

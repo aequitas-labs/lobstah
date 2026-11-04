@@ -239,7 +239,6 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:helm': {
     flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--label': { value: '<name>' }, '--take': {}, '--harness': { value: HARNESS } },
   },
-  'man:pass': { flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' }, '--note': { value: '<text>' } } },
   'man:chat': { positionals: 'brief|full', subverbs: ['brief', 'full'], maxPositionals: 1, flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' } } },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
@@ -439,9 +438,6 @@ Sign-on records who the man is (harness, directory, host; --label names it).
 A live foreign holder refuses without --take; a stale one is claimable.
 The session id resolves --session, then hook stdin, then
 $CLAUDE_CODE_SESSION_ID — so inside Claude Code no flag is needed.`,
-  'man:pass': `Record a todo/goals pass for this grounds, with an optional note.
-Lists todos stale first and today's goals with their done state. Clears pass-due
-until the next day, interval, or newly stale todo. Reserved for this grounds' helm.`,
   'man:chat': `Set this grounds' helm chat to brief or full without a config edit or restart.
 Brief points at cards instead of repeating their detail and keeps routine wakes quiet.
 The seat retains the override on re-sign and takeover. A terminal user or this grounds' helm may change it.`,
