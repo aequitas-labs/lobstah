@@ -14,6 +14,7 @@ import {
   touchEvents,
   unhandled,
   writeActivity,
+  liveHeavyTickets,
 } from '@lobstah/core';
 import type { Lane, NormalizedEvent, Verb } from '@lobstah/core';
 import type { AdapterRun } from '@lobstah/adapters';
@@ -242,6 +243,14 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
   const runnerEvent = (data: Record<string, unknown>) =>
     record({ at: new Date().toISOString(), type: 'runner', data });
 
+  const inHeavyLine = () => {
+    try {
+      return liveHeavyTickets({ dispatch: id }).length > 0;
+    } catch {
+      return false;
+    }
+  };
+
   const releaseHold = () => {
     if (!hold) return;
     clearInterval(hold.heartbeat);
@@ -278,6 +287,12 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     }, pollMs);
     const expiry = setTimeout(() => {
       releaseHold();
+      // A push can wait in line past any window: the line bounds it, not this.
+      if (inHeavyLine()) {
+        runnerEvent({ holding: 'heavy', forSecs: Math.round(ms / 1000) });
+        holdOpen(ms);
+        return;
+      }
       runnerEvent({ backgroundWait: 'expired', live: liveBackground });
       unreported();
     }, ms);
@@ -322,11 +337,14 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     }
     // Paused: nothing for the harness to do until the wait ends. The
     // session ends and the dispatch holds no slot while it waits.
-    if (lastVerb === 'paused') {
+    // Except on the heavy line: parking would end the session and kill the
+    // push it's waiting on. Held below like any other background work.
+    const onHeavyLine = lastVerb === 'paused' && readStatusLog(id, lane).at(-1)?.waitingOn === 'heavy';
+    if (lastVerb === 'paused' && !onHeavyLine) {
       finish(true);
       continue;
     }
-    if (waiting) {
+    if (waiting && !onHeavyLine) {
       await awaitAnswer(lastVerb);
       continue;
     }
@@ -341,7 +359,7 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     // No report. The worker may be waiting on background work it started —
     // a push behind a slow pre-push gate — and the harness wakes it when that
     // settles; ending the session here would kill the work.
-    if (liveBackground > 0) {
+    if (liveBackground > 0 || inHeavyLine()) {
       runnerEvent({ holding: 'background', live: liveBackground, forSecs: Math.round(backgroundWaitMs / 1000) });
       holdOpen(backgroundWaitMs);
       continue;

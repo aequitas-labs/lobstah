@@ -46,7 +46,9 @@ export type NoticeKind =
   | 'push-failed'
   | 'repair-stopped'
   | 'pool-out'
-  | 'pool-returned';
+  | 'pool-returned'
+  | 'heavy-line-long'
+  | 'heavy-over-limit';
 
 /**
  * Notices that never wake a helm on their own: they show in tend, the
@@ -57,7 +59,7 @@ export type NoticeKind =
  * can also be posted `quiet` on its own (a trap that ghosted while idle, a
  * trap available as part of a batch).
  */
-export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening', 'trap-starting', 'trap-signed-on', 'trap-stowed', 'pool-returned'];
+export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening', 'trap-starting', 'trap-signed-on', 'trap-stowed', 'pool-returned', 'heavy-line-long'];
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */

@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { codexInvocation, gitPushTargets, lobstahHome, toolTarget } from '@lobstah/core';
+import { heavyDir, codexInvocation, gitPushTargets, lobstahHome, toolTarget } from '@lobstah/core';
 import type { NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
@@ -31,6 +31,13 @@ function isolatedCodexHome(): string {
   if (!fs.existsSync(cfg)) {
     fs.writeFileSync(cfg, '# lobstah-managed: auth inherited from ~/.codex, interactive config not' + '\n');
   }
+  return dir;
+}
+
+/** The sandbox lets a worker write here and no further, so its heavy commands can queue. */
+function heavyLineDir(): string {
+  const dir = heavyDir();
+  fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
@@ -90,7 +97,7 @@ export function pumpCodexEvent(
 export function codexExecArgs(opts: AdapterStartOpts, prompt: string, resumeThread?: string): string[] {
   const args = ['exec'];
   if (resumeThread) args.push('resume', resumeThread);
-  args.push('--json', '--skip-git-repo-check', '--sandbox', 'workspace-write', '--cd', opts.cwd);
+  args.push('--json', '--skip-git-repo-check', '--sandbox', 'workspace-write', '--add-dir', heavyLineDir(), '--cd', opts.cwd);
   if (opts.model) args.push('-m', opts.model);
   if (opts.effort) args.push('-c', `model_reasoning_effort=${JSON.stringify(opts.effort)}`);
   args.push(prompt);
@@ -217,6 +224,7 @@ export function createCodexAdapter(): Adapter {
         workingDirectory: opts.cwd,
         skipGitRepoCheck: true,
         sandboxMode: 'workspace-write',
+        additionalDirectories: [heavyLineDir()],
         approvalPolicy: 'never',
         ...(opts.model ? { model: opts.model } : {}),
         ...(opts.effort ? { modelReasoningEffort: opts.effort } : {}),

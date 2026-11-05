@@ -166,6 +166,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('copies a signed-off $harness resume command in the modal only, not on $view or deck', async ({ harness, view }) => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     const trap = d.traps.find((t) => t.trapId === 't2')!;
     trap.harness = harness;
     trap.sessionId = 'past-session';
@@ -193,8 +194,9 @@ describe('glass page: tabs and hash routing', () => {
     expect(g.$('#overlay')!.className).toBe('open');
   }, 15_000);
 
-  it.each(['claude', 'codex'])('copies the %s live trap and helm resume commands', async (harness) => {
+  it.each(['claude', 'codex'])('offers no resume for a live %s trap, and copies the helm resume command', async (harness) => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.traps[0]!.harness = harness;
     d.helms[0]!.harness = harness;
     const g = await page(d, { hash: '#traps' });
@@ -202,9 +204,8 @@ describe('glass page: tabs and hash routing', () => {
     g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
     const prefix = harness === 'codex' ? 'codex resume ' : 'claude --resume ';
     await openRow(g, '#traps', 'wt:t1');
-    const row = g.$$('#modalbox .cmd').find((el) => text(el).includes(prefix))!;
-    await click(g, row.querySelector('button'));
-    expect(writes.at(-1)).toBe(prefix + d.traps[0]!.sessionId);
+    expect(text(g.$('#modalbox'))).not.toContain(prefix);
+    expect(text(g.$('#modalbox'))).not.toContain('open this session');
     await escape(g);
     await click(g, g.$('#chips .chip.click'));
     await click(g, g.$('#modalbox .cmd button'));
@@ -213,6 +214,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('opens a signed-off $harness desktop link from $view and deck, and copies it in the modal only', async ({ harness, view }) => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     const trap = d.traps.find((t) => t.trapId === 't2')!;
     Object.assign(trap, { harness, sessionId: 'past-session', link: harness === 'codex' ? 'codex://threads/past-session' : 'claude://claude.ai/past-session', window: { entrypoint: 'claude-desktop' } });
     const g = await page(d, { hash: '#traps', prefs: { view } });
@@ -221,7 +223,7 @@ describe('glass page: tabs and hash routing', () => {
     const card = async (selector: string) => {
       const open = g.$$(selector + ' a.btn.open').filter((a) => a.getAttribute('href') === trap.link);
       expect(open).toHaveLength(1);
-      expect(text(open[0])).toBe('↗ open');
+      expect(text(open[0])).toBe('↗ Open');
       expect(text(g.$(selector))).not.toContain(trap.link!);
       expect(text(g.$(selector))).not.toContain('desktop thread');
       expect(g.$$(selector + ' .cmd')).toHaveLength(0);
@@ -241,14 +243,14 @@ describe('glass page: tabs and hash routing', () => {
     expect(writes.at(-1)).toBe(trap.link);
   }, 15_000);
 
-  it('keeps the ↗ open button on a live desktop trap card and its link in the modal', async () => {
+  it('keeps the ↗ Open button on a live desktop trap card and its link in the modal', async () => {
     const d = acceptanceFleet();
-    d.focusSupported = true;
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((el) => text(el).includes('wt:t1'))!;
-    expect(text(card.querySelector('.footact'))).toBe('↗ open');
+    expect(text(card.querySelector('.footact'))).toBe('↗ Open');
     expect(text(card)).not.toContain('codex://threads/live-session');
     expect(card.querySelectorAll('.cmd')).toHaveLength(0);
     await click(g, card);
@@ -258,6 +260,7 @@ describe('glass page: tabs and hash routing', () => {
 
   it('does not offer a CLI command for live desktop traps or the helm without a link', async () => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.traps[0]!.desktopThread = true;
     d.traps[0]!.harness = 'codex';
     d.helms[0]!.desktopThread = true;
@@ -272,8 +275,193 @@ describe('glass page: tabs and hash routing', () => {
     expect(text(g.$('#modalbox'))).not.toContain('codex resume');
   });
 
+  it('copies the attach command from a live tmux trap modal, and never from its card', async () => {
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
+    d.traps[0]!.attachCommand = 'tmux -L lobstah attach -t %7';
+    const g = await page(d, { hash: '#traps' });
+    const writes: string[] = [];
+    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
+    expect(text(g.$('#traps'))).not.toContain('attach -t');
+    await openRow(g, '#traps', 'wt:t1');
+    const row = g.$$('#modalbox .cmd').find((el) => text(el).includes('attach -t %7'))!;
+    await click(g, row.querySelector('button'));
+    expect(writes.at(-1)).toBe('tmux -L lobstah attach -t %7');
+  });
+
+  it('tells an off-machine desktop where a live trap runs and keeps the attach command, without a session link', async () => {
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device: 'desktop' };
+    const trap = d.traps[0]!;
+    const foot = async () => {
+      const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
+      expect(g.$$('#traps button.open')).toHaveLength(0);
+      return g.$$('#traps .card').find((c) => text(c).includes('wt:t1'))!;
+    };
+    expect(text(await foot())).toContain('Running on studio, only reachable from there');
+    trap.attachCommand = 'ssh studio -t tmux -L lobstah attach -r -t %7';
+    expect(text(await foot())).toContain('Running on studio');
+    expect(text(await foot())).not.toContain('only reachable');
+    const attach = await page(d, { hash: '#traps' });
+    await openRow(attach, '#traps', 'wt:t1');
+    expect(attach.$$('#modalbox .cmd').map(text).join()).toContain('attach -r -t %7');
+    expect(text(attach.$('#modalbox'))).toContain('This glass is read-only from here');
+    trap.attachCommand = undefined;
+    Object.assign(trap, { harness: 'codex', link: 'codex://threads/live-session' });
+    const card = await foot();
+    expect(text(card)).toContain('Running on studio, only reachable from there');
+    expect(card.querySelector('a[href^="codex:"]')).toBeNull();
+    const desktopTrap = await page(d, { hash: '#traps' });
+    await openRow(desktopTrap, '#traps', 'wt:t1');
+    expect(desktopTrap.$$('#modalbox a[href^="codex:"]')).toHaveLength(0);
+    expect(text(desktopTrap.$('#modalbox'))).not.toContain('open this session');
+  });
+
+  for (const device of ['phone', 'unknown'] as const) {
+    it(`shows a ${device} only where a trap runs, its state and the read-only notice`, async () => {
+      const d = acceptanceFleet();
+      d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device };
+      const trap = d.traps[0]!;
+      const modal = async () => {
+        const g = await page(d, { hash: '#traps' });
+        await openRow(g, '#traps', 'wt:t1');
+        const box = g.$('#modalbox');
+        expect(text(box)).toContain('Running on studio, only reachable from there');
+        expect(text(box)).toContain('live');
+        expect(text(box)).toContain('This glass is read-only from here');
+        expect(text(box)).not.toContain('open this session');
+        expect(text(box)).not.toContain('Session link');
+        expect(g.$$('#modalbox a[href^="claude:"], #modalbox a[href^="codex:"], #modalbox a[href^="vscode:"]')).toHaveLength(0);
+        expect(text(box)).not.toContain('attach -r');
+      };
+      trap.attachCommand = 'ssh studio -t tmux -L lobstah attach -r -t %7';
+      await modal();
+      trap.attachCommand = undefined;
+      for (const link of ['claude://claude.ai/local_1', 'codex://threads/live-session', 'vscode://anthropic.claude-code/open?session=abc']) {
+        Object.assign(trap, { harness: link.startsWith('codex') ? 'codex' : 'claude', link });
+        await modal();
+      }
+    });
+  }
+
+  it('offers a phone no resume command or open button for a signed-off trap, and none for a helm', async () => {
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' };
+    Object.assign(d.traps[0]!, { live: false, harness: 'codex', link: 'codex://threads/gone', sessionId: 'gone' });
+    const signedOff = await page(d, { hash: '#traps' });
+    await openRow(signedOff, '#traps', 'wt:t1');
+    expect(text(signedOff.$('#modalbox'))).toContain('Signed off — no window');
+    expect(text(signedOff.$('#modalbox'))).not.toContain('open this session');
+    expect(signedOff.$$('#modalbox a[href^="codex:"]')).toHaveLength(0);
+    Object.assign(d.traps[0]!, { harness: 'claude', link: undefined });
+    const command = await page(d, { hash: '#traps' });
+    await openRow(command, '#traps', 'wt:t1');
+    expect(text(command.$('#modalbox'))).not.toContain('claude --resume');
+  });
+
+  describe('a live Claude link', () => {
+    const LIVE = 'https://claude.ai/code/session_01AbC';
+    const open = async (viewer: GlassSnapshot['viewer'], over: Record<string, unknown> = {}) => {
+      const d = acceptanceFleet();
+      d.viewer = viewer;
+      d.focusToken = viewer?.onMachine ? 'fixture-token' : undefined;
+      Object.assign(d.traps[0]!, { harness: 'claude', liveLink: LIVE, ...over });
+      const g = await page(d, { hash: '#traps' });
+      await openRow(g, '#traps', 'wt:t1');
+      return g;
+    };
+    const links = (g: GlassDom) => g.$$(`#modalbox a[href="${LIVE}"]`);
+
+    for (const device of ['phone', 'desktop', 'unknown'] as const) {
+      it(`opens from a ${device} off the machine, in a new tab, with where it runs`, async () => {
+        const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device });
+        const [link] = links(g);
+        expect(links(g)).toHaveLength(1);
+        expect(text(link)).toBe('Open live Claude');
+        expect(link!.getAttribute('target')).toBe('_blank');
+        expect(link!.getAttribute('rel')).toContain('noopener');
+        expect(text(g.$('#modalbox'))).toContain('Running on studio');
+        expect(text(g.$('#modalbox'))).not.toContain('only reachable');
+        expect(text(g.$('#modalbox'))).toContain('Opens in the Claude app or a browser');
+        expect(text(g.$('#modalbox'))).toContain('This glass is read-only from here');
+      });
+    }
+
+    it('keeps the rule for what else a phone sees: no attach command or desktop link beside it', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { attachCommand: 'ssh studio -t tmux -L lobstah attach -r -t %7', link: 'claude://claude.ai/local_1' });
+      expect(links(g)).toHaveLength(1);
+      expect(text(g.$('#modalbox'))).not.toContain('attach -r');
+      expect(g.$$('#modalbox a[href^="claude:"]')).toHaveLength(0);
+    });
+
+    it('sits beside the attach command for a desktop off the machine', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'desktop' }, { attachCommand: 'ssh studio -t tmux -L lobstah attach -r -t %7' });
+      expect(links(g)).toHaveLength(1);
+      expect(text(g.$('#modalbox'))).toContain('attach -r -t %7');
+    });
+
+    it('sits beside open on the machine', async () => {
+      const g = await open({ onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' });
+      expect(links(g)).toHaveLength(1);
+      expect(g.$$('#modalbox button.open')).toHaveLength(1);
+      expect(text(g.$('#modalbox'))).not.toContain('read-only');
+    });
+
+    it('shows on the trap card and the deck, not only in the modal', async () => {
+      const d = acceptanceFleet();
+      d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' };
+      Object.assign(d.traps[0]!, { harness: 'claude', liveLink: LIVE });
+      const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
+      expect(g.$$(`#traps a[href="${LIVE}"]`)).toHaveLength(1);
+    });
+
+    it('says why when two processes hold the session, with no link to tap', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { liveLink: undefined, sessionWriters: [6882, 2669] });
+      expect(links(g)).toHaveLength(0);
+      expect(text(g.$('#modalbox'))).toContain('Processes 6882 and 2669 both hold this session');
+    });
+
+    it('gives a signed-off trap no live link', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { live: false, liveLink: undefined });
+      expect(links(g)).toHaveLength(0);
+      expect(text(g.$('#modalbox'))).not.toContain('Opens in the Claude app');
+    });
+
+    it('offers a Codex trap on a phone no action at all', async () => {
+      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { harness: 'codex', liveLink: undefined, link: 'codex://threads/live-session', desktopThread: true });
+      expect(g.$$('#modalbox a[href^="codex:"], #modalbox a[href^="https://chatgpt"], #modalbox button.open')).toHaveLength(0);
+      expect(text(g.$('#modalbox'))).toContain('Running on studio, only reachable from there');
+      expect(text(g.$('#modalbox'))).not.toContain('open this session');
+    });
+  });
+
+  it('offers a phone no attach command in a dispatch modal', async () => {
+    const d = acceptanceFleet();
+    const x = d.dispatches.find((c) => !c.claimedBy?.startsWith('wt:'))!;
+    const modal = async (device: 'phone' | 'desktop') => {
+      d.viewer = { onMachine: false, windowFocus: false, machine: 'studio', device };
+      const g = await page(d, { hash: '#dispatches' });
+      await openRow(g, '#dispatches', x.id.slice(0, 8));
+      return text(g.$('#modalbox'));
+    };
+    expect(await modal('desktop')).toContain(`lobstah attach ${x.id}`);
+    expect(await modal('phone')).not.toContain('lobstah attach');
+  });
+
+  it('hides links and attach from a phone on a forward that keeps the address, and leaves open working', async () => {
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'phone' };
+    d.traps[0]!.attachCommand = 'tmux -L lobstah attach -t %7';
+    const g = await page(d, { hash: '#traps' });
+    await openRow(g, '#traps', 'wt:t1');
+    expect(g.$$('#modalbox button.open')).toHaveLength(1);
+    expect(text(g.$('#modalbox'))).not.toContain('attach -t');
+    expect(text(g.$('#modalbox'))).not.toContain('read-only');
+  });
+
   it('shows one copyable desktop link in a live trap modal', async () => {
     const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps' });
     await openRow(g, '#traps', 'wt:t1');
@@ -289,28 +477,28 @@ describe('glass page: tabs and hash routing', () => {
     expect([...t2.querySelector('.trapdot')!.classList]).toEqual(['dot', 'trapdot', 'dim']);
   });
 
-  it('shows the ↗ open button on live traps in the table, cards, deck, and modal only', async () => {
+  it('shows the ↗ Open button on live traps in the table, cards, deck, and modal only', async () => {
     const d = acceptanceFleet();
-    d.focusSupported = true;
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     d.traps.find((t) => t.trapId === 't2')!.sessionId = 'past-session';
     d.traps.find((t) => t.trapId === 't2')!.harness = 'codex';
     const g = await page(d, { hash: '#traps' });
     const t1 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t1'))!;
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
-    expect(text(t1)).toContain('↗ open');
-    expect(text(t2)).not.toContain('↗ open');
+    expect(text(t1)).toContain('↗ Open');
+    expect(text(t2)).not.toContain('↗ Open');
     expect(text(t2)).not.toContain('codex resume past-session');
     await click(g, t1.querySelector('button'));
     expect(g.$('#overlay')!.className).toBe('');
     await click(g, t1);
-    expect(text(g.$('#modalbox'))).toContain('↗ open');
+    expect(text(g.$('#modalbox'))).toContain('↗ Open');
     await escape(g);
     await g.go('#deck');
-    expect(text(g.$('#deck'))).toContain('↗ open');
+    expect(text(g.$('#deck'))).toContain('↗ Open');
     await g.go('#traps');
     const cardPage = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
-    expect(text(cardPage.$('#traps'))).toContain('↗ open');
+    expect(text(cardPage.$('#traps'))).toContain('↗ Open');
   });
   it('opens On deck by default and follows the hash to each tab', async () => {
     const g = await page(acceptanceFleet());
@@ -792,7 +980,9 @@ describe('glass page: On deck', () => {
 
 describe('glass page: header', () => {
   it('the helm chip names the man and opens the helm modal with its resume command', async () => {
-    const g = await page(acceptanceFleet());
+    const d = acceptanceFleet();
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
+    const g = await page(d);
     const chip = g.$('#chips .chip.click')!;
     expect(text(chip)).toBe('⛵ claude @ web helm fleet · chat full 30s ago');
     expect(chip.querySelector('.ok')).toBeTruthy();

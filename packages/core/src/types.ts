@@ -80,7 +80,7 @@ export interface Descriptor {
 }
 
 /** What a paused (or questioning) worker waits on, outside lobstah. */
-export const WAITING_ON = ['review', 'pr', 'deploy', 'person', 'external'] as const;
+export const WAITING_ON = ['review', 'pr', 'deploy', 'person', 'external', 'heavy'] as const;
 export type WaitingOn = (typeof WAITING_ON)[number];
 /** The verbs that may say what they wait on (`--waiting-on`, `--link`). */
 export const WAITING_ON_VERBS: readonly Verb[] = ['paused', 'needs-decision', 'blocked'];

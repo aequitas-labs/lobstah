@@ -124,6 +124,26 @@ naming a dispatch id. Then:
   Stop hook blocks with standing work or the arm command when no watcher is
   live. Re-run after exit 3.
 
+## Heavy commands
+
+One line per machine keeps full test runs, builds and pushes from overloading
+it. A person's own pushes never wait.
+
+- Run full test suites, full builds and Playwright as
+  `lobstah heavy -- <command>`. A focused test file or single-package build
+  doesn't need it. The exit code is the command's. If you forget, a one-line
+  reminder corrects you for next time.
+- `git push` queues on its own. Run it as a tracked background task, and report
+  `paused "Push in line" --waiting-on heavy`, then run `lobstah soak --wait`
+  as usual. The helm isn't woken for this. The task's notification tells you
+  when it finished: report `working` and carry on.
+- `lobstah heavy` shows the line. Over the time limit a command loses its slot
+  and keeps running, so a slow gate isn't a failure. Never use `--no-verify` to
+  skip the line.
+- A remote over SSH may drop an idle connection while a push waits inside the
+  hook. If it does, use `lobstah heavy -- git push`, which waits before git
+  starts.
+
 ## Permissions
 
 When your harness's own check (a permission prompt, Claude Code's auto-mode

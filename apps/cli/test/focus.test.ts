@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, writeTrapAnchor } from '@lobstah/core';
 import type { TrapRegistration, WindowRef } from '@lobstah/core';
-import { focusRegistration, focusTrap } from '../src/focus.js';
+import { focusRegistration, focusTrap, tmuxAttachCommand } from '../src/focus.js';
 import type { FileReader, FileRunner } from '../src/focus.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -86,10 +86,42 @@ describe('safe window focus ladder', () => {
   it('says how to attach when no Terminal window shows the pane, and never opens the bundle that started the server', async () => {
     const { seen, run } = calls();
     const read: FileReader = async () => '';
-    const result = await focusRegistration(reg({ termProgram: 'tmux', tmuxPane: '%3', bundleId: 'com.apple.Terminal' }), { platform: 'darwin', run, read });
-    expect(result).toEqual({ focused: false, reason: "Selected the trap's tmux pane, but no Terminal window shows it — run `tmux -L lobstah attach`." });
+    const result = await focusRegistration(reg({ termProgram: 'tmux', tmuxPane: '%3', bundleId: 'com.apple.Terminal' }), { platform: 'darwin', run, read, machine: 'studio' });
+    expect(result).toEqual({ focused: false, reason: "Selected the trap's tmux pane on studio, but no Terminal window shows it — run `tmux -L lobstah attach`" });
     expect(seen.map(([file]) => file)).toEqual(['tmux']);
-    expect(await focusRegistration(reg({ tmuxPane: '%3', tmuxSocket: 'relative/socket' }), { platform: 'darwin', run, read })).toEqual({ focused: false, reason: 'Invalid recorded tmux socket.' });
+    expect(await focusRegistration(reg({ tmuxPane: '%3', tmuxSocket: 'relative/socket' }), { platform: 'darwin', run, read })).toEqual({ focused: false, reason: 'Invalid recorded tmux socket' });
+  });
+
+  it('names the machine in every successful result', async () => {
+    const { run } = calls();
+    const windows: WindowRef[] = [
+      { termProgram: 'Apple_Terminal', tty: 'ttys001' },
+      { bundleId: 'com.apple.Safari' },
+    ];
+    for (const win of windows) {
+      const result = await focusRegistration(reg(win), { platform: 'darwin', run, read: async () => '', machine: 'studio' });
+      expect(result).toMatchObject({ focused: true, message: expect.stringContaining('on studio') });
+    }
+    const linked = await focusRegistration(reg(undefined, 'codex://threads/abc'), { platform: 'darwin', run, machine: 'studio' });
+    expect(linked).toMatchObject({ focused: true, message: 'Opened the session link on studio' });
+  });
+
+  it('writes the attach command for where it will be pasted', () => {
+    const here = { onMachine: true, machine: 'studio' };
+    const away = { onMachine: false, machine: 'studio' };
+    expect(tmuxAttachCommand({ tmuxPane: '%12' }, here)).toBe('tmux -L lobstah attach -t %12');
+    expect(tmuxAttachCommand({ tmuxPane: '%12' }, away)).toBe('ssh studio -t tmux -L lobstah attach -r -t %12');
+    expect(tmuxAttachCommand({ tmuxPane: '%12', tmuxSocket: '/private/tmp/tmux-501/lobstah' }, away)).toBe('ssh studio -t tmux -S /private/tmp/tmux-501/lobstah attach -r -t %12');
+  });
+
+  it('offers no attach command for a value it could not paste unquoted', () => {
+    const here = { onMachine: true, machine: 'studio' };
+    expect(tmuxAttachCommand(undefined, here)).toBeUndefined();
+    expect(tmuxAttachCommand({ termProgram: 'Apple_Terminal' }, here)).toBeUndefined();
+    expect(tmuxAttachCommand({ tmuxPane: '%1; rm -rf ~' }, here)).toBeUndefined();
+    expect(tmuxAttachCommand({ tmuxPane: '%1', tmuxSocket: '/tmp/a b' }, here)).toBeUndefined();
+    expect(tmuxAttachCommand({ tmuxPane: '%1', tmuxSocket: '/tmp/$(id)' }, here)).toBeUndefined();
+    expect(tmuxAttachCommand({ tmuxPane: '%1' }, { onMachine: false, machine: '-oProxyCommand=id' })).toBeUndefined();
   });
 
   it('opens a validated session link before any native window step', async () => {
@@ -166,7 +198,7 @@ describe('safe window focus ladder', () => {
   it('rejects an invalid stored link at read time, and never focuses a trap that is not live', async () => {
     const { seen, run } = calls();
     expect(await focusRegistration(reg(undefined, 'javascript:alert(1)'), { platform: 'linux', run })).toMatchObject({ focused: false });
-    expect(await focusTrap('deadbeef', { platform: 'darwin', run })).toMatchObject({ focused: false, reason: 'Trap is not live.' });
+    expect(await focusTrap('deadbeef', { platform: 'darwin', run })).toMatchObject({ focused: false, reason: 'Trap is not live' });
     expect(seen).toEqual([]);
   });
 });
