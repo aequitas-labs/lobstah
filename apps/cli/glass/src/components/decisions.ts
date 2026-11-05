@@ -1,4 +1,4 @@
-import { sessionLinkOpens } from './common.js';
+import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../../../packages/core/src/desktop-start-link.js';
 import type { Attachment } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
@@ -276,7 +276,7 @@ export function DecisionModal({
                 html`<${Markdown} text=${c.detail} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`,
               c.kind === 'decision' && attachments(c.key, c.attachments),
               c.kind === 'decision' && c.appStart && validDesktopStartLink(c.appStart.url)
-                ? html`${sessionLinkOpens() ? html`<a class="btn" href=${c.appStart.url}>Open Claude Code</a>` : html`<p class="dim">Open this start card on the Mac to open Claude Code</p>`}<p class="dim">The card clears after the configured session signs on and parks.</p>`
+                ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
                 : draft?.sent
                   ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
                   : answerForm(c, draft, extensions.join(',')),

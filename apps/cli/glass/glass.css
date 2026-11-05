@@ -599,6 +599,20 @@ tr.rowhead:hover {
   -webkit-line-clamp: 2;
   white-space: normal;
 }
+.configured-traps {
+  margin-bottom: var(--space-3);
+}
+.desktop-start {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.desktop-start .btn {
+  justify-self: start;
+}
+.desktop-start .dim {
+  font-size: 12px;
+}
 /* A badge of up to 12 characters (done, claude, working) never shrinks. */
 .card .top .badge {
   flex: 0 0 auto;
