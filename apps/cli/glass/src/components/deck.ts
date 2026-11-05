@@ -32,6 +32,8 @@ import {
   startCommands,
   trapNow,
   trapNowText,
+  trapDisplayName,
+  trapScope,
   windowAction,
 } from './common.js';
 import { GrantChip } from './session-grants.js';
@@ -51,6 +53,8 @@ import type { DecisionDraft } from '../store.js';
 interface DeckItem {
   key: string;
   title: Children;
+  /** Trap-only secondary context beside Open, with its stable address on the name. */
+  trap?: { address: string; scope: string };
   badge?: { text: string; tone?: string; worker?: Partial<WorkerMetadata> };
   worker?: WorkerMetadata;
   meta?: Children;
@@ -83,7 +87,9 @@ function deckItem(it: DeckItem, view: View) {
       : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
   }
   if (view === 'cards')
-    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${it.action && html`<div class="foot"><span class="footact">${it.action}</span></div>`}</div>`;
+    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b title=${it.trap?.address}>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${(it.action || it.trap?.scope) && html`<div class="foot">${it.trap?.scope && html`<span class="trap-scope" title=${it.trap.scope}>${it.trap.scope}</span>`}<span class="footact">${it.action}</span></div>`}</div>`;
+  if (it.trap)
+    return html`<div key=${it.key} class="deckline trap-deckline click" onClick=${it.open}><div class="trap-heading"><b title=${it.trap.address}>${it.title}</b>${badge}${it.meta && html`<span class="dim">${it.meta}</span>`}</div><div class="trap-secondary">${it.trap.scope && html`<span class="trap-scope" title=${it.trap.scope}>${it.trap.scope}</span>`}<span class="footact">${it.action}</span></div>${it.extra}</div>`;
   return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${worker && [' ', worker]}${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
 }
 
@@ -203,7 +209,8 @@ export function Deck({
   });
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
-    title: '🪤 ' + (t.repoLabel ?? t.label ?? `wt:${t.trapId}`),
+    title: '🪤 ' + trapDisplayName(t),
+    trap: { address: `wt:${t.trapId}`, scope: trapScope(t) },
     badge: t.requested
       ? { text: 'requested', tone: 'dim' }
       : t.starting

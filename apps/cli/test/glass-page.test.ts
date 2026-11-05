@@ -1110,7 +1110,8 @@ describe('glass page: a dispatch shows its trap by name', () => {
     const g = await page(namedFleet(), { hash: '#dispatches', prefs: { view: 'table' } });
     await click(g, row(g, 'cccccccc').querySelector('a.trapname'));
     expect(text(g.$('#modalbox h3'))).toContain('🪤');
-    expect(text(g.$('#modalbox h3'))).toContain('t1');
+    expect(text(g.$('#modalbox h3'))).toContain('crisp-heron');
+    expect(text(g.$('#modalbox .trap-address'))).toContain('wt:t1');
     await escape(g);
     await click(g, row(g, 'dddddddd').querySelector('a.trapname'));
     expect(text(g.$('#modalbox h3'))).toContain('signed off');

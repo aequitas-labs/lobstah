@@ -2104,6 +2104,45 @@ footer .glass-brand {
   overflow-wrap: anywhere;
 }
 
+/* The trap is the primary identity; repo/profile stays on the secondary action line. */
+.trap-deckline {
+  white-space: normal;
+}
+.trap-heading,
+.trap-secondary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.trap-secondary {
+  margin-top: var(--space-1);
+  color: var(--dim);
+  font-size: 12px;
+}
+.trap-secondary .footact {
+  margin-left: auto;
+}
+.trap-scope {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trap-address {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.trap-heading > .dim {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trap-heading > b {
+  overflow-wrap: anywhere;
+}
+
 /* Settings: each row is a key, its value and where it came from; on a phone the key sits above. */
 .cfg h2 {
   letter-spacing: normal;

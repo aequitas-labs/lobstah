@@ -103,21 +103,27 @@ it.each(['table', 'cards'])(
   },
 );
 
-it("shows a trap's repo beside its name on a card and in its modal, and keeps the table's repo column", async () => {
+it("shows the trap name first, keeps repo context secondary, and retains the table's repo column", async () => {
   const worktree = path.join(home, 'wt');
   fs.mkdirSync(worktree);
   const signed = signOnTrap({ sessionId: 'card-trap', harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000, name: 'amber-gull' });
   if (!('ok' in signed)) throw new Error('unexpected hold');
-  const label = `amber-gull (wt:${signed.ok.trapId})`;
+  const address = `wt:${signed.ok.trapId}`;
   dom = await loadGlass(GLASS_PAGE, { ...emptyFleet(), traps: buildGlassSnapshot().traps }, { now: NOW, hash: '#traps', prefs: { view: 'cards' } });
-  expect(dom.$('main .card .top b')?.textContent).toBe(`🪤 web · ${label}`);
+  expect(dom.$('main .card .top b')?.textContent).toBe('🪤 amber-gull');
+  expect(dom.$('main .card .top b')?.getAttribute('title')).toBe(address);
+  expect(dom.$('main .card .foot .trap-scope')?.textContent).toBe('web');
   expect(dom.$('main .card .meta')?.textContent).not.toContain('web');
   (dom.$('main .card') as unknown as HTMLElement).click();
   await dom.settle();
-  expect(dom.$('#overlay h3')?.textContent).toContain(`web · ${label}`);
+  expect(dom.$('#overlay h3')?.textContent).toContain('amber-gull');
+  expect(dom.$('#overlay h3')?.textContent).not.toContain('web');
+  expect(dom.$('#overlay .trap-address')?.textContent).toBe(`web · ${address}`);
   await dom.close();
   dom = await loadGlass(GLASS_PAGE, { ...emptyFleet(), traps: buildGlassSnapshot().traps }, { now: NOW, hash: '#traps', prefs: { view: 'table' } });
-  expect(dom.$('main tr.rowhead td b')?.textContent).toBe(label);
+  expect(dom.$('main tr.rowhead td b')?.textContent).toBe('amber-gull');
+  expect(dom.$('main tr.rowhead .trap-address')?.textContent).toBe(address);
+  expect(dom.$$('main tr.rowhead td')[1]?.textContent).toBe('web');
 });
 
 it('shows only the latest 20 uses across active grants in descending time order', async () => {

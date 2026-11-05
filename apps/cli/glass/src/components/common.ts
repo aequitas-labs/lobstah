@@ -316,6 +316,16 @@ export const namedText = (text: string): string =>
 const labelled = (text: string, at: number, length: number, name: string): boolean =>
   text.slice(Math.max(0, at - name.length - 2), at) === `${name} (` && text[at + length] === ')';
 
+/** The trap's own name leads glass labels; its address is the fallback when no name is known. */
+export function trapDisplayName(trap: Pick<GlassTrap, 'trapId' | 'name' | 'label'>): string {
+  return trap.name ?? knownTrapName(trap.trapId) ?? trap.label?.replace(/\s*\(wt:[^)]+\)$/, '') ?? `wt:${trap.trapId}`;
+}
+
+/** The repo or configured profile belongs below the trap name, never in its title. */
+export function trapScope(trap: Pick<GlassTrap, 'repo' | 'configured'>): string {
+  return trap.configured ? `trap:${trap.configured.profile} · ${trap.configured.grounds}` : (trap.repo ?? '');
+}
+
 /** A trap shown by name, its full `wt:<id>` in the title. A click opens the trap's modal. */
 export function TrapName(trapId: string): Children {
   const address = 'wt:' + trapId;
