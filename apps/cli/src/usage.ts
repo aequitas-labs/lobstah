@@ -64,6 +64,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   goals: { flags: { '--grounds': { value: '<name>' }, '--session': { value: '<id>' }, '--file': { value: '<md>' } }, flagSubverbs: { '--file': ['recap'] }, positionals: '[<date>|set <line>...|add <text>|rm <n>|done <n>|undo <n>|recap-data [<date>]|recap <date> --file <md>]' },
   focus: { flags: {}, positionals: '<trap>' },
   tmux: { flags: {}, positionals: '[<repo>]', maxPositionals: 1 },
+  heavy: { flags: { '--bg': {}, '--json': {} }, positionals: '[-- <command>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
@@ -300,6 +301,9 @@ wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster 
 Accepts its name or id with or without wt:. Reports the focus step, or why it could
 not focus. A session link can open on any supported platform; native window
 focus requires macOS.`,
+  heavy: `The machine's one line for heavy commands, such as full test runs and builds.
+With no command, shows the line. With one, waits for a slot, runs it, then frees the slot.
+--bg returns at once and posts the exit code and log to this dispatch's inbox.`,
   tmux: `Open a new Terminal window on this Desktop with its own view of the trap
 session: it starts on that repo's window, or the first, and switches windows without
 moving other views. Closing the window ends the view, never a trap. Inside tmux or off

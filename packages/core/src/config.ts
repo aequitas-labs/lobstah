@@ -277,6 +277,18 @@ export interface LimitsConfig {
   releaseOnMerge: boolean;
 }
 
+/** The machine's heavy-check line (`lobstah heavy`). */
+export interface HeavyConfig {
+  /** Commands that run at once, across all repos. auto: 1 below 14 cores, otherwise 2. */
+  slots: number | 'auto';
+  /** Test workers per run. auto: a third of the cores, at least 2. */
+  workers: number | 'auto';
+  /** Active minutes a command keeps its slot. Past this it keeps running without one. */
+  holdLimitMins: number;
+  /** How long the oldest waiter waits before a quiet notice. */
+  lineNoticeMins: number;
+}
+
 export interface SoakConfig {
   /** Sign-on and first-park window for Codex throws; --timeout overrides it. */
   codexStartSecs: number;
@@ -415,6 +427,7 @@ export interface Config {
   harness: HarnessDefaults;
   limits: LimitsConfig;
   soak: SoakConfig;
+  heavy: HeavyConfig;
   helm: HelmConfig;
   wait: WaitConfig;
   glass: GlassConfig;
@@ -532,6 +545,20 @@ function parseSoak(raw: unknown): SoakConfig {
   }
   if (!Number.isInteger(soak.tmuxPageSize) || soak.tmuxPageSize < 1) throw new Error('soak.tmuxPageSize must be a positive whole number');
   return soak;
+}
+
+export const DEFAULT_HEAVY: HeavyConfig = { slots: 'auto', workers: 'auto', holdLimitMins: 45, lineNoticeMins: 30 };
+
+function parseHeavy(raw: unknown): HeavyConfig {
+  if (raw !== undefined && (!raw || typeof raw !== 'object' || Array.isArray(raw))) throw new Error(`[heavy] must be a table in ${configPath()}`);
+  const heavy: HeavyConfig = { ...DEFAULT_HEAVY, ...((raw as Partial<HeavyConfig>) ?? {}) };
+  for (const key of ['slots', 'workers'] as const) {
+    if (heavy[key] !== 'auto' && (!Number.isInteger(heavy[key]) || (heavy[key] as number) < 1)) throw new Error(`[heavy].${key} must be "auto" or a positive integer in ${configPath()}`);
+  }
+  for (const key of ['holdLimitMins', 'lineNoticeMins'] as const) {
+    if (typeof heavy[key] !== 'number' || !Number.isFinite(heavy[key]) || heavy[key] <= 0) throw new Error(`[heavy].${key} must be a positive number in ${configPath()}`);
+  }
+  return heavy;
 }
 
 export const DEFAULT_SOAK: SoakConfig = {
@@ -688,6 +715,7 @@ export function loadConfig(): Config {
     harness: parseHarness(raw.harness, '[harness]') ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
     soak: parseSoak(raw.soak),
+    heavy: parseHeavy(raw.heavy),
     helm,
     wait,
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
