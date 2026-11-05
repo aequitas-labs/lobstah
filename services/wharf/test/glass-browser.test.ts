@@ -60,6 +60,16 @@ it('requires its cookie, not an API bearer, and derives the account rather than 
   expect((await browser('accounts/b/dispatches')).status).toBe(404);
   expect((await SELF.fetch(`https://state.test/v1/accounts/${account}/dispatches`, { headers: { Cookie: cookie } })).status).toBe(401);
 });
+it('reads cards with the glass cookie, by list or by id, and nothing else under cards', async () => {
+  await job();
+  const list = await browser('cards'); expect(list.status).toBe(200);
+  const progress = (await list.json<Array<{ id: string; family: string; key: string }>>()).find((c) => c.family === 'dispatch' && c.key === 'job')!;
+  expect(progress.id).toMatch(/^c\d+$/);
+  expect(await (await browser(`cards/${progress.id}`)).json()).toMatchObject({ id: progress.id, item: { kind: 'job', id: 'job' } });
+  expect((await SELF.fetch(`https://glass.test/api/glass/cards/${progress.id}`)).status).toBe(401);
+  expect((await browser('cards', { cards: [] })).status).toBe(404);
+  expect((await browser('cards/job')).status).toBe(404);
+});
 it('accepts cookie-scoped wake hints without a helm lease and fences expired sessions', async () => {
   const response = await browser('wake', undefined, 'GET', { Upgrade: 'websocket' }); expect(response.status).toBe(101);
   const socket = response.webSocket!; socket.accept();

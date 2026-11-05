@@ -1,6 +1,7 @@
 import { WHARF_REVIEW_REQUEST_KINDS } from '../../../packages/core/src/backend-model.js';
 import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, repoIdentity, requireThat, text } from './protocol.js';
+import { cardSchema, cardTables } from './cards.js';
 import type { Actor, Command } from './account.js';
 
 export const glassSchema = `
@@ -8,8 +9,9 @@ export const glassSchema = `
   CREATE TABLE IF NOT EXISTS human_requests (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS worker_details (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS dispatch_acks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  ${cardSchema}
 `;
-export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks'];
+export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks', ...cardTables];
 type Result = { status: number; value: unknown };
 type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
 /** Pure synchronous SQL operations inside the account's auth/idempotency transaction. */
@@ -71,6 +73,12 @@ export class GlassState {
       const r = JSON.parse(row.data) as WharfHumanRequest; r.state = 'expired'; this.put('human_requests', row.id, r);
       if (!r.kind.startsWith('review-')) this.hooks.event('human-request-expired', r.dispatch, r.id);
     }
+  }
+  /** Every published document, withdrawn ones too: a withdrawal ends its card. */
+  publishedDocuments(): WharfDocument[] { return this.list<WharfDocument>('documents').filter((d) => d.published); }
+  /** Human requests as the glass shows them, with whether one waits for a helm. */
+  requestViews(now: number): WharfHumanRequest[] {
+    return this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) }));
   }
   worker(id: string, body: Record<string, unknown>) {
     const info: Record<string, string> = {};

@@ -10,7 +10,8 @@ import { AuthScreen, authDestination, authEntry } from './auth-screen.js';
 import type { AuthState } from './auth-screen.js';
 import { requestState } from './model.js';
 import { glassWake } from './wake.js';
-import { parseRoute, routeHash, TABS } from './route.js';
+import { itemTab, parseRoute, routeHash, TABS } from './route.js';
+import { CardDetail } from './card.js';
 import type { Item, Tab } from './route.js';
 import type { DispatchView, Snapshot } from './model.js';
 import { setDecisionBadge } from '../../../../apps/cli/glass/src/app-badge.js';
@@ -37,6 +38,12 @@ export function App() {
   const setModal = (item?: Item) => {
     setItem(item);
     history.replaceState(null, '', routeHash({ tab, item }));
+  };
+  // A card names the item it is about: open that, in the view it is listed in.
+  const openItem = (item: Item) => {
+    setTab(itemTab(item.kind));
+    setItem(item);
+    history.replaceState(null, '', routeHash({ tab: itemTab(item.kind), item }));
   };
   const generation = useRef(0);
   const loggedOut = useRef(!!authEntry(location));
@@ -253,7 +260,7 @@ export function App() {
       snapshot &&
       html`<div id="overlay" class="open" onClick=${(e: Event) => {
         if (e.target === e.currentTarget) setModal(undefined);
-      }}><section class="modal" role="dialog" aria-modal="true" aria-label=${selectedDoc?.title ?? found?.id ?? 'details'} tabindex="-1" onKeyDown=${keydown}><button class="btn x" aria-label="close details" onClick=${() => setModal(undefined)}>×</button>${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}<h3>${LinkedText(selectedDoc?.title ?? found?.id ?? `${modal.kind} ${modal.id}`)}</h3>${!found && html`<div class="dim">No ${modal.kind} with this id is listed on this wharf for your account. It may have been withdrawn or removed.</div>`}${selectedDoc && selectedDoc.kind !== 'review' && html`<${Document} key=${selectedDoc.id} doc=${selectedDoc} action=${action} />`}${selectedDoc?.kind === 'review' && html`<${ReviewActions} key=${selectedDoc.id + ':' + (selectedDoc.review?.state ?? '')} doc=${selectedDoc} action=${action} />`}${selectedJob && html`<${Job} key=${selectedJob.id} job=${selectedJob} workers=${snapshot.workers} action=${action} />`}${selectedWorker && html`<div class="sub">${selectedWorker.harness ?? 'unknown harness'} · ${LinkedText(selectedWorker.repoRemote)}</div><${Session} worker=${selectedWorker} />`}</section></div>`
+      }}><section class="modal" role="dialog" aria-modal="true" aria-label=${selectedDoc?.title ?? found?.id ?? 'details'} tabindex="-1" onKeyDown=${keydown}><button class="btn x" aria-label="close details" onClick=${() => setModal(undefined)}>×</button>${error && html`<div class="bad" role="alert">${error}</div>`}${notice && html`<div class="ok" role="status">${notice}</div>`}${modal.kind === 'card' && html`<${CardDetail} key=${modal.id} id=${modal.id} open=${openItem} boatName=${(boat: string) => snapshot.boats.find((b) => b.id === boat)?.name} />`}${modal.kind !== 'card' && html`<h3>${LinkedText(selectedDoc?.title ?? found?.id ?? `${modal.kind} ${modal.id}`)}</h3>`}${!found && modal.kind !== 'card' && html`<div class="dim">No ${modal.kind} with this id is listed on this wharf for your account. It may have been withdrawn or removed.</div>`}${selectedDoc && selectedDoc.kind !== 'review' && html`<${Document} key=${selectedDoc.id} doc=${selectedDoc} action=${action} />`}${selectedDoc?.kind === 'review' && html`<${ReviewActions} key=${selectedDoc.id + ':' + (selectedDoc.review?.state ?? '')} doc=${selectedDoc} action=${action} />`}${selectedJob && html`<${Job} key=${selectedJob.id} job=${selectedJob} workers=${snapshot.workers} action=${action} />`}${selectedWorker && html`<div class="sub">${selectedWorker.harness ?? 'unknown harness'} · ${LinkedText(selectedWorker.repoRemote)}</div><${Session} worker=${selectedWorker} />`}</section></div>`
     }
     <footer><span><img class="glass-brand" src=${logo} alt="" /> lobstah · wharf · PR watches and repair run on your boats</span></footer>`;
 }
