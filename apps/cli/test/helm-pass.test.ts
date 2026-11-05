@@ -1,3 +1,4 @@
+import { HELM_STOP_REMINDER } from '../src/charter.js';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -66,7 +67,7 @@ for (const harness of ['claude', 'codex'] as const) {
     expect(stopped.reason).toContain(run(['goals', '--session', session]).stdout.trim());
     expect(stopped.reason).not.toContain('man pass');
     expect(helmPassStatus('fleet', loadConfig().helm).reasons).toEqual([]);
-    expect(run(['hook', 'stop'], { session_id: session, stop_hook_active: true }).stdout).toBe('');
+    expect(JSON.parse(run(['hook', 'stop'], { session_id: session, stop_hook_active: true }).stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
   });
 }
 

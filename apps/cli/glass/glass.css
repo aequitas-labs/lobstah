@@ -1623,6 +1623,36 @@ a.lob {
   padding: 0;
   background: none;
 }
+/* Copy controls change no layout: the button floats over its block's corner, and inline code copies when clicked. */
+.mdcodewrap {
+  position: relative;
+}
+.copybtn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+}
+.copybtn:hover {
+  color: var(--fg);
+}
+.copyinline {
+  cursor: copy;
+}
+.copyinline:hover {
+  box-shadow: inset 0 0 0 1px var(--line-hover);
+}
+.copyinline.copied {
+  box-shadow: inset 0 0 0 1px var(--ok);
+}
 .mdpage blockquote {
   border-left: 3px solid var(--line);
   padding-left: 10px;

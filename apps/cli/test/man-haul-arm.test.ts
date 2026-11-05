@@ -10,6 +10,7 @@ import { readCursor } from '../src/reported.js';
 import { landedCatches } from '../src/tend.js';
 import { liveWatcher } from '../src/watchers.js';
 import { DEFAULT_WAIT, IdleWait } from '@lobstah/core';
+import { HELM_STOP_REMINDER } from '../src/charter.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -39,6 +40,45 @@ const registration = (heartbeatAt: string) => fs.writeFileSync(watcherFile(), JS
 
 const graceConfig = (secs: number) => fs.writeFileSync(path.join(home, 'config.toml'), `[helm]\narmGraceSecs = ${secs}\n`);
 
+describe('the card reminder at a helm turn end', () => {
+  beforeEach(() => graceConfig(0.2));
+
+  it('rides on a blocking Stop, where the helm reads it', () => {
+    enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
+    const output = JSON.parse(haul().stdout);
+    expect(output.decision).toBe('block');
+    expect(output.reason.split('\n').at(-1)).toBe(HELM_STOP_REMINDER);
+    expect(output.systemMessage).toBeUndefined();
+  });
+  it('is the only output on a Stop that lets the turn end: one JSON object, no block', () => {
+    enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
+    registration(new Date().toISOString());
+    const res = haul();
+    expect(res.status).toBe(0);
+    expect(JSON.parse(res.stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
+  });
+  it('is said once when the Stop has nothing else to say', () => {
+    expect(JSON.parse(haul().stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
+  });
+  it('never reaches a session that is not the helm', () => {
+    const res = spawnSync(process.execPath, [cli, 'man', 'haul'], {
+      encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home }, timeout: 10_000, input: JSON.stringify({ session_id: 'someone-else' }),
+    });
+    expect(res.status).toBe(0);
+    expect(res.stdout).not.toContain(HELM_STOP_REMINDER);
+  });
+  it('never reaches a trap', () => {
+    const worktree = path.join(home, 'wt');
+    fs.mkdirSync(worktree);
+    const signed = signOnTrap({ sessionId: 'trap-session', harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000 });
+    expect('ok' in signed).toBe(true);
+    const res = spawnSync(process.execPath, [cli, 'man', 'haul'], {
+      encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home }, timeout: 10_000, input: JSON.stringify({ session_id: 'trap-session' }),
+    });
+    expect(res.stdout).not.toContain(HELM_STOP_REMINDER);
+  });
+});
+
 describe('man haul arm mode', () => {
   // A short grace window keeps the block paths fast; the window has its own tests.
   beforeEach(() => graceConfig(0.2));
@@ -54,7 +94,7 @@ describe('man haul arm mode', () => {
   it('allows a stop with a live watcher registration', () => {
     enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
     registration(new Date().toISOString());
-    expect(haul().stdout).toBe('');
+    expect(JSON.parse(haul().stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
   });
 
   it('accepts a helm or trap watcher at the four-hour backoff cap', () => {
@@ -70,7 +110,7 @@ describe('man haul arm mode', () => {
         encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home }, input: JSON.stringify({ session_id: sid }), timeout: 10_000,
       });
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toBe('');
+      expect(result.stdout.trim()).toBe(kind === 'man' ? JSON.stringify({ systemMessage: HELM_STOP_REMINDER }) : '');
       expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(14400);
     }
   });
@@ -82,7 +122,7 @@ describe('man haul arm mode', () => {
   });
 
   it('allows a stop with nothing in flight', () => {
-    expect(haul().stdout).toBe('');
+    expect(JSON.parse(haul().stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
   });
 
   it('blocks on a standing question even when a watcher is live', () => {
@@ -146,7 +186,7 @@ describe('man haul arm grace window', () => {
     enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
     fs.mkdirSync(path.dirname(watcherFile()), { recursive: true });
     const [res] = await Promise.all([haulAsync(), later(1_000, () => registration(new Date().toISOString()))]);
-    expect(res.stdout).toBe('');
+    expect(JSON.parse(res.stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
   }, 15_000);
 
   it('blocks when the registration lands after the window', async () => {
@@ -164,7 +204,7 @@ describe('man haul arm grace window', () => {
     enqueue({ id: dispatchId, repo: 'web', brief: 'b' });
     registration(new Date(Date.now() - 10_000).toISOString());
     const [res] = await Promise.all([haulAsync(), later(1_000, () => registration(new Date().toISOString()))]);
-    expect(res.stdout).toBe('');
+    expect(JSON.parse(res.stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
   }, 15_000);
 });
 
