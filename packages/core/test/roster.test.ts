@@ -166,6 +166,29 @@ describe('planThrow', () => {
     }
   });
 
+  it('a Claude trap whose session is open in any process is refused, not resumed; once it ends the trap resumes', async () => {
+    const claudeHome = path.join(home, 'claude');
+    const reg = signOn('early-pebble');
+    stowTrap(reg.trapId);
+    const project = path.join(claudeHome, 'projects', reg.worktree.replace(/[^A-Za-z0-9-]/g, '-'));
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, `${reg.sessionId}.jsonl`), '{}\n');
+    expect(planThrow(loadConfig(), { all: true }, { claudeHome })[0]).toMatchObject({ action: 'resume' });
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    try {
+      fs.mkdirSync(path.join(claudeHome, 'sessions'), { recursive: true });
+      fs.writeFileSync(path.join(claudeHome, 'sessions', `${holder.pid}.json`), JSON.stringify({ pid: holder.pid, sessionId: reg.sessionId, tmux: 'lobstah:@1.%14' }));
+      const [held] = planThrow(loadConfig(), { all: true }, { claudeHome });
+      expect(held).toMatchObject({ action: 'skip', sessionHeld: true });
+      expect(held!.why).toContain(`process ${holder.pid} (tmux pane %14)`);
+      holder.kill('SIGKILL');
+      await new Promise((resolve) => holder.once('exit', resolve));
+      expect(planThrow(loadConfig(), { all: true }, { claudeHome })[0]).toMatchObject({ action: 'resume' });
+    } finally {
+      holder.kill('SIGKILL');
+    }
+  });
+
   it('an unconfigured repo, a foreign anchor, and a pre-roster worktree are unresolved', () => {
     const reg = signOn('amber-gull');
     stowTrap(reg.trapId);
