@@ -348,8 +348,12 @@ const RUNS_ANYTHING = new Set([
 /** A package runner: the word after it is the one that runs. */
 const PACKAGE_RUNNERS = new Set(['npx', 'pnpx', 'pnpm', 'npm', 'yarn', 'bun', 'bunx']);
 const PACKAGE_RUNNER_VERBS = new Set(['exec', 'dlx', 'run', 'x']);
-/** Repo-relative paths that run code or hold configuration: an intent never allows writing them. */
-const PROTECTED_PATH = /^(?:\.git|\.husky|\.claude|\.codex|\.lobstah)(?:\/|$)/;
+/**
+ * Repo-relative paths that run code or hold configuration: an intent never
+ * allows writing them, at any depth. Case doesn't count, because `.GIT/hooks`
+ * is `.git/hooks` on a case-insensitive filesystem.
+ */
+const PROTECTED_PATH = /(?:^|\/)(?:\.git|\.husky|\.claude|\.codex|\.lobstah)(?:\/|$)/i;
 /** The longest intent sentence: a person reads it on a card before approving it. */
 const INTENT_TEXT_MAX = 300;
 /** The most patterns one intent grant carries. */
