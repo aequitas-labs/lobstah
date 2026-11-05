@@ -138,6 +138,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--timeout': { value: '<secs>' },
       '--repo': { value: '<key>' },
       '--link': { value: '<url>' },
+      '--remote-link': { value: '<url>' },
       '--name': { value: '<word-word>' },
       '--ticket': { value: '<ticket>' },
     },
@@ -197,6 +198,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--harness': { value: HARNESS },
       '--request': { value: '<id>' },
       '--bypass': {},
+      '--remote-control': {},
       '--timeout': { value: '<secs>' },
       '--all': {},
       '--repo': { value: '<key>' },
@@ -372,7 +374,7 @@ installs the shipped PR check; with --for, a check that fails after the first
 \`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
   soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
 Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
-Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
+Sessions reuse traps. --one stows after a catch; --name, --link set name, URL; --remote-link: the https://claude.ai/code/… URL Claude printed.
 --wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
 \`trap bypass <trap> on|off\` (a person; --yes skips confirmation): the trap's next start runs with no permission checks
@@ -428,7 +430,7 @@ PR, and merge gate. Pure disk read.`,
   'man:throw': `Bring roster traps back, or start fresh, and wait until they listen; live/starting traps refuse.
 <trap>: one; --all: grounds; --repo: one repo; --new [--count N] [--request <id>]: fresh traps.
 --new shows reusable traps; --reason is required when any exist and never overrides the repo's traps cap.
---dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's.`,
+--dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's. --remote-control: this Claude trap starts in Remote Control, where Claude's own setting doesn't.`,
   'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull. set (the
 helm's) saves how a throw starts it; default or key= clears a field. forget removes a
 stowed trap's record, worktree, and protected ref (refused while it has unpushed commits).`,

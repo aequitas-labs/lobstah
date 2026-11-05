@@ -78,5 +78,8 @@ export * from './wharf-credentials.js';
 export * from './wharf-broker.js';
 export * from './wait-backoff.js';
 export * from './goals.js';
+export * from './viewer-device.js';
+export * from './remote-link.js';
+export * from './session-holder.js';
 export * from './goal-line.js';
 export * from './helm-pass.js';

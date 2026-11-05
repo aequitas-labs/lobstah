@@ -118,6 +118,11 @@ import {
   storageGrounds,
   captureWindow,
   captureHarnessProcess,
+  endingProcessOwnsTrap,
+  harnessAncestorPid,
+  rosterTrapForSession,
+  sessionHolders,
+  sessionHolderText,
   endHarnessProcess,
   heartbeatHelm,
   helmChat,
@@ -186,6 +191,7 @@ import {
   codexDesktopThread,
   CODEX_DESKTOP_THREAD,
   worktreeProgress,
+  validRemoteLink,
   validSessionLink,
   linkMismatch,
   ReportError,
@@ -257,7 +263,7 @@ import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
-import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, startMode, throwBatch, throwTrap } from './throw.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, REMOTE_CONTROL_CLAUDE_ONLY, startMode, throwBatch, throwTrap } from './throw.js';
 import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
@@ -272,6 +278,14 @@ import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
+
+/** The one trap on this session, for a stow that names none. Several would mean guessing which to sign off. */
+function soleTrapForStow(sessionId: string, quiet: boolean): string | undefined {
+  const manned = listTraps().filter((t) => t.sessionId === sessionId);
+  if (manned.length < 2) return manned[0]?.trapId;
+  if (quiet) return undefined;
+  throw new Error(`several traps share session ${sessionId}: ${manned.map((t) => trapLabel(t)).join(', ')}. Stow one by name with \`lobstah stow --wt <name>\`.`);
+}
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -1713,6 +1727,10 @@ async function mainCli(): Promise<void> {
       // id's UUID version, else the descriptor) — never guess from the ask.
       const { harness = 'claude', sessionId } = resolveSessionHarness(id, loadConfig(), lane);
       if (!sessionId) throw new Error(`${id} has no recorded harness session to attach to`);
+      if (!has('--print')) {
+        const holders = sessionHolders(sessionId);
+        if (holders.length) throw new Error(`not attaching ${id}: ${sessionHolderText(sessionId, holders)}`);
+      }
       if (harness === 'codex' && codexDesktopThread(sessionId)) {
         throw new Error(
           `${id}: ${CODEX_DESKTOP_THREAD} (session ${sessionId}) — open it in the Codex desktop app, ` +
@@ -2154,7 +2172,7 @@ async function mainCli(): Promise<void> {
         }
         console.log(`warning: ${BYPASS_WARNING}`);
       }
-      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}) };
+      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}), ...(has('--remote-control') ? { remoteControl: true } : {}) };
       if (has('--new')) {
         // Fresh traps: --count of them, for --repo (or a glass request's repo, or the grounds' only repo).
         if (pos.length > 0 || has('--all')) throw new UsageError(`--new starts fresh traps: no names, no --all\n\n${usageFor('man:throw')!}`);
@@ -2184,7 +2202,9 @@ async function mainCli(): Promise<void> {
         guardNewTraps(cfgThrow, repoKey, count, reason);
         if (dry) {
           const profile = freshProfile(cfgThrow, repoKey, harness);
-          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>', ...(bypass ? { bypass } : {}) });
+          if (has('--remote-control') && profile.harness !== 'claude') throw new UsageError(REMOTE_CONTROL_CLAUDE_ONLY);
+          const remote = has('--remote-control');
+          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>', ...(bypass ? { bypass } : {}), ...(remote ? { remoteControl: '<name>' } : {}) });
           console.log(toonKV({ plan: 'dry run — launches nothing', new: `${count} fresh ${repoKey} trap(s)`, reason }));
           console.log(
             toonTable(
@@ -2211,6 +2231,9 @@ async function mainCli(): Promise<void> {
         console.log(json ? JSON.stringify({ results }, null, 2) : batchText(results));
         if (results.some((r) => r.result === 'failed')) process.exitCode = 1;
         break;
+      }
+      if (has('--remote-control') && (has('--all') || opt('--repo') !== undefined)) {
+        throw new UsageError(`--remote-control connects one chosen trap: name it, or use --new\n\n${usageFor('man:throw')!}`);
       }
       if (!dry && (has('--all') || opt('--repo') !== undefined)) {
         if (pos.length > 0) throw new UsageError(`name traps, or select with --all / --repo, not both\n\n${usageFor('man:throw')!}`);
@@ -3070,6 +3093,9 @@ async function mainCli(): Promise<void> {
       if (opt('--link') !== undefined && !validSessionLink(opt('--link'))) {
         throw new UsageError('invalid --link: use a supported claude://, vscode://, or codex:// session URL');
       }
+      if (opt('--remote-link') !== undefined && !validRemoteLink(opt('--remote-link'))) {
+        throw new UsageError('invalid --remote-link: use the https://claude.ai/code/… URL Claude printed');
+      }
       const cfg = loadConfig();
       const site = inspectSoakSite(process.cwd(), cfg.repos);
       const repoFlag = opt('--repo');
@@ -3158,6 +3184,14 @@ async function mainCli(): Promise<void> {
               'by the lobstah plugin (`lobstah man brief`). Re-runs in this worktree need no flags.',
           );
         }
+        // A session that lost its trap to a sweep goes back to it, not on to a second trap here.
+        // A deliberate stow released it, so it may volunteer elsewhere.
+        const owner = rosterTrapForSession(sessionId);
+        if (owner && owner.trapId !== priorId && owner.state !== 'stowed' && !trapBySession(sessionId)) {
+          throw new Error(
+            `this session belongs to trap ${trapLabel(owner)}: run \`lobstah soak\` from ${owner.worktree} to bring it back, or \`lobstah stow --wt ${owner.name}\` first to release it.`,
+          );
+        }
       } else {
         sessionId = callerSession(opt('--session'), true)?.id;
         if (!sessionId) {
@@ -3196,10 +3230,23 @@ async function mainCli(): Promise<void> {
             );
           }
           repoKey = key;
+          // The trap this session last signed on as comes back under its own
+          // name: however it started, never a second trap on one session.
+          const owner = rosterTrapForSession(sessionId, key);
           // A worktree soak already created for this session (its trap was
           // swept, say) is re-used, never duplicated.
           const existing = soakWorktreeFor(worktreesDir(), sessionId, key);
-          if (existing) {
+          const ownerHere = owner && fs.existsSync(owner.worktree) && trapIdAt(owner.worktree) === owner.trapId;
+          // A deliberate `stow --remove` released the trap; a sweep didn't.
+          if (owner && !ownerHere && owner.state !== 'stowed') {
+            throw new Error(
+              `this session belongs to trap ${trapLabel(owner)}, whose checkout at ${owner.worktree} is gone or anchors another trap. End this session, then \`lobstah man throw ${owner.name}\` restores it.`,
+            );
+          }
+          if (owner && ownerHere) {
+            worktree = canon(owner.worktree);
+            prior = readTrap(owner.trapId);
+          } else if (existing) {
             worktree = canon(existing);
             const id = trapIdAt(existing);
             prior = id !== undefined ? readTrap(id) : undefined;
@@ -3254,13 +3301,16 @@ async function mainCli(): Promise<void> {
           one: has('--one') || undefined,
           name: opt('--name'),
           window,
-          // Only a Codex trap's process is ended at stow or checked by a throw.
-          ...(resolved.harness === 'codex' ? { harnessProcess: captureHarnessProcess() } : {}),
+          // A throw won't resume a session whose process still runs. Claude's own
+          // variable confirms this CLI runs inside that session, not beside it.
+          ...(resolved.harness === 'codex' || process.env.CLAUDE_CODE_SESSION_ID === sessionId ? { harnessProcess: captureHarnessProcess() } : {}),
           link: linkIgnored ? undefined : linkFlag,
           ...(reservation ? { trapId: reservation.trapId, startDeadline: reservation.deadline } : {}),
           ...(reservation?.batch ? { batch: reservation.batch } : {}),
           ...(reservation?.creationReason ? { creationReason: reservation.creationReason } : {}),
           ...(reservation?.startMode ? { startMode: reservation.startMode } : {}),
+          ...(reservation?.remoteControlSince ? { remoteControlSince: reservation.remoteControlSince } : {}),
+          ...(opt('--remote-link') !== undefined ? { remoteLink: opt('--remote-link') } : {}),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
       } catch (err) {
@@ -3365,7 +3415,7 @@ async function mainCli(): Promise<void> {
       const trapId =
         (wtFlag ? trapIdForName(wtFlag.startsWith('wt:') ? wtFlag.slice(3) : wtFlag) ?? (/^(?:wt:)?[0-9a-f]{8}$/.test(wtFlag) ? wtFlag.replace(/^wt:/, '') : undefined) : undefined) ??
         (site && !site.primary ? trapIdAt(site.worktree) : undefined) ??
-        (sessionId !== undefined ? trapBySession(sessionId)?.trapId : undefined);
+        (sessionId !== undefined ? soleTrapForStow(sessionId, quiet) : undefined);
       if (trapId === undefined) {
         if (quiet) break;
         if (wtFlag) throw new Error(unknownTrapMessage(wtFlag));
@@ -3392,6 +3442,8 @@ async function mainCli(): Promise<void> {
       // session registered as its trap. Any other session ending in the
       // worktree (a second window, a child session) leaves the trap alone.
       if ((quiet || sessionEnd) && readTrap(trapId) && readTrap(trapId)!.sessionId !== sessionId) break;
+      // Nor for another process on the same session: the trap's own may still be running.
+      if (sessionEnd && !endingProcessOwnsTrap(readTrap(trapId)?.harnessProcess, harnessAncestorPid())) break;
       // A trap always signs itself off from its own worktree (or its own
       // session id). Stowing someone ELSE's trap is steering — with a
       // claimed helm, that force path is the helm's alone.

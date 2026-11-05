@@ -18,6 +18,12 @@ export function text(value: unknown, max = 1024): string {
 export function identifier(value: unknown): string {
   const s = text(value, 128); requireThat(/^[A-Za-z0-9_-]+$/.test(s), 400, 'invalid identifier'); return s;
 }
+/** How long a worker's sign-on or renewal holds. */
+export const LEASE_MS = 90_000;
+/** A tmux pane id as a boat reports it, such as `%12`. */
+export function tmuxPane(value: unknown): string {
+  const s = text(value, 16); requireThat(/^%(0|[1-9][0-9]*)$/.test(s), 400, 'invalid tmux pane'); return s;
+}
 export function repoIdentity(value: unknown): string {
   try { return validateRepoIdentity(value); } catch { throw new ApiError(400, 'canonical repoRemote required'); }
 }

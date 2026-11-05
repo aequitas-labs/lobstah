@@ -75,7 +75,8 @@ export class WharfTrapBroker {
     this.signingOn.add(t.worktree);
     try {
       await this.remote(t.scope, t.name).request('workers/sign-on', { worker: t.name, repo: t.repo,
-        repoRemote: this.options.identity!(t.repo), harness, session }, randomUUID());
+        repoRemote: this.options.identity!(t.repo), harness, session,
+        ...(typeof body.tmuxPane === 'string' && /^%[0-9]+$/.test(body.tmuxPane) ? { tmuxPane: body.tmuxPane } : {}) }, randomUUID());
       if (!this.alive(pid)) throw new Error('trap session process is gone');
       const agent: BrokerAgent = { grounds: t.scope.grounds, repo: t.repo, trap: t.name, session, capability: secret(), worktree: t.worktree, ...(t.origin ? { origin: t.origin } : {}) };
       this.sessions.set(agent.capability, { agent, scope: t.scope, name: t.name, pid, seen: this.now(), current: null, reported: false, tail: Promise.resolve() });

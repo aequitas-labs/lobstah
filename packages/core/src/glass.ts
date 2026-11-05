@@ -12,6 +12,7 @@ import type { ActivityView } from './activity.js';
 import type { TodoView } from './todos.js';
 import type { HelmPassView } from './helm-pass.js';
 import type { PermissionsProposal } from './decisions.js';
+import type { ViewerDevice } from './viewer-device.js';
 
 /**
  * The spyglass's data contract: the JSON `lobstah glass` serves at /data.
@@ -368,6 +369,12 @@ export interface GlassMessage {
 /** A trap: live (a registration) or historical (only receipts, mail, and notices survive). */
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   desktopThread?: boolean;
+  /** The Claude Remote Control URL Claude emitted for this live session. It opens on any device the owner is signed in on. */
+  liveLink?: string;
+  /** Set when two processes hold this trap's session: the live link is withheld. */
+  sessionWriters?: number[];
+  /** The command that joins this live trap's tmux pane, written for where this page's viewer is. */
+  attachCommand?: string;
   trapId: string;
   label?: string;
   /** `label` after the trap's repo, for a card with no repo column. */
@@ -429,6 +436,22 @@ export interface GlassAnswerLimits {
   extensions: string[];
 }
 
+/**
+ * What the server can tell about a page's viewer, from the request's Host and User-Agent.
+ * This decides what the page offers. It authorizes nothing: every action still
+ * checks Host, Origin and the page token.
+ */
+export interface GlassViewer {
+  /** The request used this glass's own address: this machine, or a forward that keeps that address. */
+  onMachine: boolean;
+  /** Native window selection can run for this viewer. Session links may work without it. */
+  windowFocus: boolean;
+  /** This machine's short name, for saying where its traps run. */
+  machine: string;
+  /** The device asking. Commands and session links are offered only where they can work. */
+  device: ViewerDevice;
+}
+
 /** The /data payload: one disk pass, everything the page renders. */
 export interface GlassHeavyTicket {
   state: 'running' | 'over' | 'waiting';
@@ -452,10 +475,10 @@ export interface GlassSnapshot {
   helmPasses?: HelmPassView[];
   goals?: Array<{ grounds: string; date: string; lines: string[] }>;
   backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;
-  /** Per-server secret for the same-origin actions: focusing a trap and answering a decision. */
+  /** Per-server secret for the same-origin actions, sent only to this machine's own glass address. */
   focusToken?: string;
-  /** Native window selection is available on this host. Session links may work elsewhere. */
-  focusSupported?: boolean;
+  /** What the server can tell about who asked for this page. */
+  viewer?: GlassViewer;
   /** Configured repo keys, for the New trap form. */
   repoKeys?: string[];
   /** A helm is signed on and beating: a trap request will be answered. */
