@@ -342,6 +342,19 @@ export interface GlassReview {
   staged?: boolean;
 }
 
+/** A task's stable identity, visible label and current saved state. */
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  checked: boolean;
+}
+
+/** Saved document progress; closed decisions cannot be edited. */
+export interface ChecklistProgress {
+  items: ChecklistItem[];
+  readOnly: boolean;
+}
+
 export interface GlassReport {
   key: string;
   title: string;
@@ -412,6 +425,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
 
 /** A standing decision as the glass renders it: the record plus its detail page. */
 export interface GlassDecision {
+  /** Closed cards are available through their deep link, without answer controls. */
+  readOnly?: boolean;
   appStart?: import('./desktop-start-link.js').DesktopAppStart;
   key: string;
   title: string;

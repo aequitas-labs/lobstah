@@ -268,19 +268,21 @@ export function DecisionModal({
         <span class="dmeta dim">${source(c)}${source(c).length ? ' · ' : ''}${Age(c.at)} ago</span>
       </div>
       ${
-        c.kind === 'decision' && c.permissionsProposal
+        c.kind === 'decision' && c.permissionsProposal && !c.readOnly
           ? [html`<${PermissionsProposalCard} card=${c} draft=${draft} />`, legend(0, true)]
           : [
               c.kind === 'decision' &&
                 c.detail.trim() &&
-                html`<${Markdown} text=${c.detail} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`,
+                html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`,
               c.kind === 'decision' && attachments(c.key, c.attachments),
-              c.kind === 'decision' && c.appStart && validDesktopStartLink(c.appStart.url)
+              c.kind === 'decision' && !c.readOnly && c.appStart && validDesktopStartLink(c.appStart.url)
                 ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
-                : draft?.sent
-                  ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
-                  : answerForm(c, draft, extensions.join(',')),
-              !(c.kind === 'decision' && c.appStart) &&
+                : c.kind === 'decision' && c.readOnly
+                  ? html`<div class="dim">Closed decision</div>`
+                  : draft?.sent
+                    ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
+                    : answerForm(c, draft, extensions.join(',')),
+              !(c.kind === 'decision' && (c.appStart || c.readOnly)) &&
                 legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && c.permission),
             ]
       }`,

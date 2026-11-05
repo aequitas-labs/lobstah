@@ -282,6 +282,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--option': { value: '<label>', repeatable: true },
       '--attach': { value: '<file>', repeatable: true },
       '--withdraw': { value: '<key>' },
+      '--show': { value: '<card-or-report-key>' },
       '--replace': { value: '<key>' },
       '--grounds': { value: '<name>' },
       '--session': { value: '<id>' },

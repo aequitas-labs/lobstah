@@ -57,6 +57,9 @@ export interface GlassDom {
 }
 
 export interface GlassDomOptions {
+  /** Optional document-state endpoints for behavior tests. */
+  get?: (url: string) => { status: number; body: unknown } | undefined;
+
   now: number;
   /** What `GET /data/settings` answers; absent, it answers 500. */
   settings?: GlassSettings;
@@ -138,6 +141,9 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
       headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
       json: async () => JSON.parse(JSON.stringify(body)),
     });
+    const supplied = opts.get?.(url);
+    if (supplied) return json(supplied.status, supplied.body);
+    if (typeof url === 'string' && (url.startsWith('/data/decision/') || url.startsWith('/api/checklist?'))) return json(404, { reason: 'Document not found.' });
     if (url === '/data/settings') return opts.settings ? json(200, opts.settings) : json(500, { error: 'no settings' });
     if (typeof url === 'string' && url.startsWith('/data/dispatch/')) {
       dataFetched.push(url);

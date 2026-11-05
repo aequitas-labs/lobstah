@@ -8,7 +8,7 @@ import { LinkedText } from './links.js';
 
 /**
  * A report on its own page (`/report/<key>`): fetched once and rendered
- * once. It never polls, so nothing re-renders while a person reads it.
+ * once. Only checklist state refreshes while a person reads it.
  * Showing it acks the report (`report-viewed`); the page stays as rendered.
  */
 
@@ -23,7 +23,7 @@ export function ReportView({ view }: { view: ReportViewState }) {
   const r = view.report;
   return html`<main class="reportview">
     <h1>${LinkedText(r.title)}</h1>
-    <${ReportSection} r=${r} text=${view.text !== undefined ? { text: view.text } : { error: view.error }} />
+    <${ReportSection} r=${r} token=${view.token} text=${view.text !== undefined ? { text: view.text } : { error: view.error }} />
   </main>`;
 }
 

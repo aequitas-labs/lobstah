@@ -7,14 +7,14 @@ import { Age, ImageThumb, attachmentRows, cmdRow } from './common.js';
 import { LinkedText } from './links.js';
 
 type FileUrl = (name: string) => string;
-const markdown = (text: string, fileUrl: FileUrl, copyCode = false) =>
-  html`<${MarkdownElements} text=${text} copyCode=${copyCode} image=${(name: string, alt: string) => ImageThumb(fileUrl(name), alt, 'mdimg')} />`;
+const markdown = (text: string, fileUrl: FileUrl, copyCode = false, documentKey?: string, token?: string, readOnly = false) =>
+  html`<${MarkdownElements} text=${text} copyCode=${copyCode} documentKey=${documentKey} token=${token} readOnly=${readOnly} image=${(name: string, alt: string) => ImageThumb(fileUrl(name), alt, 'mdimg')} />`;
 
 /** The page body for one report's markdown, or the loading and error states. */
-export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string; error?: string } | undefined }) {
+export function ReportPage({ r, text, token }: { r: GlassReport; text: { text?: string; error?: string } | undefined; token?: string }) {
   const body =
     text?.text !== undefined
-      ? markdown(text.text, (name) => reportFileUrl(r.key, name))
+      ? markdown(text.text, (name) => reportFileUrl(r.key, name), false, r.key, token)
       : text?.error
         ? html`<div class="bad">${text.error}</div>`
         : html`<div class="dim">loading…</div>`;
@@ -22,8 +22,18 @@ export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string;
 }
 
 /** Markdown as elements, with images from `fileUrl` and code that copies (a decision's detail page). */
-export function Markdown({ text, fileUrl }: { text: string; fileUrl: FileUrl }) {
-  return html`<div class="mdpage">${markdown(text, fileUrl, true)}</div>`;
+export function Markdown({
+  text,
+  fileUrl,
+  documentKey,
+  readOnly,
+}: {
+  text: string;
+  fileUrl: FileUrl;
+  documentKey?: string;
+  readOnly?: boolean;
+}) {
+  return html`<div class="mdpage">${markdown(text, fileUrl, true, documentKey, undefined, readOnly)}</div>`;
 }
 
 /** The report's heading line: who it is from (a trap, a headless dispatch's id, nothing for the helm), its age, and `acked`. */
@@ -37,15 +47,17 @@ export function ReportSection({
   r,
   text,
   heading,
+  token,
 }: {
   r: GlassReport;
   text: { text?: string; error?: string } | undefined;
   heading?: boolean;
+  token?: string;
 }) {
   return [
     heading && html`<div class="sec">report · ${LinkedText(r.title)}</div>`,
     html`<div class="sub">${reportByline(r)}</div>`,
-    html`<${ReportPage} r=${r} text=${text} />`,
+    html`<${ReportPage} r=${r} text=${text} token=${token} />`,
     r.attachments.length > 0 && [
       html`<div class="sec">report attachments (${r.attachments.length})</div>`,
       attachmentRows(r.attachments, (name) => reportFileUrl(r.key, name)),

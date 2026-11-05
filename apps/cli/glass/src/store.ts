@@ -9,6 +9,8 @@ import type { DispatchDetail, GlassOlder, GlassPrefs, GlassTab, ModalRef } from 
  * reconciliation touches only the DOM that differs.
  */
 export interface GlassState {
+  /** A closed decision opened by its deep link, outside the live queue. */
+  archivedDecision?: import('@lobstah/core').GlassDecision;
   /** The latest /data snapshot; undefined until the first fetch lands. */
   snapshot: GlassSnapshot | undefined;
   /** The tab, from the URL hash. */

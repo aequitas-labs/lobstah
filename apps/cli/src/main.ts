@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { checklistSummary } from './checklists.js';
 import { validateAssistanceParent, configuredTrapViews, withConfiguredTrapSlot } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -461,6 +462,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   the helm's own todos, per grounds; shown in
                                   man tend, man report, and the glass, and
                                   re-injected at session start and compaction.
+  man ask --show <card-or-report-key>   (read checklist progress)
   man ask [<dispatch-id>] --title <q> [--detail <f.md>] [--option <label> ...] [--attach <file> ...] [--replace <key>]
                                   put a decision to the human: a card in the
                                   glass until answered or withdrawn
@@ -2135,6 +2137,12 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'man:ask': {
+      const show = opt('--show');
+      if (show !== undefined) {
+        try { console.log(checklistSummary(show)); }
+        catch (error) { throw new UsageError(error instanceof Error ? error.message : 'Could not read checklist.'); }
+        break;
+      }
       const caller = callerSession(opt('--session'));
       let groundsName = opt('--grounds');
       // Framing a question for the human is steering: the claimed helm's alone.

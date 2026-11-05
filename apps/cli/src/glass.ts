@@ -1,3 +1,5 @@
+import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
+import { readArchivedDecision, readDecision, readDecisionAnswer } from '@lobstah/core';
 import { configuredTrapViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
@@ -155,6 +157,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['helm-chat', 1024],
   ['todo-schedule', 1024],
   ['decision-viewed', 1024],
+  ['checklist-tick', 1024],
   ['permissions-proposal-preview', 8192],
   ['permissions-proposal-answer', 8192],
   ['report-viewed', 1024],
@@ -967,6 +970,15 @@ export function serveGlass(
               return reply(500, { ok: false, reason: 'The time could not be stored.' });
             }
           }
+          case 'checklist-tick': {
+            const payload = body.payload as { key?: unknown; item?: unknown; checked?: unknown } | undefined;
+            if (!payload || typeof payload.key !== 'string' || payload.key.length > 200 || typeof payload.item !== 'string' || payload.item.length > 80 || typeof payload.checked !== 'boolean')
+              return reply(400, { ok: false, reason: 'A document key, task identity and checked state are required.' });
+            try { return reply(200, { ok: true, ...setChecklistTick(payload.key, payload.item, payload.checked) }); }
+            catch (error) {
+              return reply(error instanceof ChecklistError ? error.status : 500, { ok: false, reason: error instanceof ChecklistError ? error.message : 'The checklist could not be stored.' });
+            }
+          }
           case 'decision-answer': {
             try {
               const { key, ...answer } = decisionAnswerRequest(body.payload);
@@ -1186,6 +1198,27 @@ export function serveGlass(
       void (options.focus ?? ((trap: TrapRegistration) => focusRegistration(trap, { openTerminal: true })))(reg)
         .then((result) => reply(result.focused ? 200 : 409, result))
         .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
+      return;
+    }
+    if (req.method === 'GET' && (req.url?.startsWith('/api/checklist?') || req.url?.startsWith('/data/decision/'))) {
+      if (req.headers.host !== ownHost()) { res.writeHead(403); res.end(); return; }
+      try {
+        let value: unknown;
+        if (req.url.startsWith('/api/checklist?')) {
+          const key = new URL(req.url, 'http://localhost').searchParams.get('key') ?? '';
+          value = readChecklist(key);
+        } else {
+          const key = decodeURIComponent(req.url.slice('/data/decision/'.length));
+          const meta = readDecision(key) ?? readArchivedDecision(key);
+          if (!meta) throw new ChecklistError('Card not found.', 404);
+          value = { ...glassDecisions([meta])[0], readOnly: !readDecision(key) || !!readDecisionAnswer(key) };
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(value));
+      } catch (error) {
+        res.writeHead(error instanceof ChecklistError ? error.status : 400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ reason: error instanceof Error ? error.message : 'Invalid document.' }));
+      }
       return;
     }
     if (req.url === '/api/version' && req.method === 'GET') {

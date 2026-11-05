@@ -232,9 +232,22 @@ export function readDecision(key: string): DecisionMeta | undefined {
   return meta?.key === key ? meta : undefined;
 }
 
-export function readDecisionDetail(key: string): string | undefined {
+/** The retained directory of a withdrawn card, never a caller-supplied path. */
+export function archivedDecisionDir(key: string): string | undefined {
   const dir = decisionDir(key);
-  if (!dir || !readDecision(key)) return undefined;
+  return dir ? path.join(decisionsRoot(), '.withdrawn', path.basename(dir)) : undefined;
+}
+
+/** Read a withdrawn card for a read-only deep link or progress inspection. */
+export function readArchivedDecision(key: string): DecisionMeta | undefined {
+  const dir = archivedDecisionDir(key);
+  const meta = dir ? readJsonFile<DecisionMeta>(path.join(dir, DECISION_JSON)) : undefined;
+  return meta?.key === key ? meta : undefined;
+}
+
+export function readDecisionDetail(key: string): string | undefined {
+  const dir = readDecision(key) ? decisionDir(key) : readArchivedDecision(key) ? archivedDecisionDir(key) : undefined;
+  if (!dir) return undefined;
   try {
     return fs.readFileSync(path.join(dir, DETAIL_MD), 'utf8');
   } catch {
@@ -453,13 +466,15 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   return { meta, replaced };
 }
 
-/** Withdraw a standing decision: its directory is removed. An answered one stays. */
+/** Withdraw a standing decision into a read-only archive, retaining its task progress. */
 export function withdrawDecision(key: string): DecisionMeta {
   const meta = readDecision(key);
   if (!meta) throw new DecisionError(`no decision ${key}`, 404);
   const answer = readDecisionAnswer(key);
   if (answer) throw new DecisionError(`decision ${key} was already answered at ${answer.answeredAt}`, 409);
-  fs.rmSync(decisionDir(key)!, { recursive: true, force: true });
+  const archive = archivedDecisionDir(key)!;
+  fs.mkdirSync(path.dirname(archive), { recursive: true });
+  atomicRenameSync(decisionDir(key)!, archive);
   return meta;
 }
 
@@ -615,8 +630,9 @@ export function removeAnsweredDecision(key: string): void {
  */
 export function resolveDecisionFile(key: string, name: string): string | undefined {
   if (!name || name !== path.basename(name) || name !== path.win32.basename(name) || name === '.' || name === '..') return undefined;
-  const meta = readDecision(key);
-  const dir = decisionDir(key);
+  const active = readDecision(key);
+  const meta = active ?? readArchivedDecision(key);
+  const dir = active ? decisionDir(key) : archivedDecisionDir(key);
   if (!meta || !dir) return undefined;
   const stored = meta.renamed?.[name] ?? name;
   const hit = meta.attachments.find((a) => a.name === stored);
