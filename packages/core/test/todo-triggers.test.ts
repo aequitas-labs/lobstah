@@ -152,19 +152,27 @@ describe('dispatch triggers', () => {
 });
 
 describe('PR triggers', () => {
-  it('merged and closed follow the record’s state', () => {
+  it.each([
+    ['MERGED', 'merged'],
+    ['CLOSED', 'closed without merging'],
+  ])('a merge wait fires once for %s and names the actual outcome', (state, outcome) => {
     const key = pr(1, { state: 'OPEN' });
-    addTodo(G, 'merge', Date.now(), { triggers: any({ kind: 'pr', key, on: 'merged' }) });
-    addTodo(G, 'close', Date.now(), { triggers: any({ kind: 'pr', key, on: 'closed' }) });
+    addTodo(G, 'finish the PR follow-up', Date.now(), { triggers: any({ kind: 'pr', key, on: 'merged' }) });
     expect(fireDueTodos().fired).toBe(0);
+    pr(1, { state });
+    expect(fireDueTodos().fired).toBe(1);
+    expect(fireDueTodos().fired).toBe(0);
+    expect(only().firing!.cause).toEqual({ kind: 'event', triggers: [`${key} ${outcome}`] });
+    expect(claimTodoFirings(G)[0]!.firedBy).toBe(`${key} ${outcome}`);
+    expect(claimTodoFirings(G)).toEqual([]);
+  });
+
+  it('a closed condition still waits specifically for closure without a merge', () => {
+    const key = pr(1, { state: 'MERGED' });
+    const target = { kind: 'pr' as const, key, on: 'closed' as const };
+    expect(readTodoTrigger(target, due(Date.now()))).toEqual({ state: 'waiting' });
     pr(1, { state: 'CLOSED' });
-    expect(fireDueTodos().fired).toBe(1);
-    pr(1, { state: 'MERGED' });
-    expect(fireDueTodos().fired).toBe(1);
-    expect(listTodos(G).map((t) => t.firing!.cause)).toEqual([
-      { kind: 'event', triggers: [`${key} merged`] },
-      { kind: 'event', triggers: [`${key} closed`] },
-    ]);
+    expect(readTodoTrigger(target, due(Date.now()))).toEqual({ state: 'met', as: 'closed' });
   });
 
   it.each([

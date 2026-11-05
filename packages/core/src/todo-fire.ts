@@ -66,6 +66,7 @@ function latchTriggers(todo: Todo, now: number): { latched: boolean; cause?: Tod
 
 /** A trigger and what happened to it, in words: `card:decision:ab12cd34 answered`. */
 function triggerHappened(item: TodoTrigger, as: string): string {
+  if (item.kind === 'pr') return `${item.key} ${as}`;
   return item.kind === 'card' ? `${todoTriggerLabel(item)} ${as}` : todoTriggerLabel(item);
 }
 

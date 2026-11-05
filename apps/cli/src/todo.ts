@@ -287,7 +287,7 @@ export function todoContext(grounds: string, now: number = Date.now()): string {
     ...overdue.map((todo) => `${todoLine(todo)} [overdue]`),
     ...shown.map((todo) => `${todoLine(todo)}${todo.triggers ? ` [waiting on ${todoWaitingOn(todo.triggers)}]` : ''}${staleIds.has(todo.id) ? ' [stale]' : ''}`),
     ...(remaining > 0 ? [`… and ${remaining} more (lobstah todo ls)`] : []),
-    ...scheduled.map((todo) => `${todoLine(todo)} [due ${shortTodoTime(todo.dueAt!, now, helm.timezone)}${todo.snoozes ? `; snoozed ${todo.snoozes}` : ''}]`),
+    ...scheduled.map((todo) => `${todoLine(todo)} [due ${shortTodoTime(todo.dueAt!, now, helm.timezone)}${todo.snoozes ? `; snoozed ${todo.snoozes}` : ''}]${todo.triggers ? ` [waiting on ${todoWaitingOn(todo.triggers)}]` : ''}`),
     ...(note ? [note] : []),
   ].join('\n');
 }
