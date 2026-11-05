@@ -21,7 +21,7 @@ export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string;
   return html`<div class="mdpage" data-report=${r.key}>${body}</div>`;
 }
 
-/** Markdown as elements, with images from `fileUrl` and a copy button on its code (a decision's detail page). */
+/** Markdown as elements, with images from `fileUrl` and code that copies (a decision's detail page). */
 export function Markdown({ text, fileUrl }: { text: string; fileUrl: FileUrl }) {
   return html`<div class="mdpage">${markdown(text, fileUrl, true)}</div>`;
 }

@@ -7,33 +7,31 @@ import type { Children } from '../html.js';
 /** Shared safe Markdown: raw HTML stays text; images resolve only to owned files. */
 type Image = (name: string, alt: string) => Children;
 
-/** How one Markdown body renders: where its images come from, and whether its code offers a copy button. */
+/** How one Markdown body renders: where its images come from, and whether its code can be copied. */
 interface RenderOptions {
   image: Image;
   copyCode: boolean;
 }
 
-/** The button's words, for a block and for the small inline button. */
-const COPY_LABEL = {
-  idle: { block: 'Copy', inline: '⧉', title: 'Copy' },
-  copied: { block: 'Copied', inline: '✓', title: 'Copied' },
-  selected: { block: 'Selected', inline: '✓', title: 'Selected, ready to copy' },
+/** What a copy control shows and says in each state. */
+const COPY_NOTE = {
+  idle: { icon: '⧉', title: 'Copy' },
+  copied: { icon: '✓', title: 'Copied' },
+  selected: { icon: '✓', title: 'Selected, ready to copy' },
 };
 
-/** How long the button says what just happened. */
+/** How long a control says what just happened. */
 const COPY_NOTE_MS = 1500;
 
 /**
- * Code with a button that copies exactly its text. The clipboard is missing on
- * a plain HTTP address off the machine, and a browser can refuse it: then the
- * text is selected instead, ready to copy by hand.
+ * Copies exactly `text`. The clipboard is missing on a plain HTTP address off
+ * the machine, and a browser can refuse it: then the code is selected instead,
+ * ready to copy by hand.
  */
-function CopyableCode({ text, block }: { text: string; block: boolean }) {
-  const [state, setState] = useState<keyof typeof COPY_LABEL>('idle');
+function useCopy(text: string) {
+  const [state, setState] = useState<keyof typeof COPY_NOTE>('idle');
   const code = useRef<HTMLElement>(null);
-  const copy = async (e: Event) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const copy = async () => {
     try {
       await navigator.clipboard.writeText(text);
       setState('copied');
@@ -49,11 +47,45 @@ function CopyableCode({ text, block }: { text: string; block: boolean }) {
     }
     setTimeout(() => setState('idle'), COPY_NOTE_MS);
   };
-  const label = COPY_LABEL[state];
-  const button = html`<button type="button" class="copybtn" title=${label.title} aria-label=${label.title} onClick=${copy}>${block ? label.block : label.inline}</button>`;
-  return block
-    ? html`<div class="mdcodewrap"><pre class="mdcode"><code ref=${code}>${text}</code></pre>${button}</div>`
-    : html`<span class="copycode"><code ref=${code}>${text}</code>${button}</span>`;
+  return { state, code, copy };
+}
+
+/** A fenced block with an icon button floating over its top-right corner. */
+function CopyableBlock({ text }: { text: string }) {
+  const { state, code, copy } = useCopy(text);
+  const note = COPY_NOTE[state];
+  const click = (e: Event) => {
+    e.stopPropagation();
+    void copy();
+  };
+  return html`<div class="mdcodewrap"><pre class="mdcode"><code ref=${code}>${text}</code></pre><button type="button" class="copybtn" title=${note.title} aria-label=${note.title} onClick=${click}>${note.icon}</button></div>`;
+}
+
+/**
+ * Inline code that copies when clicked or tapped, so a sentence keeps its exact
+ * layout: a hover control wouldn't work on a phone. A drag across the code is
+ * someone selecting part of it, and stays theirs.
+ */
+function CopyableInline({ text }: { text: string }) {
+  const { state, code, copy } = useCopy(text);
+  const click = (e: Event) => {
+    e.stopPropagation();
+    const selection = window.getSelection();
+    if (
+      selection &&
+      !selection.isCollapsed &&
+      (code.current?.contains(selection.anchorNode) || code.current?.contains(selection.focusNode))
+    )
+      return;
+    void copy();
+  };
+  const key = (e: KeyboardEvent) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
+    void copy();
+  };
+  return html`<code ref=${code} class=${'copyinline' + (state === 'idle' ? '' : ' copied')} role="button" tabindex="0" title=${COPY_NOTE[state].title} onClick=${click} onKeyDown=${key}>${text}</code>`;
 }
 
 function inline(options: RenderOptions, nodes: MdInline[]): Children {
@@ -62,7 +94,7 @@ function inline(options: RenderOptions, nodes: MdInline[]): Children {
       case 'text':
         return n.v;
       case 'code':
-        return options.copyCode ? html`<${CopyableCode} text=${n.v} block=${false} />` : html`<code>${n.v}</code>`;
+        return options.copyCode ? html`<${CopyableInline} text=${n.v} />` : html`<code>${n.v}</code>`;
       case 'b':
         return html`<strong>${inline(options, n.c)}</strong>`;
       case 'i':
@@ -71,7 +103,10 @@ function inline(options: RenderOptions, nodes: MdInline[]): Children {
         return html`<br />`;
       case 'a': {
         const href = safeHref(n.href);
-        return href ? html`<a href=${href} target="_blank" rel="noopener noreferrer">${inline(options, n.c)}</a>` : inline(options, n.c);
+        // Code inside a link stays the link: its click opens it.
+        return href
+          ? html`<a href=${href} target="_blank" rel="noopener noreferrer">${inline({ ...options, copyCode: false }, n.c)}</a>`
+          : inline(options, n.c);
       }
       case 'img': {
         const name = bareImageName(n.src);
@@ -96,7 +131,7 @@ function blocks(options: RenderOptions, list: MdBlock[]): Children {
       case 'p':
         return html`<p>${inline(options, b.c)}</p>`;
       case 'code':
-        return options.copyCode ? html`<${CopyableCode} text=${b.v} block=${true} />` : html`<pre class="mdcode"><code>${b.v}</code></pre>`;
+        return options.copyCode ? html`<${CopyableBlock} text=${b.v} />` : html`<pre class="mdcode"><code>${b.v}</code></pre>`;
       case 'hr':
         return html`<hr />`;
       case 'quote':
