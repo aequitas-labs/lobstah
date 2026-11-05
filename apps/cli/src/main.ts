@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { configuredTrapViews, withConfiguredTrapSlot } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -1072,7 +1073,12 @@ async function mainCli(): Promise<void> {
   const startDispatch = (d: Descriptor, lane: Lane, files: string[], session?: ResolvedSession): string[] => {
     const warnings: string[] = [];
     let address = d.for;
-    if (address) {
+    if (d.target) {
+      if (!session || helmOf(session.id)?.grounds !== d.target.grounds) throw new UsageError('only the helm of the configured profile grounds may dispatch to it');
+      gateHelm(session, d.target.grounds);
+      if (loadConfig().traps?.[d.target.profile]?.grounds !== d.target.grounds) throw new UsageError('configured target is missing or belongs to another grounds');
+    }
+    if (address && !d.target) {
       const cfgDispatch = loadConfig();
       gateHelm(session);
       if (address.startsWith('session:')) {
@@ -1082,6 +1088,7 @@ async function mainCli(): Promise<void> {
         address = `wt:${trap.trapId}`;
       }
       const trap = trapByAddress(address);
+      if (trap?.configured) throw new UsageError(`configured traps use --for trap:${trap.configured.profile}, without --repo`);
       if (trap && hasOpenCatch(trap)) warnings.push(`${dispatchQueueReason({ ...d, for: address }, lane)}; sticky work stays queued. Cancel and re-dispatch unaddressed, or cancel and re-address to another trap.`);
       const reserved = trap ? undefined : reservationByAddress(address);
       if (!trap && !reserved) throw new Error(`${unknownTrapMessage(address)} — \`lobstah man tend\` lists live traps`);
@@ -1233,6 +1240,25 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'dispatch': {
+      const configuredAddress = opt('--for');
+      if (configuredAddress?.startsWith('trap:')) {
+        const cfg = loadConfig(), name = configuredAddress.slice(5), profile = cfg.traps?.[name];
+        if (!profile) throw new UsageError(`unknown configured trap ${configuredAddress}`);
+        const caller = callerSession(opt('--session'));
+        if (!caller || helmOf(caller.id)?.grounds !== profile.grounds) throw new UsageError('only the helm of the configured profile grounds may dispatch to it');
+        gateHelm(caller, profile.grounds);
+        if (opt('--grounds') !== undefined && storageGrounds(opt('--grounds')!, cfg) !== profile.grounds) throw new UsageError(`trap:${name} serves grounds ${profile.grounds}`);
+        for (const flag of ['--repo', '--pool', '--trap-any', '--pr', '--follow-up', '--harness', '--model', '--effort']) if (has(flag)) throw new UsageError(`${flag} does not apply to a configured trap dispatch`);
+        const briefFile = opt('--brief') ?? opt('--bait'), briefText = opt('--brief-text');
+        if (!briefFile && !briefText) throw new UsageError('dispatch requires --brief <file> or --brief-text');
+        const descriptor: Descriptor = { id: opt('--id') ?? randomUUID(), brief: briefText ?? fs.readFileSync(briefFile!, 'utf8'), for: configuredAddress,
+          target: { kind: 'configured-trap', profile: name, grounds: profile.grounds, surface: profile.surface } };
+        const lane: Lane = has('--chore') ? 'chore' : 'work';
+        descriptor.attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(descriptor.id, lane));
+        enqueue(descriptor, lane);
+        console.log(toonKV({ id: descriptor.id, for: configuredAddress, grounds: profile.grounds, repo: 'none', lane }));
+        break;
+      }
       if (has('--trap-any') && (opt('--for') !== undefined || opt('--pool') !== undefined)) throw new UsageError('--trap-any cannot be combined with --for or --pool');
       const poolName = opt('--pool');
       const pool = poolName !== undefined ? loadConfig().pools[poolName] : undefined;
@@ -1307,12 +1333,18 @@ async function mainCli(): Promise<void> {
         if (pools.length > 0) console.log(`\n${toonTable('pools', poolRows(pools), POOL_COLUMNS)}`);
         break;
       }
+      if (id.startsWith('trap:')) {
+        const profile = configuredTrapViews(loadConfig()).find((view) => view.profile === id.slice(5));
+        if (!profile) throw new UsageError(`unknown configured profile ${id}`);
+        console.log(JSON.stringify(profile, null, 2));
+        break;
+      }
       const namedTrap = trapByAddress(id);
       if (namedTrap) {
         const availability = trapAvailability(namedTrap);
         const progress = dispatchProgress().find((p) => p.id === namedTrap.claimed);
         console.log(toonKV({ trap: `wt:${namedTrap.trapId}`, name: namedTrap.name, label: trapLabel(namedTrap),
-          session: namedTrap.sessionId, repo: namedTrap.repo ?? '(addressed only)', worktree: namedTrap.worktree,
+          session: namedTrap.sessionId, repo: namedTrap.repo ?? 'none', ...(namedTrap.configured ? { profile: namedTrap.configured.profile, grounds: namedTrap.configured.grounds, surface: namedTrap.configured.surface, cwd: namedTrap.cwd } : { worktree: namedTrap.worktree }),
           availability: availability.text, claimed: availability.dispatch, harness: namedTrap.harness, heartbeatAt: namedTrap.heartbeatAt,
           ...(progress ? { attention: progress.state, reason: progress.text } : {}) }));
         break;
@@ -1320,7 +1352,7 @@ async function mainCli(): Promise<void> {
       const rostered = rosterByAddress(id);
       if (rostered) {
         console.log(toonKV({ trap: `wt:${rostered.trapId}`, name: rostered.name, state: rostered.state === 'ghosted' ? 'ghosted' : 'stowed', repo: rostered.repo,
-          harness: rostered.profile?.harness ?? rostered.harness, worktree: rostered.worktree, creationReason: rostered.creationReason }));
+          harness: rostered.profile?.harness ?? rostered.harness, ...(rostered.configured ? { profile: rostered.configured.profile, grounds: rostered.configured.grounds, surface: rostered.configured.surface, cwd: rostered.worktree } : { worktree: rostered.worktree }), creationReason: rostered.creationReason }));
         break;
       }
       if (id.startsWith('wt:') || /^[a-z]+-[a-z]+$/.test(id)) throw new Error(unknownTrapMessage(id));
@@ -1520,14 +1552,16 @@ async function mainCli(): Promise<void> {
       const trap = claimedBy?.startsWith('wt:') ? readTrap(claimedBy.slice('wt:'.length)) : undefined;
       if (trap && Date.now() - (Date.parse(trap.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000) address = claimedBy;
       else headless = true;
+      if (origin.descriptor.target && opt('--pr')) throw new UsageError('configured trap results do not accept PR evidence');
       const followUp: Descriptor = {
         id: randomUUID(),
         repo: origin.descriptor.repo,
+        ...(origin.descriptor.target ? { target: origin.descriptor.target } : {}),
         brief: `Follow-up instruction from ${from} on dispatch ${origin.id}:\n${text}`,
-        followUp: origin.id,
-        for: address,
+        followUp: origin.descriptor.target ? undefined : origin.id,
+        for: origin.descriptor.target ? `trap:${origin.descriptor.target.profile}` : address,
         ...(!address && origin.descriptor.pool ? { pool: origin.descriptor.pool } : {}),
-        ...(opt('--pr') !== undefined ? { pr: resolvePrTarget(origin.descriptor.repo, opt('--pr')!) } : {}),
+        ...(opt('--pr') !== undefined ? { pr: resolvePrTarget(origin.descriptor.repo!, opt('--pr')!) } : {}),
       };
       const warnings = startDispatch(followUp, origin.lane, values('--attach'), sender);
       if (!has('--no-reply')) expectReply({ dispatchId: followUp.id, lane: origin.lane, from, text });
@@ -1537,7 +1571,8 @@ async function mainCli(): Promise<void> {
         sendMessage(origin.id, origin.lane, `[from ${from}]\n${text}`, from);
       }
       console.log(`started: follow-up ${followUp.id} of ${origin.id}`);
-      if (headless) console.log(`delivery: unaddressed${followUp.pool ? ` (pool ${followUp.pool})` : ''}; a matching trap or headless worker may take it`);
+      if (origin.descriptor.target) console.log(`delivery: trap:${origin.descriptor.target.profile} (sticky configured profile)`);
+      else if (headless) console.log(`delivery: unaddressed${followUp.pool ? ` (pool ${followUp.pool})` : ''}; a matching trap or headless worker may take it`);
       else console.log(`delivery: ${trapAddressText(address!, 'label')} (sticky; follows the previous trap claim)`);
       for (const warning of warnings) console.log(toonKV({ warning }));
       break;
@@ -1584,6 +1619,8 @@ async function mainCli(): Promise<void> {
         throw new UsageError(`--report goes with done or failed\n\n${usageFor('report')!}`);
       if ((attachFiles.length > 0 || attachDirs.length > 0) && reportFile === undefined)
         throw new UsageError(`--attach and --attach-dir go with --report\n\n${usageFor('report')!}`);
+      const configuredReport = storedDescriptor(id, lane)?.target;
+      if (configuredReport && (prUrl || values('--human-gate').length)) throw new UsageError('configured trap results accept files and screenshots, not PR evidence');
       let filed: ReportMeta | undefined;
       if (reportFile !== undefined) {
         try {
@@ -1607,7 +1644,7 @@ async function mainCli(): Promise<void> {
       // A trap reports from its own checkout, or names its session from
       // anywhere else (a primary checkout): keep its last commit as the
       // ownership anchor for safe PR-watch repairs after the session moves on.
-      if (verb === 'done') {
+      if (verb === 'done' && !configuredReport) {
         const claim = readSessionClaim(id, lane);
         let ownCheckout = false;
         if (claim?.by.startsWith('wt:') && claim.worktree && fs.existsSync(claim.worktree)) {
@@ -2456,6 +2493,7 @@ async function mainCli(): Promise<void> {
       }
       const repo = opt('--repo');
       const entries = listRoster().filter((e) => repo === undefined || e.repo === repo);
+      if (repo === undefined) console.log(toonTable('configured-traps', configuredTrapViews(loadConfig()).map((profile) => ({ ...profile })), ['profile', 'grounds', 'surface', 'harness', 'capacity', 'state', 'cwd']));
       console.log(
         toonTable(
           'roster',
@@ -2463,19 +2501,21 @@ async function mainCli(): Promise<void> {
             const live = readTrap(e.trapId);
             return {
               trap: trapLabel(e),
-              repo: e.repo ?? '',
+              repo: e.repo ?? 'none',
+              configured: e.configured ? `trap:${e.configured.profile} (${e.configured.grounds}, ${e.configured.surface})` : '',
+              cwd: e.configured ? e.worktree : '',
               state: live ? trapAvailability(live).text : e.state,
               harness: e.harness,
               model: e.model ?? '',
               mode: nextStartMode(loadConfig(), e),
               session: e.sessionId.slice(0, 8),
-              revision: e.head ? `${e.head.slice(0, 12)}${e.branch ? ` (${e.branch})` : ''}` : '',
+              revision: e.configured ? '' : e.head ? `${e.head.slice(0, 12)}${e.branch ? ` (${e.branch})` : ''}` : '',
               left: e.leftAt ? `${e.leftAt} (${e.leftReason ?? ''})` : '',
               profile: profileText(e.profile),
               creationReason: e.creationReason ?? '',
             };
           }),
-          ['trap', 'repo', 'state', 'harness', 'model', 'mode', 'session', 'revision', 'left', 'profile', 'creationReason'],
+          ['trap', 'repo', 'configured', 'cwd', 'state', 'harness', 'model', 'mode', 'session', 'revision', 'left', 'profile', 'creationReason'],
         ),
       );
       console.log(toonHelp(['lobstah man throw --plan --all   (what a throw would do for every eligible trap)']));
@@ -3019,7 +3059,7 @@ async function mainCli(): Promise<void> {
               }
             : undefined;
         const helmNoticeFilter = helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
-        const progressLines = () => dispatchProgress().filter((p) => !helmRepos || helmRepos.has(p.repo)).map((p) => `- ${p.text}`);
+        const progressLines = () => dispatchProgress().filter((p) => !helmRepos || !p.repo || helmRepos.has(p.repo)).map((p) => `- ${p.text}`);
         // The helm's cursor starts at its sign-on (see `man wait`).
         const helmWakes = noticeWakes(helm);
         const helmFloorMs = wakeFloorMs(helm);
@@ -3200,6 +3240,34 @@ async function mainCli(): Promise<void> {
         throw new UsageError('invalid --remote-link: use the https://claude.ai/code/… URL Claude printed');
       }
       const cfg = loadConfig();
+
+      const configuredSession = callerSession(opt('--session'))?.id;
+      const currentConfigured = configuredSession ? (trapBySession(configuredSession)?.configured ?? (rosterTrapForSession(configuredSession)?.state !== 'stowed' ? rosterTrapForSession(configuredSession)?.configured : undefined)) : undefined;
+      const configuredName = opt('--trap') ?? currentConfigured?.profile;
+      if (configuredName) {
+        const profile = cfg.traps?.[configuredName];
+        if (!profile) throw new UsageError(`configured trap ${configuredName} is missing from [traps]; its existing catch remains addressed`);
+        if (!configuredSession) throw new UsageError('configured sign-on needs --session <id>');
+        for (const flag of ['--repo', '--ticket', '--name']) if (has(flag)) throw new UsageError(`${flag} cannot be combined with --trap`);
+        if (has('--wait') && sessionWatcher(configuredSession)) throw new Error(alreadyArmed(sessionWatcher(configuredSession)!));
+        const window = captureWindow();
+        const harness = detectHarness({ flag: opt('--harness'), prior: currentConfigured ? trapBySession(configuredSession)?.harness : undefined, sessionId: configuredSession }).harness;
+        if (harness !== profile.harness) throw new UsageError(`trap:${configuredName} requires harness ${profile.harness}; detected ${harness ?? 'unknown'}`);
+        const desktop = window?.entrypoint === 'claude-desktop';
+        if ((profile.surface === 'claude-desktop') !== desktop) throw new UsageError(`trap:${configuredName} requires surface ${profile.surface}; this session is ${desktop ? 'claude-desktop' : 'terminal'}`);
+        const reg = withConfiguredTrapSlot(configuredName, profile, configuredSession, (slot) => {
+          const result = signOnTrap({ worktree: slot.cwd, cwd: slot.cwd, configured: { profile: configuredName, grounds: profile.grounds, surface: profile.surface }, trapId: slot.trapId,
+            harness: profile.harness, sessionId: configuredSession, window, link: opt('--link'), ttlMs: cfg.soak.ttlSecs * 1000 });
+          if ('held' in result) throw new Error(`trap:${configuredName} is held by a live session`);
+          return result.ok;
+        });
+        console.log(toonKV({ trap: `wt:${reg.trapId}`, profile: configuredName, grounds: profile.grounds, surface: profile.surface, harness, cwd: reg.cwd, repo: 'none', state: 'signed on' }));
+        if (has('--wait')) {
+          const waiter = armWatcher(reg.sessionId, 'trap', reg.trapId);
+          try { await soakPark(reg.trapId, opt('--timeout'), true); } finally { waiter.stop(); }
+        }
+        break;
+      }
       const site = inspectSoakSite(process.cwd(), cfg.repos);
       const repoFlag = opt('--repo');
       if (repoFlag !== undefined && !cfg.repos[repoFlag]) {
@@ -3520,10 +3588,13 @@ async function mainCli(): Promise<void> {
       // the SessionEnd hook signs off and keeps the worktree.
       const sessionEnd = hookRead && hook?.hook_event_name === 'SessionEnd';
       const site = inspectSoakSite(process.cwd(), loadConfig().repos);
+      const configuredOwner = sessionId ? trapBySession(sessionId) : undefined;
       const trapId =
+        (!wtFlag && configuredOwner?.configured ? configuredOwner.trapId : undefined) ??
         (wtFlag ? trapIdForName(wtFlag.startsWith('wt:') ? wtFlag.slice(3) : wtFlag) ?? (/^(?:wt:)?[0-9a-f]{8}$/.test(wtFlag) ? wtFlag.replace(/^wt:/, '') : undefined) : undefined) ??
         (site && !site.primary ? trapIdAt(site.worktree) : undefined) ??
         (sessionId !== undefined ? soleTrapForStow(sessionId, quiet) : undefined);
+      if (trapId && readTrap(trapId)?.configured && has('--remove')) throw new UsageError('configured traps keep their working folder; use stow without --remove');
       if (trapId === undefined) {
         if (quiet) break;
         if (wtFlag) throw new Error(unknownTrapMessage(wtFlag));
@@ -3587,7 +3658,7 @@ async function mainCli(): Promise<void> {
         (site && !site.primary && trapIdAt(site.worktree) === trapId ? site.worktree : undefined) ??
         anchoredWorktree(worktreesDir(), trapId);
       const anchor = wtDir !== undefined ? readTrapAnchor(wtDir) : undefined;
-      const created = reg?.createdWorktree === true || anchor?.createdBy === 'soak';
+      const created = !reg?.configured && (reg?.createdWorktree === true || anchor?.createdBy === 'soak');
       let worktreeOut: Record<string, unknown> = {};
       if (wtDir !== undefined && fs.existsSync(wtDir)) {
         // Stow keeps the worktree unless asked to remove it (--remove).
@@ -3599,7 +3670,7 @@ async function mainCli(): Promise<void> {
               ? 'soak did not create this worktree; stow leaves it in place'
               : undefined;
         if (keepReason) {
-          worktreeOut = { worktree: 'kept', path: wtDir, reason: keepReason };
+          worktreeOut = reg?.configured ? { folder: 'kept', path: wtDir, reason: 'configured working folders are kept' } : { worktree: 'kept', path: wtDir, reason: keepReason };
         } else {
           // Branch cleanup may follow: keep the revision under the trap's protected ref.
           recordRosterRevision(trapId, protectTrapRevision(wtDir, trapId));

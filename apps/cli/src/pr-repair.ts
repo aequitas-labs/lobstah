@@ -549,7 +549,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
           repairBrief(pr, kind, {
             id,
             gates,
-            trunk: config.repos[target.repo]?.trunk,
+            trunk: target.repo ? config.repos[target.repo]?.trunk : undefined,
             above: stackedAbove(pr, (records ??= readPrs()), workers ?? []),
             ...(kind === 'checks' && fresh.length > 0 ? { checks: fresh } : {}),
           }),

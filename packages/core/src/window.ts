@@ -25,10 +25,12 @@ export interface WindowRef {
 }
 
 function ancestorTty(): string | undefined {
+  // Windows has no POSIX controlling tty; its app references still come from the environment.
+  if (process.platform === 'win32') return undefined;
   try {
     let pid = process.ppid;
     for (let hop = 0; hop < 15 && pid > 1; hop++) {
-      const out = execFileSync('ps', ['-o', 'ppid=,tty=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+      const out = execFileSync('ps', ['-o', 'ppid=,tty=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       if (!out) return undefined;
       const [ppid, tty] = out.split(/\s+/);
       if (tty && tty !== '??' && tty !== '?' && tty !== '-') return tty;

@@ -162,6 +162,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   const cfg = loadConfig();
   const descriptor = JSON.parse(fs.readFileSync(path.join(activeDir, 'descriptor.json'), 'utf8')) as Descriptor;
+  if (descriptor.target || !descriptor.repo) throw new Error('configured trap work cannot launch headless');
   const resolved = resolveDispatch(descriptor, cfg);
   const repo = cfg.repos[descriptor.repo]!;
 

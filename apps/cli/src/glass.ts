@@ -1,3 +1,4 @@
+import { configuredTrapViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
 import { glassSettings } from './glass-settings.js';
@@ -344,6 +345,7 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     lane: r.lane,
     bucket: r.bucket,
     repo: r.d.repo,
+    target: r.d.target,
     for: r.d.for,
     followUp: r.d.followUp,
     title: briefTitle(r.d.brief),
@@ -689,6 +691,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const harness = t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]);
     return {
       ...t,
+      ...(roster?.configured ? { configured: roster.configured, cwd: roster.worktree } : {}),
       name,
       totalCatches: catches.get(name ?? `wt:${t.trapId}`) ?? 0,
       label: trapLabel({ trapId: t.trapId, name }),
@@ -759,6 +762,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     })(),
     helms,
     traps,
+    configuredTraps: configuredTrapViews(loadConfig()),
     stats: { catchesToday: stats.catchesToday, totalCatches: stats.totalCatches },
     trapNames: trapNamesShown(traps, dispatches, attention, names),
     notices: allNotices.slice().reverse(),
