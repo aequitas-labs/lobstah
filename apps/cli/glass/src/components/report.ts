@@ -1,5 +1,6 @@
 import type { GlassReport } from '@lobstah/core';
 import { MarkdownElements } from './markdown.js';
+import { getState } from '../store.js';
 import { reportFileUrl, reportFrom } from '../../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -8,7 +9,7 @@ import { LinkedText } from './links.js';
 
 type FileUrl = (name: string) => string;
 const markdown = (text: string, fileUrl: FileUrl, copyCode = false, documentKey?: string, token?: string, readOnly = false) =>
-  html`<${MarkdownElements} text=${text} copyCode=${copyCode} documentKey=${documentKey} token=${token} readOnly=${readOnly} image=${(name: string, alt: string) => ImageThumb(fileUrl(name), alt, 'mdimg')} />`;
+  html`<${MarkdownElements} text=${text} copyCode=${copyCode} documentKey=${documentKey} token=${token ?? getState().snapshot?.focusToken} readOnly=${readOnly} image=${(name: string, alt: string) => ImageThumb(fileUrl(name), alt, 'mdimg')} />`;
 
 /** The page body for one report's markdown, or the loading and error states. */
 export function ReportPage({ r, text, token }: { r: GlassReport; text: { text?: string; error?: string } | undefined; token?: string }) {

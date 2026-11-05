@@ -193,3 +193,33 @@ it('does not apply a late save response to a different card with the same task t
     expect((page.$('input[aria-label="Open review"]') as HTMLInputElement).checked).toBe(false);
   } finally { await page.close(); }
 });
+
+
+it('bundles the shared Markdown renderer before core build artifacts exist', async () => {
+  const { build } = await import('esbuild');
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL('../glass/src/components/markdown.ts', import.meta.url))],
+    bundle: true, write: false, platform: 'browser', format: 'esm',
+    plugins: [{ name: 'no-built-core', setup(bundler) {
+      bundler.onResolve({ filter: /^@lobstah\/core(?:\/|$)/ }, () => ({ errors: [{ text: 'Shared Markdown must not depend on core build artifacts; wharf builds alongside core.' }] }));
+    } }],
+  });
+  expect(result.outputFiles[0]!.text).toContain('MarkdownElements');
+});
+
+
+it('typechecks wharf glass without compiled core declarations', async () => {
+  const ts = (await import('typescript')).default;
+  const configPath = fileURLToPath(new URL('../../../services/wharf/glass/tsconfig.json', import.meta.url));
+  const config = ts.readConfigFile(configPath, ts.sys.readFile);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, path.dirname(configPath));
+  const host = ts.createCompilerHost(parsed.options);
+  const exists = host.fileExists.bind(host);
+  const read = host.readFile.bind(host);
+  const coreArtifact = (file: string): boolean => file.replaceAll('\\', '/').includes('/packages/core/dist/');
+  host.fileExists = (file) => !coreArtifact(file) && exists(file);
+  host.readFile = (file) => coreArtifact(file) ? undefined : read(file);
+  const program = ts.createProgram(parsed.fileNames, parsed.options, host);
+  const errors = ts.getPreEmitDiagnostics(program).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
+  expect(errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual([]);
+});

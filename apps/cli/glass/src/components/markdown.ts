@@ -1,5 +1,4 @@
-import type { ChecklistProgress } from '@lobstah/core';
-import { getState } from '../store.js';
+import type { ChecklistProgress } from '../../../../../packages/core/src/checklist-types.js';
 import { bareImageName, markdownTasks, parseMarkdown, safeHref } from '../../../src/glass-markdown.js';
 import type { MdBlock, MdInline } from '../../../src/glass-markdown.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -221,7 +220,7 @@ export function MarkdownElements({
     try {
       const response = await fetch('/requests', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-lobstah-token': token ?? getState().snapshot?.focusToken ?? '' },
+        headers: { 'content-type': 'application/json', 'x-lobstah-token': token ?? '' },
         body: JSON.stringify({ kind: 'checklist-tick', payload: { key: documentKey, item: id, checked } }),
       });
       const stored = (await response.json()) as ChecklistProgress & { ok: boolean; reason?: string };
