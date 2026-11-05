@@ -198,3 +198,15 @@ it('drops a done Todo from tend and the glass once the day rolls over at 04:00 l
   expect(buildGlassSnapshot().todos ?? []).toEqual([]);
   expect(run('todo', 'ls', '--all', '--grounds', 'day').stdout).toContain('Ship it');
 });
+
+it('recap-data lists a repeating todo done that day, and leaves out one only skipped', () => {
+  const doneAt = '2026-10-14T15:00:00.000Z';
+  const items = [
+    { id: 1, text: 'Done on a series', state: 'open', updatedAt: doneAt, lastDoneAt: doneAt, every: { cadence: 'daily', at: '09:00' } },
+    { id: 2, text: 'Skipped on a series', state: 'open', updatedAt: doneAt, every: { cadence: 'daily', at: '09:00' } },
+    { id: 3, text: 'Done on another day', state: 'open', updatedAt: doneAt, lastDoneAt: '2026-10-10T15:00:00.000Z', every: { cadence: 'daily', at: '09:00' } },
+  ];
+  fs.mkdirSync(path.join(home, 'todos'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'todos', 'day.json'), JSON.stringify({ items }));
+  expect(goalsRecapData('day', '2026-10-14', loadConfig()).todos.map((t) => t.id)).toEqual([1]);
+});

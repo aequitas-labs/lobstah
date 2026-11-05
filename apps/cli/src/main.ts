@@ -24,11 +24,16 @@ import {
   workerLabel,
   addTodo,
   closeTodo,
+  completeTodo,
+  formatTodoRecurrence,
   formatTodoTime,
   listTodos,
+  nextOccurrenceAfter,
   parseTodoDuration,
+  parseTodoRecurrence,
   parseTodoTime,
   parseTodoUntil,
+  skipTodo,
   snoozeTodo,
   TodoError,
   acknowledge,
@@ -1962,15 +1967,31 @@ async function mainCli(): Promise<void> {
           const now = Date.now();
           const at = opt('--at');
           const inDuration = opt('--in');
-          const dueAt = at !== undefined ? parseTodoTime(at, now, tz) : inDuration !== undefined ? parseTodoDuration(inDuration, now) : undefined;
-          const t = addTodo(grounds, text, now, { dueAt });
-          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text, ...(t.dueAt ? { due: formatTodoTime(t.dueAt, tz) } : {}) }));
+          const everyText = opt('--every');
+          if (everyText !== undefined && (at !== undefined || inDuration !== undefined)) throw new UsageError(`--every stands alone: a repeat sets its own times\n\n${usageFor('todo')!}`);
+          const every = everyText !== undefined ? parseTodoRecurrence(everyText) : undefined;
+          const dueAt = every
+            ? new Date(nextOccurrenceAfter(every, now, tz)).toISOString()
+            : at !== undefined
+              ? parseTodoTime(at, now, tz)
+              : inDuration !== undefined
+                ? parseTodoDuration(inDuration, now)
+                : undefined;
+          const t = addTodo(grounds, text, now, { dueAt, every });
+          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text, ...(t.dueAt ? { due: formatTodoTime(t.dueAt, tz) } : {}), ...(t.every ? { every: formatTodoRecurrence(t.every) } : {}) }));
           console.log(toonHelp([`lobstah todo done ${t.id}   (when finished)`, `lobstah todo drop ${t.id}   (when no longer needed)`]));
         } else if (verb === 'done' || verb === 'drop') {
           const id = Number(pos[1]);
           if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo ${verb} requires a todo id\n\n${usageFor('todo')!}`);
-          const t = closeTodo(grounds, id, verb === 'done' ? 'done' : 'dropped');
-          console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text }));
+          const tz = helmTimezone();
+          const t = verb === 'done' ? completeTodo(grounds, id, Date.now(), tz) : closeTodo(grounds, id, 'dropped');
+          console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text, ...(t.state === 'open' ? { next: formatTodoTime(t.dueAt!, tz) } : {}) }));
+        } else if (verb === 'skip') {
+          const id = Number(pos[1]);
+          if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo skip requires a todo id\n\n${usageFor('todo')!}`);
+          const tz = helmTimezone();
+          const t = skipTodo(grounds, id, Date.now(), tz);
+          console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text, next: formatTodoTime(t.dueAt!, tz) }));
         } else if (verb === 'snooze') {
           const id = Number(pos[1]);
           if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo snooze requires a todo id\n\n${usageFor('todo')!}`);

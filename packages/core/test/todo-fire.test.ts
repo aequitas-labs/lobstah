@@ -3,8 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { tryDirLock } from '../src/dir-lock.js';
-import { claimTodoFirings, fireDueTodos, peekTodoFirings } from '../src/todo-fire.js';
-import { addTodo, closeTodo, listTodos, snoozeTodo, staleTodos, todoOverdue, todoScheduled, todosRoot, TodoError } from '../src/todos.js';
+import { claimTodoFirings, completeTodo, fireDueTodos, peekTodoFirings, skipTodo } from '../src/todo-fire.js';
+import { addTodo, closeTodo, listTodos, snoozeTodo, staleTodos, todoOverdue, todoScheduled, todosRoot, TodoError, type TodoRecurrence } from '../src/todos.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const T0 = Date.parse('2026-11-05T15:00:00Z');
@@ -202,5 +202,103 @@ describe('the grounds lock', () => {
       held.release(Date.now() + 1000);
     }
     expect(fireDueTodos(T0 + HOUR)).toEqual({ fired: 1, errors: [] });
+  });
+});
+
+describe('a repeating todo', () => {
+  const NY = 'America/New_York';
+  const daily = { cadence: 'daily', at: '09:00' } as const;
+  /** Thursday 09:00 in New York, and that same time on later days. */
+  const THU_9AM = Date.parse('2026-11-05T14:00:00Z');
+  const at9 = (days: number) => THU_9AM + days * DAY;
+  const series = (every: TodoRecurrence = daily, dueAt = at9(0)) =>
+    addTodo('g', 'standup', THU_9AM - DAY, { dueAt: due(dueAt), every });
+  const only = () => listTodos('g', { all: true })[0]!;
+
+  it('done stays open at the first occurrence after now, and records lastDoneAt', () => {
+    series();
+    fireDueTodos(at9(0), NY);
+    const done = completeTodo('g', 1, at9(0) + HOUR, NY);
+    expect(done).toMatchObject({ state: 'open', dueAt: due(at9(1)), lastDoneAt: due(at9(0) + HOUR) });
+    expect(done.firing).toBeUndefined();
+  });
+
+  it('done early passes the coming occurrence: Friday’s done on Thursday passes that Friday', () => {
+    series({ cadence: 'weekly', day: 'fri', at: '09:00' }, at9(1));
+    const done = completeTodo('g', 1, at9(0), NY);
+    expect(done.dueAt).toBe(due(at9(8)));
+  });
+
+  it('skip moves to that same occurrence and leaves lastDoneAt unchanged', () => {
+    series();
+    fireDueTodos(at9(0), NY);
+    const skipped = skipTodo('g', 1, at9(0) + HOUR, NY);
+    expect(skipped).toMatchObject({ state: 'open', dueAt: due(at9(1)) });
+    expect(skipped.lastDoneAt).toBeUndefined();
+    expect(skipped.firing).toBeUndefined();
+
+    completeTodo('g', 1, at9(1), NY);
+    const lastDone = only().lastDoneAt;
+    expect(skipTodo('g', 1, at9(2), NY).lastDoneAt).toBe(lastDone);
+  });
+
+  it('skip refuses a todo that doesn’t repeat', () => {
+    addTodo('g', 'one-off', T0);
+    expect(() => skipTodo('g', 1, T0, NY)).toThrow("todo 1 doesn't repeat: snooze it or drop it");
+  });
+
+  it('three missed occurrences give one firing naming the newest', () => {
+    series();
+    expect(fireDueTodos(at9(3) + HOUR, NY).fired).toBe(1);
+    expect(only().dueAt).toBe(due(at9(3)));
+    expect(only().firing).toMatchObject({ firedAt: due(at9(3) + HOUR), cause: { kind: 'time', dueAt: due(at9(3)) } });
+    expect(fireDueTodos(at9(3) + 2 * HOUR, NY).fired).toBe(0);
+    expect(claimTodoFirings('g', at9(3) + 2 * HOUR, NY)).toHaveLength(1);
+  });
+
+  it('an ignored series fires again at each new occurrence, and wakes again', () => {
+    series();
+    fireDueTodos(at9(0), NY);
+    expect(claimTodoFirings('g', at9(0), NY)).toHaveLength(1);
+    expect(claimTodoFirings('g', at9(0) + HOUR, NY)).toHaveLength(0);
+
+    expect(fireDueTodos(at9(1) - 1, NY).fired).toBe(0);
+    expect(fireDueTodos(at9(1), NY).fired).toBe(1);
+    const [event] = claimTodoFirings('g', at9(1), NY);
+    expect(event).toMatchObject({ id: 1, repeats: true, firedAt: due(at9(1)) });
+  });
+
+  it('a snoozed occurrence fires at its new time, then done moves past it', () => {
+    series();
+    fireDueTodos(at9(0), NY);
+    snoozeTodo('g', 1, due(at9(0) + 5 * HOUR), at9(0) + HOUR);
+    expect(fireDueTodos(at9(0) + 2 * HOUR, NY).fired).toBe(0);
+    expect(fireDueTodos(at9(0) + 5 * HOUR, NY).fired).toBe(1);
+    expect(only().firing!.cause.dueAt).toBe(due(at9(0) + 5 * HOUR));
+    expect(completeTodo('g', 1, at9(0) + 6 * HOUR, NY).dueAt).toBe(due(at9(1)));
+  });
+
+  it('a done before a later snooze time moves past that time', () => {
+    series();
+    snoozeTodo('g', 1, due(at9(2) + HOUR), at9(0));
+    expect(completeTodo('g', 1, at9(0) + HOUR, NY).dueAt).toBe(due(at9(3)));
+  });
+
+  it('weekdays carry over the weekend', () => {
+    series({ cadence: 'weekdays', at: '09:00' }, at9(1));
+    expect(completeTodo('g', 1, at9(1), NY).dueAt).toBe(due(at9(4)));
+  });
+
+  it('drop ends a series', () => {
+    series();
+    expect(closeTodo('g', 1, 'dropped', at9(0))).toMatchObject({ state: 'dropped' });
+    expect(fireDueTodos(at9(5), NY).fired).toBe(0);
+  });
+
+  it('done on a todo with no repeat rule moves it to state done', () => {
+    addTodo('g', 'one-off', T0, { dueAt: due(T0 + HOUR) });
+    const done = completeTodo('g', 1, T0, NY);
+    expect(done.state).toBe('done');
+    expect(done.lastDoneAt).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatTodoTime, parseTodoDuration, parseTodoTime, parseTodoUntil, shortTodoTime, wallClockInstant } from '../src/todo-time.js';
+import { formatTodoRecurrence, formatTodoTime, latestOccurrenceBy, nextOccurrenceAfter, parseTodoDuration, parseTodoRecurrence, parseTodoTime, parseTodoUntil, shortTodoTime, wallClockInstant } from '../src/todo-time.js';
 
 const NY = 'America/New_York';
 /** Thursday 2026-11-05 10:00 in New York. */
@@ -140,5 +140,65 @@ describe('todo times: printing', () => {
   it('a table cell names the day this week and the date further out', () => {
     expect(shortTodoTime('2026-11-06T14:00:00.000Z', THU_10AM, NY)).toBe('fri 09:00');
     expect(shortTodoTime('2026-11-20T14:00:00.000Z', THU_10AM, NY)).toBe('nov 20 09:00');
+  });
+});
+
+describe('todo repeats: the forms --every reads', () => {
+  it('reads each cadence and prints it back', () => {
+    expect(parseTodoRecurrence('daily 09:00')).toEqual({ cadence: 'daily', at: '09:00' });
+    expect(parseTodoRecurrence('weekdays 9:30')).toEqual({ cadence: 'weekdays', at: '09:30' });
+    expect(parseTodoRecurrence('WEEKLY Friday 17:00')).toEqual({ cadence: 'weekly', day: 'fri', at: '17:00' });
+    expect(formatTodoRecurrence({ cadence: 'weekly', day: 'fri', at: '17:00' })).toBe('weekly fri 17:00');
+    expect(formatTodoRecurrence({ cadence: 'daily', at: '09:00' })).toBe('daily 09:00');
+  });
+
+  it('refuses a schedule with no time, or one it can’t read', () => {
+    const message = '--every needs a schedule and a time: "daily 09:00", "weekdays 09:00" or "weekly fri 09:00"';
+    for (const input of ['weekly', 'daily', '09:00', 'hourly 09:00', 'weekly 09:00', 'weekly someday 09:00', 'daily 25:00']) {
+      expect(() => parseTodoRecurrence(input), input).toThrow(message);
+    }
+    expect(() => parseTodoRecurrence('daily 9am')).toThrow('use 24-hour time: "daily 09:00"');
+  });
+});
+
+describe('todo repeats: occurrences', () => {
+  const FRI_6PM = Date.parse('2026-11-06T23:00:00Z');
+  const next = (schedule: string, after: number) => new Date(nextOccurrenceAfter(parseTodoRecurrence(schedule), after, NY)).toISOString();
+  const latest = (schedule: string, by: number) => new Date(latestOccurrenceBy(parseTodoRecurrence(schedule), by, NY)).toISOString();
+
+  it('daily falls on the next day once today’s has passed', () => {
+    expect(next('daily 09:00', THU_10AM)).toBe('2026-11-06T14:00:00.000Z');
+    expect(next('daily 11:00', THU_10AM)).toBe('2026-11-05T16:00:00.000Z');
+  });
+
+  it('weekdays skip the weekend', () => {
+    expect(next('weekdays 09:00', FRI_6PM)).toBe('2026-11-09T14:00:00.000Z');
+    expect(latest('weekdays 09:00', Date.parse('2026-11-08T23:00:00Z'))).toBe('2026-11-06T14:00:00.000Z');
+  });
+
+  it('weekly finds its day, and next week once it has passed', () => {
+    expect(next('weekly fri 09:00', THU_10AM)).toBe('2026-11-06T14:00:00.000Z');
+    expect(next('weekly thu 09:00', THU_10AM)).toBe('2026-11-12T14:00:00.000Z');
+    expect(latest('weekly thu 09:00', THU_10AM)).toBe('2026-11-05T14:00:00.000Z');
+  });
+
+  it('an occurrence exactly at the instant is “by” it but not “after” it', () => {
+    const at = Date.parse('2026-11-06T14:00:00Z');
+    expect(next('daily 09:00', at)).toBe('2026-11-07T14:00:00.000Z');
+    expect(latest('daily 09:00', at)).toBe('2026-11-06T14:00:00.000Z');
+  });
+
+  it('a time before 04:00 belongs to the goal day it names', () => {
+    expect(next('weekly fri 01:00', THU_10AM)).toBe('2026-11-07T06:00:00.000Z');
+  });
+
+  it('keeps its wall-clock time across the autumn change', () => {
+    expect(next('daily 09:00', Date.parse('2026-10-31T14:00:00Z'))).toBe('2026-11-01T14:00:00.000Z');
+    expect(next('daily 09:00', Date.parse('2026-10-30T14:00:00Z'))).toBe('2026-10-31T13:00:00.000Z');
+  });
+
+  it('keeps its wall-clock time across the spring change', () => {
+    expect(next('daily 09:00', Date.parse('2027-03-13T15:00:00Z'))).toBe('2027-03-14T13:00:00.000Z');
+    expect(next('daily 09:00', Date.parse('2027-03-12T15:00:00Z'))).toBe('2027-03-13T14:00:00.000Z');
   });
 });

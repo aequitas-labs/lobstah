@@ -5,6 +5,7 @@ import {
   claimTodoFirings,
   displayGrounds,
   fireDueTodos,
+  formatTodoRecurrence,
   goalDate,
   goalLine,
   listTodos,
@@ -54,7 +55,9 @@ function view(grounds: string, todos: Todo[], days: number, now: number, display
     ...(t.dueAt ? { dueAt: t.dueAt } : {}),
     overdue: todoOverdue(t, now),
     ...(t.state === 'open' && t.firing ? { firedBy: todoFiredBy(t.firing.cause, tz) } : {}),
+    ...(t.every ? { every: formatTodoRecurrence(t.every) } : {}),
     ...(t.snoozes ? { snoozes: t.snoozes } : {}),
+    ...(t.lastDoneAt ? { lastDoneAt: t.lastDoneAt } : {}),
   }));
 }
 
@@ -112,10 +115,11 @@ function dueCell(t: TodoView, now: number): string {
   return t.overdue ? `overdue ${ageLabel(now - Date.parse(t.dueAt))}` : shortTodoTime(t.dueAt, now, helmTimezone());
 }
 
-/** `state`, `due` and `snoozes` columns appear only when a listed todo uses them. */
+/** `state`, `due`, `every` and `snoozes` columns appear only when a listed todo uses them. */
 export function todoTable(todos: TodoView[], withGrounds: boolean, now = Date.now()): string {
   const anyDone = todos.some((t) => t.done);
   const anyDue = todos.some((t) => !t.done && t.dueAt !== undefined);
+  const anyRepeating = todos.some((t) => t.every !== undefined);
   const anySnoozed = todos.some((t) => t.snoozes !== undefined);
   const cols = [
     ...(withGrounds ? ['grounds'] : []),
@@ -123,6 +127,7 @@ export function todoTable(todos: TodoView[], withGrounds: boolean, now = Date.no
     ...(anyDone ? ['state'] : []),
     'text',
     ...(anyDue ? ['due'] : []),
+    ...(anyRepeating ? ['every'] : []),
     ...(anySnoozed ? ['snoozes'] : []),
     'added',
   ];
@@ -135,6 +140,7 @@ export function todoTable(todos: TodoView[], withGrounds: boolean, now = Date.no
       state: t.done ? 'done' : 'open',
       text: t.text,
       due: dueCell(t, now),
+      every: t.every ?? '',
       snoozes: t.snoozes ?? 0,
       added: t.createdAt.slice(0, 10),
     })),
@@ -148,8 +154,8 @@ export function todoTable(todos: TodoView[], withGrounds: boolean, now = Date.no
  * A damaged todo file never fails a wait: the next write names the damage.
  */
 export function takeTodoDue(grounds: string, claim: boolean, now = Date.now()): TodoDueEvent[] {
-  fireDueTodos(now);
   const tz = helmTimezone();
+  fireDueTodos(now, tz);
   try {
     return claim ? claimTodoFirings(grounds, now, tz) : peekTodoFirings(grounds, tz);
   } catch {
@@ -164,7 +170,7 @@ export function takeTodoDue(grounds: string, claim: boolean, now = Date.now()): 
 export function createTodoFiring(): (now: number, log: (message: string) => void) => void {
   let logged = new Set<string>();
   return (now, log) => {
-    const { errors } = fireDueTodos(now);
+    const { errors } = fireDueTodos(now, helmTimezone());
     for (const error of errors) if (!logged.has(error)) log(error);
     logged = new Set(errors);
   };
@@ -172,7 +178,8 @@ export function createTodoFiring(): (now: number, log: (message: string) => void
 
 /** The `next` line of a `todo-due` event. */
 function todoDueNext(event: TodoDueEvent): string {
-  return `do it, then \`lobstah todo done ${event.id}\`; \`lobstah todo snooze ${event.id} --until <time>\` to retry later; then re-arm \`lobstah man wait\`.`;
+  const skip = event.repeats ? `\`lobstah todo skip ${event.id}\` to pass this one; ` : '';
+  return `do it, then \`lobstah todo done ${event.id}\`; ${skip}\`lobstah todo snooze ${event.id} --until <time>\` to retry later; then re-arm \`lobstah man wait\`.`;
 }
 
 /** `man wait`: one `todo-due` event per firing. */
@@ -213,7 +220,7 @@ export function todoContext(grounds: string, now: number = Date.now()): string {
   const remaining: number = others.length - shown.length;
   return [
     `Your todos (\`lobstah todo done <id>\` when finished, \`lobstah todo drop <id>\` when no longer needed):`,
-    'Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.',
+    'Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.',
     ...overdue.map((todo) => `${todoLine(todo)} [overdue]`),
     ...shown.map((todo) => `${todoLine(todo)}${staleIds.has(todo.id) ? ' [stale]' : ''}`),
     ...(remaining > 0 ? [`… and ${remaining} more (lobstah todo ls)`] : []),

@@ -24,11 +24,23 @@ export interface Todo {
   updatedAt: string;
   /** The next attempt, an ISO instant. Absent: no time trigger. */
   dueAt?: string;
-  /** Set once when the todo fires; cleared by a snooze. */
+  /** The repeat rule. A series stays open through done and skip; drop ends it. */
+  every?: TodoRecurrence;
+  /** Set once when the todo fires; cleared by done, skip or snooze. */
   firing?: TodoFiring;
+  /** The last done on a series, for the glass and the recap. */
+  lastDoneAt?: string;
   /** How many times a time already set has been moved, shown beside the todo. */
   snoozes?: number;
 }
+
+/** A day a weekly repeat falls on. */
+export type TodoWeekday = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat';
+
+/** A wall-clock repeat in `[helm].timezone`. `at` is 24-hour HH:MM. */
+export type TodoRecurrence =
+  | { cadence: 'daily' | 'weekdays'; at: string }
+  | { cadence: 'weekly'; day: TodoWeekday; at: string };
 
 /** One firing. Its existence is what stops a second one for this due. */
 export interface TodoFiring {
@@ -60,9 +72,12 @@ export interface TodoView {
   dueAt?: string;
   /** Open and past its due, or fired and not yet cleared. */
   overdue: boolean;
+  /** "weekdays 09:00" when it repeats. */
+  every?: string;
   /** What fired it, in words. */
   firedBy?: string;
   snoozes?: number;
+  lastDoneAt?: string;
 }
 
 /** The todos of one grounds as stored. Writers change it through `updateTodoFile`. */
@@ -168,6 +183,7 @@ export function listTodos(grounds: string, opts: { all?: boolean } = {}): Todo[]
 /** What a new todo can carry besides its text. */
 export interface NewTodoFields {
   dueAt?: string;
+  every?: TodoRecurrence;
 }
 
 export function addTodo(grounds: string, text: string, now = Date.now(), fields: NewTodoFields = {}): Todo {
@@ -182,6 +198,7 @@ export function addTodo(grounds: string, text: string, now = Date.now(), fields:
       createdAt: at,
       updatedAt: at,
       ...(fields.dueAt ? { dueAt: fields.dueAt } : {}),
+      ...(fields.every ? { every: fields.every } : {}),
     };
     data.items.push(todo);
     data.nextId += 1;
@@ -190,7 +207,7 @@ export function addTodo(grounds: string, text: string, now = Date.now(), fields:
 }
 
 /** The open todo with this id, or a `TodoError` naming why there isn't one. */
-function openTodo(data: TodoFile, id: number): Todo {
+export function openTodo(data: TodoFile, id: number): Todo {
   const todo = data.items.find((t) => t.id === id);
   if (!todo) throw new TodoError(`no todo ${id} — \`lobstah todo ls\` lists them`);
   if (todo.state !== 'open') throw new TodoError(`todo ${id} is already ${todo.state}`);

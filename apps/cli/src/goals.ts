@@ -50,11 +50,11 @@ export function goalsRecapData(grounds: string, date: string, cfg: Config) {
     return answer && inDay(answer.answeredAt) ? [{ key: d.key, title: d.title, answeredAt: answer.answeredAt, option: answer.option, text: answer.text }] : [];
   });
   // Optional #232 store: no import, command or dependency on the todo PR.
-  let todos: Array<{ id: number; text: string; state: string; updatedAt: string }> = [];
+  let todos: Array<{ id: number; text: string; state: string; updatedAt: string; lastDoneAt?: string }> = [];
   try { todos = JSON.parse(fs.readFileSync(path.join(lobstahHome(), 'todos', `${key}.json`), 'utf8')).items ?? []; }
   catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   return { date, timezone: cfg.helm.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, dayStartsAt: '04:00',
-    goals, dispatches, prs, cards, todos: todos.filter((t) => (t.state === 'done' || t.state === 'dropped') && inDay(t.updatedAt)),
+    goals, dispatches, prs, cards, todos: todos.filter((t) => ((t.state === 'done' || t.state === 'dropped') && inDay(t.updatedAt)) || inDay(t.lastDoneAt)),
     note: 'PR firstSeenAt is when lobstah first recorded it, not its forge creation time. Only retained records are available.' };
 }
 

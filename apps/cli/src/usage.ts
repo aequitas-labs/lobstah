@@ -88,16 +88,17 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<key>]',
   },
   todo: {
-    subverbs: ['add', 'done', 'drop', 'snooze', 'ls'],
+    subverbs: ['add', 'done', 'drop', 'snooze', 'skip', 'ls'],
     flags: {
       '--all': {},
       '--json': {},
       '--session': { value: '<id>' },
       '--at': { value: '<time>' },
       '--in': { value: '<30m|2h|3d>' },
+      '--every': { value: '<schedule>' },
       '--until': { value: '<time|duration>' },
     },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--at': ['add'], '--in': ['add'], '--until': ['snooze'] },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--at': ['add'], '--in': ['add'], '--every': ['add'], '--until': ['snooze'] },
     positionals: '["<text>"|<id>]',
   },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
@@ -363,9 +364,9 @@ its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
   todo: `The helm's own todo list, kept per grounds so it survives restarts and compaction.
 add "<text>" records one; done and drop close it; ls (or bare) lists open ones (--all adds closed). Open todos show in man tend, man report, the glass and every session start; a done one stays checked until 04:00. A trap gets none.
-add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop.
+add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once.
 24-hour, in [helm].timezone: "fri 09:00", "tomorrow 09:00", "09:00", "thu", "2026-11-06 09:00", "2026-11-06T14:00Z". A day runs 04:00 to 04:00.
-Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.`,
+Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,
