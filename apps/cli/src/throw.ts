@@ -34,6 +34,7 @@ import {
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
+import { listCodexHooks } from './codex-hook-list.js';
 import { codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
 import { trapTabTitle } from './terminal-title.js';
 import { openTmuxPane, tmuxPaneTail, type TmuxPaneRef, type TmuxRunner } from './tmux-terminal.js';
@@ -327,7 +328,7 @@ async function launchAndWait(
       const folder = codexTrapFolderTrust(w.command.cwd, w.trapId);
       folderTrust = folder.detail;
       // An unattended throw must not park at the interactive update picker.
-      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd }));
+      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd, listed: await listCodexHooks(w.command.cwd) }));
     }
     opened = (await w.adapter.launch({ ...w.command, trap: w.name ? trapTabTitle(w.name, w.repo) : w.label, ...(w.repo ? { repo: w.repo } : {}) })) || undefined;
   } catch (err) {

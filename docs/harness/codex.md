@@ -30,10 +30,13 @@ says when the plugin is behind.
 
 ## Thrown trap startup
 
-Codex 0.160.1 blocks at **Hooks need review** before the first model turn
-when any hook definition is new or changed. A longer throw timeout cannot
-clear that picker. `man throw` supplies invocation-scoped `hooks.state`
-hashes for the installed plugin's six exact `lobstah hook <event>` commands.
+Codex blocks at **Hooks need review** before the first model turn when any
+hook definition is new or changed. A longer throw timeout cannot clear that
+picker. `man throw` supplies invocation-scoped `hooks.state` for the installed
+plugin's exact `lobstah hook <event>` commands. It asks Codex for each hash
+through `hooks/list`, because from Codex 0.166 a plugin hook's trust also covers
+the plugin's contents (`trusted_content_hash`). If Codex can't answer, lobstah
+computes the hook hash itself, which is enough only before 0.166.
 Thrown sessions also set `check_for_update_on_startup=false` for that
 invocation, so an interactive update picker cannot hold the launch.
 The launcher rejects a plugin definition containing another command; it
