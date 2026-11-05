@@ -7,6 +7,9 @@ import type { GlassState } from '../store.js';
 import { PetArt } from './pet-art.js';
 import { reviewLink } from './common.js';
 
+/** Where a lob's text is cut: past a stack's title, count and state. */
+const LOB_TEXT_MAX = 60;
+
 /**
  * The crawling lobs: attention walking along the bottom of the page.
  * prefs.lobs gates the lobs; acked items (the pet's shared ack) and lobs
@@ -21,7 +24,7 @@ function lob(it: LobItem, i: number) {
     if (it.hideKey) hideLob(it.hideKey, it.hideHash ?? '');
   };
   const body = [
-    html`<div class="bub">${it.label && [html`<span class="badge dim">${it.label}</span>`, ' ']}<span>${it.text.length > 48 ? it.text.slice(0, 47) + '…' : it.text}</span></div>`,
+    html`<div class="bub">${it.label && [html`<span class="badge dim">${it.label}</span>`, ' ']}<span>${it.text.length > LOB_TEXT_MAX ? it.text.slice(0, LOB_TEXT_MAX - 1) + '…' : it.text}</span></div>`,
     html`<${PetArt} />`,
   ];
   // A PR lob is a plain link out (read-only: the glass opens, never acts);

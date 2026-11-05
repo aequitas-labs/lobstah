@@ -1,4 +1,4 @@
-import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, TendAttention } from '@lobstah/core';
+import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { useState } from 'preact/hooks';
 import { desktopSession, dispatchFileUrl, isImageName, prBadgeClass, resumeCommand, watchState } from '../../../src/glass-diff.js';
@@ -353,7 +353,7 @@ export function prCell(x: GlassDispatchSummary) {
     return [
       x.prList.map((p, i) => [
         i ? ' → ' : '',
-        html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`,
+        html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" title=${p.title} onClick=${stop}>#${p.number}</a>`,
         p.badge && [' ', html`<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>`],
       ]),
       x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
@@ -412,9 +412,12 @@ export const prLink = (p: Pick<GlassPr, 'url' | 'number'>) =>
 
 export const reviewLink = (url: string) => prReviewUrl(url, getState().snapshot?.reviewTools);
 
-/** A PR card's name: the number bold, then the title; the number alone when there is no title. One line, cut with an ellipsis. */
+/** A PR card's name: the number bold, then the title; the number alone when there is no title. */
 export const prName = (p: Pick<GlassPr, 'number' | 'title'>) =>
   html`<span class="prname" title=${p.title || undefined}><b>#${p.number}</b>${p.title && [' ', LinkedText(p.title)]}</span>`;
+
+/** What a stack is about, as its heading's lead; nothing when it has no title. */
+export const stackTitle = (s: GlassStack) => s.title && [html`<b class="stacktitle">${LinkedText(s.title)}</b>`, ' '];
 
 /** A stack's numbers, `#98 → #101`, each carrying its PR's title as a title attribute. `bold` marks one number. */
 export function stackNumbers(numbers: number[], titles: Map<number, string | undefined>, bold?: number) {

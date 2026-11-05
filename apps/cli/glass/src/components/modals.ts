@@ -94,7 +94,7 @@ function stackLine(p: PrModalView['pr'], s: NonNullable<PrModalView['stack']>) {
       : s.nextNumber
         ? ' · next is #' + s.nextNumber
         : '';
-  return [numbers, ' · ', s.position, ' of ', s.size, ' · floor ', s.floor, next];
+  return [s.title && [html`<b>${LinkedText(s.title)}</b>`, ' · '], numbers, ' · ', s.position, ' of ', s.size, ' · floor ', s.floor, next];
 }
 
 /** A dispatch-chain link: opens that dispatch's modal instead of following the #. */

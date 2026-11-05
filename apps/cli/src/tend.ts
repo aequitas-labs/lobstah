@@ -38,7 +38,11 @@ import {
   prReviewUrl,
   parsePrRef,
   pendingIds,
+  cutPrTitle,
   prBadge,
+  prKeyLabel,
+  prLabel,
+  prNote,
   prNewestFirst,
   prStandingKinds,
   queuedDescriptor,
@@ -179,6 +183,7 @@ export interface TendWatch {
 export interface TendRepairWaiting {
   key: string;
   url: string;
+  title?: string;
   kind: string;
   heldBy: string;
   reason: string;
@@ -259,18 +264,31 @@ export function onTheHook(
 export const prKinds = prStandingKinds;
 
 const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
-  'pr:draft': (pr) => `#${pr.number} draft`,
+  'pr:draft': (pr) => prNote(pr, 'draft'),
   'pr:review': (pr) =>
-    `#${pr.number} review: ${[
+    prNote(pr, `review: ${[
       pr.review?.unresolvedThreads ? `${pr.review.unresolvedThreads} unresolved` : '',
       pr.review?.changesRequested ? 'changes requested' : '',
     ]
       .filter(Boolean)
-      .join(', ')}`,
-  'pr:checks': (pr) => `#${pr.number} checks ${pr.checks.failed}/${pr.checks.total} failed`,
-  'pr:conflict': (pr) => `#${pr.number} conflicts with ${pr.baseRefName ?? 'its base'}`,
-  'pr:ready': (pr) => `#${pr.number} ready to merge`,
+      .join(', ')}`),
+  'pr:checks': (pr) => prNote(pr, `checks ${pr.checks.failed}/${pr.checks.total} failed`),
+  'pr:conflict': (pr) => prNote(pr, `conflicts with ${pr.baseRefName ?? 'its base'}`),
+  'pr:ready': (pr) => prNote(pr, 'ready to merge'),
 };
+
+/** How long a stack's title runs in its headline: the count and state must still fit a pet's bubble. */
+const STACK_HEADLINE_TITLE_MAX = 40;
+
+/** The merge view with each PR's title from its record: pickup's own state keeps none. */
+function mergeViewWithTitles(view: MergeView, records: readonly PrEvidence[]): MergeView {
+  const titles = new Map(records.map((pr) => [pr.url, pr.title]));
+  const titled = <T extends { url: string }>(p: T): T => {
+    const title = titles.get(p.url);
+    return title ? { ...p, title } : p;
+  };
+  return { ...view, open: view.open.map(titled), recent: view.recent.map(titled) };
+}
 
 /** Hide a repairable problem only after a live repairer has claimed safe work. */
 export function humanPrAttention(
@@ -442,8 +460,8 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
   for (const s of stacks) {
     const members = s.members.map((pr) => {
       const items = out.filter((a) => a.prUrl === pr.url);
-      return { key: parsePrRef(pr.url)!.key, url: pr.url, number: pr.number,
-        note: items.map((a) => a.note).join('; ') || `#${pr.number} ${prBadge(pr).text}`,
+      return { key: parsePrRef(pr.url)!.key, url: pr.url, number: pr.number, ...(pr.title ? { title: pr.title } : {}),
+        note: items.map((a) => a.note).join('; ') || prNote(pr, prBadge(pr).text),
         kinds: items.map((a) => a.kind) };
     });
     // Member readiness lives only in the stack item. A member's own problem
@@ -455,10 +473,11 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
       stateHash: stackStateHash(s, epochs[s.id]?.epoch),
       id: source.id, lane: source.lane, verb: 'stack-ready', at, standingSince: at,
       ageSecs: Math.max(0, Math.round((now - Date.parse(at)) / 1000)), note: s.text,
+      ...(s.title ? { headline: `${cutPrTitle(s.title, STACK_HEADLINE_TITLE_MAX)} (${s.allReady ? `${members.length} PRs, all green` : `${s.ready} of ${members.length} ready`})` } : {}),
       // Only an all-ready stack (every member past its settle window) walks;
       // a partly ready one is a quiet standing row in tend and the glass.
       quiet: !s.allReady || !!epochs[s.id]?.silent || !!s.legacy,
-      stack: { ready: s.ready, total: members.length, allReady: s.allReady, members },
+      stack: { ...(s.title ? { title: s.title } : {}), ready: s.ready, total: members.length, allReady: s.allReady, members },
       repo: forgeRepoKey(cfg, s.repo), prUrl: top.url });
   }
   return out;
@@ -1060,7 +1079,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     awaiting,
     notices,
     helms,
-    merge,
+    ...(merge ? { merge: mergeViewWithTitles(merge, records) } : {}),
     stacks,
     parked: parked.map((p) => ({
       id: p.id,
@@ -1074,6 +1093,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     repairsWaiting: waitingRepairs(records).map((pr) => ({
       key: pr.key,
       url: pr.url,
+      ...(pr.title ? { title: pr.title } : {}),
       kind: pr.repair!.kind,
       heldBy: pr.repair!.heldBy ?? '',
       reason: pr.repair!.reason ?? '',
@@ -1110,7 +1130,7 @@ export function renderTend(r: TendReport): string {
   if (r.queueWait) lines.push(r.queueWait);
   if (r.todoNote) lines.push(r.todoNote);
   for (const stack of r.stacks) {
-    lines.push(`stack ${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
+    lines.push(`stack ${stack.title ? `${stack.title} · ` : ''}${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
     if (stack.readiness) lines.push(`${stack.readiness.text} ${stack.readiness.url}`);
     const item = r.attention.find((a) => a.key === `stack:${stack.readiness?.id}`);
     if (item?.stack) for (const member of item.stack.members) lines.push(`  ${member.note} ${member.url}`);
@@ -1196,7 +1216,7 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'repairs waiting',
-        r.repairsWaiting.map((w) => ({ pr: w.key, kind: w.kind, heldBy: named(w.heldBy), reason: named(w.reason), until: w.until ?? '' })),
+        r.repairsWaiting.map((w) => ({ pr: prKeyLabel(w.key, w.title), kind: w.kind, heldBy: named(w.heldBy), reason: named(w.reason), until: w.until ?? '' })),
         ['pr', 'kind', 'heldBy', 'reason', 'until'],
       ),
     );
@@ -1204,7 +1224,7 @@ export function renderTend(r: TendReport): string {
   if (r.repairChores?.length) {
     lines.push('');
     lines.push(toonTable('repair chores', r.repairChores.map((c) => ({
-      id: c.id.slice(0, 8), pr: c.pr, lane: c.lane, state: c.state,
+      id: c.id.slice(0, 8), pr: prKeyLabel(c.pr, c.title), lane: c.lane, state: c.state,
       worker: named(c.worker), waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
     })), ['id', 'pr', 'lane', 'state', 'worker', 'waitingForTrap']));
   }
@@ -1289,8 +1309,8 @@ export function renderTend(r: TendReport): string {
       toonTable(
         `prs (${r.merge.repo}, observed ${r.merge.updatedAt})`,
         [
-          ...r.merge.open.map((p) => ({ pr: `#${p.number}`, state: p.mergeableState, gate: p.gate, url: p.url })),
-          ...r.merge.recent.map((p) => ({ pr: `#${p.number}`, state: p.disposition, gate: '', url: p.url })),
+          ...r.merge.open.map((p) => ({ pr: prLabel(p), state: p.mergeableState, gate: p.gate, url: p.url })),
+          ...r.merge.recent.map((p) => ({ pr: prLabel(p), state: p.disposition, gate: '', url: p.url })),
         ],
         ['pr', 'state', 'gate', 'url'],
       ),

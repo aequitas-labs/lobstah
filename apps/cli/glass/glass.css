@@ -422,6 +422,18 @@ a.deckline > .dim {
   font-size: 11px;
   margin: 3px 0 5px;
 }
+.stacktitle {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.deckmember {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .seg {
   display: inline-flex;
   border: 1px solid var(--line);
@@ -550,6 +562,13 @@ tr.rowhead:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* A PR's name is what the card is for: two lines before the ellipsis. */
+.card .top > .prname {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
 }
 /* A badge of up to 12 characters (done, claude, working) never shrinks. */
 .card .top .badge {

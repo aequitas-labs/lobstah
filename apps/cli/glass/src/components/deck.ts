@@ -28,6 +28,7 @@ import {
   opener,
   prName,
   stackNumbers,
+  stackTitle,
   startCommands,
   trapNow,
   trapNowText,
@@ -116,7 +117,7 @@ function deckStack(
       const meta = `${p.repo} · ${p.badge.text}${acked ? ' · acked' : ''}`;
       return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta" title=${meta}>${meta}</div></div>`;
     };
-    return html`<div key=${s.id} class="deckstack"><div class="dim">${chain} · ${nextText}${ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}<div class="cards">${members.map(card)}</div></div>`;
+    return html`<div key=${s.id} class="deckstack"><div class="dim">${stackTitle(s)}${chain} · ${nextText}${ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${members.map(card)}</div></div>`;
   }
   const badges = members.flatMap((p) =>
     (standing.get(p.key) || []).map(
@@ -125,7 +126,8 @@ function deckStack(
     ),
   );
   const spaced = badges.flatMap((b, i) => (i ? [' ', b] : [b]));
-  return html`<div key=${s.id} class=${'deckline' + (next ? ' click' : '')} onClick=${next && opener('pr', next.key)}><b>${chain}</b> <span class="dim">· ${nextText}</span>${badges.length > 0 && [' · ', spaced]}${ack}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}</div>`;
+  const lone = members.length === 1 ? members[0] : undefined;
+  return html`<div key=${s.id} class=${'deckline' + (next ? ' click' : '')} onClick=${next && opener('pr', next.key)}>${stackTitle(s)}${lone ? prName(lone) : html`<b>${chain}</b>`} <span class="dim">· ${nextText}</span>${badges.length > 0 && [' · ', spaced]}${ack}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}${!lone && members.map((p) => html`<div key=${p.key} class="deckmember dim">${prName(p)}</div>`)}</div>`;
 }
 
 function deckPrs(inp: DeckInputs, view: View) {

@@ -20,6 +20,7 @@ import {
   markFollowUp,
   mergeEvidence,
   parsePrRef,
+  prKeyLabel,
   postNotice,
   laneOf,
   PUSH_REJECTED,
@@ -511,7 +512,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         });
         postNotice({
           kind: 'repair-stopped',
-          text: `${pr.key}: repairs stopped — ${reason} (${pr.url})`,
+          text: `${prKeyLabel(pr.key, pr.title)}: repairs stopped — ${reason} (${pr.url})`,
           refId: owner,
           repo: target.repo,
           dedupeKey: `repair-stopped-${pr.key}-${pr.headSha}`,
@@ -619,6 +620,7 @@ export function waitingRepairs(records: readonly PrRecord[] = readPrs()): PrReco
 export interface RepairChore {
   id: string;
   pr: string;
+  title?: string;
   lane: 'chore';
   state: 'queued' | 'active';
   worker: string;
@@ -639,7 +641,7 @@ export function repairChores(records: readonly PrRecord[] = readPrs()): RepairCh
     const claim = readSessionClaim(id, 'chore');
     const waitingForTrap = bucket.bucket === 'queue' && !!descriptor.for;
     rows.push({
-      id, pr: pr.url, lane: 'chore', state: bucket.bucket === 'queue' ? 'queued' : 'active',
+      id, pr: pr.url, ...(pr.title ? { title: pr.title } : {}), lane: 'chore', state: bucket.bucket === 'queue' ? 'queued' : 'active',
       worker: claim?.by ?? descriptor.for ?? 'headless', waitingForTrap,
       ...(waitingForTrap && descriptor.systemRepair.trapWaitUntil ? { until: descriptor.systemRepair.trapWaitUntil } : {}),
     });

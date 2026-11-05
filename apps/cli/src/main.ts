@@ -176,6 +176,7 @@ import {
   toonKV,
   toonTable,
   VERBS,
+  cutPrTitle,
   parsePrRef,
   prBadge,
   readPr,
@@ -244,7 +245,6 @@ import {
   addPrWatch,
   autoRegisterPrWatch,
   backfillPrWatches,
-  cutTitle,
   syncPrWatches,
   runDueManWatches,
   pollSecs,
@@ -1861,7 +1861,7 @@ async function mainCli(): Promise<void> {
             const ageMins = Math.max(0, Math.floor((now - Date.parse(r.observedAt)) / 60_000));
             return {
               number: `#${r.number}`,
-              title: cutTitle(r.title),
+              title: cutPrTitle(r.title),
               repo: r.repo,
               state: r.state,
               badge: prBadge(r).text,

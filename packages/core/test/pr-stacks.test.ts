@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { derivePrStacks, ensureLayout, listNotices, loadConfig, postNotice, readStackEpochs, syncStackReadiness, unseenNotices, upsertPr } from '../src/index.js';
+import { cutPrTitle, derivePrStacks, ensureLayout, laneDirs, prKeyLabel, prLabel, prNote, prStackTitle, listNotices, loadConfig, postNotice, readStackEpochs, syncStackReadiness, unseenNotices, upsertPr } from '../src/index.js';
 import type { PrEvidence } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -205,5 +205,100 @@ describe('stack detection and readiness', () => {
     expect(unseenNotices(true)).toEqual([]);
     upsertPr(row(2, { headSha: 'new' })); sync();
     expect(unseenNotices(true)).toHaveLength(1);
+  });
+});
+
+describe('PR and stack titles', () => {
+  /** A stored work dispatch, so a stack can take its name from the brief. */
+  const dispatch = (id: string, brief: string, followUp?: string) => {
+    const dir = path.join(laneDirs('work').done, id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'descriptor.json'), JSON.stringify({ id, repo: 'web', brief, ...(followUp ? { followUp } : {}) }));
+  };
+  /** An observation from a PR record, naming the dispatches behind it. */
+  const owned = (n: number, title: string | undefined, ...dispatches: string[]) =>
+    ({ ...row(n), ...(title ? { title } : {}), dispatches });
+
+  it('a PR shows its title beside its number, and its number alone without one', () => {
+    expect(prLabel({ number: 7, title: 'Put job photos first' })).toBe('#7 Put job photos first');
+    expect(prLabel({ number: 7 })).toBe('#7');
+    expect(prNote({ number: 7, title: 'Put job photos first' }, 'draft')).toBe('#7 Put job photos first · draft');
+    expect(prNote({ number: 7 }, 'draft')).toBe('#7 draft');
+    expect(prKeyLabel('pr:o/r#7', 'Put job photos first')).toBe('pr:o/r#7 Put job photos first');
+    expect(prKeyLabel('pr:o/r#7', undefined)).toBe('pr:o/r#7');
+  });
+
+  it('cuts a long title to its limit and keeps a title to one clean line', () => {
+    const cut = prLabel({ number: 7, title: 'x'.repeat(200) });
+    expect(Array.from(cut.slice('#7 '.length))).toHaveLength(48);
+    expect(cut.endsWith('…')).toBe(true);
+    expect(cutPrTitle('Fix\n\tthe \u001b[31mlogin\u001b[0m  test')).toBe('Fix the [31mlogin [0m test');
+    expect(cutPrTitle(undefined)).toBe('');
+  });
+
+  it("a stack from no known dispatch takes its bottom PR's title", () => {
+    const [s] = derivePrStacks([owned(1, 'Add the heavy line'), owned(2, 'Queue pushes'), owned(3, 'Show it in tend')], { now: time });
+    expect(s).toMatchObject({ title: 'Add the heavy line', text: 'stack ready to merge: Add the heavy line (#1 → #3, 3 PRs, all green)', state: '3 PRs, all green' });
+  });
+
+  it('a waiting stack says the title, the count and what it waits on', () => {
+    const [s] = derivePrStacks([owned(1, 'Add the heavy line'), { ...owned(2, 'Queue pushes'), draft: true }], { now: time });
+    expect(s).toMatchObject({ text: 'stack waiting: Add the heavy line (#1 → #2, 1 of 2 ready) — #2 draft', state: '1 of 2 ready — #2 draft' });
+  });
+
+  it('a stack with no titles at all keeps its numbers', () => {
+    const [s] = derivePrStacks([row(1), row(2)], { now: time });
+    expect(s!.title).toBeUndefined();
+    expect(s!.text).toBe('stack ready to merge: acme/web #1 → #2 (2 PRs, all green) — merge in this order, bottom first');
+  });
+
+  it("takes the name from the dispatch's brief heading, when every member came from it", () => {
+    dispatch('d1', '# Heavy-check queue\n\nBuild it.');
+    const [s] = derivePrStacks([owned(1, 'Add the heavy line', 'd1'), owned(2, 'Queue pushes', 'd1')], { now: time });
+    expect(s).toMatchObject({ title: 'Heavy-check queue', text: 'stack ready to merge: Heavy-check queue (#1 → #2, 2 PRs, all green)' });
+  });
+
+  it('walks a follow-up back to the brief that has a heading, across one chain', () => {
+    dispatch('root', '# Heavy-check queue\n\nPlan it.');
+    dispatch('next', 'Follow-up instruction from helm on dispatch root:\nBuild it.', 'root');
+    dispatch('last', 'Follow-up instruction from helm on dispatch next:\nFix the top.', 'next');
+    const [s] = derivePrStacks([owned(1, 'Add the heavy line', 'next'), owned(2, 'Queue pushes', 'last')], { now: time });
+    expect(s!.title).toBe('Heavy-check queue');
+  });
+
+  it("uses the bottom PR's title when the brief has no leading heading", () => {
+    dispatch('d1', 'Follow-up instruction from helm:\n# not the name\nBuild it.');
+    const [s] = derivePrStacks([owned(1, 'Add the heavy line', 'd1'), owned(2, 'Queue pushes', 'd1')], { now: time });
+    expect(s!.title).toBe('Add the heavy line');
+  });
+
+  it("uses the bottom PR's title when the members came from different dispatches", () => {
+    dispatch('d1', '# One thing');
+    dispatch('d2', '# Another thing');
+    const [s] = derivePrStacks([owned(1, 'Add the heavy line', 'd1'), owned(2, 'Queue pushes', 'd2')], { now: time });
+    expect(s!.title).toBe('Add the heavy line');
+  });
+
+  it("uses the bottom PR's title when the dispatch also has an open PR outside the stack", () => {
+    dispatch('d1', '# Everything at once');
+    const other = { ...owned(9, 'Something else', 'd1'), headRefName: 'other', baseRefName: 'main' };
+    const [s] = derivePrStacks([owned(1, 'Add the heavy line', 'd1'), owned(2, 'Queue pushes', 'd1'), other], { now: time });
+    expect(s!.title).toBe('Add the heavy line');
+  });
+
+  it("a repair dispatch names nothing: the chore lane isn't read", () => {
+    const dir = path.join(laneDirs('chore').active, 'r1');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'descriptor.json'), JSON.stringify({ id: 'r1', repo: 'web', brief: '# Repair the PR' }));
+    expect(prStackTitle([owned(1, 'Add the heavy line', 'r1')], [])).toBe('Add the heavy line');
+  });
+
+  it('the notice keeps the title, and a change note still leads', () => {
+    upsertPr(owned(1, 'Add the heavy line')); upsertPr(owned(2, 'Queue pushes'));
+    sync();
+    expect(readyNotices()).toEqual([expect.objectContaining({ text: 'stack ready to merge: Add the heavy line (#1 → #2, 2 PRs, all green)' })]);
+    upsertPr(owned(3, 'Show it in tend'));
+    sync();
+    expect(readyNotices()).toEqual([expect.objectContaining({ text: 'Stack updated · #3 added — stack ready to merge: Add the heavy line (#1 → #3, 3 PRs, all green)' })]);
   });
 });
