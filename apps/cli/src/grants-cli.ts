@@ -50,6 +50,7 @@ import type {
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { isTrapReportCommand } from './permission-context.js';
 
 /**
  * Grants from the command line and the hooks: a person grants, revokes and
@@ -506,18 +507,21 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}),
     };
     const cwd = typeof h.cwd === 'string' ? h.cwd : process.cwd();
-    const ids = checkCall(call, cwd, preToolUse);
-    if (ids) {
+    const trap = call.session ? trapBySession(call.session) : undefined;
+    const command = call.input.command ?? call.input.cmd;
+    const report = !!trap && ['Bash', 'shell', 'exec_command'].includes(call.tool.split('.').at(-1)!)
+      && typeof command === 'string' && isTrapReportCommand(command);
+    const ids = report ? undefined : checkCall(call, cwd, preToolUse);
+    if (report || ids) {
       console.log(
         JSON.stringify({
           hookSpecificOutput: preToolUse
-            ? { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: `lobstah grant ${ids.join(', ')}` }
+            ? { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: report ? 'Trap reports reach the helm without a permission card.' : `lobstah grant ${ids!.join(', ')}` }
             : { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
         }),
       );
       return;
     }
-    const trap = call.session ? trapBySession(call.session) : undefined;
     // Configured desks keep the harness reviewer as the only approval flow; existing grants above still reduce friction.
     if (trap?.configured) return;
     if (preToolUse) {
@@ -580,6 +584,7 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
           dispatch: trap.claimed,
           lane,
           repo: trap.repo,
+          ...(typeof call.input.description === 'string' ? { description: call.input.description } : {}),
           ask: {
             ...(request.command !== undefined ? { command: request.command } : { path: request.path! }),
             harness,
@@ -595,7 +600,7 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
 }
 
 /** File a trap's permission request as a card with Allow once, Allow always and No. */
-export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string }): DecisionMeta {
+export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string; description?: string }): DecisionMeta {
   const session = opts.ask.session ?? listTraps().find((t) => t.name === opts.ask.trap || t.trapId === opts.ask.trap)?.sessionId;
   if (session) opts.ask = { ...opts.ask, session, tool: opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write') };
   const target = opts.ask.command !== undefined ? opts.ask.command : opts.ask.path!;
@@ -616,16 +621,21 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
       family = false;
     }
   }
-  const title =
-    opts.ask.command !== undefined ? `Allow: ${commandGrantScope(target).command}` : `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
+  const commandTitle = `${opts.ask.trap ?? 'The trap'} wants to run: \``;
+  const compactTarget = target.replace(/\s+/g, ' ').trim();
+  const commandBudget = Math.max(1, 199 - commandTitle.length);
+  const title = opts.ask.command !== undefined
+    ? `${commandTitle}${compactTarget.length > commandBudget ? `${compactTarget.slice(0, commandBudget - 1)}…` : compactTarget}\``
+    : `Allow ${kind}: ${compactTarget}`;
   const detail = [
-    opts.note ? `${opts.note}\n` : '',
     `${opts.ask.trap ? withTrapRepo(opts.repo, opts.ask.trap) : 'The trap'} asks to ${kind} exactly this${opts.ask.harness === 'any' ? '' : ` (${opts.ask.harness === 'claude' ? 'Claude Code' : 'Codex'})`}:`,
     '',
     '```',
     target,
     '```',
     '',
+    ...(opts.description ? [`**Trap's description:** ${opts.description}`, ''] : []),
+    ...(opts.note ? [opts.note, ''] : []),
     `- **Allow once**: this trap may ${kind} it once, within the hour.`,
     `- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
     ...(family
