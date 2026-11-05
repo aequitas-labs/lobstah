@@ -1172,7 +1172,7 @@ export function serveGlass(
       if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id' });
       const reg = liveTrap(trapId);
       if (!reg) return reply(409, { focused: false, reason: 'Trap is not live' });
-      void (options.focus ?? focusRegistration)(reg)
+      void (options.focus ?? ((trap: TrapRegistration) => focusRegistration(trap, { openTerminal: true })))(reg)
         .then((result) => reply(result.focused ? 200 : 409, result))
         .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
       return;
