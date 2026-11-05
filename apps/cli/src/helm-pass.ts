@@ -10,9 +10,9 @@ export function helmPassNotice(grounds: string, config: Config, now = Date.now()
   const date = goalDate(new Date(now), config.helm.timezone);
   return [
     `pass-due — ${name} (${status.reasons.join(', ')})`,
-    renderTodoList(grounds, now),
+    renderTodoList(grounds, now, { collapseScheduled: true }),
     renderGoals(readGoals(grounds, date), name),
-    'For each todo: do it, card it, move it to the tracker, or drop it. For each goal: check its done state and choose the next step.',
+    'For each todo: do it, card it, snooze it, move it to the tracker, or drop it. For each goal: check its done state and choose the next step.',
   ].join('\n');
 }
 

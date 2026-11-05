@@ -90,7 +90,10 @@ getting woken instead of asking:
   lobstah todo add "<text>" keep your own reminder, in free text, under your
                             grounds; \`todo done <id>\`, \`todo drop <id>\`,
                             \`todo ls\`. Re-injected at every session start;
-                            tend notes the stale ones
+                            tend notes the stale ones. \`--at <time>\` or
+                            \`--in <duration>\` gives it a time, \`todo snooze
+                            <id> --until <time>\` moves it; at its time man wait
+                            wakes you with a todo-due event
                             Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.
   lobstah man ask           put a question the helm cannot decide to the human:
                             [<dispatch-id>] --title, --detail <f.md>,

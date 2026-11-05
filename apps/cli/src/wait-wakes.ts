@@ -1,5 +1,5 @@
 import { QUIET_NOTICE_KINDS } from '@lobstah/core';
-import type { Notice, ReplyEvent, WatchAttention } from '@lobstah/core';
+import type { Notice, ReplyEvent, TodoDueEvent, WatchAttention } from '@lobstah/core';
 import type { NotifyEvent } from '@lobstah/supervisor';
 import type { Digest } from './digest.js';
 
@@ -11,6 +11,7 @@ export function helmWakeKeys(batch: {
   watches?: readonly WatchAttention[];
   notices?: readonly Notice[];
   replies?: readonly ReplyEvent[];
+  todos?: readonly TodoDueEvent[];
 }): string[] {
   return [
     ...(batch.events ?? []).filter(e => e.entry.verb !== 'working').map(e => statusKey(e.id, e.entry.verb, e.entry.at)),
@@ -19,6 +20,7 @@ export function helmWakeKeys(batch: {
       .map(n => JSON.stringify(['notice', n.kind, n.refId, n.stateHash ?? n.seq])),
     // A working reply to an explicit send is news; routine working progress is not.
     ...(batch.replies ?? []).map(r => JSON.stringify(['reply', r.id, r.entry.at])),
+    ...(batch.todos ?? []).map(t => JSON.stringify(['todo', t.grounds, t.id, t.firedAt])),
   ];
 }
 

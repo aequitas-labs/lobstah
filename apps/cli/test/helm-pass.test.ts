@@ -139,3 +139,32 @@ it('glass shows the same last pass age beside goals and todos', async () => {
     expect(page.$('.todos')?.textContent).toContain('last pass 7 min ago');
   } finally { await page.close(); }
 });
+
+it('a pass lists overdue todos first, collapses those waiting, and offers a snooze', () => {
+  const now = Date.now();
+  addTodo('fleet', 'Waiting one', now, { dueAt: new Date(now + 86400_000).toISOString() });
+  addTodo('fleet', 'Plain one', now);
+  addTodo('fleet', 'Late one', now - 86400_000, { dueAt: new Date(now - 1000).toISOString() });
+  const notice = helmPassNotice('fleet', loadConfig(), now)!;
+  expect(notice).toContain('1 scheduled (lobstah todo ls)');
+  expect(notice).not.toContain('Waiting one');
+  expect(notice.indexOf('Late one')).toBeLessThan(notice.indexOf('Plain one'));
+  expect(notice).toContain('snooze it');
+});
+
+it('a pass with only scheduled todos shows the one line', () => {
+  const now = Date.now();
+  addTodo('fleet', 'Waiting one', now, { dueAt: new Date(now + 86400_000).toISOString() });
+  const notice = helmPassNotice('fleet', loadConfig(), now)!;
+  expect(notice).toContain('1 scheduled (lobstah todo ls)');
+  expect(notice).not.toContain('todos: none');
+});
+
+it('an overdue todo adds no pass reason; a todo with a due is not stale', () => {
+  const now = Date.now();
+  const config = loadConfig().helm;
+  recordHelmPass('fleet', config, undefined, now);
+  addTodo('fleet', 'Old with a time', now - 30 * 86400_000, { dueAt: new Date(now - 1000).toISOString() });
+  expect(helmPassStatus('fleet', config, now).reasons).toEqual([]);
+  expect(helmPassStatus('fleet', config, now).staleTodos).toEqual([]);
+});

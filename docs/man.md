@@ -606,7 +606,14 @@ the helm files to keep.
   in it.
   `lobstah todo done <id>` and `lobstah todo drop <id>` close one;
   `lobstah todo ls` (or bare `todo`) lists the open ones, and `--all` adds
-  closed ones. They are stored per grounds in `todos/<grounds>.json` with
+  closed ones. `todo add "<text>" --at <time>` or `--in <duration>` gives one
+  a time, and `todo snooze <id> --until <time|duration>` sets or moves it. A
+  todo with a time is quiet and never stale until then. At its time, `man wait`
+  and the Stop hook wake the helm once with a `todo-due` event, and it stays
+  overdue until `done`, `snooze` or `drop`. Times read in `[helm].timezone`, in
+  24-hour form: `fri 09:00`, `tomorrow 09:00`, `09:00`, `thu` (09:00 that day),
+  `2026-11-06 09:00`, `2026-11-06T14:00Z`. A day name means a goal day, which
+  runs from 04:00 to 04:00. So `fri 01:00` is the late end of Friday. They are stored per grounds in `todos/<grounds>.json` with
   created and updated times. `man tend`, `man report`, and the glass deck
   show the open ones, and `man brief` re-injects them beside the charter at
   every session start and after compaction. A todo marked done stays in

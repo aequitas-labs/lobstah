@@ -8,6 +8,8 @@ export * from './stats.js';
 export * from './attachments.js';
 export * from './reports.js';
 export * from './todos.js';
+export * from './todo-time.js';
+export * from './todo-fire.js';
 export * from './decisions.js';
 export * from './grants.js';
 export * from './grant-scope.js';
