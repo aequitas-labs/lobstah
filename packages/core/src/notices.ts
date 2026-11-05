@@ -15,6 +15,8 @@ import { dispatchProgress } from './dispatch-progress.js';
  * of consumption so nothing is ever invisible.
  */
 export type NoticeKind =
+  | 'trap-profile-missing'
+  | 'assistance-result'
   | 'trap-signed-on'
   | 'trap-listening'
   | 'trap-available'
@@ -73,6 +75,8 @@ export interface Notice {
   url?: string;
   /** Repo key, so a helm can scope notices to its grounds. */
   repo?: string;
+  /** Explicit ownership for repo-less notices. */
+  grounds?: string;
   /** The session whose action caused it — consumed as usual, but never
    *  woken back at its own author (a helm's stow should not wake the helm
    *  to announce itself). */
@@ -108,6 +112,7 @@ export function postNotice(n: {
   refId?: string;
   url?: string;
   repo?: string;
+  grounds?: string;
   /** The session whose action caused this — its own wakes skip the echo. */
   by?: string;
   dedupeKey?: string;
@@ -134,6 +139,7 @@ export function postNotice(n: {
     refId: n.refId,
     ...(n.url ? { url: n.url } : {}),
     repo: n.repo,
+    ...(n.grounds ? { grounds: n.grounds } : {}),
     by: n.by,
     ...(n.quiet ? { quiet: true } : {}),
     ...(n.stateHash ? { stateHash: n.stateHash } : {}),

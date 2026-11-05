@@ -412,6 +412,7 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
 
 /** A standing decision as the glass renders it: the record plus its detail page. */
 export interface GlassDecision {
+  appStart?: import('./desktop-start-link.js').DesktopAppStart;
   key: string;
   title: string;
   /** The detail markdown; images it names by bare filename load from the decision's attachments. */

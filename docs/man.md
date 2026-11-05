@@ -1608,3 +1608,34 @@ disk  warn  412.3 GB free on ~/.lobstah/worktrees; minFreeGB 10; retentionDays 1
   after a reboot.
 - An honest six-verb status contract, validated at the write path, so the
   liaison never has to parse prose to know where things stand.
+
+## Configured repo-less traps
+
+Declare one `[traps.<name>]` profile per grounds with `harness`, `surface`
+(`claude-desktop` or `terminal`), and `grounds`. `cwd` is an optional existing
+plain folder; `maxInstances` defaults to 1. See the configuration reference.
+A configured session joins with `lobstah soak --trap <name> --session <own-id>
+--wait`. Its identity, inbox, park, stow and ghost history survive without a
+git worktree. Forget frees an idle instance and keeps its folder and history.
+
+Route a bounded app or browser step with:
+
+```sh
+lobstah dispatch --for trap:desk --grounds fleet --assist <original-id> --brief /tmp/inspection.md
+```
+
+The catch stays queued for that profile. The original worker keeps repo and
+PR ownership; a terminal child report returns its findings and attachments
+to the original dispatch once. Results arriving after the parent ends stay
+filed and notify the helm. Configured catches accept `--report` and
+`--attach`, rather than PR evidence. Tool approval remains with the harness
+Auto reviewer.
+
+`lobstah man throw trap:desk` files one app-start card for an absent Claude
+Desktop profile. Open its prefilled Code link on the Mac, confirm the folder
+if Claude asks, and send the sign-on instruction. The catch stays queued
+until that session signs on and parks. Returning sessions use their saved
+app link when available; they are never cold-started in a terminal. Opening
+a card is not sign-on. Roster, status, tend and glass show the profile,
+grounds, surface, capacity, queued catches and current state. Desk catches
+share one host UI lease across grounds; the person's keyboard remains free.

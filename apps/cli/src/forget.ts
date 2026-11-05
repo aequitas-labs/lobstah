@@ -45,6 +45,16 @@ function unsavedFiles(dir: string): string[] | undefined {
   return r.stdout.split('\n').filter((l) => l.trim() && l.slice(3) !== TRAP_ANCHOR_FILE).map((l) => l.slice(3));
 }
 
+/** Pending assistance and an app-start card retain their slot until their work or start is withdrawn. */
+async function assertConfiguredInstanceIdle(profile: string, grounds: string, label: string): Promise<void> {
+  const { pendingIds, activeIds, storedDescriptor, standingDecisions } = await import('@lobstah/core');
+  if (standingDecisions().some((card) => card.appStart?.profile === profile && card.grounds === grounds)) throw new ForgetRefusedError(`${label} has a pending app start; withdraw its start card first`);
+  for (const lane of ['work', 'chore'] as const) for (const id of [...pendingIds(lane), ...activeIds(lane)]) {
+    const target = storedDescriptor(id, lane)?.target;
+    if (target?.profile === profile && target.grounds === grounds) throw new ForgetRefusedError(`${label} has queued or active work`);
+  }
+}
+
 /**
  * `lobstah man roster forget <trap>`: the trap leaves the roster for good.
  * Its worktree is removed (one soak did not create is left in place, minus
@@ -57,17 +67,21 @@ function unsavedFiles(dir: string): string[] | undefined {
  */
 export async function forgetTrap(address: string, cfg: Config, opts: { force?: boolean } = {}): Promise<ForgetResult> {
   const entry = rosterByAddress(address);
-  if (!entry) throw new Error(`no roster record for ${address} — \`lobstah man roster\` lists them`);
+  if (!entry) {
+    const { configuredTrapSlots, forgetConfiguredTrapSlot } = await import('@lobstah/core');
+    const slot = configuredTrapSlots().find((candidate) => address === `trap:${candidate.profile}` || address.replace(/^wt:/, '') === candidate.trapId);
+    if (!slot) throw new Error(`no roster record for ${address} — \`lobstah man roster\` lists them`);
+    if (readTrap(slot.trapId)) throw new ForgetRefusedError(`${address} is signed on; stow it first`);
+    await assertConfiguredInstanceIdle(slot.profile, slot.grounds, address);
+    forgetConfiguredTrapSlot(slot.trapId);
+    return { trap: address, worktree: 'kept', worktreeNote: 'configured working folder kept', ref: 'absent', dropped: [], bounced: 0 };
+  }
   const label = trapLabel(entry);
   if (readTrap(entry.trapId)) throw new ForgetRefusedError(`${label} is signed on — never forget a live trap; stow it first`);
   if (readReservation(entry.trapId)) throw new ForgetRefusedError(`${label} is starting (reserved) — withdraw it with \`lobstah stow --wt ${entry.name}\` first`);
 
   if (entry.configured) {
-    const { pendingIds, activeIds, storedDescriptor: descriptorFor } = await import('@lobstah/core');
-    for (const lane of ['work', 'chore'] as const) for (const id of [...pendingIds(lane), ...activeIds(lane)]) {
-      const target = descriptorFor(id, lane)?.target;
-      if (target?.profile === entry.configured.profile && target.grounds === entry.configured.grounds) throw new ForgetRefusedError(`${label} has queued or active work`);
-    }
+    await assertConfiguredInstanceIdle(entry.configured.profile, entry.configured.grounds, label);
     if (entry.lastCatch) {
       const { laneOf, storedDescriptor, readStatusLog } = await import('@lobstah/core');
       const lane = laneOf(entry.lastCatch);

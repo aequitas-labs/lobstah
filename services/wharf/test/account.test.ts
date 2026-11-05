@@ -45,7 +45,7 @@ beforeEach(async () => {
   // New pool shares storage across tests: explicitly delete only test DO data.
   const stub = env.ACCOUNTS.getByName('a');
   await runInDurableObject(stub, async (_instance: Account, state) => {
-    for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'event_details', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
+    for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'event_details', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key!='generation'");
     state.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
   });
@@ -375,4 +375,48 @@ it('validates permissions, requires explicit admin confirmation, and rejects rep
   expect((await call('workers/renew', { worker: 'worker' }, m.token)).status).toBe(403);
   expect((await call('dispatches/dispatch/heartbeat', {}, receipt.token)).status).toBe(403);
   expect((await call('dispatches/dispatch/report', { verb: 'done' }, receipt.token)).status).toBe(200);
+});
+
+it('routes configured catches only to their profile and grounds and relays a child result once', async () => {
+  const originalBoat = await boat('parent-worker');
+  await enqueue('parent'); const parentClaim = await claim(originalBoat.token, 'parent-worker');
+  const target = { kind: 'configured-trap', profile: 'desk', grounds: 'studio', surface: 'claude-desktop', parentDispatch: 'parent' };
+  const queued = await call('dispatches', { id: 'inspection', target, brief: 'Inspect a window', for: 'trap:desk' });
+  expect(queued.status).toBe(200); expect(await queued.json()).not.toHaveProperty('repo');
+  const stranger = await boat('stranger');
+  expect(await (await call('claims', { worker: 'stranger' }, stranger.token)).json()).toBeNull();
+  expect((await call('workers/sign-on', { worker: 'wrong-desk', harness: 'claude', target: { ...target, grounds: 'elsewhere', parentDispatch: undefined } }, originalBoat.token)).status).toBe(200);
+  expect(await (await call('claims', { worker: 'wrong-desk' }, originalBoat.token)).json()).toBeNull();
+  expect((await call('workers/sign-on', { worker: 'desk-worker', harness: 'claude', target: { ...target, parentDispatch: undefined } }, originalBoat.token)).status).toBe(200);
+  const childClaim = await claim(originalBoat.token, 'desk-worker'); expect(childClaim.dispatch.id).toBe('inspection');
+  expect((await call('dispatches/inspection/report', { verb: 'done', evidence: { prUrls: ['https://github.com/test/repo/pull/1'] } }, childClaim.token)).status).toBe(400);
+  const childClient = new WharfBackend({ kind: 'wharf', url: 'https://state.test', account: 'a', tokenEnv: 'TEST_TOKEN' }, childClaim.token, { fetch: (input, init) => SELF.fetch(input, init) });
+  const file = await childClient.upload('inspection', 'findings.md', new TextEncoder().encode('# Inspection\nThe screen is correct'), 'child-file');
+  const body = { verb: 'done', note: 'The screen is correct', evidence: { files: [file] } };
+  expect((await call('dispatches/inspection/report', body, childClaim.token, 'desk-finish')).status).toBe(200);
+  expect((await call('dispatches/inspection/report', body, childClaim.token, 'desk-finish')).status).toBe(200);
+  const messages = await (await call('dispatches/parent/messages', undefined, parentClaim.token)).json<Array<{ text: string }>>();
+  expect(messages).toHaveLength(1); expect(messages[0]?.text).toContain('The screen is correct');
+  const parentView = await (await call('dispatches/parent')).json<{ assistance: Array<{ files: Array<{ id: string }> }> }>();
+  expect(parentView.assistance[0]?.files[0]?.id).toBe(file);
+  expect((await call(`dispatches/parent/files/${file}`, undefined, parentClaim.token)).status).toBe(200);
+  const glass = await (await call('glass')).json<{ workers: Array<{ id: string; target?: unknown; repoRemote?: string }> }>();
+  const desk = glass.workers.find((worker) => worker.id === 'desk-worker'); expect(desk?.target).toMatchObject({ profile: 'desk', grounds: 'studio' }); expect(desk?.repoRemote).toBeNull();
+});
+
+it('cancels queued assistance with its parent and retains late active results', async () => {
+  const originalBoat = await boat('parent-worker'); await enqueue('parent'); await claim(originalBoat.token, 'parent-worker');
+  const target = { kind: 'configured-trap', profile: 'desk', grounds: 'studio', surface: 'claude-desktop', parentDispatch: 'parent' };
+  expect((await call('dispatches', { id: 'queued-child', target, brief: 'Inspect later' })).status).toBe(200);
+  expect((await call('dispatches/parent/cancel', {})).status).toBe(200);
+  expect(await (await call('dispatches/queued-child')).json()).toMatchObject({ state: 'cancelled' });
+  await enqueue('second-parent'); await claim(originalBoat.token, 'parent-worker');
+  expect((await call('dispatches', { id: 'active-child', target: { ...target, parentDispatch: 'second-parent' }, brief: 'Inspect now' })).status).toBe(200);
+  expect((await call('workers/sign-on', { worker: 'desk-worker', harness: 'claude', target: { ...target, parentDispatch: undefined } }, originalBoat.token)).status).toBe(200);
+  const childClaim = await claim(originalBoat.token, 'desk-worker');
+  await call('dispatches/second-parent/cancel', {});
+  expect((await call('dispatches/active-child/report', { verb: 'failed', note: 'Stopped; findings retained' }, childClaim.token)).status).toBe(200);
+  expect(await (await call('dispatches/second-parent')).json()).toMatchObject({ state: 'cancelled' });
+  const events = await (await call('events')).json<{ events: Array<{ kind: string }> }>();
+  expect(events.events.some((event) => event.kind === 'assistance-retained')).toBe(true);
 });

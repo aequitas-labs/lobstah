@@ -1,3 +1,4 @@
+import type { ConfiguredTrapTarget } from '../../../packages/core/src/configured-trap-model.js';
 import type { DispatchInput, ReportInput } from '../../../packages/core/src/backend-model.js';
 import { validateRepoIdentity } from '../../../packages/core/src/repo-identity.js';
 
@@ -35,13 +36,23 @@ export function boatName(value: unknown): string {
 function keys(b: Record<string, unknown>, allowed: string[]) {
   requireThat(Object.keys(b).every((k) => allowed.includes(k)), 400, 'unexpected field');
 }
+/** A hosted configured target carries routing identity only, never a local folder or repo substitute. */
+export function configuredTarget(value: unknown): ConfiguredTrapTarget {
+  const target = object(value); keys(target, ['kind', 'profile', 'grounds', 'surface', 'parentDispatch']);
+  requireThat(target.kind === 'configured-trap' && ['terminal', 'claude-desktop'].includes(String(target.surface)), 400, 'invalid configured target');
+  return { kind: 'configured-trap', profile: identifier(target.profile), grounds: identifier(target.grounds), surface: target.surface as ConfiguredTrapTarget['surface'], ...(target.parentDispatch === undefined ? {} : { parentDispatch: identifier(target.parentDispatch) }) };
+}
+
 export function dispatchInput(value: unknown): DispatchInput {
   const b = object(value);
-  keys(b, ['id', 'repo', 'repoRemote', 'brief', 'lane', 'for', 'boat', 'followUp', 'harness', 'model', 'effort']);
-  const d: DispatchInput = { id: identifier(b.id), repo: identifier(b.repo), repoRemote: repoIdentity(b.repoRemote), brief: text(b.brief, 48000) };
+  keys(b, ['id', 'repo', 'repoRemote', 'target', 'grounds', 'brief', 'lane', 'for', 'boat', 'followUp', 'harness', 'model', 'effort']);
+  const target = b.target === undefined ? undefined : configuredTarget(b.target);
+  if (target) requireThat(['repo', 'repoRemote', 'followUp', 'harness', 'model', 'effort'].every((key) => b[key] === undefined), 400, 'configured target cannot carry repository or launch metadata');
+  const d: DispatchInput = { id: identifier(b.id), brief: text(b.brief, 48000), ...(target ? { target, for: `trap:${target.profile}`, grounds: target.grounds } : { repo: identifier(b.repo), repoRemote: repoIdentity(b.repoRemote), ...(b.grounds ? { grounds: identifier(b.grounds) } : {}) }) };
+  if (target && b.for !== undefined) requireThat(b.for === d.for, 400, 'configured address must match its profile');
   if (b.lane !== undefined) { requireThat(b.lane === 'work' || b.lane === 'chore', 400, 'invalid lane'); d.lane = b.lane; }
   for (const k of ['for', 'boat', 'followUp', 'harness', 'effort'] as const) {
-    if (b[k] !== undefined) d[k] = identifier(b[k]);
+    if (b[k] !== undefined && !(target && k === 'for')) d[k] = identifier(b[k]);
   }
   if (b.model !== undefined) { const model = text(b.model, 128); requireThat(/^[A-Za-z0-9._-]+$/.test(model), 400, 'invalid model identifier'); d.model = model; }
   return d;

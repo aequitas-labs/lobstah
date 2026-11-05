@@ -41,6 +41,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   dispatch: {
     flags: {
       '--grounds': { value: '<name>' },
+      '--assist': { value: '<dispatch>' },
       '--repo': { value: '<key>' },
       '--pool': { value: '<name>' },
       '--trap-any': {},

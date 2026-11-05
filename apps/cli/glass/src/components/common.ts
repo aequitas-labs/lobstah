@@ -115,9 +115,21 @@ export function viewerHasTerminal(): boolean {
 }
 
 /** Session links open an app on the trap's machine, so they only work for a viewer there. */
-function sessionLinkOpens(): boolean {
+export function sessionLinkOpens(): boolean {
   const viewer = getState().snapshot?.viewer;
   return !!viewer?.onMachine && viewer.device !== 'phone';
+}
+
+/** The configured app-start action, sized and spaced like the other decision controls. */
+export function DesktopStartAction({ url, decision = false }: { url: string; decision?: boolean }): Children {
+  return html`<div class="desktop-start" onClick=${stop}>
+    ${
+      sessionLinkOpens()
+        ? html`<a class="btn dopt open" href=${url}>Open Claude Code</a>`
+        : html`<div class="dim">${decision ? 'Open this start card on the Mac to open Claude Code' : 'Open Claude Code on the Mac to sign on'}</div>`
+    }
+    ${decision && html`<div class="dim">The card clears after the configured session signs on and parks.</div>`}
+  </div>`;
 }
 
 /** The notice for a page whose actions the server refuses. */

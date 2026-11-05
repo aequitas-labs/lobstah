@@ -26,3 +26,6 @@ export interface RepoDispatchTarget {
   kind: 'repo';
   repo: string;
 }
+
+/** The complete desk instruction; tool approvals remain with the harness reviewer. */
+export const CONFIGURED_TRAP_INSTRUCTION = 'You are a repo-less trap assigned an inspection or reversible UI step. File findings or screenshots for the original dispatch; its worker keeps ownership of repo changes and the PR.';

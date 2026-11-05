@@ -1,3 +1,5 @@
+import { acquireDesktopLease, releaseDesktopLease } from './desktop-lease.js';
+import { reconcileAssistance } from './assistance.js';
 import * as fs from 'node:fs';
 import { VERBS, TERMINAL_VERBS, WAITING_ON, WAITING_ON_VERBS } from './types.js';
 import type { Lane, StatusEntry, Verb, WaitingOn } from './types.js';
@@ -99,10 +101,12 @@ export function appendStatus(
   }
   const claim = readSessionClaim(id, lane);
   const trap = claim?.by.startsWith('wt:') ? readTrap(claim.by.slice(3)) : undefined;
+  if (trap?.configured?.surface === 'claude-desktop' && verb === 'working' && !acquireDesktopLease(trap)) throw new Error('another configured desk owns the host UI; retry working when it finishes');
   const write = (): void => { fs.appendFileSync(statusPath(id, lane), `${JSON.stringify(entry)}\n`); };
   // Resuming a paused trap must wait for an in-progress cache removal, never race it as working.
   if (trap && repoCachesConfigured(trap.repo)) withTrapCacheLock(trap.trapId, write);
   else write();
+  if (trap?.configured?.surface === 'claude-desktop' && ['done', 'failed', 'paused', 'needs-decision', 'blocked'].includes(verb)) releaseDesktopLease(trap.trapId);
   if (trap && trap.claimed === id && (verb === 'done' || verb === 'failed')) clearFinishedTrapCaches(trap, verb);
   if (verb === 'done') {
     try {
@@ -111,6 +115,7 @@ export function appendStatus(
       // A count is never worth failing a report: cull folds any catch missed here.
     }
   }
+  if (verb === 'done' || verb === 'failed') reconcileAssistance();
   return entry;
 }
 
