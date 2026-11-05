@@ -760,3 +760,81 @@ describe('glass: pasting into the answer box', () => {
     expect(text(card(g, KEY)!.querySelector('.derr'))).toContain('.jpg: type not accepted');
   });
 });
+
+describe('copy buttons on card code', () => {
+  const COMMAND = 'gh pr view 7 --json title  --jq ".title"\necho "two  spaces"';
+  /** A card whose detail has inline code and a fenced command, on an otherwise empty deck. */
+  const cardFleet = (): GlassSnapshot => {
+    const d = fleet();
+    d.decisions = [{ ...d.decisions[0]!, detail: `Run \`lobstah man tend\` first, then:\n\n\`\`\`sh\n${COMMAND}\n\`\`\`\n`, attachments: [] }];
+    return d;
+  };
+  const opened: GlassDom[] = [];
+  const open = async (d: GlassSnapshot, opts: GlassDomOptions = {}) => {
+    const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: `#decision/${encodeURIComponent(KEY)}`, ...opts });
+    opened.push(g);
+    return g;
+  };
+  afterEach(async () => {
+    for (const g of opened.splice(0)) await g.close();
+  });
+  const settle = async (done: () => boolean) => {
+    for (let i = 0; i < 50 && !done(); i++) await new Promise((r) => setTimeout(r, 5));
+  };
+
+  it('offers one on every inline span and fenced block, and copies the exact text', async () => {
+    const g = await open(cardFleet());
+    const writes: string[] = [];
+    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
+    const buttons = g.$$('.mdpage .copybtn') as HTMLElement[];
+    expect(buttons).toHaveLength(2);
+    expect(g.$('.mdpage .copycode code')?.textContent).toBe('lobstah man tend');
+    expect(g.$('.mdpage .mdcodewrap pre.mdcode code')?.textContent).toBe(COMMAND);
+    const [inlineCopy, blockCopy] = buttons;
+    expect(blockCopy!.textContent).toBe('Copy');
+    expect(inlineCopy!.getAttribute('aria-label')).toBe('Copy');
+    inlineCopy!.click();
+    await settle(() => writes.length === 1);
+    blockCopy!.click();
+    await settle(() => writes.length === 2 && blockCopy!.textContent === 'Copied');
+    expect(writes).toEqual(['lobstah man tend', COMMAND]);
+    expect(blockCopy!.textContent).toBe('Copied');
+  });
+
+  it('selects the text when the clipboard refuses', async () => {
+    const g = await open(cardFleet());
+    g.window.navigator.clipboard.writeText = async () => { throw new Error('denied'); };
+    const button = g.$('.mdpage .mdcodewrap .copybtn') as HTMLElement;
+    button.click();
+    await settle(() => button.textContent === 'Selected');
+    expect(button.textContent).toBe('Selected');
+    expect(g.window.getSelection()?.toString()).toBe(COMMAND);
+  });
+
+  it('selects the text when there is no clipboard, as on a plain HTTP address', async () => {
+    const g = await open(cardFleet());
+    Object.defineProperty(g.window.navigator, 'clipboard', { value: undefined, configurable: true });
+    const button = g.$('.mdpage .copycode .copybtn') as HTMLElement;
+    button.click();
+    await settle(() => button.getAttribute('aria-label') !== 'Copy');
+    expect(button.getAttribute('aria-label')).toBe('Selected, ready to copy');
+    expect(g.window.getSelection()?.toString()).toBe('lobstah man tend');
+  });
+
+  it('a click on a copy button stays on the button, not the card behind it', async () => {
+    const g = await open(cardFleet());
+    g.window.navigator.clipboard.writeText = async () => {};
+    let reached = 0;
+    g.$('.mdpage')!.parentElement!.addEventListener('click', () => { reached++; });
+    (g.$('.mdpage .mdcodewrap .copybtn') as HTMLElement).click();
+    expect(reached).toBe(0);
+  });
+
+  it('a report page has none: only cards do', async () => {
+    const d = cardFleet();
+    d.decisions = [];
+    const g = await open(d, { hash: '#reports' });
+    expect(g.$$('.copybtn')).toHaveLength(0);
+  });
+});
+
