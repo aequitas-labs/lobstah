@@ -270,6 +270,8 @@ export interface ThrowOptions {
   bypass?: boolean;
   /** `man throw --remote-control`: this start connects to the harness's remote control: Claude's Remote Control, for a machine without `remoteControlAtStartup`. */
   remoteControl?: boolean;
+  /** Test seam: asks Codex for its hooks' hashes; production uses listCodexHooks. */
+  listHooks?: typeof listCodexHooks;
   /** Test seam: readies Codex's shared server for a trap about to attach; production uses prepareCodexServer. */
   prepareCodexServer?: (cwd: string, trapId: string) => Promise<void>;
 }
@@ -341,7 +343,7 @@ async function launchAndWait(
         w.command.preface = `lobstah soak remember-window --ticket ${w.ticket}`;
       }
       // An unattended throw must not park at the interactive update picker.
-      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd, listed: await listCodexHooks(w.command.cwd) }));
+      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd, listed: await (opts.listHooks ?? listCodexHooks)(w.command.cwd) }));
     }
     opened = (await w.adapter.launch({ ...w.command, trap: w.name ? trapTabTitle(w.name, w.repo) : w.label, ...(w.repo ? { repo: w.repo } : {}) })) || undefined;
   } catch (err) {
