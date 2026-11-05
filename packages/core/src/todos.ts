@@ -22,10 +22,12 @@ export interface Todo {
   state: TodoState;
   createdAt: string;
   updatedAt: string;
-  /** The next attempt, an ISO instant. Absent: no time trigger. */
+  /** The next attempt, an ISO instant. Absent: no time trigger. A backstop when triggers are set. */
   dueAt?: string;
   /** The repeat rule. A series stays open through done and skip; drop ends it. */
   every?: TodoRecurrence;
+  /** The events that wake this todo. */
+  triggers?: TodoTriggerSet;
   /** Set once when the todo fires; cleared by done, skip or snooze. */
   firing?: TodoFiring;
   /** The last done on a series, for the glass and the recap. */
@@ -42,6 +44,27 @@ export type TodoRecurrence =
   | { cadence: 'daily' | 'weekdays'; at: string }
   | { cadence: 'weekly'; day: TodoWeekday; at: string };
 
+/** Triggers and how they combine. A time in `dueAt` backstops both modes. */
+export interface TodoTriggerSet {
+  mode: 'any' | 'all';
+  items: TodoTrigger[];
+}
+
+/** What a trigger names. Fields are resolved and validated at add. */
+export type TodoTriggerTarget =
+  | { kind: 'card'; key: string }
+  | { kind: 'dispatch'; id: string; verb: 'done' | 'blocked' | 'needs-decision' | 'failed' }
+  | { kind: 'pr'; key: string; on: 'merged' | 'closed' | 'green' }
+  | { kind: 'trap'; trapId: string; name: string };
+
+/** A target plus its latch: once met it stays met, even if the record later changes. */
+export type TodoTrigger = TodoTriggerTarget & {
+  /** When the condition was first seen true. */
+  metAt?: string;
+  /** What happened, in words: "answered", "withdrawn", "merged". */
+  metAs?: string;
+};
+
 /** One firing. Its existence is what stops a second one for this due. */
 export interface TodoFiring {
   firedAt: string;
@@ -50,8 +73,11 @@ export interface TodoFiring {
   deliveredAt?: string;
 }
 
-/** Why a todo fired. */
-export type TodoFireCause = { kind: 'time'; dueAt: string };
+/** Why a todo fired: its time, its triggers, or a trigger whose record is gone. */
+export type TodoFireCause =
+  | { kind: 'time'; dueAt: string }
+  | { kind: 'event'; triggers: string[] }
+  | { kind: 'lost'; trigger: string };
 
 /**
  * One todo as tend, `man report`, and the glass show it: an open one, or one
@@ -74,7 +100,9 @@ export interface TodoView {
   overdue: boolean;
   /** "weekdays 09:00" when it repeats. */
   every?: string;
-  /** What fired it, in words. */
+  /** "pr:o/r#1 merged · ✓ trap:early-pebble free (any)", with met ones marked. */
+  waitingOn?: string;
+  /** What fired it, in words, when something other than its time did. */
   firedBy?: string;
   snoozes?: number;
   lastDoneAt?: string;
@@ -184,6 +212,7 @@ export function listTodos(grounds: string, opts: { all?: boolean } = {}): Todo[]
 export interface NewTodoFields {
   dueAt?: string;
   every?: TodoRecurrence;
+  triggers?: TodoTriggerSet;
 }
 
 export function addTodo(grounds: string, text: string, now = Date.now(), fields: NewTodoFields = {}): Todo {
@@ -199,6 +228,7 @@ export function addTodo(grounds: string, text: string, now = Date.now(), fields:
       updatedAt: at,
       ...(fields.dueAt ? { dueAt: fields.dueAt } : {}),
       ...(fields.every ? { every: fields.every } : {}),
+      ...(fields.triggers ? { triggers: fields.triggers } : {}),
     };
     data.items.push(todo);
     data.nextId += 1;

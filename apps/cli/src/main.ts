@@ -27,6 +27,7 @@ import {
   completeTodo,
   formatTodoRecurrence,
   formatTodoTime,
+  todoWaitingOn,
   listTodos,
   nextOccurrenceAfter,
   parseTodoDuration,
@@ -283,7 +284,7 @@ import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
-import { createTodoFiring, emitTodoDue, helmTimezone, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews } from './todo.js';
+import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
@@ -1969,6 +1970,11 @@ async function mainCli(): Promise<void> {
           const inDuration = opt('--in');
           const everyText = opt('--every');
           if (everyText !== undefined && (at !== undefined || inDuration !== undefined)) throw new UsageError(`--every stands alone: a repeat sets its own times\n\n${usageFor('todo')!}`);
+          const whenAny = values('--when');
+          const whenAll = values('--when-all');
+          if (whenAny.length > 0 && whenAll.length > 0) throw new UsageError(`--when means any and --when-all means all: use one\n\n${usageFor('todo')!}`);
+          const whenValues = whenAny.length > 0 ? whenAny : whenAll;
+          if (everyText !== undefined && whenValues.length > 0) throw new UsageError(`--every stands alone: a repeat can't also wait on an event\n\n${usageFor('todo')!}`);
           const every = everyText !== undefined ? parseTodoRecurrence(everyText) : undefined;
           const dueAt = every
             ? new Date(nextOccurrenceAfter(every, now, tz)).toISOString()
@@ -1977,8 +1983,19 @@ async function mainCli(): Promise<void> {
               : inDuration !== undefined
                 ? parseTodoDuration(inDuration, now)
                 : undefined;
-          const t = addTodo(grounds, text, now, { dueAt, every });
-          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text, ...(t.dueAt ? { due: formatTodoTime(t.dueAt, tz) } : {}), ...(t.every ? { every: formatTodoRecurrence(t.every) } : {}) }));
+          const prepared = whenValues.length > 0 ? prepareTodoTriggers(whenValues, whenAll.length > 0 ? 'all' : 'any', new Date(now).toISOString()) : undefined;
+          const t = addTodo(grounds, text, now, { dueAt, every, triggers: prepared?.triggers });
+          const watching = (prepared?.unwatched ?? []).map(watchTriggerPr);
+          console.log(toonKV({
+            todo: t.id,
+            grounds: shown,
+            text: t.text,
+            ...(t.dueAt ? { due: formatTodoTime(t.dueAt, tz) } : {}),
+            ...(t.every ? { every: formatTodoRecurrence(t.every) } : {}),
+            ...(t.triggers ? { waiting: todoWaitingOn(t.triggers) } : {}),
+            ...(prepared?.already.length ? { already: prepared.already.join(', ') } : {}),
+          }));
+          for (const line of watching) console.log(line);
           console.log(toonHelp([`lobstah todo done ${t.id}   (when finished)`, `lobstah todo drop ${t.id}   (when no longer needed)`]));
         } else if (verb === 'done' || verb === 'drop') {
           const id = Number(pos[1]);

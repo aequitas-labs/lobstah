@@ -1,5 +1,6 @@
 import { formatTodoTime, latestOccurrenceBy, nextOccurrenceAfter } from './todo-time.js';
-import { openTodo, readTodoFile, todoGrounds, updateTodoFile, TodoError, type Todo, type TodoFireCause } from './todos.js';
+import { readTodoTrigger, todoTriggerLabel } from './todo-triggers.js';
+import { openTodo, readTodoFile, todoGrounds, updateTodoFile, TodoError, type Todo, type TodoFireCause, type TodoTrigger } from './todos.js';
 
 /**
  * Firing todos, and handing each firing to its helm once. `fireDueTodos` runs
@@ -25,37 +26,78 @@ export interface TodoFireResult {
   errors: string[];
 }
 
-/**
- * Why this todo should fire now, or undefined when it shouldn't. A series
- * names its newest occurrence that has passed, so missed ones give one firing
- * with no backfill, and an ignored series fires again at each new occurrence.
- */
-function fireCause(todo: Todo, now: number, timezone?: string): TodoFireCause | undefined {
-  if (todo.state !== 'open' || todo.dueAt === undefined) return undefined;
+/** Why this todo's time means it should fire now, or undefined. A series names its newest passed occurrence. */
+function timeCause(todo: Todo, now: number, timezone?: string): TodoFireCause | undefined {
+  if (todo.dueAt === undefined) return undefined;
   const dueAt = Date.parse(todo.dueAt);
   if (dueAt > now) return undefined;
   if (!todo.every) return todo.firing ? undefined : { kind: 'time', dueAt: todo.dueAt };
   const newest = Math.max(dueAt, latestOccurrenceBy(todo.every, now, timezone));
-  if (todo.firing && newest <= Date.parse(todo.firing.cause.dueAt)) return undefined;
+  if (todo.firing?.cause.kind === 'time' && newest <= Date.parse(todo.firing.cause.dueAt)) return undefined;
   return { kind: 'time', dueAt: new Date(newest).toISOString() };
 }
 
-/** Record a firing on every todo that should fire. Takes a grounds' lock only when one should. */
+/**
+ * Latch whatever has newly come true, and say what that fires. Each trigger
+ * latches once, so one that fired stays quiet after a snooze while the unmet
+ * ones keep listening. Mode all fires when its last one latches.
+ */
+function latchTriggers(todo: Todo, now: number): { latched: boolean; cause?: TodoFireCause } {
+  const triggers = todo.triggers;
+  if (!triggers || todo.firing) return { latched: false };
+  const at = new Date(now).toISOString();
+  const newly: string[] = [];
+  let lost: string | undefined;
+  for (const item of triggers.items) {
+    if (item.metAt) continue;
+    const reading = readTodoTrigger(item, todo.createdAt);
+    if (reading.state === 'waiting') continue;
+    item.metAt = at;
+    item.metAs = reading.state === 'met' ? reading.as : 'lost';
+    if (reading.state === 'lost') lost ??= todoTriggerLabel(item);
+    else newly.push(triggerHappened(item, reading.as));
+  }
+  if (lost) return { latched: true, cause: { kind: 'lost', trigger: lost } };
+  if (newly.length === 0) return { latched: false };
+  if (triggers.mode === 'any') return { latched: true, cause: { kind: 'event', triggers: newly } };
+  if (triggers.items.some((item) => !item.metAt)) return { latched: true };
+  return { latched: true, cause: { kind: 'event', triggers: triggers.items.map((item) => triggerHappened(item, item.metAs!)) } };
+}
+
+/** A trigger and what happened to it, in words: `card:decision:ab12cd34 answered`. */
+function triggerHappened(item: TodoTrigger, as: string): string {
+  if (item.kind === 'pr') return `${item.key} ${as}`;
+  return item.kind === 'card' ? `${todoTriggerLabel(item)} ${as}` : todoTriggerLabel(item);
+}
+
+/**
+ * Bring one todo up to date: latch its triggers, then record a firing. Returns
+ * whether anything changed. Triggers come first, so a time passing with
+ * triggers unmet is what the deadline backstop means.
+ */
+function advanceTodo(todo: Todo, now: number, timezone?: string): { changed: boolean; fired: boolean } {
+  if (todo.state !== 'open') return { changed: false, fired: false };
+  const { latched, cause: triggerCause } = latchTriggers(todo, now);
+  const cause = triggerCause ?? timeCause(todo, now, timezone);
+  if (!cause) return { changed: latched, fired: false };
+  if (cause.kind === 'time') todo.dueAt = cause.dueAt;
+  todo.firing = { firedAt: new Date(now).toISOString(), cause };
+  return { changed: true, fired: true };
+}
+
+/**
+ * Bring every todo up to date. The first look works on a throwaway read, so a
+ * grounds' lock is taken only when something changes; the same check then runs
+ * again under the lock before writing.
+ */
 export function fireDueTodos(now = Date.now(), timezone?: string): TodoFireResult {
   const result: TodoFireResult = { fired: 0, errors: [] };
   for (const grounds of todoGrounds()) {
     try {
-      if (!readTodoFile(grounds).items.some((todo) => fireCause(todo, now, timezone))) continue;
+      if (!readTodoFile(grounds).items.some((todo) => advanceTodo(todo, now, timezone).changed)) continue;
       result.fired += updateTodoFile(grounds, now, (data) => {
-        let fired = 0;
-        for (const todo of data.items) {
-          const cause = fireCause(todo, now, timezone);
-          if (!cause) continue;
-          todo.dueAt = cause.dueAt;
-          todo.firing = { firedAt: new Date(now).toISOString(), cause };
-          fired += 1;
-        }
-        return fired > 0 ? fired : undefined;
+        const outcomes = data.items.map((todo) => advanceTodo(todo, now, timezone));
+        return outcomes.some((outcome) => outcome.changed) ? outcomes.filter((outcome) => outcome.fired).length : undefined;
       }) ?? 0;
     } catch (err) {
       result.errors.push(`todos for ${grounds}: ${err instanceof Error ? err.message : String(err)}`);
@@ -66,7 +108,9 @@ export function fireDueTodos(now = Date.now(), timezone?: string): TodoFireResul
 
 /** A firing's cause in words, for the event and the views. */
 export function todoFiredBy(cause: TodoFireCause, timezone?: string): string {
-  return `due ${formatTodoTime(cause.dueAt, timezone)}`;
+  if (cause.kind === 'time') return `due ${formatTodoTime(cause.dueAt, timezone)}`;
+  if (cause.kind === 'event') return cause.triggers.join(' · ');
+  return `gone: ${cause.trigger}`;
 }
 
 function dueEvent(grounds: string, todo: Todo, timezone?: string): TodoDueEvent {
