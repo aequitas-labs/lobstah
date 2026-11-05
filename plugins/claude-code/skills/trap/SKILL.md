@@ -172,9 +172,9 @@ does the job. `--intent` is one honest sentence labelling them for him; it allow
 nothing itself. Anything that doesn't match goes to your harness's reviewer as
 usual, told nothing about this.
 
-The glass shows Chris a card with Allow once, Allow always, and No, plus Allow
-this kind for 1h (this trap only) and Always allow this kind (every trap in the
-repo, until revoked) when you proposed one. His answer
+The glass shows Chris a card with Allow once, Allow always, and No. When you
+propose a kind, it shows Allow once, Allow this kind for 1h (this trap only),
+Always allow this kind (every trap in the repo, until revoked), and No. His answer
 arrives in the dispatch's inbox, naming the grant.
 
 - A grant listed by `lobstah grants` is Chris's approval: he made it, at a

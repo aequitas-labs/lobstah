@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { addGrant, enqueue, ensureLayout, GrantError, INTENT_ALWAYS_OPTION, INTENT_HOUR_OPTION, listGrants, parseIntentPattern, signOnTrap, claimBait, standingDecisions, unhandled } from '@lobstah/core';
+import { addGrant, answerDecision, enqueue, ensureLayout, GrantError, INTENT_ALWAYS_OPTION, INTENT_HOUR_OPTION, listGrants, parseIntentPattern, signOnTrap, claimBait, standingDecisions, unhandled } from '@lobstah/core';
 import type { DecisionMeta, Grant, GrantIntent } from '@lobstah/core';
 import { applyPermissionAnswer, askPermission, checkCall, permissionAnswerAllowed } from '../src/grants-cli.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
@@ -56,9 +56,7 @@ const bash = (command: string) => ({ harness: 'claude' as const, tool: 'Bash', i
 describe('the permission card', () => {
   it('offers the kind of action beside Allow once when the trap proposes one', () => {
     const { options } = askCard(INTENT);
-    expect(options.slice(0, 3)).toEqual(['Allow once', INTENT_HOUR_OPTION, INTENT_ALWAYS_OPTION]);
-    expect(options).toContain('Allow always');
-    expect(options.at(-1)).toBe('No');
+    expect(options).toEqual(['Allow once', INTENT_HOUR_OPTION, INTENT_ALWAYS_OPTION, 'No']);
   });
 
   it('offers only what it did with no proposal', () => {
@@ -134,9 +132,11 @@ describe('answering in the glass', () => {
     expect(messages).toContain("Anything else goes to your harness's reviewer as usual");
   });
 
-  it('Allow once and Allow always still write the grants they did', () => {
+  it('Allow once still writes the grant it did, and Allow always is not offered beside the kinds', () => {
     expect(answerWith(askCard(INTENT), 'Allow once')).toMatchObject({ mode: 'once', match: 'exact' });
-    expect(answerWith(askCard(INTENT), 'Allow always')?.mode).toBe('always');
+    const card = askCard(INTENT);
+    expect(() => answerDecision({ key: card.key, option: 'Allow always', by: 'glass', maxBytes: 1024 })).toThrow(/not an option/);
+    expect(answerWith(askCard(), 'Allow always')?.mode).toBe('always');
   });
 
   it('with no trap on the card, 1h covers the repo; with no repo, always covers the trap', () => {

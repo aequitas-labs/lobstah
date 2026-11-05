@@ -607,8 +607,11 @@ A trap that will need more commands of one kind proposes them on its permission 
 
 The patterns are the grant. lobstah's own hook matches them, the same on Claude Code and Codex, from the moment the grant is made, and each match runs without asking and is recorded against the grant's id. The sentence only labels the grant on the card and the Grants tab, and allows nothing. A command that doesn't match goes to the harness's own reviewer, unchanged and told nothing. lobstah writes no harness configuration for these grants and adds no deny or prompt rules.
 
+The card then offers three ways to allow, and No:
+
 | Button | Scope | Lasts |
 |---|---|---|
+| Allow once | This trap, this command | One use, within the hour |
 | Allow this kind for 1h | This trap only | One hour |
 | Always allow this kind | Every trap in this repo | Until revoked |
 

@@ -610,14 +610,19 @@ function intentCardText(intent: GrantIntent): string[] {
   ];
 }
 
-/** File a trap's permission request as a card with Allow once, Allow always and No, plus the kind of action when the trap proposes one. */
+/**
+ * File a trap's permission request as a card with Allow once, Allow always and No.
+ * When the trap proposes a kind of action, the card offers Allow once, the two
+ * kind options and No instead: three ways to allow.
+ */
 export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string }): DecisionMeta {
   const session = opts.ask.session ?? listTraps().find((t) => t.name === opts.ask.trap || t.trapId === opts.ask.trap)?.sessionId;
   if (session) opts.ask = { ...opts.ask, session, tool: opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write') };
   const target = opts.ask.command !== undefined ? opts.ask.command : opts.ask.path!;
   const kind = opts.ask.command !== undefined ? 'run' : 'write to';
   const scope = permissionScopeText(opts.ask);
-  let family = !!session;
+  const intent = !!opts.ask.intent;
+  let family = !!session && !intent;
   if (family && opts.ask.command) {
     try {
       validateSessionGrant({
@@ -650,7 +655,7 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
           `- **${INTENT_ALWAYS_OPTION}**: these patterns, for every trap in ${opts.repo ?? 'this repo'}, until you revoke it on the Grants tab.`,
         ]
       : []),
-    `- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
+    ...(intent ? [] : [`- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`]),
     ...(family
       ? [
           `- **${TOOL_FAMILY_OPTION}**: tool \`${toolFamily(opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write'))}\` for session \`${session}\` only, with the shown command prefix when applicable; expires automatically.`,
@@ -661,8 +666,10 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
   return askDecision({
     title: title.length > 200 ? `${title.slice(0, 199)}…` : title,
     detailText: detail,
-    options: ['Allow once', ...(opts.ask.intent ? [INTENT_HOUR_OPTION, INTENT_ALWAYS_OPTION] : []), 'Allow always', ...(family ? [TOOL_FAMILY_OPTION] : []), 'No'],
-    optionNotes: { 'Allow always': scope.short },
+    options: intent
+      ? ['Allow once', INTENT_HOUR_OPTION, INTENT_ALWAYS_OPTION, 'No']
+      : ['Allow once', 'Allow always', ...(family ? [TOOL_FAMILY_OPTION] : []), 'No'],
+    ...(intent ? {} : { optionNotes: { 'Allow always': scope.short } }),
     dispatch: opts.dispatch,
     lane: opts.lane,
     ...(opts.repo ? { repo: opts.repo } : {}),
