@@ -95,9 +95,11 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--at': { value: '<time>' },
       '--in': { value: '<30m|2h|3d>' },
       '--every': { value: '<schedule>' },
+      '--when': { value: '<trigger>', repeatable: true },
+      '--when-all': { value: '<trigger>', repeatable: true },
       '--until': { value: '<time|duration>' },
     },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--at': ['add'], '--in': ['add'], '--every': ['add'], '--until': ['snooze'] },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--at': ['add'], '--in': ['add'], '--every': ['add'], '--when': ['add'], '--when-all': ['add'], '--until': ['snooze'] },
     positionals: '["<text>"|<id>]',
   },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
@@ -355,9 +357,8 @@ before deleting, so they survive it; so does a per-local-day count (400 days),
 which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
-  todo: `The helm's own todo list, kept per grounds so it survives restarts and compaction.
-add "<text>" records one; done and drop close it; ls (or bare) lists open ones (--all adds closed). Open todos show in man tend, man report, the glass and every session start; a done one stays checked until 04:00. A trap gets none.
-add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once.
+  todo: `The helm's own todo list, kept per grounds so it survives restarts and compaction. add "<text>" records one; done and drop close it; ls (or bare) lists open ones (--all adds closed). Open todos show in man tend, man report, the glass and every session start; a done one stays checked until 04:00. A trap gets none.
+add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once. add --when <trigger> wakes on any, --when-all on all, with --at or --in as a deadline: card:<key>, dispatch:<id> done|blocked|needs-decision|failed, pr:<o>/<r>#<n> merged|closed|green (registers a watch if none), trap:<name> free.
 24-hour, in [helm].timezone: "fri 09:00", "tomorrow 09:00", "09:00", "thu", "2026-11-06 09:00", "2026-11-06T14:00Z". A day runs 04:00 to 04:00.
 Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,

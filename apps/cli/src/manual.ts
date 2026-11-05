@@ -95,7 +95,9 @@ getting woken instead of asking:
                             <id> --until <time>\` moves it; at its time man wait
                             wakes you with a todo-due event. \`--every <schedule>\`
                             repeats it: \`todo done\` moves it on, \`todo skip
-                            <id>\` passes one, \`todo drop\` ends it
+                            <id>\` passes one, \`todo drop\` ends it. \`--when
+                            <trigger>\` (any) or \`--when-all\` (all) wakes you on
+                            card:, dispatch:, pr: or trap:
                             Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.
   lobstah man ask           put a question the helm cannot decide to the human:
                             [<dispatch-id>] --title, --detail <f.md>,
