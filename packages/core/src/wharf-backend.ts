@@ -50,7 +50,7 @@ function report(v: unknown): ReportInput & { at: string } {
   if (r.until !== undefined) out.until = string(r.until);
   if (r.link !== undefined) out.link = url(r.link);
   if (r.waitingOn !== undefined) {
-    if (!['review', 'pr', 'deploy', 'person', 'external'].includes(String(r.waitingOn))) throw new BackendError(502, 'invalid waiting kind');
+    if (!['review', 'pr', 'deploy', 'person', 'external', 'heavy'].includes(String(r.waitingOn))) throw new BackendError(502, 'invalid waiting kind');
     out.waitingOn = r.waitingOn as ReportInput['waitingOn'];
   }
   if (r.evidence !== undefined) {

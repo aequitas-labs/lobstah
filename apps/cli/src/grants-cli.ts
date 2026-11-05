@@ -1,6 +1,13 @@
 import {
+  firstHeavyReminder,
   GrantError,
+  hasOpenCatch,
+  heavyCommandPattern,
+  heavyReminderText,
   listTraps,
+  lockIsLive,
+  readWorktreeLock,
+  storedDescriptor,
   trapDisplayName,
   withTrapRepo,
   listHelms,
@@ -417,6 +424,39 @@ function defersCodexConnectorApproval(call: CallInput, harness: string | undefin
  * the normal approval flow goes on. Uncovered Codex connector calls defer
  * without a card; other uncovered calls keep their existing card behavior.
  */
+/**
+ * A trap or worker on a dispatch ran a heavy command outside the line. Adds
+ * one line of context, with no permission decision: it approves nothing,
+ * blocks nothing and changes nothing. Never fails the hook.
+ */
+function heavyReminder(call: CallInput, cwd: string): void {
+  try {
+    const command = call.tool === 'Bash' ? call.input.command : undefined;
+    if (typeof command !== 'string') return;
+    const who = heavyDispatchOf(call.session, cwd);
+    if (!who) return;
+    const pattern = heavyCommandPattern(command, loadConfig().heavy.repos[who.repo ?? '']?.reminders);
+    if (!pattern || !firstHeavyReminder(who.dispatch, pattern)) return;
+    console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: heavyReminderText(command) } }));
+  } catch {
+    /* a reminder is never worth a failed hook */
+  }
+}
+
+/** The dispatch this session's trap holds, or the one whose runner holds this worktree. */
+function heavyDispatchOf(session: string | undefined, cwd: string): { dispatch: string; repo?: string } | undefined {
+  const trap = session ? trapBySession(session) : undefined;
+  if (trap?.claimed && hasOpenCatch(trap)) return { dispatch: trap.claimed, ...(trap.repo ? { repo: trap.repo } : {}) };
+  for (let at = path.resolve(cwd); ; at = path.dirname(at)) {
+    if (fs.existsSync(path.join(at, '.git'))) {
+      const lock = readWorktreeLock(at);
+      if (!lock || lock.kind === 'warm' || !lockIsLive(lock)) return undefined;
+      return { dispatch: lock.id, ...(storedDescriptor(lock.id, lock.lane)?.repo ? { repo: storedDescriptor(lock.id, lock.lane)!.repo } : {}) };
+    }
+    if (path.dirname(at) === at) return undefined;
+  }
+}
+
 export function permissionRequestHook(preToolUse = false, preHarness: 'claude' | 'codex' = 'claude'): void {
   try {
     const h = readStdinJson();
@@ -441,7 +481,10 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       return;
     }
     const trap = call.session ? trapBySession(call.session) : undefined;
-    if (preToolUse) return;
+    if (preToolUse) {
+      heavyReminder(call, cwd);
+      return;
+    }
     const registeredHarness = trap?.harness
       ?? listHelms().find((helm) => helm.sessionId === call.session)?.harness
       ?? (typeof h.turn_id === 'string' ? 'codex' : undefined);

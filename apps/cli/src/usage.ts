@@ -100,7 +100,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     flags: {
       '--pr': { value: '<url>', repeatable: true },
       '--no-watch': {},
-      '--waiting-on': { value: 'review|pr|deploy|person|external' },
+      '--waiting-on': { value: 'review|pr|deploy|person|external|heavy' },
       '--link': { value: '<url>' },
       '--until': { value: '<iso|30m|4h|2d>' },
       '--human-gate': { value: '<check>', repeatable: true },

@@ -50,6 +50,7 @@ import {
   daemonSkip,
   sweepGhostTraps,
   expireReservations,
+  liveHeavyTickets,
   pausedWaiting,
   poolDir,
   poolWaits,
@@ -213,7 +214,8 @@ export function reconcileOne(
     alive,
     lastVerb,
     // Paused on something external (--waiting-on): silence is expected.
-    pausedWaiting: pausedWaiting(statusLog.at(-1)),
+    // So is a command in the heavy line: it may not start for a while.
+    pausedWaiting: pausedWaiting(statusLog.at(-1)) || liveHeavyTickets({ dispatch: st.id }).length > 0,
     lastEventAt: lastEventAt(st.id, st.lane),
     startedAt: st.runner ? Date.parse(st.runner.startedAt) : undefined,
     now: Date.now(),

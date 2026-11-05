@@ -212,7 +212,12 @@ no slot. The hook still runs in full, so a wrong setting costs only some load.
 [heavy.repos.homebase]
 lightRefs = ["refs/heads/pr-evidence"]  # remote refs
 lightPaths = ["apps/design/"]           # every changed file is under one of these
+reminders = ["pnpm test:e2e"]           # this repo's own heavy commands
 ```
+
+A trap or worker on a dispatch that runs a known heavy command outside the line
+gets one line of context, once per dispatch for each command. It approves
+nothing and blocks nothing, and that run isn't queued.
 
 The line never kills or fails a command. If the line itself fails, the command
 runs without a slot and prints one line. A waiter removed from the line because

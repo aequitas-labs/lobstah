@@ -13,7 +13,7 @@ export function helmWakeKeys(batch: {
   replies?: readonly ReplyEvent[];
 }): string[] {
   return [
-    ...(batch.events ?? []).filter(e => e.entry.verb !== 'working').map(e => statusKey(e.id, e.entry.verb, e.entry.at)),
+    ...(batch.events ?? []).filter(e => e.entry.verb !== 'working' && e.entry.waitingOn !== 'heavy').map(e => statusKey(e.id, e.entry.verb, e.entry.at)),
     ...(batch.watches ?? []).flatMap(w => w.events.map(e => JSON.stringify(['watch', w.watch.key, e.seq]))),
     ...(batch.notices ?? []).filter(n => !n.quiet && !QUIET_NOTICE_KINDS.includes(n.kind))
       .map(n => JSON.stringify(['notice', n.kind, n.refId, n.stateHash ?? n.seq])),
