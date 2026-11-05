@@ -75,6 +75,8 @@ The trap's work runs in the server, not the pane, and that changes a few things:
 - **The server keeps its own environment.** Start it from a plain terminal, or let
   a throw start it. Never run `codex remote-control start` on a server with traps on
   it: it restarts the server.
+- **A message from the phone is an instruction.** What Chris sends in a trap's
+  session from his phone counts the same as typing in its pane.
 - **The phone shows two hosts called `Mac`** when the desktop app is paired too.
   Both list the same threads, and only the server's host can open a trap's thread.
   Each thread is named `lobstah <trap>`.
