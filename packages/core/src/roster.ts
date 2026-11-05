@@ -69,7 +69,7 @@ export interface RosterEntry {
   /** Navigation hints from the last sign-on. Never liveness evidence. */
   window?: WindowRef;
   link?: string;
-  /** The harness process of the last sign-on: a throw does not resume a Codex thread it still holds. */
+  /** The harness process of the last sign-on: a throw does not resume a session it still holds. */
   harnessProcess?: HarnessProcess;
   firstSignedOnAt: string;
   signedOnAt: string;

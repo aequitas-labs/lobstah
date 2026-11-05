@@ -1,14 +1,6 @@
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
-import {
-  desktopSession,
-  dispatchReport,
-  modalItem,
-  prBadgeClass,
-  prModalView,
-  reportPageUrl,
-  trapFileUrl,
-} from '../../../src/glass-diff.js';
+import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal, changeHelmChat } from '../actions.js';
 import { useState } from 'preact/hooks';
@@ -22,19 +14,23 @@ import {
   attachmentRows,
   cmdRow,
   resumeRow,
+  trapSessionRow,
   startCommands,
   detailBody,
   NamedText,
   opener,
   TrapName,
+  liveLinkNote,
   namedText,
   prCell,
   prChecks,
   prLink,
   prMerge,
   prReview,
+  readOnlyNotice,
   stackNumbers,
   trapRow,
+  viewerHasTerminal,
   windowAction,
 } from './common.js';
 
@@ -135,12 +131,13 @@ function prModal(d: GlassSnapshot, key: string) {
 }
 
 function helmModal(h: GlassHelm) {
+  const sessionRow = h.sessionId ? resumeRow(h) : null;
   const stale = Date.now() - Date.parse(h.heartbeatAt) > 1800000;
   return [
     close,
     html`<h3>⛵ ${h.man}</h3><div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
     html`<${WorkerDetails} worker=${h} />`,
-    h.sessionId && [html`<div class="sec">open this session</div>`, resumeRow(h)],
+    sessionRow && [html`<div class="sec">open this session</div>`, sessionRow],
     h.transcript && [html`<div class="sec">transcript</div>`, cmdRow(h.transcript)],
   ];
 }
@@ -162,7 +159,7 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
           cmdRow(namedText(x.claimedBy)),
           html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead: lobstah send ${namedText(x.claimedBy)} "…"</div>`,
         ]
-      : [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
+      : viewerHasTerminal() && [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
   return [
     close,
     html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
@@ -233,6 +230,7 @@ function trapModal(t: GlassTrap) {
           html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${LinkedText(m.text)}${m.attachments?.length ? attachmentRows(m.attachments, (name) => trapFileUrl(t.trapId, name)) : ''}</div>`,
       )
     : html`<div class="empty">none</div>`;
+  const sessionRow = trapSessionRow(t);
   // Each catch's last note; its modal has the whole log.
   const catches = t.catches.length
     ? t.catches.map(
@@ -250,13 +248,16 @@ function trapModal(t: GlassTrap) {
     html`<div class="sub">${sub}</div>`,
     html`<div class="sec">window</div>`,
     windowAction(t) ?? html`<span class="dim">Signed off — no window</span>`,
+    liveLinkNote(t),
+    readOnlyNotice(),
     startCommands(t),
     !t.requested &&
       !t.starting &&
-      (t.sessionId || (t.link && desktopSession(t))) && [
+      sessionRow && [
         html`<div class="sec">open this session</div>`,
-        resumeRow(t),
-        t.sessionId &&
+        sessionRow,
+        !t.live &&
+          t.sessionId &&
           html`<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>`,
       ],
     html`<div class="sec">lifecycle (${t.notices.length})</div>`,

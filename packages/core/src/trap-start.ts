@@ -45,6 +45,8 @@ export interface TrapReservation {
   batch?: string;
   /** The permission mode the throw started the session in (`auto`, `bypassPermissions`, ...). */
   startMode?: string;
+  /** Set when this trap starts with Claude's `--remote-control`: the time before which a URL can't be this run's. */
+  remoteControlSince?: string;
 }
 
 /** `<trapId>-<32 hex>`: the id prefix finds the reservation, the rest proves it. */
@@ -84,10 +86,11 @@ export function shellQuote(value: string): string {
  * The commands that start a reserved trap's session in the repo's primary
  * checkout, per harness: all harnesses, or only the reserved one.
  */
-export function trapStartCommands(repoPath: string, ticket: string, harness?: string): Array<{ harness: 'claude' | 'codex'; command: string }> {
+export function trapStartCommands(repoPath: string, ticket: string, harness?: string, remoteControl?: string): Array<{ harness: 'claude' | 'codex'; command: string }> {
   const cd = `cd ${shellQuote(repoPath)} && `;
+  const remote = remoteControl ? `--remote-control ${shellQuote(remoteControl)} ` : '';
   const all: Array<{ harness: 'claude' | 'codex'; command: string }> = [
-    { harness: 'claude', command: `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${ticket}"` },
+    { harness: 'claude', command: `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude ${remote}"/lobstah:trap soak --ticket ${ticket}"` },
     { harness: 'codex', command: `${cd}codex -c 'tui.terminal_title=[]' '$lobstah:trap soak --ticket ${ticket}'` },
   ];
   return harness === 'claude' || harness === 'codex' ? all.filter((c) => c.harness === harness) : all;
@@ -154,6 +157,8 @@ export function reserveTrap(opts: {
   creationReason?: string;
   batch?: string;
   startMode?: string;
+  /** The trap starts with Claude's `--remote-control`. */
+  remoteControl?: boolean;
   /** A new throw enforces its configured repo cap under a cross-process reservation lock. */
   maxTraps?: number;
   now?: number;
@@ -217,6 +222,7 @@ export function reserveTrap(opts: {
     ...(opts.request ? { request: opts.request } : {}),
     ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
     ...(opts.startMode ? { startMode: opts.startMode } : {}),
+    ...(opts.remoteControl ? { remoteControlSince: new Date(now).toISOString() } : {}),
     ...(opts.returning ? { worktree: opts.returning.worktree } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   };

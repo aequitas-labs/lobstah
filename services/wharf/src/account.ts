@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { ReportInput, BackendEvent, DispatchInput } from '../../../packages/core/src/backend-model.js';
-import { ApiError, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
+import { ApiError, LEASE_MS, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
 import { personSessionLive } from './auth.js';
@@ -15,7 +15,6 @@ type FileRow = { id: string; dispatch: string; name: string; size: number; hash:
 export type Command = { account: string; helm: boolean; personId?: string; token: string; method: string; path: string; key?: string; session?: string; body: unknown; after?: string;
   personSessionId?: string;
   prepared?: { id?: string; hash: string } };
-const LEASE_MS = 90_000;
 const HELM_MS = 120_000;
 
 /** One account's only coordination authority. No alarms, timers or socket pings. */

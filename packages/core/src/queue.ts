@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import type { Descriptor, Lane } from './types.js';
 import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './paths.js';
 import { appendStatus } from './status.js';
+import { dropHeavyTickets } from './heavy.js';
 import { observeLocalCatch } from './catch-context.js';
 
 function atomicWrite(file: string, content: string): void {
@@ -163,6 +164,11 @@ export function complete(id: string, lane: Lane): void {
 
 export function requestCancel(id: string, lane: Lane): void {
   fs.writeFileSync(path.join(laneDirs(lane).active, id, 'cancel'), new Date().toISOString());
+  try {
+    dropHeavyTickets({ dispatch: id }, 'its dispatch was cancelled');
+  } catch {
+    /* the tickets clear once their processes end */
+  }
 }
 
 /**

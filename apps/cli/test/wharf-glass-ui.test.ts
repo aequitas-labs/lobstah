@@ -4,10 +4,11 @@ import { afterEach, expect, it } from 'vitest';
 import { GLASS_SCRIPT, GLASS_CSS } from '../../../services/wharf/src/glass-page.generated.js';
 import { snapshot, jobs, detail, markdown } from './fixtures/wharf-glass.js';
 import { parseRoute, routeHash } from '../../../services/wharf/glass/src/route.js';
+import { attachCommand, resume } from '../../../services/wharf/glass/src/model.js';
 let windows: Window[] = [];
 afterEach(async () => { await Promise.all(windows.map((w) => w.happyDOM.close())); windows = []; });
-async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void> } = {}) {
-  const window = new Window({ url: 'https://glass.test' + path, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
+async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void>; userAgent?: string } = {}) {
+  const window = new Window({ url: 'https://glass.test' + path, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true, ...(data.userAgent ? { navigator: { userAgent: data.userAgent } } : {}) } });
   windows.push(window); const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] = [], reads: string[] = [], copied: string[] = [], intervals: (() => void)[] = [];
   let unauthenticated = signedOut;
@@ -71,11 +72,27 @@ it('shows jobs, notes, catches, PR links and the remote boat’s copy command wi
   const g = await page(); expect(g.doc.body.textContent).toContain('waiting for helm'); await g.tab('jobs'); await g.click('Build the hosted spyglass');
   expect(g.doc.body.textContent).toContain('Browser controls'); expect(g.doc.body.textContent).toContain('Waiting for review'); expect(g.doc.body.textContent).toContain('Please preserve local behavior.');
   expect(g.doc.querySelector("a[href='https://github.com/aequitas-labs/lobstah/pull/205']")).toBeTruthy();
-  expect(g.doc.body.textContent).toContain('on chris-macbook'); expect(g.doc.body.textContent).toContain('cannot open a remote window');
+  expect(g.doc.body.textContent).toContain('on chris-macbook'); expect(g.doc.body.textContent).toContain("can't open a remote window");
   expect(g.doc.querySelectorAll('.mdpage').length).toBe(1); expect(g.reads).toContain('/api/glass/dispatches/job/files/worker-md');
   expect(g.reads).toContain('/api/glass/dispatches/job/files/worker-image');
   await g.click('⧉'); expect(g.copied).toEqual(['codex resume test-session']); expect(g.doc.body.textContent).toContain('copied');
   expect(g.doc.querySelectorAll('[role=dialog]').length).toBe(1); await g.click('×'); await g.tab('traps'); expect(g.doc.body.textContent).toContain('codex'); expect(g.doc.body.textContent).toContain('kind-crab');
+});
+it('shows a phone where a worker ran and no command it cannot use', async () => {
+  const g = await page('/', false, { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148 Safari/604.1' });
+  await g.tab('jobs'); await g.click('Build the hosted spyglass');
+  const modal = g.doc.querySelector('[role=dialog]')!;
+  expect(modal.textContent).toContain('on chris-macbook, only reachable from there');
+  expect(modal.textContent).not.toContain('codex resume'); expect(modal.querySelector('.cmd')).toBeNull();
+});
+it('offers a live worker its attach command or where it runs, and never resume', () => {
+  const worker = { ...snapshot.workers[0]!, live: true };
+  expect(resume(worker)).toBe('codex resume test-session');
+  expect(attachCommand(worker)).toBeUndefined();
+  const inPane = { ...worker, tmuxPane: '%12' };
+  expect(attachCommand(inPane)).toBe('ssh chris-macbook -t tmux -L lobstah attach -r -t %12');
+  expect(attachCommand({ ...inPane, tmuxPane: '%1;id' })).toBeUndefined();
+  expect(attachCommand({ ...inPane, boatName: '-oProxyCommand=id' })).toBeUndefined();
 });
 it('renders reports/cards as safe elements and requests only their own attachment images', async () => {
   const g = await page(); await g.click('Choose the next catch');

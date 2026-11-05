@@ -1374,12 +1374,16 @@ launched twice. Otherwise:
 fresh or rostered:
 
 - Claude Code: `--permission-mode auto`.
-- Codex: `--approve-for-me`, which asks for approval on request and routes
-  each request to Codex's automatic reviewer, inside the workspace-write
-  sandbox. This is the nearest Codex has to Claude Code's auto mode. The
-  sandbox also gets the network (`-c sandbox_workspace_write.network_access=true`)
-  and, with `--add-dir`, lobstah's home and the repo's git directory: a trap
-  pushes, opens PRs, commits from a linked worktree, and reports.
+- Codex:
+  `--sandbox danger-full-access --ask-for-approval on-request -c approvals_reviewer="auto_review"`.
+  There is no OS sandbox. Codex asks for approval on request and routes each
+  request to its automatic reviewer. This is the nearest Codex has to Claude
+  Code's auto mode. The execpolicy rules in `$CODEX_HOME/rules` still apply:
+  `prompt` goes to the reviewer and `forbidden` is refused.
+
+A headless Codex dispatch is not a thrown trap and keeps the workspace-write
+sandbox. `heavy/` under lobstah's home is added as a writable directory, so its
+heavy commands can join the line.
 
 The mode is set, first match wins, by:
 

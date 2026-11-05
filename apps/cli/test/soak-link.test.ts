@@ -111,3 +111,39 @@ describe('a stored link that contradicts its window', () => {
     expect(result).toMatchObject({ focused: true, step: 'app' });
   });
 });
+
+describe('soak --remote-link', () => {
+  beforeEach(() => {
+    process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude-home');
+  });
+  afterEach(() => {
+    delete process.env.CLAUDE_CONFIG_DIR;
+  });
+  const REMOTE = 'https://claude.ai/code/session_01AbC';
+  const run = (cwd: string, session: string, harness: string, ...args: string[]) =>
+    spawnSync(process.execPath, [cli, 'soak', '--session', session, '--harness', harness, ...args], { cwd, encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home } });
+
+  /** By folder name: Windows can report a temp path in another form (RUNNER~1). */
+  const trapIn = (folder: string) => buildGlassSnapshot().traps.find((t) => t.worktree !== undefined && path.basename(t.worktree) === folder)!;
+
+  processTest('records the URL Claude printed, keeps it for the session, and refuses anything else', () => {
+    const worktree = path.join(tmp, 'remote-wt');
+    git(primary, 'worktree', 'add', '-q', '-b', 'remote-wt', worktree);
+    expect(run(worktree, SESSION, 'claude', '--remote-link', 'claude://claude.ai/local_1').status).not.toBe(0);
+    expect(run(worktree, SESSION, 'claude', '--remote-link', 'https://evil.test/code/a').status).not.toBe(0);
+    const on = run(worktree, SESSION, 'claude', '--remote-link', REMOTE);
+    expect(on.status, on.stderr || on.stdout).toBe(0);
+    const live = () => trapIn('remote-wt');
+    expect(live().liveLink).toBe(REMOTE);
+    expect(run(worktree, SESSION, 'claude').status).toBe(0);
+    expect(live().liveLink).toBe(REMOTE);
+  });
+
+  processTest('never gives a Codex trap a live link', () => {
+    const worktree = path.join(tmp, 'codex-wt');
+    git(primary, 'worktree', 'add', '-q', '-b', 'codex-wt', worktree);
+    const on = run(worktree, SESSION, 'codex', '--remote-link', REMOTE);
+    expect(on.status, on.stderr || on.stdout).toBe(0);
+    expect(trapIn('codex-wt').liveLink).toBeUndefined();
+  });
+});

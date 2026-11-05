@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { BackendError, brokerAddressFile, brokerRequest, ensureLayout, loadConfig, saveBrokerAgent, type BrokerAgent, type ClaimReceipt } from '@lobstah/core';
 import { BROKER_LIVENESS_MS, startWharfBroker, WharfTrapBroker, type BrokerOptions } from '../src/wharf-trap-broker.js';
 import { wharfCommand } from '../src/wharf-commands.js';
+import { lobstahTmuxPane } from '../src/wharf-soak.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string, now: number, alive: boolean;
@@ -128,6 +129,18 @@ it('uses the same bounded local interface for manual soak and throw, returning o
     expect((await fetch(`http://127.0.0.1:${address.port}/ticket`, { method: 'POST', body: '{}' })).status).toBe(400);
   } finally { await running.close(); }
   await expect(brokerRequest('ticket', {})).rejects.toThrow("the boat's daemon is not running");
+});
+it('forwards only a real tmux pane id to the wharf, and only from lobstah\'s own server', async () => {
+  const signOnBody = async (tmuxPane: unknown) => {
+    const f = fixture(), t = await f.broker.ticket('away', 'repo');
+    await f.broker.signOn({ ...t, session: 'session', pid: 123, harness: 'codex', tmuxPane });
+    return f.request.mock.calls.find(([route]) => route === 'workers/sign-on')![1];
+  };
+  expect(await signOnBody('%12')).toMatchObject({ tmuxPane: '%12' });
+  expect(await signOnBody('%1;id')).not.toHaveProperty('tmuxPane');
+  expect(lobstahTmuxPane({ TMUX: '/private/tmp/tmux-501/lobstah,1,0', TMUX_PANE: '%12' })).toBe('%12');
+  expect(lobstahTmuxPane({ TMUX: '/private/tmp/tmux-501/default,1,0', TMUX_PANE: '%12' })).toBeUndefined();
+  expect(lobstahTmuxPane({})).toBeUndefined();
 });
 it('a bound coding agent cannot invoke global reads, login or helm using the boat credential', async () => {
   saveBrokerAgent({ grounds: 'away', repo: 'repo', trap: 'test-crab', session: 'session', capability: 'secret', worktree: home }, home);
