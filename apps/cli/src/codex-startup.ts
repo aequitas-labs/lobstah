@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import { readTrapAnchor } from '@lobstah/core';
 import { codexHookHash, type CodexHook, type HookHandler } from './hook-readiness.js';
+import { codexHookTrustToml, codexHookTrustValues, type CodexHookList, type CodexHookTrustValues } from './codex-hook-list.js';
 import { installedCodexPlugin } from './plugin-version.js';
 
 type HookGroups = Record<string, Array<{ matcher?: string; hooks?: HookHandler[] }>>;
@@ -179,17 +180,22 @@ const COMMANDS: Record<CodexHook, string> = {
 };
 
 /**
- * Codex 0.160.1 blocks before its first prompt when any hook needs review.
+ * Codex blocks before its first prompt when any hook needs review.
  * Supply trust for only the installed plugin's exact, vetted lobstah commands,
  * and for `cwd`'s project hooks when they match the committed file (see
  * codexProjectHookTrust), as a session flag. No persisted config writes, no blanket trust bypass,
  * and no changes to enabled=false or to any other hook's trust.
  *
+ * With `listed` (see listCodexHooks), Codex supplies the hash for a vetted command: since 0.166
+ * a plugin hook's trust also covers the plugin's contents, which lobstah can't
+ * compute. Without an answer from Codex, lobstah computes the hook hash itself,
+ * which is all that Codex before 0.166 asks for.
+ *
  * hooks.state is one inline TOML value: plugin IDs contain dots and must not
  * be interpreted as dotted override paths. Codex merges session hook state
  * with user state field by field (codex-hooks config_rules).
  */
-export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string; cwd?: string } = {}): string[] {
+export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string; cwd?: string; listed?: CodexHookList } = {}): string[] {
   const plugin = installedCodexPlugin(opts);
   if (!plugin) return [];
   const file = path.join(plugin.root, 'hooks', 'hooks.json');
@@ -206,13 +212,25 @@ export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string
           throw new Error(`cannot authorize ${event} in ${file}: expected exactly ${command}`);
         }
         const key = `lobstah@lobstah:hooks/hooks.json:${event.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}:${g}:${h}`;
-        entries.push(`${JSON.stringify(key)}={trusted_hash=${JSON.stringify(codexHookHash(event as CodexHook, group.matcher, handler))}}`);
+        const reported = opts.listed?.get(key);
+        if (reported?.command !== undefined && reported.command !== command) {
+          throw new Error(`cannot authorize ${event}: Codex reports \`${reported.command}\`, expected exactly ${command}`);
+        }
+        const values: CodexHookTrustValues = reported
+          ? codexHookTrustValues(reported.currentHash)
+          : { trusted_hash: codexHookHash(event as CodexHook, group.matcher, handler) };
+        entries.push(`${JSON.stringify(key)}=${codexHookTrustToml(values)}`);
       }
     }
   }
   // The checkout's own committed project hooks, keyed by the file Codex loads.
   for (const e of opts.cwd ? codexProjectHookTrust(opts.cwd).supplied : []) {
-    entries.push(`${JSON.stringify(e.key)}={trusted_hash=${JSON.stringify(e.hash)}}`);
+    const reported = opts.listed?.get(e.key);
+    // A project hook is vetted by its hash, so Codex's answer only counts when the two agree.
+    const values = reported && codexHookTrustValues(reported.currentHash).trusted_hash === e.hash
+      ? codexHookTrustValues(reported.currentHash)
+      : { trusted_hash: e.hash };
+    entries.push(`${JSON.stringify(e.key)}=${codexHookTrustToml(values)}`);
   }
   return entries.length ? ['-c', `hooks.state={${entries.join(',')}}`] : [];
 }
