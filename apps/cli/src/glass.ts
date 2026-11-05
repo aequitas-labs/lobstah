@@ -774,6 +774,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     reviews: glassReviews(reviewTools(cfg)),
     reviewSetup: reviewSetupView(),
     sessionGrants: listGrants().grants.filter(g => g.mode === 'session').map(({ callIds: _ids, ...g }) => g),
+    standingGrants: listGrants().grants.filter(g => g.mode !== 'session').map(({ callIds: _ids, ...g }) => g),
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),

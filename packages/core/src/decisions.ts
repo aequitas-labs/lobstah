@@ -1,3 +1,4 @@
+import type { GrantIntent } from './grants.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
@@ -43,10 +44,17 @@ export interface PermissionAsk {
   harness: 'claude' | 'codex' | 'any';
   /** The trap that asked, when known: an "Allow once" is good for it alone. */
   trap?: string;
+  /** The kind of action the trap proposes approving: the card offers it, for a person to read and choose. */
+  intent?: GrantIntent;
 }
 
 /** The options of a permission card, in order. */
 export const PERMISSION_OPTIONS = ['Allow once', 'Allow always', 'No'] as const;
+
+/** A permission card's option: approve the kind of action the trap proposed, for an hour. */
+export const INTENT_HOUR_OPTION = 'Allow this kind for 1h';
+/** A permission card's option: approve the kind of action the trap proposed, until revoked. */
+export const INTENT_ALWAYS_OPTION = 'Always allow this kind';
 
 /** Exact allow-list changes; approval may only select a subset of these stored rules. */
 export type PermissionRuleChange =

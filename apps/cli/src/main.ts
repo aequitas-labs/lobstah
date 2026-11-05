@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { applyHeavyHooks } from '@lobstah/core';
+import type { GrantIntent } from '@lobstah/core';
 import {
   IdleWait,
   reviewAttention,
@@ -95,6 +96,9 @@ import {
   throwTerminalText,
   TrapStartingError,
   listRoster,
+  parseIntentPattern,
+  validateIntent,
+  GrantError,
   rosterByAddress,
   setRosterProfile,
   isTerminalApp,
@@ -1605,6 +1609,19 @@ async function mainCli(): Promise<void> {
       if ((permCommand !== undefined || permPath !== undefined) && verb !== 'needs-decision')
         throw new UsageError(`--ask and --ask-path go with needs-decision\n\n${usageFor('report')!}`);
       if (permCommand !== undefined && permPath !== undefined) throw new UsageError('--ask takes a command, --ask-path a file: name one');
+      const intentText = opt('--intent');
+      const intentPatterns = values('--allow');
+      if ((intentText !== undefined || intentPatterns.length > 0) && permCommand === undefined && permPath === undefined) throw new UsageError(`--intent and --allow go with --ask or --ask-path\n\n${usageFor('report')!}`);
+      if (intentPatterns.length > 0 && intentText === undefined) throw new UsageError(`--allow needs --intent: say in a sentence what it's for\n\n${usageFor('report')!}`);
+      let proposedIntent: GrantIntent | undefined;
+      if (intentText !== undefined) {
+        try {
+          proposedIntent = validateIntent({ text: intentText, patterns: intentPatterns.map(parseIntentPattern) });
+        } catch (err) {
+          if (err instanceof GrantError) throw new UsageError(err.message);
+          throw err;
+        }
+      }
       const titleClaim = verb === 'done' || verb === 'failed' ? readSessionClaim(id, lane) : undefined;
       const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
       const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true);
@@ -1672,6 +1689,7 @@ async function mainCli(): Promise<void> {
             ...(permCommand !== undefined ? { command: permCommand.trim() } : { path: path.resolve(permPath!) }),
             harness,
             ...(askingTrap ? { trap: askingTrap.name ?? askingTrap.trapId } : {}),
+            ...(proposedIntent ? { intent: proposedIntent } : {}),
           },
           ...(note ? { note } : {}),
         }).key;

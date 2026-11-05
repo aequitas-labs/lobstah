@@ -351,7 +351,7 @@ export async function sendAnswer(key: string): Promise<void> {
   const files = permission ? [] : draft.files;
   if (!draft.option && !text.trim() && files.length === 0) {
     setDraft(key, {
-      error: permission ? 'Choose Allow once, Allow always, or No.' : 'Choose an option, write an answer, or attach a file.',
+      error: permission ? 'Choose an answer.' : 'Choose an option, write an answer, or attach a file.',
     });
     return;
   }
