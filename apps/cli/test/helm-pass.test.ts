@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { enqueue, addTodo, ensureLayout, goalDate, helmPassStatus, loadConfig, readHelmPass, recordHelmPass, setGoals, takeHelm } from '@lobstah/core';
+import { enqueue, addTodo, ensureLayout, goalDate, helmPassStatus, loadConfig, readHelmPass, recordHelmPass, setGoals, snoozeTodo, takeHelm } from '@lobstah/core';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
@@ -140,23 +140,29 @@ it('glass shows the same last pass age beside goals and todos', async () => {
   } finally { await page.close(); }
 });
 
-it('a pass lists overdue todos first, collapses those waiting, and offers a snooze', () => {
+it('a pass lists every open todo, including future and snoozed items, with due times', () => {
   const now = Date.now();
   addTodo('fleet', 'Waiting one', now, { dueAt: new Date(now + 86400_000).toISOString() });
+  const snoozed = addTodo('fleet', 'Snoozed one', now, { dueAt: new Date(now + 86400_000).toISOString() });
+  snoozeTodo('fleet', snoozed.id, new Date(now + 2 * 86400_000).toISOString(), now);
   addTodo('fleet', 'Plain one', now);
   addTodo('fleet', 'Late one', now - 86400_000, { dueAt: new Date(now - 1000).toISOString() });
   const notice = helmPassNotice('fleet', loadConfig(), now)!;
-  expect(notice).toContain('1 scheduled (lobstah todo ls)');
-  expect(notice).not.toContain('Waiting one');
+  expect(notice).toContain('Waiting one');
+  expect(notice).toContain('due');
+  expect(notice).toContain('Snoozed one');
+  expect(notice).toContain('snoozes');
+  expect(notice.indexOf('Plain one')).toBeLessThan(notice.indexOf('Waiting one'));
   expect(notice.indexOf('Late one')).toBeLessThan(notice.indexOf('Plain one'));
   expect(notice).toContain('snooze it');
 });
 
-it('a pass with only scheduled todos shows the one line', () => {
+it('a pass with only scheduled todos still lists their names and due times', () => {
   const now = Date.now();
   addTodo('fleet', 'Waiting one', now, { dueAt: new Date(now + 86400_000).toISOString() });
   const notice = helmPassNotice('fleet', loadConfig(), now)!;
-  expect(notice).toContain('1 scheduled (lobstah todo ls)');
+  expect(notice).toContain('Waiting one');
+  expect(notice).toContain('due');
   expect(notice).not.toContain('todos: none');
 });
 
