@@ -1,4 +1,3 @@
-import { HarnessText } from './harness-icon.js';
 import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../../../packages/core/src/desktop-start-link.js';
 import type { Attachment } from '@lobstah/core';
@@ -115,8 +114,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
 }
 
 /** A decision's title: the helm's, or the worker's note for a raw question. */
-const titleOf = (c: DecisionCard) =>
-  c.kind === 'decision' ? (c.appStart ? html`<${HarnessText} text=${c.title} />` : LinkedText(c.title)) : NamedText(c.note);
+const titleOf = (c: DecisionCard) => (c.kind === 'decision' ? LinkedText(c.title) : NamedText(c.note));
 
 /** Unread, read, or answered (from this page, until the snapshot drops it). */
 function stateOf(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean): 'unread' | 'read' | 'answered' {

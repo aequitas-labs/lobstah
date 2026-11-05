@@ -542,16 +542,12 @@ tr.rowhead:hover {
   vertical-align: -3px;
   flex: 0 0 auto;
 }
-.btn:has(> .harness-icon) {
+.worker-compact {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  vertical-align: middle;
 }
 .worker-harness {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  vertical-align: middle;
   cursor: help;
 }
 .worker-harness:focus-visible {
@@ -2076,28 +2072,6 @@ footer .glass-brand {
 }
 .grant-audit code {
   overflow-wrap: anywhere;
-}
-
-/* Native radio keys choose a harness; each mark keeps its accessible product name. */
-.harness-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 2px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.harness-picker legend {
-  padding-inline: 3px;
-  font-size: 11px;
-  color: var(--dim);
-}
-.harness-picker label {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  cursor: pointer;
 }
 
 /* The trap is the primary identity; repo/profile stays on the secondary action line. */

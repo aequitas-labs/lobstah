@@ -10,7 +10,7 @@ it('shows configured profile capacity and grounds without inventing a repo or re
   try {
     const profile = glass.$$('#traps .card').find((card) => card.textContent?.includes('trap:desk'));
     expect(profile?.textContent).toContain('studio');
-    expect(profile?.textContent).toContain('Desktop app');
+    expect(profile?.textContent).toContain('claude-desktop');
     expect(profile?.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Claude');
     expect(profile?.textContent).toContain('0/1');
     expect(profile?.textContent).toContain('needs-app-start');
@@ -32,8 +32,8 @@ it('shows the desktop start link beside its queued catch and keeps phone viewers
   const phone = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: '#traps' });
   try {
     expect(phone.$('#traps a[href^="claude:"]')).toBeNull();
-    expect(phone.$('#traps .desktop-start')?.textContent).toContain('Code on the Mac');
-    expect(phone.$('#traps .desktop-start [role="img"]')?.getAttribute('aria-label')).toBe('Claude');
+    expect(phone.$('#traps .desktop-start')?.textContent).toContain('Open Claude Code on the Mac');
+    expect(phone.$('#traps .desktop-start .harness-icon')).toBeNull();
   } finally { await phone.close(); }
 });
 
@@ -45,7 +45,9 @@ it('renders an app-start action on the decision deep link without an approval an
   snapshot.decisions = [{ key, title: 'Start desk in Claude Code', detail: 'Send the prefilled sign-on instruction', options: [], attachments: [], askedBy: 'helm', askedAt: new Date(NOW).toISOString(), stateHash: 'start', appStart: { profile: 'desk', url: 'claude://code/new?q=Run+soak&folder=%2Ftmp%2Fdesk' } }];
   const glass = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: `#decision/${encodeURIComponent(key)}` });
   try {
-    expect(glass.$('.dmodal a[href^="claude:"]')?.getAttribute('aria-label')).toBe('Open Claude Code');
+    expect(glass.$('.dmodal a[href^="claude:"]')?.textContent).toBe('Open Claude Code');
+    expect(glass.$('.dmodal .dtitle')?.textContent).toBe('Start desk in Claude Code');
+    expect(glass.$('.dmodal .harness-icon')).toBeNull();
     expect(glass.$('.dmodal textarea')).toBeNull();
     expect(glass.$('.dmodal')?.textContent).toContain('clears after');
   } finally { await glass.close(); }
