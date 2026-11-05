@@ -16,6 +16,46 @@ keys of that section.
 | `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
 | `readySettleSecs` | `600` | `pr:ready` stands after continuously meeting the ready conditions on the same head for this many seconds. Any not-ready observation or new head resets the timer. Each attention read re-evaluates expiry from the persisted start, even without a new forge event. `0` restores immediate ready attention; other `pr:*` kinds are unchanged. |
 
+## `[traps.<name>]` — repo-less workers
+
+A named profile serves exactly one grounds, without git, repo setup or a
+worktree. Profiles are separate per grounds. `soak --trap <name> --session
+<id>` signs on the current session; `dispatch --for trap:<name>` queues
+sticky work for that profile. Configured catches accept reports and files,
+not PR evidence. Tool approval stays with the harness Auto reviewer.
+
+```toml
+[traps.desk]
+harness = "claude"
+surface = "claude-desktop"
+grounds = "fleet"              # implicit grounds: fleet or its display name home
+maxInstances = 1              # live, stowed, ghosted and pending instances
+# cwd = "~/Desktop/desk"      # optional existing plain folder, no git required
+
+[traps.ops]
+harness = "codex"
+surface = "terminal"
+terminal = "tmux"             # optional: terminal, iterm or tmux
+maxInstances = 1
+grounds = "fleet"
+```
+
+`harness`, `surface` and `grounds` are required. `claude-desktop` requires
+Claude; `terminal` supports Claude and Codex. `maxInstances` defaults to 1
+and must be a positive integer. `terminal` is valid only for a terminal
+surface. `cwd` must be an existing absolute directory (`~/` expands);
+omitting it creates a private folder under
+`$LOBSTAH_HOME/trap-workspaces/<grounds>/<profile>/<instance>`. A folder
+inside a repo still remains a plain folder for this profile. Unknown keys,
+grounds, harnesses and surfaces are config errors naming the key.
+
+Stow and ghost keep the instance and folder. Returning reuses a slot;
+`man roster forget` frees an idle instance without deleting its folder,
+app session, configuration or catch history. Queued and active work prevent
+forgetting. Removing configuration leaves existing catches and identities
+intact and prevents new claims. Roster, tend and the glass show each
+profile's grounds, surface, capacity and state.
+
 ## `[repos.<key>]` — workspace definitions
 
 The descriptor's `repo` field resolves here; the key is what dispatchers name.

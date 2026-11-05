@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { parseConfiguredTraps, type ConfiguredTrapProfile } from './configured-traps.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
@@ -434,6 +435,8 @@ export interface GroundsConfig {
 }
 
 export interface Config {
+  /** Named repo-less profiles; absent leaves repo traps unchanged. */
+  traps?: Record<string, ConfiguredTrapProfile>;
   repos: Record<string, RepoConfig>;
   harness: HarnessDefaults;
   limits: LimitsConfig;
@@ -745,6 +748,7 @@ export function loadConfig(): Config {
     grounds,
     wharves,
     pools: parsePools(raw.pools, repos),
+    traps: parseConfiguredTraps(raw.traps, grounds),
     hooks: parseHooks(raw.hooks),
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
     readySettleSecs,
@@ -765,6 +769,7 @@ export interface ResolvedDispatch {
 
 /** Precedence chain: descriptor > repo config > global config > adapter default. */
 export function resolveDispatch(d: Descriptor, cfg: Config): ResolvedDispatch {
+  if (d.target || !d.repo) throw new Error('configured trap work cannot launch headless');
   const repo = cfg.repos[d.repo];
   if (!repo) throw new Error(`unknown repo key "${d.repo}" — add it to ${configPath()}`);
   const rh = repo.harness ?? {};

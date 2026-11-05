@@ -56,7 +56,7 @@ export function liveStatus(id: string, lane: Lane, verb: Verb, createdAt: string
   if (commit) lines.push(`last commit: ${redactSummary(commit)}`);
   else if (evidence.commits?.length) lines.push(`last commit: ${redactSummary(evidence.commits[0]!)}`);
   fingerprint.push(lines.at(-1)?.startsWith('last commit:') ? lines.at(-1)! : '');
-  const trunk = descriptor && cfg.repos[descriptor.repo]?.trunk;
+  const trunk = descriptor?.repo ? cfg.repos[descriptor.repo]?.trunk : undefined;
   const ahead = worktree && trunk && git(worktree, 'rev-list', '--count', `origin/${trunk}..HEAD`);
   if (ahead !== undefined && trunk) lines.push(`ahead of ${trunk}: ${ahead} commit${ahead === '1' ? '' : 's'}`);
   if (ahead !== undefined && trunk) fingerprint.push(`ahead of ${trunk}: ${ahead}`);

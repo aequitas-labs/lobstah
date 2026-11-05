@@ -1,3 +1,4 @@
+import type { ConfiguredTrapLocation } from './configured-traps.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -21,7 +22,7 @@ import { laneOf } from './worktrees.js';
 import { protectTrapRevision, removeGhostWorktree } from './worktree-safety.js';
 import { readRoster, recordRosterDeparture, recordRosterSignOn } from './roster.js';
 import { readReservation } from './trap-start.js';
-import { DEFAULT_SOAK } from './config.js';
+import { loadConfig, DEFAULT_SOAK } from './config.js';
 import { clearFinishedTrapCaches, repoCachesConfigured } from './cache-cleanup.js';
 import { withTrapCacheLock } from './cache-paths.js';
 import { sessionWorker } from './session-workers.js';
@@ -38,6 +39,8 @@ import { resumeTrapTurn } from './trap-turn.js';
  * live session is refused (the session lock).
  */
 export interface TrapRegistration {
+  /** Configured location bypasses every git and worktree operation. */
+  configured?: ConfiguredTrapLocation;
   trapId: string;
   /** Stable, human-friendly address; absent only on older registrations. */
   name?: string;
@@ -274,6 +277,7 @@ export function nameTrapsIn(text: string, style: 'name' | 'label' = 'name', name
 
 /** Resolve a bare name, wt:name, bare id, or wt:id to the live registration. */
 export function trapByAddress(address: string): TrapRegistration | undefined {
+  if (address.startsWith('trap:')) return listTraps().find((reg) => reg.configured?.profile === address.slice(5));
   const value = address.startsWith('wt:') ? address.slice(3) : address;
   if (!/^[a-z0-9-]+$/.test(value)) return undefined;
   return readTrap(trapIdForName(value) ?? value);
@@ -312,6 +316,7 @@ export function signOnTrap(opts: {
   worktree: string;
   cwd: string;
   repo?: string;
+  configured?: ConfiguredTrapLocation;
   harness: string;
   sessionId: string;
   one?: boolean;
@@ -337,13 +342,14 @@ export function signOnTrap(opts: {
   }
   if (opts.remoteLink !== undefined && !validRemoteLink(opts.remoteLink)) throw new Error('invalid remote link: pass the https://claude.ai/code/… URL Claude printed');
   const now = opts.now ?? Date.now();
-  const anchored = trapIdAt(opts.worktree);
+  const anchored = opts.configured ? undefined : trapIdAt(opts.worktree);
   if (opts.trapId !== undefined && anchored !== undefined && anchored !== opts.trapId) {
     throw new Error(`this worktree already anchors trap wt:${anchored}; a reserved trap signs on in a new worktree — run soak from the repo's primary checkout`);
   }
-  if (opts.trapId !== undefined && anchored === undefined) writeTrapAnchor(opts.worktree, { trapId: opts.trapId });
+  if (!opts.configured && opts.trapId !== undefined && anchored === undefined) writeTrapAnchor(opts.worktree, { trapId: opts.trapId });
+  if (opts.configured && (!opts.trapId || opts.repo)) throw new Error('configured sign-on requires a durable instance and no repo');
   const trapId = opts.trapId ?? ensureTrapId(opts.worktree);
-  const createdWorktree = readTrapAnchor(opts.worktree)?.createdBy === 'soak' || undefined;
+  const createdWorktree = !opts.configured && readTrapAnchor(opts.worktree)?.createdBy === 'soak' || undefined;
   const prior = readTrap(trapId);
   if (prior && prior.sessionId !== opts.sessionId) {
     const fresh = now - trapLastSeen(prior) <= opts.ttlMs;
@@ -352,10 +358,10 @@ export function signOnTrap(opts: {
   // One session mans one trap: its messages, listener and stow all go by session.
   const other = listTraps().find((r) => r.sessionId === opts.sessionId && r.trapId !== trapId);
   if (other) throw new Error(`this session already mans trap ${trapLabel(other)} at ${other.worktree}. Sign it off with \`lobstah stow\` before it signs on as another trap.`);
-  const anchor = readTrapAnchor(opts.worktree)!;
+  const anchor = opts.configured ? { trapId: trapId } : readTrapAnchor(opts.worktree)!;
   // The roster holds the trap's canonical name: a returning trap keeps it.
   const name = reserveTrapName(trapId, opts.name ?? prior?.name ?? readRoster(trapId)?.name ?? anchor.name, undefined, opts.name !== undefined);
-  if (anchor.name !== name) writeTrapAnchor(opts.worktree, { ...anchor, name });
+  if (!opts.configured && anchor.name !== name) writeTrapAnchor(opts.worktree, { ...anchor, name });
   const iso = new Date(now).toISOString();
   const sameSession = prior?.sessionId === opts.sessionId;
   const window = opts.window ?? (sameSession ? prior.window : undefined);
@@ -372,6 +378,7 @@ export function signOnTrap(opts: {
     worktree: opts.worktree,
     cwd: opts.cwd,
     repo: opts.repo,
+    ...(opts.configured ? { configured: { profile: opts.configured.profile, grounds: opts.configured.grounds, surface: opts.configured.surface } } : {}),
     harness: opts.harness,
     model: worker.model,
     config: worker.config,
@@ -395,7 +402,7 @@ export function signOnTrap(opts: {
     ...(sameSession && prior.titlePending ? { titlePending: prior.titlePending } : {}),
   };
   atomicWrite(regPath(trapId), JSON.stringify(reg, null, 2));
-  recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: protectTrapRevision(opts.worktree, trapId, now), creationReason: opts.creationReason, startMode: opts.startMode, now });
+  recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: opts.configured ? undefined : protectTrapRevision(opts.worktree, trapId, now), creationReason: opts.creationReason, startMode: opts.startMode, now });
   // Back within the grace: held messages deliver at the next park.
   releaseSignedOff(trapId);
   if (!prior) {
@@ -474,7 +481,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   if (!reg) return undefined;
   // The roster keeps the trap, and a protected ref its revision, before the
   // registration goes and stow may remove the checkout.
-  const revision = fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, trapId) : undefined;
+  const revision = !reg.configured && fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, trapId) : undefined;
   recordRosterDeparture(reg, 'stowed', reason, { revision });
   fs.mkdirSync(signedOffDir(), { recursive: true });
   atomicWrite(signedOffPath(trapId), JSON.stringify({ trapId, name: reg.name, worktree: reg.worktree, at: new Date().toISOString() } satisfies SignedOff));
@@ -683,11 +690,20 @@ export function claimBait(reg: TrapRegistration): { id: string; lane: Lane; desc
   return claimTrapBait(reg);
 }
 
+/** Missing or changed profile configuration leaves existing catches alone and prevents new claims. */
+function configuredTargetMatches(reg: TrapRegistration, descriptor: Descriptor): boolean {
+  if (!descriptor.target || !reg.configured) return false;
+  const profile = loadConfig().traps?.[descriptor.target.profile];
+  return reg.configured.profile === descriptor.target.profile && reg.configured.grounds === descriptor.target.grounds &&
+    reg.configured.surface === descriptor.target.surface && profile?.grounds === descriptor.target.grounds &&
+    profile.surface === reg.configured.surface && profile.harness === reg.harness;
+}
+
 function claimTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descriptor: Descriptor } | null {
   if (hasOpenCatch(reg)) return null;
   const mine = `wt:${reg.trapId}`;
   const addressed = (d: Descriptor): boolean =>
-    d.for === mine && (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));
+    (d.target ? configuredTargetMatches(reg, d) : !reg.configured && d.for === mine) && (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));
   // Addressed chores and work beat general work. Expired system chores are
   // left for the daemon, never delivered late to their former trap.
   for (const [lane, pass] of [
@@ -742,7 +758,7 @@ export function trapReady(reg: TrapRegistration, deferMs: number, now = Date.now
  */
 export function daemonSkip(traps: TrapRegistration[], deferMs: number, now = Date.now()): (d: Descriptor) => boolean {
   return (d) => {
-    if (d.for !== undefined || d.trapAny) return true; // sticky / trap-only — never the daemon's
+    if (d.target || d.for !== undefined || d.trapAny) return true; // sticky / trap-only — never the daemon's
     if (d.pool !== undefined) return false; // pool work is never a trap's
     return traps.some((r) => r.repo === d.repo && trapReady(r, deferMs, now));
   };
@@ -829,13 +845,13 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     dropTrapTickets(reg.trapId, 'its trap ghosted');
     const holding = hasOpenCatch(reg);
     const released = releaseCatch(reg);
-    const removal = reg.createdWorktree && fs.existsSync(reg.worktree) ? removeGhostWorktree(reg.worktree) : undefined;
-    const revision = removal?.revision ?? (fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, reg.trapId, now) : undefined);
+    const removal = !reg.configured && reg.createdWorktree && fs.existsSync(reg.worktree) ? removeGhostWorktree(reg.worktree) : undefined;
+    const revision = removal?.revision ?? (!reg.configured && fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, reg.trapId, now) : undefined);
     recordRosterDeparture(reg, 'ghosted', pauseExpired ? 'ghosted: its pause expired' : 'ghosted: went quiet mid-watch', { revision, now });
     const catchNote = released.requeued ? ', catch requeued' : released.finalized ? ', catch finalized' : '';
     const worktreeNote = removal
       ? `; worktree ${removal.removed ? 'removed' : 'kept'}: ${reg.worktree}; branch ${removal.branch}; modified files ${removal.modifiedFiles ?? 'unknown'}; unpushed commits ${removal.unpushedCommits ?? 'unknown'}${removal.reason ? ` (${removal.reason})` : ''}`
-      : '; worktree kept; re-soaking restores the same address';
+      : reg.configured ? '; working folder kept; re-soaking its configured profile restores the same address' : '; worktree kept; re-soaking restores the same address';
     actions.push({ trapId: reg.trapId, ...released, ...(pauseExpired ? { pauseExpired } : {}), ...(removal ? { worktree: removal.removed ? 'removed' : 'kept' } : {}) });
     fs.rmSync(regPath(reg.trapId), { force: true });
     fs.rmSync(beatPath(reg.trapId), { force: true });
@@ -887,8 +903,8 @@ export function baitBrief(id: string, d: Descriptor): string {
   return [
     `You are a lobstah worker session and have been assigned dispatch ${id}.`,
     '',
-    'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
-    `Acknowledge this assignment now with \`lobstah report ${id} working "<note>"\`, then report at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" [--pr <url>]\` (or \`failed\`).`,
+    d.target ? 'You are a repo-less trap assigned an inspection or reversible UI step. File findings or screenshots for the original dispatch; its worker keeps ownership of repo changes and the PR.' : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
+    `Acknowledge this assignment now with \`lobstah report ${id} working "<note>"\`, then report at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" ${d.target ? '[--report <file>] [--attach <file>]' : '[--pr <url>]'}\` (or \`failed\`).`,
     'A needs-decision or blocked report queues your question to the human; the answer arrives in this dispatch\'s inbox.',
     '`working` means you are still executing and will report again. If the next move belongs to a person or to the helm, report `needs-decision` with the question. If you are waiting on an external await, report `paused` and name it. Never end a turn on `working`.',
     'Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`.',
@@ -1000,8 +1016,8 @@ export type BeatResult =
  */
 export function beatTrap(input: BeatInput): BeatResult {
   const now = input.now ?? Date.now();
-  const trapId =
-    trapIdAbove(input.cwd) ?? (input.sessionId ? trapBySession(input.sessionId)?.trapId : undefined);
+  const sessionTrap = input.sessionId ? trapBySession(input.sessionId) : undefined;
+  const trapId = sessionTrap?.configured ? sessionTrap.trapId : trapIdAbove(input.cwd) ?? sessionTrap?.trapId;
   const reg = trapId !== undefined ? readTrap(trapId) : undefined;
   if (!trapId || !reg) return { beat: false, reason: 'not-soaking' };
   if (input.sessionId && input.sessionId !== reg.sessionId) return { beat: false, reason: 'other-session' };
@@ -1009,7 +1025,7 @@ export function beatTrap(input: BeatInput): BeatResult {
   // A push is recorded on every beat: the throttle never drops one.
   const command = (input.toolInput as { command?: unknown } | undefined)?.command;
   const pushes = typeof command === 'string' || Array.isArray(command) ? gitPushTargets(command as string | string[]) : undefined;
-  if (pushes && hasOpenCatch(reg)) recordPush(reg.claimed!, laneOf(reg.claimed!) ?? 'work', resolvePushTargets(pushes, input.cwd), new Date(now).toISOString());
+  if (!reg.configured && pushes && hasOpenCatch(reg)) recordPush(reg.claimed!, laneOf(reg.claimed!) ?? 'work', resolvePushTargets(pushes, input.cwd), new Date(now).toISOString());
   const last = msOf(readBeat(trapId)?.at ?? '');
   if (now - last < (input.throttleMs ?? 30_000)) return { beat: false, reason: 'throttled' };
   const at = new Date(now).toISOString();

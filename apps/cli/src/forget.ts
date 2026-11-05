@@ -62,6 +62,22 @@ export async function forgetTrap(address: string, cfg: Config, opts: { force?: b
   if (readTrap(entry.trapId)) throw new ForgetRefusedError(`${label} is signed on — never forget a live trap; stow it first`);
   if (readReservation(entry.trapId)) throw new ForgetRefusedError(`${label} is starting (reserved) — withdraw it with \`lobstah stow --wt ${entry.name}\` first`);
 
+  if (entry.configured) {
+    const { pendingIds, activeIds, storedDescriptor: descriptorFor } = await import('@lobstah/core');
+    for (const lane of ['work', 'chore'] as const) for (const id of [...pendingIds(lane), ...activeIds(lane)]) {
+      const target = descriptorFor(id, lane)?.target;
+      if (target?.profile === entry.configured.profile && target.grounds === entry.configured.grounds) throw new ForgetRefusedError(`${label} has queued or active work`);
+    }
+    if (entry.lastCatch) {
+      const { laneOf, storedDescriptor, readStatusLog } = await import('@lobstah/core');
+      const lane = laneOf(entry.lastCatch);
+      if (lane && storedDescriptor(entry.lastCatch, lane) && !['done', 'failed'].includes(readStatusLog(entry.lastCatch, lane).at(-1)?.verb ?? '')) throw new ForgetRefusedError(`${label} still has in-flight work`);
+    }
+    const bounced = bounceTrapMessages(entry.trapId);
+    releaseSignedOff(entry.trapId);
+    forgetRoster(entry.trapId);
+    return { trap: label, worktree: 'kept', worktreeNote: 'configured working folder kept', ref: 'absent', dropped: [], bounced };
+  }
   const repo = entry.repo ? cfg.repos[entry.repo] : undefined;
   const gitDir = entry.gitDir ?? (repo ? gitCommonDir(repo.path) : undefined);
   const present = fs.existsSync(entry.worktree);

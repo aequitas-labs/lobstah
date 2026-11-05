@@ -1,3 +1,5 @@
+import type { ConfiguredTrapLocation } from './configured-traps.js';
+import { forgetConfiguredTrapSlot } from './configured-trap-slots.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
@@ -42,6 +44,8 @@ export interface TrapProfile {
 export type RosterState = 'live' | 'stowed' | 'ghosted';
 
 export interface RosterEntry {
+  /** Named plain-folder instance; never a repository checkout. */
+  configured?: ConfiguredTrapLocation;
   version: typeof ROSTER_VERSION;
   trapId: string;
   /** The trap's canonical name. A returning trap signs on under it. */
@@ -145,6 +149,7 @@ export function listRoster(): RosterEntry[] {
 
 /** Resolve a bare name, wt:name, bare id, or wt:id to a roster record. */
 export function rosterByAddress(address: string): RosterEntry | undefined {
+  if (address.startsWith('trap:')) return listRoster().find((entry) => entry.configured?.profile === address.slice(5));
   const value = address.startsWith('wt:') ? address.slice(3) : address;
   if (!/^[a-z0-9-]+$/.test(value)) return undefined;
   return readRoster(trapIdForName(value) ?? value) ?? listRoster().find((e) => e.name === value);
@@ -178,6 +183,7 @@ function withRevision(entry: RosterEntry, revision: TrapRevision | undefined): R
 export function forgetRoster(trapId: string): RosterEntry | undefined {
   const entry = readRoster(trapId);
   if (!entry) return undefined;
+  if (entry.configured) forgetConfiguredTrapSlot(trapId);
   fs.rmSync(rosterPath(trapId), { force: true });
   if (trapIdForName(entry.name) === trapId) releaseTrapName(entry.name);
   return entry;
@@ -211,6 +217,7 @@ export function recordRosterSignOn(
     ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
   };
   setOrDrop(entry, 'repo', reg.repo);
+  setOrDrop(entry, 'configured', reg.configured);
   setOrDrop(entry, 'createdWorktree', reg.createdWorktree || undefined);
   setOrDrop(entry, 'window', reg.window);
   setOrDrop(entry, 'link', reg.link);

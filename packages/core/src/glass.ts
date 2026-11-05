@@ -206,7 +206,8 @@ export interface GlassDispatchSummary {
   id: string;
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';
-  repo: string;
+  repo?: string;
+  target?: import('./configured-trap-model.js').ConfiguredTrapTarget;
   for?: string;
   followUp?: string;
   /** The brief's first line. */
@@ -501,6 +502,7 @@ export interface GlassSnapshot {
   heavy?: GlassHeavy;
   helms: GlassHelm[];
   traps: GlassTrap[];
+  configuredTraps?: import('./configured-trap-views.js').ConfiguredTrapView[];
   /** Catches (dispatches finished done): today, on the server's local day, and all time. */
   stats?: { catchesToday: number; totalCatches: number };
   /**
