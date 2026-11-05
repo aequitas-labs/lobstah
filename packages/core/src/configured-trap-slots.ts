@@ -68,6 +68,7 @@ export function configuredFolderOverlaps(directory: string): boolean {
   return fs.readdirSync(slotsDirectory()).filter((file) => file.endsWith('.folder')).some((file) => {
     const folder = canonical(fs.readFileSync(path.join(slotsDirectory(), file), 'utf8'));
     const relative = path.relative(candidate, folder), reverse = path.relative(folder, candidate);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)) || (!reverse.startsWith('..') && !path.isAbsolute(reverse));
+    const inside = (relativePath: string): boolean => relativePath !== '..' && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath);
+    return inside(relative) || inside(reverse);
   });
 }

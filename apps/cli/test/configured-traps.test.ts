@@ -53,10 +53,10 @@ it('runs a repo-less catch through the built CLI and rejects repo evidence befor
 it('keeps configured folders out of pressure culls even after forgetting their slot', async () => {
   const { withConfiguredTrapSlot, forgetConfiguredTrapSlot } = await import('@lobstah/core');
   const { planPressureCull, removeWorktree } = await import('../src/cull.js');
-  const cwd = path.join(home, 'worktrees', 'user-folder'); fs.mkdirSync(cwd, { recursive: true });
+  const parent = path.join(home, 'worktrees', 'user-folder'), cwd = path.join(parent, '..nested'); fs.mkdirSync(cwd, { recursive: true });
   const slot = withConfiguredTrapSlot('ops', { harness: 'claude', surface: 'terminal', grounds: 'fleet', maxInstances: 1, cwd }, undefined, (instance) => instance);
   forgetConfiguredTrapSlot(slot.trapId);
-  expect(planPressureCull().some((candidate) => candidate.target === cwd)).toBe(false);
-  expect(() => removeWorktree('user-folder', cwd)).toThrow(/never culled/);
+  expect(planPressureCull().some((candidate) => candidate.target === parent)).toBe(false);
+  expect(() => removeWorktree('user-folder', parent)).toThrow(/never culled/);
   expect(fs.existsSync(cwd)).toBe(true);
 });
