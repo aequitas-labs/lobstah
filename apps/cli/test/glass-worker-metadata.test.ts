@@ -16,7 +16,7 @@ function fixture() {
 }
 function details(values: string[]) {
   expect(g!.$$('#modalbox .worker-details')).toHaveLength(1);
-  expect(g!.$$('#modalbox .worker-details dd').map(n => n.querySelector('[role="img"]')?.getAttribute('aria-label')?.toLowerCase() ?? n.textContent)).toEqual(values);
+  expect(g!.$$('#modalbox .worker-details dd').map(n => n.textContent)).toEqual(values);
 }
 async function close() {
   g!.document.dispatchEvent(new g!.window.KeyboardEvent('keydown', { key: 'Escape' }));
@@ -51,7 +51,9 @@ describe('worker metadata in the glass', () => {
       await close();
       await g.go('#dispatches');
       expect(g.$('#dispatches')?.textContent).not.toContain('gpt-5.4');
-      expect(g.$('#dispatches .worker-harness')?.getAttribute('aria-label')).toBe('Codex · gpt-5.4 · high');
+      expect(g.$('#dispatches .worker-harness')?.getAttribute('aria-label')).toBe('gpt-5.4 · high');
+      expect(g.$('#dispatches .worker-harness')?.textContent).toBe('codex');
+      expect(g.$('#dispatches .worker-harness .harness-icon')).toBeNull();
       (g.$(`#dispatches ${view === 'cards' ? '.card' : '.rowhead'}`) as HTMLElement).click(); await g.settle();
       details(['codex', 'gpt-5.4', 'high', 'unknown', observedAt]);
       expect(g.$('#modalbox')?.textContent?.match(/gpt-5\.4/g)).toHaveLength(1);
@@ -68,23 +70,24 @@ describe('worker metadata in the glass', () => {
     Object.assign(d.traps[0]!, { model: null, config: { effort: null, permissionMode: null }, observedAt: undefined });
     g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#traps', prefs: { view: 'cards' } });
     expect(g.$('#traps .worker-harness')?.getAttribute('aria-label')).toBe('Codex · model unknown');
-    expect(g.$('#chips .worker-harness')?.getAttribute('aria-label')).toBe('Claude · claude-sonnet-4-6');
+    expect(g.$('#chips .worker-harness')?.getAttribute('aria-label')).toBe('claude-sonnet-4-6');
     (g.$('#traps .card') as HTMLElement).click(); await g.settle();
     details(['codex', 'model unknown', 'unknown', 'unknown', 'unknown']);
   });
 });
 
-it('keeps harness choices named and submits the selected icon choice', async () => {
+it('keeps full harness names in the chooser and submits the selected harness', async () => {
   const snapshot = fixture();
   snapshot.focusToken = 'test-page-token';
   snapshot.repoKeys = ['web'];
   g = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: '#traps', post: () => ({ status: 200, body: { ok: true } }) });
   (g.$('#traps .newtrap button') as HTMLElement).click();
   await g.settle();
-  const choices = g.$$('#traps input[name="harness"]');
-  expect(choices.map(choice => choice.getAttribute('aria-label'))).toEqual(['Claude', 'Codex']);
-  expect(g.$$('#traps .harness-picker [role="img"]').map(icon => icon.getAttribute('title'))).toEqual(['Claude', 'Codex']);
-  (choices[1] as HTMLInputElement).click();
+  const choice = g.$('#traps select[name="harness"]') as HTMLSelectElement;
+  expect([...choice.options].map(option => option.textContent)).toEqual(['Claude', 'Codex']);
+  expect(g.$('#traps .newtrap .harness-icon')).toBeNull();
+  choice.value = 'codex';
+  choice.dispatchEvent(new g.window.Event('change', { bubbles: true }));
   await g.settle();
   (g.$('#traps .newtrap button[type="submit"]') as HTMLElement).click();
   await g.settle();

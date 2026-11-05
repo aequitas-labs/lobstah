@@ -72,7 +72,7 @@ function deckItem(it: DeckItem, view: View) {
   const badge =
     it.badge &&
     (it.badge.worker
-      ? html`<${Harness} worker=${it.badge.worker} label=${it.badge.text} cls=${'badge ' + (it.badge.tone || 'dim')} />`
+      ? html`<${Harness} worker=${it.badge.worker} label=${it.badge.text} cls=${'badge ' + (it.badge.tone || 'dim')} compact />`
       : html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`);
   const worker = it.worker && html`<${Harness} worker=${it.worker} />`;
   if (it.href) {
