@@ -65,6 +65,8 @@ describe('what a pattern allows through', () => {
   it('a * inside a pattern is one word, so a wrapper cannot be handed another command', () => {
     const grant = grantFor(commandPatterns('scripts/with-timeout * npx wrangler tail'));
     expect(grantCovers(grant, asTrap('scripts/with-timeout 60 npx wrangler tail'), roots)).toBe(true);
+    expect(grantCovers(grant, asTrap('scripts/with-timeout 90 npx wrangler tail other --format json'), roots)).toBe(true);
+    expect(grantCovers(grant, asTrap('scripts/with-timeout 60 npx wrangler tailor'), roots)).toBe(false);
     expect(grantCovers(grant, asTrap('scripts/with-timeout 60 rm -rf build npx wrangler tail'), roots)).toBe(false);
     expect(grantCovers(grant, asTrap('scripts/with-timeout 60 bash -c "rm x" npx wrangler tail'), roots)).toBe(false);
   });

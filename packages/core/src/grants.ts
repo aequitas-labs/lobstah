@@ -435,6 +435,7 @@ function pathGlobMatches(glob: string, text: string): boolean {
  * so `with-timeout * npx wrangler tail` can't take `60 bash -c "rm x"` as its
  * `*`. Only a final `*` runs on past a space, and one inside an open quote stops
  * at the closing quote, so `--command "SELECT *` doesn't take `1" --file evil.sql`.
+ * A glob with no final `*` takes more arguments after it, as a prefix does.
  */
 function commandGlobMatches(glob: string, command: string): boolean {
   const parts = glob.split('*');
@@ -446,7 +447,7 @@ function commandGlobMatches(glob: string, command: string): boolean {
     const stem = parts.slice(0, -1).map((part) => `${escapeRegExp(part)}\\S*`).join('') + escapeRegExp(parts.at(-1)!);
     body = stem + (openQuote ? `[^${openQuote}]*${openQuote}` : '[\\s\\S]*');
   } else {
-    body += escapeRegExp(last);
+    body += `${escapeRegExp(last)}(?: [\\s\\S]*)?`;
   }
   return new RegExp(`^${body}$`).test(command);
 }
