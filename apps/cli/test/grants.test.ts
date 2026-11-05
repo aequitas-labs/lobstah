@@ -14,12 +14,12 @@ import {
   revokeGrant,
   readDecision,
   readDecisionDetail,
+  readStatusLog,
   signOnTrap,
   standingDecisions,
   takeHelm,
   trapBySession,
   unhandled,
-  readDecisionDetail,
 } from '@lobstah/core';
 import { askPermission, callRequests, confirm, patchPaths, personOnly, rosterConfigPatch } from '../src/grants-cli.js';
 import { answerKey } from '../src/decision-answer.js';
@@ -79,7 +79,7 @@ describe('lobstah hook permission-request', () => {
     });
 
   it('files a Codex cmd request as a permission card, and its always grant covers different arguments', () => {
-    trap('codex-trap', 'codex');
+    const registered = trap('codex-trap', 'codex');
     enqueue({ id: 'd-codex', repo: 'web', brief: 'push the plan' });
     expect(claimBait(trapBySession('codex-trap')!)?.id).toBe('d-codex');
     const command = 'ume push .temp/plan.html --session f6cc416c --project p --gate plan --title "Plan"';
@@ -89,7 +89,7 @@ describe('lobstah hook permission-request', () => {
     const cards = standingDecisions();
     expect(cards).toHaveLength(1);
     const c = cards[0]!;
-    expect(c.title).toBe('Allow: ume push');
+    expect(c.title).toBe(`${registered.name} wants to run: \`${command}\``);
     expect(c.optionNotes?.['Allow always']).toBe('`ume push …` (any arguments) for Codex traps');
     expect(readDecisionDetail(c.key)).toContain(command);
     answerKey(c.key, { option: 'Allow always', by: 'glass' });
@@ -100,6 +100,58 @@ describe('lobstah hook permission-request', () => {
     });
     expect(JSON.parse(next.stdout)).toEqual(ALLOW);
     expect(standingDecisions()).toHaveLength(0);
+  });
+
+  it.each(['claude', 'codex'] as const)('lets a held %s report reach the helm without an Allow card', (harness) => {
+    const session = `${harness}-report`;
+    trap(session, harness);
+    enqueue({ id: 'held-report', repo: 'web', brief: 'Choose the next step' });
+    claimBait(trapBySession(session)!);
+    const note = 'Pick B option 1, 2 or 3;\nthen confirm the read-only check.';
+    const command = `lobstah report held-report needs-decision "${note}"`;
+    const result = run(['hook', 'permission-request'], {
+      session_id: session,
+      tool_name: harness === 'claude' ? 'Bash' : 'functions.exec_command',
+      tool_input: { command, description: 'Pick B option 1, 2 or 3' },
+    });
+    expect(JSON.parse(result.stdout)).toEqual(ALLOW);
+    const delivered = run(['report', 'held-report', 'needs-decision', note], undefined);
+    expect(delivered.status, delivered.stderr).toBe(0);
+    expect(readStatusLog('held-report', 'work').at(-1)).toMatchObject({ verb: 'needs-decision', note });
+    expect(standingDecisions()).toEqual([]);
+  });
+
+  it('does not treat a compound command or substitution as only a report', () => {
+    trap('report-trap', 'claude');
+    enqueue({ id: 'compound-report', repo: 'web', brief: 'Choose the next step' });
+    claimBait(trapBySession('report-trap')!);
+    for (const command of [
+      'lobstah report compound-report working ok; npm publish',
+      'lobstah report compound-report working "$(npm publish)"',
+      'lobstah report compound-report working ok\nnpm publish',
+      'lobstah report compound-report working ok # comment\\\nnpm publish',
+    ]) {
+      expect(ask('report-trap', command).stdout).toBe('');
+    }
+    expect(standingDecisions()).toHaveLength(4);
+  });
+
+  it('titles an Allow card with the command and labels the description separately', () => {
+    const registered = trap('description-trap', 'claude');
+    enqueue({ id: 'description-report', repo: 'web', brief: 'Inspect the build' });
+    claimBait(trapBySession('description-trap')!);
+    const command = 'ps -p 1842 -o pid,etime,command';
+    const description = 'Pick B option 1, 2 or 3';
+    run(['hook', 'permission-request'], {
+      session_id: 'description-trap', tool_name: 'Bash', tool_input: { command, description },
+    });
+    const [card] = standingDecisions();
+    expect(card!.title).toBe(`${registered.name} wants to run: \`${command}\``);
+    expect(card!.title).not.toContain(description);
+    expect(card!.permission?.command).toBe(command);
+    const detail = readDecisionDetail(card!.key);
+    expect(detail).toContain(`\`\`\`\n${command}\n\`\`\``);
+    expect(detail).toContain(`**Trap's description:** ${description}`);
   });
 
   it("allows a trap's granted command, and nothing else", () => {
@@ -284,8 +336,16 @@ describe('a permission card', () => {
   it('offers Allow once, Allow always and No, and shows the exact command', () => {
     const c = card();
     expect(c.options).toEqual(['Allow once', 'Allow always', 'Allow this tool family for 15 min', 'No']);
-    expect(c.title).toBe('Allow: wrangler deploy');
+    expect(c.title).toMatch(/ wants to run: `wrangler deploy`$/);
     expect(readDecision(c.key)?.permission).toMatchObject({ command: 'wrangler deploy', harness: 'codex' });
+  });
+
+  it('truncates the command title while preserving the full command in the detail', () => {
+    const command = `git diff -- ${'long-file-name/'.repeat(30)}file.ts`;
+    const c = askPermission({ dispatch: 'long-command', lane: 'work', ask: { command, harness: 'codex', trap: 'early-cove' } });
+    expect(c.title).toHaveLength(200);
+    expect(c.title).toMatch(/^early-cove wants to run: `git diff -- .*…`$/);
+    expect(readDecisionDetail(c.key)).toContain(command);
   });
 
   it('Allow once in the glass grants it to the asking trap, once, and tells the trap to retry exactly', () => {

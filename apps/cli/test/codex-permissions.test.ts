@@ -73,7 +73,7 @@ describe('editing [auto_review].extra_policy', () => {
 });
 
 describe('the Codex plan', () => {
-  it('adds context only, the same entries Claude Code gets, and only allow rules for proposals and helm relays', () => {
+  it('adds context only, the same entries Claude Code gets, and only allow rules for proposals and coordination', () => {
     expect(lobstahContext('/h/w', 4949).map((e) => /^\*\*[^*]+\*\*/.exec(e)?.[0])).toEqual(['**lobstah worktrees**', '**lobstah helm**', '**lobstah glass**']);
     expect(baseProfile('/h/w', 4949).environment).toEqual(lobstahContext('/h/w', 4949));
     expect(planCodex(EXT, false, env())!.changes.filter((c) => c.at === 'auto_review.extra_policy').map((c) => c.entry)).toEqual([...lobstahContext(), ...EXT.environment]);
@@ -81,6 +81,8 @@ describe('the Codex plan', () => {
       expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'permissions', 'propose'] }),
       expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'dispatch'] }),
       expect.objectContaining({ decision: 'allow', pattern: ['lobstah', 'send'] }),
+      ...['report', 'todo', 'status', 'inbox', 'soak', 'stow', 'catch', 'ls', 'logs', 'reports', 'goals', 'attention', 'prs', 'reviews']
+        .map((command) => expect.objectContaining({ decision: 'allow', pattern: ['lobstah', command] })),
     ]);
   });
 
@@ -112,7 +114,9 @@ describe('the Codex plan', () => {
       seen.push(command.join(' '));
       return { status: 0, stdout: '{"decision":"forbidden"}', stderr: '' };
     });
-    expect(seen).toEqual(['lobstah permissions propose', 'lobstah dispatch', 'lobstah send', 'vercel env pull', 'wrangler dev']);
+    expect(seen).toEqual(['lobstah permissions propose', 'lobstah dispatch', 'lobstah send',
+      ...['report', 'todo', 'status', 'inbox', 'soak', 'stow', 'catch', 'ls', 'logs', 'reports', 'goals', 'attention', 'prs', 'reviews'].map((command) => `lobstah ${command}`),
+      'vercel env pull', 'wrangler dev']);
   });
 });
 
