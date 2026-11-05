@@ -1742,6 +1742,8 @@ async function mainCli(): Promise<void> {
       if (!has('--print')) {
         const holders = sessionHolders(sessionId);
         if (holders.length) throw new Error(`not attaching ${id}: ${sessionHolderText(sessionId, holders)}`);
+        const claiming = listRoster().filter((entry) => entry.sessionId === sessionId);
+        if (claiming.length > 1) throw new Error(`not attaching ${id}: session ${sessionId.slice(0, 8)} is claimed by traps ${claiming.map((entry) => entry.name).join(', ')}, and a resume would make a second writer`);
       }
       if (harness === 'codex' && codexDesktopThread(sessionId)) {
         throw new Error(

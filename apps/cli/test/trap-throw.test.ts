@@ -541,7 +541,7 @@ describe('the start command', () => {
       }
     });
 
-    processTest('throw refuses a session another trap is registered on', async () => {
+    processTest('throw starts cold, with no resume, on a session another trap is registered on', async () => {
       const reg = await thrown();
       stow(reg, true);
       const project = path.join(claudeHome, 'projects', reg.worktree.replace(/[^A-Za-z0-9-]/g, '-'));
@@ -549,8 +549,14 @@ describe('the start command', () => {
       fs.writeFileSync(path.join(project, `${OTHER}.jsonl`), '{}\n');
       fs.writeFileSync(trapFile('93a6a892'), JSON.stringify({ trapId: '93a6a892', name: 'smooth-gull', worktree: path.join(home, 'x'), cwd: home, harness: 'claude', sessionId: OTHER, signedOnAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() }));
       const seen: TerminalLaunch[] = [];
-      await expect(throwTrap({ cfg: loadConfig(), address: reg.name!, adapter: idle(seen), timeoutSecs: 1 })).rejects.toThrow('trap smooth-gull');
-      expect(seen).toHaveLength(0);
+      const fresh = '33333333-4444-4555-8666-777777777777';
+      const result = await throwTrap({ cfg: loadConfig(), address: reg.name!, adapter: fakeTerminal(fresh, seen), timeoutSecs: 20 });
+      expect(result.action).toBe('cold');
+      expect(result.why).toContain(`session ${OTHER.slice(0, 8)} belongs to live trap smooth-gull`);
+      expect(seen).toHaveLength(1);
+      expect(JSON.stringify(seen[0])).not.toContain('--resume');
+      expect(JSON.stringify(seen[0])).not.toContain(OTHER);
+      expect(result.registration.sessionId).toBe(fresh);
     });
 
     processTest('stow names a trap: with two on one session it refuses to guess, and --wt stows only that one', async () => {
