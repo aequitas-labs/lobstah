@@ -17,6 +17,8 @@ import {
   Table,
   trapNow,
   trapNowText,
+  trapDisplayName,
+  trapScope,
   trapRow,
   windowAction,
   DesktopStartAction,
@@ -37,7 +39,7 @@ const dim = (t: GlassTrap): string => (t.live || t.starting ? '' : ' dim');
 
 function row(t: GlassTrap, grants: Grant[]) {
   const r = trapRow(t);
-  return html`<tr key=${t.trapId} class=${'rowhead' + dim(t)} onClick=${opener('trap', t.trapId)}><td><b>${t.label ?? `wt:${t.trapId}`}</b></td><td>${t.configured ? `trap:${t.configured.profile} · ${t.configured.grounds}` : (t.repo ?? '—')}</td><td class="grow">${t.worktree ?? ''}</td><td>${t.harness && html`<${Harness} worker=${t} cls="" />`}</td><td>${(t.sessionId ?? '').slice(0, 8)}<${GrantChip} session=${t.sessionId} grants=${grants} /></td><td>${trapNow(t)}${startCommands(t)}</td><td>${r.listen}</td><td>${r.hb}</td><td>${mailCell(t)}</td><td class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</td><td>${windowAction(t)}</td></tr>`;
+  return html`<tr key=${t.trapId} class=${'rowhead' + dim(t)} onClick=${opener('trap', t.trapId)}><td><b title=${`wt:${t.trapId}`}>${trapDisplayName(t)}</b><div class="trap-address dim">wt:${t.trapId}</div></td><td>${t.configured ? `trap:${t.configured.profile} · ${t.configured.grounds}` : (t.repo ?? '—')}</td><td class="grow">${t.worktree ?? ''}</td><td>${t.harness && html`<${Harness} worker=${t} cls="" />`}</td><td>${(t.sessionId ?? '').slice(0, 8)}<${GrantChip} session=${t.sessionId} grants=${grants} /></td><td>${trapNow(t)}${startCommands(t)}</td><td>${r.listen}</td><td>${r.hb}</td><td>${mailCell(t)}</td><td class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</td><td>${windowAction(t)}</td></tr>`;
 }
 
 function card(t: GlassTrap, grants: Grant[]) {
@@ -55,7 +57,7 @@ function card(t: GlassTrap, grants: Grant[]) {
   ]
     .filter(Boolean)
     .join(' · ');
-  return html`<div key=${t.trapId} class=${'card' + dim(t)} onClick=${opener('trap', t.trapId)}><div class="top"><b>🪤 ${t.repoLabel ?? t.label ?? `wt:${t.trapId}`}</b>${!t.requested && !t.starting && t.harness ? html`<${Harness} worker=${t} />` : html`<span class=${'badge' + badgeLong(badgeText(t))} title=${badgeTitle(badgeText(t))}>${badgeText(t)}</span>`}</div><div class="meta" title=${meta}>${meta}<${GrantChip} session=${t.sessionId} grants=${grants} /></div>${t.worktree && html`<div class="note" title=${t.worktree}>${t.worktree}</div>`}<div class="note" title=${trapNowText(t)}>${trapNow(t)}</div>${startCommands(t)}<div class="foot"><span>${r.listen}${t.live && [' · heartbeat ', r.hb]} · <span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>${mail && [' · ', mail]}</span><span class="footact">${windowAction(t)}</span></div></div>`;
+  return html`<div key=${t.trapId} class=${'card' + dim(t)} onClick=${opener('trap', t.trapId)}><div class="top"><b title=${`wt:${t.trapId}`}>🪤 ${trapDisplayName(t)}</b>${!t.requested && !t.starting && t.harness ? html`<${Harness} worker=${t} />` : html`<span class=${'badge' + badgeLong(badgeText(t))} title=${badgeTitle(badgeText(t))}>${badgeText(t)}</span>`}</div><div class="meta" title=${meta}>${meta}<${GrantChip} session=${t.sessionId} grants=${grants} /></div>${t.worktree && html`<div class="note" title=${t.worktree}>${t.worktree}</div>`}<div class="note" title=${trapNowText(t)}>${trapNow(t)}</div>${startCommands(t)}<div class="foot"><span>${r.listen}${t.live && [' · heartbeat ', r.hb]} · <span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>${mail && [' · ', mail]}</span></div><div class="foot"><span class="trap-scope" title=${trapScope(t)}>${trapScope(t)}</span><span class="footact">${windowAction(t)}</span></div></div>`;
 }
 
 export function Traps({ inp, grants = [] }: { inp: SectionInputs['traps']; grants?: Grant[] }) {
