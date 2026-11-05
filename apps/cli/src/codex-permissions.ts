@@ -244,6 +244,39 @@ export function planCodex(ext: PermissionsConfig, remove: boolean, env: NodeJS.P
   return { home: dir, configFile, rulesFile, config: { ...(before !== undefined ? { before } : {}), after }, rules: { ...(rulesBefore !== undefined ? { before: rulesBefore } : {}), ...(rulesAfter !== undefined ? { after: rulesAfter } : {}) }, rulesList, changes };
 }
 
+const INTENT_BEGIN = '<!-- lobstah:intents:begin (written by lobstah for intent grants; edits inside are replaced) -->';
+const INTENT_END = '<!-- lobstah:intents:end -->';
+
+/**
+ * Replace the intent grants' block in `[auto_review].extra_policy`, leaving
+ * lobstah's own profile block and everything of the user's alone. Codex reads
+ * this file when a session starts, so a session already running doesn't see
+ * the change. Does nothing when Codex isn't set up here, or when the file
+ * already says this. Every other value in the file must come through unchanged.
+ */
+export function writeCodexIntentBlock(entries: string[], env: NodeJS.ProcessEnv = process.env, home = os.homedir()): void {
+  const dir = codexHome(env, home);
+  if (!fs.existsSync(dir)) return;
+  const configFile = path.join(dir, 'config.toml');
+  const before = readText(configFile) ?? '';
+  const parsed = parseConfig(configFile, before);
+  const review = parsed.auto_review as Record<string, unknown> | undefined;
+  const current = review?.extra_policy;
+  if (current !== undefined && typeof current !== 'string') throw new Error(`auto_review.extra_policy in ${configFile} is not a string`);
+  if (review !== undefined && !scan(before.split('\n')).some((l) => l.header === 'auto_review')) {
+    throw new Error(`auto_review in ${configFile} is set with a dotted key or an inline table`);
+  }
+  const start = (current ?? '').indexOf(INTENT_BEGIN);
+  const end = (current ?? '').indexOf(INTENT_END);
+  const others = (start >= 0 && end > start ? (current ?? '').slice(0, start) + (current ?? '').slice(end + INTENT_END.length) : (current ?? '')).trim();
+  const block = entries.length ? [INTENT_BEGIN, ...entries, INTENT_END].join('\n') : '';
+  const policy = [others, block].filter(Boolean).join('\n\n') || undefined;
+  if (policy === current) return;
+  const after = setExtraPolicy(before, policy);
+  if (!sameApartFromPolicy(parsed, parseConfig(configFile, after), policy)) throw new Error(`editing ${configFile} would change other values`);
+  writeAtomic(configFile, after);
+}
+
 export type ExecpolicyCheck = (rulesFile: string, command: string[], env: NodeJS.ProcessEnv) => { status: number | null; stdout: string; stderr: string; missing?: boolean };
 
 const runCheck: ExecpolicyCheck = (rulesFile, command, env) => {
