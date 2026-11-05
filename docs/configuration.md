@@ -197,7 +197,7 @@ send a continuation.
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
 | `todoStaleDays` | `3` | Open helm todos with no due time and older than this many days are stale and require a todo/goals pass. `0` disables staleness. |
 | `passIntervalSecs` | `7200` | Maximum seconds between delivered todo/goals passes. `0` disables only this interval; a new goals day or newly stale todo still makes a pass due. |
-| `briefTodoLimit` | `5` | Maximum open todos in the session-start brief, oldest first; the remainder is counted. `0` shows only the count. Overdue todos always show and use up the limit. Todos waiting for a time collapse to one count line. |
+| `briefTodoLimit` | `5` | Maximum unscheduled open todos in the session-start brief, oldest first; the remainder is counted. `0` shows only their count. Overdue todos always show and use up the limit. Future and snoozed todos always stay listed with their due times, outside the limit. |
 | `goalsNudgeSecs` | `7200` | Minimum seconds between capped goals lines on `man wait` timeout digests, per helm session; resets at the goals-day boundary. `0` disables. |
 | `chat` | `"full"` | Default chat detail: `"full"` or `"brief"`. Brief mode points at cards instead of repeating detail and keeps routine wakes quiet. `lobstah man chat brief\|full [--grounds <name>]` or glass Settings overrides it for that grounds' signed-on helm, effective next turn, without a restart or config edit. The override stays with the seat on re-sign/takeover and ends when relieved. |
 
