@@ -100,6 +100,19 @@ describe('a hook honours an intent grant', () => {
     expect(listGrants().grants[0]!.uses).toBe(1);
   });
 
+  it('counts a Codex call once, though only its first hook names the call', () => {
+    signOn('pearl-gull', 'codex');
+    intentGrant({ harness: 'any' });
+    const input = { command: 'npx wrangler tail' };
+    const preToolUse = { harness: 'codex' as const, tool: 'Bash', input, session: SESSION, callId: 'exec-1', turn: 'turn-1' };
+    const permissionRequest = { harness: 'codex' as const, tool: 'Bash', input, session: SESSION, turn: 'turn-1' };
+    checkCall(preToolUse, worktree, true);
+    checkCall(permissionRequest, worktree, false);
+    expect(listGrants().grants[0]!.uses).toBe(1);
+    checkCall({ ...preToolUse, callId: 'exec-2', turn: 'turn-2' }, worktree, true);
+    expect(listGrants().grants[0]!.uses).toBe(2);
+  });
+
   it('every file in a patch must match, and a tool grant covers a call naming no command or file', () => {
     signOn();
     const grant = intentGrant({ intent: { text: 'write the report', patterns: [parseIntentPattern('path:reports/'), parseIntentPattern('tool:mcp__cloudflare__*')] } });
