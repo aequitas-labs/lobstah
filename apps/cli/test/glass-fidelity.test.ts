@@ -155,6 +155,15 @@ function foldPrTitles(el: Element): Node {
   }
   for (const n of copy.querySelectorAll('.chip.click .dim')) n.textContent = (n.textContent ?? '').replace(/ · chat (full|brief)$/, '');
   for (const n of copy.querySelectorAll('.prack')) n.remove();
+  // Product icons replace text intentionally. Restore only their legacy representation;
+  // the worker metadata tests check the real accessible names and selection behavior.
+  for (const icon of copy.querySelectorAll('.harness-icon')) {
+    if (icon.parentElement?.classList.contains('worker-harness') && icon.parentElement.querySelector('b')) {
+      const gap = icon.nextSibling;
+      if (gap?.nodeType === 3 && !gap.textContent?.trim()) gap.remove();
+      icon.remove();
+    } else icon.replaceWith(doc.createTextNode((icon.getAttribute('aria-label') ?? '').toLowerCase()));
+  }
   // Intentional worker UI additions have functional coverage separately.
   // Keep comparing the unrelated UI against the frozen pre-metadata page.
   for (const n of copy.querySelectorAll('.worker-details')) {

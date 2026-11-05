@@ -361,7 +361,7 @@ describe('glass: short card badges stay whole', () => {
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
     const trap = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
     const claude = trap.querySelector('.top > .badge')!;
-    expect(text(claude)).toBe('claude');
+    expect(claude.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Claude');
     expect(claude.className).not.toContain('long');
     expect(style(claude).getPropertyValue('flex')).toBe('0 0 auto');
     // Twelve characters is still whole; thirteen is long.

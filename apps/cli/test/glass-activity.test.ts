@@ -137,7 +137,8 @@ describe('glass: a requested trap, and the start command on a starting card only
       const g = await page(fleetWith(true), { hash: '#traps', prefs: { view } });
       const items = view === 'cards' ? g.$$('#traps .card') : g.$$('#traps tr');
       const requested = items.find((c) => text(c).includes('requested ·'))!;
-      expect(text(requested)).toContain('requested · web · claude · waiting for the helm');
+      expect(text(requested)).toContain('requested · web · · waiting for the helm');
+      expect(requested.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Claude');
       expect(requested.className).toContain('dim');
       const blocks = g.$$('#traps .startcmds');
       expect(blocks).toHaveLength(1);
@@ -148,7 +149,7 @@ describe('glass: a requested trap, and the start command on a starting card only
   }
   it('with no helm signed on, the requested card says so; the deck has the New trap button', async () => {
     const g = await page(fleetWith(false), { hash: '#traps', prefs: { view: 'cards' } });
-    expect(g.$$('#traps .card').some((c) => text(c).includes('requested · web · claude · waiting for a helm'))).toBe(true);
+    expect(g.$$('#traps .card').some((c) => text(c).includes('requested · web · · waiting for a helm') && c.querySelector('[aria-label="Claude"]'))).toBe(true);
     await g.go('#deck');
     expect(g.$$('#deck .newtrap button').map(text)).toEqual(['+ New trap']);
   });
