@@ -1,6 +1,6 @@
 /** Portable coordination records. No filesystem, service or runtime imports. */
 export type BackendVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed';
-export type BackendWait = 'review' | 'pr' | 'deploy' | 'person' | 'external';
+export type BackendWait = 'review' | 'pr' | 'deploy' | 'person' | 'external' | 'heavy';
 export interface DispatchInput {
   id: string; repo: string; repoRemote?: string; brief: string; lane?: 'work' | 'chore';
   for?: string; boat?: string; followUp?: string; harness?: string; model?: string; effort?: string;

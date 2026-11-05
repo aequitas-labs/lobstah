@@ -3,8 +3,17 @@ import { IdleWait, loadConfig, brokerRequest, forgetBrokerAgent, readBrokerAgent
 import { resolveSessionId } from './session-id.js';
 import { wharfSessionPid } from './wharf-session-pid.js';
 import { detectHarness } from './harness-detect.js';
+import { TMUX_SOCKET } from './tmux-terminal.js';
 type Scope = Extract<BackendScope, { kind: 'wharf' }>;
 type Options = { opt: (flag: string) => string | undefined; has: (flag: string) => boolean };
+/**
+ * The pane to publish to the wharf, only when it's on lobstah's own tmux
+ * server, because that's the server the command wharf offers will name.
+ */
+export function lobstahTmuxPane(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const socket = env.TMUX?.split(',')[0];
+  return env.TMUX_PANE && socket && path.basename(socket) === TMUX_SOCKET ? env.TMUX_PANE : undefined;
+}
 export const brokerBody = (a: BrokerAgent) => ({ grounds: a.grounds, session: a.session, capability: a.capability });
 export async function endBrokerAgent(a: BrokerAgent) {
   try { await brokerRequest('end', brokerBody(a)); }
@@ -42,7 +51,7 @@ export async function wharfSoak(scope: Scope, opts: Options): Promise<void> {
     const t = supplied ? { ticket: supplied, trap: process.env.LOBSTAH_WHARF_TRAP,
       request: process.env.LOBSTAH_WHARF_REQUEST, repo, grounds: scope.grounds }
       : await brokerRequest<Record<string, unknown>>('ticket', { grounds: scope.grounds, repo, cwd: process.cwd() });
-    a = await brokerRequest<BrokerAgent>('sign-on', { ...t, session, pid: wharfSessionPid(), harness: harness.harness });
+    a = await brokerRequest<BrokerAgent>('sign-on', { ...t, session, pid: wharfSessionPid(), harness: harness.harness, tmuxPane: lobstahTmuxPane() });
     saveBrokerAgent(a); saveBrokerAgent(a, a.worktree);
   }
   if (path.resolve(process.cwd()) !== path.resolve(a.worktree)) {

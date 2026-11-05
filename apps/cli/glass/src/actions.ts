@@ -395,6 +395,9 @@ export function closeModal(): void {
   setState({ modal: null, detail: null });
 }
 
+/** Why an action can't run on a page viewed through another address. */
+export const READ_ONLY_REASON = 'This glass is read-only from here';
+
 /** Ask the local server to focus one live trap; it accepts no path, URL, or command. */
 export async function openTrapWindow(trapId: string): Promise<void> {
   const token = getState().snapshot?.focusToken;
@@ -405,9 +408,9 @@ export async function openTrapWindow(trapId: string): Promise<void> {
       headers: { 'x-lobstah-focus-token': token },
     });
     const result = (await response.json()) as { message?: string; reason?: string };
-    setState({ focusResults: { ...getState().focusResults, [trapId]: result.message ?? result.reason ?? 'Window focus failed.' } });
+    setState({ focusResults: { ...getState().focusResults, [trapId]: result.message ?? result.reason ?? 'Window focus failed' } });
   } catch {
-    setState({ focusResults: { ...getState().focusResults, [trapId]: 'Window focus failed.' } });
+    setState({ focusResults: { ...getState().focusResults, [trapId]: 'Window focus failed' } });
   }
 }
 
@@ -417,8 +420,9 @@ export async function openTrapWindow(trapId: string): Promise<void> {
  * snapshot follows at once so the requested card shows.
  */
 export async function requestTrap(repo: string, harness: string): Promise<string | undefined> {
-  const token = getState().snapshot?.focusToken;
-  if (!token) return 'The glass has no page token yet.';
+  const snapshot = getState().snapshot;
+  const token = snapshot?.focusToken;
+  if (!token) return snapshot?.viewer?.onMachine === false ? READ_ONLY_REASON : 'The glass has no page token yet.';
   try {
     const response = await fetch('/requests', {
       method: 'POST',
@@ -469,8 +473,9 @@ export async function changeHelmChat(grounds: string, chat: 'full' | 'brief'): P
 }
 
 async function glassRequest(kind: string, payload: Record<string, unknown>): Promise<string | undefined> {
-  const token = getState().snapshot?.focusToken;
-  if (!token) return 'The glass has no page token yet.';
+  const snapshot = getState().snapshot;
+  const token = snapshot?.focusToken;
+  if (!token) return snapshot?.viewer?.onMachine === false ? READ_ONLY_REASON : 'The glass has no page token yet.';
   try {
     const response = await fetch('/requests', {
       method: 'POST',

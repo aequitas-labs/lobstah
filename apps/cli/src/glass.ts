@@ -39,7 +39,13 @@ import {
   trapStartCommands,
   writeRequest,
   trapLastSeen,
+  claudeTranscriptFile,
+  processRemoteLink,
+  readClaudeProcesses,
+  transcriptRemoteLink,
+  validRemoteLink,
   validSessionLink,
+  viewerDevice,
   linkMismatch,
   trapLabel,
   trapRepoLabel,
@@ -75,8 +81,9 @@ import {
   parseTodoUntil,
   snoozeTodo,
   TodoError,
+  heavyGlassView,
 } from '@lobstah/core';
-import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
+import type { Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
@@ -100,7 +107,7 @@ import { startSnapshotThread } from './glass-snapshot-thread.js';
 import { briefTitle, olderPage, pollBody } from './glass-poll.js';
 import { GlassPresence, PAGE_ID_RE, showSecretMatches, validShowHash } from './glass-presence.js';
 import type { PollBody } from './glass-poll.js';
-import { focusRegistration, liveTrap } from './focus.js';
+import { focusRegistration, liveTrap, machineName, tmuxAttachCommand } from './focus.js';
 import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
@@ -195,6 +202,31 @@ function assetPath(name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * A live Claude trap's link, found per trap: its own running process, in
+ * Claude's record of it, shows whether Remote Control is connected right now.
+ * Two processes on the session would take a phone's message to two writers,
+ * so the page says so instead of offering the link. No process means nothing
+ * can open. Only a Claude that keeps no such records falls back on the URL it
+ * wrote to the transcript of a run started with --remote-control.
+ */
+function trapLiveView(t: GlassTrap, processes: ClaudeProcess[] | undefined): Pick<GlassTrap, 'liveLink' | 'sessionWriters'> {
+  if (!t.sessionId) return {};
+  const manual = validRemoteLink(t.remoteLink) ? t.remoteLink : undefined;
+  if (processes) {
+    const mine = processes.filter((p) => p.sessionId === t.sessionId);
+    if (mine.length > 1) return { sessionWriters: mine.map((p) => p.pid) };
+    const link = mine[0] ? (processRemoteLink(mine[0]) ?? manual) : undefined;
+    return link ? { liveLink: link } : {};
+  }
+  if (manual) return { liveLink: manual };
+  const since = t.remoteControlSince ? Date.parse(t.remoteControlSince) : NaN;
+  if (!Number.isFinite(since)) return {};
+  const file = claudeTranscriptFile(t.sessionId, [t.cwd, t.worktree].filter((c): c is string => !!c));
+  const liveLink = file ? transcriptRemoteLink(file, since) : undefined;
+  return liveLink ? { liveLink } : {};
 }
 
 /** Claude Code transcript: the cwd munged to '-' under ~/.claude/projects. */
@@ -637,6 +669,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     if (id) seenIds.add(id);
   }
   const catches = new Map(stats.perTrap.map((t) => [t.name, t.catches]));
+  // Read once per snapshot, and only if a live Claude trap needs it.
+  let claudeRead: { processes: ClaudeProcess[] | undefined } | undefined;
+  const claudeProcesses = () => (claudeRead ??= { processes: readClaudeProcesses() }).processes;
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
@@ -655,7 +690,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
       window,
+      attachCommand: registered ? tmuxAttachCommand(window, { onMachine: !!options.local, machine: machineName() }) : undefined,
       link: validSessionLink(link) && linkMismatch(link, window) === undefined ? link : undefined,
+      ...(registered && harness === 'claude' ? trapLiveView(t, claudeProcesses()) : {}),
       sessionId,
       harness,
       desktopThread: (harness === 'codex' && !!sessionId && !!codexDesktopThread(sessionId)) || undefined,
@@ -683,7 +720,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
             ...(() => {
               const ticket = options.local ? readReservationTicket(r.trapId) : undefined;
               const repoPath = cfg.repos[r.repo]?.path;
-              return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness) } : {};
+              return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness, r.remoteControlSince ? r.name : undefined) } : {};
             })(),
             ...(r.failedAt || Date.now() > (Date.parse(r.deadline) || 0)
               ? { failedAt: r.failedAt ?? r.deadline, reason: r.reason ?? `no session signed on by ${r.deadline}` }
@@ -707,6 +744,13 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     reviewTools: reviewTools(cfg),
     daemon: executor ? { version: executor.version, heartbeat: executor.heartbeat } : undefined,
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
+    heavy: (() => {
+      try {
+        return heavyGlassView(Date.now(), cfg);
+      } catch {
+        return undefined;
+      }
+    })(),
     helms,
     traps,
     stats: { catchesToday: stats.catchesToday, totalCatches: stats.totalCatches },
@@ -1116,21 +1160,21 @@ export function serveGlass(
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(result));
       };
-      if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required.' });
+      if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required' });
       if (
         !authorized(req, 'x-lobstah-focus-token') ||
         (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
         req.headers['transfer-encoding'] !== undefined
       ) {
-        return reply(403, { focused: false, reason: 'Focus request was not authorized.' });
+        return reply(403, { focused: false, reason: 'Focus request was not authorized' });
       }
       const trapId = req.url.slice('/api/focus/'.length);
-      if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id.' });
+      if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id' });
       const reg = liveTrap(trapId);
-      if (!reg) return reply(409, { focused: false, reason: 'Trap is not live.' });
+      if (!reg) return reply(409, { focused: false, reason: 'Trap is not live' });
       void (options.focus ?? focusRegistration)(reg)
         .then((result) => reply(result.focused ? 200 : 409, result))
-        .catch(() => reply(500, { focused: false, reason: 'Window focus failed.' }));
+        .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
       return;
     }
     if (req.url === '/api/version' && req.method === 'GET') {
@@ -1207,12 +1251,13 @@ export function serveGlass(
       // Start commands carry a ticket: only a same-host request (this
       // machine's own page, not a rebound name) gets them.
       const local = req.headers.host === ownHost();
-      const page = `"focusToken":${JSON.stringify(focusToken)},"focusSupported":${process.platform === 'darwin'}`;
+      const viewer: GlassViewer = { onMachine: local, windowFocus: local && process.platform === 'darwin', machine: machineName(), device: viewerDevice(req.headers['user-agent'], req.headers['sec-ch-ua-mobile']) };
+      const page = `"viewer":${JSON.stringify(viewer)}${local ? `,"focusToken":${JSON.stringify(focusToken)}` : ''}`;
       const send = (p: PollBody) => {
         // The ETag covers what a person reads, not the beats: a poll where
         // only heartbeats and ages moved answers 304, and the beats header
         // carries them either way.
-        const etag = `W/"${p.hash}.${instance}.${local ? 'l' : 'r'}"`;
+        const etag = `W/"${p.hash}.${instance}.${local ? 'l' : 'r'}.${viewer.device}"`;
         const headers = {
           'content-type': 'application/json',
           'cache-control': 'no-store',
