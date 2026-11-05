@@ -1,3 +1,4 @@
+import type { GlassSettings } from '@lobstah/core';
 import type { GlassBeats, GlassDispatch, GlassOlderKind, GlassOlderPage, GlassSnapshot, StatsPage } from '@lobstah/core';
 import {
   addOlder,
@@ -221,6 +222,23 @@ export async function loadStats(): Promise<void> {
     setState({ statsError: 'stats could not be read' });
   } finally {
     statsInflight = false;
+  }
+}
+
+let settingsInflight = false;
+
+/** The Settings tab's values: masked by the server, and only read. */
+export async function loadSettings(): Promise<void> {
+  if (settingsInflight) return;
+  settingsInflight = true;
+  try {
+    const r = await fetch('/data/settings', { cache: 'no-store' });
+    if (!r.ok) throw new Error(`/data/settings answered ${r.status}`);
+    setState({ settings: (await r.json()) as GlassSettings, settingsError: null });
+  } catch {
+    setState({ settingsError: 'Settings could not be read' });
+  } finally {
+    settingsInflight = false;
   }
 }
 
