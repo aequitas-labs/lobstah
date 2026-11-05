@@ -355,7 +355,7 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note. \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
---waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No; --intent <sentence> and --allow <pattern> propose approving that kind of action.`,
+--waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No; --allow <pattern> with an --intent <sentence> label propose allowing that kind of action.`,
   goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
 ${GOAL_WORDING_RULE}
 set replaces today's lines; add appends one; rm removes the displayed line number. Edits are allowed all day.

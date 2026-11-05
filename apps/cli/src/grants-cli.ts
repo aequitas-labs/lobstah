@@ -1,4 +1,3 @@
-import { syncIntentContext } from './intent-context.js';
 import type { GrantIntent, IntentPattern } from '@lobstah/core';
 import {
   firstHeavyReminder,
@@ -291,7 +290,6 @@ export function grantsCommand(opts: { all: boolean; json: boolean }): void {
 /** `lobstah grant revoke <id>`, also `lobstah revoke <id>`: anyone may take a permission away. */
 export function revokeCommand(id: string): void {
   const g = revokeGrant(id, AGENT_ENV.some((k) => process.env[k] !== undefined) ? 'agent' : localPerson());
-  syncIntentContext();
   console.log(toonKV({ revoked: g.id, what: what(g), at: g.revokedAt! }));
 }
 
@@ -388,8 +386,9 @@ export function checkCall(call: CallInput, cwd: string, sessionOnly = false): st
 
 /**
  * The intent grants allowing a trap's call straight through, or nothing. Every
- * request the call makes must match; only then is each use recorded. An intent
- * grant is honoured wherever the hook runs: a pattern match needs no reviewer.
+ * request the call makes must match; only then is each use recorded. Honoured
+ * wherever the hook runs, so a grant means the same on Claude Code and Codex,
+ * from the moment it's made.
  */
 function intentGrantIds(requests: GrantRequest[], base: GrantRequest, call: CallInput): string[] | undefined {
   const scoped = (requests.length ? requests : [{}]).map((request) => ({ ...base, ...request }));
@@ -504,8 +503,6 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}),
     };
     const cwd = typeof h.cwd === 'string' ? h.cwd : process.cwd();
-    // An intent grant that lapsed since the last call leaves the reviewers' context here.
-    syncIntentContext();
     const ids = checkCall(call, cwd, preToolUse);
     if (ids) {
       console.log(
@@ -592,19 +589,18 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
   }
 }
 
-/** The kind of action a card offers, as the person reads it before choosing. */
-function intentCardText(intent: GrantIntent, harness: PermissionAsk['harness']): string[] {
+/** What a card's "this kind" buttons approve, as the person reads it before choosing. */
+function intentCardText(intent: GrantIntent): string[] {
   return [
     '**This kind of action:**',
     '',
     `> ${intent.text}`,
     '',
-    ...(intent.patterns.length
-      ? ['**Runs without asking:**', '', ...intent.patterns.map((item: IntentPattern) => `- \`${intentPatternText(item)}\``), '']
-      : ['**Runs without asking:** nothing. Every command still goes to the reviewer.', '']),
-    `Anything else this trap does goes to its harness's reviewer as usual, which is told you approved this kind of action.${
-      harness === 'claude' ? '' : " A Codex session that's already running isn't told until its next session."
-    }`,
+    '**Runs without asking:**',
+    '',
+    ...intent.patterns.map((item: IntentPattern) => `- \`${intentPatternText(item)}\``),
+    '',
+    "Only these patterns are allowed. Anything else goes to the harness's reviewer, as it would without a grant.",
     '',
   ];
 }
@@ -641,12 +637,12 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
     target,
     '```',
     '',
-    ...(opts.ask.intent ? intentCardText(opts.ask.intent, opts.ask.harness) : []),
+    ...(opts.ask.intent ? intentCardText(opts.ask.intent) : []),
     `- **Allow once**: this trap may ${kind} it once, within the hour.`,
     ...(opts.ask.intent
       ? [
-          `- **${INTENT_HOUR_OPTION}**: approves this kind of action for this trap, for an hour.`,
-          `- **${INTENT_ALWAYS_OPTION}**: the same, until you revoke it on the Grants tab.`,
+          `- **${INTENT_HOUR_OPTION}**: these patterns, for this trap only, for an hour.`,
+          `- **${INTENT_ALWAYS_OPTION}**: these patterns, for every trap in ${opts.repo ?? 'this repo'}, until you revoke it on the Grants tab.`,
         ]
       : []),
     `- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
@@ -732,23 +728,25 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
   }
   if (answer.by === 'glass' && ask.intent && (answer.option === INTENT_HOUR_OPTION || answer.option === INTENT_ALWAYS_OPTION)) {
     const hour = answer.option === INTENT_HOUR_OPTION;
+    // For an hour, this trap only. Always, every trap in the repo. Each falls back to the other's scope when a card has only that.
+    const scope = hour ? (ask.trap ? { trap: ask.trap } : { repo: decision.repo }) : decision.repo ? { repo: decision.repo } : { trap: ask.trap };
     const grant = addGrant({
       mode: 'intent',
       intent: ask.intent,
-      harness: ask.harness,
+      // The patterns mean the same under either harness: lobstah's own hook matches them.
+      harness: 'any',
       by: 'glass',
-      ...(ask.trap ? { trap: ask.trap } : { repo: decision.repo }),
+      ...scope,
       ...(decision.dispatch ? { dispatch: decision.dispatch } : {}),
       ...(hour ? { expiresAt: new Date(Date.now() + INTENT_HOUR_MS).toISOString() } : {}),
     });
-    syncIntentContext();
     if (decision.dispatch) {
       sendMessage(
         decision.dispatch,
         decision.lane ?? 'work',
-        `Chris allowed this kind of action ${hour ? 'for an hour' : 'until revoked'}: grant ${grant.id}. ` +
-          (grant.intent!.patterns.length ? `Commands matching ${grant.intent!.patterns.map((item) => `\`${intentPatternText(item)}\``).join(', ')} run without asking. ` : '') +
-          `Anything else still goes to your harness's reviewer. Stay within what was approved: ${grant.intent!.text}`,
+        `Chris allowed this kind of action ${hour ? 'for this trap, for an hour' : `for every trap in ${grant.repo ?? 'this repo'}, until revoked`}: grant ${grant.id}. ` +
+          `Commands matching ${grant.intent!.patterns.map((item) => `\`${intentPatternText(item)}\``).join(', ')} now run without asking. ` +
+          "Anything else goes to your harness's reviewer as usual.",
         'glass',
       );
     }

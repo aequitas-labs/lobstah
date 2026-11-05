@@ -74,7 +74,9 @@ describe('the permission card', () => {
     expect(detail).toContain(INTENT.text);
     expect(detail).toContain('`scripts/with-timeout * npx wrangler tail`');
     expect(detail).toContain('`path:reports/`');
-    expect(detail).toContain("goes to its harness's reviewer");
+    expect(detail).toContain("Anything else goes to the harness's reviewer, as it would without a grant");
+    expect(detail).toContain('for this trap only, for an hour');
+    expect(detail).toContain('for every trap in web, until you revoke it');
   });
 
   it('leads with what is being approved, above the options', () => {
@@ -82,34 +84,38 @@ describe('the permission card', () => {
     const detail = fs.readFileSync(path.join(home, 'decisions', card.key.replace('decision:', ''), 'detail.md'), 'utf8');
     expect(detail.indexOf(INTENT.text)).toBeLessThan(detail.indexOf('**Allow once**'));
   });
-
-  it('is honest that a running Codex session is not told', () => {
-    const detailOf = (card: DecisionMeta) => fs.readFileSync(path.join(home, 'decisions', card.key.replace('decision:', ''), 'detail.md'), 'utf8');
-    expect(detailOf(askCard(INTENT))).not.toContain('already running');
-    const codex = askPermission({ dispatch: DISPATCH, lane: 'work', repo: 'web', ask: { command: 'npx wrangler tail', harness: 'codex', trap: 'pearl-gull', intent: INTENT } });
-    expect(detailOf(codex)).toContain("A Codex session that's already running isn't told until its next session");
-  });
-
-  it('says so when a sentence has no patterns', () => {
-    const card = askCard({ text: 'read logs', patterns: [] });
-    expect(fs.readFileSync(path.join(home, 'decisions', card.key.replace('decision:', ''), 'detail.md'), 'utf8')).toContain('nothing. Every command still goes to the reviewer');
-  });
 });
 
 describe('answering in the glass', () => {
-  it('"for 1h" writes an intent grant for this trap and harness that lapses in an hour', () => {
+  it('"for 1h" covers this trap only, for an hour', () => {
     const before = Date.now();
     const grant = answerWith(askCard(INTENT), INTENT_HOUR_OPTION)!;
-    expect(grant).toMatchObject({ mode: 'intent', trap: 'pearl-gull', harness: 'claude', by: 'glass', dispatch: DISPATCH, intent: INTENT });
+    expect(grant).toMatchObject({ mode: 'intent', trap: 'pearl-gull', harness: 'any', by: 'glass', dispatch: DISPATCH, intent: INTENT });
+    expect(grant.repo).toBeUndefined();
     const left = Date.parse(grant.expiresAt!) - before;
     expect(left).toBeGreaterThanOrEqual(3_600_000);
     expect(left).toBeLessThan(3_660_000);
   });
 
-  it('"always" writes one with no expiry', () => {
+  it('"always" covers every trap in this repo, until revoked', () => {
     const grant = answerWith(askCard(INTENT), INTENT_ALWAYS_OPTION)!;
-    expect(grant.mode).toBe('intent');
+    expect(grant).toMatchObject({ mode: 'intent', repo: 'web', harness: 'any' });
+    expect(grant.trap).toBeUndefined();
     expect(grant.expiresAt).toBeUndefined();
+  });
+
+  it('the scopes hold: another trap is not covered by 1h, and is by always', () => {
+    const otherSession = '22222222-3333-4444-8555-666666666666';
+    const otherWorktree = path.join(home, 'other');
+    fs.mkdirSync(otherWorktree);
+    const other = signOnTrap({ worktree: otherWorktree, cwd: otherWorktree, repo: 'web', harness: 'codex', sessionId: otherSession, name: 'early-pebble', ttlMs: 3_600_000 });
+    expect('ok' in other).toBe(true);
+    const otherCall = { harness: 'codex' as const, tool: 'exec_command', input: { cmd: 'scripts/with-timeout 90 npx wrangler tail other' }, session: otherSession };
+    const hour = answerWith(askCard(INTENT), INTENT_HOUR_OPTION)!;
+    expect(checkCall(bash('scripts/with-timeout 90 npx wrangler tail other'), worktree, true)).toEqual([hour.id]);
+    expect(checkCall(otherCall, otherWorktree, true)).toBeUndefined();
+    const always = answerWith(askCard(INTENT), INTENT_ALWAYS_OPTION)!;
+    expect(checkCall(otherCall, otherWorktree, true)).toEqual([always.id]);
   });
 
   it('then a different command of that kind runs, with no new card', () => {
@@ -123,9 +129,9 @@ describe('answering in the glass', () => {
     const grant = answerWith(askCard(INTENT), INTENT_HOUR_OPTION)!;
     const messages = JSON.stringify(unhandled(DISPATCH, 'work'));
     expect(messages).toContain(grant.id);
-    expect(messages).toContain('for an hour');
+    expect(messages).toContain('for this trap, for an hour');
     expect(messages).toContain('scripts/with-timeout * npx wrangler tail');
-    expect(messages).toContain("Anything else still goes to your harness's reviewer");
+    expect(messages).toContain("Anything else goes to your harness's reviewer as usual");
   });
 
   it('Allow once and Allow always still write the grants they did', () => {
@@ -133,9 +139,11 @@ describe('answering in the glass', () => {
     expect(answerWith(askCard(INTENT), 'Allow always')?.mode).toBe('always');
   });
 
-  it('with no trap on the card, the grant covers the repo', () => {
-    const card = askPermission({ dispatch: DISPATCH, lane: 'work', repo: 'web', ask: { command: 'x y', harness: 'claude', intent: INTENT } });
-    expect(answerWith(card, INTENT_ALWAYS_OPTION)).toMatchObject({ repo: 'web' });
+  it('with no trap on the card, 1h covers the repo; with no repo, always covers the trap', () => {
+    const noTrap = askPermission({ dispatch: DISPATCH, lane: 'work', repo: 'web', ask: { command: 'x y', harness: 'claude', intent: INTENT } });
+    expect(answerWith(noTrap, INTENT_HOUR_OPTION)).toMatchObject({ repo: 'web' });
+    const noRepo = askPermission({ dispatch: DISPATCH, lane: 'work', ask: { command: 'x y', harness: 'claude', trap: 'pearl-gull', intent: INTENT } });
+    expect(answerWith(noRepo, INTENT_ALWAYS_OPTION)).toMatchObject({ trap: 'pearl-gull' });
   });
 });
 
@@ -176,8 +184,9 @@ describe('a trap proposes with lobstah report', () => {
     [['--ask', 'npx wrangler tail', '--intent', 'read logs', '--allow', 'git'], 'one word'],
     [['--ask', 'npx wrangler tail', '--intent', 'read logs', '--allow', 'bash -c'], 'runs anything'],
     [['--ask', 'npx wrangler tail', '--intent', 'read logs', '--allow', 'lobstah grant x'], 'its own permissions'],
-    [['--ask', 'npx wrangler tail', '--allow', 'npx wrangler tail'], '--allow needs --intent'],
-    [['--intent', 'read logs'], 'go with --ask'],
+    [['--ask', 'npx wrangler tail', '--allow', 'npx wrangler tail'], 'go together'],
+    [['--ask', 'npx wrangler tail', '--intent', 'read logs'], 'go together'],
+    [['--intent', 'read logs', '--allow', 'npx wrangler tail'], 'go with --ask'],
   ])('refuses %j, and files no card', (args, reason) => {
     const out = report(...args);
     expect(out.status).not.toBe(0);
@@ -214,18 +223,18 @@ describe('the Grants tab', () => {
     }
   });
 
-  it('lists command and path grants too, and says what an empty one means', async () => {
+  it('lists command and path grants too, and an always grant as covering its repo', async () => {
     const g = await open([
       standing({ id: 'g-1', mode: 'always', intent: undefined, trap: undefined, command: 'npx wrangler tail', match: 'prefix', harness: 'any' }),
       standing({ id: 'g-2', mode: 'always', intent: undefined, trap: undefined, path: '/w/reports/', harness: 'any' }),
-      standing({ id: 'g-3', intent: { text: 'read logs', patterns: [] } }),
+      standing({ id: 'g-3', trap: undefined, repo: 'web', harness: 'any' }),
     ]);
     try {
       const text = g.$$('.standing-grant').map((card) => card.textContent ?? '');
       expect(text[0]).toContain('npx wrangler tail …');
       expect(text[0]).toContain('Every trap');
       expect(text[1]).toContain('Write /w/reports/');
-      expect(text[2]).toContain('every command goes to the reviewer');
+      expect(text[2]).toContain('Every trap in web');
     } finally {
       await g.close();
     }

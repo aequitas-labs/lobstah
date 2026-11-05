@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
 import { glassSettings } from './glass-settings.js';
-import { syncIntentContext } from './intent-context.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -1015,7 +1014,7 @@ export function serveGlass(
           case 'grant-revoke': {
             const id = (body.payload as { id?: unknown } | undefined)?.id;
             if (typeof id !== 'string' || !/^g-[a-f0-9]+$/.test(id)) return reply(400, { ok: false, reason: 'A grant id is required.' });
-            try { revokeGrant(id, 'glass'); syncIntentContext(); return reply(200, { ok: true }); }
+            try { revokeGrant(id, 'glass'); return reply(200, { ok: true }); }
             catch (err) { return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) }); }
           }
           case 'review-mode': {

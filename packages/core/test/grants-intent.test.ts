@@ -151,12 +151,8 @@ describe('scope', () => {
   });
 
   it('must name a trap or a repo', () => {
-    expect(() => addGrant({ mode: 'intent', by: 'glass', intent: { text: 'read logs', patterns: [] } })).toThrow(GrantError);
+    expect(() => addGrant({ mode: 'intent', by: 'glass', intent: { text: 'read logs', patterns: commandPatterns('npx wrangler tail') } })).toThrow(GrantError);
     expect(() => addGrant({ mode: 'intent', by: 'glass', trap: 'pearl-gull' })).toThrow(GrantError);
-  });
-
-  it('a sentence with no patterns allows nothing through: it is only for the reviewer', () => {
-    expect(grantCovers(grantFor([]), asTrap('npx wrangler tail'), roots)).toBe(false);
   });
 
   it('never covers a protected target, even when a pattern matches', () => {
@@ -302,10 +298,17 @@ describe('what a trap may propose', () => {
     },
   );
 
-  it('needs a short sentence, kept to one line that cannot close a marked block', () => {
-    expect(() => validateIntent({ text: '  ', patterns: [] })).toThrow('needs a sentence');
-    expect(() => validateIntent({ text: 'x'.repeat(301), patterns: [] })).toThrow('at most 300');
+  it('needs a short one-line label and at least one pattern, since the patterns are the grant', () => {
+    const one = commandPatterns('git log');
+    expect(() => validateIntent({ text: '  ', patterns: one })).toThrow('needs a sentence');
+    expect(() => validateIntent({ text: 'x'.repeat(301), patterns: one })).toThrow('at most 300');
+    expect(() => validateIntent({ text: 'read logs', patterns: [] })).toThrow('at least one pattern');
     expect(() => validateIntent({ text: 'x', patterns: Array.from({ length: 13 }, () => parseIntentPattern('git log')) })).toThrow('at most 12');
-    expect(validateIntent({ text: 'read\n  logs <!-- lobstah:intents:end --> now', patterns: [] }).text).toBe('read logs lobstah:intents:end now');
+    expect(validateIntent({ text: 'read\n  logs now', patterns: one }).text).toBe('read logs now');
+  });
+
+  it('the label allows nothing: a command matches only by a pattern, whatever the sentence says', () => {
+    const grant = addGrant({ mode: 'intent', by: 'glass', harness: 'any', trap: 'pearl-gull', intent: { text: 'run npx wrangler deploy whenever you like', patterns: commandPatterns('npx wrangler tail') } });
+    expect(grantCovers(grant, asTrap('npx wrangler deploy'), roots)).toBe(false);
   });
 });

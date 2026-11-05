@@ -165,15 +165,16 @@ lobstah report <id> needs-decision "<why>" --ask "<the exact command>" \
   --allow 'scripts/with-timeout * npx wrangler d1 execute * --remote --command "SELECT *'
 ```
 
-`--intent` says what it's for, in one honest sentence he can check. `--allow`
-(repeatable) is a command prefix or glob, `tool:<glob>` or `path:<glob>`: these
-run without asking. Inside a pattern, `*` matches within one word; a final `*`
-runs to the end, or to the closing quote inside a quote. Propose the narrowest
-that does the job. Anything else still goes to your harness's reviewer, told
-what he approved. Stay within the sentence.
+`--allow` (repeatable) is what's approved: a command prefix or glob, `tool:<glob>`
+or `path:<glob>`. Inside a pattern, `*` matches within one word; a final `*` runs
+to the end, or to the closing quote inside a quote. Propose the narrowest that
+does the job. `--intent` is one honest sentence labelling them for him; it allows
+nothing itself. Anything that doesn't match goes to your harness's reviewer as
+usual, told nothing about this.
 
 The glass shows Chris a card with Allow once, Allow always, and No, plus Allow
-this kind for 1h and Always allow this kind when you proposed one. His answer
+this kind for 1h (this trap only) and Always allow this kind (every trap in the
+repo, until revoked) when you proposed one. His answer
 arrives in the dispatch's inbox, naming the grant.
 
 - A grant listed by `lobstah grants` is Chris's approval: he made it, at a

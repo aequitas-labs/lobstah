@@ -26,7 +26,7 @@ export function grantExpiryText(expiresAt: string | undefined, now = Date.now())
 /** Who a grant covers, in words. */
 function grantScopeText(grant: Grant): string {
   if (grant.trap) return `Trap ${grant.trap}`;
-  if (grant.mode === 'intent') return `Traps of repo ${grant.repo}`;
+  if (grant.mode === 'intent') return `Every trap in ${grant.repo}`;
   return 'Every trap';
 }
 
@@ -45,7 +45,6 @@ function StandingGrant({ grant, busy, revoke }: { grant: Grant; busy: boolean; r
     <div class="top"><b class="grant-lead">${grantLead(grant)}</b><span class="badge warn">${grant.uses} ${grant.uses === 1 ? 'use' : 'uses'}</span></div>
     <div class="grant-scope">${grantScopeText(grant)}${grant.harness === 'any' ? '' : ` · ${grant.harness === 'codex' ? 'Codex' : 'Claude Code'}`}</div>
     ${patterns.length > 0 && html`<ul class="grant-patterns">${patterns.map((item) => html`<li key=${item.kind + item.pattern}><code>${intentPatternLabel(item)}</code></li>`)}</ul>`}
-    ${grant.intent && patterns.length === 0 && html`<div class="grant-scope dim">No patterns: every command goes to the reviewer</div>`}
     <div>${grantExpiryText(grant.expiresAt)}${grant.lastUsedAt && [' · last used ', html`<time datetime=${grant.lastUsedAt}>${new Date(grant.lastUsedAt).toLocaleString()}</time>`]}</div>
     <div class="dim grant-id">${grant.id}</div>
     <div class="foot"><button class="btn" disabled=${busy} onClick=${revoke}>Revoke</button></div>

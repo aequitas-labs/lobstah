@@ -1612,7 +1612,7 @@ async function mainCli(): Promise<void> {
       const intentText = opt('--intent');
       const intentPatterns = values('--allow');
       if ((intentText !== undefined || intentPatterns.length > 0) && permCommand === undefined && permPath === undefined) throw new UsageError(`--intent and --allow go with --ask or --ask-path\n\n${usageFor('report')!}`);
-      if (intentPatterns.length > 0 && intentText === undefined) throw new UsageError(`--allow needs --intent: say in a sentence what it's for\n\n${usageFor('report')!}`);
+      if ((intentPatterns.length > 0) !== (intentText !== undefined)) throw new UsageError(`--intent and --allow go together: the patterns are what's allowed, and the sentence labels them\n\n${usageFor('report')!}`);
       let proposedIntent: GrantIntent | undefined;
       if (intentText !== undefined) {
         try {
