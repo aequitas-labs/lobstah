@@ -512,7 +512,8 @@ dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
 and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
-PRs, Reviews, Reports, Notices, and Stats. The Stats tab shows catches per day as a
+PRs, Reviews, Reports, Notices, Stats, and Settings, a read-only view of the
+effective config with its secrets masked. The Stats tab shows catches per day as a
 53-week heatmap, with today, this week, the total, and the top traps; it
 reads `stats.json` from `GET /data/stats` and sends nothing. The Reports tab lists every report, unacked first,
 then newest first, and the repo filter and the search box (title, author,
@@ -1312,6 +1313,7 @@ lobstah man roster set <trap> --harness codex --model <m> --terminal iterm --con
                                                     # save how a throw starts it; `default` or `key=` clears
 lobstah man throw <trap> [--timeout <secs>]         # bring one trap back; wait until it listens
 lobstah man throw <trap> --bypass                   # a person, at a terminal: this start skips permission checks
+lobstah man throw <trap> --remote-control           # this start can be driven from a phone: Claude's Remote Control, or Codex's shared server
 lobstah man throw --all                             # every eligible trap in your grounds, at once
 lobstah man throw --repo <key>                      # every eligible trap of one repo
 lobstah man throw --new --repo <key> --count N      # N fresh traps (see "Starting a new trap")
@@ -1319,6 +1321,15 @@ lobstah man throw --dry-run <trap>... | --all | --repo <key> | --new ...
                                                     # what a throw would do; launches nothing (--plan too)
 lobstah man roster forget <trap> [--force]          # remove a stowed trap's record, worktree, and ref
 ```
+
+`man throw --remote-control` makes one start reachable from a phone, new
+(`--new`) or returning. A Codex trap attaches to Codex's shared app-server, so its
+pane and a paired phone drive one thread. Other traps are unchanged unless
+`[soak].codexRemoteControl = true`, which covers every Codex start, including
+scheduled and batch throws. It saves hook and folder trust in
+`~/.codex/config.toml`. Pair the phone once with `codex remote-control pair` at your
+own terminal, which grants the whole host. See
+[Codex's shared server](harness/codex.md#on-codexs-shared-server) for what changes.
 
 `man throw --dry-run` (or `--plan`) launches nothing and writes nothing. Each
 row says what a throw would do and why:

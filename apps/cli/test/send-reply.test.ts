@@ -1,3 +1,4 @@
+import { HELM_STOP_REMINDER } from '../src/charter.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -182,7 +183,7 @@ describe('man haul and an unanswered send', () => {
     expect(lobstah(['man', 'wait', '--session', helmSession, '--timeout', '1']).stdout).toContain('event: reply');
     const settled = haul();
     expect(settled.stdout).not.toContain('sent · ');
-    expect(settled.stdout).not.toContain('reply ');
+    expect(settled.stdout.replace(HELM_STOP_REMINDER, '')).not.toContain('reply ');
   });
 
   it('with a live watcher, a send alone lets the stop pass', () => {
@@ -192,7 +193,7 @@ describe('man haul and an unanswered send', () => {
     try {
       const res = haul();
       expect(res.status).toBe(0);
-      expect(res.stdout).toBe('');
+      expect(JSON.parse(res.stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
     } finally {
       watcher.stop();
     }

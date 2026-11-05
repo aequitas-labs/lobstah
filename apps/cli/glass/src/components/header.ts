@@ -21,6 +21,7 @@ const TAB_LABEL: Record<GlassTab, string> = {
   todos: 'TODOs',
   notices: 'Notices',
   stats: 'Stats',
+  settings: 'Settings',
 };
 const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed', 'unknown'];
 
@@ -83,8 +84,8 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
   const only = (t: GlassTab) => (tab === t ? '' : 'display:none');
   const repos = d ? repoList(d) : [];
   const kinds = d ? kindList(d) : [];
-  // The Stats tab has nothing to filter.
-  return html`<div class="controls" style=${tab === 'stats' || tab === 'grants' ? 'display:none' : undefined}>
+  // These tabs have nothing to filter.
+  return html`<div class="controls" style=${tab === 'stats' || tab === 'grants' || tab === 'settings' ? 'display:none' : undefined}>
     <select id="f-lane" style=${d && only('dispatches')} value=${st.lane} onChange=${(e: Event) => setPrefs({ lane: value(e) })}>
       <option value="">all lanes</option>
       <option value="work">work</option>
