@@ -5,6 +5,7 @@ import {
   closeLightbox,
   closeModal,
   decisionNumberKey,
+  loadSettings,
   loadStats,
   openDecision,
   reviewRequest,
@@ -58,6 +59,8 @@ const initialState = (): GlassState => ({
   lightbox: null,
   stats: null,
   statsError: null,
+  settings: null,
+  settingsError: null,
   statsFocus: null,
 });
 
@@ -147,6 +150,7 @@ function startGlass(): void {
     // A `#decision/<key>` link (a lob, the pet) opens that decision too.
     if (focusDecision) openDecision(focusDecision);
     if (route === 'stats') void loadStats();
+    if (route === 'settings') void loadSettings();
   });
   /** Whether a key lands in something the person is typing into. */
   const typing = (t: HTMLElement | null): boolean =>
@@ -195,4 +199,5 @@ function startGlass(): void {
   startPresence();
   startPolling();
   if (getState().route === 'stats') void loadStats();
+  if (getState().route === 'settings') void loadSettings();
 }

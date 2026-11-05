@@ -10,7 +10,7 @@ import type { ThrowOptions } from './throw.js';
  * The daemon owns starts; trap-only work stays unaddressed until a real
  * claimant takes it. A slow or failed start cannot reserve that work.
  */
-export function createTrapDispatchScheduler(options: Pick<ThrowOptions, 'adapter' | 'timeoutSecs' | 'pollMs'> = {}) {
+export function createTrapDispatchScheduler(options: Pick<ThrowOptions, 'adapter' | 'timeoutSecs' | 'pollMs' | 'listHooks'> = {}) {
   const running = new Set<string>();
   return (cfg: Config, now: number, log: (message: string) => void): void => {
     const groups = new Map<string, { descriptor: Descriptor; lane: Lane; since: string }>();

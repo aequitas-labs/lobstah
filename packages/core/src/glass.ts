@@ -548,3 +548,51 @@ export interface GlassSnapshot {
 
 /** A snapshot with every dispatch whole: what the server reads from disk before /data slims it (glass-poll.ts). */
 export type GlassFullSnapshot = Omit<GlassSnapshot, 'dispatches'> & { dispatches: GlassDispatch[] };
+
+/** Where a value came from: config.toml, or lobstah's default. */
+export type SettingSource = 'config' | 'default';
+
+/** One setting as the page shows it. `value` is already masked. */
+export interface SettingRow {
+  key: string;
+  value: string;
+  source: SettingSource;
+}
+
+/** A named group of settings. */
+export interface SettingsSection {
+  title: string;
+  rows: SettingRow[];
+}
+
+/** One repo's settings, with its trap count beside its cap. */
+export interface SettingsRepo {
+  key: string;
+  traps: { used: number; limit?: number };
+  rows: SettingRow[];
+}
+
+/** One grounds and the repos it holds. */
+export interface SettingsGrounds {
+  name: string;
+  repos: string[];
+}
+
+/** One installed part of lobstah and its version; a plugin that isn't installed is left out. */
+export interface SettingsVersion {
+  name: string;
+  version: string;
+  note?: string;
+}
+
+/** The body of `GET /data/settings`. */
+export interface GlassSettings {
+  /** The config file these values come from. */
+  file: string;
+  /** Why the config could not be loaded. Its sections are then empty. */
+  error?: string;
+  versions: { rows: SettingsVersion[]; match: boolean; text: string };
+  grounds: SettingsGrounds[];
+  repos: SettingsRepo[];
+  sections: SettingsSection[];
+}

@@ -1,6 +1,7 @@
 import { configuredTrapViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
+import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -35,7 +36,9 @@ import {
   listRequests,
   liveHelms,
   readReservationTicket,
+  listRoster,
   readRoster,
+  sessionClaimedElsewhere,
   trapRequestError,
   trapStartCommands,
   writeRequest,
@@ -674,6 +677,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   // Read once per snapshot, and only if a live Claude trap needs it.
   let claudeRead: { processes: ClaudeProcess[] | undefined } | undefined;
   const claudeProcesses = () => (claudeRead ??= { processes: readClaudeProcesses() }).processes;
+  const rosterEntries = listRoster();
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
@@ -681,7 +685,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const name = t.name ?? names(t.trapId);
     const window = t.window ?? (!registered ? roster?.window : undefined);
     const link = t.link ?? (!registered ? roster?.link : undefined);
-    const sessionId = t.sessionId ?? roster?.sessionId ?? signed?.by;
+    const savedSession = t.sessionId ?? roster?.sessionId ?? signed?.by;
+    // A trap that isn't live offers its session to resume, unless the session is another trap's.
+    const sessionId = !registered && savedSession && sessionClaimedElsewhere(savedSession, t.trapId, { traps: live, roster: rosterEntries }) ? undefined : savedSession;
     const harness = t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]);
     return {
       ...t,
@@ -1176,7 +1182,7 @@ export function serveGlass(
       if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id' });
       const reg = liveTrap(trapId);
       if (!reg) return reply(409, { focused: false, reason: 'Trap is not live' });
-      void (options.focus ?? focusRegistration)(reg)
+      void (options.focus ?? ((trap: TrapRegistration) => focusRegistration(trap, { openTerminal: true })))(reg)
         .then((result) => reply(result.focused ? 200 : 409, result))
         .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
       return;
@@ -1291,6 +1297,11 @@ export function serveGlass(
       const ok = req.method === 'GET';
       res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(ok ? readStatsPage() : { error: 'GET required' }));
+    } else if (req.url === '/data/settings') {
+      // The Settings tab: read-only, with secrets masked before they leave this function.
+      const ok = req.method === 'GET';
+      res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(ok ? glassSettings() : { error: 'GET required' }));
     } else if (req.url?.startsWith('/data/')) {
       // History the poll leaves out, and one dispatch's detail: built on the
       // snapshot thread when there is one. Nothing else lives under /data/.

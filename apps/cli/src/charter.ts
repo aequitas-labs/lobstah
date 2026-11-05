@@ -1,7 +1,11 @@
 import { displayGrounds, GOAL_WORDING_RULE, helmChat, loadConfig, readHelm, type Config, type Grounds } from '@lobstah/core';
 
 export const CARD_LINK_RULE = 'Always refer to a card with a clickable Markdown link, using the url printed by lobstah man ask.';
-export const HELM_REMINDER = 'Helm reminder: any question or choice for the human goes on a card with lobstah man ask, not only in chat. ' + CARD_LINK_RULE;
+/** What goes on a card: the one source the charter and the prompt reminder share. */
+export const CARD_RULE = 'Every question, choice or action for the human (answer, approve, review, run a command, click, sign in, test) goes on a card, with exact steps and any command in the card. Saying it in chat too is fine; chat alone is not. When a card is answered, act on it in the same turn or put the follow-up on a todo.';
+export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${CARD_LINK_RULE}`;
+/** The helm's Stop hook says this at every turn end. Only a blocking Stop output reaches the model; otherwise the person sees it. */
+export const HELM_STOP_REMINDER = 'If this reply requires human action, put it on a card.';
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
 export const DESK_ROUTING_RULE = 'For a bounded browser, app or computer step a repo worker cannot do, dispatch --for trap:<profile> --assist <original-id>. The original worker keeps repo and PR ownership. Use man throw trap:<profile> for an absent desk; point at its app-start card instead of starting a terminal session.';
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';

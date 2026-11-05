@@ -7,8 +7,8 @@ import { Age, ImageThumb, attachmentRows, cmdRow } from './common.js';
 import { LinkedText } from './links.js';
 
 type FileUrl = (name: string) => string;
-const markdown = (text: string, fileUrl: FileUrl) =>
-  html`<${MarkdownElements} text=${text} image=${(name: string, alt: string) => ImageThumb(fileUrl(name), alt, 'mdimg')} />`;
+const markdown = (text: string, fileUrl: FileUrl, copyCode = false) =>
+  html`<${MarkdownElements} text=${text} copyCode=${copyCode} image=${(name: string, alt: string) => ImageThumb(fileUrl(name), alt, 'mdimg')} />`;
 
 /** The page body for one report's markdown, or the loading and error states. */
 export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string; error?: string } | undefined }) {
@@ -21,9 +21,9 @@ export function ReportPage({ r, text }: { r: GlassReport; text: { text?: string;
   return html`<div class="mdpage" data-report=${r.key}>${body}</div>`;
 }
 
-/** Markdown as elements, with images from `fileUrl` (a decision's detail page). */
+/** Markdown as elements, with images from `fileUrl` and code that copies (a decision's detail page). */
 export function Markdown({ text, fileUrl }: { text: string; fileUrl: FileUrl }) {
-  return html`<div class="mdpage">${markdown(text, fileUrl)}</div>`;
+  return html`<div class="mdpage">${markdown(text, fileUrl, true)}</div>`;
 }
 
 /** The report's heading line: who it is from (a trap, a headless dispatch's id, nothing for the helm), its age, and `acked`. */
