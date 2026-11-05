@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
+import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -1292,6 +1293,11 @@ export function serveGlass(
       const ok = req.method === 'GET';
       res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(ok ? readStatsPage() : { error: 'GET required' }));
+    } else if (req.url === '/data/settings') {
+      // The Settings tab: read-only, with secrets masked before they leave this function.
+      const ok = req.method === 'GET';
+      res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(ok ? glassSettings() : { error: 'GET required' }));
     } else if (req.url?.startsWith('/data/')) {
       // History the poll leaves out, and one dispatch's detail: built on the
       // snapshot thread when there is one. Nothing else lives under /data/.

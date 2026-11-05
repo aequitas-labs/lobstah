@@ -2079,3 +2079,48 @@ footer .glass-brand {
 .grant-audit code {
   overflow-wrap: anywhere;
 }
+
+/* Settings: each row is a key, its value and where it came from; on a phone the key sits above. */
+.cfg h2 {
+  letter-spacing: normal;
+  text-transform: none;
+  font-size: 13px;
+  color: var(--fg);
+}
+.cfg h3 {
+  font-size: 12px;
+  margin: 12px 0 4px;
+}
+.cfgtraps {
+  font-weight: normal;
+}
+.cfgrow {
+  display: grid;
+  grid-template-columns: minmax(0, 18em) minmax(0, 1fr) 4.5em;
+  gap: 2px 12px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+}
+.cfgkey {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.cfgvalue {
+  overflow-wrap: anywhere;
+}
+.cfgsource {
+  color: var(--dim);
+  font-size: 11px;
+  text-align: right;
+}
+.cfgsource.set {
+  color: var(--ok);
+}
+@media (max-width: 640px) {
+  .cfgrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .cfgkey {
+    grid-column: 1 / -1;
+  }
+}
