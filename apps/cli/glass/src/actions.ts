@@ -463,6 +463,11 @@ export async function reviewRequest(kind: ReviewRequestKind, payload: Record<str
   return glassRequest(kind, payload);
 }
 
+/** Set or move a todo's time from its row. Resolves to the parser's message, or undefined on success. */
+export async function scheduleTodo(grounds: string, id: number, until: string): Promise<string | undefined> {
+  return glassRequest('todo-schedule', { grounds, id, until });
+}
+
 export async function changeHelmChat(grounds: string, chat: 'full' | 'brief'): Promise<string | undefined> {
   return glassRequest('helm-chat', { grounds, chat });
 }

@@ -77,6 +77,10 @@ import {
   ANSWER_EXTENSIONS,
   ANSWER_FILES_MAX,
   ANSWER_TEXT_MAX,
+  formatTodoTime,
+  parseTodoUntil,
+  snoozeTodo,
+  TodoError,
   heavyGlassView,
 } from '@lobstah/core';
 import type { Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
@@ -92,7 +96,7 @@ import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, red
 import { glassReviews } from './reviews.js';
 import { reviewSetupView, writeReviewMode } from './reviews-setup.js';
 import { buildTendReport, landedCatches } from './tend.js';
-import { todoStaleLine, todoViews } from './todo.js';
+import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
@@ -145,6 +149,7 @@ export function requestBodyCap(): number {
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
   ['helm-chat', 1024],
+  ['todo-schedule', 1024],
   ['decision-viewed', 1024],
   ['permissions-proposal-preview', 8192],
   ['permissions-proposal-answer', 8192],
@@ -933,6 +938,22 @@ export function serveGlass(
             } catch (err) {
               if (err instanceof Error && err.message.startsWith('no helm signed on')) return reply(409, { ok: false, reason: 'No helm is signed on for these grounds.' });
               return reply(500, { ok: false, reason: 'The helm chat setting could not be stored.' });
+            }
+          }
+          case 'todo-schedule': {
+            // Set or move a todo's time from its row. No helm gate, the same as answering a card.
+            const { grounds, id, until } = (body.payload ?? {}) as { grounds?: unknown; id?: unknown; until?: unknown };
+            if (typeof grounds !== 'string' || grounds.length > 200 || !Number.isInteger(id) || (id as number) < 1 || typeof until !== 'string' || until.length > 200) {
+              return reply(400, { ok: false, reason: 'A todo and a time are required.' });
+            }
+            try {
+              const now = Date.now();
+              const timezone = helmTimezone();
+              const todo = snoozeTodo(grounds, id as number, parseTodoUntil(until, now, timezone), now);
+              return reply(200, { ok: true, id: todo.id, dueAt: todo.dueAt, due: formatTodoTime(todo.dueAt!, timezone) });
+            } catch (err) {
+              if (err instanceof TodoError) return reply(400, { ok: false, reason: err.message });
+              return reply(500, { ok: false, reason: 'The time could not be stored.' });
             }
           }
           case 'decision-answer': {
