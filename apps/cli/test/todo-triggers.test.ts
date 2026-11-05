@@ -10,20 +10,18 @@ import { removeTempDir } from '../../../test/temp-dir.js';
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const SESSION = 'todo-trigger-helm';
 let home: string;
-let bin: string;
+let ghStub: string;
 
-/** A fake gh: `pr view` answers with this state, and exits 1 for PR 404. */
+/** Cross-platform `gh pr view` responses, intercepted before executable lookup. */
 const fakeGh = (state: string): void => {
-  const view = JSON.stringify({ state, isDraft: false, headRefOid: 'abc', statusCheckRollup: [] });
-  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\ncase "$*" in *"view 404"*) echo "no such pull request" >&2; exit 1;; esac\necho '${view}'\n`);
-  fs.chmodSync(path.join(bin, 'gh'), 0o755);
+  fs.writeFileSync(path.join(home, 'gh-view.json'), JSON.stringify({ state, isDraft: false, headRefOid: 'abc', statusCheckRollup: [] }));
 };
 const run = (args: string[], hook?: Record<string, unknown>) => {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CLAUDE') && !key.startsWith('CODEX')));
-  return spawnSync(process.execPath, [cli, ...args], {
+  return spawnSync(process.execPath, ['--require', ghStub, cli, ...args], {
     cwd: home,
     encoding: 'utf8',
-    env: { ...env, LOBSTAH_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+    env: { ...env, LOBSTAH_HOME: home },
     timeout: 20_000,
     input: hook ? JSON.stringify({ cwd: home, ...hook }) : undefined,
   });
@@ -40,8 +38,23 @@ const stored = () => listTodos('fleet');
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-todo-trigger-cli-'));
   process.env.LOBSTAH_HOME = home;
-  bin = path.join(home, 'bin');
-  fs.mkdirSync(bin);
+  ghStub = path.join(home, 'gh-stub.cjs');
+  // A shell script on PATH is not executable by Windows spawnSync. Stub the
+  // Node subprocess boundary so no platform can fall through to the real gh.
+  fs.writeFileSync(ghStub, `
+    const childProcess = require('node:child_process');
+    const originalSpawn = childProcess.spawnSync;
+    childProcess.spawnSync = function(command, args, options) {
+      if (command !== 'gh') return originalSpawn(command, args, options);
+      if (args[0] === 'api' && args[1] === 'graphql') return { status: 0, signal: null, pid: 0, stdout: JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } }), stderr: '' };
+      if (args[0] !== 'pr' || args[1] !== 'view') throw new Error('Unexpected gh call in todo trigger test');
+      const missing = args[2] === '404';
+      return { status: missing ? 1 : 0, signal: null, pid: 0,
+        stdout: missing ? '' : require('node:fs').readFileSync(require('node:path').join(__dirname, 'gh-view.json'), 'utf8'),
+        stderr: missing ? 'no such pull request' : '' };
+    };
+    require('node:module').syncBuiltinESMExports();
+  `);
   ensureLayout();
   fakeGh('OPEN');
 });
@@ -106,10 +119,17 @@ describe('todo add --when: a PR trigger', () => {
     expect(fireDueTodos().fired).toBe(1);
   });
 
-  it('a closed PR gets no watch either', () => {
+  it('a closed PR gets no watch and emits todo-due with the actual outcome', () => {
+    takeHelm({ sessionId: SESSION, grounds: { name: 'fleet', repos: [] }, ttlMs: 60_000, identity: { harness: 'claude' } });
     fakeGh('CLOSED');
-    expect(add('--when', 'pr:o/r#7 merged').status).toBe(0);
+    const out = add('--when', 'pr:o/r#7 merged', '--session', SESSION);
+    expect(out.status, printed(out)).toBe(0);
+    expect(out.stdout).toContain('already: closed without merging');
     expect(readWatch('pr:o/r#7')).toBeUndefined();
+    const woke = run(['man', 'wait', '--session', SESSION, '--timeout', '1']);
+    expect(woke.stdout).toContain('event: todo-due');
+    expect(woke.stdout).toContain('pr:o/r#7 closed without merging');
+    expect(woke.stdout).not.toContain('firedBy: pr:o/r#7 merged');
   });
 
   it('a refused trigger beside a good one registers no watch', () => {

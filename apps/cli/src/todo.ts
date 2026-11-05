@@ -167,11 +167,6 @@ export function todoTable(todos: TodoView[], withGrounds: boolean, now = Date.no
   );
 }
 
-/** How many open todos wait for a time still ahead, as one line, or undefined. */
-export function scheduledTodoLine(count: number): string | undefined {
-  return count > 0 ? `${count} scheduled (lobstah todo ls)` : undefined;
-}
-
 /**
  * Record what has come due, then hand this grounds' undelivered firings to
  * this wake. `claim` false is `--peek`: it shows them without using them up.
@@ -267,7 +262,7 @@ export function todoDueLine(event: TodoDueEvent): string {
  * The todo block re-injected into the helm's context at session start and
  * after compaction, beside the charter. Empty when the grounds has none.
  */
-export function todoContext(grounds: string, now = Date.now()): string {
+export function todoContext(grounds: string, now: number = Date.now()): string {
   let todos: Todo[];
   let helm: HelmConfig;
   try {
@@ -278,7 +273,7 @@ export function todoContext(grounds: string, now = Date.now()): string {
   }
   if (todos.length === 0) return '';
   todos.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id - b.id);
-  // Overdue ones always show, whatever the limit leaves; those waiting for a time collapse to a count.
+  // Overdue and scheduled todos stay named; only unscheduled todos use the brief limit.
   const overdue = todos.filter((todo) => todoOverdue(todo, now));
   const scheduled = todos.filter((todo) => todoScheduled(todo, now));
   const others = todos.filter((todo) => !todoOverdue(todo, now) && !todoScheduled(todo, now));
@@ -286,14 +281,13 @@ export function todoContext(grounds: string, now = Date.now()): string {
   const staleIds = new Set(staleTodos(todos, helm.todoStaleDays, now).map((todo) => todo.id));
   const note = staleTodoNote(staleIds.size, helm.todoStaleDays);
   const remaining: number = others.length - shown.length;
-  const scheduledLine = scheduledTodoLine(scheduled.length);
   return [
     `Your todos (\`lobstah todo done <id>\` when finished, \`lobstah todo drop <id>\` when no longer needed):`,
     'Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.',
     ...overdue.map((todo) => `${todoLine(todo)} [overdue]`),
     ...shown.map((todo) => `${todoLine(todo)}${todo.triggers ? ` [waiting on ${todoWaitingOn(todo.triggers)}]` : ''}${staleIds.has(todo.id) ? ' [stale]' : ''}`),
     ...(remaining > 0 ? [`… and ${remaining} more (lobstah todo ls)`] : []),
-    ...(scheduledLine ? [scheduledLine] : []),
+    ...scheduled.map((todo) => `${todoLine(todo)} [due ${shortTodoTime(todo.dueAt!, now, helm.timezone)}${todo.snoozes ? `; snoozed ${todo.snoozes}` : ''}]${todo.triggers ? ` [waiting on ${todoWaitingOn(todo.triggers)}]` : ''}`),
     ...(note ? [note] : []),
   ].join('\n');
 }
@@ -328,17 +322,8 @@ export function quietGoalsNudge(grounds: string, sessionId: string, now = Date.n
   return line.length <= 200 ? line : `${line.slice(0, 199)}…`;
 }
 
-/**
- * Full open todo list shared by `todo ls` and automatic helm passes: overdue
- * first, then stale, with those waiting for a time last. `collapseScheduled`
- * (a pass) turns those waiting into one line.
- */
-export function renderTodoList(grounds: string, now = Date.now(), opts: { collapseScheduled?: boolean } = {}): string {
+/** Full open todo list for `todo ls` and helm passes, including future and snoozed items. */
+export function renderTodoList(grounds: string, now: number = Date.now()): string {
   const todos = todoViews(now, grounds, { openOnly: true }).sort((a, b) => Number(b.stale) - Number(a.stale) || a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
-  const waiting = todos.filter((t) => !t.overdue && t.dueAt !== undefined);
-  const listed = opts.collapseScheduled ? todos.filter((t) => t.overdue || t.dueAt === undefined) : todos;
-  const scheduledLine = opts.collapseScheduled ? scheduledTodoLine(waiting.length) : undefined;
-  if (listed.length === 0 && scheduledLine) return scheduledLine;
-  const list = listed.length > 0 ? todoTable(listed, false, now) : toonKV({ todos: 'none', grounds: displayName()(grounds) });
-  return scheduledLine ? `${list}\n${scheduledLine}` : list;
+  return todos.length > 0 ? todoTable(todos, false, now) : toonKV({ todos: 'none', grounds: displayName()(grounds) });
 }

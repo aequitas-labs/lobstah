@@ -103,11 +103,14 @@ function dispatchReached(id: string, verb: string, createdAt: string): TriggerRe
   return reported ? { state: 'met', as: verb } : { state: 'waiting' };
 }
 
-/** Whether a PR record shows the condition. Green: at least one check, none failed, pending or unknown. */
+/** A merge wait ends on either terminal PR outcome; green requires readable, passing checks. */
 function prReached(key: string, on: 'merged' | 'closed' | 'green'): TriggerReading {
   const pr = readPr(key);
   if (!pr) return { state: 'lost' };
-  if (on === 'merged') return pr.state === 'MERGED' ? { state: 'met', as: 'merged' } : { state: 'waiting' };
+  if (on === 'merged') {
+    if (pr.state === 'MERGED') return { state: 'met', as: 'merged' };
+    return pr.state === 'CLOSED' ? { state: 'met', as: 'closed without merging' } : { state: 'waiting' };
+  }
   if (on === 'closed') return pr.state === 'CLOSED' ? { state: 'met', as: 'closed' } : { state: 'waiting' };
   const { total, failed, pending, unknown } = pr.checks;
   return total > 0 && failed === 0 && pending === 0 && unknown === undefined ? { state: 'met', as: 'green' } : { state: 'waiting' };

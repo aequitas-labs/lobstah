@@ -623,7 +623,9 @@ the helm files to keep.
   `--when-all` on all of them; mixing the two is refused. `--at` or `--in` beside
   either is a deadline backstop. The triggers are `card:<key>` (answered or
   withdrawn), `dispatch:<id> done|blocked|needs-decision|failed`,
-  `pr:<owner>/<repo>#<n> merged|closed|green` and `trap:<name> free`. A trigger
+  `pr:<owner>/<repo>#<n> merged|closed|green` and `trap:<name> free`. A `merged`
+  wait also fires if the PR closes without merging, and the event names that
+  outcome. A trigger
   lobstah can't observe is refused and not stored. A PR trigger with no watch
   registers one owned by the helm and says so; that watch also wakes the helm on
   failing checks and requested changes. Each daemon tick reads only the local
