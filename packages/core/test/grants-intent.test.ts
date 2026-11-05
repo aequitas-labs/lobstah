@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   addGrant,
+  checkoutRoots,
   ensureLayout,
   grantActive,
   GrantError,
@@ -27,7 +28,7 @@ beforeEach(() => {
   ensureLayout();
   checkout = path.join(home, 'wt');
   fs.mkdirSync(checkout);
-  roots = [{ repo: 'web', root: checkout }];
+  roots = checkoutRoots({ web: { path: checkout } });
 });
 afterEach(() => {
   removeTempDir(home);
@@ -117,6 +118,17 @@ describe('what a pattern allows through', () => {
     expect(grantCovers(grant, write('reports/today.md', { repo: 'other' }), roots)).toBe(false);
     expect(grantCovers(grant, { harness: 'claude', tool: 'Write', trap: 'pearl-gull', repo: 'web', path: path.join(home, 'elsewhere', 'reports', 'a.md') }, roots)).toBe(false);
   });
+
+  it.each(['.git/hooks/pre-commit', '.GIT/hooks/pre-commit', '.Husky/pre-push', 'reports/.git/hooks/pre-commit', 'reports/.claude/settings.json'])(
+    'never covers writing %s, even under a pattern that matches it',
+    (file) => {
+      const grant = grantFor([{ kind: 'path', pattern: 'reports/' }, { kind: 'path', pattern: '*.md' }, { kind: 'path', pattern: 'a*/' }]);
+      // Whatever a stored pattern says: this is the check at match time.
+      const broad = { ...grant, intent: { ...grant.intent!, patterns: [{ kind: 'path' as const, pattern: file }, { kind: 'path' as const, pattern: file.split('/')[0] + '/' }] } };
+      const request: GrantRequest = { harness: 'claude', tool: 'Write', trap: 'pearl-gull', repo: 'web', path: path.join(checkout, file) };
+      expect(grantCovers(broad, request, roots)).toBe(false);
+    },
+  );
 });
 
 describe('scope', () => {
@@ -276,6 +288,9 @@ describe('what a trap may propose', () => {
     ['path:.husky/', 'run code or hold configuration'],
     ['path:.claude/settings.json', 'run code or hold configuration'],
     ['path:.lobstah/', 'run code or hold configuration'],
+    ['path:.GIT/hooks/', 'run code or hold configuration'],
+    ['path:.Claude/', 'run code or hold configuration'],
+    ['path:src/.git/hooks/', 'run code or hold configuration'],
   ])('refuses %s', (raw, reason) => {
     expect(() => validateIntent(intent(raw))).toThrow(reason);
   });
