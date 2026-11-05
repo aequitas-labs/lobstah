@@ -64,6 +64,8 @@ const git = (cwd: string, args: string[]): string | undefined => {
 export interface CodexFolderTrust {
   args: string[];
   detail: string;
+  /** The folder these args trust, when they trust one. */
+  trustedPath?: string;
 }
 
 /**
@@ -97,6 +99,7 @@ export function codexTrapFolderTrust(cwd: string, trapId: string, opts: { env?: 
     // Codex splits override keys on dots without unquoting path segments.
     // One inline table keeps the native pathname literal, including dots.
     args: ['-c', `projects={${JSON.stringify(canonicalCwd)}={trust_level="trusted"}}`],
+    trustedPath: canonicalCwd,
     detail: `Folder access: launch-only trust for lobstah-created worktree ${canonicalCwd}; hook trust remains separate`,
   };
 }
@@ -196,12 +199,24 @@ const COMMANDS: Record<CodexHook, string> = {
  * with user state field by field (codex-hooks config_rules).
  */
 export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string; cwd?: string; listed?: CodexHookList } = {}): string[] {
+  const entries = codexTrapHookTrust(opts).map(({ key, values }) => `${JSON.stringify(key)}=${codexHookTrustToml(values)}`);
+  return entries.length ? ['-c', `hooks.state={${entries.join(',')}}`] : [];
+}
+
+/** One hook lobstah is prepared to trust, and the values that trust it. */
+export interface CodexHookTrustEntry {
+  key: string;
+  values: CodexHookTrustValues;
+}
+
+/** The hooks a Codex trap may trust, by the rules on codexTrapHookArgs: its own vetted commands and committed project hooks. */
+export function codexTrapHookTrust(opts: { env?: NodeJS.ProcessEnv; home?: string; cwd?: string; listed?: CodexHookList } = {}): CodexHookTrustEntry[] {
   const plugin = installedCodexPlugin(opts);
   if (!plugin) return [];
   const file = path.join(plugin.root, 'hooks', 'hooks.json');
   const config = JSON.parse(fs.readFileSync(file, 'utf8')) as { hooks?: Record<string, Array<{ matcher?: string; hooks?: HookHandler[] }>> };
   if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks)) throw new Error(`invalid lobstah hooks in ${file}`);
-  const entries: string[] = [];
+  const entries: CodexHookTrustEntry[] = [];
   for (const [event, groups] of Object.entries(config.hooks)) {
     const command = Object.hasOwn(COMMANDS, event) ? COMMANDS[event as CodexHook] : undefined;
     if (!command || !Array.isArray(groups)) throw new Error(`cannot authorize unknown lobstah hook ${event} in ${file}; update the CLI and plugin together`);
@@ -219,7 +234,7 @@ export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string
         const values: CodexHookTrustValues = reported
           ? codexHookTrustValues(reported.currentHash)
           : { trusted_hash: codexHookHash(event as CodexHook, group.matcher, handler) };
-        entries.push(`${JSON.stringify(key)}=${codexHookTrustToml(values)}`);
+        entries.push({ key, values });
       }
     }
   }
@@ -230,9 +245,9 @@ export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string
     const values = reported && codexHookTrustValues(reported.currentHash).trusted_hash === e.hash
       ? codexHookTrustValues(reported.currentHash)
       : { trusted_hash: e.hash };
-    entries.push(`${JSON.stringify(e.key)}=${codexHookTrustToml(values)}`);
+    entries.push({ key: e.key, values });
   }
-  return entries.length ? ['-c', `hooks.state={${entries.join(',')}}`] : [];
+  return entries;
 }
 
 /**

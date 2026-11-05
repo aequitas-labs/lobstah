@@ -77,6 +77,12 @@ export interface TrapRegistration {
   link?: string;
   /** This session's Claude Remote Control URL, recorded with \`soak --remote-link\`. A separate field: it opens on any device. */
   remoteLink?: string;
+  /**
+   * This Codex trap runs on the shared app-server, so no process is its own:
+   * its tools descend from the server, which hosts every other trap too. It
+   * records no `harnessProcess`, and stow stops its thread instead.
+   */
+  codexServer?: true;
   /** Started with \`--remote-control\` at this time: the glass looks in its transcript for the URL Claude emitted since. */
   remoteControlSince?: string;
   /** The active dispatch this trap currently works, if any. */
@@ -330,6 +336,7 @@ export function signOnTrap(opts: {
   startMode?: string;
   remoteLink?: string;
   remoteControlSince?: string;
+  codexServer?: boolean;
   now?: number;
 }): SignOnResult {
   if (opts.link !== undefined && !validSessionLink(opts.link)) {
@@ -359,7 +366,9 @@ export function signOnTrap(opts: {
   const iso = new Date(now).toISOString();
   const sameSession = prior?.sessionId === opts.sessionId;
   const window = opts.window ?? (sameSession ? prior.window : undefined);
-  const harnessProcess = opts.harnessProcess ?? (sameSession ? prior.harnessProcess : undefined);
+  const codexServer = opts.codexServer || (sameSession && prior.codexServer) || undefined;
+  // On the shared server the nearest harness process is the server: never this trap's to signal.
+  const harnessProcess = codexServer ? undefined : opts.harnessProcess ?? (sameSession ? prior.harnessProcess : undefined);
   // A link, new or kept from an earlier sign-on, must fit the window.
   const link = opts.link ?? (sameSession && validSessionLink(prior?.link) ? prior.link : undefined);
   // Both belong to this session: another session's connection isn't this one's.
@@ -386,6 +395,7 @@ export function signOnTrap(opts: {
     link: link !== undefined && linkMismatch(link, window) === undefined ? link : undefined,
     ...(remoteLink ? { remoteLink } : {}),
     ...(remoteControlSince ? { remoteControlSince } : {}),
+    ...(codexServer ? { codexServer: true as const } : {}),
     claimed: prior?.claimed,
     ...(createdWorktree ? { createdWorktree } : {}),
     ...(opts.startDeadline ? { startDeadline: opts.startDeadline } : sameSession && prior.startDeadline ? { startDeadline: prior.startDeadline } : {}),

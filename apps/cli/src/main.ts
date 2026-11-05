@@ -129,6 +129,7 @@ import {
   storageGrounds,
   captureWindow,
   captureHarnessProcess,
+  rememberReservationWindow,
   endingProcessOwnsTrap,
   harnessAncestorPid,
   rosterTrapForSession,
@@ -225,6 +226,7 @@ import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
+import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
@@ -275,7 +277,7 @@ import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
-import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, REMOTE_CONTROL_CLAUDE_ONLY, startMode, throwBatch, throwTrap } from './throw.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, onCodexServer, startMode, throwBatch, throwTrap } from './throw.js';
 import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
@@ -2261,8 +2263,7 @@ async function mainCli(): Promise<void> {
         guardNewTraps(cfgThrow, repoKey, count, reason);
         if (dry) {
           const profile = freshProfile(cfgThrow, repoKey, harness);
-          if (has('--remote-control') && profile.harness !== 'claude') throw new UsageError(REMOTE_CONTROL_CLAUDE_ONLY);
-          const remote = has('--remote-control');
+          const remote = has('--remote-control') || onCodexServer({ cfg: cfgThrow }, profile.harness);
           const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>', ...(bypass ? { bypass } : {}), ...(remote ? { remoteControl: '<name>' } : {}) });
           console.log(toonKV({ plan: 'dry run — launches nothing', new: `${count} fresh ${repoKey} trap(s)`, reason }));
           console.log(
@@ -3151,6 +3152,13 @@ async function mainCli(): Promise<void> {
         confirmTitle(opt('--session'));
         break;
       }
+      // Runs in a thrown pane before Codex starts: a trap on the shared server can't see its own pane later.
+      if (pos[0] === 'remember-window') {
+        const ticket = opt('--ticket');
+        if (ticket === undefined) throw new UsageError(`soak remember-window requires --ticket <t>\n\n${usageFor('soak')!}`);
+        rememberReservationWindow(ticket, captureWindow());
+        break;
+      }
       // End this session's own `soak --wait` listener by the pid its
       // registration records. Every session on the machine runs the same
       // command line, so a pattern match (pkill -f) would hit theirs too.
@@ -3370,7 +3378,8 @@ async function mainCli(): Promise<void> {
       if (made) worktree = canon(made.dir);
       // The CLI, not the prose, decides whether a session link fits: a link
       // for another surface (a vscode:// link from a terminal CLI) is dropped.
-      const window = captureWindow();
+      const onCodexSharedServer = reservation?.codexServer ?? listTraps().find((t) => t.sessionId === sessionId)?.codexServer ?? false;
+      const window = onCodexSharedServer ? reservation?.window : captureWindow();
       const linkFlag = opt('--link');
       const linkIgnored = linkFlag !== undefined ? linkMismatch(linkFlag, window) : undefined;
       let res: ReturnType<typeof signOnTrap>;
@@ -3386,7 +3395,9 @@ async function mainCli(): Promise<void> {
           window,
           // A throw won't resume a session whose process still runs. Claude's own
           // variable confirms this CLI runs inside that session, not beside it.
-          ...(resolved.harness === 'codex' || process.env.CLAUDE_CODE_SESSION_ID === sessionId ? { harnessProcess: captureHarnessProcess() } : {}),
+          // Not on Codex's shared server: there, the nearest harness process is the server, which hosts every other trap.
+          ...(!onCodexSharedServer && (resolved.harness === 'codex' || process.env.CLAUDE_CODE_SESSION_ID === sessionId) ? { harnessProcess: captureHarnessProcess() } : {}),
+          ...(onCodexSharedServer ? { codexServer: true } : {}),
           link: linkIgnored ? undefined : linkFlag,
           ...(reservation ? { trapId: reservation.trapId, startDeadline: reservation.deadline } : {}),
           ...(reservation?.batch ? { batch: reservation.batch } : {}),
@@ -3408,6 +3419,8 @@ async function mainCli(): Promise<void> {
       }
       // The session applies its title as a sign-on step, then confirms it.
       const reg = askTrapTitle(res.ok.trapId, res.ok.name ?? `wt:${res.ok.trapId}`) ?? res.ok;
+      // The phone lists threads by name: show the trap's.
+      if (reg.codexServer && reg.name) await nameCodexThread(reg.sessionId, `lobstah ${reg.name}`);
       if (reservation) dropReservation(reservation.trapId);
       // Pushes from here queue from this sign-on on. A trap needs no restart.
       applyHeavyHooks(reg.worktree);
@@ -3547,6 +3560,8 @@ async function mainCli(): Promise<void> {
       // a later throw starts. A trap stowing itself keeps its session.
       const harnessEnding: HarnessEnding | undefined =
         reg?.harness === 'codex' && reg.harnessProcess && !own && !sessionEnd ? await endHarnessProcess(reg.harnessProcess) : undefined;
+      // On Codex's shared server, stop the thread: the process there hosts every other trap too.
+      const threadStop: CodexThreadStop | undefined = reg?.codexServer && !own && !sessionEnd ? await stopCodexThread(reg.sessionId) : undefined;
       const released = reg ? releaseCatch(reg) : {};
       // Unread messages wait for a re-soak of this worktree within the grace
       // (a restart signs off and on again); the daemon bounces them after it.
@@ -3611,6 +3626,7 @@ async function mainCli(): Promise<void> {
             ...(reg?.name ? { name: reg.name, label: trapLabel(reg) } : {}),
             ...(reg ? { stowed: `wt:${trapId}` } : { trap: `wt:${trapId}`, soaking: false }),
             ...(harnessEnding ? { process: `${harnessEnding} (codex pid ${reg!.harnessProcess!.pid})` } : {}),
+            ...(threadStop ? { thread: threadStop } : {}),
             ...(released.requeued ? { requeued: released.requeued } : {}),
             ...(released.finalized ? { finalized: released.finalized } : {}),
             ...(bounced > 0 ? { bounced: `${bounced} undelivered message(s) — returned to the helm as notices` } : {}),
@@ -3701,6 +3717,7 @@ async function mainCli(): Promise<void> {
             stampRepairerBeat(now);
           },
           todoFiring: createTodoFiring(),
+          codexServerWatch: createCodexServerWatch(),
         });
       } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;

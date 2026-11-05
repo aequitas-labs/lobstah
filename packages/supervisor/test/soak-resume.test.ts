@@ -100,3 +100,9 @@ it('the todo firing hook runs after the PR watches, so PR records are fresh', ()
   tick(() => {}, { prWatches: () => order.push('pr'), todoFiring: () => order.push('todo') });
   expect(order).toEqual(['pr', 'todo']);
 });
+
+it('a throwing Codex server watch is logged, and the tick carries on', () => {
+  const log: string[] = [];
+  expect(() => tick((message) => log.push(message), { codexServerWatch: () => { throw new Error('socket went away'); } })).not.toThrow();
+  expect(log).toContain('codex server watch: socket went away');
+});
