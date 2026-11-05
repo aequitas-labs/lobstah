@@ -44,7 +44,9 @@ export interface TendAttention {
   /** Progress with no current human action: visible, but never walks. */
   quiet?: boolean;
   /** One item owns every member's attention, regardless of watch ownership. */
-  stack?: { ready: number; total: number; allReady: boolean; members: Array<{ key: string; url: string; number: number; note: string; kinds: TendAttentionKind[] }> };
+  /** A stack's short line for a small surface (the pet's bubble, a glass lob): title, count and state. */
+  headline?: string;
+  stack?: { title?: string; ready: number; total: number; allReady: boolean; members: Array<{ key: string; url: string; number: number; title?: string; note: string; kinds: TendAttentionKind[] }> };
   id: string;
   lane: Lane;
   /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
@@ -99,6 +101,8 @@ export interface LandedCatch {
 export interface MergeViewPr {
   number: number;
   url: string;
+  /** Joined from the PR's record when tend builds its report. */
+  title?: string;
   headRef: string;
   headSha: string;
   mergeableState: string;
@@ -119,7 +123,7 @@ export interface MergeView {
   repo: string;
   open: MergeViewPr[];
   /** PRs that left the open set, with how they left. Pruned after 48h. */
-  recent: Array<{ number: number; url: string; disposition: 'merged' | 'closed'; at: string }>;
+  recent: Array<{ number: number; url: string; title?: string; disposition: 'merged' | 'closed'; at: string }>;
 }
 
 export interface GlassPrWatch {
@@ -176,8 +180,10 @@ export interface GlassStack {
   open: boolean;
   nextNumber?: number;
   behind: number;
-  /** Shared stack readiness, absent for a lone PR or an incomplete chain. */
-  readiness?: { id: string; url: string; ready: number; total: number; allReady: boolean; text: string };
+  /** What a stack of several PRs is about (core prStackTitle). Absent for a lone PR, whose row has its own title. */
+  title?: string;
+  /** Shared stack readiness, absent for a lone PR or an incomplete chain. `state` leaves out what the heading says. */
+  readiness?: { id: string; url: string; ready: number; total: number; allReady: boolean; text: string; state: string };
 }
 
 /** The evidence fields a dispatch's row shows: where it went and its PRs. */
@@ -242,7 +248,7 @@ export interface GlassDispatchSummary {
   /** The merge view's gate verdict, where pick has one. */
   prGate?: string;
   /** Every PR of a dispatch with more than one, in stack order, each with its badge once observed. */
-  prList?: Array<{ url: string; number: number; badge?: PrBadge }>;
+  prList?: Array<{ url: string; number: number; title?: string; badge?: PrBadge }>;
 }
 
 /** A dispatch with everything: its summary plus the fields its modal shows. */

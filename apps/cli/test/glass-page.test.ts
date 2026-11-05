@@ -820,7 +820,7 @@ describe('glass page: PRs', () => {
     ]);
   });
 
-  it('titles: a PR card shows the number bold and the title after it on one line; no title shows the number alone', async () => {
+  it('titles: a PR card shows the number bold and the title after it; no title shows the number alone', async () => {
     for (const hash of ['#deck', '#prs']) {
       const g = await page(everyAttentionFleet(), { hash, prefs: { view: 'cards' } });
       const names = g.$$(`${hash} .card .prname`);

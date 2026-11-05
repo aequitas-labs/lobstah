@@ -3,11 +3,12 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { loadConfig } from './config.js';
 import type { Config } from './config.js';
-import { parsePrRef, prBadge, prStandingKinds } from './pr.js';
+import { cutPrTitle, parsePrRef, prBadge, prStandingKinds } from './pr.js';
 import type { PrEvidence } from './pr.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { listNotices, noticesDir, postNotice } from './notices.js';
 import { readPrs, withPrLock } from './prs.js';
+import { storedDescriptor } from './queue.js';
 
 export interface PrStack {
   /** Born at the bottom PR; persisted membership carries it across merges. */
@@ -16,13 +17,82 @@ export interface PrStack {
   members: PrEvidence[];
   ready: number;
   allReady: boolean;
+  /** What the stack is about: see prStackTitle. Absent when nothing names it. */
+  title?: string;
+  /** The stack's one line for notices and digests. */
   text: string;
+  /** The state alone, for a view that already shows the title and the PRs. */
+  state: string;
   /** Read-only views are silent even before the watch migrates old state. */
   legacy?: boolean;
 }
 
 export function stackReadyEnabled(cfg: Pick<Config, 'attentionKinds'>): boolean {
   return cfg.attentionKinds.includes('pr:ready') || cfg.attentionKinds.includes('stack-ready');
+}
+
+/** A PR observation, with the dispatches behind it when it comes from a PR record. */
+type StackMember = Pick<PrEvidence, 'url' | 'title' | 'state'> & { dispatches?: readonly string[] };
+
+/** How long a stack's title runs in a heading or a notice. */
+const STACK_TITLE_MAX = 60;
+
+/** A brief's name: its leading `#` heading. A follow-up or a brief with no heading has none. */
+function briefName(brief: string): string | undefined {
+  const first = brief.split(/\r?\n/).find((line) => line.trim());
+  return first ? /^#\s+(.+?)\s*#*\s*$/.exec(first)?.[1] : undefined;
+}
+
+/** A work dispatch and the ones it follows up, nearest first. Repairs live in the chore lane and name nothing. */
+function followUpChain(id: string): Array<{ id: string; brief: string }> {
+  const chain: Array<{ id: string; brief: string }> = [];
+  const seen = new Set<string>();
+  for (let at: string | undefined = id; at && !seen.has(at); ) {
+    seen.add(at);
+    const descriptor = storedDescriptor(at, 'work');
+    if (!descriptor) break;
+    chain.push({ id: at, brief: descriptor.brief });
+    at = descriptor.followUp;
+  }
+  return chain;
+}
+
+/**
+ * The name a stack has from the dispatch that built it: the nearest brief
+ * heading on that dispatch's follow-up chain. A stack came from one dispatch
+ * when every member's first dispatch shares a chain, and no other open PR
+ * does, since that dispatch's title then describes more than this stack.
+ */
+function dispatchStackName(members: readonly StackMember[], all: readonly StackMember[]): string | undefined {
+  const chains = new Map<string, Array<{ id: string; brief: string }>>();
+  const chainOf = (p: StackMember): Array<{ id: string; brief: string }> => {
+    const first = p.dispatches?.[0];
+    if (!first) return [];
+    const known = chains.get(first);
+    if (known) return known;
+    const chain = followUpChain(first);
+    chains.set(first, chain);
+    return chain;
+  };
+  const rootOf = (p: StackMember): string | undefined => chainOf(p).at(-1)?.id;
+  const root = rootOf(members[0]!);
+  if (!root || members.some((p) => rootOf(p) !== root)) return undefined;
+  const urls = new Set(members.map((p) => p.url));
+  if (all.some((p) => p.state === 'OPEN' && !urls.has(p.url) && rootOf(p) === root)) return undefined;
+  for (const { brief } of chainOf(members[0]!)) {
+    const name = briefName(brief);
+    if (name) return name;
+  }
+  return undefined;
+}
+
+/**
+ * What a stack is about: the name its dispatch's brief gives it, else its
+ * bottom PR's title. `members` run bottom to top; `all` is every PR observed.
+ * Undefined when neither exists, and the stack is shown by its numbers.
+ */
+export function prStackTitle(members: readonly StackMember[], all: readonly StackMember[]): string | undefined {
+  return cutPrTitle(dispatchStackName(members, all) ?? members[0]?.title, STACK_TITLE_MAX) || undefined;
 }
 
 /**
@@ -65,11 +135,21 @@ export function derivePrStacks(
     const ready = members.filter(isReady).length;
     const allReady = ready === members.length;
     const order = members.map((p) => `#${p.number}`).join(' → ');
+    const range = `#${bottom.number} → #${members.at(-1)!.number}`;
     const waiting = members.filter((p) => !isReady(p)).map((p) => `#${p.number} ${waitingReason(p, settleSecs, now)}`).join('; ');
+    const title = prStackTitle(members, valid);
+    const count = `${members.length} PRs`;
+    // Notices stay one line: the title, the count and the state. A stack with no title falls back to its numbers.
+    const text = allReady
+      ? title
+        ? `stack ready to merge: ${title} (${range}, ${count}, all green)`
+        : `stack ready to merge: ${repo(bottom)} ${order} (${count}, all green) — merge in this order, bottom first`
+      : title
+        ? `stack waiting: ${title} (${range}, ${ready} of ${members.length} ready) — ${waiting}`
+        : `stack waiting: ${ready} of ${members.length} ready: ${repo(bottom)} ${order} — ${waiting}`;
     out.push({ id: parsePrRef(bottom.url)!.key, repo: repo(bottom), members, ready, allReady,
-      text: allReady
-        ? `stack ready to merge: ${repo(bottom)} ${order} (${members.length} PRs, all green) — merge in this order, bottom first`
-        : `stack waiting: ${ready} of ${members.length} ready: ${repo(bottom)} ${order} — ${waiting}` });
+      ...(title ? { title } : {}), text,
+      state: allReady ? `${count}, all green` : `${ready} of ${members.length} ready — ${waiting}` });
   }
   return out;
 }
@@ -122,10 +202,15 @@ const headsOf = (s: PrStack) => Object.fromEntries(s.members.map((p) => [parsePr
  * A waiting stack, or one notified only once, keeps its plain text.
  */
 export function stackText(s: Pick<PrStack, 'members' | 'allReady' | 'text'>, epoch?: Pick<StackEpoch, 'priorMembers'>): string {
-  if (!s.allReady || !epoch?.priorMembers) return s.text;
+  const change = stackChange(s, epoch);
+  return change ? `${change} — ${s.text}` : s.text;
+}
+
+/** What changed since the previous ready notification, in words; undefined when there is nothing to say. */
+function stackChange(s: Pick<PrStack, 'members' | 'allReady'>, epoch?: Pick<StackEpoch, 'priorMembers'>): string | undefined {
+  if (!s.allReady || !epoch?.priorMembers) return undefined;
   const added = s.members.filter((p) => !epoch.priorMembers!.includes(parsePrRef(p.url)!.key)).map((p) => `#${p.number}`);
-  const change = added.length ? `${added.join(', ')} added` : `#${s.members[0]!.number}–#${s.members.at(-1)!.number}`;
-  return `Stack updated · ${change} — ${s.text}`;
+  return `Stack updated · ${added.length ? `${added.join(', ')} added` : `#${s.members[0]!.number}–#${s.members.at(-1)!.number}`}`;
 }
 export const stackStateHash = (s: Pick<PrStack, 'id'>, epoch = 0) => createHash('sha1').update(JSON.stringify([s.id, epoch])).digest('hex').slice(0, 16);
 
@@ -139,7 +224,8 @@ export function identifyPrStacks(stacks: PrStack[], state = readStackEpochs()): 
     })).filter((x) => x.overlap > 0).sort((a, b) => b.overlap - a.overlap || a.old.at.localeCompare(b.old.at) || a.id.localeCompare(b.id));
     const id = matches[0]?.old.version === 2 ? matches[0].id : s.id;
     used.add(id);
-    return { ...s, id, text: stackText(s, state[id]), legacy: matches.some((m) => m.old.version !== 2) };
+    const change = stackChange(s, state[id]);
+    return { ...s, id, text: stackText(s, state[id]), state: change ? `${change} — ${s.state}` : s.state, legacy: matches.some((m) => m.old.version !== 2) };
   });
 }
 

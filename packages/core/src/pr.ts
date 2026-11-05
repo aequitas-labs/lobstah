@@ -259,6 +259,37 @@ export interface PrEvidence {
   closedAt?: string;
 }
 
+/** How long a PR's title runs beside its number on one line. */
+const PR_LABEL_MAX = 48;
+
+/**
+ * A PR title on one line: at most `max` characters, the last an ellipsis when
+ * cut; '' when absent. A title is the PR author's text, so control characters
+ * (terminal escapes among them) never pass through.
+ */
+export function cutPrTitle(title: string | undefined, max = 60): string {
+  const chars = Array.from((title ?? '').replace(/\p{Cc}/gu, ' ').replace(/\s+/g, ' ').trim());
+  return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('').trimEnd()}…`;
+}
+
+/** `#2653 Put job photos first…`; the number alone when the PR has no title. */
+export function prLabel(pr: Pick<PrEvidence, 'number' | 'title'>): string {
+  const title = cutPrTitle(pr.title, PR_LABEL_MAX);
+  return title ? `#${pr.number} ${title}` : `#${pr.number}`;
+}
+
+/** A PR's state beside its name: `#2653 Put job photos… · checks 1/3 failed`, or `#2653 checks 1/3 failed` with no title. */
+export function prNote(pr: Pick<PrEvidence, 'number' | 'title'>, state: string): string {
+  const label = prLabel(pr);
+  return `${label}${pr.title?.trim() ? ' ·' : ''} ${state}`;
+}
+
+/** A PR's key with its title, for a line that names the repo: `pr:o/r#7 Put job photos…`. */
+export function prKeyLabel(key: string, title: string | undefined): string {
+  const cut = cutPrTitle(title, PR_LABEL_MAX);
+  return cut ? `${key} ${cut}` : key;
+}
+
 /** Which pr:* kinds stand on this observation, independent of display suppression. */
 export function prStandingKinds(pr: PrEvidence, settle?: { readySettleSecs: number; now: number }): PrStandingKind[] {
   if (pr.state !== 'OPEN') return [];
@@ -456,9 +487,11 @@ export function derivePrEvents(
     .slice(0, 10);
   const sha7 = view.headRefOid.slice(0, 7);
   const base = { pr: ref.key, url: ref.url, headSha: view.headRefOid };
+  const titled = prKeyLabel(ref.key, view.title);
+  const named = titled === ref.key ? ref.key : `${titled}:`;
   const events: PrEvent[] = [];
   const push = (kind: PrEventKind, detail: string, summary: string, extra: Partial<PrEvent>, notice: boolean) =>
-    events.push({ seq: `${epoch}:${kind}:${detail}`, kind, summary: `${ref.key} ${summary}`, ...base, ...extra, notice });
+    events.push({ seq: `${epoch}:${kind}:${detail}`, kind, summary: `${named} ${summary}`, ...base, ...extra, notice });
 
   const done = now.s === 'MERGED' || now.s === 'CLOSED';
   // First sight of a terminal PR: record only. No checks, no review, no notice event.
