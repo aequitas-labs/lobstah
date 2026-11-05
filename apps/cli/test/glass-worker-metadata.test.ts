@@ -16,7 +16,7 @@ function fixture() {
 }
 function details(values: string[]) {
   expect(g!.$$('#modalbox .worker-details')).toHaveLength(1);
-  expect(g!.$$('#modalbox .worker-details dd').map(n => n.textContent)).toEqual(values);
+  expect(g!.$$('#modalbox .worker-details dd').map(n => n.querySelector('[role="img"]')?.getAttribute('aria-label')?.toLowerCase() ?? n.textContent)).toEqual(values);
 }
 async function close() {
   g!.document.dispatchEvent(new g!.window.KeyboardEvent('keydown', { key: 'Escape' }));
@@ -30,8 +30,10 @@ describe('worker metadata in the glass', () => {
       expect(g.$('#traps')?.textContent).not.toContain('my-model');
       expect(g.$('#traps')?.textContent).not.toContain('acceptEdits');
       const indicator = g.$('#traps .worker-harness') as HTMLElement;
-      expect(indicator.textContent?.trim()).toBe('codex');
-      expect(indicator.getAttribute('aria-label')).toBe('my-model · high');
+      expect(indicator.textContent?.trim()).toBe('');
+      expect(indicator.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Codex');
+      expect(indicator.getAttribute('title')).toBe('Codex · my-model · high');
+      expect(indicator.getAttribute('aria-label')).toBe('Codex · my-model · high');
       expect(indicator.getAttribute('tabindex')).toBe('0');
       indicator.focus(); await g.settle();
       expect(g.document.activeElement).toBe(indicator);
@@ -49,7 +51,7 @@ describe('worker metadata in the glass', () => {
       await close();
       await g.go('#dispatches');
       expect(g.$('#dispatches')?.textContent).not.toContain('gpt-5.4');
-      expect(g.$('#dispatches .worker-harness')?.getAttribute('aria-label')).toBe('gpt-5.4 · high');
+      expect(g.$('#dispatches .worker-harness')?.getAttribute('aria-label')).toBe('Codex · gpt-5.4 · high');
       (g.$(`#dispatches ${view === 'cards' ? '.card' : '.rowhead'}`) as HTMLElement).click(); await g.settle();
       details(['codex', 'gpt-5.4', 'high', 'unknown', observedAt]);
       expect(g.$('#modalbox')?.textContent?.match(/gpt-5\.4/g)).toHaveLength(1);
@@ -58,16 +60,33 @@ describe('worker metadata in the glass', () => {
       await g.go('#deck');
       expect(g.$('#deck')?.textContent).not.toContain('my-model');
       expect(g.$('#deck')?.textContent).not.toContain('gpt-5.4');
-      expect(g.$$('#deck .worker-harness').map(n => n.getAttribute('aria-label'))).toContain('my-model · high');
+      expect(g.$$('#deck .worker-harness').map(n => n.getAttribute('aria-label'))).toContain('Codex · my-model · high');
     });
   }
   it('null model says model unknown; null effort is omitted and absent observation stays unknown', async () => {
     const d = fixture();
     Object.assign(d.traps[0]!, { model: null, config: { effort: null, permissionMode: null }, observedAt: undefined });
     g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#traps', prefs: { view: 'cards' } });
-    expect(g.$('#traps .worker-harness')?.getAttribute('aria-label')).toBe('model unknown');
-    expect(g.$('#chips .worker-harness')?.getAttribute('aria-label')).toBe('claude-sonnet-4-6');
+    expect(g.$('#traps .worker-harness')?.getAttribute('aria-label')).toBe('Codex · model unknown');
+    expect(g.$('#chips .worker-harness')?.getAttribute('aria-label')).toBe('Claude · claude-sonnet-4-6');
     (g.$('#traps .card') as HTMLElement).click(); await g.settle();
     details(['codex', 'model unknown', 'unknown', 'unknown', 'unknown']);
   });
+});
+
+it('keeps harness choices named and submits the selected icon choice', async () => {
+  const snapshot = fixture();
+  snapshot.focusToken = 'test-page-token';
+  snapshot.repoKeys = ['web'];
+  g = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: '#traps', post: () => ({ status: 200, body: { ok: true } }) });
+  (g.$('#traps .newtrap button') as HTMLElement).click();
+  await g.settle();
+  const choices = g.$$('#traps input[name="harness"]');
+  expect(choices.map(choice => choice.getAttribute('aria-label'))).toEqual(['Claude', 'Codex']);
+  expect(g.$$('#traps .harness-picker [role="img"]').map(icon => icon.getAttribute('title'))).toEqual(['Claude', 'Codex']);
+  (choices[1] as HTMLInputElement).click();
+  await g.settle();
+  (g.$('#traps .newtrap button[type="submit"]') as HTMLElement).click();
+  await g.settle();
+  expect(g.posts().map(post => JSON.parse(post.body))).toContainEqual({ kind: 'trap-request', payload: { repo: 'web', harness: 'codex' } });
 });

@@ -1,3 +1,4 @@
+import { HarnessIcon } from './harness-icon.js';
 import type { ComponentChildren } from 'preact';
 import type { PermissionRuleChange } from '@lobstah/core';
 import type { DecisionCard } from '../../../src/glass-diff.js';
@@ -10,7 +11,7 @@ type ProposalCard = Extract<DecisionCard, { kind: 'decision' }>;
 /** One changing rule: its sign, its harness, and the rule itself. */
 const change = (rule: PermissionRuleChange) => [
   html`<span class="psign" aria-label=${rule.action === 'add' ? 'add' : 'remove'}>${rule.action === 'add' ? '+' : '−'}</span>`,
-  html`<span class="badge">${rule.harness === 'codex' ? 'Codex' : 'Claude'}</span>`,
+  html`<span class="badge"><${HarnessIcon} harness=${rule.harness} /></span>`,
   html`<code>${rule.harness === 'codex' ? rule.rule.join(' ') : rule.rule}</code>`,
 ];
 

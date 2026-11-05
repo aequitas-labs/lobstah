@@ -1,3 +1,4 @@
+import { HarnessIcon } from './harness-icon.js';
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../../src/glass-diff.js';
@@ -183,7 +184,7 @@ function trapModal(t: GlassTrap) {
     ? [
         t.repo ?? '',
         ' · ',
-        t.harness ?? '',
+        html`<${HarnessIcon} harness=${t.harness} />`,
         ' · requested ',
         Age(t.requested.at),
         ' ago from the glass; the helm starts it with man throw --new.',

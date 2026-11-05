@@ -377,12 +377,14 @@ describe('glass page: tabs and hash routing', () => {
         const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device });
         const [link] = links(g);
         expect(links(g)).toHaveLength(1);
-        expect(text(link)).toBe('Open live Claude');
+        expect(link?.getAttribute('aria-label')).toBe('Open live Claude');
+        expect(link?.querySelector('[role="img"]')?.getAttribute('title')).toBe('Claude');
         expect(link!.getAttribute('target')).toBe('_blank');
         expect(link!.getAttribute('rel')).toContain('noopener');
         expect(text(g.$('#modalbox'))).toContain('Running on studio');
         expect(text(g.$('#modalbox'))).not.toContain('only reachable');
-        expect(text(g.$('#modalbox'))).toContain('Opens in the Claude app or a browser');
+        expect(text(g.$('#modalbox'))).toContain('Opens in the app or a browser');
+        expect(g.$('#modalbox .dim [role="img"]')?.getAttribute('aria-label')).toBe('Claude');
         expect(text(g.$('#modalbox'))).toContain('This glass is read-only from here');
       });
     }
@@ -939,7 +941,7 @@ describe('glass page: On deck', () => {
         '🪤 wt:t7',
         '🪤 wt:t2',
       ]);
-      expect(items.map((l) => text(l.querySelector('.badge')))).toEqual([
+      expect(items.map((l) => l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')))).toEqual([
         'claude',
         'claude',
         'codex',
