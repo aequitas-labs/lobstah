@@ -199,21 +199,37 @@ describe('todo verbs: times', () => {
     expect(todos.find((t) => t.text === 'behind')).toMatchObject({ stale: false, overdue: true });
   });
 
-  it('the brief lists overdue ones first whatever the limit leaves, and collapses those waiting', () => {
+  it('the brief keeps future and snoozed todos named even when the unscheduled limit is zero', () => {
     const grounds = helm();
     fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\nbriefTodoLimit = 0\n');
     addTodo(grounds, 'waiting one', Date.now(), { dueAt: new Date(Date.now() + DAY).toISOString() });
-    addTodo(grounds, 'waiting two', Date.now(), { dueAt: new Date(Date.now() + DAY).toISOString() });
+    const snoozed = addTodo(grounds, 'waiting two', Date.now(), { dueAt: new Date(Date.now() + DAY).toISOString() });
+    expect(run(['todo', 'snooze', String(snoozed.id), '--until', '2d', '--session', HELM]).status).toBe(0);
     addTodo(grounds, 'plain one', Date.now());
     addTodo(grounds, 'late one', Date.now() - DAY, { dueAt: new Date(Date.now() - 1000).toISOString() });
     const out = run(['hook', 'session-start'], { session_id: HELM, source: 'startup' });
     const ctx = JSON.parse(out.stdout).hookSpecificOutput.additionalContext as string;
     expect(ctx).toContain('late one — added');
     expect(ctx).toContain('[overdue]');
-    expect(ctx).not.toContain('waiting one');
+    expect(ctx).toContain('waiting one');
+    expect(ctx).toContain('waiting two');
+    expect(ctx).toContain('[due ');
+    expect(ctx).toContain('; snoozed 1]');
     expect(ctx).not.toContain('plain one');
-    expect(ctx).toContain('2 scheduled (lobstah todo ls)');
+    expect(ctx).not.toContain('scheduled (lobstah todo ls)');
     expect(ctx).toContain('… and 1 more (lobstah todo ls)');
+  });
+
+  it.each(['tend', 'report'])('man %s keeps the full list with future and snoozed due times', (surface) => {
+    const grounds = helm();
+    addTodo(grounds, 'Future follow-up', Date.now(), { dueAt: new Date(Date.now() + DAY).toISOString() });
+    const snoozed = addTodo(grounds, 'Snoozed follow-up', Date.now(), { dueAt: new Date(Date.now() + DAY).toISOString() });
+    expect(run(['todo', 'snooze', String(snoozed.id), '--until', '2d', '--session', HELM]).status).toBe(0);
+    const out = run(['man', surface, ...(surface === 'report' ? ['--session', HELM] : [])]);
+    expect(out.status, out.stdout + out.stderr).toBe(0);
+    expect(out.stdout).toContain('Future follow-up');
+    expect(out.stdout).toContain('Snoozed follow-up');
+    expect(out.stdout).toContain('due,snoozes');
   });
 
   it('tend lists overdue first, with one count line, and waiting last', () => {
