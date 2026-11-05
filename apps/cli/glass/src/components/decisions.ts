@@ -1,3 +1,5 @@
+import { DesktopStartAction } from './common.js';
+import { validDesktopStartLink } from '../../../../../packages/core/src/desktop-start-link.js';
 import type { Attachment } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
 import { decisionFileUrl } from '../../../src/glass-diff.js';
@@ -273,8 +275,13 @@ export function DecisionModal({
                 c.detail.trim() &&
                 html`<${Markdown} text=${c.detail} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`,
               c.kind === 'decision' && attachments(c.key, c.attachments),
-              draft?.sent ? html`<div class="danswered ok">answered · ${draft.sent}</div>` : answerForm(c, draft, extensions.join(',')),
-              legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && c.permission),
+              c.kind === 'decision' && c.appStart && validDesktopStartLink(c.appStart.url)
+                ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
+                : draft?.sent
+                  ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
+                  : answerForm(c, draft, extensions.join(',')),
+              !(c.kind === 'decision' && c.appStart) &&
+                legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && c.permission),
             ]
       }`,
     c.key,

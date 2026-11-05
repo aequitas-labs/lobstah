@@ -141,3 +141,5 @@ tracked background task. End the turn while the external operation runs.
 
 Markers (`.lobstah-man`) and `man init` are manual fallbacks for setups
 without the plugin; see docs/man.md. `lobstah man` prints the full manual; `lobstah doctor` diagnoses a broken setup.
+
+For a bounded browser, app or computer step a repo worker cannot do, use `lobstah dispatch --for trap:<profile> --assist <original-id> --brief <file>`. The original worker keeps repo and PR ownership. An absent desktop profile needs its `lobstah man throw trap:<profile>` app-start card, never a terminal fallback.

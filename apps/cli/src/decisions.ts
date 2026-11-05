@@ -50,6 +50,7 @@ export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()):
     return {
     key: d.key,
     title: d.title,
+    ...(d.appStart ? { appStart: d.appStart } : {}),
     detail: readDecisionDetail(d.key) ?? '',
     options: d.options,
     ...(d.permission ? { permission: true } : {}),

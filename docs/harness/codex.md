@@ -44,6 +44,43 @@ never uses `--dangerously-bypass-hook-trust`, edits saved trust, enables a
 disabled hook, or approves repo/user/other-plugin hooks. Those still require
 their normal review. Manually launched Codex sessions still use `/hooks`.
 
+### On Codex's shared server
+
+`man throw --remote-control` starts a Codex trap with `--remote unix://`, attached
+to Codex's shared app-server. Its pane and a paired phone then drive one thread:
+either can send a turn, and an approval reaches both, with the first answer
+clearing the other. `[soak].codexRemoteControl = true` does this for every Codex
+trap, including scheduled and batch throws. Other traps are unchanged.
+
+To pair the phone, run `codex remote-control pair` at your own terminal. Pairing
+grants the whole host, not one trap, and the phone can steer whatever runs on it.
+Thrown traps run `danger-full-access` by default, so few commands ask for approval.
+
+The trap's work runs in the server, not the pane, and that changes a few things:
+
+- **Trust is saved.** `-c` flags don't reach the server, so a throw saves the same
+  trust it would otherwise pass for the session: lobstah's own hook commands,
+  committed project hooks and a lobstah-created worktree, in `~/.codex/config.toml`.
+  An explicit untrusted folder stays untrusted, and `enabled` isn't touched. A
+  folder that needs a person's decision still stops at Codex's own prompt.
+- **No process is the trap's own.** The server hosts every trap on it, so the trap
+  records no harness process. `stow` from outside interrupts its turn and leaves
+  the server running. The pane's TUI stays open until it's closed.
+- **Closing the pane doesn't stop the work.** The thread stays loaded while the
+  phone has it open. Otherwise it unloads about 60 seconds after its last client goes.
+- **A server restart interrupts traps.** A forced restart stops running commands and
+  listeners, and the TUI reconnects within seconds. The lobstah daemon notices and
+  sends each trap a turn telling it to carry on, so an interrupted command can run
+  again. After a hard crash, the old command may still be running when it does.
+- **The server keeps its own environment.** Start it from a plain terminal, or let
+  a throw start it. Never run `codex remote-control start` on a server with traps on
+  it: it restarts the server.
+- **A message from the phone is an instruction.** What Chris sends in a trap's
+  session from his phone counts the same as typing in its pane.
+- **The phone shows two hosts called `Mac`** when the desktop app is paired too.
+  Both list the same threads, and only the server's host can open a trap's thread.
+  Each thread is named `lobstah <trap>`.
+
 In 0.160.1, linked worktrees inherit project trust and hook declarations
 from their primary checkout, including the primary hook source path. They
 do not need blanket trust for `~/.codex/worktrees` or `~/.lobstah/worktrees`.

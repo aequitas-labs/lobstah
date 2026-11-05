@@ -1,3 +1,4 @@
+import { configuredTrapViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { reviewTools } from './review-tools.js';
@@ -594,6 +595,7 @@ export function poolRows(pools: PoolView[]): Array<Record<string, string | numbe
 export const POOL_COLUMNS = ['pool', 'repo', 'size', 'free', 'overflow', 'claimed', 'out', 'warming'];
 
 export interface TendReport {
+  configuredTraps?: ReturnType<typeof configuredTrapViews>;
   goals?: ReturnType<typeof visibleGoals>;
   backends?: ReturnType<typeof backendViews>;
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
@@ -1077,6 +1079,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     watches,
     traps,
     repoTraps: repoTrapRows(cfg),
+    configuredTraps: configuredTrapViews(cfg),
     awaiting,
     notices,
     helms,
@@ -1233,6 +1236,7 @@ export function renderTend(r: TendReport): string {
     lines.push('');
     lines.push(toonTable('pools', poolRows(r.pools), POOL_COLUMNS));
   }
+  if (r.configuredTraps?.length) lines.push('', toonTable('configured-traps', r.configuredTraps.map((profile) => ({ ...profile })), ['profile', 'grounds', 'surface', 'harness', 'capacity', 'state', 'cwd']));
   if (r.repoTraps?.length) {
     lines.push('', toonTable('repo-traps', r.repoTraps, ['repo', 'traps']));
   }

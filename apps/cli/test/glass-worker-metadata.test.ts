@@ -30,8 +30,10 @@ describe('worker metadata in the glass', () => {
       expect(g.$('#traps')?.textContent).not.toContain('my-model');
       expect(g.$('#traps')?.textContent).not.toContain('acceptEdits');
       const indicator = g.$('#traps .worker-harness') as HTMLElement;
-      expect(indicator.textContent?.trim()).toBe('codex');
-      expect(indicator.getAttribute('aria-label')).toBe('my-model · high');
+      expect(indicator.textContent?.trim()).toBe('');
+      expect(indicator.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Codex');
+      expect(indicator.getAttribute('title')).toBe('Codex · my-model · high');
+      expect(indicator.getAttribute('aria-label')).toBe('Codex · my-model · high');
       expect(indicator.getAttribute('tabindex')).toBe('0');
       indicator.focus(); await g.settle();
       expect(g.document.activeElement).toBe(indicator);
@@ -50,6 +52,8 @@ describe('worker metadata in the glass', () => {
       await g.go('#dispatches');
       expect(g.$('#dispatches')?.textContent).not.toContain('gpt-5.4');
       expect(g.$('#dispatches .worker-harness')?.getAttribute('aria-label')).toBe('gpt-5.4 · high');
+      expect(g.$('#dispatches .worker-harness')?.textContent).toBe('codex');
+      expect(g.$('#dispatches .worker-harness .harness-icon')).toBeNull();
       (g.$(`#dispatches ${view === 'cards' ? '.card' : '.rowhead'}`) as HTMLElement).click(); await g.settle();
       details(['codex', 'gpt-5.4', 'high', 'unknown', observedAt]);
       expect(g.$('#modalbox')?.textContent?.match(/gpt-5\.4/g)).toHaveLength(1);
@@ -58,16 +62,34 @@ describe('worker metadata in the glass', () => {
       await g.go('#deck');
       expect(g.$('#deck')?.textContent).not.toContain('my-model');
       expect(g.$('#deck')?.textContent).not.toContain('gpt-5.4');
-      expect(g.$$('#deck .worker-harness').map(n => n.getAttribute('aria-label'))).toContain('my-model · high');
+      expect(g.$$('#deck .worker-harness').map(n => n.getAttribute('aria-label'))).toContain('Codex · my-model · high');
     });
   }
   it('null model says model unknown; null effort is omitted and absent observation stays unknown', async () => {
     const d = fixture();
     Object.assign(d.traps[0]!, { model: null, config: { effort: null, permissionMode: null }, observedAt: undefined });
     g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#traps', prefs: { view: 'cards' } });
-    expect(g.$('#traps .worker-harness')?.getAttribute('aria-label')).toBe('model unknown');
+    expect(g.$('#traps .worker-harness')?.getAttribute('aria-label')).toBe('Codex · model unknown');
     expect(g.$('#chips .worker-harness')?.getAttribute('aria-label')).toBe('claude-sonnet-4-6');
     (g.$('#traps .card') as HTMLElement).click(); await g.settle();
     details(['codex', 'model unknown', 'unknown', 'unknown', 'unknown']);
   });
+});
+
+it('keeps full harness names in the chooser and submits the selected harness', async () => {
+  const snapshot = fixture();
+  snapshot.focusToken = 'test-page-token';
+  snapshot.repoKeys = ['web'];
+  g = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: '#traps', post: () => ({ status: 200, body: { ok: true } }) });
+  (g.$('#traps .newtrap button') as HTMLElement).click();
+  await g.settle();
+  const choice = g.$('#traps select[name="harness"]') as HTMLSelectElement;
+  expect([...choice.options].map(option => option.textContent)).toEqual(['Claude', 'Codex']);
+  expect(g.$('#traps .newtrap .harness-icon')).toBeNull();
+  choice.value = 'codex';
+  choice.dispatchEvent(new g.window.Event('change', { bubbles: true }));
+  await g.settle();
+  (g.$('#traps .newtrap button[type="submit"]') as HTMLElement).click();
+  await g.settle();
+  expect(g.posts().map(post => JSON.parse(post.body))).toContainEqual({ kind: 'trap-request', payload: { repo: 'web', harness: 'codex' } });
 });

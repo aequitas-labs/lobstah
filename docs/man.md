@@ -1313,6 +1313,7 @@ lobstah man roster set <trap> --harness codex --model <m> --terminal iterm --con
                                                     # save how a throw starts it; `default` or `key=` clears
 lobstah man throw <trap> [--timeout <secs>]         # bring one trap back; wait until it listens
 lobstah man throw <trap> --bypass                   # a person, at a terminal: this start skips permission checks
+lobstah man throw <trap> --remote-control           # this start can be driven from a phone: Claude's Remote Control, or Codex's shared server
 lobstah man throw --all                             # every eligible trap in your grounds, at once
 lobstah man throw --repo <key>                      # every eligible trap of one repo
 lobstah man throw --new --repo <key> --count N      # N fresh traps (see "Starting a new trap")
@@ -1320,6 +1321,15 @@ lobstah man throw --dry-run <trap>... | --all | --repo <key> | --new ...
                                                     # what a throw would do; launches nothing (--plan too)
 lobstah man roster forget <trap> [--force]          # remove a stowed trap's record, worktree, and ref
 ```
+
+`man throw --remote-control` makes one start reachable from a phone, new
+(`--new`) or returning. A Codex trap attaches to Codex's shared app-server, so its
+pane and a paired phone drive one thread. Other traps are unchanged unless
+`[soak].codexRemoteControl = true`, which covers every Codex start, including
+scheduled and batch throws. It saves hook and folder trust in
+`~/.codex/config.toml`. Pair the phone once with `codex remote-control pair` at your
+own terminal, which grants the whole host. See
+[Codex's shared server](harness/codex.md#on-codexs-shared-server) for what changes.
 
 `man throw --dry-run` (or `--plan`) launches nothing and writes nothing. Each
 row says what a throw would do and why:
@@ -1598,3 +1608,34 @@ disk  warn  412.3 GB free on ~/.lobstah/worktrees; minFreeGB 10; retentionDays 1
   after a reboot.
 - An honest six-verb status contract, validated at the write path, so the
   liaison never has to parse prose to know where things stand.
+
+## Configured repo-less traps
+
+Declare one `[traps.<name>]` profile per grounds with `harness`, `surface`
+(`claude-desktop` or `terminal`), and `grounds`. `cwd` is an optional existing
+plain folder; `maxInstances` defaults to 1. See the configuration reference.
+A configured session joins with `lobstah soak --trap <name> --session <own-id>
+--wait`. Its identity, inbox, park, stow and ghost history survive without a
+git worktree. Forget frees an idle instance and keeps its folder and history.
+
+Route a bounded app or browser step with:
+
+```sh
+lobstah dispatch --for trap:desk --grounds fleet --assist <original-id> --brief /tmp/inspection.md
+```
+
+The catch stays queued for that profile. The original worker keeps repo and
+PR ownership; a terminal child report returns its findings and attachments
+to the original dispatch once. Results arriving after the parent ends stay
+filed and notify the helm. Configured catches accept `--report` and
+`--attach`, rather than PR evidence. Tool approval remains with the harness
+Auto reviewer.
+
+`lobstah man throw trap:desk` files one app-start card for an absent Claude
+Desktop profile. Open its prefilled Code link on the Mac, confirm the folder
+if Claude asks, and send the sign-on instruction. The catch stays queued
+until that session signs on and parks. Returning sessions use their saved
+app link when available; they are never cold-started in a terminal. Opening
+a card is not sign-on. Roster, status, tend and glass show the profile,
+grounds, surface, capacity, queued catches and current state. Desk catches
+share one host UI lease across grounds; the person's keyboard remains free.

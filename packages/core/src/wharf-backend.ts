@@ -36,7 +36,13 @@ async function responseValue(response: Response): Promise<unknown> {
   return value;
 }
 function input(v: unknown): DispatchInput {
-  const r = record(v); const d: DispatchInput = { id: string(r.id), repo: string(r.repo), brief: string(r.brief) };
+  const r = record(v); const d: DispatchInput = { id: string(r.id), brief: string(r.brief) };
+  if (r.target !== undefined) {
+    const target = record(r.target);
+    if (target.kind !== 'configured-trap' || !['claude-desktop', 'terminal'].includes(String(target.surface)) || r.repo !== undefined || r.repoRemote !== undefined) throw new BackendError(502, 'invalid configured target');
+    d.target = { kind: 'configured-trap', profile: string(target.profile), grounds: string(target.grounds), surface: target.surface as 'claude-desktop' | 'terminal', ...(target.parentDispatch === undefined ? {} : { parentDispatch: string(target.parentDispatch) }) };
+  } else d.repo = string(r.repo);
+  if (r.grounds !== undefined) d.grounds = string(r.grounds);
   if (r.repoRemote !== undefined) d.repoRemote = string(r.repoRemote);
   for (const k of ['for', 'boat', 'followUp', 'harness', 'model', 'effort'] as const) if (r[k] !== undefined) d[k] = string(r[k]);
   if (r.lane === 'work' || r.lane === 'chore') d.lane = r.lane;
@@ -105,7 +111,12 @@ export class WharfBackend implements CoordinationBackend {
     return value.map((v) => {
       const r = record(v); if (!['queued', 'active', 'done', 'cancelled'].includes(String(r.state))) throw new BackendError(502, 'invalid dispatch state');
       const unservable = r.unservable ? record(r.unservable) : undefined;
-      return { ...input(r), state: r.state as DispatchView['state'], ...(r.status ? { status: report(r.status) } : {}),
+      let assistance: DispatchView['assistance'];
+      if (r.assistance !== undefined) {
+        if (!Array.isArray(r.assistance) || r.assistance.length > 32) throw new BackendError(502, 'invalid assistance results');
+        assistance = r.assistance.map((value) => { const child = record(value); if (!Array.isArray(child.files) || child.files.length > 32) throw new BackendError(502, 'invalid assistance files'); return { id: string(child.id), state: string(child.state), ...(child.note === undefined ? {} : { note: string(child.note) }), files: child.files.map((value) => { const file = record(value); if (typeof file.size !== 'number' || file.size < 0) throw new BackendError(502, 'invalid assistance file size'); return { id: string(file.id), name: string(file.name), size: file.size }; }) }; });
+      }
+      return { ...input(r), ...(assistance ? { assistance } : {}), state: r.state as DispatchView['state'], ...(r.status ? { status: report(r.status) } : {}),
         ...(r.ack ? { ack: { ...ack(r.ack), status: string(record(r.ack).status) } } : {}),
         ...(r.boatName ? { boatName: string(r.boatName) } : {}),
         ...(r.workerId ? { workerId: string(r.workerId) } : {}), ...(r.claimedBoat ? { claimedBoat: string(r.claimedBoat) } : {}),

@@ -83,9 +83,10 @@ export function livenessView(id: string, lane: Lane): LivenessView {
     const runner = JSON.parse(fs.readFileSync(path.join(laneDirs(lane).active, id, 'runner.json'), 'utf8')) as { attempts?: number };
     attempt = runner.attempts;
   } catch { /* not a headless active run */ }
+  if (d?.target) return { ...(elapsed ? { elapsed } : {}), ...(attempt ? { attempt } : {}) };
   const branch = (wt && git(wt, 'branch', '--show-current')) || ev.branch;
   const lastCommit = wt && git(wt, 'log', '-1', '--format=%h %s');
-  const trunk = d && cfg.repos[d.repo]?.trunk;
+  const trunk = d?.repo ? cfg.repos[d.repo]?.trunk : undefined;
   const ahead = wt && trunk && git(wt, 'rev-list', '--count', `origin/${trunk}..HEAD`);
   return {
     ...(elapsed ? { elapsed } : {}),

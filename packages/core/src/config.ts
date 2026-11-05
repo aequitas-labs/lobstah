@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { parseConfiguredTraps, type ConfiguredTrapProfile } from './configured-traps.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
@@ -342,6 +343,11 @@ export interface SoakConfig {
   tmuxPages: TmuxPages;
   /** Panes per window when `tmuxPages = "fixed"`. */
   tmuxPageSize: number;
+  /**
+   * Start every Codex trap on Codex's shared app-server, as `man throw
+   * --remote-control` does for one: scheduled and batch throws too.
+   */
+  codexRemoteControl: boolean;
 }
 
 /** How lobstah's tmux server groups trap panes into windows. */
@@ -434,6 +440,8 @@ export interface GroundsConfig {
 }
 
 export interface Config {
+  /** Named repo-less profiles; absent leaves repo traps unchanged. */
+  traps?: Record<string, ConfiguredTrapProfile>;
   repos: Record<string, RepoConfig>;
   harness: HarnessDefaults;
   limits: LimitsConfig;
@@ -548,6 +556,7 @@ function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
   if (!Number.isInteger(soak.codexStartSecs) || soak.codexStartSecs < 1) throw new Error('soak.codexStartSecs must be a positive whole number');
   if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
+  if (typeof soak.codexRemoteControl !== 'boolean') throw new Error('soak.codexRemoteControl must be true or false');
   if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm' && soak.terminal !== 'tmux') {
     throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal", "iterm" or "tmux"`);
   }
@@ -593,6 +602,7 @@ export const DEFAULT_SOAK: SoakConfig = {
   signOffGraceSecs: 600,
   tmuxPages: 'repo',
   tmuxPageSize: 6,
+  codexRemoteControl: false,
 };
 
 export const DEFAULT_HELM: HelmConfig = {
@@ -745,6 +755,7 @@ export function loadConfig(): Config {
     grounds,
     wharves,
     pools: parsePools(raw.pools, repos),
+    traps: parseConfiguredTraps(raw.traps, grounds),
     hooks: parseHooks(raw.hooks),
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
     readySettleSecs,
@@ -765,6 +776,7 @@ export interface ResolvedDispatch {
 
 /** Precedence chain: descriptor > repo config > global config > adapter default. */
 export function resolveDispatch(d: Descriptor, cfg: Config): ResolvedDispatch {
+  if (d.target || !d.repo) throw new Error('configured trap work cannot launch headless');
   const repo = cfg.repos[d.repo];
   if (!repo) throw new Error(`unknown repo key "${d.repo}" — add it to ${configPath()}`);
   const rh = repo.harness ?? {};

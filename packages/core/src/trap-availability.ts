@@ -16,6 +16,7 @@ export interface TrapAvailability {
 
 /** Terminal reports release availability even before the stale claimed pointer is cleared. */
 export function trapAvailability(reg: TrapRegistration, now = Date.now()): TrapAvailability {
+  if (reg.configured && reg.claimed && !storedDescriptor(reg.claimed, 'work') && !storedDescriptor(reg.claimed, 'chore')) return { state: 'busy', dispatch: reg.claimed, verb: reg.hostedCatch ? 'working' : 'waiting', text: `busy on ${reg.claimed} (wharf)` };
   if (hasOpenCatch(reg)) {
     const id = reg.claimed!;
     const lane = storedDescriptor(id, 'work') ? 'work' : 'chore';
@@ -29,7 +30,7 @@ export function trapAvailability(reg: TrapRegistration, now = Date.now()): TrapA
   for (const lane of ['chore', 'work'] as const) {
     for (const id of pendingIds(lane)) {
       const d = queuedDescriptor(id, lane);
-      if (d?.for !== `wt:${reg.trapId}`) continue;
+      if (d?.for !== `wt:${reg.trapId}` && !(d?.target && d.target.profile === reg.configured?.profile && d.target.grounds === reg.configured.grounds)) continue;
       const age = d.queuedAt ? ageLabel(Math.max(0, now - Date.parse(d.queuedAt))) : 'age unknown';
       return { state: 'busy', dispatch: id, verb: 'queued', text: `busy on ${id} (queued, ${age})` };
     }

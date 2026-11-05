@@ -120,6 +120,13 @@ describe.skipIf(process.platform === 'win32')('asking Codex over its own protoco
     expect((await listCodexHooks(cwd))?.get(pluginKey('stop'))).toEqual(hook);
   });
 
+  it('does not run the server inside the checkout, which Windows would then refuse to delete', async () => {
+    const seen = path.join(home, 'server-cwd');
+    fakeCodex(`pwd > ${JSON.stringify(seen)}; exit 1`);
+    await listCodexHooks(cwd);
+    expect(fs.realpathSync(fs.readFileSync(seen, 'utf8').trim())).not.toBe(fs.realpathSync(cwd));
+  });
+
   it('keeps stdin open until the reply, because the real server exits when stdin closes', async () => {
     const reply = JSON.stringify({ id: 2, result: { data: [{ hooks: [] }] } });
     // Like the real server: it answers a moment later, and exits first if stdin closes.

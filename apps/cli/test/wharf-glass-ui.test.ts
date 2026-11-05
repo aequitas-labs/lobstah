@@ -76,7 +76,7 @@ it('shows jobs, notes, catches, PR links and the remote boat’s copy command wi
   expect(g.doc.querySelectorAll('.mdpage').length).toBe(1); expect(g.reads).toContain('/api/glass/dispatches/job/files/worker-md');
   expect(g.reads).toContain('/api/glass/dispatches/job/files/worker-image');
   await g.click('⧉'); expect(g.copied).toEqual(['codex resume test-session']); expect(g.doc.body.textContent).toContain('copied');
-  expect(g.doc.querySelectorAll('[role=dialog]').length).toBe(1); await g.click('×'); await g.tab('traps'); expect(g.doc.body.textContent).toContain('codex'); expect(g.doc.body.textContent).toContain('kind-crab');
+  expect(g.doc.querySelectorAll('[role=dialog]').length).toBe(1); await g.click('×'); await g.tab('traps'); expect(g.doc.querySelector('.card .harness-icon')?.getAttribute('aria-label')).toBe('Codex'); expect(g.doc.querySelector('.card .harness-icon')?.getAttribute('title')).toBe('Codex'); expect(g.doc.body.textContent).toContain('kind-crab');
 });
 it('shows a phone where a worker ran and no command it cannot use', async () => {
   const g = await page('/', false, { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148 Safari/604.1' });

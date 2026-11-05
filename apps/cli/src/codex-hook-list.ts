@@ -65,7 +65,8 @@ export function listCodexHooks(cwd: string, opts: { env?: NodeJS.ProcessEnv; tim
     { id: listRequestId, method: 'hooks/list', params: { cwds: [cwd] } },
   ];
   return new Promise((resolve) => {
-    const server = spawn(invocation.file, invocation.argv, { cwd, env: { ...process.env, ...opts.env }, stdio: ['pipe', 'pipe', 'ignore'] });
+    // The checkout is named in the request, not used as the server's directory: a running process would hold it open on Windows.
+    const server = spawn(invocation.file, invocation.argv, { env: { ...process.env, ...opts.env }, stdio: ['pipe', 'pipe', 'ignore'] });
     const finish = (list: CodexHookList | undefined): void => {
       clearTimeout(timer);
       server.kill();

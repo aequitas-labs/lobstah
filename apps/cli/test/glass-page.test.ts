@@ -378,6 +378,7 @@ describe('glass page: tabs and hash routing', () => {
         const [link] = links(g);
         expect(links(g)).toHaveLength(1);
         expect(text(link)).toBe('Open live Claude');
+        expect(link?.querySelector('.harness-icon')).toBeNull();
         expect(link!.getAttribute('target')).toBe('_blank');
         expect(link!.getAttribute('rel')).toContain('noopener');
         expect(text(g.$('#modalbox'))).toContain('Running on studio');
@@ -939,7 +940,7 @@ describe('glass page: On deck', () => {
         '🪤 wt:t7',
         '🪤 wt:t2',
       ]);
-      expect(items.map((l) => text(l.querySelector('.badge')))).toEqual([
+      expect(items.map((l) => l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')))).toEqual([
         'claude',
         'claude',
         'codex',
@@ -1109,7 +1110,8 @@ describe('glass page: a dispatch shows its trap by name', () => {
     const g = await page(namedFleet(), { hash: '#dispatches', prefs: { view: 'table' } });
     await click(g, row(g, 'cccccccc').querySelector('a.trapname'));
     expect(text(g.$('#modalbox h3'))).toContain('🪤');
-    expect(text(g.$('#modalbox h3'))).toContain('t1');
+    expect(text(g.$('#modalbox h3'))).toContain('crisp-heron');
+    expect(text(g.$('#modalbox .trap-address'))).toContain('wt:t1');
     await escape(g);
     await click(g, row(g, 'dddddddd').querySelector('a.trapname'));
     expect(text(g.$('#modalbox h3'))).toContain('signed off');
