@@ -1,3 +1,4 @@
+import { validDesktopStartLink, type DesktopAppStart } from './desktop-start-link.js';
 import type { GrantIntent } from './grants.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -72,6 +73,8 @@ export interface PermissionsProposal {
 }
 
 export interface DecisionMeta {
+  /** A configured desktop session start action, separate from tool approval. */
+  appStart?: DesktopAppStart;
   /** `decision:<rid>`. */
   key: string;
   title: string;
@@ -337,6 +340,7 @@ export function standingDecisions(): DecisionMeta[] {
 }
 
 export interface AskOptions {
+  appStart?: DesktopAppStart;
   title: string;
   /** A markdown file to copy as the detail page. */
   detailFile?: string;
@@ -388,6 +392,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   if (opts.replace !== undefined && !standingDecisions().some((d) => d.key === opts.replace)) {
     throw new DecisionError(`no standing decision ${opts.replace} to replace — \`lobstah man tend\` lists them`);
   }
+  if (opts.appStart && (!validDesktopStartLink(opts.appStart.url) || !/^[a-z][a-z0-9-]{0,63}$/.test(opts.appStart.profile))) throw new DecisionError('invalid desktop app start action');
   const title = checkTitle(opts.title);
   const options = checkOptions(opts.options ?? []);
   let detail = opts.detailText ?? '';
@@ -425,6 +430,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   const meta: DecisionMeta = {
     key,
     title,
+    ...(opts.appStart ? { appStart: opts.appStart } : {}),
     options,
     ...(opts.optionNotes ? { optionNotes: Object.fromEntries(Object.entries(opts.optionNotes).filter(([o]) => options.includes(o))) } : {}),
     attachments: attached,

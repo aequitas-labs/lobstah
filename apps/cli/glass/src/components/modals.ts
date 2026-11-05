@@ -20,6 +20,8 @@ import {
   NamedText,
   opener,
   TrapName,
+  trapDisplayName,
+  trapScope,
   liveLinkNote,
   namedText,
   prCell,
@@ -242,7 +244,8 @@ function trapModal(t: GlassTrap) {
     : html`<div class="empty">none yet</div>`;
   return [
     close,
-    html`<h3>🪤 ${t.repoLabel ?? t.label ?? `wt:${t.trapId}`} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'}</span></h3>`,
+    html`<h3>🪤 ${trapDisplayName(t)} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'}</span></h3>`,
+    html`<div class="sub trap-address">${trapScope(t)}${trapScope(t) && ' · '}wt:${t.trapId}</div>`,
     html`<${WorkerDetails} worker=${t} />`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,

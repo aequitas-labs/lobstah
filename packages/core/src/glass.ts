@@ -206,7 +206,8 @@ export interface GlassDispatchSummary {
   id: string;
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';
-  repo: string;
+  repo?: string;
+  target?: import('./configured-trap-model.js').ConfiguredTrapTarget;
   for?: string;
   followUp?: string;
   /** The brief's first line. */
@@ -411,6 +412,7 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
 
 /** A standing decision as the glass renders it: the record plus its detail page. */
 export interface GlassDecision {
+  appStart?: import('./desktop-start-link.js').DesktopAppStart;
   key: string;
   title: string;
   /** The detail markdown; images it names by bare filename load from the decision's attachments. */
@@ -501,6 +503,7 @@ export interface GlassSnapshot {
   heavy?: GlassHeavy;
   helms: GlassHelm[];
   traps: GlassTrap[];
+  configuredTraps?: import('./configured-trap-views.js').ConfiguredTrapView[];
   /** Catches (dispatches finished done): today, on the server's local day, and all time. */
   stats?: { catchesToday: number; totalCatches: number };
   /**

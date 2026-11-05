@@ -16,6 +16,46 @@ keys of that section.
 | `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
 | `readySettleSecs` | `600` | `pr:ready` stands after continuously meeting the ready conditions on the same head for this many seconds. Any not-ready observation or new head resets the timer. Each attention read re-evaluates expiry from the persisted start, even without a new forge event. `0` restores immediate ready attention; other `pr:*` kinds are unchanged. |
 
+## `[traps.<name>]` — repo-less workers
+
+A named profile serves exactly one grounds, without git, repo setup or a
+worktree. Profiles are separate per grounds. `soak --trap <name> --session
+<id>` signs on the current session; `dispatch --for trap:<name>` queues
+sticky work for that profile. Configured catches accept reports and files,
+not PR evidence. Tool approval stays with the harness Auto reviewer.
+
+```toml
+[traps.desk]
+harness = "claude"
+surface = "claude-desktop"
+grounds = "fleet"              # implicit grounds: fleet or its display name home
+maxInstances = 1              # live, stowed, ghosted and pending instances
+# cwd = "~/Desktop/desk"      # optional existing plain folder, no git required
+
+[traps.ops]
+harness = "codex"
+surface = "terminal"
+terminal = "tmux"             # optional: terminal, iterm or tmux
+maxInstances = 1
+grounds = "fleet"
+```
+
+`harness`, `surface` and `grounds` are required. `claude-desktop` requires
+Claude; `terminal` supports Claude and Codex. `maxInstances` defaults to 1
+and must be a positive integer. `terminal` is valid only for a terminal
+surface. `cwd` must be an existing absolute directory (`~/` expands);
+omitting it creates a private folder under
+`$LOBSTAH_HOME/trap-workspaces/<grounds>/<profile>/<instance>`. A folder
+inside a repo still remains a plain folder for this profile. Unknown keys,
+grounds, harnesses and surfaces are config errors naming the key.
+
+Stow and ghost keep the instance and folder. Returning reuses a slot;
+`man roster forget` frees an idle instance without deleting its folder,
+app session, configuration or catch history. Queued and active work prevent
+forgetting. Removing configuration leaves existing catches and identities
+intact and prevents new claims. Roster, tend and the glass show each
+profile's grounds, surface, capacity and state.
+
 ## `[repos.<key>]` — workspace definitions
 
 The descriptor's `repo` field resolves here; the key is what dispatchers name.
@@ -181,6 +221,7 @@ send a continuation.
 | `ttlSecs` | `1800` | Heartbeat age past which a registration is a ghost trap: the sweep removes it and requeues an unfinished catch, finalizes done/failed in `done/`, or finalizes a cancelled catch as failed. A fresh `lobstah report` or beat counts as liveness. If the daemon's own tick gap exceeds this TTL, it grants a full TTL after resume before sweeping any traps. |
 | `beat` | `true` | The post-tool hook (`lobstah soak beat`) refreshes a soaking session's liveness and writes its catch's activity, at most once per 30 seconds per trap. With `false` the hook does nothing, and a trap's liveness comes from its reports and its park only. |
 | `signOffGraceSecs` | `600` | After a trap signs off, its address is held this long: messages to it wait for a re-soak of the same worktree instead of bouncing, `send` to it queues with a warning, and work addressed to it raises no `bait-orphaned` notice. After the grace the daemon bounces the held messages. `0` bounces at sign-off. |
+| `codexRemoteControl` | `false` | Start every Codex trap on Codex's shared app-server, so a paired phone can drive it, as `man throw --remote-control` does for one. It covers scheduled and batch throws, and saves hook and folder trust in `~/.codex/config.toml`. See [Codex](harness/codex.md). |
 | `terminal` | unset | The terminal app a thrown trap opens in: `terminal` (Terminal.app) or `iterm` (iTerm2). A trap's roster profile (`man roster set <trap> --terminal`) overrides it. Unset, `man throw` uses the app the trap last signed on from, else Terminal.app. `man throw` opens the trap's session there through AppleScript (macOS only); the app needs Automation permission for the terminal that runs `man throw`. |
 | `pausedTtlSecs` | `86400` (24 hours) | A trap whose catch last reported `paused` is kept out of the ghost sweep this long after the report. `report paused --until <iso|duration>` sets the expiry instead. After it, the sweep removes the trap as usual, and the notice says the pause expired. |
 

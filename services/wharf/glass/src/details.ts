@@ -90,9 +90,10 @@ export function Job({ job, workers, action }: { job: DispatchView; workers: Work
           ]
         : [];
     }) ?? [];
-  return html`<div class="sub">${job.id} · ${job.repo} · ${job.status?.verb ?? job.state} · ${job.boatName ?? worker?.boatName ?? 'boat unknown'}${acked(job.ack)}</div>
+  return html`<div class="sub">${job.id} · ${job.target ? `trap:${job.target.profile} · ${job.target.grounds}` : job.repo} · ${job.status?.verb ?? job.state} · ${job.boatName ?? worker?.boatName ?? 'boat unknown'}${acked(job.ack)}</div>
     <div class="sec">brief</div><pre>${LinkedText(job.brief)}</pre>
     <div class="sec">status notes / catches</div>${error && html`<div class="bad">${error}</div>`}${detail?.reports.map((s) => html`<div class="catch"><div class="hdr"><b>${s.verb}</b><span class="dim">${when(s.at)}</span></div><pre>${LinkedText(s.note)}</pre>${s.waitingOn && html`<div class="waiting">waiting on ${LinkedText(s.waitingOn)}${s.until ? ' until ' + s.until : ''}</div>`}${s.evidence?.prUrls?.map((url) => safeHref(url) && html`<div><a href=${safeHref(url)} target="_blank" rel="noopener noreferrer">${url}</a></div>`)}</div>`)}
+    ${detail?.assistance?.length && html`<div class="sec">Assistance</div>${detail.assistance.map((child) => html`<div class="catch"><a href=${`#job/${child.id}`}>${child.id}</a> · ${child.state}<div>${LinkedText(child.note)}</div><${Files} files=${child.files} kind="dispatches" id=${child.id} /></div>`)}`}
     <div class="sec">messages</div>${detail?.messages.map((m) => html`<div class="msg"><div class="hdr">${m.received ? 'received' : 'unread'}</div>${LinkedText(m.text)}</div>`)}
     <${Files} files=${detail?.files ?? []} kind="dispatches" id=${job.id} />
     ${reports.map((r) => html`<div class="sec">worker report</div><${Document} key=${r.markdown.id} doc=${r} action=${action} kind="dispatches" />`)}

@@ -32,7 +32,7 @@ export function goalsRecapData(grounds: string, date: string, cfg: Config) {
     const ids = new Set([...readDirIfPresent(dirs.active), ...readDirIfPresent(dirs.done)].filter((s) => !s.startsWith('.')));
     for (const id of ids) {
       const descriptor = storedDescriptor(id, lane);
-      if (!descriptor || !g.repos.includes(descriptor.repo)) continue;
+      if (!descriptor || !(descriptor.target ? descriptor.target.grounds === key : descriptor.repo && g.repos.includes(descriptor.repo))) continue;
       const evidence = readEvidence(id, lane);
       for (const url of [evidence?.prUrl, ...(evidence?.prUrls ?? [])]) if (url) urls.add(url);
       for (const entry of readStatusLog(id, lane)) if ((entry.verb === 'done' || entry.verb === 'failed') && inDay(entry.at))

@@ -7,6 +7,7 @@ export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${CARD_LINK_RULE}`;
 /** The helm's Stop hook says this at every turn end. Only a blocking Stop output reaches the model; otherwise the person sees it. */
 export const HELM_STOP_REMINDER = 'If this reply requires human action, put it on a card.';
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
+export const DESK_ROUTING_RULE = 'For a bounded browser, app or computer step a repo worker cannot do, dispatch --for trap:<profile> --assist <original-id>. The original worker keeps repo and PR ownership. Use man throw trap:<profile> for an absent desk; point at its app-start card instead of starting a terminal session.';
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';
 export const DISPATCH_UNBLOCKED_RULE = 'Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.';
 export const PARKED_TODO_RULE = 'Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.';
@@ -38,6 +39,7 @@ Role:
 - Do not do the work yourself. Write a self-contained brief and dispatch it.
 - Answer a worker's question when you can decide. Send the answer. Ask the human with \`lobstah man ask\` when the choice is theirs.
 - ${HELM_REMINDER}
+- ${DESK_ROUTING_RULE}
 - ${TRAP_REUSE_RULE} Use \`lobstah dispatch --repo <key> --trap-any --brief <file>\`.
 - ${DISPATCH_UNBLOCKED_RULE}
 - ${PARKED_TODO_RULE}

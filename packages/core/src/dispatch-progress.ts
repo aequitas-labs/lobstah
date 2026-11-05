@@ -25,7 +25,8 @@ export function dispatchQueueReason(d: Descriptor, lane: Lane, cfg = loadConfig(
     if (now - Date.parse(trap.heartbeatAt) > cfg.soak.ttlSecs * 1000) return `addressed to ${trapRepoLabel(trap)}, which is no longer answering`;
     return `addressed to ${trapRepoLabel(trap)}, waiting for its session to take the brief`;
   }
-  if (!cfg.repos[d.repo]) return `repo ${d.repo} is not configured`;
+  if (d.target) return `addressed to trap:${d.target.profile} in grounds ${d.target.grounds}, waiting for its session to park`;
+  if (!d.repo || !cfg.repos[d.repo]) return `repo ${d.repo} is not configured`;
   if (d.trapAny) return trapCapacityReason(cfg, d.repo, d.harness, now);
   if (poolWaits(d, cfg)) return `pool ${d.pool} has no free worktree`;
   const ceiling = lane === 'chore' ? cfg.limits.choreConcurrent : cfg.limits.maxConcurrent;
@@ -38,7 +39,7 @@ export function dispatchQueueReason(d: Descriptor, lane: Lane, cfg = loadConfig(
 export interface DispatchProgress {
   id: string;
   lane: Lane;
-  repo: string;
+  repo?: string;
   state: 'queued-too-long' | 'stalled' | 'idle-while-working';
   since: string;
   ageSecs: number;

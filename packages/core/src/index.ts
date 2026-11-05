@@ -86,3 +86,13 @@ export * from './remote-link.js';
 export * from './session-holder.js';
 export * from './goal-line.js';
 export * from './helm-pass.js';
+
+export * from './configured-traps.js';
+export * from './configured-trap-slots.js';
+export * from './configured-trap-views.js';
+export * from './assistance.js';
+export * from './desktop-lease.js';
+export * from './desktop-start-link.js';
+export * from './desktop-start.js';
+export { CONFIGURED_TRAP_INSTRUCTION } from './configured-trap-model.js';
+export * from './configured-trap-health.js';

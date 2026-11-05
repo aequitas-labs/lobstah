@@ -40,7 +40,7 @@ const short = (s: string) => s.slice(0, 8);
 /** What the origin's dispatch was asked to run on — descriptor, then config defaults. */
 function askedHarness(id: string, lane: Lane, cfg: Config): string {
   const d = storedDescriptor(id, lane);
-  return d?.harness ?? (d ? cfg.repos[d.repo]?.harness?.default : undefined) ?? cfg.harness.default ?? 'claude';
+  return d?.harness ?? (d?.repo ? cfg.repos[d.repo]?.harness?.default : undefined) ?? cfg.harness.default ?? 'claude';
 }
 
 export function planStart(input: PlanInput): StartPlan {

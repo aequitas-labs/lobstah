@@ -6,7 +6,7 @@ import type { BackendMessage, ClaimReceipt } from './backend-model.js';
 
 export interface BrokerAddress { pid: number; port: number; nonce: string }
 export interface BrokerAgent {
-  grounds: string; repo: string; trap: string; session: string; capability: string; worktree: string; origin?: string;
+  grounds: string; repo?: string; configured?: import('./configured-trap-model.js').ConfiguredTrapLocation; trap: string; session: string; capability: string; worktree: string; origin?: string;
 }
 export const brokerAddressFile = () => path.join(lobstahHome(), 'wharf-broker.json');
 function agentFile(grounds: string, cwd: string) {

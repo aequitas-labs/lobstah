@@ -40,6 +40,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   dispatch: {
     flags: {
+      '--grounds': { value: '<name>' },
+      '--assist': { value: '<dispatch>' },
       '--repo': { value: '<key>' },
       '--pool': { value: '<name>' },
       '--trap-any': {},
@@ -141,8 +143,9 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<key>]',
   },
   soak: {
-    subverbs: ['beat', 'title-set', 'stop-listener'],
+    subverbs: ['beat', 'title-set', 'stop-listener', 'remember-window'],
     flags: {
+      '--trap': { value: '<profile>' },
       '--session': { value: '<id>' },
       '--one': {},
       '--harness': { value: HARNESS },
@@ -308,8 +311,7 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 export const PROSE: Record<string, string> = {
   setup: `\`setup reviews\` derives your GitHub login (or --identity), writes a self-contained notify configuration,
 enables review notifications, and installs pick. Refuses installation while unrelated issue or PR-feedback pickup is enabled.`,
-  dispatch: `Queue work; prints id. Claimed helm: --session <helm-id>. --attach copies files. --for <name>, wt:<name>, wt:<id> is sticky; session:<id> resolves to its trap.
---trap-any: queues immediately; daemon prefers free listeners, then starts stowed/new traps within the repo's cap. Never headless.
+  dispatch: `Queue work; prints id. --session names the helm. --attach copies files; --for is sticky. --trap-any: queues immediately; daemon prefers free listeners, then starts stowed/new traps within the repo's cap. Never headless.
 --pool: warm headless worktree, exclusive with --for/--trap-any. --pr: push to that open PR, open none. Alias: set --bait.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
@@ -383,8 +385,7 @@ installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report --pr\`, a trap's beat, and \`watch backfill --apply\` register; reads never do.
 \`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
-  soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
-Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
+  soak: `Volunteer as worker; --trap <profile> uses a configured plain folder. Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL; --remote-link: the https://claude.ai/code/… URL Claude printed.
 --wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
@@ -442,7 +443,7 @@ PR, and merge gate. Pure disk read.`,
   'man:throw': `Bring roster traps back, or start fresh, and wait until they listen; live/starting traps refuse.
 <trap>: one; --all: grounds; --repo: one repo; --new [--count N] [--request <id>]: fresh traps.
 --new shows reusable traps; --reason is required when any exist and never overrides the repo's traps cap.
---dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's. --remote-control: this Claude trap starts in Remote Control, where Claude's own setting doesn't.`,
+--dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's. --remote-control: this Claude trap starts in Remote Control, where Claude's own setting doesn't; this Codex trap attaches to Codex's shared server, so a paired phone can drive it ([soak].codexRemoteControl: every Codex trap).`,
   'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull. set (the
 helm's) saves how a throw starts it; default or key= clears a field. forget removes a
 stowed trap's record, worktree, and protected ref (refused while it has unpushed commits).`,

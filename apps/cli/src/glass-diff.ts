@@ -191,6 +191,7 @@ export const decisionFileUrl = (key: string, name: string): string => `/decision
 export type DecisionCard =
   | {
       kind: 'decision';
+      appStart?: import('@lobstah/core').DesktopAppStart;
       key: string;
       title: string;
       detail: string;
@@ -233,6 +234,7 @@ export function decisionCards(
         detail: d.detail,
         options: d.options,
         ...(d.permission ? { permission: true } : {}),
+        ...(d.appStart ? { appStart: d.appStart } : {}),
         ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
         ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
         attachments: d.attachments,
@@ -501,7 +503,7 @@ export interface SectionInputs {
   chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[]; stats: GlassSnapshot['stats']; backends?: GlassSnapshot['backends'] };
   deck: DeckInputs;
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatchSummary[] };
-  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[] };
+  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps'] };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
   reviews: { view: GlassPrefs['view'] | undefined; list: GlassReview[] };
@@ -563,6 +565,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     },
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },
     traps: {
+      configured: d.configuredTraps,
       view: st.view,
       list: traps.map((t) => seat(trapView(d, t))),
     },

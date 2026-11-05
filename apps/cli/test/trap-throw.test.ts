@@ -28,7 +28,7 @@ import {
   type ThrowPlanRow,
   type TrapRegistration,
 } from '@lobstah/core';
-import { freshProfile, harnessCommand, launchShellText, nextStartMode, REMOTE_CONTROL_CLAUDE_ONLY, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
+import { freshProfile, harnessCommand, launchShellText, nextStartMode, onCodexServer, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { trapRows } from '../src/trap-list.js';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -391,7 +391,7 @@ describe('the start command', () => {
     expect(startCommand(row({ harness: 'claude' }), entry, 'T')).toMatchObject({ cwd: '/w/soak-abcd1234', argv: ['claude', '--permission-mode', 'auto', '/lobstah:trap soak --ticket T'] });
   });
 
-  it('adds the interactive Remote Control option under the trap name, before the prompt, and never on Codex', () => {
+  it('adds the interactive Remote Control option under the trap name, before the prompt, and never Claude\'s option on Codex', () => {
     const base = { cwd: '/w', ticket: 'T' };
     expect(harnessCommand({ ...base, harness: 'claude', remoteControl: 'amber-gull' }).argv).toEqual(['claude', '--permission-mode', 'auto', '--remote-control', 'amber-gull', '/lobstah:trap soak --ticket T']);
     expect(harnessCommand({ ...base, harness: 'claude' }).argv).not.toContain('--remote-control');
@@ -614,10 +614,64 @@ describe('the start command', () => {
     });
   });
 
-  it('refuses --remote-control for Codex before anything starts', async () => {
-    const seen: TerminalLaunch[] = [];
-    await expect(throwNew({ cfg: loadConfig(), repo: 'r', harness: 'codex', remoteControl: true, reason: 'no', adapter: idle(seen) })).rejects.toThrow(REMOTE_CONTROL_CLAUDE_ONLY);
-    expect(seen).toHaveLength(0);
+  describe('a Codex trap on the shared app-server', () => {
+    const base = { cwd: '/w', ticket: 'T', harness: 'codex' };
+
+    it('attaches with --remote before any subcommand, so resume reaches the same server', () => {
+      expect(harnessCommand({ ...base, remoteControl: 'amber-gull' }).argv.slice(0, 3)).toEqual(['codex', '--remote', 'unix://']);
+      const resumed = harnessCommand({ ...base, remoteControl: 'amber-gull', resume: 'thread-1' }).argv;
+      expect(resumed.indexOf('--remote')).toBeLessThan(resumed.indexOf('resume'));
+    });
+
+    it('stays off unless asked for: the flag, or the setting', () => {
+      expect(harnessCommand(base).argv).not.toContain('--remote');
+      const cfg = (codexRemoteControl: boolean) => ({ cfg: { soak: { codexRemoteControl } } as ReturnType<typeof loadConfig> });
+      expect(onCodexServer(cfg(false), 'codex')).toBe(false);
+      expect(onCodexServer({ ...cfg(false), remoteControl: true }, 'codex')).toBe(true);
+      expect(onCodexServer(cfg(true), 'codex')).toBe(true);
+      expect(onCodexServer({ ...cfg(true), remoteControl: true }, 'claude')).toBe(false);
+    });
+
+    it('runs the preface in the pane, and starts the session whether or not it succeeds', () => {
+      expect(launchShellText({ cwd: '/w', env: {}, argv: ['codex'], preface: 'lobstah soak remember-window --ticket T' })).toBe("cd /w && { lobstah soak remember-window --ticket T; } ; codex");
+      expect(launchShellText({ cwd: '/w', env: {}, argv: ['codex'] })).toBe('cd /w && codex');
+    });
+
+    it('readies the server before the pane opens, reserves the trap for it, and hides the ticket', async () => {
+      const order: string[] = [];
+      const seen: TerminalLaunch[] = [];
+      let shown = '';
+      const adapter = (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (launch) => { order.push('launch'); seen.push(launch); throw new Error('stop here'); } });
+      await expect(throwNew({
+        cfg: loadConfig(), repo: 'r', harness: 'codex', remoteControl: true, reason: 'test', adapter,
+        prepareCodexServer: async () => { order.push('prepare'); },
+        onLaunch: (launched) => { shown = launched.command; },
+      })).rejects.toThrow('stop here');
+      expect(order).toEqual(['prepare', 'launch']);
+      expect(seen[0]!.argv.slice(0, 1)).toEqual(['codex']);
+      expect(seen[0]!.argv).toContain('--remote');
+      expect(seen[0]!.preface).toMatch(/^lobstah soak remember-window --ticket [0-9a-f]{8}-[0-9a-f]{32}$/);
+      expect(shown).toBe('');
+    });
+
+    it('never prepares a server, or adds a preface, for a Codex trap that did not ask', async () => {
+      const seen: TerminalLaunch[] = [];
+      let prepared = false;
+      const adapter = (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (launch) => { seen.push(launch); throw new Error('stop here'); } });
+      await expect(throwNew({ cfg: loadConfig(), repo: 'r', harness: 'codex', reason: 'test', adapter, prepareCodexServer: async () => { prepared = true; } })).rejects.toThrow('stop here');
+      expect(prepared).toBe(false);
+      expect(seen[0]!.argv).not.toContain('--remote');
+      expect(seen[0]!.preface).toBeUndefined();
+    });
+
+    it('leaves the trap unstarted when the server can not be readied', async () => {
+      const seen: TerminalLaunch[] = [];
+      await expect(throwNew({
+        cfg: loadConfig(), repo: 'r', harness: 'codex', remoteControl: true, reason: 'test', adapter: idle(seen),
+        prepareCodexServer: async () => { throw new Error('could not start Codex shared server'); },
+      })).rejects.toThrow('could not start Codex shared server');
+      expect(seen).toHaveLength(0);
+    });
   });
 
   it('starts every trap in auto mode by default; a roster permissionMode overrides; bypass wins', () => {
