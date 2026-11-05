@@ -108,7 +108,8 @@ import type { GlassStack } from './glass-prs.js';
 import { todoOverdueLine, todoStaleLine, todoTable, todoViews, type TodoView } from './todo.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
-const HEARTBEAT_STALE_MS = 90_000;
+/** A daemon heartbeat older than this means the daemon isn't running. */
+export const HEARTBEAT_STALE_MS = 90_000;
 /** A queued item this old with capacity free means claiming is broken. */
 const CLAIM_STALE_MS = 120_000;
 const DAY_MS = 24 * 3600_000;

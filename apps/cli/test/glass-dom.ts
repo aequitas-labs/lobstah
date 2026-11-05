@@ -1,3 +1,4 @@
+import type { GlassSettings } from '@lobstah/core';
 import { Window } from 'happy-dom';
 import type { GlassFullSnapshot, GlassOlderKind } from '@lobstah/core';
 import { olderPage, pollBody } from '../src/glass-poll.js';
@@ -57,6 +58,8 @@ export interface GlassDom {
 
 export interface GlassDomOptions {
   now: number;
+  /** What `GET /data/settings` answers; absent, it answers 500. */
+  settings?: GlassSettings;
   /** Optional installed-app API; absent in browsers that do not support it. */
   badge?: (count: number) => Promise<void>;
   /** The page path, e.g. `/report/<key>`; the default is `/`. */
@@ -135,6 +138,7 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
       headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
       json: async () => JSON.parse(JSON.stringify(body)),
     });
+    if (url === '/data/settings') return opts.settings ? json(200, opts.settings) : json(500, { error: 'no settings' });
     if (typeof url === 'string' && url.startsWith('/data/dispatch/')) {
       dataFetched.push(url);
       const id = decodeURIComponent(url.slice('/data/dispatch/'.length));

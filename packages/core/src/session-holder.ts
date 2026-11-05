@@ -5,8 +5,10 @@ import * as path from 'node:path';
 import { harnessProcessAlive } from './harness-process.js';
 import { validRemoteLink } from './remote-link.js';
 import { listRoster } from './roster.js';
+import type { RosterEntry } from './roster.js';
 import { readSessionWatcher } from './session-watcher.js';
 import { listTraps } from './soak.js';
+import type { TrapRegistration } from './soak.js';
 
 /** A process or trap that still has a harness session open. */
 export interface SessionHolder {
@@ -141,6 +143,27 @@ export function sessionHolders(sessionId: string, opts: { claudeHome?: string } 
     if (watcher) holders.push({ pid: watcher.pid, listener: true, ...(watcher.trapId ? { trap: `wt:${watcher.trapId}` } : {}) });
   }
   return holders;
+}
+
+/** The traps and roster records a session check reads; a caller looping over many traps reads them once. */
+export interface SessionClaimSources {
+  traps?: readonly Pick<TrapRegistration, 'trapId' | 'name' | 'sessionId'>[];
+  roster?: readonly Pick<RosterEntry, 'trapId' | 'name' | 'sessionId'>[];
+}
+
+/**
+ * Why `trapId` must not resume this session: another trap is signed on with it,
+ * or another roster record also claims it. Resuming would make a second writer,
+ * or leave two traps sharing one history. Undefined when the session is this
+ * trap's alone.
+ */
+export function sessionClaimedElsewhere(sessionId: string, trapId: string, sources: SessionClaimSources = {}): string | undefined {
+  const session = sessionId.slice(0, 8);
+  const live = (sources.traps ?? listTraps()).find((reg) => reg.sessionId === sessionId && reg.trapId !== trapId);
+  if (live) return `session ${session} belongs to live trap ${live.name ?? `wt:${live.trapId}`}`;
+  const others = (sources.roster ?? listRoster()).filter((entry) => entry.sessionId === sessionId && entry.trapId !== trapId);
+  if (others.length) return `session ${session} is also claimed by trap ${others.map((entry) => entry.name).join(', ')}`;
+  return undefined;
 }
 
 /** Which holders have the session open, and how to stop each. */

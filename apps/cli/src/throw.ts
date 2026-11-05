@@ -430,7 +430,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
         trapId: entry.trapId,
         name: entry.name,
         createdBy: 'soak',
-        sessionId: entry.sessionId,
+        ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
         repo: entry.repo,
         ...(entry.soakBranch ? { branch: entry.soakBranch } : {}),
       });

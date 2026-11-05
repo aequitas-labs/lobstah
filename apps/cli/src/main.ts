@@ -229,7 +229,7 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
-import { charter, HELM_REMINDER, helmChatRule } from './charter.js';
+import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS } from './tend.js';
 import { runCull } from './cull.js';
@@ -1745,6 +1745,8 @@ async function mainCli(): Promise<void> {
       if (!has('--print')) {
         const holders = sessionHolders(sessionId);
         if (holders.length) throw new Error(`not attaching ${id}: ${sessionHolderText(sessionId, holders)}`);
+        const claiming = listRoster().filter((entry) => entry.sessionId === sessionId);
+        if (claiming.length > 1) throw new Error(`not attaching ${id}: session ${sessionId.slice(0, 8)} is claimed by traps ${claiming.map((entry) => entry.name).join(', ')}, and a resume would make a second writer`);
       }
       if (harness === 'codex' && codexDesktopThread(sessionId)) {
         throw new Error(
@@ -2845,9 +2847,14 @@ async function mainCli(): Promise<void> {
       // lobstah man gate applies (helm registration, marker file, or env).
       // Hookless sessions have foreground verbs instead: `soak --wait` for
       // workers, `man wait` for the lobstah man.
+      // A helm's turn end always says the card reminder, in the block when
+      // there is one. A Stop hook prints one JSON object, so the rest stays silent.
+      let stopHelm = false;
+      let stopBlocked = false;
       try {
         const hook = readHookStdin();
         const trapReg = hook?.session_id ? trapBySession(hook.session_id) : undefined;
+        stopHelm = !trapReg && !!hook?.session_id && !!helmOf(hook.session_id);
         if (trapReg) {
           // Cancellation and inbox steering keep their existing priority.
           // This is a single peek, not the automatic background park.
@@ -2906,8 +2913,10 @@ async function mainCli(): Promise<void> {
           break;
         }
         const emit = (reason: string) => {
-          const rule = helmChatRule(hook?.session_id ? helmOf(hook.session_id)?.grounds : undefined);
-          console.log(JSON.stringify({ decision: 'block', reason: reason + (rule ? `\n${rule}` : '') }));
+          const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
+          const rule = helmChatRule(helmNow?.grounds);
+          stopBlocked = true;
+          console.log(JSON.stringify({ decision: 'block', reason: [reason, rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
         };
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
@@ -3125,6 +3134,8 @@ async function mainCli(): Promise<void> {
         );
       } catch {
         // never break a stop
+      } finally {
+        if (stopHelm && !stopBlocked) console.log(JSON.stringify({ systemMessage: HELM_STOP_REMINDER }));
       }
       break;
     }

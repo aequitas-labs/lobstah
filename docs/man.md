@@ -512,7 +512,8 @@ dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
 and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
-PRs, Reviews, Reports, Notices, and Stats. The Stats tab shows catches per day as a
+PRs, Reviews, Reports, Notices, Stats, and Settings, a read-only view of the
+effective config with its secrets masked. The Stats tab shows catches per day as a
 53-week heatmap, with today, this week, the total, and the top traps; it
 reads `stats.json` from `GET /data/stats` and sends nothing. The Reports tab lists every report, unacked first,
 then newest first, and the repo filter and the search box (title, author,
