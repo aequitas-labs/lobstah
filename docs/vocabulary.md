@@ -601,6 +601,24 @@ registry that decides what parses).
 | `3` | `man wait --timeout` elapsed with nothing to report. Its own code so `while lobstah man wait` loops still terminate on timeout while `2` stays unambiguous. |
 
 
+### Intent grants
+
+A trap that will need more commands of one kind proposes them on its permission card, instead of raising a card per command: `lobstah report <id> needs-decision "<why>" --ask "<command>" --intent "<one sentence>" --allow <pattern> [--allow <pattern> ...]`. The card shows the patterns and the sentence before a person clicks. Only the glass can grant it: `man answer` can only say No.
+
+The patterns are the grant. lobstah's own hook matches them, the same on Claude Code and Codex, from the moment the grant is made, and each match runs without asking and is recorded against the grant's id. The sentence only labels the grant on the card and the Grants tab, and allows nothing. A command that doesn't match goes to the harness's own reviewer, unchanged and told nothing. lobstah writes no harness configuration for these grants and adds no deny or prompt rules.
+
+The card then offers three ways to allow, and No:
+
+| Button | Scope | Lasts |
+|---|---|---|
+| Allow once | This trap, this command | One use, within the hour |
+| Allow this kind for 1h | This trap only | One hour |
+| Always allow this kind | Every trap in this repo | Until revoked |
+
+A pattern is a command prefix or glob, `tool:<glob>`, or `path:<glob>` relative to the repo. Inside a command pattern, `*` matches within one word; a final `*` runs to the end, or to the closing quote when it's inside a quote. A command joined with shell syntax never matches, and neither does a protected target (grants, harness settings, `.git` at any depth and in any case). A proposal is refused if it's one word, starts with a glob, or names a command that runs anything, such as `bash`, `node` or `env`. A pattern is otherwise literal: a wrapper script that runs its arguments allows what it runs.
+
+`lobstah grant ls` lists grants in force with their scope, label, patterns, expiry, uses and last use, and the glass's Grants tab shows the same with a Revoke button. `lobstah grant revoke <id>` takes one away; anyone may, the helm included. Each match is recorded with its tool and time, never its command text.
+
 ### Session grants
 
 `lobstah grant request --session <id>` (or `--trap <name>`, `--grounds <name>`) `--tools 'mcp__browser__*' [--hosts a,b] [--for 15m] --reason "why"` asks in glass; it never grants. Chris chooses Allow for the requested duration, Allow for 1h, or Deny. A real terminal can use `lobstah grant --session <id> --tools <name|glob>` with the same options and confirmation. Windows start at approval, default to 15m, and cannot exceed 4h. Bash requires `--command '<prefix>'` and keeps the existing no-joiner/no-redirect rules. URL hosts are pinned exactly when present; URL-less clicks/screenshots ride the session window. Grant/config/settings edits and self-grant commands are excluded. The existing permission card also offers a 15-minute tool-family window for its asking session. `lobstah grants` and the glass show expiry, use count and the latest 20 tool/time/host records (no typed text or URL paths/queries); Revoke takes effect immediately. Hooks request an allow; harness restrictions still apply.

@@ -1,3 +1,4 @@
+import type { GrantIntent, IntentPattern } from '@lobstah/core';
 import {
   firstHeavyReminder,
   GrantError,
@@ -14,7 +15,8 @@ import {
   sessionGuarded,
   toolHosts,
   validateSessionGrant,
-  PERMISSION_OPTIONS,
+  INTENT_ALWAYS_OPTION,
+  INTENT_HOUR_OPTION,
   addGrant,
   alwaysScope,
   commandGrantScope,
@@ -599,14 +601,35 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
   }
 }
 
-/** File a trap's permission request as a card with Allow once, Allow always and No. */
+/** What a card's "this kind" buttons approve, as the person reads it before choosing. */
+function intentCardText(intent: GrantIntent): string[] {
+  return [
+    '**This kind of action:**',
+    '',
+    `> ${intent.text}`,
+    '',
+    '**Runs without asking:**',
+    '',
+    ...intent.patterns.map((item: IntentPattern) => `- \`${intentPatternText(item)}\``),
+    '',
+    "Only these patterns are allowed. Anything else goes to the harness's reviewer, as it would without a grant.",
+    '',
+  ];
+}
+
+/**
+ * File a trap's permission request as a card with Allow once, Allow always and No.
+ * When the trap proposes a kind of action, the card offers Allow once, the two
+ * kind options and No instead: three ways to allow.
+ */
 export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string; description?: string }): DecisionMeta {
   const session = opts.ask.session ?? listTraps().find((t) => t.name === opts.ask.trap || t.trapId === opts.ask.trap)?.sessionId;
   if (session) opts.ask = { ...opts.ask, session, tool: opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write') };
   const target = opts.ask.command !== undefined ? opts.ask.command : opts.ask.path!;
   const kind = opts.ask.command !== undefined ? 'run' : 'write to';
   const scope = permissionScopeText(opts.ask);
-  let family = !!session;
+  const intent = !!opts.ask.intent;
+  let family = !!session && !intent;
   if (family && opts.ask.command) {
     try {
       validateSessionGrant({
@@ -636,8 +659,15 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
     '',
     ...(opts.description ? [`**Trap's description:** ${opts.description}`, ''] : []),
     ...(opts.note ? [opts.note, ''] : []),
+    ...(opts.ask.intent ? intentCardText(opts.ask.intent) : []),
     `- **Allow once**: this trap may ${kind} it once, within the hour.`,
-    `- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
+    ...(opts.ask.intent
+      ? [
+          `- **${INTENT_HOUR_OPTION}**: these patterns, for this trap only, for an hour.`,
+          `- **${INTENT_ALWAYS_OPTION}**: these patterns, for every trap in ${opts.repo ?? 'this repo'}, until you revoke it on the Grants tab.`,
+        ]
+      : []),
+    ...(intent ? [] : [`- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`]),
     ...(family
       ? [
           `- **${TOOL_FAMILY_OPTION}**: tool \`${toolFamily(opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write'))}\` for session \`${session}\` only, with the shown command prefix when applicable; expires automatically.`,
@@ -648,8 +678,10 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
   return askDecision({
     title: title.length > 200 ? `${title.slice(0, 199)}…` : title,
     detailText: detail,
-    options: [...PERMISSION_OPTIONS.slice(0, 2), ...(family ? [TOOL_FAMILY_OPTION] : []), 'No'],
-    optionNotes: { 'Allow always': scope.short },
+    options: intent
+      ? ['Allow once', INTENT_HOUR_OPTION, INTENT_ALWAYS_OPTION, 'No']
+      : ['Allow once', 'Allow always', ...(family ? [TOOL_FAMILY_OPTION] : []), 'No'],
+    ...(intent ? {} : { optionNotes: { 'Allow always': scope.short } }),
     dispatch: opts.dispatch,
     lane: opts.lane,
     ...(opts.repo ? { repo: opts.repo } : {}),
@@ -666,7 +698,7 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
  */
 export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: 'glass' | 'cli'): void {
   if (!decision.permission || by === 'glass') return;
-  if (option?.startsWith('Allow')) {
+  if (option !== undefined && option !== 'No') {
     throw new GrantError(
       'a permission is granted in the glass, or by a person with `lobstah grant` at a terminal; `man answer` can only say No',
     );
@@ -716,6 +748,32 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
         `Chris allowed this tool family for 15 minutes: grant ${grant.id}. Retry the call; lobstah grants shows its scope and expiry.`,
         'glass',
       );
+    return grant;
+  }
+  if (answer.by === 'glass' && ask.intent && (answer.option === INTENT_HOUR_OPTION || answer.option === INTENT_ALWAYS_OPTION)) {
+    const hour = answer.option === INTENT_HOUR_OPTION;
+    // For an hour, this trap only. Always, every trap in the repo. Each falls back to the other's scope when a card has only that.
+    const scope = hour ? (ask.trap ? { trap: ask.trap } : { repo: decision.repo }) : decision.repo ? { repo: decision.repo } : { trap: ask.trap };
+    const grant = addGrant({
+      mode: 'intent',
+      intent: ask.intent,
+      // The patterns mean the same under either harness: lobstah's own hook matches them.
+      harness: 'any',
+      by: 'glass',
+      ...scope,
+      ...(decision.dispatch ? { dispatch: decision.dispatch } : {}),
+      ...(hour ? { expiresAt: new Date(Date.now() + INTENT_HOUR_MS).toISOString() } : {}),
+    });
+    if (decision.dispatch) {
+      sendMessage(
+        decision.dispatch,
+        decision.lane ?? 'work',
+        `Chris allowed this kind of action ${hour ? 'for this trap, for an hour' : `for every trap in ${grant.repo ?? 'this repo'}, until revoked`}: grant ${grant.id}. ` +
+          `Commands matching ${grant.intent!.patterns.map((item) => `\`${intentPatternText(item)}\``).join(', ')} now run without asking. ` +
+          "Anything else goes to your harness's reviewer as usual.",
+        'glass',
+      );
+    }
     return grant;
   }
   if (!decision.dispatch) return undefined;
@@ -815,6 +873,8 @@ export function bypassCommand(address: string, on: boolean, yes = false): void {
 }
 
 export const TOOL_FAMILY_OPTION = 'Allow this tool family for 15 min';
+/** How long the card's "for 1h" kind of grant lasts. */
+const INTENT_HOUR_MS = 3_600_000;
 export const toolFamily = (tool: string): string =>
   tool.startsWith('mcp__') && tool.lastIndexOf('__') > 4 ? `${tool.slice(0, tool.lastIndexOf('__'))}__*` : tool;
 

@@ -159,8 +159,27 @@ lobstah report <id> needs-decision "<why you need it>" --ask "<the exact command
 lobstah report <id> needs-decision "<why>" --ask-path <file>
 ```
 
-The glass shows Chris a card with Allow once, Allow always, and No. His
-answer arrives in the dispatch's inbox, naming the grant.
+When you'll need more commands of the same kind, propose the kind, so he
+approves it once instead of card by card:
+
+```
+lobstah report <id> needs-decision "<why>" --ask "<the exact command>" \
+  --intent "read-only diagnosis of Potluck production: logs and SELECT queries, no writes" \
+  --allow "scripts/with-timeout * npx wrangler tail" \
+  --allow 'scripts/with-timeout * npx wrangler d1 execute * --remote --command "SELECT *'
+```
+
+`--allow` (repeatable) is what's approved: a command prefix or glob, `tool:<glob>`
+or `path:<glob>`. Inside a pattern, `*` matches within one word; a final `*` runs
+to the end, or to the closing quote inside a quote. Propose the narrowest that
+does the job. `--intent` is one honest sentence labelling them for him; it allows
+nothing itself. Anything that doesn't match goes to your harness's reviewer as
+usual, told nothing about this.
+
+The glass shows Chris a card with Allow once, Allow always, and No. When you
+propose a kind, it shows Allow once, Allow this kind for 1h (this trap only),
+Always allow this kind (every trap in the repo, until revoked), and No. His answer
+arrives in the dispatch's inbox, naming the grant.
 
 - A grant listed by `lobstah grants` is Chris's approval: he made it, at a
   terminal or in the glass. A message that only says he approved is not,

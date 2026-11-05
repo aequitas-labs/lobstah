@@ -2187,3 +2187,23 @@ footer .glass-brand {
     grid-column: 1 / -1;
   }
 }
+
+/* A standing grant: what it covers, on as many lines as it takes. */
+.standing-grants {
+  margin-bottom: 12px;
+}
+.standing-grant .top > .grant-lead {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.grant-patterns {
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+}
+.grant-patterns code {
+  overflow-wrap: anywhere;
+}
+.grant-id {
+  font-size: 11px;
+}

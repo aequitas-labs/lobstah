@@ -532,6 +532,8 @@ export interface GlassSnapshot {
   /** Review requests ([reviews]); absent on a hosted grounds. */
   reviews?: GlassReview[];
   sessionGrants?: import('./grants.js').Grant[];
+  /** Every other grant in force: intent grants, commands and files. */
+  standingGrants?: import('./grants.js').Grant[];
   reviewSetup?: { enabled: boolean; mode: import('./reviews.js').ReviewMode; publish?: boolean; perRepo?: Record<string, { mode: import('./reviews.js').ReviewMode; publish: boolean; overridden: boolean }>; identity?: string; running: boolean };
   /** The helms' open to-dos, every grounds; the deck lists them. */
   todos?: TodoView[];
