@@ -1,4 +1,3 @@
-import { syncIntentContext } from './intent-context.js';
 import {
   firstHeavyReminder,
   GrantError,
@@ -289,7 +288,6 @@ export function grantsCommand(opts: { all: boolean; json: boolean }): void {
 /** `lobstah grant revoke <id>`, also `lobstah revoke <id>`: anyone may take a permission away. */
 export function revokeCommand(id: string): void {
   const g = revokeGrant(id, AGENT_ENV.some((k) => process.env[k] !== undefined) ? 'agent' : localPerson());
-  syncIntentContext();
   console.log(toonKV({ revoked: g.id, what: what(g), at: g.revokedAt! }));
 }
 
@@ -386,8 +384,9 @@ export function checkCall(call: CallInput, cwd: string, sessionOnly = false): st
 
 /**
  * The intent grants allowing a trap's call straight through, or nothing. Every
- * request the call makes must match; only then is each use recorded. An intent
- * grant is honoured wherever the hook runs: a pattern match needs no reviewer.
+ * request the call makes must match; only then is each use recorded. Honoured
+ * wherever the hook runs, so a grant means the same on Claude Code and Codex,
+ * from the moment it's made.
  */
 function intentGrantIds(requests: GrantRequest[], base: GrantRequest, call: CallInput): string[] | undefined {
   const scoped = (requests.length ? requests : [{}]).map((request) => ({ ...base, ...request }));
@@ -502,8 +501,6 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}),
     };
     const cwd = typeof h.cwd === 'string' ? h.cwd : process.cwd();
-    // An intent grant that lapsed since the last call leaves the reviewers' context here.
-    syncIntentContext();
     const ids = checkCall(call, cwd, preToolUse);
     if (ids) {
       console.log(

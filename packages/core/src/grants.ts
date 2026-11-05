@@ -29,10 +29,10 @@ import type { CheckoutRoot } from './grant-scope.js';
  * A once-grant stays exact.
  *
  * An intent grant is a person's approval of a kind of action for one trap or
- * repo: a sentence saying what it covers, plus patterns. A call matching a
- * pattern is allowed through; anything else goes to the harness's own reviewer
- * as it always would, which reads the sentence as context (intent-context.ts).
- * It never adds a refusal: it only removes friction.
+ * repo. The grant is its patterns: lobstah's own hook matches them, the same on
+ * Claude Code and Codex, from the moment the grant is made. The sentence only
+ * labels the grant for the person reading it. Anything that doesn't match goes
+ * to the harness's own reviewer, unchanged and told nothing.
  */
 
 export type GrantHarness = 'claude' | 'codex' | 'any';
@@ -44,8 +44,9 @@ export interface IntentPattern {
   pattern: string;
 }
 
-/** What a person approved in an intent grant: the kind of action in plain words, and what passes without review. */
+/** What a person approved in an intent grant: the patterns that run without asking, and the sentence that labels them. */
 export interface GrantIntent {
+  /** The label on the card and the Grants tab. It allows nothing itself. */
   text: string;
   patterns: IntentPattern[];
 }
@@ -413,10 +414,10 @@ function validateToolPattern(pattern: string): void {
  * above. What passes is shown on the card for a person to read before approving.
  */
 export function validateIntent(intent: GrantIntent): GrantIntent {
-  // One line, and it can't close the marked block it's written into for Codex's reviewer.
-  const text = intent.text.replace(/<!--|-->/g, ' ').replace(/\s+/g, ' ').trim();
+  const text = intent.text.replace(/\s+/g, ' ').trim();
   if (!text) throw new GrantError('an intent needs a sentence saying what it covers');
   if (text.length > INTENT_TEXT_MAX) throw new GrantError(`an intent is at most ${INTENT_TEXT_MAX} characters`);
+  if (intent.patterns.length === 0) throw new GrantError('an intent needs at least one pattern: the patterns are what it allows');
   if (intent.patterns.length > INTENT_PATTERNS_MAX) throw new GrantError(`an intent has at most ${INTENT_PATTERNS_MAX} patterns`);
   const patterns = intent.patterns.map((item) => ({ kind: item.kind, pattern: item.pattern.trim() }));
   for (const { kind, pattern } of patterns) {
@@ -479,7 +480,7 @@ function intentPatternCovers(item: IntentPattern, req: GrantRequest, roots: read
 /**
  * Does an intent grant allow this call straight through? Only for the trap or
  * repo and harness it names, only on a pattern, and never on a protected
- * target. Everything else in scope is the harness reviewer's to judge.
+ * target. Everything else is the harness reviewer's, exactly as without a grant.
  */
 export function intentGrantCovers(g: Grant, req: GrantRequest, roots: readonly CheckoutRoot[] = checkoutRoots()): boolean {
   if (!g.intent || (g.harness !== 'any' && g.harness !== req.harness)) return false;

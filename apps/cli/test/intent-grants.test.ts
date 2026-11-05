@@ -4,10 +4,8 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parse } from 'smol-toml';
 import { addGrant, ensureLayout, listGrants, parseIntentPattern, revokeGrant, signOnTrap } from '@lobstah/core';
 import type { Grant } from '@lobstah/core';
-import { intentContextEntry, syncIntentContext } from '../src/intent-context.js';
 import { checkCall } from '../src/grants-cli.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -41,10 +39,9 @@ const signOn = (name = 'pearl-gull', harness: 'claude' | 'codex' = 'claude', ses
   if (!('ok' in signed)) throw new Error('held');
   return signed.ok;
 };
+/** A Codex trap and a Claude Code trap read the same grant the same way. */
 const intentGrant = (extra: Partial<Parameters<typeof addGrant>[0]> = {}): Grant =>
   addGrant({ mode: 'intent', by: 'glass', harness: 'claude', trap: 'pearl-gull', intent: { text: 'read-only diagnosis: logs and SELECT queries, no writes', patterns: [parseIntentPattern('npx wrangler tail')] }, ...extra });
-const claudeSettings = () => JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8')) as Record<string, any>;
-const codexPolicy = () => (parse(fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf8')) as { auto_review?: { extra_policy?: string } }).auto_review?.extra_policy;
 const bash = (command: string, extra = {}) => ({ harness: 'claude' as const, tool: 'Bash', input: { command }, session: SESSION, ...extra });
 
 describe('a hook honours an intent grant', () => {
@@ -80,6 +77,14 @@ describe('a hook honours an intent grant', () => {
     expect(checkCall(bash('npx wrangler tail'), worktree, true)).toBeUndefined();
   });
 
+  it('means the same on Codex: the same patterns, through the same check', () => {
+    signOn('pearl-gull', 'codex');
+    const grant = intentGrant({ harness: 'any' });
+    const call = { harness: 'codex' as const, tool: 'exec_command', input: { cmd: 'npx wrangler tail potluck' }, session: SESSION };
+    expect(checkCall(call, worktree, true)).toEqual([grant.id]);
+    expect(checkCall({ ...call, input: { cmd: 'npx wrangler deploy' } }, worktree, true)).toBeUndefined();
+  });
+
   it('covers a repo-scoped grant from the trap\'s repo', () => {
     signOn();
     const grant = intentGrant({ trap: undefined, repo: 'web' });
@@ -107,123 +112,22 @@ describe('a hook honours an intent grant', () => {
   });
 });
 
-describe("the reviewers' context", () => {
-  it('tells Claude Code\'s classifier, keeping its built-in context and everything else in the file', () => {
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ model: 'opus', permissions: { allow: ['Read(*)'] } }));
+describe('no harness configuration is touched', () => {
+  it('making, using and revoking a grant leaves Claude Code and Codex config as it was', () => {
+    const claudeFile = path.join(claudeDir, 'settings.json');
+    const codexFile = path.join(codexDir, 'config.toml');
+    const claudeBefore = JSON.stringify({ model: 'opus', autoMode: { environment: ['$defaults', 'my own note'] } });
+    const codexBefore = 'model = "x"\n# a comment\n\n[auto_review]\nextra_policy = "my own policy"\n';
+    fs.writeFileSync(claudeFile, claudeBefore);
+    fs.writeFileSync(codexFile, codexBefore);
     signOn();
     const grant = intentGrant();
-    expect(syncIntentContext(env)).toEqual([]);
-    const settings = claudeSettings();
-    expect(settings.model).toBe('opus');
-    expect(settings.permissions).toEqual({ allow: ['Read(*)'] });
-    expect(settings.autoMode.environment[0]).toBe('$defaults');
-    const entry = settings.autoMode.environment[1] as string;
-    expect(entry).toContain(grant.id);
-    expect(entry).toContain('read-only diagnosis: logs and SELECT queries, no writes');
-    expect(entry).toContain('lobstah trap pearl-gull');
-    expect(entry).toContain(worktree);
-    expect(entry).toContain('until revoked');
-  });
-
-  it('adds beside a list the user has, and removes only its own', () => {
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ autoMode: { environment: ['$defaults', 'my own note'] } }));
-    const grant = intentGrant();
-    syncIntentContext(env);
-    expect(claudeSettings().autoMode.environment).toEqual(['$defaults', 'my own note', intentContextEntry(listGrants().grants[0]!)]);
-    revokeGrant(grant.id, 'glass');
-    syncIntentContext(env);
-    expect(claudeSettings().autoMode.environment).toEqual(['$defaults', 'my own note']);
-  });
-
-  it('leaves the settings as it found them once the last grant goes', () => {
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ model: 'opus' }));
-    const grant = intentGrant();
-    syncIntentContext(env);
-    expect(claudeSettings().autoMode).toBeDefined();
-    revokeGrant(grant.id, 'glass');
-    syncIntentContext(env);
-    expect(claudeSettings()).toEqual({ model: 'opus' });
-  });
-
-  it('removes a grant that lapsed', () => {
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), '{}');
-    addGrant(
-      { mode: 'intent', by: 'glass', harness: 'claude', trap: 'pearl-gull', intent: { text: 'read logs', patterns: [] }, expiresAt: new Date(Date.now() + 40).toISOString() },
-    );
-    syncIntentContext(env);
-    expect(JSON.stringify(claudeSettings())).toContain('read logs');
-    const until = Date.now() + 60;
-    while (Date.now() < until) { /* past the expiry */ }
-    syncIntentContext(env);
-    expect(JSON.stringify(claudeSettings())).not.toContain('read logs');
-  });
-
-  it("tells Codex's reviewer in a block of its own, leaving the user's text and lobstah's profile block", () => {
-    const profile = '<!-- lobstah:begin (written by `lobstah permissions`; edits inside are replaced) -->\nprofile\n<!-- lobstah:end -->';
-    fs.writeFileSync(path.join(codexDir, 'config.toml'), `model = "x"\n# a comment\n\n[auto_review]\nextra_policy = """my own policy\n\n${profile}"""\n\n[other]\nkept = true\n`);
-    const grant = intentGrant({ harness: 'codex' });
-    expect(syncIntentContext(env)).toEqual([]);
-    const policy = codexPolicy()!;
-    expect(policy).toContain('my own policy');
-    expect(policy).toContain(profile);
-    expect(policy).toContain('read-only diagnosis');
-    const text = fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf8');
-    expect(text).toContain('# a comment');
-    expect(parse(text)).toMatchObject({ model: 'x', other: { kept: true } });
-    revokeGrant(grant.id, 'glass');
-    syncIntentContext(env);
-    expect(codexPolicy()).toBe(`my own policy\n\n${profile}`);
-    expect(fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf8')).toContain('# a comment');
-  });
-
-  it('removes the Codex policy it created', () => {
-    fs.writeFileSync(path.join(codexDir, 'config.toml'), 'model = "x"\n');
-    const grant = intentGrant({ harness: 'codex' });
-    syncIntentContext(env);
-    expect(codexPolicy()).toContain('read-only diagnosis');
-    revokeGrant(grant.id, 'glass');
-    syncIntentContext(env);
-    expect(codexPolicy()).toBeUndefined();
-  });
-
-  it('tells each harness only about its own grants', () => {
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), '{}');
-    fs.writeFileSync(path.join(codexDir, 'config.toml'), '');
-    intentGrant({ harness: 'codex' });
-    syncIntentContext(env);
-    expect(JSON.stringify(claudeSettings())).not.toContain('read-only diagnosis');
-    expect(codexPolicy()).toContain('read-only diagnosis');
-  });
-
-  it('does not write again when nothing changed', () => {
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), '{}');
-    intentGrant();
-    syncIntentContext(env);
-    const file = path.join(claudeDir, 'settings.json');
-    fs.writeFileSync(file, '{"changed":"by someone else"}');
-    syncIntentContext(env);
-    expect(fs.readFileSync(file, 'utf8')).toBe('{"changed":"by someone else"}');
-  });
-
-  it('reports a settings file it cannot read, and the grant still works', () => {
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), 'not json');
-    signOn();
-    const grant = intentGrant();
-    expect(syncIntentContext(env)[0]).toContain('not valid JSON');
-    expect(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8')).toBe('not json');
     expect(checkCall(bash('npx wrangler tail'), worktree, true)).toEqual([grant.id]);
-  });
-
-  it('skips a harness that is not set up here', () => {
-    expect(syncIntentContext({ CLAUDE_CONFIG_DIR: path.join(home, 'none'), CODEX_HOME: path.join(home, 'none-either') })).toEqual([]);
-    expect(fs.existsSync(path.join(home, 'none'))).toBe(false);
-    expect(fs.existsSync(path.join(home, 'none-either'))).toBe(false);
-  });
-
-  it('names a repo-scoped grant by its repo, and a timed grant by its end', () => {
-    const entry = intentContextEntry(intentGrant({ trap: undefined, repo: 'web', expiresAt: '2030-01-01T00:00:00.000Z' }));
-    expect(entry).toContain('the lobstah traps of repo web');
-    expect(entry).toContain('until 2030-01-01T00:00:00.000Z');
+    expect(checkCall(bash('npx wrangler deploy'), worktree, true)).toBeUndefined();
+    const revoked = spawnSync(process.execPath, [cli, 'grant', 'revoke', grant.id], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, ...env, LOBSTAH_HOME: home } });
+    expect(revoked.status, revoked.stderr).toBe(0);
+    expect(fs.readFileSync(claudeFile, 'utf8')).toBe(claudeBefore);
+    expect(fs.readFileSync(codexFile, 'utf8')).toBe(codexBefore);
   });
 });
 
@@ -253,15 +157,6 @@ describe('lobstah grant ls and grant revoke', () => {
     expect(checkCall(bash('npx wrangler tail'), worktree, true)).toBeUndefined();
     expect(lobstah('grant', 'ls').stdout).not.toContain(grant.id);
     expect(lobstah('grant', 'ls', '--all').stdout).toContain(grant.id);
-  });
-
-  it('takes the revoked grant out of the reviewers\' context', () => {
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), '{}');
-    const grant = intentGrant();
-    syncIntentContext(env);
-    expect(JSON.stringify(claudeSettings())).toContain(grant.id);
-    expect(lobstah('grant', 'revoke', grant.id).status).toBe(0);
-    expect(JSON.stringify(claudeSettings())).not.toContain(grant.id);
   });
 
   it('asks for an id, and says so for an unknown one', () => {
