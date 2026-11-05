@@ -523,8 +523,23 @@ export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
   const s = trapState(t);
   if (s.kind === 'working' || (s.kind === 'idle' && s.listening)) return 'ok';
   if (s.kind === 'start failed') return 'bad';
+  // Waiting for a slot is routine: nothing here needs a person.
+  if (s.kind === 'parked' && s.current.waiting?.on === 'heavy') return 'ok';
   return s.kind === 'parked' || s.kind === 'starting' ? 'warn' : 'dim';
 }
+
+/** A trap's or worker's place in the heavy line: `in line, 1st`, `running, 6m`, `over limit`. */
+export function heavyPlace(match: { trap?: string; dispatch?: string }): string | undefined {
+  const tickets = getState().snapshot?.heavy?.tickets ?? [];
+  const t = tickets.find((x) => (match.dispatch && x.dispatch === match.dispatch) || (match.trap && x.trap === match.trap));
+  if (!t) return undefined;
+  if (t.state === 'over') return `${t.command} · over limit`;
+  if (t.state === 'running') return `${t.command} · running, ${minutesSince(t.since)}m`;
+  return `${t.command} · in line, ${ordinal(t.position ?? 1)}`;
+}
+
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
+const minutesSince = (iso?: string) => (iso ? Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60_000)) : 0);
 
 const parkedText = (c: GlassDispatchSummary) => (c.waiting ? `waiting on ${c.waiting.on}` : c.note || 'waiting');
 const workTitle = (c: GlassDispatchSummary) => c.title.slice(0, 40) || '(no title)';
@@ -539,6 +554,8 @@ export function trapNow(t: GlassTrap): Children {
   if (s.kind === 'signed off') return [dot, html`<span class="dim">signed off</span>`];
   if (s.kind === 'idle') return [dot, 'idle · ', s.listening ? 'listening' : 'not listening'];
   const current = s.current;
+  const place = heavyPlace({ trap: t.trapId, dispatch: current.id });
+  if (place) return [dot, place];
   if (s.kind === 'parked') return [dot, 'parked · ', NamedText(parkedText(current))];
   const openDispatch = (event: MouseEvent) => {
     event.preventDefault();
@@ -599,6 +616,8 @@ export function trapNowText(t: GlassTrap): string {
   if (s.kind === 'start failed') return `start failed · ${s.reason}`;
   if (s.kind === 'signed off') return 'signed off';
   if (s.kind === 'idle') return `idle · ${s.listening ? 'listening' : 'not listening'}`;
+  if (s.kind === 'parked' && s.current.waiting?.on === 'heavy')
+    return heavyPlace({ trap: t.trapId, dispatch: s.current.id }) ?? 'waiting in the heavy line';
   if (s.kind === 'parked') return `parked · ${parkedText(s.current)}`;
   const current = s.current;
   return [

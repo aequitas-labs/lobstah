@@ -219,6 +219,12 @@ A trap or worker on a dispatch that runs a known heavy command outside the line
 gets one line of context, once per dispatch for each command. It approves
 nothing and blocks nothing, and that run isn't queued.
 
+`lobstah heavy`, `man tend` and the glass show the line, and the load average
+beside it. Waiting doesn't count as needing attention. A long line is one quiet
+notice, `heavy-line-long`, once until the line empties. A command over its limit
+is one `heavy-over-limit` notice per ticket, which wakes the helm because
+something may be stuck. Joining, starting and finishing post nothing.
+
 The line never kills or fails a command. If the line itself fails, the command
 runs without a slot and prints one line. A waiter removed from the line because
 its trap or dispatch stopped exits 75 having run nothing. `--bg` returns at once

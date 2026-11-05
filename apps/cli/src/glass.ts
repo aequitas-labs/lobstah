@@ -71,6 +71,7 @@ import {
   ANSWER_EXTENSIONS,
   ANSWER_FILES_MAX,
   ANSWER_TEXT_MAX,
+  heavyGlassView,
 } from '@lobstah/core';
 import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
@@ -702,6 +703,13 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     reviewTools: reviewTools(cfg),
     daemon: executor ? { version: executor.version, heartbeat: executor.heartbeat } : undefined,
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
+    heavy: (() => {
+      try {
+        return heavyGlassView(Date.now(), cfg);
+      } catch {
+        return undefined;
+      }
+    })(),
     helms,
     traps,
     stats: { catchesToday: stats.catchesToday, totalCatches: stats.totalCatches },

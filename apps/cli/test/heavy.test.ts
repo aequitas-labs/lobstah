@@ -143,6 +143,20 @@ describe('lobstah heavy', () => {
     expect(tickets()).toEqual([]);
   }, TEST_MS);
 
+  it('man tend shows the line while anything is in it, and only then', async () => {
+    setSlots(1);
+    const tend = () => spawnSync(process.execPath, [cli, 'man', 'tend'], { env: env(), cwd: home, encoding: 'utf8' }).stdout;
+    expect(tend()).not.toContain('heavy:');
+    const holding = path.join(home, 'holding');
+    const release = path.join(home, 'release');
+    const first = start(`const fs=require('fs');fs.writeFileSync(${JSON.stringify(holding)},'');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)}))clearInterval(t)},50)`);
+    await until(() => fs.existsSync(holding));
+    expect(tend()).toMatch(/heavy: 1 of 1 running · 0 waiting/);
+    fs.writeFileSync(release, '');
+    expect(await first.done).toBe(0);
+    expect(tend()).not.toContain('heavy:');
+  }, TEST_MS);
+
   it('a cancelled waiter exits having run nothing', async () => {
     setSlots(1);
     const marker = path.join(home, 'ran');

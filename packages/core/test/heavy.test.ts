@@ -4,8 +4,8 @@ import os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  checkHeavyLine, DEFAULT_HEAVY, dropHeavyTickets, formatHeavyView, HEAVY_WAITER_GRACE_MS, heavyDir, heavySlots, heavyView, heavyWorkerEnv,
-  heavyWorkers, joinHeavyLine, loadConfig, ordinal, releaseHeavyTicket, setHeavyGroup, tickHeavyTicket,
+  checkHeavyLine, DEFAULT_HEAVY, dropHeavyTickets, formatHeavyView, HEAVY_WAITER_GRACE_MS, heavyDaemonPass, heavyDir, heavyGlassView, heavySlots, heavyView, heavyWorkerEnv,
+  heavyWorkers, joinHeavyLine, listNotices, loadConfig, ordinal, releaseHeavyTicket, setHeavyGroup, tickHeavyTicket,
 } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -229,6 +229,66 @@ describe('the line', () => {
   });
 });
 
+describe('the daemon pass', () => {
+  const notices = () => listNotices(50).map((n) => ({ kind: n.kind, quiet: n.quiet }));
+
+  it('clears the dead with nobody waiting to notice', () => {
+    const a = join();
+    expect(checkHeavyLine(a.seq).kind).toBe('run');
+    editTicket(a.seq, { pid: deadPid(), startedAt: undefined });
+    heavyDaemonPass();
+    expect(fs.existsSync(ticketPath(a.seq))).toBe(false);
+  });
+
+  it('says nothing for joining, starting or finishing', () => {
+    const a = join();
+    expect(checkHeavyLine(a.seq).kind).toBe('run');
+    heavyDaemonPass();
+    releaseHeavyTicket(a.seq);
+    heavyDaemonPass();
+    expect(notices()).toEqual([]);
+  });
+
+  it('posts one waking notice per ticket over its limit', () => {
+    setConfig('[heavy]\nslots = 1\nholdLimitMins = 1\n');
+    const now = Date.now();
+    const a = join({ repo: 'homebase', label: 'fresh-cove' });
+    expect(checkHeavyLine(a.seq, now).kind).toBe('run');
+    tickHeavyTicket(a.seq, now + 30_000);
+    expect(tickHeavyTicket(a.seq, now + 60_000)).toBe(true);
+    heavyDaemonPass(now + 60_000);
+    heavyDaemonPass(now + 70_000);
+    expect(notices()).toEqual([{ kind: 'heavy-over-limit', quiet: undefined }]);
+    expect(listNotices(1)[0]!.text).toContain('homebase · fresh-cove: git push passed the 1 minute limit');
+  });
+
+  it('a slot lost because its owner stopped is not an overrun', () => {
+    const a = join({ trap: 't1' });
+    expect(checkHeavyLine(a.seq).kind).toBe('run');
+    dropHeavyTickets({ trap: 't1' }, 'its trap was stowed');
+    heavyDaemonPass();
+    expect(notices()).toEqual([]);
+  });
+
+  it('posts one quiet notice for a long line, until the line empties', () => {
+    setConfig('[heavy]\nslots = 1\nlineNoticeMins = 10\n');
+    const now = Date.now();
+    const a = join();
+    const b = join();
+    expect(checkHeavyLine(a.seq, now).kind).toBe('run');
+    heavyDaemonPass(now + 9 * 60_000);
+    expect(notices()).toEqual([]);
+    heavyDaemonPass(now + 10 * 60_000);
+    heavyDaemonPass(now + 11 * 60_000);
+    expect(notices()).toEqual([{ kind: 'heavy-line-long', quiet: true }]);
+    releaseHeavyTicket(b.seq);
+    heavyDaemonPass(now + 12 * 60_000);
+    const c = join();
+    heavyDaemonPass(now + 40 * 60_000 + (Date.parse(JSON.parse(fs.readFileSync(ticketPath(c.seq), 'utf8')).joinedAt) - now));
+    expect(notices().filter((n) => n.kind === 'heavy-line-long')).toHaveLength(2);
+  });
+});
+
 describe('the view', () => {
   it('shows who runs and who waits, in order', () => {
     setConfig('[heavy]\nslots = 1\n');
@@ -241,6 +301,22 @@ describe('the view', () => {
     expect(text).toMatch(/running\s+homebase · fresh-cove\s+git push\s+0m/);
     expect(text).toMatch(/waiting\s+lobstah · amber-gull\s+vitest run\s+0m\s+1st/);
     expect(text).toMatch(/waiting\s+homebase · worker 03e2d892\s+git push\s+0m\s+2nd/);
+  });
+
+  it('gives the glass counts and each ticket\'s place', () => {
+    setConfig('[heavy]\nslots = 1\n');
+    const a = join({ trap: 't1', dispatch: 'd1' });
+    join({ trap: 't2' });
+    join({ dispatch: 'd3' });
+    expect(checkHeavyLine(a.seq).kind).toBe('run');
+    expect(heavyGlassView()).toMatchObject({
+      slots: 1, running: 1, waiting: 2,
+      tickets: [
+        { state: 'running', trap: 't1', dispatch: 'd1', command: 'git push' },
+        { state: 'waiting', trap: 't2', position: 1 },
+        { state: 'waiting', dispatch: 'd3', position: 2 },
+      ],
+    });
   });
 
   it('writes ordinals', () => {
