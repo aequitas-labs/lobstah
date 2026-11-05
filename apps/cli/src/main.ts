@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { applyHeavyHooks } from '@lobstah/core';
 import {
   IdleWait,
   reviewAttention,
@@ -3275,6 +3276,8 @@ async function mainCli(): Promise<void> {
       // The session applies its title as a sign-on step, then confirms it.
       const reg = askTrapTitle(res.ok.trapId, res.ok.name ?? `wt:${res.ok.trapId}`) ?? res.ok;
       if (reservation) dropReservation(reservation.trapId);
+      // Pushes from here queue from this sign-on on. A trap needs no restart.
+      applyHeavyHooks(reg.worktree);
       // The terminal tab or tmux pane carries the trap's name while it soaks.
       // Every sign-on sets it, so a pane whose title a throw failed to set still gets it.
       const shownTitle = reg.name ? trapTabTitle(reg.name, reg.repo) : undefined;
@@ -3933,6 +3936,12 @@ wallClockSecs      = 3600
       if (pos[0] !== 'reviews') throw new UsageError(usageFor('setup')!);
       const { setupReviews } = await import('./reviews-setup.js');
       await setupReviews(opt('--identity'));
+      break;
+    }
+    case '__heavy-push': {
+      if (has('--probe')) break;
+      const { heavyPushHook } = await import('./heavy.js');
+      await heavyPushHook(pos);
       break;
     }
     case '__pool-warm': {

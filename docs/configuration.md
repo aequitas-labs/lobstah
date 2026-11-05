@@ -198,6 +198,22 @@ command, `lobstah heavy` shows the line.
 | `holdLimitMins` | `45` | Active minutes a command keeps its slot. Past this it loses the slot and keeps running. Sleep doesn't count. |
 | `lineNoticeMins` | `30` | How long the oldest waiter waits before a quiet notice. |
 
+Pushes queue with no change to how they're run. Soak, worktree creation and
+pool warm-up set a linked worktree's `core.hooksPath` to a shim in
+`~/.lobstah/heavy/hooks`, which runs the repo's real hook unchanged. Its
+`pre-push` takes a slot first, but only in a lobstah worktree, in an agent
+session, and when the repo has a real hook. A person's push never waits. This
+isn't applied on Windows.
+
+`[heavy.repos.<key>]` names pushes the repo's hook handles cheaply, so they take
+no slot. The hook still runs in full, so a wrong setting costs only some load.
+
+```toml
+[heavy.repos.homebase]
+lightRefs = ["refs/heads/pr-evidence"]  # remote refs
+lightPaths = ["apps/design/"]           # every changed file is under one of these
+```
+
 The line never kills or fails a command. If the line itself fails, the command
 runs without a slot and prints one line. A waiter removed from the line because
 its trap or dispatch stopped exits 75 having run nothing. `--bg` returns at once

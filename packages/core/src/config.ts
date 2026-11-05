@@ -287,6 +287,15 @@ export interface HeavyConfig {
   holdLimitMins: number;
   /** How long the oldest waiter waits before a quiet notice. */
   lineNoticeMins: number;
+  /** Pushes a repo's hook handles cheaply, which take no slot. */
+  repos: Record<string, HeavyRepoConfig>;
+}
+
+export interface HeavyRepoConfig {
+  /** Remote refs whose pushes are light, such as `refs/heads/pr-evidence`. */
+  lightRefs: string[];
+  /** Path prefixes: a push changing only files under these is light. */
+  lightPaths: string[];
 }
 
 export interface SoakConfig {
@@ -547,7 +556,7 @@ function parseSoak(raw: unknown): SoakConfig {
   return soak;
 }
 
-export const DEFAULT_HEAVY: HeavyConfig = { slots: 'auto', workers: 'auto', holdLimitMins: 45, lineNoticeMins: 30 };
+export const DEFAULT_HEAVY: HeavyConfig = { slots: 'auto', workers: 'auto', holdLimitMins: 45, lineNoticeMins: 30, repos: {} };
 
 function parseHeavy(raw: unknown): HeavyConfig {
   if (raw !== undefined && (!raw || typeof raw !== 'object' || Array.isArray(raw))) throw new Error(`[heavy] must be a table in ${configPath()}`);
@@ -558,6 +567,16 @@ function parseHeavy(raw: unknown): HeavyConfig {
   for (const key of ['holdLimitMins', 'lineNoticeMins'] as const) {
     if (typeof heavy[key] !== 'number' || !Number.isFinite(heavy[key]) || heavy[key] <= 0) throw new Error(`[heavy].${key} must be a positive number in ${configPath()}`);
   }
+  const strings = (v: unknown, where: string): string[] => {
+    if (v === undefined) return [];
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new Error(`${where} must be a list of strings in ${configPath()}`);
+    return v as string[];
+  };
+  const repos: Record<string, HeavyRepoConfig> = {};
+  for (const [key, r] of Object.entries((heavy.repos ?? {}) as Record<string, Partial<HeavyRepoConfig>>)) {
+    repos[key] = { lightRefs: strings(r?.lightRefs, `[heavy.repos.${key}].lightRefs`), lightPaths: strings(r?.lightPaths, `[heavy.repos.${key}].lightPaths`) };
+  }
+  heavy.repos = repos;
   return heavy;
 }
 

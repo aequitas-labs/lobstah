@@ -51,7 +51,7 @@ function descriptorRepo(id: string, lane: Lane): string | undefined {
 /** Who is asking, from the worktree: its trap, or the dispatch whose runner holds it. */
 export function heavyIdentity(cwd: string, env: NodeJS.ProcessEnv = process.env): Omit<HeavyJoin, 'pid' | 'command'> {
   const out: Omit<HeavyJoin, 'pid' | 'command'> = {};
-  const session = env.CLAUDE_CODE_SESSION_ID?.trim();
+  const session = (env.CLAUDE_CODE_SESSION_ID ?? env.CODEX_THREAD_ID ?? env.CODEX_SESSION_ID)?.trim();
   if (session) out.session = session;
   const trapId = trapIdAbove(cwd);
   const reg = trapId ? readTrap(trapId) : undefined;
@@ -103,13 +103,19 @@ export function windowsCommand(argv: string[], platform: NodeJS.Platform = proce
 }
 
 /** Run `argv`, wired to this process. Resolves with its exit code. */
-function runChild(argv: string[], env: NodeJS.ProcessEnv, hooks: { onGroup?: (group: number) => void; onTick?: () => void } = {}): Promise<number> {
+function runChild(argv: string[], env: NodeJS.ProcessEnv, hooks: { input?: Buffer; onGroup?: (group: number) => void; onTick?: () => void } = {}): Promise<number> {
   // Its own process group, so a killed wrapper leaves a command whose load is
   // still visible to the line. A command on a terminal stays in the foreground.
   const detached = process.platform !== 'win32' && !process.stdin.isTTY;
   return new Promise((resolve) => {
     const [file, args, shell] = windowsCommand(argv);
-    const child = spawn(file, args, { stdio: 'inherit', env, detached, shell, windowsHide: true });
+    const stdio = hooks.input ? (['pipe', 'inherit', 'inherit'] as const) : 'inherit';
+    const child = spawn(file, args, { stdio: stdio as 'inherit', env, detached, shell, windowsHide: true });
+    if (hooks.input) {
+      // A hook that never reads its stdin closes the pipe: not an error.
+      child.stdin?.on('error', () => {});
+      child.stdin?.end(hooks.input);
+    }
     const forward = (signal: NodeJS.Signals) => () => {
       if (!detached || child.pid === undefined) return;
       try {
@@ -139,16 +145,22 @@ function runChild(argv: string[], env: NodeJS.ProcessEnv, hooks: { onGroup?: (gr
 type Outcome = { exit: number; ranCommand: boolean; reason?: string };
 
 /** Wait for a slot, run the command, free the slot. A queue failure runs the command without one. */
-export async function runInLine(argv: string[], baseEnv: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Promise<Outcome> {
-  if (baseEnv[TICKET_ENV]) return { exit: await runChild(argv, baseEnv), ranCommand: true };
+export async function runInLine(
+  argv: string[],
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+  opts: { label?: string; input?: Buffer } = {},
+): Promise<Outcome> {
+  const { input } = opts;
+  if (baseEnv[TICKET_ENV]) return { exit: await runChild(argv, baseEnv, { input }), ranCommand: true };
   const unqueued = async (err: unknown): Promise<Outcome> => {
     say(`running without a slot: the line failed (${err instanceof Error ? err.message : String(err)})`);
-    return { exit: await runChild(argv, baseEnv), ranCommand: true };
+    return { exit: await runChild(argv, baseEnv, { input }), ranCommand: true };
   };
 
   let seq: number;
   try {
-    seq = joinHeavyLine({ ...heavyIdentity(cwd, baseEnv), pid: process.pid, command: commandLabel(argv) }).seq;
+    seq = joinHeavyLine({ ...heavyIdentity(cwd, baseEnv), pid: process.pid, command: opts.label ?? commandLabel(argv) }).seq;
   } catch (err) {
     return unqueued(err);
   }
@@ -218,6 +230,7 @@ export async function runInLine(argv: string[], baseEnv: NodeJS.ProcessEnv = pro
   let exit: number | undefined;
   try {
     exit = await runChild(argv, env, {
+      input,
       onGroup: (group) => {
         try {
           setHeavyGroup(seq, group);
@@ -292,6 +305,65 @@ function postResult(who: ReturnType<typeof heavyIdentity>, argv: string[], log: 
   } catch (err) {
     say(`could not post the result: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+const NO_COMMIT = /^0+$/;
+
+/** What this ref's push changes, or undefined when that can't be told. */
+function changedPaths(cwd: string, remote: string, localSha: string, remoteSha: string): string[] | undefined {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000, maxBuffer: 64 * 1024 * 1024 });
+  let base = remoteSha;
+  if (NO_COMMIT.test(remoteSha)) {
+    const found = [`refs/remotes/${remote}/HEAD`, `refs/remotes/${remote}/main`, `refs/remotes/${remote}/master`].flatMap((ref) => {
+      try {
+        return [git('merge-base', localSha, ref).trim()];
+      } catch {
+        return [];
+      }
+    })[0];
+    if (!found) return undefined;
+    base = found;
+  }
+  try {
+    return git('diff', '--name-only', '-z', base, localSha).split('\0').filter(Boolean);
+  } catch {
+    return undefined; // the remote commit isn't here: unknown, so not light
+  }
+}
+
+/**
+ * A push the repo's hook handles cheaply, so waiting in line would be for
+ * nothing. The hook still runs in full, so a wrong setting costs only load.
+ */
+export function isLightPush(refs: string, remote: string, cwd: string, light: { lightRefs: string[]; lightPaths: string[] } | undefined): boolean {
+  const lines = refs.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return false;
+  return lines.every((line) => {
+    const [, localSha, remoteRef, remoteSha] = line.split(/\s+/);
+    if (!localSha || !remoteRef || !remoteSha) return false;
+    if (NO_COMMIT.test(localSha)) return true; // deleting a branch checks nothing
+    if (light?.lightRefs.includes(remoteRef)) return true;
+    if (!light?.lightPaths.length) return false;
+    const changed = changedPaths(cwd, remote, localSha, remoteSha);
+    return !!changed?.length && changed.every((file) => light.lightPaths.some((prefix) => file.startsWith(prefix)));
+  });
+}
+
+/** The shim's pre-push: a slot, unless the push is light, then the repo's real hook. */
+export async function heavyPushHook(argv: string[]): Promise<void> {
+  const input = fs.readFileSync(0);
+  const cwd = process.cwd();
+  let light = false;
+  try {
+    const repo = heavyIdentity(cwd).repo;
+    light = isLightPush(input.toString('utf8'), argv[1] ?? 'origin', cwd, repo ? loadConfig().heavy.repos[repo] : undefined);
+  } catch {
+    /* unknown counts as heavy */
+  }
+  const { exit } = light
+    ? { exit: await runChild(argv, process.env, { input }) }
+    : await runInLine(argv, process.env, cwd, { label: 'git push', input });
+  process.exit(exit);
 }
 
 export async function heavyCommand(argv: string[], opts: { bg?: boolean; json?: boolean }): Promise<void> {
