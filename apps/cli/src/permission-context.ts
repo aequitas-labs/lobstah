@@ -3,6 +3,36 @@ import { loadConfig, worktreesDir } from '@lobstah/core';
 /** Helm relay commands allowed by default in both harness permission profiles. */
 export const HELM_RELAY_COMMANDS: readonly string[] = ['dispatch', 'send'];
 
+/** Trap coordination commands allowed without a separate permission card. */
+export const TRAP_COORDINATION_COMMANDS: readonly string[] = [
+  'report', 'todo', 'status', 'inbox', 'soak', 'stow', 'catch', 'ls', 'logs', 'reports', 'goals', 'attention', 'prs', 'reviews',
+];
+
+/** Decide whether a shell call is a literal report, with no other shell execution. */
+export function isTrapReportCommand(command: string): boolean {
+  if (!/^lobstah[ \t]+report(?:[ \t]|$)/.test(command.trimStart())) return false;
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < command.length; index++) {
+    const character = command[index]!;
+    if (quote === "'") {
+      if (character === "'") quote = undefined;
+      continue;
+    }
+    if (character === '\\') {
+      if (++index === command.length) return false;
+      continue;
+    }
+    if (character === '$' || character === '`') return false;
+    if (quote === '"') {
+      if (character === '"') quote = undefined;
+      continue;
+    }
+    if (character === "'" || character === '"') quote = character;
+    else if (/[#;&|<>()\n\r]/.test(character)) return false;
+  }
+  return quote === undefined;
+}
+
 /**
  * The context lobstah gives both auto-mode reviewers: Claude Code's classifier
  * reads it from `autoMode.environment`, Codex's reviewer from lobstah's block

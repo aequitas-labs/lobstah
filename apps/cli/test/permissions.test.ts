@@ -51,7 +51,12 @@ describe('the profile', () => {
     expect(p.environment.join('\n')).toMatch(/glass \(127\.0\.0\.1:4949\) is the user's own UI on this machine\. A `decision-answer` event with `from: glass`/);
     expect(p.environment).toHaveLength(3);
     expect(p.deny).toEqual([]);
-    expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)', 'Bash(lobstah dispatch:*)', 'Bash(lobstah send:*)']);
+    expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)', 'Bash(lobstah dispatch:*)', 'Bash(lobstah send:*)',
+      'Bash(lobstah report:*)', 'Bash(lobstah todo:*)', 'Bash(lobstah status:*)', 'Bash(lobstah inbox:*)',
+      'Bash(lobstah soak:*)', 'Bash(lobstah stow:*)', 'Bash(lobstah catch:*)', 'Bash(lobstah ls:*)',
+      'Bash(lobstah logs:*)', 'Bash(lobstah reports:*)', 'Bash(lobstah goals:*)', 'Bash(lobstah attention:*)',
+      'Bash(lobstah prs:*)', 'Bash(lobstah reviews:*)',
+    ]);
   });
 
   it('writes absolute rule paths the way Claude Code matches them, Windows drives included', () => {
@@ -145,7 +150,7 @@ describe('lobstah permissions', () => {
     const applied = JSON.parse(fs.readFileSync(file, 'utf8'));
     expect(applied.model).toBe('opus');
     expect(applied.permissions.allow[0]).toBe('Bash(npm run test *)');
-    expect(readOwned(file).allow).toHaveLength(5);
+    expect(readOwned(file).allow).toHaveLength(19);
     expect(await run(undefined)).toContain("lobstah's profile is applied and current");
     await run('remove', { yes: true });
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(USER);
