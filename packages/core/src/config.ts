@@ -342,6 +342,11 @@ export interface SoakConfig {
   tmuxPages: TmuxPages;
   /** Panes per window when `tmuxPages = "fixed"`. */
   tmuxPageSize: number;
+  /**
+   * Start every Codex trap on Codex's shared app-server, as `man throw
+   * --remote-control` does for one: scheduled and batch throws too.
+   */
+  codexRemoteControl: boolean;
 }
 
 /** How lobstah's tmux server groups trap panes into windows. */
@@ -548,6 +553,7 @@ function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
   if (!Number.isInteger(soak.codexStartSecs) || soak.codexStartSecs < 1) throw new Error('soak.codexStartSecs must be a positive whole number');
   if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
+  if (typeof soak.codexRemoteControl !== 'boolean') throw new Error('soak.codexRemoteControl must be true or false');
   if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm' && soak.terminal !== 'tmux') {
     throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal", "iterm" or "tmux"`);
   }
@@ -593,6 +599,7 @@ export const DEFAULT_SOAK: SoakConfig = {
   signOffGraceSecs: 600,
   tmuxPages: 'repo',
   tmuxPageSize: 6,
+  codexRemoteControl: false,
 };
 
 export const DEFAULT_HELM: HelmConfig = {
