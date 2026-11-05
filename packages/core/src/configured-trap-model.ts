@@ -26,4 +26,3 @@ export interface RepoDispatchTarget {
   kind: 'repo';
   repo: string;
 }
-
