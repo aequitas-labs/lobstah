@@ -11,6 +11,8 @@ export interface LobAttention {
   lane: string;
   verb: string;
   note?: string;
+  /** A stack's short line; a lob shows it before the note. */
+  headline?: string;
   /** tend's attention kind; a `pr:*` item walks as a link to its PR. */
   kind?: string;
   prUrl?: string;
@@ -87,7 +89,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
       // A report opens its own page in a new tab.
       if (x.kind === 'report' && x.key) return { key: 'report:' + x.key, text: x.note || x.verb, label, href: reportPageUrl(x.key), ...hide };
       return typeof x.kind === 'string' && (x.kind.startsWith('pr:') || x.kind === 'stack-ready') && x.prUrl
-        ? { key: x.kind + ':' + (x.key ?? x.prUrl), text: x.note || x.kind, href: x.prUrl, label, ...hide }
+        ? { key: x.kind + ':' + (x.key ?? x.prUrl), text: x.headline || x.note || x.kind, href: x.prUrl, label, ...hide }
         : {
             key: (x.kind ?? 'question') + ':' + (x.key ?? x.lane + ':' + x.id),
             text: x.note || x.verb,

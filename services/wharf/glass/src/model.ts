@@ -46,7 +46,7 @@ export function resume(worker: Worker): string | undefined {
   if (worker.harness === 'claude') return `claude --resume ${worker.session}`;
   if (worker.harness === 'codex') return `codex resume ${worker.session}`;
 }
-/** The read-only command that joins a live worker's pane from anywhere. It ignores size, so a phone can't reflow the panes beside it. */
+/** The read-only command that joins a live worker's pane from anywhere. It ignores size, so a small window can't reflow the panes beside it. */
 export function attachCommand(worker: Worker): string | undefined {
   if (!worker.tmuxPane || !/^%(0|[1-9][0-9]*)$/.test(worker.tmuxPane)) return;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(worker.boatName)) return;

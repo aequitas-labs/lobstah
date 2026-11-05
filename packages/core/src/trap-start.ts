@@ -5,7 +5,7 @@ import { uniqueTempPath, atomicRenameSync, soakingDir } from './paths.js';
 import { withDirLock } from './dir-lock.js';
 import { postNotice } from './notices.js';
 import { pendingIds, queuedDescriptor } from './queue.js';
-import { newTrapId, readTrap, listTraps, trapLabel } from './soak.js';
+import { newTrapId, readTrap, listTraps, trapLabel, trapRepoLabel } from './soak.js';
 import { listRoster } from './roster.js';
 import { reserveTrapName, trapIdForName } from './trap-names.js';
 
@@ -45,6 +45,8 @@ export interface TrapReservation {
   batch?: string;
   /** The permission mode the throw started the session in (`auto`, `bypassPermissions`, ...). */
   startMode?: string;
+  /** Set when this trap starts with Claude's `--remote-control`: the time before which a URL can't be this run's. */
+  remoteControlSince?: string;
 }
 
 /** `<trapId>-<32 hex>`: the id prefix finds the reservation, the rest proves it. */
@@ -76,17 +78,19 @@ export function readReservationTicket(trapId: string): string | undefined {
 
 /** A value as a POSIX shell word, for a command printed for a person to run. */
 export function shellQuote(value: string): string {
-  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+  // A leading `=` is quoted: zsh reads an unquoted `=word` as that command's path.
+  return /^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./:@%+=,-]*$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
  * The commands that start a reserved trap's session in the repo's primary
  * checkout, per harness: all harnesses, or only the reserved one.
  */
-export function trapStartCommands(repoPath: string, ticket: string, harness?: string): Array<{ harness: 'claude' | 'codex'; command: string }> {
+export function trapStartCommands(repoPath: string, ticket: string, harness?: string, remoteControl?: string): Array<{ harness: 'claude' | 'codex'; command: string }> {
   const cd = `cd ${shellQuote(repoPath)} && `;
+  const remote = remoteControl ? `--remote-control ${shellQuote(remoteControl)} ` : '';
   const all: Array<{ harness: 'claude' | 'codex'; command: string }> = [
-    { harness: 'claude', command: `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${ticket}"` },
+    { harness: 'claude', command: `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude ${remote}"/lobstah:trap soak --ticket ${ticket}"` },
     { harness: 'codex', command: `${cd}codex -c 'tui.terminal_title=[]' '$lobstah:trap soak --ticket ${ticket}'` },
   ];
   return harness === 'claude' || harness === 'codex' ? all.filter((c) => c.harness === harness) : all;
@@ -153,6 +157,8 @@ export function reserveTrap(opts: {
   creationReason?: string;
   batch?: string;
   startMode?: string;
+  /** The trap starts with Claude's `--remote-control`. */
+  remoteControl?: boolean;
   /** A new throw enforces its configured repo cap under a cross-process reservation lock. */
   maxTraps?: number;
   now?: number;
@@ -216,6 +222,7 @@ export function reserveTrap(opts: {
     ...(opts.request ? { request: opts.request } : {}),
     ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
     ...(opts.startMode ? { startMode: opts.startMode } : {}),
+    ...(opts.remoteControl ? { remoteControlSince: new Date(now).toISOString() } : {}),
     ...(opts.returning ? { worktree: opts.returning.worktree } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   };
@@ -224,8 +231,8 @@ export function reserveTrap(opts: {
   postNotice({
     kind: 'trap-starting',
     text: opts.returning
-      ? `trap ${trapLabel(reservation)} thrown back for repo ${opts.repo} — starting, sign-on due by ${reservation.deadline}`
-      : `trap ${trapLabel(reservation)} reserved for repo ${opts.repo} — starting, sign-on due by ${reservation.deadline}; address work with \`--for ${name}\``,
+      ? `trap ${trapRepoLabel(reservation)} thrown back — starting, sign-on due by ${reservation.deadline}`
+      : `trap ${trapRepoLabel(reservation)} reserved — starting, sign-on due by ${reservation.deadline}; address work with \`--for ${name}\``,
     refId: trapId,
     repo: opts.repo,
     by: opts.by,
@@ -258,7 +265,7 @@ export function withdrawReservation(trapId: string, by?: string): TrapReservatio
   if (!r) return undefined;
   postNotice({
     kind: 'trap-stowed',
-    text: `trap ${trapLabel(r)} reservation withdrawn before sign-on — work addressed to it stays queued`,
+    text: `trap ${trapRepoLabel(r)} reservation withdrawn before sign-on — work addressed to it stays queued`,
     refId: trapId,
     repo: r.repo,
     by,
@@ -286,7 +293,7 @@ export function expireReservations(now = Date.now()): TrapReservation[] {
     postNotice({
       kind: 'trap-start-failed',
       text:
-        `trap ${trapLabel(r)} did not start: ${reason}. ` +
+        `trap ${trapRepoLabel(r)} did not start: ${reason}. ` +
         (waiting ? `${waiting} dispatch(es) addressed to it stay queued. ` : '') +
         `A session can still redeem its ticket; \`lobstah stow --wt ${r.name}\` withdraws the reservation.`,
       refId: r.trapId,

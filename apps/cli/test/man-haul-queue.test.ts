@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enqueue, ensureLayout, helmOf, takeHelm } from '@lobstah/core';
+import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // Exercise the built CLI: the bug is the Stop hook's control-flow gate.
@@ -17,6 +18,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-haul-queue-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  recordHelmPass('fleet', DEFAULT_HELM);
   takeHelm({ sessionId, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
 });
 afterEach(() => {

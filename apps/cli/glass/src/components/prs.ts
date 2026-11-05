@@ -19,6 +19,7 @@ import {
   prReview,
   ShowOlder,
   stackNumbers,
+  stackTitle,
   watchCell,
 } from './common.js';
 import type { OlderControl } from './common.js';
@@ -58,7 +59,7 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
 
 function prTable(inp: PrsInputs, older: unknown) {
   const rows = prGroups(inp).flatMap(({ s, prs }) => [
-    html`<tr key=${'stack:' + s.id}><th colspan="8">${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}</th></tr>`,
+    html`<tr key=${'stack:' + s.id}><th colspan="8">${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}</th></tr>`,
     ...prs.map(
       (p) =>
         html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
@@ -74,7 +75,7 @@ function prCards(inp: PrsInputs, older: unknown) {
   const body = groups.length
     ? groups.map(
         ({ s, prs }) =>
-          html`<${Fragment} key=${'stack:' + s.id}><h2>${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} /></h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}<div class="cards">${prs.map(card)}</div><//>`,
+          html`<${Fragment} key=${'stack:' + s.id}><h2>${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} /></h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${prs.map(card)}</div><//>`,
       )
     : html`<div class="empty">no PR evidence</div>`;
   return [body, older, otherWatches(inp)];

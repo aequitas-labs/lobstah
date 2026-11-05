@@ -52,7 +52,7 @@ export function reportInput(value: unknown): ReportInput {
   const r: ReportInput = { verb: b.verb as ReportInput['verb'] };
   if (b.note !== undefined) r.note = text(b.note, 16000);
   if (b.waitingOn !== undefined) {
-    requireThat(['paused', 'needs-decision', 'blocked'].includes(r.verb) && ['review', 'pr', 'deploy', 'person', 'external'].includes(String(b.waitingOn)), 400, 'invalid waitingOn');
+    requireThat(['paused', 'needs-decision', 'blocked'].includes(r.verb) && ['review', 'pr', 'deploy', 'person', 'external', 'heavy'].includes(String(b.waitingOn)), 400, 'invalid waitingOn');
     r.waitingOn = b.waitingOn as ReportInput['waitingOn'];
   }
   if (b.until !== undefined) {

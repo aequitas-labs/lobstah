@@ -277,6 +277,29 @@ export interface LimitsConfig {
   releaseOnMerge: boolean;
 }
 
+/** The machine's heavy-check line (`lobstah heavy`). */
+export interface HeavyConfig {
+  /** Commands that run at once, across all repos. auto: 1 below 14 cores, otherwise 2. */
+  slots: number | 'auto';
+  /** Test workers per run. auto: a third of the cores, at least 2. */
+  workers: number | 'auto';
+  /** Active minutes a command keeps its slot. Past this it keeps running without one. */
+  holdLimitMins: number;
+  /** How long the oldest waiter waits before a quiet notice. */
+  lineNoticeMins: number;
+  /** Pushes a repo's hook handles cheaply, which take no slot. */
+  repos: Record<string, HeavyRepoConfig>;
+}
+
+export interface HeavyRepoConfig {
+  /** Remote refs whose pushes are light, such as `refs/heads/pr-evidence`. */
+  lightRefs: string[];
+  /** Path prefixes: a push changing only files under these is light. */
+  lightPaths: string[];
+  /** This repo's own heavy commands, which get the reminder: `pnpm test:e2e`. */
+  reminders: string[];
+}
+
 export interface SoakConfig {
   /** Sign-on and first-park window for Codex throws; --timeout overrides it. */
   codexStartSecs: number;
@@ -346,8 +369,10 @@ export interface HelmConfig {
   park?: 'arm' | 'block';
   /** Arm mode: seconds the Stop hook polls for a watcher that is still starting before it blocks. */
   armGraceSecs: number;
-  /** Open helm to-dos older than this many days earn a short note in `man tend`; 0 disables. */
+  /** Open helm todos older than this many days are stale and require a pass; 0 disables staleness. */
   todoStaleDays: number;
+  /** Maximum seconds between delivered todo/goals passes; 0 disables the interval, not daily or stale passes. */
+  passIntervalSecs: number;
   /** Maximum open todos listed in the session-start brief; 0 lists only the remainder count. */
   briefTodoLimit: number;
   /** Minimum seconds between quiet-timeout goals reminders per helm session; 0 disables. */
@@ -413,6 +438,7 @@ export interface Config {
   harness: HarnessDefaults;
   limits: LimitsConfig;
   soak: SoakConfig;
+  heavy: HeavyConfig;
   helm: HelmConfig;
   wait: WaitConfig;
   glass: GlassConfig;
@@ -532,6 +558,30 @@ function parseSoak(raw: unknown): SoakConfig {
   return soak;
 }
 
+export const DEFAULT_HEAVY: HeavyConfig = { slots: 'auto', workers: 'auto', holdLimitMins: 45, lineNoticeMins: 30, repos: {} };
+
+function parseHeavy(raw: unknown): HeavyConfig {
+  if (raw !== undefined && (!raw || typeof raw !== 'object' || Array.isArray(raw))) throw new Error(`[heavy] must be a table in ${configPath()}`);
+  const heavy: HeavyConfig = { ...DEFAULT_HEAVY, ...((raw as Partial<HeavyConfig>) ?? {}) };
+  for (const key of ['slots', 'workers'] as const) {
+    if (heavy[key] !== 'auto' && (!Number.isInteger(heavy[key]) || (heavy[key] as number) < 1)) throw new Error(`[heavy].${key} must be "auto" or a positive integer in ${configPath()}`);
+  }
+  for (const key of ['holdLimitMins', 'lineNoticeMins'] as const) {
+    if (typeof heavy[key] !== 'number' || !Number.isFinite(heavy[key]) || heavy[key] <= 0) throw new Error(`[heavy].${key} must be a positive number in ${configPath()}`);
+  }
+  const strings = (v: unknown, where: string): string[] => {
+    if (v === undefined) return [];
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new Error(`${where} must be a list of strings in ${configPath()}`);
+    return v as string[];
+  };
+  const repos: Record<string, HeavyRepoConfig> = {};
+  for (const [key, r] of Object.entries((heavy.repos ?? {}) as Record<string, Partial<HeavyRepoConfig>>)) {
+    repos[key] = { lightRefs: strings(r?.lightRefs, `[heavy.repos.${key}].lightRefs`), lightPaths: strings(r?.lightPaths, `[heavy.repos.${key}].lightPaths`), reminders: strings(r?.reminders, `[heavy.repos.${key}].reminders`) };
+  }
+  heavy.repos = repos;
+  return heavy;
+}
+
 export const DEFAULT_SOAK: SoakConfig = {
   codexStartSecs: 600,
   acceptWharfStarts: false,
@@ -554,6 +604,7 @@ export const DEFAULT_HELM: HelmConfig = {
   reportSecs: 900,
   armGraceSecs: 5,
   todoStaleDays: 3,
+  passIntervalSecs: 7200,
   briefTodoLimit: 5,
   goalsNudgeSecs: 7200,
 };
@@ -611,7 +662,7 @@ export function loadConfig(): Config {
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
   if (helm.chat !== 'full' && helm.chat !== 'brief') throw new Error('[helm].chat must be "full" or "brief"');
-  for (const key of ['briefTodoLimit', 'goalsNudgeSecs'] as const) {
+  for (const key of ['briefTodoLimit', 'goalsNudgeSecs', 'passIntervalSecs'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isSafeInteger(helm[key]) || helm[key] < 0)
       throw new Error(`[helm].${key} must be a non-negative whole number in ${configPath()}`);
   }
@@ -685,6 +736,7 @@ export function loadConfig(): Config {
     harness: parseHarness(raw.harness, '[harness]') ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
     soak: parseSoak(raw.soak),
+    heavy: parseHeavy(raw.heavy),
     helm,
     wait,
     glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },

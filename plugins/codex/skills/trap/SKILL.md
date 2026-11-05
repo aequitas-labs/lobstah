@@ -120,6 +120,27 @@ naming a dispatch id. Then:
   there is no watcher to arm. A quiet exit 3 means re-run the wait, never
   stow.
 
+## Heavy commands
+
+One line per machine keeps full test runs, builds and pushes from overloading
+it. A person's own pushes never wait.
+
+- Run full test suites, full builds and Playwright as
+  `lobstah heavy -- <command>`. A focused test file or single-package build
+  doesn't need it. The exit code is the command's. If you forget, a one-line
+  reminder corrects you for next time.
+- Push with `lobstah heavy --bg -- git push origin <branch>`. It returns at
+  once, and a detached holder waits its turn, runs the push, and posts the exit
+  code, log path and last lines to your dispatch's inbox. Report
+  `paused "Push in line" --waiting-on heavy`, then run `lobstah soak --wait`,
+  which delivers that message. The helm isn't woken for this. Report `working`
+  when it arrives and carry on.
+- A plain `git push` still queues, but ending your turn gives you no word of
+  when it finished. Poll it to its end, or use `--bg`.
+- `lobstah heavy` shows the line. Over the time limit a command loses its slot
+  and keeps running, so a slow gate isn't a failure. Never use `--no-verify` to
+  skip the line.
+
 ## Permissions
 
 When your harness's own check (a permission prompt, Claude Code's auto-mode

@@ -78,7 +78,7 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
 
 ## Rules
 
-- Before setting goals proposed in chat or on the glass, check that each starts with a verb and has a specific, measurable end (number, PR/issue, URL or named state). If all pass, set them as given. Otherwise, use `lobstah man ask` to show originals beside proposed rewordings, with Use rewording, Keep originals and Edit options; run `lobstah goals set` only after the person chooses.
+- A goal is one line with a verb and a done state you'd recognise at a glance: merged, released, live, replying. PR numbers, commits and migration lists stay in the helm's tracking and the cards, not in the goal. Before setting goals proposed in chat or on the glass, check each one. If all pass, set them as given. If a goal has no verb or no done state, use `lobstah man ask` to show originals beside proposed rewordings, with Use rewording, Keep originals and Edit options; run `lobstah goals set` only after the person chooses. Never ask for IDs or numbers.
 - Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.
   `lobstah dispatch --repo <key> --trap-any --brief <file>` selects in that order;
   at the repo's `traps` cap it waits for a suitable free trap. `man throw --new`
@@ -88,7 +88,7 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
   alone — the worker has no other context.
 - Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.
 - Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.
-- Todos are commitments. Judge whether each one can act now or should wait. Once a todo is marked stale, act on it: do it, ask on a card, move it to the issue tracker, or drop it.
+- Todos are commitments. Judge whether each one can act now or should wait, and give one that waits a time or a trigger. When a todo fires, goes overdue or is marked stale, act on it: do it, ask on a card, snooze it when there's a reason to wait, move it to the issue tracker, or drop it.
 - Withdraw a decision card (`lobstah man ask --withdraw <key>`) as soon as it no longer applies: its work finished, its PR merged or closed, or a newer card replaced it.
 - Addressed work is sticky: `--for <trap-name>` waits for that trap and never
   falls back to a headless worker. `man tend` lists live traps.

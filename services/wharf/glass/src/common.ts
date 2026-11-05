@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../../../../apps/cli/glass/src/html.js';
+import { viewerDevice } from '../../../../packages/core/src/viewer-device.js';
 import { fileUrl } from './api.js';
 import { attachCommand, resume } from './model.js';
 import type { WharfFile, Worker } from './model.js';
@@ -30,6 +31,8 @@ export function Copy({ command }: { command: string }) {
 /** How a worker's session is reached. A live one never offers resume, which would start a second process on a session still in use. */
 export function Session({ worker }: { worker: Worker }) {
   const head = html`<div class="sec">session · on ${worker.boatName}</div>`;
+  // Only a desktop can use a copied command. A phone gets where the worker runs.
+  if (viewerDevice(navigator.userAgent) !== 'desktop') return html`${head}<div class="sub">${worker.live ? 'Running' : 'Ran'} on ${worker.boatName}, only reachable from there</div>`;
   if (worker.live) {
     const attach = attachCommand(worker);
     return attach

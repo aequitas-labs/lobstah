@@ -396,7 +396,7 @@ export function closeModal(): void {
 }
 
 /** Why an action can't run on a page viewed through another address. */
-const READ_ONLY_REASON = 'This glass is read-only from here';
+export const READ_ONLY_REASON = 'This glass is read-only from here';
 
 /** Ask the local server to focus one live trap; it accepts no path, URL, or command. */
 export async function openTrapWindow(trapId: string): Promise<void> {
@@ -461,6 +461,11 @@ export type ReviewRequestKind =
  */
 export async function reviewRequest(kind: ReviewRequestKind, payload: Record<string, unknown>): Promise<string | undefined> {
   return glassRequest(kind, payload);
+}
+
+/** Set or move a todo's time from its row. Resolves to the parser's message, or undefined on success. */
+export async function scheduleTodo(grounds: string, id: number, until: string): Promise<string | undefined> {
+  return glassRequest('todo-schedule', { grounds, id, until });
 }
 
 export async function changeHelmChat(grounds: string, chat: 'full' | 'brief'): Promise<string | undefined> {

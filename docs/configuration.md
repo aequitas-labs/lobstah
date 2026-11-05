@@ -184,21 +184,78 @@ send a continuation.
 | `terminal` | unset | The terminal app a thrown trap opens in: `terminal` (Terminal.app) or `iterm` (iTerm2). A trap's roster profile (`man roster set <trap> --terminal`) overrides it. Unset, `man throw` uses the app the trap last signed on from, else Terminal.app. `man throw` opens the trap's session there through AppleScript (macOS only); the app needs Automation permission for the terminal that runs `man throw`. |
 | `pausedTtlSecs` | `86400` (24 hours) | A trap whose catch last reported `paused` is kept out of the ghost sweep this long after the report. `report paused --until <iso|duration>` sets the expiry instead. After it, the sweep removes the trap as usual, and the notice says the pause expired. |
 
+## `[heavy]` — the machine's line for heavy commands (`lobstah heavy`)
+
+`lobstah heavy -- <command>` waits for a slot, runs the command, and frees the
+slot. One line covers every repo on the machine. Each process manages its own
+place in `~/.lobstah/heavy/`, so the line doesn't depend on the daemon. With no
+command, `lobstah heavy` shows the line.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `slots` | `"auto"` | Commands that run at once. `auto` is 1 below 14 cores, otherwise 2. Read on every check, so a change needs no restart. |
+| `workers` | `"auto"` | Test workers per run, set as `VITEST_MAX_WORKERS`, `VITEST_MAX_FORKS` and `VITEST_MAX_THREADS` unless already set. `auto` is a third of the cores, at least 2. |
+| `holdLimitMins` | `45` | Active minutes a command keeps its slot. Past this it loses the slot and keeps running. Sleep doesn't count. |
+| `lineNoticeMins` | `30` | How long the oldest waiter waits before a quiet notice. |
+
+Pushes queue with no change to how they're run. Soak, worktree creation and
+pool warm-up set a linked worktree's `core.hooksPath` to a shim in
+`~/.lobstah/heavy/hooks`, which runs the repo's real hook unchanged. Its
+`pre-push` takes a slot first, but only in a lobstah worktree, in an agent
+session, and when the repo has a real hook. A person's push never waits. This
+isn't applied on Windows.
+
+`[heavy.repos.<key>]` names pushes the repo's hook handles cheaply, so they take
+no slot. The hook still runs in full, so a wrong setting costs only some load.
+
+```toml
+[heavy.repos.homebase]
+lightRefs = ["refs/heads/pr-evidence"]  # remote refs
+lightPaths = ["apps/design/"]           # every changed file is under one of these
+reminders = ["pnpm test:e2e"]           # this repo's own heavy commands
+```
+
+A trap or worker on a dispatch that runs a known heavy command outside the line
+gets one line of context, once per dispatch for each command. It approves
+nothing and blocks nothing, and that run isn't queued.
+
+`lobstah heavy`, `man tend` and the glass show the line, and the load average
+beside it. Waiting doesn't count as needing attention. A long line is one quiet
+notice, `heavy-line-long`, once until the line empties. A command over its limit
+is one `heavy-over-limit` notice per ticket, which wakes the helm because
+something may be stuck. Joining, starting and finishing post nothing.
+
+The line never kills or fails a command. If the line itself fails, the command
+runs without a slot and prints one line. A waiter removed from the line because
+its trap or dispatch stopped exits 75 having run nothing. `--bg` returns at once
+and posts the exit code, log path and last lines to the dispatch's inbox.
+
 ## `[helm]` — the orchestrator seat (`lobstah man helm`)
 
 | Key | Default | Meaning |
 |---|---|---|
 | `ttlSecs` | `1800` | Heartbeat age past which a helm registration is stale: the next `man helm` claims it without `--take`. The park and `man brief` heartbeat it. |
 | `reportSecs` | `900` | Minimum seconds between park-delivered digests for a helm session. The digest is also change-gated — quiet grounds deliver nothing regardless of cadence. |
-| `timezone` | system timezone | IANA timezone (e.g. `America/New_York`) for daily goals and for when a done todo leaves `man tend` and the glass. A day starts at 04:00 local. |
+| `timezone` | system timezone | IANA timezone (e.g. `America/New_York`) for daily goals, for reading todo times, and for when a done todo leaves `man tend` and the glass. A day starts at 04:00 local. |
 | `queuedNoticeSecs` | `180` | Queued age before a dispatch-progress notice wakes the helm with its queue reason and remedy. `0` disables. Reminders back off at 15, 45, 105… minutes after the threshold; claim clears the condition. |
 | `stalledNoticeSecs` | `1200` | Silence since both a claimed dispatch's last activity and note before dispatch-progress attention. The same reminder backoff applies; activity or a note clears it. Paused, needs-decision and blocked workers use their existing paths. `0` disables. |
 | `idleWorkingNoticeSecs` | `60` | Explicitly idle trap whose last report is working: wake the helm with its full note. A live session-owned background wait exempts it. Tool activity or a new report clears it; reminders use the same backoff. `0` disables. |
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
-| `todoStaleDays` | `3` | Open helm todos (`lobstah todo`) older than this many days add one note to `man tend`. `0` disables. |
-| `briefTodoLimit` | `5` | Maximum open todos in the session-start brief, oldest first; the remainder is counted. `0` shows only the count. |
+| `todoStaleDays` | `3` | Open helm todos with no due time and older than this many days are stale and require a todo/goals pass. `0` disables staleness. |
+| `passIntervalSecs` | `7200` | Maximum seconds between delivered todo/goals passes. `0` disables only this interval; a new goals day or newly stale todo still makes a pass due. |
+| `briefTodoLimit` | `5` | Maximum unscheduled open todos in the session-start brief, oldest first; the remainder is counted. `0` shows only their count. Overdue todos always show and use up the limit. Future and snoozed todos always stay listed with their due times, outside the limit. |
 | `goalsNudgeSecs` | `7200` | Minimum seconds between capped goals lines on `man wait` timeout digests, per helm session; resets at the goals-day boundary. `0` disables. |
 | `chat` | `"full"` | Default chat detail: `"full"` or `"brief"`. Brief mode points at cards instead of repeating detail and keeps routine wakes quiet. `lobstah man chat brief\|full [--grounds <name>]` or glass Settings overrides it for that grounds' signed-on helm, effective next turn, without a restart or config edit. The override stays with the seat on re-sign/takeover and ends when relieved. |
+
+A todo/goals pass is due on the first helm sign-on or wait of a goals day
+(04:00 local), after the interval, or when a todo becomes stale. When due,
+sign-on, the Stop hook, and quiet `man wait` timeouts print the full open todo
+list (stale first) and today's goals with their done states, using the same
+renderers as `lobstah todo ls` and `lobstah goals`. Showing those details records
+the pass automatically; there is no extra command. The Stop hook blocks once to
+deliver the details. Previews (`man wait --peek`), `todo ls`, and `goals` stay
+read-only. A delivery acknowledges current stale todo versions; new stale
+versions stand again. Glass shows the last pass age beside goals and todos.
 
 ## `[wait]` — quiet helm and trap waiters
 
@@ -447,7 +504,10 @@ restriction; the classifier keeps its own safety policy:
 - the helm doing what you asked in its chat is not a bypass;
 - an answer you give on a glass card is your own, like a chat message.
 
-It also allows `Read` and `Edit` on `<lobstah home>/worktrees/**`.
+It also allows `Read` and `Edit` on `<lobstah home>/worktrees/**`, permission
+proposals, and `lobstah dispatch` / `lobstah send` relays. Applying the profile
+adds missing allow rules, preserving existing rule order and backing up settings
+before writing. Doctor warns when the profile needs applying.
 `[permissions]` adds to it:
 
 ```toml
@@ -472,7 +532,7 @@ allow     = [["wrangler", "dev"]]
   - Text outside the markers is yours and stays.
   - lobstah edits only the key's own lines, keeping comments, key order and the string's quoting. It parses the file before and after; anything else changing refuses the write.
 - **`rules/lobstah.rules`.** This file is wholly lobstah's. It holds the base rules plus `[permissions.codex]`:
-  - allow: `lobstah permissions propose`. lobstah adds no `forbidden` or `prompt` rule of its own; Codex's reviewer keeps its own policy.
+  - allow: `lobstah permissions propose`, `lobstah dispatch`, and `lobstah send`. lobstah adds no `forbidden` or `prompt` rule of its own; Codex's reviewer keeps its own policy.
   - `codex execpolicy check` loads every rule before the file is put in place.
 
 `remove` deletes `rules/lobstah.rules` and lobstah's block. Neither verb sets `approvals_reviewer` or `approval_policy`: `man throw` already starts Codex traps with `--approve-for-me`.

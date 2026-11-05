@@ -1,6 +1,15 @@
 import {
+  firstHeavyReminder,
   GrantError,
+  hasOpenCatch,
+  heavyCommandPattern,
+  heavyReminderText,
   listTraps,
+  lockIsLive,
+  readWorktreeLock,
+  storedDescriptor,
+  trapDisplayName,
+  withTrapRepo,
   listHelms,
   sessionGuarded,
   toolHosts,
@@ -39,6 +48,7 @@ import type {
 } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 
 /**
  * Grants from the command line and the hooks: a person grants, revokes and
@@ -127,7 +137,7 @@ function harnessOf(v: string | undefined): GrantHarness {
 }
 
 function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo' | 'tools' | 'session'>): string {
-  if (g.tools) return `${g.tools}${g.command ? ` (${g.command} …)` : ''} for session ${g.session}`;
+  if (g.tools) return `${g.tools}${g.command ? ` (${g.command} …)` : ''} ${g.session ? `for session ${g.session}` : 'in every trap'}`;
   if (g.path !== undefined) return g.repo !== undefined ? `write ${g.path} in any ${g.repo} checkout` : `write ${g.path}`;
   return g.match === 'prefix' ? `${g.command} …` : g.command!;
 }
@@ -304,10 +314,10 @@ export function callRequests(call: CallInput, trap: string | undefined, cwd: str
   }
   if (tool === 'apply_patch') {
     const patch = typeof raw === 'string' ? raw : typeof call.input.patch === 'string' ? (call.input.patch as string) : '';
-    return patchPaths(patch).map((p) => ({ ...base, path: p.startsWith('/') ? p : `${cwd}/${p}` }));
+    return patchPaths(patch).map((p) => ({ ...base, path: path.isAbsolute(p) ? p : `${cwd}/${p}` }));
   }
   const file = call.input.file_path ?? call.input.notebook_path;
-  if (typeof file === 'string') return [{ ...base, path: file.startsWith('/') ? file : `${cwd}/${file}` }];
+  if (typeof file === 'string') return [{ ...base, path: path.isAbsolute(file) ? file : `${cwd}/${file}` }];
   return [];
 }
 
@@ -341,7 +351,14 @@ export function checkCall(call: CallInput, cwd: string, sessionOnly = false): st
   // The trap's own harness, as it signed on: the hook entry is shared by both plugins.
   const harness = trap.harness === 'codex' ? 'codex' : trap.harness === 'claude' ? 'claude' : call.harness;
   const requests = callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd);
-  if (requests.length === 0) return undefined;
+  if (requests.length === 0) {
+    // A connector or other tool names no command or file: a standing tool grant covers it in every trap.
+    const g = useGrant(
+      { harness, tool: call.tool, input: call.input, cwd, trap: trap.name ?? trap.trapId },
+      { ...(call.session ? { session: call.session } : {}), ...(call.callId ? { callId: call.callId } : {}) },
+    );
+    return g?.mode === 'always' && g.tools !== undefined ? [g.id] : undefined;
+  }
   // Check every request before spending any: a once-grant is not spent on a call that is refused anyway.
   const { grants, intact } = listGrants();
   const roots = checkoutRoots();
@@ -391,13 +408,55 @@ export function grantCheckHook(): void {
 }
 
 /**
+ * Codex runs this hook before choosing the reviewer and exposes no later
+ * refusal/human-wait hook. Uncovered MCP calls without shell/file targets
+ * must defer to native approval, rather than predicting a need for a person.
+ */
+function defersCodexConnectorApproval(call: CallInput, harness: string | undefined, cwd: string): boolean {
+  return harness === 'codex' && call.tool.startsWith('mcp__') && callRequests(call, undefined, cwd).length === 0;
+}
+
+/**
  * `lobstah hook permission-request`: the PermissionRequest hook of both
  * plugins. With a grant that covers a trap's call it allows it: in Codex
  * before the approval reviewer, in Claude Code where a permission prompt
  * would show (the mod covers auto mode). Otherwise it prints nothing, and
- * the normal approval flow goes on. An uncovered call from an assigned trap
- * also files a permission card, so its glass answer writes a real grant.
+ * the normal approval flow goes on. Uncovered Codex connector calls defer
+ * without a card; other uncovered calls keep their existing card behavior.
  */
+/**
+ * A trap or worker on a dispatch ran a heavy command outside the line. Adds
+ * one line of context, with no permission decision: it approves nothing,
+ * blocks nothing and changes nothing. Never fails the hook.
+ */
+function heavyReminder(call: CallInput, cwd: string): void {
+  try {
+    const command = call.tool === 'Bash' ? call.input.command : undefined;
+    if (typeof command !== 'string') return;
+    const who = heavyDispatchOf(call.session, cwd);
+    if (!who) return;
+    const pattern = heavyCommandPattern(command, loadConfig().heavy.repos[who.repo ?? '']?.reminders);
+    if (!pattern || !firstHeavyReminder(who.dispatch, pattern)) return;
+    console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: heavyReminderText(command) } }));
+  } catch {
+    /* a reminder is never worth a failed hook */
+  }
+}
+
+/** The dispatch this session's trap holds, or the one whose runner holds this worktree. */
+function heavyDispatchOf(session: string | undefined, cwd: string): { dispatch: string; repo?: string } | undefined {
+  const trap = session ? trapBySession(session) : undefined;
+  if (trap?.claimed && hasOpenCatch(trap)) return { dispatch: trap.claimed, ...(trap.repo ? { repo: trap.repo } : {}) };
+  for (let at = path.resolve(cwd); ; at = path.dirname(at)) {
+    if (fs.existsSync(path.join(at, '.git'))) {
+      const lock = readWorktreeLock(at);
+      if (!lock || lock.kind === 'warm' || !lockIsLive(lock)) return undefined;
+      return { dispatch: lock.id, ...(storedDescriptor(lock.id, lock.lane)?.repo ? { repo: storedDescriptor(lock.id, lock.lane)!.repo } : {}) };
+    }
+    if (path.dirname(at) === at) return undefined;
+  }
+}
+
 export function permissionRequestHook(preToolUse = false, preHarness: 'claude' | 'codex' = 'claude'): void {
   try {
     const h = readStdinJson();
@@ -422,7 +481,14 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       return;
     }
     const trap = call.session ? trapBySession(call.session) : undefined;
-    if (preToolUse) return;
+    if (preToolUse) {
+      heavyReminder(call, cwd);
+      return;
+    }
+    const registeredHarness = trap?.harness
+      ?? listHelms().find((helm) => helm.sessionId === call.session)?.harness
+      ?? (typeof h.turn_id === 'string' ? 'codex' : undefined);
+    if (defersCodexConnectorApproval(call, registeredHarness, cwd)) return;
     if (!trap?.claimed) {
       if (
         call.session &&
@@ -515,7 +581,7 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
     opts.ask.command !== undefined ? `Allow: ${commandGrantScope(target).command}` : `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
   const detail = [
     opts.note ? `${opts.note}\n` : '',
-    `The trap asks to ${kind} exactly this${opts.ask.harness === 'any' ? '' : ` (${opts.ask.harness === 'claude' ? 'Claude Code' : 'Codex'})`}:`,
+    `${opts.ask.trap ? withTrapRepo(opts.repo, opts.ask.trap) : 'The trap'} asks to ${kind} exactly this${opts.ask.harness === 'any' ? '' : ` (${opts.ask.harness === 'claude' ? 'Claude Code' : 'Codex'})`}:`,
     '',
     '```',
     target,
@@ -566,6 +632,10 @@ export function permissionAnswerAllowed(decision: DecisionMeta, option: string |
 export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAnswer): Grant | undefined {
   const ask = decision.permission;
   if (!ask) return undefined;
+  if (answer.by === 'glass' && ask.sessionGrant && !ask.sessionGrant.command && answer.option === STANDING_TOOL_OPTION) {
+    const r = ask.sessionGrant;
+    return addGrant({ mode: 'always', tools: r.tools, hosts: r.hosts, reason: r.reason, by: 'glass' });
+  }
   if (answer.by === 'glass' && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
     const r = ask.sessionGrant;
     const duration = answer.option === 'Allow for 1h' ? 3600_000 : r.durationMs;
@@ -730,7 +800,14 @@ type SessionOptions = {
   command?: string;
 };
 
-/** Asking is agent-safe: this writes a decision, never a grant. */
+/** The card option that allows a tool glob for every trap, until revoked. */
+export const STANDING_TOOL_OPTION = 'Allow always';
+
+/**
+ * Asking is agent-safe: this writes a decision, never a grant. A trap's card
+ * for a tool glob also offers Allow always, so one answer covers every trap
+ * and later session.
+ */
 export function requestSessionGrant(opts: SessionOptions): DecisionMeta {
   const session = sessionTarget(opts);
   const durationMs = sessionDuration(opts.duration);
@@ -749,10 +826,13 @@ export function requestSessionGrant(opts: SessionOptions): DecisionMeta {
   if (opts.command && /[;&|<>`$\n\r]/.test(opts.command)) throw new GrantError('a session Bash prefix cannot contain shell syntax');
   if (!opts.reason.trim()) throw new GrantError('--reason is required');
   const duration = opts.duration ?? '15m';
+  const trap = listTraps().find((t) => t.sessionId === session);
+  const standing = !opts.command && trap !== undefined;
   return askDecision({
     title: `Allow ${opts.tools} for ${duration}?`.slice(0, 200),
-    detailText: `Session: \`${session}\`\n\nTools: \`${opts.tools}\`\n\n${opts.command ? `Bash prefix: \`${opts.command}\`\n\n` : ''}Hosts: \`${(opts.hosts ?? []).join(', ') || 'not pinned'}\`\n\n${opts.reason}\n\nExpires automatically. Revoke at any time in the glass. Clicks and screenshots have no URL and ride this window.`,
-    options: [...new Set([`Allow for ${duration}`, 'Allow for 1h', 'Deny'])],
+    ...(trap?.repo ? { repo: trap.repo } : {}),
+    detailText: `${trap ? `Trap: ${trapDisplayName(trap)}\n\n` : ''}Session: \`${session}\`\n\nTools: \`${opts.tools}\`\n\n${opts.command ? `Bash prefix: \`${opts.command}\`\n\n` : ''}Hosts: \`${(opts.hosts ?? []).join(', ') || 'not pinned'}\`\n\n${opts.reason}\n\nExpires automatically. Revoke at any time in the glass. Clicks and screenshots have no URL and ride this window.${standing ? `\n\n- **${STANDING_TOOL_OPTION}**: \`${opts.tools}\` in every trap and every later session, without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists it).` : ''}`,
+    options: [...new Set([`Allow for ${duration}`, 'Allow for 1h', ...(standing ? [STANDING_TOOL_OPTION] : []), 'Deny'])],
     askedBy: 'worker',
     permission: {
       harness: 'any',

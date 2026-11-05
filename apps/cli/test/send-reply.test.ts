@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   appendStatus, awaitingReply, claimNext, complete, ensureLayout, laneDirs, markListed, readExpectation, takeHelm,
 } from '@lobstah/core';
+import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { armWatcher } from '../src/watchers.js';
 
@@ -20,6 +21,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-send-reply-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  recordHelmPass('fleet', DEFAULT_HELM);
 });
 afterEach(() => {
   removeTempDir(home);

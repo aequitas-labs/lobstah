@@ -1,10 +1,10 @@
-import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, TendAttention } from '@lobstah/core';
+import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
 import { useState } from 'preact/hooks';
 import { desktopSession, dispatchFileUrl, isImageName, prBadgeClass, resumeCommand, watchState } from '../../../src/glass-diff.js';
 import type { ResumeSession } from '../../../src/glass-diff.js';
 import type { DispatchDetail, ModalType } from '../../../src/glass-diff.js';
-import { copyText, loadOlder, openLightbox, openTrapWindow, requestTrap, showModal } from '../actions.js';
+import { copyText, loadOlder, openLightbox, openTrapWindow, READ_ONLY_REASON, requestTrap, showModal } from '../actions.js';
 import { getState } from '../store.js';
 import { prReviewUrl } from '../../../../../packages/core/src/pr-review.js';
 import { html } from '../html.js';
@@ -27,6 +27,11 @@ export const ageText = (iso: string | undefined | null): string => {
 
 /** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
 export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
+
+/** The same pass age beside goals and todos, recomputed when the glass refreshes. */
+export function lastPassText(at: string | undefined): string {
+  return at ? `last pass ${Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 60000))} min ago` : 'No pass recorded';
+}
 
 type WorkerInfo = { harness?: string | null; model?: string | null; config?: WorkerConfig; observedAt?: string };
 
@@ -103,6 +108,38 @@ export const badgeLong = (text: string | undefined): string => (longBadge(text) 
 export const opener = (type: ModalType, key: string) => () => showModal(type, key);
 export const stop = (e: Event) => e.stopPropagation();
 
+/** This device can use a copied command. A phone can't, and off the machine an unknown device isn't assumed to. */
+export function viewerHasTerminal(): boolean {
+  const viewer = getState().snapshot?.viewer;
+  return !!viewer && (viewer.onMachine ? viewer.device !== 'phone' : viewer.device === 'desktop');
+}
+
+/** Session links open an app on the trap's machine, so they only work for a viewer there. */
+function sessionLinkOpens(): boolean {
+  const viewer = getState().snapshot?.viewer;
+  return !!viewer?.onMachine && viewer.device !== 'phone';
+}
+
+/** The notice for a page whose actions the server refuses. */
+export function readOnlyNotice(): Children {
+  return getState().snapshot?.viewer?.onMachine === false && html`<div class="dim">${READ_ONLY_REASON}</div>`;
+}
+
+/** A link to the live session in Claude. It works on any device, so no viewer check. */
+const liveLinkButton = (href: string) =>
+  html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" onClick=${stop}>Open live Claude</a>`;
+
+/** What the live link does, said once in the modal: which client takes it depends on the device. */
+export function liveLinkNote(t: GlassTrap): Children {
+  if (t.live && t.sessionWriters)
+    return html`<div class="bad">Processes ${t.sessionWriters.join(' and ')} both hold this session, so its live link is hidden. End one to get it back</div>`;
+  return (
+    t.live &&
+    t.liveLink &&
+    html`<div class="dim">Opens in the Claude app or a browser, signed in to the same account. The trap keeps running on its machine</div>`
+  );
+}
+
 /**
  * A live trap seen from a page that isn't on its machine: where it runs and
  * what can reach it, instead of a button that can't help. Presentation only:
@@ -114,9 +151,9 @@ function offMachineAction(t: GlassTrap, machine = 'its machine'): Children {
     const address = `127.0.0.1${location.port ? ':' + location.port : ''}`;
     return html`<span class="winaction"><span class="dim">Open controls need</span> <a href=${'http://' + address} onClick=${stop}>${address}</a></span>`;
   }
-  if (t.link)
-    return html`<span class="winaction offmachine"><span class="dim">Running on ${machine}</span> <a href=${t.link} onClick=${stop}>Session link</a></span>`;
-  return html`<span class="dim offmachine">${t.attachCommand ? `Running on ${machine}` : `Running on ${machine}, only reachable from there`}</span>`;
+  if (t.liveLink)
+    return html`<span class="winaction offmachine"><span class="dim">Running on ${machine}</span> ${liveLinkButton(t.liveLink)}</span>`;
+  return html`<span class="dim offmachine">${t.attachCommand && viewerHasTerminal() ? `Running on ${machine}` : `Running on ${machine}, only reachable from there`}</span>`;
 }
 
 /**
@@ -129,7 +166,7 @@ export function windowAction(t: GlassTrap): Children {
   if (t.starting) return html`<span class="dim">${t.starting.failedAt ? 'Did not start' : 'Starting — no window yet'}</span>`;
   const desktop = desktopSession(t) && !!t.link;
   if (!t.live) {
-    if (!desktop) return null;
+    if (!desktop || !sessionLinkOpens()) return null;
     // The server focuses live traps only; a signed-off app session opens its stored link.
     return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
   }
@@ -141,7 +178,7 @@ export function windowAction(t: GlassTrap): Children {
     stop(e);
     void openTrapWindow(t.trapId);
   };
-  return html`<span class="winaction"><button class="btn open" title="Open this trap's window" onClick=${clicked}>↗ Open</button>${t.link && !desktop && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${
+  return html`<span class="winaction"><button class="btn open" title="Open this trap's window" onClick=${clicked}>↗ Open</button>${t.link && !desktop && sessionLinkOpens() && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${t.liveLink && [' ', liveLinkButton(t.liveLink)]}${
     state.focusResults[t.trapId] && [' ', html`<span class="dim">${state.focusResults[t.trapId]}</span>`]
   }</span>`;
 }
@@ -193,18 +230,22 @@ export const cmdRow = (text: string, key?: string, label?: string, href?: string
 /**
  * How the modal offers a trap's session. A live trap never offers resume,
  * which would start a second process on a session still in use: it offers its
- * attach command or its desktop link, or nothing when neither exists.
+ * attach command or its desktop link, or nothing when neither exists or works
+ * on this device.
  */
 export const trapSessionRow = (t: GlassTrap): Children => {
-  if (t.live && !desktopSession(t)) return t.attachCommand ? cmdRow(t.attachCommand) : null;
+  if (t.live && !desktopSession(t)) return t.attachCommand && viewerHasTerminal() ? cmdRow(t.attachCommand) : null;
   return t.sessionId || (t.link && desktopSession(t)) ? resumeRow(t) : null;
 };
 
-export const resumeRow = (session: ResumeSession) => {
-  if (desktopSession(session))
+export const resumeRow = (session: ResumeSession): Children => {
+  if (desktopSession(session)) {
+    if (!sessionLinkOpens()) return null;
     return session.link
       ? cmdRow(session.link, undefined, 'desktop thread:', session.link)
       : html`<span class="dim">desktop thread — open in the app</span>`;
+  }
+  if (!viewerHasTerminal()) return null;
   const command = resumeCommand(session);
   return command ? cmdRow(command) : html`<span class="dim">Resume command unavailable</span>`;
 };
@@ -376,7 +417,7 @@ export function prCell(x: GlassDispatchSummary) {
     return [
       x.prList.map((p, i) => [
         i ? ' → ' : '',
-        html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`,
+        html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" title=${p.title} onClick=${stop}>#${p.number}</a>`,
         p.badge && [' ', html`<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>`],
       ]),
       x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
@@ -435,9 +476,12 @@ export const prLink = (p: Pick<GlassPr, 'url' | 'number'>) =>
 
 export const reviewLink = (url: string) => prReviewUrl(url, getState().snapshot?.reviewTools);
 
-/** A PR card's name: the number bold, then the title; the number alone when there is no title. One line, cut with an ellipsis. */
+/** A PR card's name: the number bold, then the title; the number alone when there is no title. */
 export const prName = (p: Pick<GlassPr, 'number' | 'title'>) =>
   html`<span class="prname" title=${p.title || undefined}><b>#${p.number}</b>${p.title && [' ', LinkedText(p.title)]}</span>`;
+
+/** What a stack is about, as its heading's lead; nothing when it has no title. */
+export const stackTitle = (s: GlassStack) => s.title && [html`<b class="stacktitle">${LinkedText(s.title)}</b>`, ' '];
 
 /** A stack's numbers, `#98 → #101`, each carrying its PR's title as a title attribute. `bold` marks one number. */
 export function stackNumbers(numbers: number[], titles: Map<number, string | undefined>, bold?: number) {
@@ -546,8 +590,23 @@ export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
   const s = trapState(t);
   if (s.kind === 'working' || (s.kind === 'idle' && s.listening)) return 'ok';
   if (s.kind === 'start failed') return 'bad';
+  // Waiting for a slot is routine: nothing here needs a person.
+  if (s.kind === 'parked' && s.current.waiting?.on === 'heavy') return 'ok';
   return s.kind === 'parked' || s.kind === 'starting' ? 'warn' : 'dim';
 }
+
+/** A trap's or worker's place in the heavy line: `in line, 1st`, `running, 6m`, `over limit`. */
+export function heavyPlace(match: { trap?: string; dispatch?: string }): string | undefined {
+  const tickets = getState().snapshot?.heavy?.tickets ?? [];
+  const t = tickets.find((x) => (match.dispatch && x.dispatch === match.dispatch) || (match.trap && x.trap === match.trap));
+  if (!t) return undefined;
+  if (t.state === 'over') return `${t.command} · over limit`;
+  if (t.state === 'running') return `${t.command} · running, ${minutesSince(t.since)}m`;
+  return `${t.command} · in line, ${ordinal(t.position ?? 1)}`;
+}
+
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
+const minutesSince = (iso?: string) => (iso ? Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60_000)) : 0);
 
 const parkedText = (c: GlassDispatchSummary) => (c.waiting ? `waiting on ${c.waiting.on}` : c.note || 'waiting');
 const workTitle = (c: GlassDispatchSummary) => c.title.slice(0, 40) || '(no title)';
@@ -562,6 +621,8 @@ export function trapNow(t: GlassTrap): Children {
   if (s.kind === 'signed off') return [dot, html`<span class="dim">signed off</span>`];
   if (s.kind === 'idle') return [dot, 'idle · ', s.listening ? 'listening' : 'not listening'];
   const current = s.current;
+  const place = heavyPlace({ trap: t.trapId, dispatch: current.id });
+  if (place) return [dot, place];
   if (s.kind === 'parked') return [dot, 'parked · ', NamedText(parkedText(current))];
   const openDispatch = (event: MouseEvent) => {
     event.preventDefault();
@@ -622,6 +683,8 @@ export function trapNowText(t: GlassTrap): string {
   if (s.kind === 'start failed') return `start failed · ${s.reason}`;
   if (s.kind === 'signed off') return 'signed off';
   if (s.kind === 'idle') return `idle · ${s.listening ? 'listening' : 'not listening'}`;
+  if (s.kind === 'parked' && s.current.waiting?.on === 'heavy')
+    return heavyPlace({ trap: t.trapId, dispatch: s.current.id }) ?? 'waiting in the heavy line';
   if (s.kind === 'parked') return `parked · ${parkedText(s.current)}`;
   const current = s.current;
   return [

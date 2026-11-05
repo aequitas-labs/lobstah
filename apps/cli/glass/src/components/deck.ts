@@ -14,6 +14,7 @@ import { html } from '../html.js';
 import type { Children } from '../html.js';
 import {
   Age,
+  lastPassText,
   Harness,
   NamedText,
   WorkerAddress,
@@ -27,6 +28,7 @@ import {
   opener,
   prName,
   stackNumbers,
+  stackTitle,
   startCommands,
   trapNow,
   trapNowText,
@@ -115,7 +117,7 @@ function deckStack(
       const meta = `${p.repo} · ${p.badge.text}${acked ? ' · acked' : ''}`;
       return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta" title=${meta}>${meta}</div></div>`;
     };
-    return html`<div key=${s.id} class="deckstack"><div class="dim">${chain} · ${nextText}${ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}<div class="cards">${members.map(card)}</div></div>`;
+    return html`<div key=${s.id} class="deckstack"><div class="dim">${stackTitle(s)}${chain} · ${nextText}${ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${members.map(card)}</div></div>`;
   }
   const badges = members.flatMap((p) =>
     (standing.get(p.key) || []).map(
@@ -124,7 +126,8 @@ function deckStack(
     ),
   );
   const spaced = badges.flatMap((b, i) => (i ? [' ', b] : [b]));
-  return html`<div key=${s.id} class=${'deckline' + (next ? ' click' : '')} onClick=${next && opener('pr', next.key)}><b>${chain}</b> <span class="dim">· ${nextText}</span>${badges.length > 0 && [' · ', spaced]}${ack}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.text}</div>`}</div>`;
+  const lone = members.length === 1 ? members[0] : undefined;
+  return html`<div key=${s.id} class=${'deckline' + (next ? ' click' : '')} onClick=${next && opener('pr', next.key)}>${stackTitle(s)}${lone ? prName(lone) : html`<b>${chain}</b>`} <span class="dim">· ${nextText}</span>${badges.length > 0 && [' · ', spaced]}${ack}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}${!lone && members.map((p) => html`<div key=${p.key} class="deckmember dim">${prName(p)}</div>`)}</div>`;
 }
 
 function deckPrs(inp: DeckInputs, view: View) {
@@ -152,6 +155,7 @@ function deckPrs(inp: DeckInputs, view: View) {
 export function Deck({
   inp,
   goals = [],
+  passes = [],
   grants = [],
   drafts,
   focus,
@@ -160,6 +164,7 @@ export function Deck({
 }: {
   inp: DeckInputs;
   goals?: GlassSnapshot['goals'];
+  passes?: GlassSnapshot['helmPasses'];
   grants?: Grant[];
   drafts: Record<string, DecisionDraft>;
   focus: string | null;
@@ -198,7 +203,7 @@ export function Deck({
   });
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
-    title: '🪤 ' + (t.label ?? `wt:${t.trapId}`),
+    title: '🪤 ' + (t.repoLabel ?? t.label ?? `wt:${t.trapId}`),
     badge: t.requested
       ? { text: 'requested', tone: 'dim' }
       : t.starting
@@ -206,13 +211,11 @@ export function Deck({
         : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim', worker: t.live ? t : undefined },
     meta: [
       html`<${GrantChip} session=${t.sessionId} grants=${grants} />`,
-      t.repo || '',
-      ' · ',
       html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`,
       ' · ',
       trapNow(t),
     ],
-    metaText: `${t.repo || ''} · 🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
+    metaText: `🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
     action: windowAction(t),
     extra: startCommands(t),
     open: opener('trap', t.trapId),
@@ -221,13 +224,13 @@ export function Deck({
     shownGoals.length > 0 &&
       html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map(
         (g) =>
-          html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><ol>${g.lines.map(
+          html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><div class="dim">${lastPassText(passes.find((pass) => pass.grounds === g.grounds)?.lastPassAt)}</div><ol>${g.lines.map(
             (line, i) => {
               const goal = goalLine(line);
               return html`<li class=${goal.done ? 'done' : undefined}><label class="goal-check"><input type="checkbox" checked=${goal.done} disabled aria-label=${`Goal ${i + 1}: ${goal.text}`} title=${`Read-only; use lobstah goals ${goal.done ? 'undo' : 'done'} ${i + 1} --grounds ${g.grounds}`} /><span>${goal.done ? html`<s>${LinkedText(goal.text)}</s>` : LinkedText(goal.text)}</span></label></li>`;
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
   ];
 }

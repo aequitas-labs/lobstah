@@ -606,7 +606,32 @@ the helm files to keep.
   in it.
   `lobstah todo done <id>` and `lobstah todo drop <id>` close one;
   `lobstah todo ls` (or bare `todo`) lists the open ones, and `--all` adds
-  closed ones. They are stored per grounds in `todos/<grounds>.json` with
+  closed ones. `todo add "<text>" --at <time>` or `--in <duration>` gives one
+  a time, and `todo snooze <id> --until <time|duration>` sets or moves it. A
+  todo with a time is quiet and never stale until then. At its time, `man wait`
+  and the Stop hook wake the helm once with a `todo-due` event, and it stays
+  overdue until `done`, `snooze` or `drop`. Times read in `[helm].timezone`, in
+  24-hour form: `fri 09:00`, `tomorrow 09:00`, `09:00`, `thu` (09:00 that day),
+  `2026-11-06 09:00`, `2026-11-06T14:00Z`. A day name means a goal day, which
+  runs from 04:00 to 04:00. So `fri 01:00` is the late end of Friday.
+  `todo add "<text>" --every "daily 09:00"`, `"weekdays 09:00"` or
+  `"weekly fri 09:00"` repeats one, and `--every` stands alone. `todo done`
+  moves it to the next occurrence, `todo skip <id>` passes one without counting
+  it as done, and `todo drop` ends it. Missed occurrences fire once when lobstah
+  next checks, with no backfill. A done on a series counts in `goals recap-data`.
+  `todo add "<text>" --when <trigger>` wakes on any of its triggers, and
+  `--when-all` on all of them; mixing the two is refused. `--at` or `--in` beside
+  either is a deadline backstop. The triggers are `card:<key>` (answered or
+  withdrawn), `dispatch:<id> done|blocked|needs-decision|failed`,
+  `pr:<owner>/<repo>#<n> merged|closed|green` and `trap:<name> free`. A `merged`
+  wait also fires if the PR closes without merging, and the event names that
+  outcome. A trigger
+  lobstah can't observe is refused and not stored. A PR trigger with no watch
+  registers one owned by the helm and says so; that watch also wakes the helm on
+  failing checks and requested changes. Each daemon tick reads only the local
+  record a trigger names, so it fires at most one interval late. A trigger whose
+  record is gone fires with what was lost. A todo waiting only on a trigger keeps
+  the age rule; a snooze quiets it and its unmet triggers keep listening. They are stored per grounds in `todos/<grounds>.json` with
   created and updated times. `man tend`, `man report`, and the glass deck
   show the open ones, and `man brief` re-injects them beside the charter at
   every session start and after compaction. A todo marked done stays in
@@ -1349,12 +1374,16 @@ launched twice. Otherwise:
 fresh or rostered:
 
 - Claude Code: `--permission-mode auto`.
-- Codex: `--approve-for-me`, which asks for approval on request and routes
-  each request to Codex's automatic reviewer, inside the workspace-write
-  sandbox. This is the nearest Codex has to Claude Code's auto mode. The
-  sandbox also gets the network (`-c sandbox_workspace_write.network_access=true`)
-  and, with `--add-dir`, lobstah's home and the repo's git directory: a trap
-  pushes, opens PRs, commits from a linked worktree, and reports.
+- Codex:
+  `--sandbox danger-full-access --ask-for-approval on-request -c approvals_reviewer="auto_review"`.
+  There is no OS sandbox. Codex asks for approval on request and routes each
+  request to its automatic reviewer. This is the nearest Codex has to Claude
+  Code's auto mode. The execpolicy rules in `$CODEX_HOME/rules` still apply:
+  `prompt` goes to the reviewer and `forbidden` is refused.
+
+A headless Codex dispatch is not a thrown trap and keeps the workspace-write
+sandbox. `heavy/` under lobstah's home is added as a writable directory, so its
+heavy commands can join the line.
 
 The mode is set, first match wins, by:
 

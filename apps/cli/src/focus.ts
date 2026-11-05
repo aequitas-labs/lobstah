@@ -55,11 +55,16 @@ const TERMINAL_SCRIPT = `on run argv
   error "tab not found"
 end run`;
 
-/** Opens a new Terminal window running one command, passed as an argument so it's never spliced into the script. */
+/**
+ * Opens a new Terminal window running one command, passed as an argument so
+ * it's never spliced into the script. The window opens before Terminal comes
+ * forward, so it lands on the current Desktop and activating never switches
+ * to another Desktop holding an older window.
+ */
 const TERMINAL_RUN_SCRIPT = `on run argv
   tell application "Terminal"
-    activate
     do script (item 1 of argv)
+    activate
   end tell
 end run`;
 
@@ -102,6 +107,37 @@ export function tmuxAttachCommand(win: TrapRegistration['window'], viewer: Attac
   const server = socket ? `-S ${socket}` : `-L ${TMUX_SOCKET}`;
   if (viewer.onMachine) return `tmux ${server} attach -t ${pane}`;
   return SSH_HOST_RE.test(viewer.machine) ? `ssh ${viewer.machine} -t tmux ${server} attach -r -t ${pane}` : undefined;
+}
+
+/** A client that can show a pane's window: the session it is attached to, and its tty, which may not be a Terminal tab's. */
+interface PaneView {
+  session: string;
+  window: string;
+  tty: string;
+}
+
+/**
+ * The clients attached to sessions holding this pane's window. Grouped
+ * sessions share windows and each has its own current one, so one pane can
+ * have several views: one already showing it comes first, then the most
+ * recently used. A bare pane target would pick by session activity instead,
+ * which can land on a session no client is attached to. Undefined when tmux
+ * couldn't say: then nothing can be assumed about what's attached.
+ */
+async function paneViews(read: FileReader, server: string[], pane: string): Promise<PaneView[] | undefined> {
+  try {
+    const holders = (await read('tmux', [...server, 'list-panes', '-a', '-f', `#{==:#{pane_id},${pane}}`, '-F', '#{session_id} #{window_id}'])).split('\n').filter(Boolean).map((line) => line.split(' '));
+    const window = holders[0]?.[1];
+    if (!window) return [];
+    const sessions = new Set(holders.map(([session]) => session));
+    const clients = (await read('tmux', [...server, 'list-clients', '-F', '#{session_id} #{window_id} #{client_activity} #{client_tty}'])).split('\n').filter(Boolean).map((line) => line.split(' '));
+    return clients
+      .map(([session = '', current = '', activity = '', tty = '']) => ({ session, window, tty: tty.replace(/^\/dev\//, ''), shows: current === window, activity: Number(activity) || 0 }))
+      .filter((c) => sessions.has(c.session) && c.tty)
+      .sort((a, b) => Number(b.shows) - Number(a.shows) || b.activity - a.activity);
+  } catch {
+    return undefined;
+  }
 }
 
 function safeWorktree(reg: TrapRegistration): boolean {
@@ -184,23 +220,18 @@ export async function focusRegistration(
     // The pane's own server: the socket recorded at sign-on, else lobstah's.
     const server = win.tmuxSocket ? ['-S', win.tmuxSocket] : ['-L', TMUX_SOCKET];
     const pane = win.tmuxPane;
-    const selected = await attempt('tmux', [...server, 'select-window', '-t', pane, ';', 'select-pane', '-t', pane, ';',
+    const select = (window: string) => attempt('tmux', [...server, 'select-window', '-t', window, ';', 'select-pane', '-t', pane, ';',
       'if-shell', '-F', '-t', pane, '#{window_zoomed_flag}', '', `resize-pane -Z -t ${pane}`], 'tmux', 'Selected the trap\'s tmux pane.');
-    if (selected) {
-      // Undefined when tmux couldn't say: then nothing can be assumed about what's attached.
-      let clients: string[] | undefined;
-      try {
-        clients = (await read('tmux', [...server, 'list-clients', '-t', pane, '-F', '#{client_tty}'])).split('\n').map((t) => t.replace(/^\/dev\//, '')).filter(Boolean);
-      } catch {
-        clients = undefined;
-      }
-      for (const tty of (clients ?? []).filter((t) => TTY_RE.test(t))) {
-        const raised = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', tty], 'tmux', `Selected the trap's tmux pane and raised its Terminal window on ${machine}`);
-        if (raised) return raised;
-      }
-      if (clients?.length) return { focused: true, step: 'tmux', message: `Selected the pane on ${machine}, it's open in another app` };
+    const views = await paneViews(read, server, pane);
+    // Only the raised view changes window, so other views stay where they are.
+    for (const view of (views ?? []).filter((v) => TTY_RE.test(v.tty))) {
+      const raised = await attempt('osascript', ['-e', TERMINAL_SCRIPT, '--', view.tty], 'tmux', `Selected the trap's tmux pane and raised its Terminal window on ${machine}`);
+      if (raised && await select(`${view.session}:${view.window}`)) return raised;
+    }
+    if (await select(views?.[0] ? `${views[0].session}:${views[0].window}` : pane)) {
+      if (views?.length) return { focused: true, step: 'tmux', message: `Selected the pane on ${machine}, it's open in another app` };
       const command = tmuxAttachCommand(win, { onMachine: true, machine });
-      if (clients && command && options.openTerminal) {
+      if (views && command && options.openTerminal) {
         const opened = await attempt('osascript', ['-e', TERMINAL_RUN_SCRIPT, '--', command], 'tmux', `Opened a Terminal window on ${machine}`);
         if (opened) return opened;
       }

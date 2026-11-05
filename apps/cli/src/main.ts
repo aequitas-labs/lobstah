@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { applyHeavyHooks } from '@lobstah/core';
 import {
   IdleWait,
   reviewAttention,
@@ -23,7 +24,18 @@ import {
   workerLabel,
   addTodo,
   closeTodo,
+  completeTodo,
+  formatTodoRecurrence,
+  formatTodoTime,
+  todoWaitingOn,
   listTodos,
+  nextOccurrenceAfter,
+  parseTodoDuration,
+  parseTodoRecurrence,
+  parseTodoTime,
+  parseTodoUntil,
+  skipTodo,
+  snoozeTodo,
   TodoError,
   acknowledge,
   isParked,
@@ -117,6 +129,11 @@ import {
   storageGrounds,
   captureWindow,
   captureHarnessProcess,
+  endingProcessOwnsTrap,
+  harnessAncestorPid,
+  rosterTrapForSession,
+  sessionHolders,
+  sessionHolderText,
   endHarnessProcess,
   heartbeatHelm,
   helmChat,
@@ -131,6 +148,7 @@ import {
   helmOf,
   liveHelms,
   relieveHelm,
+  groundsList,
   resolveGrounds,
   takeHelm,
   noticeWakes,
@@ -175,6 +193,7 @@ import {
   toonKV,
   toonTable,
   VERBS,
+  cutPrTitle,
   parsePrRef,
   prBadge,
   readPr,
@@ -185,6 +204,7 @@ import {
   codexDesktopThread,
   CODEX_DESKTOP_THREAD,
   worktreeProgress,
+  validRemoteLink,
   validSessionLink,
   linkMismatch,
   ReportError,
@@ -198,13 +218,14 @@ import {
   decisionDir,
   telemetryCliRun,
 } from '@lobstah/core';
-import type { Descriptor, HarnessEnding, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, Watch, WatchAttention } from '@lobstah/core';
+import type { Descriptor, HarnessEnding, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, TodoDueEvent, Watch, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
+import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS } from './tend.js';
@@ -242,7 +263,6 @@ import {
   addPrWatch,
   autoRegisterPrWatch,
   backfillPrWatches,
-  cutTitle,
   syncPrWatches,
   runDueManWatches,
   pollSecs,
@@ -255,21 +275,29 @@ import { stackPrUrls } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
-import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, startMode, throwBatch, throwTrap } from './throw.js';
+import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, REMOTE_CONTROL_CLAUDE_ONLY, startMode, throwBatch, throwTrap } from './throw.js';
 import { trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
-import { setTerminalTitle } from './terminal-title.js';
+import { setTerminalTitle, trapTabTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
-import { quietGoalsNudge, todoTable, todoViews } from './todo.js';
+import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
+
+/** The one trap on this session, for a stow that names none. Several would mean guessing which to sign off. */
+function soleTrapForStow(sessionId: string, quiet: boolean): string | undefined {
+  const manned = listTraps().filter((t) => t.sessionId === sessionId);
+  if (manned.length < 2) return manned[0]?.trapId;
+  if (quiet) return undefined;
+  throw new Error(`several traps share session ${sessionId}: ${manned.map((t) => trapLabel(t)).join(', ')}. Stow one by name with \`lobstah stow --wt <name>\`.`);
+}
 
 const HELP = `lobstah — supervision framework for coding agents
 
@@ -303,6 +331,7 @@ work (humans and agents):
                                   never from the helm's wakes)
   status [<uuid>|<trap-name>]     reconciled state or live trap   (alias: buoy)
   focus <trap>                    bring a live trap's recorded window forward
+  tmux [repo]                     open a new Terminal view of the tmux trap session
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
   send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--] <message>
@@ -478,6 +507,13 @@ workers (dispatched agents; injected into every brief):
                                   --report files a markdown page as the
                                   dispatch's report, images --attach'ed
                                   (or --attach-dir, a folder under it).
+
+heavy commands (one line per machine):
+  heavy [--bg] [--json] [-- <command>]
+                                  with no command, show the line. With one,
+                                  wait for a slot, run it, and free the slot.
+                                  The exit code is the command's. --bg returns
+                                  at once and posts the result to the inbox.
 
 soaking (interactive sessions volunteering as workers):
   soak [--session <id>] [--repo <key>] [--name <word-word>] [--link <url>] [--ticket <t>] [--one] [--harness claude|codex] [--wait [--timeout <s>]]
@@ -1098,7 +1134,8 @@ async function mainCli(): Promise<void> {
           if (pos.length > 1) throw new UsageError(usageFor('goals')!);
           return readGoals(key, action ?? today);
         })();
-      console.log(`# Goals for ${day.date} (${displayGrounds(grounds.name, cfg)})\n\n${day.lines.length ? day.lines.map((s, i) => `${i + 1}. ${s}`).join('\n') : 'No goals set.'}${day.recap ? `\n\n## Recap\n\n${day.recap}` : ''}`);
+      const { renderGoals } = await import('./goals.js');
+      console.log(renderGoals(day, displayGrounds(grounds.name, cfg)));
       break;
     }
     case 'stats': {
@@ -1145,6 +1182,11 @@ async function mainCli(): Promise<void> {
       });
       break;
     }
+    case 'heavy': {
+      const { heavyCommand } = await import('./heavy.js');
+      await heavyCommand(pos, { bg: has('--bg'), json: has('--json') });
+      break;
+    }
     case 'grants': {
       const { grantsCommand } = await import('./grants-cli.js');
       grantsCommand({ all: has('--all'), json: has('--json') });
@@ -1179,6 +1221,12 @@ async function mainCli(): Promise<void> {
       const result = await focusTrap(trapId);
       console.log(toonKV(result.focused ? { trap: `wt:${trapId}`, focused: result.step, result: result.message } : { trap: `wt:${trapId}`, focused: false, reason: result.reason }));
       if (!result.focused) process.exitCode = 1;
+      break;
+    }
+    case 'tmux': {
+      const { openTmuxView } = await import('./tmux-view.js');
+      const result = await openTmuxView(loadConfig(), pos[0]);
+      console.log(toonKV(result.opened ? { view: result.view, window: result.window, result: 'Opened a Terminal window on this view.' } : { attach: result.attach, reason: result.reason }));
       break;
     }
     case 'dispatch': {
@@ -1691,6 +1739,10 @@ async function mainCli(): Promise<void> {
       // id's UUID version, else the descriptor) — never guess from the ask.
       const { harness = 'claude', sessionId } = resolveSessionHarness(id, loadConfig(), lane);
       if (!sessionId) throw new Error(`${id} has no recorded harness session to attach to`);
+      if (!has('--print')) {
+        const holders = sessionHolders(sessionId);
+        if (holders.length) throw new Error(`not attaching ${id}: ${sessionHolderText(sessionId, holders)}`);
+      }
       if (harness === 'codex' && codexDesktopThread(sessionId)) {
         throw new Error(
           `${id}: ${CODEX_DESKTOP_THREAD} (session ${sessionId}) — open it in the Codex desktop app, ` +
@@ -1839,7 +1891,7 @@ async function mainCli(): Promise<void> {
             const ageMins = Math.max(0, Math.floor((now - Date.parse(r.observedAt)) / 60_000));
             return {
               number: `#${r.number}`,
-              title: cutTitle(r.title),
+              title: cutPrTitle(r.title),
               repo: r.repo,
               state: r.state,
               badge: prBadge(r).text,
@@ -1911,14 +1963,61 @@ async function mainCli(): Promise<void> {
         if (verb === 'add') {
           const text = pos.slice(1).join(' ');
           if (!text.trim()) throw new UsageError(`todo add requires its text\n\n${usageFor('todo')!}`);
-          const t = addTodo(grounds, text);
-          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text }));
+          if (opt('--at') !== undefined && opt('--in') !== undefined) throw new UsageError(`--at and --in both set the time: give one\n\n${usageFor('todo')!}`);
+          const tz = helmTimezone();
+          const now = Date.now();
+          const at = opt('--at');
+          const inDuration = opt('--in');
+          const everyText = opt('--every');
+          if (everyText !== undefined && (at !== undefined || inDuration !== undefined)) throw new UsageError(`--every stands alone: a repeat sets its own times\n\n${usageFor('todo')!}`);
+          const whenAny = values('--when');
+          const whenAll = values('--when-all');
+          if (whenAny.length > 0 && whenAll.length > 0) throw new UsageError(`--when means any and --when-all means all: use one\n\n${usageFor('todo')!}`);
+          const whenValues = whenAny.length > 0 ? whenAny : whenAll;
+          if (everyText !== undefined && whenValues.length > 0) throw new UsageError(`--every stands alone: a repeat can't also wait on an event\n\n${usageFor('todo')!}`);
+          const every = everyText !== undefined ? parseTodoRecurrence(everyText) : undefined;
+          const dueAt = every
+            ? new Date(nextOccurrenceAfter(every, now, tz)).toISOString()
+            : at !== undefined
+              ? parseTodoTime(at, now, tz)
+              : inDuration !== undefined
+                ? parseTodoDuration(inDuration, now)
+                : undefined;
+          const prepared = whenValues.length > 0 ? prepareTodoTriggers(whenValues, whenAll.length > 0 ? 'all' : 'any', new Date(now).toISOString()) : undefined;
+          const t = addTodo(grounds, text, now, { dueAt, every, triggers: prepared?.triggers });
+          const watching = (prepared?.unwatched ?? []).map(watchTriggerPr);
+          console.log(toonKV({
+            todo: t.id,
+            grounds: shown,
+            text: t.text,
+            ...(t.dueAt ? { due: formatTodoTime(t.dueAt, tz) } : {}),
+            ...(t.every ? { every: formatTodoRecurrence(t.every) } : {}),
+            ...(t.triggers ? { waiting: todoWaitingOn(t.triggers) } : {}),
+            ...(prepared?.already.length ? { already: prepared.already.join(', ') } : {}),
+          }));
+          for (const line of watching) console.log(line);
           console.log(toonHelp([`lobstah todo done ${t.id}   (when finished)`, `lobstah todo drop ${t.id}   (when no longer needed)`]));
         } else if (verb === 'done' || verb === 'drop') {
           const id = Number(pos[1]);
           if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo ${verb} requires a todo id\n\n${usageFor('todo')!}`);
-          const t = closeTodo(grounds, id, verb === 'done' ? 'done' : 'dropped');
-          console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text }));
+          const tz = helmTimezone();
+          const t = verb === 'done' ? completeTodo(grounds, id, Date.now(), tz) : closeTodo(grounds, id, 'dropped');
+          console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text, ...(t.state === 'open' ? { next: formatTodoTime(t.dueAt!, tz) } : {}) }));
+        } else if (verb === 'skip') {
+          const id = Number(pos[1]);
+          if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo skip requires a todo id\n\n${usageFor('todo')!}`);
+          const tz = helmTimezone();
+          const t = skipTodo(grounds, id, Date.now(), tz);
+          console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text, next: formatTodoTime(t.dueAt!, tz) }));
+        } else if (verb === 'snooze') {
+          const id = Number(pos[1]);
+          if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo snooze requires a todo id\n\n${usageFor('todo')!}`);
+          const until = opt('--until');
+          if (until === undefined) throw new UsageError(`todo snooze requires --until <time|duration>\n\n${usageFor('todo')!}`);
+          const tz = helmTimezone();
+          const now = Date.now();
+          const t = snoozeTodo(grounds, id, parseTodoUntil(until, now, tz), now);
+          console.log(toonKV({ todo: t.id, grounds: shown, due: formatTodoTime(t.dueAt!, tz), text: t.text }));
         } else if (has('--all')) {
           const all = listTodos(grounds, { all: true });
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: all }));
@@ -1926,7 +2025,7 @@ async function mainCli(): Promise<void> {
         } else {
           const open = todoViews(Date.now(), grounds, { openOnly: true });
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: open }));
-          else console.log(open.length > 0 ? todoTable(open, false) : toonKV({ todos: 'none', grounds: shown }));
+          else console.log(renderTodoList(grounds));
         }
       } catch (err) {
         if (err instanceof TodoError) throw new UsageError(err.message);
@@ -2132,7 +2231,7 @@ async function mainCli(): Promise<void> {
         }
         console.log(`warning: ${BYPASS_WARNING}`);
       }
-      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}) };
+      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}), ...(has('--remote-control') ? { remoteControl: true } : {}) };
       if (has('--new')) {
         // Fresh traps: --count of them, for --repo (or a glass request's repo, or the grounds' only repo).
         if (pos.length > 0 || has('--all')) throw new UsageError(`--new starts fresh traps: no names, no --all\n\n${usageFor('man:throw')!}`);
@@ -2162,7 +2261,9 @@ async function mainCli(): Promise<void> {
         guardNewTraps(cfgThrow, repoKey, count, reason);
         if (dry) {
           const profile = freshProfile(cfgThrow, repoKey, harness);
-          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>', ...(bypass ? { bypass } : {}) });
+          if (has('--remote-control') && profile.harness !== 'claude') throw new UsageError(REMOTE_CONTROL_CLAUDE_ONLY);
+          const remote = has('--remote-control');
+          const command = harnessCommand({ ...profile, cwd: cfgThrow.repos[repoKey]!.path, ticket: '<ticket>', ...(bypass ? { bypass } : {}), ...(remote ? { remoteControl: '<name>' } : {}) });
           console.log(toonKV({ plan: 'dry run — launches nothing', new: `${count} fresh ${repoKey} trap(s)`, reason }));
           console.log(
             toonTable(
@@ -2189,6 +2290,9 @@ async function mainCli(): Promise<void> {
         console.log(json ? JSON.stringify({ results }, null, 2) : batchText(results));
         if (results.some((r) => r.result === 'failed')) process.exitCode = 1;
         break;
+      }
+      if (has('--remote-control') && (has('--all') || opt('--repo') !== undefined)) {
+        throw new UsageError(`--remote-control connects one chosen trap: name it, or use --new\n\n${usageFor('man:throw')!}`);
       }
       if (!dry && (has('--all') || opt('--repo') !== undefined)) {
         if (pos.length > 0) throw new UsageError(`name traps, or select with --all / --repo, not both\n\n${usageFor('man:throw')!}`);
@@ -2440,6 +2544,7 @@ async function mainCli(): Promise<void> {
             `heartbeat ${ageSecs}s ago). Relieve them deliberately with \`lobstah man helm --take\`, or leave it.`,
         );
       }
+      deliverHelmPass(grounds.name, cfg, (details) => console.log(details));
       console.log(charter(grounds));
       console.log('');
       console.log(
@@ -2582,6 +2687,11 @@ async function mainCli(): Promise<void> {
         const wakes = noticeWakes(callerHelm);
         const floorMs = wakeFloorMs(callerHelm);
         runDueManWatches();
+        // The grounds `todo add` would use. With several and none named, the todos stand for their helms.
+        const todoGroundsName = groundsScope?.name ?? (groundsList(cfgWait).length === 1 ? resolveGrounds(cfgWait).name : undefined);
+        const dueTodos = () => (todoGroundsName !== undefined ? takeTodoDue(todoGroundsName, consume) : []);
+        const emitDueTodos = (events: TodoDueEvent[]) => emitTodoDue(events, (g) => displayGrounds(g, cfgWait));
+        const standingTodos = dueTodos();
         const standing = attentionNow(consume, remindMs, Date.now(), matchGrounds);
         const standingWatches = pendingWatchEvents(consume, 'man', Date.now(), floorMs);
         // Consumed as usual, but a session is never woken by its own action's
@@ -2589,12 +2699,14 @@ async function mainCli(): Promise<void> {
         const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
         // A send's answer: a working or paused note delivered once.
         const standingReplies = takeReplies(consume, matchGrounds);
-        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0) {
+        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0 || standingTodos.length > 0) {
+          if (standingTodos.length > 0) emitDueTodos(standingTodos);
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
           if (standingNotices.length > 0) emitNotices(standingNotices, sid);
           if (standingReplies.length > 0) emitReplies(standingReplies, sid);
-          delivered(helmWakeKeys({ events: standing, watches: standingWatches, notices: standingNotices, replies: standingReplies }),
+          // A todo's firing time isn't in the list: it doesn't move the digest cursor.
+          delivered(helmWakeKeys({ events: standing, watches: standingWatches, notices: standingNotices, replies: standingReplies, todos: standingTodos }),
             ...standing.map((e) => e.entry.at),
             ...standingWatches.flatMap((a) => a.events.map((e) => e.at)),
             ...standingNotices.map((n) => n.at),
@@ -2613,7 +2725,9 @@ async function mainCli(): Promise<void> {
         if (!consume) {
           // --peek is a session-start check, not a park: nothing standing
           // means return now (exit 0 — nothing timed out).
-          console.log(toonKV({ standing: 'none' }));
+          const passNotice = callerHelm ? helmPassNotice(callerHelm.grounds, cfgWait) : undefined;
+          if (passNotice) console.log(passNotice);
+          else console.log(toonKV({ standing: 'none' }));
           peekDigest();
           break;
         }
@@ -2644,6 +2758,12 @@ async function mainCli(): Promise<void> {
             delivered(helmWakeKeys({ watches: watched }), ...watched.flatMap((a) => a.events.map((e) => e.at)));
             return;
           }
+          const freshTodos = dueTodos();
+          if (freshTodos.length > 0) {
+            emitDueTodos(freshTodos);
+            delivered(helmWakeKeys({ todos: freshTodos }));
+            return;
+          }
           const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
           if (freshNotices.length > 0) {
             emitNotices(freshNotices, sid);
@@ -2657,6 +2777,7 @@ async function mainCli(): Promise<void> {
         // so a digest lost with a dead background task resurfaces on the next
         // timeout instead of being marked delivered to nobody. Silent when
         // nothing changed — the loop should not train its reader to skim.
+        if (callerHelm) deliverHelmPass(callerHelm.grounds, cfgWait, (details) => console.log(details));
         const digest = peekDigest();
         if (digest.changed && callerHelm) {
           const nudge = quietGoalsNudge(callerHelm.grounds, callerHelm.sessionId);
@@ -2814,6 +2935,21 @@ async function mainCli(): Promise<void> {
         // helm's wakes. Silent: a hook never breaks a stop with noise.
         if (!helm && liveHelms(cfgHaul.helm.ttlSecs * 1000).length > 0) break;
         if (!helm && process.env.LOBSTAH_MAN !== '1' && !fs.existsSync('.lobstah-man')) break;
+        const blockPass = (): boolean => {
+          return helm ? deliverHelmPass(helm.grounds, cfgHaul, emit) : false;
+        };
+        // A due todo wakes its helm whatever the fleet is doing, like a pass.
+        const blockTodos = (): boolean => {
+          if (!helm) return false;
+          const due = takeTodoDue(helm.grounds, true);
+          if (due.length === 0) return false;
+          new IdleWait(helm.sessionId, cfgHaul.wait).woke(helmWakeKeys({ todos: due }));
+          emit(['A todo has come due:', ...due.map(todoDueLine), 'The Stop hook checks again at turn end.'].join('\n'));
+          return true;
+        };
+        // A pass stands even with an empty fleet or an already armed watcher.
+        if (blockPass()) break;
+        if (blockTodos()) break;
         // The periodic digest: for a helm session, when the report cadence
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
@@ -2944,6 +3080,8 @@ async function mainCli(): Promise<void> {
               idle.woke();
               return;
             }
+            if (blockPass()) return;
+            if (blockTodos()) return;
             if (helm) heartbeatHelm(helm.sessionId, { parked: true }); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
@@ -2956,6 +3094,7 @@ async function mainCli(): Promise<void> {
           }
         }
         if (quiet()) {
+          if (blockPass()) break;
           idle.timedOut();
           const d = dueDigest();
           if (d) blockDigest(d);
@@ -3036,6 +3175,9 @@ async function mainCli(): Promise<void> {
       }
       if (opt('--link') !== undefined && !validSessionLink(opt('--link'))) {
         throw new UsageError('invalid --link: use a supported claude://, vscode://, or codex:// session URL');
+      }
+      if (opt('--remote-link') !== undefined && !validRemoteLink(opt('--remote-link'))) {
+        throw new UsageError('invalid --remote-link: use the https://claude.ai/code/… URL Claude printed');
       }
       const cfg = loadConfig();
       const site = inspectSoakSite(process.cwd(), cfg.repos);
@@ -3125,6 +3267,14 @@ async function mainCli(): Promise<void> {
               'by the lobstah plugin (`lobstah man brief`). Re-runs in this worktree need no flags.',
           );
         }
+        // A session that lost its trap to a sweep goes back to it, not on to a second trap here.
+        // A deliberate stow released it, so it may volunteer elsewhere.
+        const owner = rosterTrapForSession(sessionId);
+        if (owner && owner.trapId !== priorId && owner.state !== 'stowed' && !trapBySession(sessionId)) {
+          throw new Error(
+            `this session belongs to trap ${trapLabel(owner)}: run \`lobstah soak\` from ${owner.worktree} to bring it back, or \`lobstah stow --wt ${owner.name}\` first to release it.`,
+          );
+        }
       } else {
         sessionId = callerSession(opt('--session'), true)?.id;
         if (!sessionId) {
@@ -3163,10 +3313,23 @@ async function mainCli(): Promise<void> {
             );
           }
           repoKey = key;
+          // The trap this session last signed on as comes back under its own
+          // name: however it started, never a second trap on one session.
+          const owner = rosterTrapForSession(sessionId, key);
           // A worktree soak already created for this session (its trap was
           // swept, say) is re-used, never duplicated.
           const existing = soakWorktreeFor(worktreesDir(), sessionId, key);
-          if (existing) {
+          const ownerHere = owner && fs.existsSync(owner.worktree) && trapIdAt(owner.worktree) === owner.trapId;
+          // A deliberate `stow --remove` released the trap; a sweep didn't.
+          if (owner && !ownerHere && owner.state !== 'stowed') {
+            throw new Error(
+              `this session belongs to trap ${trapLabel(owner)}, whose checkout at ${owner.worktree} is gone or anchors another trap. End this session, then \`lobstah man throw ${owner.name}\` restores it.`,
+            );
+          }
+          if (owner && ownerHere) {
+            worktree = canon(owner.worktree);
+            prior = readTrap(owner.trapId);
+          } else if (existing) {
             worktree = canon(existing);
             const id = trapIdAt(existing);
             prior = id !== undefined ? readTrap(id) : undefined;
@@ -3221,13 +3384,16 @@ async function mainCli(): Promise<void> {
           one: has('--one') || undefined,
           name: opt('--name'),
           window,
-          // Only a Codex trap's process is ended at stow or checked by a throw.
-          ...(resolved.harness === 'codex' ? { harnessProcess: captureHarnessProcess() } : {}),
+          // A throw won't resume a session whose process still runs. Claude's own
+          // variable confirms this CLI runs inside that session, not beside it.
+          ...(resolved.harness === 'codex' || process.env.CLAUDE_CODE_SESSION_ID === sessionId ? { harnessProcess: captureHarnessProcess() } : {}),
           link: linkIgnored ? undefined : linkFlag,
           ...(reservation ? { trapId: reservation.trapId, startDeadline: reservation.deadline } : {}),
           ...(reservation?.batch ? { batch: reservation.batch } : {}),
           ...(reservation?.creationReason ? { creationReason: reservation.creationReason } : {}),
           ...(reservation?.startMode ? { startMode: reservation.startMode } : {}),
+          ...(reservation?.remoteControlSince ? { remoteControlSince: reservation.remoteControlSince } : {}),
+          ...(opt('--remote-link') !== undefined ? { remoteLink: opt('--remote-link') } : {}),
           ttlMs: cfg.soak.ttlSecs * 1000,
         });
       } catch (err) {
@@ -3243,8 +3409,12 @@ async function mainCli(): Promise<void> {
       // The session applies its title as a sign-on step, then confirms it.
       const reg = askTrapTitle(res.ok.trapId, res.ok.name ?? `wt:${res.ok.trapId}`) ?? res.ok;
       if (reservation) dropReservation(reservation.trapId);
-      // The terminal tab carries the trap's name while it soaks.
-      const titled = reg.name ? await setTerminalTitle(reg.window, reg.name) : undefined;
+      // Pushes from here queue from this sign-on on. A trap needs no restart.
+      applyHeavyHooks(reg.worktree);
+      // The terminal tab or tmux pane carries the trap's name while it soaks.
+      // Every sign-on sets it, so a pane whose title a throw failed to set still gets it.
+      const shownTitle = reg.name ? trapTabTitle(reg.name, reg.repo) : undefined;
+      const titled = shownTitle ? await setTerminalTitle(reg.window, shownTitle) : undefined;
       // A command cannot move the session: a session outside the trap's
       // worktree is told to change into it.
       const inside = (() => {
@@ -3267,7 +3437,7 @@ async function mainCli(): Promise<void> {
           ...(made ? { created: true, branch: made.branch } : {}),
           ...(linkIgnored ? { link: `ignored — ${linkIgnored}` } : {}),
           ...(reservation ? { ticket: `redeemed — signed on as the reserved trap` } : {}),
-          ...(titled?.named ? { terminal: `tab named ${reg.name}` } : {}),
+          ...(titled?.named ? { terminal: `${titled.target === 'tmux' ? 'pane' : 'tab'} named ${shownTitle}` } : {}),
           ...(reg.one ? { one: true } : {}),
           ...(inside ? {} : { instruction: `cd ${reg.worktree} and work in that directory from now on` }),
           ...(reg.titlePending
@@ -3328,7 +3498,7 @@ async function mainCli(): Promise<void> {
       const trapId =
         (wtFlag ? trapIdForName(wtFlag.startsWith('wt:') ? wtFlag.slice(3) : wtFlag) ?? (/^(?:wt:)?[0-9a-f]{8}$/.test(wtFlag) ? wtFlag.replace(/^wt:/, '') : undefined) : undefined) ??
         (site && !site.primary ? trapIdAt(site.worktree) : undefined) ??
-        (sessionId !== undefined ? trapBySession(sessionId)?.trapId : undefined);
+        (sessionId !== undefined ? soleTrapForStow(sessionId, quiet) : undefined);
       if (trapId === undefined) {
         if (quiet) break;
         if (wtFlag) throw new Error(unknownTrapMessage(wtFlag));
@@ -3355,6 +3525,8 @@ async function mainCli(): Promise<void> {
       // session registered as its trap. Any other session ending in the
       // worktree (a second window, a child session) leaves the trap alone.
       if ((quiet || sessionEnd) && readTrap(trapId) && readTrap(trapId)!.sessionId !== sessionId) break;
+      // Nor for another process on the same session: the trap's own may still be running.
+      if (sessionEnd && !endingProcessOwnsTrap(readTrap(trapId)?.harnessProcess, harnessAncestorPid())) break;
       // A trap always signs itself off from its own worktree (or its own
       // session id). Stowing someone ELSE's trap is steering — with a
       // claimed helm, that force path is the helm's alone.
@@ -3528,6 +3700,7 @@ async function mainCli(): Promise<void> {
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
             stampRepairerBeat(now);
           },
+          todoFiring: createTodoFiring(),
         });
       } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;
@@ -3899,6 +4072,12 @@ wallClockSecs      = 3600
       if (pos[0] !== 'reviews') throw new UsageError(usageFor('setup')!);
       const { setupReviews } = await import('./reviews-setup.js');
       await setupReviews(opt('--identity'));
+      break;
+    }
+    case '__heavy-push': {
+      if (has('--probe')) break;
+      const { heavyPushHook } = await import('./heavy.js');
+      await heavyPushHook(pos);
       break;
     }
     case '__pool-warm': {

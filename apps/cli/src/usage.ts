@@ -6,6 +6,8 @@
  * can never disagree about what actually parses.
  */
 
+import { GOAL_WORDING_RULE } from '@lobstah/core';
+
 interface FlagSpec {
   /** Value placeholder for the synopsis; absent means a boolean flag. */
   value?: string;
@@ -61,6 +63,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   stats: { flags: { '--json': {}, '--per-trap': {} }, maxPositionals: 0 },
   goals: { flags: { '--grounds': { value: '<name>' }, '--session': { value: '<id>' }, '--file': { value: '<md>' } }, flagSubverbs: { '--file': ['recap'] }, positionals: '[<date>|set <line>...|add <text>|rm <n>|done <n>|undo <n>|recap-data [<date>]|recap <date> --file <md>]' },
   focus: { flags: {}, positionals: '<trap>' },
+  tmux: { flags: {}, positionals: '[<repo>]', maxPositionals: 1 },
+  heavy: { flags: { '--bg': {}, '--json': {} }, positionals: '[-- <command>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
   send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
@@ -84,9 +88,19 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<key>]',
   },
   todo: {
-    subverbs: ['add', 'done', 'drop', 'ls'],
-    flags: { '--all': {}, '--json': {}, '--session': { value: '<id>' } },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''] },
+    subverbs: ['add', 'done', 'drop', 'snooze', 'skip', 'ls'],
+    flags: {
+      '--all': {},
+      '--json': {},
+      '--session': { value: '<id>' },
+      '--at': { value: '<time>' },
+      '--in': { value: '<30m|2h|3d>' },
+      '--every': { value: '<schedule>' },
+      '--when': { value: '<trigger>', repeatable: true },
+      '--when-all': { value: '<trigger>', repeatable: true },
+      '--until': { value: '<time|duration>' },
+    },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--at': ['add'], '--in': ['add'], '--every': ['add'], '--when': ['add'], '--when-all': ['add'], '--until': ['snooze'] },
     positionals: '["<text>"|<id>]',
   },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
@@ -96,7 +110,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     flags: {
       '--pr': { value: '<url>', repeatable: true },
       '--no-watch': {},
-      '--waiting-on': { value: 'review|pr|deploy|person|external' },
+      '--waiting-on': { value: 'review|pr|deploy|person|external|heavy' },
       '--link': { value: '<url>' },
       '--until': { value: '<iso|30m|4h|2d>' },
       '--human-gate': { value: '<check>', repeatable: true },
@@ -134,6 +148,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--timeout': { value: '<secs>' },
       '--repo': { value: '<key>' },
       '--link': { value: '<url>' },
+      '--remote-link': { value: '<url>' },
       '--name': { value: '<word-word>' },
       '--ticket': { value: '<ticket>' },
     },
@@ -193,6 +208,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--harness': { value: HARNESS },
       '--request': { value: '<id>' },
       '--bypass': {},
+      '--remote-control': {},
       '--timeout': { value: '<secs>' },
       '--all': {},
       '--repo': { value: '<key>' },
@@ -271,6 +287,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   __runner: { flags: {}, positionals: '<active-dir> [work|chore]' },
   '__pool-warm': { flags: {}, positionals: '<pool>' },
+  '__heavy-push': { flags: { '--probe': {} }, positionals: '-- <hook> [args]' },
 };
 
 // Backend selection applies to every public command, never one global backend.
@@ -297,6 +314,13 @@ wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster 
 Accepts its name or id with or without wt:. Reports the focus step, or why it could
 not focus. A session link can open on any supported platform; native window
 focus requires macOS.`,
+  heavy: `The machine's one line for heavy commands, such as full test runs and builds.
+With no command, shows the line. With one, waits for a slot, runs it, then frees the slot.
+--bg returns at once and posts the exit code and log to this dispatch's inbox.`,
+  tmux: `Open a new Terminal window on this Desktop with its own view of the trap
+session: it starts on that repo's window, or the first, and switches windows without
+moving other views. Closing the window ends the view, never a trap. Inside tmux or off
+macOS it prints the command to run.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
   send: `Steer a live chain, queue for pending work, or wake a finished chain
@@ -330,7 +354,7 @@ claimed helm this requires --session <helm-id>.`,
 \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
 --waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No.`,
   goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
-Goals should start with a verb and have a specific, measurable end.
+${GOAL_WORDING_RULE}
 set replaces today's lines; add appends one; rm removes the displayed line number. Edits are allowed all day.
 done <n> checks off a goal without removing it; undo <n> unchecks it. recap saves a markdown recap, retaining task markers.
 recap-data prints retained dispatch, PR, card and optional closed todo facts for yesterday (or <date>). Files: ~/.lobstah/goals/<grounds>/<date>.md; editable by hand. Writes are helm-gated.`,
@@ -340,12 +364,10 @@ before deleting, so they survive it; so does a per-local-day count (400 days),
 which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
-  todo: `The helm's own todo list, kept per grounds so it survives restarts and compaction.
-add "<text>" records one in free text; done <id> and drop <id> close it; ls (or bare) lists open
-ones (--all adds closed). Open todos show in man tend, man report, the glass, and the helm's
-context at every session start; a done one stays in tend and the glass, checked, until the
-04:00 day boundary. Reserved for the helm; a trap gets none.
-Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.`,
+  todo: `The helm's own todo list, kept per grounds so it survives restarts and compaction. add "<text>" records one; done and drop close it; ls (or bare) lists open ones (--all adds closed). Open todos show in man tend, man report, the glass and every session start; a done one stays checked until 04:00. A trap gets none.
+add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once. add --when <trigger> wakes on any, --when-all on all, with --at or --in as a deadline: card:<key>, dispatch:<id> done|blocked|needs-decision|failed, pr:<o>/<r>#<n> merged|closed|green (registers a watch if none; merged also fires on closure without merging), trap:<name> free.
+24-hour, in [helm].timezone: "fri 09:00", "tomorrow 09:00", "09:00", "thu", "2026-11-06 09:00", "2026-11-06T14:00Z". A day runs 04:00 to 04:00.
+Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
 or helm), the dispatch or helm grounds, when it was filed, and whether it is
 acked. \`lobstah attention ack <key>\` acks one.`,
@@ -360,7 +382,7 @@ installs the shipped PR check; with --for, a check that fails after the first
 \`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
   soak: `Volunteer as worker (name + wt:<trap>); linked worktrees sign on there.
 Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
-Sessions reuse traps. --one stows after a catch; --name, --link set name, URL.
+Sessions reuse traps. --one stows after a catch; --name, --link set name, URL; --remote-link: the https://claude.ai/code/… URL Claude printed.
 --wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
 \`trap bypass <trap> on|off\` (a person; --yes skips confirmation): the trap's next start runs with no permission checks
@@ -416,7 +438,7 @@ PR, and merge gate. Pure disk read.`,
   'man:throw': `Bring roster traps back, or start fresh, and wait until they listen; live/starting traps refuse.
 <trap>: one; --all: grounds; --repo: one repo; --new [--count N] [--request <id>]: fresh traps.
 --new shows reusable traps; --reason is required when any exist and never overrides the repo's traps cap.
---dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's.`,
+--dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's. --remote-control: this Claude trap starts in Remote Control, where Claude's own setting doesn't.`,
   'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull. set (the
 helm's) saves how a throw starts it; default or key= clears a field. forget removes a
 stowed trap's record, worktree, and protected ref (refused while it has unpushed commits).`,
@@ -465,6 +487,7 @@ post-tool-use runs soak beat, session-end runs stow --quiet. The older commands
 stay as aliases. permission-request and grant-check allow a trap's call a grant covers.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
 itself with this verb). Not for direct use.`,
+  '__heavy-push': `Internal: the git hook shim's pre-push. Takes a heavy slot, then runs the repo's own hook.`,
   '__pool-warm': `Internal: one warm-up pass over a worktree pool (the daemon re-execs itself
 with this verb). Not for direct use.`,
 };

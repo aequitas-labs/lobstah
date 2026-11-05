@@ -84,7 +84,8 @@ function withoutNewTabs(g: GlassDom): void {
   const bar = g.$('.navbar');
   if (bar) bar.replaceWith(...Array.from(bar.childNodes));
 }
-const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
+/** The old page knew no viewer: it always offered what a page on the machine offers. */
+const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [], viewer: { onMachine: true, windowFocus: false, machine: 'studio', device: 'desktop' } });
 /** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */
 const legacyWire = (d: GlassSnapshot): GlassSnapshot => {
   const shaped = legacyShape(d);

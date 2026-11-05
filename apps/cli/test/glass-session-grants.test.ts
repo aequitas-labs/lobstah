@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, addGrant, listGrants, useGrant } from '@lobstah/core';
+import { ensureLayout, addGrant, listGrants, signOnTrap, useGrant } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { requestSessionGrant } from '../src/grants-cli.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
@@ -102,6 +102,23 @@ it.each(['table', 'cards'])(
     expect(dom.$$('.grant-chip')).toHaveLength(0);
   },
 );
+
+it("shows a trap's repo beside its name on a card and in its modal, and keeps the table's repo column", async () => {
+  const worktree = path.join(home, 'wt');
+  fs.mkdirSync(worktree);
+  const signed = signOnTrap({ sessionId: 'card-trap', harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000, name: 'amber-gull' });
+  if (!('ok' in signed)) throw new Error('unexpected hold');
+  const label = `amber-gull (wt:${signed.ok.trapId})`;
+  dom = await loadGlass(GLASS_PAGE, { ...emptyFleet(), traps: buildGlassSnapshot().traps }, { now: NOW, hash: '#traps', prefs: { view: 'cards' } });
+  expect(dom.$('main .card .top b')?.textContent).toBe(`🪤 web · ${label}`);
+  expect(dom.$('main .card .meta')?.textContent).not.toContain('web');
+  (dom.$('main .card') as unknown as HTMLElement).click();
+  await dom.settle();
+  expect(dom.$('#overlay h3')?.textContent).toContain(`web · ${label}`);
+  await dom.close();
+  dom = await loadGlass(GLASS_PAGE, { ...emptyFleet(), traps: buildGlassSnapshot().traps }, { now: NOW, hash: '#traps', prefs: { view: 'table' } });
+  expect(dom.$('main tr.rowhead td b')?.textContent).toBe(label);
+});
 
 it('shows only the latest 20 uses across active grants in descending time order', async () => {
   const grant = addGrant({ mode: 'session', session: 'audit-session', tools: 'mcp__browser__*', by: 'glass' });

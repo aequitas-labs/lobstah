@@ -20,14 +20,17 @@ import {
   NamedText,
   opener,
   TrapName,
+  liveLinkNote,
   namedText,
   prCell,
   prChecks,
   prLink,
   prMerge,
   prReview,
+  readOnlyNotice,
   stackNumbers,
   trapRow,
+  viewerHasTerminal,
   windowAction,
 } from './common.js';
 
@@ -87,7 +90,7 @@ function stackLine(p: PrModalView['pr'], s: NonNullable<PrModalView['stack']>) {
       : s.nextNumber
         ? ' · next is #' + s.nextNumber
         : '';
-  return [numbers, ' · ', s.position, ' of ', s.size, ' · floor ', s.floor, next];
+  return [s.title && [html`<b>${LinkedText(s.title)}</b>`, ' · '], numbers, ' · ', s.position, ' of ', s.size, ' · floor ', s.floor, next];
 }
 
 /** A dispatch-chain link: opens that dispatch's modal instead of following the #. */
@@ -128,12 +131,13 @@ function prModal(d: GlassSnapshot, key: string) {
 }
 
 function helmModal(h: GlassHelm) {
+  const sessionRow = h.sessionId ? resumeRow(h) : null;
   const stale = Date.now() - Date.parse(h.heartbeatAt) > 1800000;
   return [
     close,
     html`<h3>⛵ ${h.man}</h3><div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
     html`<${WorkerDetails} worker=${h} />`,
-    h.sessionId && [html`<div class="sec">open this session</div>`, resumeRow(h)],
+    sessionRow && [html`<div class="sec">open this session</div>`, sessionRow],
     h.transcript && [html`<div class="sec">transcript</div>`, cmdRow(h.transcript)],
   ];
 }
@@ -155,7 +159,7 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
           cmdRow(namedText(x.claimedBy)),
           html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead: lobstah send ${namedText(x.claimedBy)} "…"</div>`,
         ]
-      : [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
+      : viewerHasTerminal() && [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
   return [
     close,
     html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
@@ -238,12 +242,14 @@ function trapModal(t: GlassTrap) {
     : html`<div class="empty">none yet</div>`;
   return [
     close,
-    html`<h3>🪤 ${t.label ?? `wt:${t.trapId}`} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'}</span></h3>`,
+    html`<h3>🪤 ${t.repoLabel ?? t.label ?? `wt:${t.trapId}`} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'}</span></h3>`,
     html`<${WorkerDetails} worker=${t} />`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
     html`<div class="sec">window</div>`,
     windowAction(t) ?? html`<span class="dim">Signed off — no window</span>`,
+    liveLinkNote(t),
+    readOnlyNotice(),
     startCommands(t),
     !t.requested &&
       !t.starting &&

@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
+import { readTrapAnchor } from '@lobstah/core';
 import { codexHookHash, type CodexHook, type HookHandler } from './hook-readiness.js';
 import { installedCodexPlugin } from './plugin-version.js';
 
@@ -58,6 +59,46 @@ const git = (cwd: string, args: string[]): string | undefined => {
     return undefined;
   }
 };
+
+export interface CodexFolderTrust {
+  args: string[];
+  detail: string;
+}
+
+/**
+ * Only a matching soak-created linked checkout receives session folder trust.
+ * Primary/adopted checkouts and explicit untrusted decisions keep Codex's
+ * native prompt. Hook trust is separate: these flags authorize no hook hash.
+ */
+export function codexTrapFolderTrust(cwd: string, trapId: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): CodexFolderTrust {
+  const review = (why: string): CodexFolderTrust => ({ args: [], detail: `Codex may wait at Folder access / Trust this folder for ${cwd}; ${why}` });
+  const anchor = readTrapAnchor(cwd);
+  if (anchor?.createdBy !== 'soak' || anchor.trapId !== trapId) return review('no launch trust is supplied for a primary or adopted checkout');
+  const paths = git(cwd, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'])?.trim().split(/\r?\n/);
+  if (!paths || paths.length !== 3 || path.resolve(paths[1]!) === path.resolve(paths[2]!)) return review('it is not a linked worktree');
+  const canonicalCwd = fs.realpathSync.native(cwd);
+  if (fs.realpathSync.native(paths[0]!) !== canonicalCwd) return review('the launch directory is not the checkout root');
+  const codexDir = (opts.env ?? process.env).CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
+  const configFile = path.join(codexDir, 'config.toml');
+  let projects: Record<string, { trust_level?: string }> = {};
+  try {
+    projects = (parse(fs.readFileSync(configFile, 'utf8')) as { projects?: typeof projects }).projects ?? {};
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return review('the existing folder trust configuration could not be read');
+  }
+  const common = path.resolve(paths[2]!);
+  const primary = path.basename(common) === '.git' ? path.dirname(common) : common;
+  const spelling = (value: string): string => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  const targets = new Set([cwd, canonicalCwd, primary].map(spelling));
+  if (Object.entries(projects).some(([key, project]) => targets.has(spelling(key)) && project.trust_level === 'untrusted'))
+    return review('an explicit untrusted decision is preserved');
+  return {
+    // Codex splits override keys on dots without unquoting path segments.
+    // One inline table keeps the native pathname literal, including dots.
+    args: ['-c', `projects={${JSON.stringify(canonicalCwd)}={trust_level="trusted"}}`],
+    detail: `Folder access: launch-only trust for lobstah-created worktree ${canonicalCwd}; hook trust remains separate`,
+  };
+}
 
 /**
  * The project hooks.json Codex loads for a checkout: in a linked worktree it

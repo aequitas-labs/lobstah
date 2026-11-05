@@ -10,7 +10,9 @@ import type { WaitingView } from './status.js';
 import type { Watch } from './watch.js';
 import type { ActivityView } from './activity.js';
 import type { TodoView } from './todos.js';
+import type { HelmPassView } from './helm-pass.js';
 import type { PermissionsProposal } from './decisions.js';
+import type { ViewerDevice } from './viewer-device.js';
 
 /**
  * The spyglass's data contract: the JSON `lobstah glass` serves at /data.
@@ -42,7 +44,9 @@ export interface TendAttention {
   /** Progress with no current human action: visible, but never walks. */
   quiet?: boolean;
   /** One item owns every member's attention, regardless of watch ownership. */
-  stack?: { ready: number; total: number; allReady: boolean; members: Array<{ key: string; url: string; number: number; note: string; kinds: TendAttentionKind[] }> };
+  /** A stack's short line for a small surface (the pet's bubble, a glass lob): title, count and state. */
+  headline?: string;
+  stack?: { title?: string; ready: number; total: number; allReady: boolean; members: Array<{ key: string; url: string; number: number; title?: string; note: string; kinds: TendAttentionKind[] }> };
   id: string;
   lane: Lane;
   /** The status verb for question/landed, `watch`, or the pr:* kind itself. */
@@ -97,6 +101,8 @@ export interface LandedCatch {
 export interface MergeViewPr {
   number: number;
   url: string;
+  /** Joined from the PR's record when tend builds its report. */
+  title?: string;
   headRef: string;
   headSha: string;
   mergeableState: string;
@@ -117,7 +123,7 @@ export interface MergeView {
   repo: string;
   open: MergeViewPr[];
   /** PRs that left the open set, with how they left. Pruned after 48h. */
-  recent: Array<{ number: number; url: string; disposition: 'merged' | 'closed'; at: string }>;
+  recent: Array<{ number: number; url: string; title?: string; disposition: 'merged' | 'closed'; at: string }>;
 }
 
 export interface GlassPrWatch {
@@ -174,8 +180,10 @@ export interface GlassStack {
   open: boolean;
   nextNumber?: number;
   behind: number;
-  /** Shared stack readiness, absent for a lone PR or an incomplete chain. */
-  readiness?: { id: string; url: string; ready: number; total: number; allReady: boolean; text: string };
+  /** What a stack of several PRs is about (core prStackTitle). Absent for a lone PR, whose row has its own title. */
+  title?: string;
+  /** Shared stack readiness, absent for a lone PR or an incomplete chain. `state` leaves out what the heading says. */
+  readiness?: { id: string; url: string; ready: number; total: number; allReady: boolean; text: string; state: string };
 }
 
 /** The evidence fields a dispatch's row shows: where it went and its PRs. */
@@ -240,7 +248,7 @@ export interface GlassDispatchSummary {
   /** The merge view's gate verdict, where pick has one. */
   prGate?: string;
   /** Every PR of a dispatch with more than one, in stack order, each with its badge once observed. */
-  prList?: Array<{ url: string; number: number; badge?: PrBadge }>;
+  prList?: Array<{ url: string; number: number; title?: string; badge?: PrBadge }>;
 }
 
 /** A dispatch with everything: its summary plus the fields its modal shows. */
@@ -367,10 +375,16 @@ export interface GlassMessage {
 /** A trap: live (a registration) or historical (only receipts, mail, and notices survive). */
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   desktopThread?: boolean;
+  /** The Claude Remote Control URL Claude emitted for this live session. It opens on any device the owner is signed in on. */
+  liveLink?: string;
+  /** Set when two processes hold this trap's session: the live link is withheld. */
+  sessionWriters?: number[];
   /** The command that joins this live trap's tmux pane, written for where this page's viewer is. */
   attachCommand?: string;
   trapId: string;
   label?: string;
+  /** `label` after the trap's repo, for a card with no repo column. */
+  repoLabel?: string;
   /** Signed on now (the registration exists), including when its beat is stale. */
   live: boolean;
   /** Parked and recently beating; false for a stale or never-parked registration. */
@@ -429,7 +443,7 @@ export interface GlassAnswerLimits {
 }
 
 /**
- * What the server can tell about a page's viewer, from the request's Host.
+ * What the server can tell about a page's viewer, from the request's Host and User-Agent.
  * This decides what the page offers. It authorizes nothing: every action still
  * checks Host, Origin and the page token.
  */
@@ -440,10 +454,31 @@ export interface GlassViewer {
   windowFocus: boolean;
   /** This machine's short name, for saying where its traps run. */
   machine: string;
+  /** The device asking. Commands and session links are offered only where they can work. */
+  device: ViewerDevice;
 }
 
 /** The /data payload: one disk pass, everything the page renders. */
+export interface GlassHeavyTicket {
+  state: 'running' | 'over' | 'waiting';
+  command: string;
+  trap?: string;
+  dispatch?: string;
+  /** When it started running, or joined the line. */
+  since?: string;
+  /** Place among the waiters, from 1. */
+  position?: number;
+}
+
+export interface GlassHeavy {
+  slots: number;
+  running: number;
+  waiting: number;
+  tickets: GlassHeavyTicket[];
+}
+
 export interface GlassSnapshot {
+  helmPasses?: HelmPassView[];
   goals?: Array<{ grounds: string; date: string; lines: string[] }>;
   backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;
   /** Per-server secret for the same-origin actions, sent only to this machine's own glass address. */
@@ -462,6 +497,8 @@ export interface GlassSnapshot {
   daemon?: { version?: string; heartbeat?: string };
   /** Work slots. `parked` dispatches (last report `paused`) hold none. */
   slots?: { headless: number; limit: number; traps: number; parked?: number };
+  /** The machine's heavy line. */
+  heavy?: GlassHeavy;
   helms: GlassHelm[];
   traps: GlassTrap[];
   /** Catches (dispatches finished done): today, on the server's local day, and all time. */

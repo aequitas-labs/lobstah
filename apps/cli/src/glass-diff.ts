@@ -599,6 +599,8 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
 export interface PrModalView {
   pr: GlassPr;
   stack: {
+    /** What the stack is about, when it has more than one PR. */
+    title?: string;
     numbers: number[];
     /** Each number's PR title, index for index; '' when a PR has none. */
     titles: string[];
@@ -632,6 +634,7 @@ export function prModalView(d: Pick<GlassSnapshot, 'prs' | 'stacks' | 'dispatche
     pr: p,
     stack: s
       ? {
+          ...(s.title ? { title: s.title } : {}),
           numbers: s.numbers,
           titles: s.numbers.map((n) => (d.prs || []).find((x) => x.stackId === s.id && x.number === n)?.title || ''),
           position: p.position + 1,

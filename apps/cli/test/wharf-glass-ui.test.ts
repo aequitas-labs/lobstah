@@ -7,8 +7,8 @@ import { parseRoute, routeHash } from '../../../services/wharf/glass/src/route.j
 import { attachCommand, resume } from '../../../services/wharf/glass/src/model.js';
 let windows: Window[] = [];
 afterEach(async () => { await Promise.all(windows.map((w) => w.happyDOM.close())); windows = []; });
-async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void> } = {}) {
-  const window = new Window({ url: 'https://glass.test' + path, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
+async function page(path = '/', signedOut = false, data: { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void>; userAgent?: string } = {}) {
+  const window = new Window({ url: 'https://glass.test' + path, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true, ...(data.userAgent ? { navigator: { userAgent: data.userAgent } } : {}) } });
   windows.push(window); const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] = [], reads: string[] = [], copied: string[] = [], intervals: (() => void)[] = [];
   let unauthenticated = signedOut;
@@ -77,6 +77,13 @@ it('shows jobs, notes, catches, PR links and the remote boat’s copy command wi
   expect(g.reads).toContain('/api/glass/dispatches/job/files/worker-image');
   await g.click('⧉'); expect(g.copied).toEqual(['codex resume test-session']); expect(g.doc.body.textContent).toContain('copied');
   expect(g.doc.querySelectorAll('[role=dialog]').length).toBe(1); await g.click('×'); await g.tab('traps'); expect(g.doc.body.textContent).toContain('codex'); expect(g.doc.body.textContent).toContain('kind-crab');
+});
+it('shows a phone where a worker ran and no command it cannot use', async () => {
+  const g = await page('/', false, { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148 Safari/604.1' });
+  await g.tab('jobs'); await g.click('Build the hosted spyglass');
+  const modal = g.doc.querySelector('[role=dialog]')!;
+  expect(modal.textContent).toContain('on chris-macbook, only reachable from there');
+  expect(modal.textContent).not.toContain('codex resume'); expect(modal.querySelector('.cmd')).toBeNull();
 });
 it('offers a live worker its attach command or where it runs, and never resume', () => {
   const worker = { ...snapshot.workers[0]!, live: true };
