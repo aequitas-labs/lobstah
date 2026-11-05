@@ -69,3 +69,34 @@ it.each([undefined, 30, 240])('a tick honors the idle-claim notice grace (%s) de
   expect(listNotices().filter((n) => n.kind === 'trap-claim-idle')).toHaveLength(1);
   expect(readTrap(signed.ok.trapId)?.claimed).toBe('idle-claim');
 });
+
+it('a throwing todo firing hook is logged, and the ghost sweep still runs', () => {
+  const worktree = path.join(home, 'checkout');
+  fs.mkdirSync(worktree);
+  const signed = signOnTrap({ worktree, cwd: worktree, harness: 'codex', repo: 'web', sessionId: 's', ttlMs: TTL });
+  if (!('ok' in signed)) throw new Error('unexpected hold');
+  const id = signed.ok.trapId;
+  heartbeatTrap(id, { parked: true });
+  tick();
+  // Past the resume grace, so this tick's sweep takes the silent trap.
+  const resume = Date.now() + TTL * 3;
+  vi.setSystemTime(resume);
+  tick();
+  vi.setSystemTime(resume + TTL / 2);
+  tick();
+  vi.setSystemTime(resume + TTL + 1);
+  const log: string[] = [];
+  tick((message) => log.push(message), {
+    todoFiring: () => {
+      throw new Error('todo file gone wrong');
+    },
+  });
+  expect(log).toContain('todo firing: todo file gone wrong');
+  expect(readTrap(id)).toBeUndefined();
+});
+
+it('the todo firing hook runs after the PR watches, so PR records are fresh', () => {
+  const order: string[] = [];
+  tick(() => {}, { prWatches: () => order.push('pr'), todoFiring: () => order.push('todo') });
+  expect(order).toEqual(['pr', 'todo']);
+});

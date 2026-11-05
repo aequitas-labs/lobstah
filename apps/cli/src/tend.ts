@@ -105,7 +105,7 @@ import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import type { RepairChore } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
-import { todoStaleLine, todoTable, todoViews, type TodoView } from './todo.js';
+import { todoOverdueLine, todoStaleLine, todoTable, todoViews, type TodoView } from './todo.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
 const HEARTBEAT_STALE_MS = 90_000;
@@ -1036,7 +1036,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   } catch {
     // an unreadable to-do file never fails tend
   }
-  const todoNote = todoStaleLine(todos);
+  const todoNote = [todoOverdueLine(todos), todoStaleLine(todos)].filter(Boolean).join('\n') || undefined;
   const helms = listHelms().map((h) => ({
     chat: helmChat(h, cfg),
     grounds: displayGrounds(h.grounds, cfg),

@@ -236,14 +236,14 @@ and posts the exit code, log path and last lines to the dispatch's inbox.
 |---|---|---|
 | `ttlSecs` | `1800` | Heartbeat age past which a helm registration is stale: the next `man helm` claims it without `--take`. The park and `man brief` heartbeat it. |
 | `reportSecs` | `900` | Minimum seconds between park-delivered digests for a helm session. The digest is also change-gated — quiet grounds deliver nothing regardless of cadence. |
-| `timezone` | system timezone | IANA timezone (e.g. `America/New_York`) for daily goals and for when a done todo leaves `man tend` and the glass. A day starts at 04:00 local. |
+| `timezone` | system timezone | IANA timezone (e.g. `America/New_York`) for daily goals, for reading todo times, and for when a done todo leaves `man tend` and the glass. A day starts at 04:00 local. |
 | `queuedNoticeSecs` | `180` | Queued age before a dispatch-progress notice wakes the helm with its queue reason and remedy. `0` disables. Reminders back off at 15, 45, 105… minutes after the threshold; claim clears the condition. |
 | `stalledNoticeSecs` | `1200` | Silence since both a claimed dispatch's last activity and note before dispatch-progress attention. The same reminder backoff applies; activity or a note clears it. Paused, needs-decision and blocked workers use their existing paths. `0` disables. |
 | `idleWorkingNoticeSecs` | `60` | Explicitly idle trap whose last report is working: wake the helm with its full note. A live session-owned background wait exempts it. Tool activity or a new report clears it; reminders use the same backoff. `0` disables. |
 | `armGraceSecs` | `5` | Arm mode: when work is in flight and no live watcher is registered, the Stop hook polls this long for one before blocking — a `man wait` (or `soak --wait`) backgrounded just before the turn ended is usually still starting. A stale registration gets the same window. |
-| `todoStaleDays` | `3` | Open helm todos older than this many days are stale and require a todo/goals pass. `0` disables staleness. |
+| `todoStaleDays` | `3` | Open helm todos with no due time and older than this many days are stale and require a todo/goals pass. `0` disables staleness. |
 | `passIntervalSecs` | `7200` | Maximum seconds between delivered todo/goals passes. `0` disables only this interval; a new goals day or newly stale todo still makes a pass due. |
-| `briefTodoLimit` | `5` | Maximum open todos in the session-start brief, oldest first; the remainder is counted. `0` shows only the count. |
+| `briefTodoLimit` | `5` | Maximum unscheduled open todos in the session-start brief, oldest first; the remainder is counted. `0` shows only their count. Overdue todos always show and use up the limit. Future and snoozed todos always stay listed with their due times, outside the limit. |
 | `goalsNudgeSecs` | `7200` | Minimum seconds between capped goals lines on `man wait` timeout digests, per helm session; resets at the goals-day boundary. `0` disables. |
 | `chat` | `"full"` | Default chat detail: `"full"` or `"brief"`. Brief mode points at cards instead of repeating detail and keeps routine wakes quiet. `lobstah man chat brief\|full [--grounds <name>]` or glass Settings overrides it for that grounds' signed-on helm, effective next turn, without a restart or config edit. The override stays with the seat on re-sign/takeover and ends when relieved. |
 

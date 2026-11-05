@@ -437,6 +437,8 @@ export interface DaemonHooks {
   spawnPoolWarm?: (name: string) => void;
   /** Dispatch-owned PR observer and repairer, provided by the CLI daemon entry. */
   prWatches?: (now: number, log: (message: string) => void) => void;
+  /** Records todo firings, provided by the CLI daemon entry. Runs after `prWatches`, so PR records are fresh. */
+  todoFiring?: (now: number, log: (message: string) => void) => void;
   /** CLI-owned asynchronous trap startup; never waits for sign-on in the tick. */
   trapStarts?: (cfg: Config, now: number, log: (message: string) => void) => void;
   /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
@@ -577,6 +579,12 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   } catch (err) {
     // A failed PR poll must not skip the rest of the tick (ghost sweeps, claims).
     log(`pr watches: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
+    hooks.todoFiring?.(hooks.now?.() ?? Date.now(), log);
+  } catch (err) {
+    // A failure here must not skip the rest of the tick either.
+    log(`todo firing: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {

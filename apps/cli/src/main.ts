@@ -24,7 +24,12 @@ import {
   workerLabel,
   addTodo,
   closeTodo,
+  formatTodoTime,
   listTodos,
+  parseTodoDuration,
+  parseTodoTime,
+  parseTodoUntil,
+  snoozeTodo,
   TodoError,
   acknowledge,
   isParked,
@@ -137,6 +142,7 @@ import {
   helmOf,
   liveHelms,
   relieveHelm,
+  groundsList,
   resolveGrounds,
   takeHelm,
   noticeWakes,
@@ -206,7 +212,7 @@ import {
   decisionDir,
   telemetryCliRun,
 } from '@lobstah/core';
-import type { Descriptor, HarnessEnding, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, Watch, WatchAttention } from '@lobstah/core';
+import type { Descriptor, HarnessEnding, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, TodoDueEvent, Watch, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@lobstah/pick';
@@ -272,7 +278,7 @@ import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
-import { quietGoalsNudge, renderTodoList, todoTable, todoViews } from './todo.js';
+import { createTodoFiring, emitTodoDue, helmTimezone, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
@@ -1951,14 +1957,29 @@ async function mainCli(): Promise<void> {
         if (verb === 'add') {
           const text = pos.slice(1).join(' ');
           if (!text.trim()) throw new UsageError(`todo add requires its text\n\n${usageFor('todo')!}`);
-          const t = addTodo(grounds, text);
-          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text }));
+          if (opt('--at') !== undefined && opt('--in') !== undefined) throw new UsageError(`--at and --in both set the time: give one\n\n${usageFor('todo')!}`);
+          const tz = helmTimezone();
+          const now = Date.now();
+          const at = opt('--at');
+          const inDuration = opt('--in');
+          const dueAt = at !== undefined ? parseTodoTime(at, now, tz) : inDuration !== undefined ? parseTodoDuration(inDuration, now) : undefined;
+          const t = addTodo(grounds, text, now, { dueAt });
+          console.log(toonKV({ todo: t.id, grounds: shown, text: t.text, ...(t.dueAt ? { due: formatTodoTime(t.dueAt, tz) } : {}) }));
           console.log(toonHelp([`lobstah todo done ${t.id}   (when finished)`, `lobstah todo drop ${t.id}   (when no longer needed)`]));
         } else if (verb === 'done' || verb === 'drop') {
           const id = Number(pos[1]);
           if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo ${verb} requires a todo id\n\n${usageFor('todo')!}`);
           const t = closeTodo(grounds, id, verb === 'done' ? 'done' : 'dropped');
           console.log(toonKV({ todo: t.id, grounds: shown, state: t.state, text: t.text }));
+        } else if (verb === 'snooze') {
+          const id = Number(pos[1]);
+          if (!Number.isInteger(id) || id < 1) throw new UsageError(`todo snooze requires a todo id\n\n${usageFor('todo')!}`);
+          const until = opt('--until');
+          if (until === undefined) throw new UsageError(`todo snooze requires --until <time|duration>\n\n${usageFor('todo')!}`);
+          const tz = helmTimezone();
+          const now = Date.now();
+          const t = snoozeTodo(grounds, id, parseTodoUntil(until, now, tz), now);
+          console.log(toonKV({ todo: t.id, grounds: shown, due: formatTodoTime(t.dueAt!, tz), text: t.text }));
         } else if (has('--all')) {
           const all = listTodos(grounds, { all: true });
           if (has('--json')) console.log(JSON.stringify({ grounds: shown, todos: all }));
@@ -2628,6 +2649,11 @@ async function mainCli(): Promise<void> {
         const wakes = noticeWakes(callerHelm);
         const floorMs = wakeFloorMs(callerHelm);
         runDueManWatches();
+        // The grounds `todo add` would use. With several and none named, the todos stand for their helms.
+        const todoGroundsName = groundsScope?.name ?? (groundsList(cfgWait).length === 1 ? resolveGrounds(cfgWait).name : undefined);
+        const dueTodos = () => (todoGroundsName !== undefined ? takeTodoDue(todoGroundsName, consume) : []);
+        const emitDueTodos = (events: TodoDueEvent[]) => emitTodoDue(events, (g) => displayGrounds(g, cfgWait));
+        const standingTodos = dueTodos();
         const standing = attentionNow(consume, remindMs, Date.now(), matchGrounds);
         const standingWatches = pendingWatchEvents(consume, 'man', Date.now(), floorMs);
         // Consumed as usual, but a session is never woken by its own action's
@@ -2635,12 +2661,14 @@ async function mainCli(): Promise<void> {
         const standingNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
         // A send's answer: a working or paused note delivered once.
         const standingReplies = takeReplies(consume, matchGrounds);
-        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0) {
+        if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0 || standingTodos.length > 0) {
+          if (standingTodos.length > 0) emitDueTodos(standingTodos);
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
           if (standingNotices.length > 0) emitNotices(standingNotices, sid);
           if (standingReplies.length > 0) emitReplies(standingReplies, sid);
-          delivered(helmWakeKeys({ events: standing, watches: standingWatches, notices: standingNotices, replies: standingReplies }),
+          // A todo's firing time isn't in the list: it doesn't move the digest cursor.
+          delivered(helmWakeKeys({ events: standing, watches: standingWatches, notices: standingNotices, replies: standingReplies, todos: standingTodos }),
             ...standing.map((e) => e.entry.at),
             ...standingWatches.flatMap((a) => a.events.map((e) => e.at)),
             ...standingNotices.map((n) => n.at),
@@ -2690,6 +2718,12 @@ async function mainCli(): Promise<void> {
           if (watched.length > 0) {
             emitWatchAttention(watched, sid);
             delivered(helmWakeKeys({ watches: watched }), ...watched.flatMap((a) => a.events.map((e) => e.at)));
+            return;
+          }
+          const freshTodos = dueTodos();
+          if (freshTodos.length > 0) {
+            emitDueTodos(freshTodos);
+            delivered(helmWakeKeys({ todos: freshTodos }));
             return;
           }
           const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
@@ -2866,8 +2900,18 @@ async function mainCli(): Promise<void> {
         const blockPass = (): boolean => {
           return helm ? deliverHelmPass(helm.grounds, cfgHaul, emit) : false;
         };
+        // A due todo wakes its helm whatever the fleet is doing, like a pass.
+        const blockTodos = (): boolean => {
+          if (!helm) return false;
+          const due = takeTodoDue(helm.grounds, true);
+          if (due.length === 0) return false;
+          new IdleWait(helm.sessionId, cfgHaul.wait).woke(helmWakeKeys({ todos: due }));
+          emit(['A todo has come due:', ...due.map(todoDueLine), 'The Stop hook checks again at turn end.'].join('\n'));
+          return true;
+        };
         // A pass stands even with an empty fleet or an already armed watcher.
         if (blockPass()) break;
+        if (blockTodos()) break;
         // The periodic digest: for a helm session, when the report cadence
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
@@ -2999,6 +3043,7 @@ async function mainCli(): Promise<void> {
               return;
             }
             if (blockPass()) return;
+            if (blockTodos()) return;
             if (helm) heartbeatHelm(helm.sessionId, { parked: true }); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
@@ -3617,6 +3662,7 @@ async function mainCli(): Promise<void> {
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
             stampRepairerBeat(now);
           },
+          todoFiring: createTodoFiring(),
         });
       } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;
