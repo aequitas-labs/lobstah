@@ -1169,7 +1169,16 @@ async function mainCli(): Promise<void> {
       throw new UsageError(usageFor('trap')!);
     }
     case 'grant': {
-      const { grantCommand, requestSessionGrant, sessionGrantCommand } = await import('./grants-cli.js');
+      const { grantCommand, grantsCommand, requestSessionGrant, revokeCommand, sessionGrantCommand } = await import('./grants-cli.js');
+      if (pos[0] === 'ls') {
+        grantsCommand({ all: has('--all'), json: has('--json') });
+        break;
+      }
+      if (pos[0] === 'revoke') {
+        if (!pos[1] || pos.length > 2) throw new UsageError(usageFor('grant')!);
+        revokeCommand(pos[1]);
+        break;
+      }
       if (pos[0] === 'request' || opt('--tools') !== undefined || opt('--session') !== undefined) {
         if (opt('--path') !== undefined || has('--once') || opt('--expires') !== undefined || opt('--harness') !== undefined) throw new UsageError('session grants use --tools, --for and optional --command; legacy grant flags do not apply');
         const options = { session: opt('--session'), trap: opt('--trap'), grounds: opt('--grounds'), tools: opt('--tools') ?? '', hosts: opt('--hosts')?.split(',').map(x => x.trim()), duration: opt('--for'), reason: opt('--reason') ?? '', command: opt('--command') ?? (pos[0] === 'request' ? pos.slice(1).join(' ') || undefined : pos.join(' ') || undefined) };

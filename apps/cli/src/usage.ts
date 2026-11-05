@@ -172,6 +172,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--expires': { value: '<iso|30m|4h|2d>' },
       '--path': { value: '<file|dir/>' },
       '--trap': { value: '<name>' },
+      '--all': {},
+      '--json': {},
     },
     positionals: '[<command...>]',
   },
@@ -390,7 +392,8 @@ Sessions reuse traps. --one stows after a catch; --name, --link set name, URL; -
 (Claude Code --dangerously-skip-permissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.
 \`trap grant|grants|revoke\` = \`grant|grants|revoke\`.`,
   grant: `A person grants a command/path, or --tools for one session (15m default, 4h max).
-Agents use grant request to ask in glass. Prefixes never cover shell joiners; --yes skips terminal confirmation.`,
+Agents use grant request to ask in glass. Prefixes never cover shell joiners; --yes skips terminal confirmation.
+grant ls [--all] [--json] lists grants, with intent, patterns, expiry, uses and last use. grant revoke <id> takes one away; anyone may.`,
   grants: `What a person has granted: id, what, once or always, harness, trap, who, when, uses.
 --all adds spent, expired and revoked grants. A trap checks a relayed approval here.`,
   revoke: `Revoke a grant by id. Anyone may take a permission away.`,

@@ -21,6 +21,7 @@ import {
   askDecision,
   checkoutRoots,
   grantCovers,
+  intentPatternText,
   listGrants,
   loadConfig,
   parseUntil,
@@ -137,7 +138,8 @@ function harnessOf(v: string | undefined): GrantHarness {
   return v;
 }
 
-function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo' | 'tools' | 'session'>): string {
+function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo' | 'tools' | 'session' | 'intent'>): string {
+  if (g.intent) return g.intent.text;
   if (g.tools) return `${g.tools}${g.command ? ` (${g.command} …)` : ''} ${g.session ? `for session ${g.session}` : 'in every trap'}`;
   if (g.path !== undefined) return g.repo !== undefined ? `write ${g.path} in any ${g.repo} checkout` : `write ${g.path}`;
   return g.match === 'prefix' ? `${g.command} …` : g.command!;
@@ -257,20 +259,25 @@ export function grantsCommand(opts: { all: boolean; json: boolean }): void {
         by: g.by,
         at: g.at,
         uses: g.uses,
+        lastUsed: g.lastUsedAt ?? '',
+        patterns: g.intent?.patterns.map(intentPatternText).join(' | ') ?? '',
+        scope: g.trap ?? (g.mode === 'intent' ? `repo ${g.repo}` : ''),
         expires: g.expiresAt ?? '',
         ...(opts.all ? { revoked: g.revokedAt ?? '' } : {}),
       })),
       [
         'id',
+        'scope',
         'what',
+        'patterns',
         'mode',
         'harness',
-        'trap',
         'session',
         'hosts',
         'by',
         'at',
         'uses',
+        'lastUsed',
         'expires',
         'audit',
         ...(opts.all ? ['revoked'] : []),
@@ -279,7 +286,7 @@ export function grantsCommand(opts: { all: boolean; json: boolean }): void {
   );
 }
 
-/** `lobstah revoke <id>`: anyone may take a permission away. */
+/** `lobstah grant revoke <id>`, also `lobstah revoke <id>`: anyone may take a permission away. */
 export function revokeCommand(id: string): void {
   const g = revokeGrant(id, AGENT_ENV.some((k) => process.env[k] !== undefined) ? 'agent' : localPerson());
   console.log(toonKV({ revoked: g.id, what: what(g), at: g.revokedAt! }));
@@ -292,6 +299,8 @@ interface CallInput {
   input: Record<string, unknown>;
   session?: string;
   callId?: string;
+  /** Codex's turn: both its hooks name it, though only PreToolUse names the call. */
+  turn?: string;
 }
 
 /** The files an `apply_patch` call touches, from its patch text. */
@@ -348,10 +357,13 @@ export function checkCall(call: CallInput, cwd: string, sessionOnly = false): st
       : useGrant(req, { session: call.session, callId: call.callId });
     if (grant?.mode === 'session') return [grant.id];
   }
-  if (sessionOnly || !trap) return undefined;
+  if (!trap) return undefined;
   // The trap's own harness, as it signed on: the hook entry is shared by both plugins.
   const harness = trap.harness === 'codex' ? 'codex' : trap.harness === 'claude' ? 'claude' : call.harness;
   const requests = callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd);
+  const intentIds = intentGrantIds(requests, { harness, tool: call.tool, input: call.input, cwd, trap: trap.name ?? trap.trapId, ...(trap.repo ? { repo: trap.repo } : {}) }, call);
+  if (intentIds) return intentIds;
+  if (sessionOnly) return undefined;
   if (requests.length === 0) {
     // A connector or other tool names no command or file: a standing tool grant covers it in every trap.
     const g = useGrant(
@@ -371,6 +383,30 @@ export function checkCall(call: CallInput, cwd: string, sessionOnly = false): st
     ids.push(g.id);
   }
   return ids;
+}
+
+/**
+ * The intent grants allowing a trap's call straight through, or nothing. Every
+ * request the call makes must match; only then is each use recorded. Honoured
+ * wherever the hook runs, so a grant means the same on Claude Code and Codex,
+ * from the moment it's made.
+ */
+function intentGrantIds(requests: GrantRequest[], base: GrantRequest, call: CallInput): string[] | undefined {
+  const scoped = (requests.length ? requests : [{}]).map((request) => ({ ...base, ...request }));
+  const { grants, intact } = listGrants();
+  const intents = grants.filter((grant) => grant.mode === 'intent');
+  if (!intact || intents.length === 0) return undefined;
+  const roots = checkoutRoots();
+  if (!scoped.every((request) => intents.some((grant) => grantCovers(grant, request, roots)))) return undefined;
+  const ids: string[] = [];
+  for (const request of scoped) {
+    // Codex fires PreToolUse and then PermissionRequest for one call, and only the first names it: the turn and the command do both.
+    const callId = call.turn ? `${call.turn}:${request.command ?? request.path ?? request.tool}` : call.callId;
+    const used = useGrant(request, { only: 'intent', ...(call.session ? { session: call.session } : {}), ...(callId ? { callId } : {}) });
+    if (!used) return undefined;
+    ids.push(used.id);
+  }
+  return [...new Set(ids)];
 }
 
 /** Read a hook's JSON from stdin; undefined when there is none. */
@@ -466,6 +502,7 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       harness: preToolUse ? (typeof h.turn_id === 'string' ? 'codex' : preHarness) : 'codex',
       tool: h.tool_name,
       ...(typeof h.tool_use_id === 'string' ? { callId: h.tool_use_id } : {}),
+      ...(typeof h.turn_id === 'string' ? { turn: h.turn_id } : {}),
       input: h.tool_input as Record<string, unknown>,
       ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}),
     };
