@@ -1,0 +1,76 @@
+import { afterEach, beforeEach, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { requestDesktopStart, ensureLayout, loadConfig, configuredTrapSlots, signOnTrap, heartbeatTrap, standingDecisions, enqueue, claimBait } from '@lobstah/core';
+import { throwConfiguredTrap } from '../src/configured-throw.js';
+import type { TerminalLaunch } from '../src/throw.js';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+let home: string;
+beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-configured-throw-')); process.env.LOBSTAH_HOME = home; ensureLayout();
+  fs.writeFileSync(path.join(home, 'config.toml'), '[traps.desk]\nharness="claude"\nsurface="claude-desktop"\ngrounds="fleet"\n[traps.ops]\nharness="codex"\nsurface="terminal"\ngrounds="fleet"\nterminal="tmux"\n');
+});
+afterEach(() => { delete process.env.LOBSTAH_HOME; fs.rmSync(home, { recursive: true, force: true }); });
+
+it('returns a concrete app-start card for a desktop and never launches its terminal adapter', async () => {
+  let launches = 0;
+  const result = await throwConfiguredTrap(loadConfig(), 'desk', 'helm', { adapter: { app: 'tmux', async launch() { launches++; } } });
+  expect(result.state).toBe('needs-app-start'); expect(launches).toBe(0);
+  expect(standingDecisions()).toHaveLength(1);
+});
+
+it('starts a terminal profile in its plain folder with the normal global reviewer mode, and observes its first park', async () => {
+  let command: TerminalLaunch | undefined;
+  const result = await throwConfiguredTrap(loadConfig(), 'ops', 'helm', { timeoutSecs: 1, pollMs: 1, adapter: { app: 'tmux', async launch(launch) {
+    command = launch;
+    const slot = configuredTrapSlots('ops')[0]!;
+    const signed = signOnTrap({ worktree: slot.cwd, cwd: slot.cwd, configured: slot, trapId: slot.trapId, harness: 'codex', sessionId: 'new-codex-session', ttlMs: 60_000 });
+    if ('held' in signed) throw new Error('held'); heartbeatTrap(signed.ok.trapId, { parked: true });
+  } } });
+  expect(result.state).toBe('listening');
+  expect(command?.cwd).toContain('trap-workspaces');
+  expect(command?.argv).toContain('approvals_reviewer="auto_review"');
+  expect(command?.argv.at(-1)).toContain('soak --trap ops');
+  expect(fs.existsSync(path.join(command!.cwd, '.lobstah-trap'))).toBe(false);
+});
+
+it('leaves configured desktop tool approvals to the harness without filing a glass card', () => {
+  const { slot } = requestDesktopStart(loadConfig(), 'desk', 'helm');
+  const signed = signOnTrap({ worktree: slot.cwd, cwd: slot.cwd, configured: slot, trapId: slot.trapId, harness: 'claude', sessionId: 'desktop-session', ttlMs: 60_000 });
+  if ('held' in signed) throw new Error('held');
+  heartbeatTrap(signed.ok.trapId, { parked: true });
+  enqueue({ id: 'inspection', brief: 'Inspect a window', for: 'trap:desk', target: { kind: 'configured-trap', profile: 'desk', grounds: 'fleet', surface: 'claude-desktop' } });
+  expect(claimBait(signed.ok)?.id).toBe('inspection');
+  const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+  const response = spawnSync(process.execPath, [cli, 'hook', 'permission-request'], { cwd: home, env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8', input: JSON.stringify({ session_id: 'desktop-session', cwd: slot.cwd, tool_name: 'Bash', tool_input: { command: 'inspect-placeholder' } }), timeout: 15_000 });
+  expect(response.status).toBe(0); expect(response.stdout).toBe(''); expect(response.stderr).toBe('');
+  expect(standingDecisions()).toEqual([]);
+});
+
+it('forgets a never-signed-on instance only after its start card is withdrawn, keeping its folder', async () => {
+  const { withdrawDecision } = await import('@lobstah/core');
+  const { forgetTrap } = await import('../src/forget.js');
+  const start = requestDesktopStart(loadConfig(), 'desk', 'helm');
+  await expect(forgetTrap('trap:desk', loadConfig())).rejects.toThrow('pending app start');
+  withdrawDecision(start.card.key);
+  await forgetTrap('trap:desk', loadConfig());
+  expect(configuredTrapSlots('desk')).toEqual([]);
+  expect(fs.existsSync(start.slot.cwd)).toBe(true);
+  expect(loadConfig().traps?.desk).toBeDefined();
+});
+
+it('preserves explicit Codex folder distrust without editing the user configuration', async () => {
+  const codexHome = path.join(home, 'codex-home'); fs.mkdirSync(codexHome);
+  const configFile = path.join(codexHome, 'config.toml'), contents = `[projects.${JSON.stringify(home)}]\ntrust_level="untrusted"\n`;
+  fs.writeFileSync(configFile, contents);
+  const previous = process.env.CODEX_HOME; process.env.CODEX_HOME = codexHome;
+  let command: TerminalLaunch | undefined;
+  try {
+    await throwConfiguredTrap(loadConfig(), 'ops', 'helm', { timeoutSecs: 0.001, adapter: { app: 'tmux', async launch(launch) { command = launch; } } });
+    expect(command?.argv.some((argument) => argument.startsWith('projects='))).toBe(false);
+    expect(command?.argv).toContain('check_for_update_on_startup=false');
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(contents);
+  } finally { if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous; }
+});

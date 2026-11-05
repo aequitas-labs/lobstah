@@ -18,7 +18,8 @@ export interface Worker {
   id: string;
   boat: string;
   boatName: string;
-  repoRemote: string;
+  repoRemote?: string;
+  target?: import('../../../../packages/core/src/configured-trap-model.js').ConfiguredTrapTarget;
   lastCheckIn: string;
   current: string | null;
   /** The boat's lease on this worker is current: its session is still running. */

@@ -159,7 +159,9 @@ export function nextStartMode(cfg: Pick<Config, 'repos' | 'harness'>, entry: Pic
 export function harnessCommand(opts: {
   harness: string;
   cwd: string;
-  ticket: string;
+  ticket?: string;
+  /** Configured profiles sign on by name rather than a repo ticket. */
+  prompt?: string;
   resume?: string;
   model?: string;
   config?: Record<string, string>;
@@ -168,6 +170,7 @@ export function harnessCommand(opts: {
   /** The trap's name, to start connected to Claude Remote Control under it. */
   remoteControl?: string;
 }): StartCommand {
+  if (!opts.ticket && !opts.prompt) throw new Error('a start command requires a ticket or configured sign-on prompt');
   const unapplied: string[] = [];
   const mode = startMode(opts.config, opts.bypass);
   if (opts.harness === 'claude') {
@@ -183,7 +186,7 @@ export function harnessCommand(opts: {
     }
     // The interactive option, not `claude remote-control` server mode, which can create more sessions.
     if (opts.remoteControl) argv.push('--remote-control', opts.remoteControl);
-    argv.push(`/lobstah:trap soak --ticket ${opts.ticket}`);
+    argv.push(opts.prompt ?? `/lobstah:trap soak --ticket ${opts.ticket}`);
     return { cwd: opts.cwd, env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }, argv, unapplied, mode };
   }
   if (opts.harness === 'codex') {
@@ -200,7 +203,7 @@ export function harnessCommand(opts: {
       else if (key !== 'permissionMode' && key !== 'bypass') unapplied.push(key);
     }
     if (opts.resume) argv.push('resume', opts.resume);
-    argv.push(`$lobstah:trap soak --ticket ${opts.ticket}`);
+    argv.push(opts.prompt ?? `$lobstah:trap soak --ticket ${opts.ticket}`);
     return { cwd: opts.cwd, env: {}, argv, unapplied, mode };
   }
   throw new Error(`no start command for harness ${opts.harness}`);

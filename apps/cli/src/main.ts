@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { configuredTrapViews, withConfiguredTrapSlot } from '@lobstah/core';
+import { validateAssistanceParent, configuredTrapViews, withConfiguredTrapSlot } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -1249,13 +1249,15 @@ async function mainCli(): Promise<void> {
         const briefFile = opt('--brief') ?? opt('--bait'), briefText = opt('--brief-text');
         if (!briefFile && !briefText) throw new UsageError('dispatch requires --brief <file> or --brief-text');
         const descriptor: Descriptor = { id: opt('--id') ?? randomUUID(), brief: briefText ?? fs.readFileSync(briefFile!, 'utf8'), for: configuredAddress,
-          target: { kind: 'configured-trap', profile: name, grounds: profile.grounds, surface: profile.surface } };
+          target: { kind: 'configured-trap', profile: name, grounds: profile.grounds, surface: profile.surface, ...(opt('--assist') ? { parentDispatch: opt('--assist') } : {}) } };
+        validateAssistanceParent(descriptor);
         const lane: Lane = has('--chore') ? 'chore' : 'work';
         descriptor.attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(descriptor.id, lane));
         enqueue(descriptor, lane);
         console.log(toonKV({ id: descriptor.id, for: configuredAddress, grounds: profile.grounds, repo: 'none', lane }));
         break;
       }
+      if (opt('--assist')) throw new UsageError('--assist requires --for trap:<profile>');
       if (has('--trap-any') && (opt('--for') !== undefined || opt('--pool') !== undefined)) throw new UsageError('--trap-any cannot be combined with --for or --pool');
       const poolName = opt('--pool');
       const pool = poolName !== undefined ? loadConfig().pools[poolName] : undefined;
@@ -2269,6 +2271,22 @@ async function mainCli(): Promise<void> {
         console.log(`warning: ${BYPASS_WARNING}`);
       }
       const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}), ...(has('--remote-control') ? { remoteControl: true } : {}) };
+      const configuredThrowName = pos.length === 1 ? (pos[0]!.startsWith('trap:') ? pos[0]!.slice(5) : rosterByAddress(pos[0]!)?.configured?.profile) : undefined;
+      if (configuredThrowName) {
+        const name = configuredThrowName, profile = cfgThrow.traps?.[name];
+        if (!profile) throw new UsageError(`unknown configured trap trap:${name}`);
+        if (!callerThrow || helmOf(callerThrow.id)?.grounds !== profile.grounds) throw new UsageError('only the configured profile grounds helm may throw it');
+        gateHelm(callerThrow, profile.grounds);
+        if (dry) { console.log(toonKV({ profile: name, surface: profile.surface, state: profile.surface === 'claude-desktop' ? 'needs-app-start' : 'terminal', plan: 'dry run' })); break; }
+        const { throwConfiguredTrap, configuredSignOnCommand } = await import('./configured-throw.js');
+        const result = await throwConfiguredTrap(cfgThrow, name, callerThrow.id, { timeoutSecs, command: configuredSignOnCommand() });
+        console.log(JSON.stringify(result, null, 2));
+        if (result.state === 'needs-app-start') {
+          const url = `${glassUrl(glassPort())}/${decisionHash(result.card.key)}`;
+          console.log(toonHelp([`Point to it with [card](${url}); open the prefilled Code link on the Mac, then send the sign-on instruction`]));
+        }
+        break;
+      }
       if (has('--new')) {
         // Fresh traps: --count of them, for --repo (or a glass request's repo, or the grounds' only repo).
         if (pos.length > 0 || has('--all')) throw new UsageError(`--new starts fresh traps: no names, no --all\n\n${usageFor('man:throw')!}`);
@@ -2532,7 +2550,7 @@ async function mainCli(): Promise<void> {
       if (groundsName === undefined && sid !== undefined) groundsName = helmOf(sid)?.grounds;
       const grounds = groundsName !== undefined ? resolveGrounds(cfgReport, groundsName) : undefined;
       const cursor = storageGrounds(opt('--cursor') ?? grounds?.name ?? 'fleet', cfgReport);
-      const digest = buildDigest({ cursor, repos: grounds ? new Set(grounds.repos) : undefined });
+      const digest = buildDigest({ cursor, grounds: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
       // Open todos are standing, not news: they show with or without a change.
       const todos = todoViews(Date.now(), grounds?.name);
       if (has('--json')) console.log(JSON.stringify({ ...digest, todos }, null, 2));
@@ -2716,11 +2734,12 @@ async function mainCli(): Promise<void> {
         const matchGrounds =
           groundsRepos !== undefined
             ? (id: string, lane: Lane) => {
+                const descriptor = storedDescriptor(id, lane);
                 const repo = repoOf(id, lane);
-                return repo === undefined || groundsRepos.has(repo);
+                return descriptor?.target ? descriptor.target.grounds === storageGrounds(groundsScope!.name, cfgWait) : repo === undefined || groundsRepos.has(repo);
               }
             : undefined;
-        const noticeFilter = groundsRepos !== undefined ? (n: Notice) => n.repo === undefined || groundsRepos.has(n.repo) : undefined;
+        const noticeFilter = groundsRepos !== undefined ? (n: Notice) => (!n.grounds || n.grounds === storageGrounds(groundsScope?.name ?? 'fleet', cfgWait)) && (n.repo === undefined || groundsRepos.has(n.repo)) : undefined;
         // A helm's cursor starts at its sign-on: older notices and watch
         // events are consumed without waking. Standing questions and
         // standing conditions still wake (attentionNow, noticeWakes).
@@ -3018,7 +3037,7 @@ async function mainCli(): Promise<void> {
           // deserve one wake before the quiet sets in.
           const idleNotices = unseenNotices(
             true,
-            helm ? (n: Notice) => n.repo === undefined || helm.repos.includes(n.repo) : undefined,
+            helm ? (n: Notice) => (!n.grounds || n.grounds === helm.grounds) && (n.repo === undefined || helm.repos.includes(n.repo)) : undefined,
             noticeWakes(helm),
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
@@ -3043,11 +3062,12 @@ async function mainCli(): Promise<void> {
         const matchHelm =
           helmRepos !== undefined
             ? (id: string, lane: Lane) => {
+                const descriptor = storedDescriptor(id, lane);
                 const repo = repoOf(id, lane);
-                return repo === undefined || helmRepos.has(repo);
+                return descriptor?.target ? descriptor.target.grounds === helm?.grounds : repo === undefined || helmRepos.has(repo);
               }
             : undefined;
-        const helmNoticeFilter = helmRepos !== undefined ? (n: Notice) => n.repo === undefined || helmRepos.has(n.repo) : undefined;
+        const helmNoticeFilter = helmRepos !== undefined ? (n: Notice) => (!n.grounds || n.grounds === helm?.grounds) && (n.repo === undefined || helmRepos.has(n.repo)) : undefined;
         const progressLines = () => dispatchProgress().filter((p) => !helmRepos || !p.repo || helmRepos.has(p.repo)).map((p) => `- ${p.text}`);
         // The helm's cursor starts at its sign-on (see `man wait`).
         const helmWakes = noticeWakes(helm);

@@ -1,3 +1,4 @@
+import { validDesktopStartLink } from '../../../../../packages/core/src/desktop-start-link.js';
 import type { Grant } from '@lobstah/core';
 import { GrantChip } from './session-grants.js';
 import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
@@ -17,6 +18,7 @@ import {
   trapNowText,
   trapRow,
   windowAction,
+  sessionLinkOpens,
 } from './common.js';
 
 /** The Traps tab: live seats, reserved (starting) ones, and the history of signed-off ones. */
@@ -59,7 +61,7 @@ export function Traps({ inp, grants = [] }: { inp: SectionInputs['traps']; grant
   const list = inp.list.map((t) => t.x);
   const head = html`<div class="tabhead"><${NewTrap} /></div>`;
   const configured = inp.configured?.length
-    ? html`<div class="cards">${inp.configured.map((profile) => html`<div class="card"><div class="top"><b>trap:${profile.profile}</b><span class="badge">${profile.state}</span></div><div class="meta">${profile.grounds} · ${profile.harness} · ${profile.surface} · ${profile.capacity}</div>${profile.cwd && html`<div class="note">${profile.cwd}</div>`}</div>`)}</div>`
+    ? html`<div class="cards">${inp.configured.map((profile) => html`<div class="card"><div class="top"><b>trap:${profile.profile}</b><span class="badge">${profile.state}</span></div><div class="meta">${profile.grounds} · ${profile.harness} · ${profile.surface} · ${profile.capacity}</div>${profile.cwd && html`<div class="note">${profile.cwd}</div>`}${profile.pending?.length && html`<div class="note">Queued: ${profile.pending.join(', ')}</div>`}${profile.start && validDesktopStartLink(profile.start.url) && (sessionLinkOpens() ? html`<a class="btn" href=${profile.start.url}>Open Claude Code</a>` : html`<div class="dim">Open Claude Code on the Mac to sign on</div>`)}</div>`)}</div>`
     : null;
   if (inp.view === 'cards')
     return [

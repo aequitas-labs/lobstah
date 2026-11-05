@@ -1,3 +1,6 @@
+import { CONFIGURED_TRAP_INSTRUCTION } from './configured-trap-model.js';
+import { closeDesktopStartCards } from './desktop-start.js';
+import { acquireDesktopLease, renewDesktopLease, releaseDesktopLease } from './desktop-lease.js';
 import type { ConfiguredTrapLocation } from './configured-traps.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -41,6 +44,8 @@ import { resumeTrapTurn } from './trap-turn.js';
 export interface TrapRegistration {
   /** Configured location bypasses every git and worktree operation. */
   configured?: ConfiguredTrapLocation;
+  /** Remote catch whose host UI lease is held by the boat broker. */
+  hostedCatch?: string;
   trapId: string;
   /** Stable, human-friendly address; absent only on older registrations. */
   name?: string;
@@ -411,6 +416,7 @@ export function signOnTrap(opts: {
       text: `trap ${trapRepoLabel(reg)} signed on (${workerLabel(reg)}, ${opts.repo ? '' : 'no repo, '}${path.basename(opts.worktree)}) — address work with \`--for ${name}\``,
       refId: trapId,
       repo: opts.repo,
+      grounds: opts.configured?.grounds,
       by: opts.sessionId,
     });
   }
@@ -482,6 +488,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   // The roster keeps the trap, and a protected ref its revision, before the
   // registration goes and stow may remove the checkout.
   const revision = !reg.configured && fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, trapId) : undefined;
+  if (reg.configured?.surface === 'claude-desktop') releaseDesktopLease(trapId);
   recordRosterDeparture(reg, 'stowed', reason, { revision });
   fs.mkdirSync(signedOffDir(), { recursive: true });
   atomicWrite(signedOffPath(trapId), JSON.stringify({ trapId, name: reg.name, worktree: reg.worktree, at: new Date().toISOString() } satisfies SignedOff));
@@ -495,6 +502,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
     text: `trap ${trapRepoLabel(reg)} ${reason} (${path.basename(reg.worktree)}) — re-soaking that worktree restores the address`,
     refId: trapId,
     repo: reg.repo,
+    grounds: reg.configured?.grounds,
     by,
   });
   return reg;
@@ -548,7 +556,7 @@ export function confirmTrapTitle(trapId: string, now = Date.now()): TrapRegistra
  */
 export function heartbeatTrap(
   trapId: string,
-  opts: { parked?: boolean; claimed?: string | null } = {},
+  opts: { parked?: boolean; claimed?: string | null; hostedCatch?: string | null } = {},
 ): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
@@ -559,8 +567,11 @@ export function heartbeatTrap(
     firstParkedAt: firstPark ? new Date().toISOString() : reg.firstParkedAt,
     ...(opts.parked ? { parkedAt: new Date().toISOString() } : {}),
     claimed: opts.claimed === null ? undefined : (opts.claimed ?? reg.claimed),
+    hostedCatch: opts.hostedCatch === null ? undefined : (opts.hostedCatch ?? reg.hostedCatch),
   };
   atomicWrite(regPath(trapId), JSON.stringify(next, null, 2));
+  if (hasOpenCatch(next)) renewDesktopLease(next);
+  if (firstPark && reg.configured) closeDesktopStartCards(trapId);
   if (firstPark) {
     // The one wake a trap's start gives the helm: it is free to take work.
     // A trap a batch started is announced by the batch's summary instead.
@@ -569,6 +580,7 @@ export function heartbeatTrap(
       text: `trap ${trapRepoLabel(next)} is available — listening (${next.harness}${next.repo ? '' : ', no repo'}); address work with \`--for ${next.name ?? `wt:${trapId}`}\``,
       refId: trapId,
       repo: reg.repo,
+      grounds: reg.configured?.grounds,
       ...(reg.batch && (!reg.startDeadline || Date.now() <= Date.parse(reg.startDeadline)) ? { quiet: true } : {}),
     });
   }
@@ -700,7 +712,8 @@ function configuredTargetMatches(reg: TrapRegistration, descriptor: Descriptor):
 }
 
 function claimTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descriptor: Descriptor } | null {
-  if (hasOpenCatch(reg)) return null;
+  if (hasOpenCatch(reg) || reg.hostedCatch) return null;
+  if (!acquireDesktopLease(reg)) return null;
   const mine = `wt:${reg.trapId}`;
   const addressed = (d: Descriptor): boolean =>
     (d.target ? configuredTargetMatches(reg, d) : !reg.configured && d.for === mine) && (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil));
@@ -739,6 +752,7 @@ function claimTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descrip
     heartbeatTrap(reg.trapId, { claimed: id, parked: true });
     return { id, lane, descriptor };
   }
+  if (reg.configured?.surface === 'claude-desktop') releaseDesktopLease(reg.trapId);
   return null;
 }
 
@@ -822,6 +836,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
           `likely no Stop hook. Have its session run \`lobstah soak --wait\`; its addressed bait waits meanwhile.`,
         refId: reg.trapId,
         repo: reg.repo,
+      grounds: reg.configured?.grounds,
         // Keyed by enlistment epoch, not session: the sweep re-scans every
         // tick and must not re-post within one enlistment, but a fresh
         // sign-on of the same worktree (even by the same session) is a new
@@ -847,6 +862,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     const released = releaseCatch(reg);
     const removal = !reg.configured && reg.createdWorktree && fs.existsSync(reg.worktree) ? removeGhostWorktree(reg.worktree) : undefined;
     const revision = removal?.revision ?? (!reg.configured && fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, reg.trapId, now) : undefined);
+    if (reg.configured?.surface === 'claude-desktop') releaseDesktopLease(reg.trapId);
     recordRosterDeparture(reg, 'ghosted', pauseExpired ? 'ghosted: its pause expired' : 'ghosted: went quiet mid-watch', { revision, now });
     const catchNote = released.requeued ? ', catch requeued' : released.finalized ? ', catch finalized' : '';
     const worktreeNote = removal
@@ -863,6 +879,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
         : `trap ${trapRepoLabel(reg)} ghosted (went quiet mid-watch)`) + ` — registration removed${catchNote}${worktreeNote}`,
       refId: reg.trapId,
       repo: reg.repo,
+      grounds: reg.configured?.grounds,
       // An idle trap that went quiet is digest news; one holding a catch wakes the helm.
       ...(holding ? {} : { quiet: true }),
     });
@@ -903,7 +920,7 @@ export function baitBrief(id: string, d: Descriptor): string {
   return [
     `You are a lobstah worker session and have been assigned dispatch ${id}.`,
     '',
-    d.target ? 'You are a repo-less trap assigned an inspection or reversible UI step. File findings or screenshots for the original dispatch; its worker keeps ownership of repo changes and the PR.' : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
+    d.target ? CONFIGURED_TRAP_INSTRUCTION : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
     `Acknowledge this assignment now with \`lobstah report ${id} working "<note>"\`, then report at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" ${d.target ? '[--report <file>] [--attach <file>]' : '[--pr <url>]'}\` (or \`failed\`).`,
     'A needs-decision or blocked report queues your question to the human; the answer arrives in this dispatch\'s inbox.',
     '`working` means you are still executing and will report again. If the next move belongs to a person or to the helm, report `needs-decision` with the question. If you are waiting on an external await, report `paused` and name it. Never end a turn on `working`.',
@@ -1021,6 +1038,7 @@ export function beatTrap(input: BeatInput): BeatResult {
   const reg = trapId !== undefined ? readTrap(trapId) : undefined;
   if (!trapId || !reg) return { beat: false, reason: 'not-soaking' };
   if (input.sessionId && input.sessionId !== reg.sessionId) return { beat: false, reason: 'other-session' };
+  if (hasOpenCatch(reg)) renewDesktopLease(reg);
   resumeTrapTurn(reg);
   // A push is recorded on every beat: the throttle never drops one.
   const command = (input.toolInput as { command?: unknown } | undefined)?.command;

@@ -481,6 +481,8 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       return;
     }
     const trap = call.session ? trapBySession(call.session) : undefined;
+    // Configured desks keep the harness reviewer as the only approval flow; existing grants above still reduce friction.
+    if (trap?.configured) return;
     if (preToolUse) {
       heavyReminder(call, cwd);
       return;

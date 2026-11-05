@@ -90,3 +90,13 @@ it('uses the configured session identity when its plain folder contains another 
   expect(beatTrap({ cwd, sessionId: 'desk-worker' }).trapId).toBe(configured.trapId);
   expect(readTrapAnchor(cwd)?.trapId).toBe(anchored.ok.trapId);
 });
+
+it('keeps addressed work and emits one grounds-scoped notice when configuration disappears', async () => {
+  const { reconcileConfiguredProfiles, loadConfig, listNotices, configuredTrapViews } = await import('../src/index.js');
+  const reg = signOn('one'); enqueue(dispatch());
+  fs.writeFileSync(path.join(home, 'config.toml'), '');
+  reconcileConfiguredProfiles(loadConfig()); reconcileConfiguredProfiles(loadConfig());
+  expect(claimBait(reg)).toBeNull(); expect(pendingIds('work')).toEqual(['desk-task']);
+  expect(listNotices(100).filter((notice) => notice.kind === 'trap-profile-missing')).toHaveLength(1);
+  expect(configuredTrapViews(loadConfig())[0]?.state).toBe('missing-config');
+});

@@ -1,3 +1,4 @@
+import { trapNameForId, releaseTrapName } from './trap-names.js';
 import { readTrap } from './soak.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -58,6 +59,7 @@ export function withConfiguredTrapSlot<T>(name: string, profile: ConfiguredTrapP
 export function forgetConfiguredTrapSlot(trapId: string): void {
   if (!/^[a-z0-9-]+$/.test(trapId)) throw new Error('invalid trap id');
   fs.rmSync(path.join(slotsDirectory(), `${trapId}.json`), { force: true });
+  const name = trapNameForId(trapId); if (name) releaseTrapName(name);
 }
 
 /** Keep configured working folders out of git culls, even after an instance is forgotten. */

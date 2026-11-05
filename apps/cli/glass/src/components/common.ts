@@ -115,7 +115,7 @@ export function viewerHasTerminal(): boolean {
 }
 
 /** Session links open an app on the trap's machine, so they only work for a viewer there. */
-function sessionLinkOpens(): boolean {
+export function sessionLinkOpens(): boolean {
   const viewer = getState().snapshot?.viewer;
   return !!viewer?.onMachine && viewer.device !== 'phone';
 }

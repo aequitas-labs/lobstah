@@ -2,7 +2,7 @@
 export type BackendVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed';
 export type BackendWait = 'review' | 'pr' | 'deploy' | 'person' | 'external' | 'heavy';
 export interface DispatchInput {
-  id: string; repo?: string; target?: import('./configured-trap-model.js').ConfiguredTrapTarget; repoRemote?: string; brief: string; lane?: 'work' | 'chore';
+  id: string; grounds?: string; repo?: string; target?: import('./configured-trap-model.js').ConfiguredTrapTarget; repoRemote?: string; brief: string; lane?: 'work' | 'chore';
   for?: string; boat?: string; followUp?: string; harness?: string; model?: string; effort?: string;
 }
 export interface ReportInput {
@@ -16,7 +16,10 @@ export interface BackendStatus extends ReportInput { at: string; reported?: true
  * `boat:<name>` or `person`.
  */
 export interface WharfAck { at: string; by: string }
+/** A configured child's retained result, with owned file references for the original catch. */
+export interface AssistanceResultView { id: string; state: string; note?: string; files: WharfFile[] }
 export interface DispatchView extends DispatchInput {
+  assistance?: AssistanceResultView[];
   state: 'queued' | 'active' | 'done' | 'cancelled'; status?: BackendStatus;
   /** The ack of the status this job stands on (`status` is that status's time). A newer report leaves none. */
   ack?: WharfAck & { status: string };

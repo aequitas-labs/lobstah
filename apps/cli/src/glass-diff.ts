@@ -191,6 +191,7 @@ export const decisionFileUrl = (key: string, name: string): string => `/decision
 export type DecisionCard =
   | {
       kind: 'decision';
+      appStart?: import('@lobstah/core').DesktopAppStart;
       key: string;
       title: string;
       detail: string;
@@ -233,6 +234,7 @@ export function decisionCards(
         detail: d.detail,
         options: d.options,
         ...(d.permission ? { permission: true } : {}),
+        ...(d.appStart ? { appStart: d.appStart } : {}),
         ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
         ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
         attachments: d.attachments,

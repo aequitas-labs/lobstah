@@ -177,6 +177,7 @@ export interface RunnerInfo {
 /** Resolve the persisted routing boundary without inventing a repository for a configured trap. */
 export function dispatchTarget(descriptor: Descriptor): RepoDispatchTarget | ConfiguredTrapTarget {
   if (descriptor.target) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(descriptor.id)) throw new Error('invalid configured dispatch id');
     if (descriptor.target.kind !== 'configured-trap' || !/^[a-z][a-z0-9-]{0,63}$/.test(descriptor.target.profile) || !/^[A-Za-z0-9_-]+$/.test(descriptor.target.grounds) || !['terminal', 'claude-desktop'].includes(descriptor.target.surface) || descriptor.for !== `trap:${descriptor.target.profile}`) throw new Error('invalid configured trap target');
     if (descriptor.repo || descriptor.pool || descriptor.trapAny || descriptor.pr || descriptor.followUp) throw new Error('configured trap dispatches cannot carry repo, pool, PR or follow-up metadata');
     return descriptor.target;

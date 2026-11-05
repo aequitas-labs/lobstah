@@ -15,7 +15,7 @@ const sql = async (statement: string, ...bindings: SqlStorageValue[]) => runInDu
 beforeEach(async () => {
   await authFixtures();
   await runInDurableObject(env.ACCOUNTS.getByName('a'), (_instance: Account, state) => {
-    for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
+    for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
   });
   const objects = await env.FILES.list({ prefix: 'a/' }); if (objects.objects.length) await env.FILES.delete(objects.objects.map((o) => o.key));

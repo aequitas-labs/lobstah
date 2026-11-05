@@ -1,3 +1,4 @@
+import { reconcileConfiguredProfiles, reconcileAssistance } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -562,6 +563,8 @@ const tickTimes = new Map<string, { last: number; resumed?: number }>();
 export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {}): void {
   const cfg = loadConfig();
   ensureLayout();
+  reconcileAssistance();
+  reconcileConfiguredProfiles(cfg);
   const now = hooks.now?.() ?? Date.now();
   const ttl = cfg.soak.ttlSecs * 1000;
   const wedgeMs = cfg.limits.wedgeThresholdSecs * 1000;

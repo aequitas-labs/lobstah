@@ -1,3 +1,4 @@
+import { withDirLock } from './dir-lock.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Attachment, Lane } from './types.js';
@@ -17,6 +18,8 @@ export interface MessageMeta {
   from: string;
   at: string;
   attachments?: Attachment[];
+  /** Stable internal delivery receipt, retained after the message is handled. */
+  deliveryId?: string;
 }
 
 const metaName = (file: string): string => file.replace(/\.msg$/, '.meta.json');
@@ -27,6 +30,29 @@ function inboxDir(id: string, lane: Lane): string {
 
 /** Queue a message. The sidecar lands before its sequenced message. */
 export function sendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = []): string {
+  return withInboxWrite(id, lane, () => appendMessage(id, lane, text, from, attachments));
+}
+
+function withInboxWrite<T>(id: string, lane: Lane, action: () => T): T {
+  const directory = inboxDir(id, lane);
+  fs.mkdirSync(directory, { recursive: true });
+  return withDirLock(path.join(directory, '.write-lock'), action, { staleMs: 30_000, waitMs: 1000, busy: () => new Error(`inbox ${id} is busy; retry`) });
+}
+
+/** Publish one visible result across retries, including a crash after delivery but before its outbox receipt. */
+export function sendMessageOnce(id: string, lane: Lane, deliveryId: string, text: string, from: string, attachments: Attachment[] = []): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(deliveryId)) throw new Error('invalid inbox delivery id');
+  return withInboxWrite(id, lane, () => {
+    const directory = inboxDir(id, lane);
+    for (const folder of [directory, path.join(directory, 'handled')]) for (const file of readDirIfPresent(folder).filter((name) => name.endsWith('.msg'))) {
+      const metadata = readMessageMeta(id, lane, file, folder !== directory);
+      if (metadata?.deliveryId === deliveryId) return file;
+    }
+    return appendMessage(id, lane, text, from, attachments, deliveryId);
+  });
+}
+
+function appendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = [], deliveryId?: string): string {
   const dir = inboxDir(id, lane);
   fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
   const existing = fs.readdirSync(dir).filter((f) => f.endsWith('.msg')).length;
@@ -34,7 +60,7 @@ export function sendMessage(id: string, lane: Lane, text: string, from?: string,
   const name = `${String(existing + handled + 1).padStart(3, '0')}.msg`;
   const tmp = uniqueTempPath(path.join(dir, name));
   if (from !== undefined || attachments.length > 0) {
-    const meta: MessageMeta = { from: from ?? 'unknown', at: new Date().toISOString(), ...(attachments.length ? { attachments } : {}) };
+    const meta: MessageMeta = { ...(deliveryId ? { deliveryId } : {}), from: from ?? 'unknown', at: new Date().toISOString(), ...(attachments.length ? { attachments } : {}) };
     const metaTmp = `${tmp}.meta`;
     fs.writeFileSync(metaTmp, JSON.stringify(meta, null, 2));
     atomicRenameSync(metaTmp, path.join(dir, metaName(name)));
