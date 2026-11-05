@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.8.5 — 2026-11-05
+
+### The desk: traps without a repo
+
+A `[traps.<name>]` profile is a worker that serves one grounds from a plain
+folder, with no git checkout, setup or culling. `soak --trap <name>` signs one
+on and keeps it through stow, and `dispatch --for trap:<name>` queues work only
+for it. The helm can send a desk step with `--assist`, and its findings and
+attachments reach the original dispatch exactly once. A Claude Desktop profile
+that isn't running gets one card with a prefilled link to start it. (#339, #343)
+
+### The glass puts trap names first
+
+Trap names lead headers, lists and cards. The repo or profile sits beside them,
+and Claude Code and Codex show as their icons on trap cards and rows. A
+read-only Settings tab shows the effective config, with secrets masked. Todos
+show when they're due, and a row can set or snooze their time. Code on a card
+has a copy button. Below 900px, every tab except On deck and Reviews sits behind
+More. (#299, #314, #334, #337, #341, #345, #346)
+
+### Intent grants: approve a kind of action once
+
+A trap can propose the commands it needs on its card, as patterns with a
+one-line label. Besides Allow once, the card offers **Allow this kind for 1h**,
+for this trap, and **Always allow this kind**, for every trap in the repo. A
+call matching the patterns runs and is recorded. Anything else goes to the
+harness's own reviewer, unchanged. Broad patterns are refused: a bare command,
+shell syntax, or a command that runs other commands. The Grants tab lists every
+grant with its uses and a Revoke button. `lobstah grant ls` and `grant revoke`
+do the same from the CLI. (#347, #348)
+
+### Allow cards name the trap and command; reports never need one
+
+A command card now reads `<trap> wants to run: <command>`, with the full command
+first and the trap's own description after it. A trap's `lobstah report` never
+becomes an Allow card, so a held question always reaches the helm. A tool card
+can be allowed always, for every trap. Codex connector calls no longer file a
+card before Codex's reviewer decides. The helm's `dispatch` and `send` relays
+are allowed by default. (#313, #316, #324, #351)
+
+### Also new
+
+- **tmux traps:** `[soak] terminal = "tmux"` opens traps as panes in lobstah's
+  own tmux server, titled with their repo and name. `lobstah tmux [repo]` opens
+  an independent view, and a glass click opens a Terminal window on a pane
+  nothing shows. (#312, #315, #317, #318, #320)
+- **The heavy line:** `lobstah heavy -- <command>` queues full test runs, builds
+  and agents' pushes for a few slots per machine. `man tend` and the glass show
+  the line. (#326–#329)
+- **Todos with a time:** `todo add --at`, `--in`, `--every "weekdays 09:00"`
+  and `--when <trigger>`, which waits on a card, dispatch, PR or trap. Each wakes
+  the helm once. Due todos and today's goals show automatically. (#323, #325,
+  #331–#333)
+- **Phones:** `man throw --remote-control` starts a Claude or Codex trap that a
+  phone can drive, and the glass offers a phone only what works there. A session
+  can hold only one trap and one writer. (#317, #342)
+- PR rows and notices show titles, not only numbers. One pet notification per
+  stack, on any base. (#300, #336)
+
+### Fixes
+
+- Thrown Codex traps sign on again: hooks are trusted with the hash Codex 0.166
+  reports, and a checkout's committed hooks are trusted for the session. (#304,
+  #340)
+- Traps keep parking after a Mac sleep. (#321)
+- A throw never resumes a session another trap holds. (#338)
+
 ## 0.8.4 — 2026-10-29
 
 ### The permission profile adds context, never restrictions
