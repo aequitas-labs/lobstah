@@ -300,6 +300,8 @@ interface CallInput {
   input: Record<string, unknown>;
   session?: string;
   callId?: string;
+  /** Codex's turn: both its hooks name it, though only PreToolUse names the call. */
+  turn?: string;
 }
 
 /** The files an `apply_patch` call touches, from its patch text. */
@@ -399,7 +401,9 @@ function intentGrantIds(requests: GrantRequest[], base: GrantRequest, call: Call
   if (!scoped.every((request) => intents.some((grant) => grantCovers(grant, request, roots)))) return undefined;
   const ids: string[] = [];
   for (const request of scoped) {
-    const used = useGrant(request, { only: 'intent', ...(call.session ? { session: call.session } : {}), ...(call.callId ? { callId: call.callId } : {}) });
+    // Codex fires PreToolUse and then PermissionRequest for one call, and only the first names it: the turn and the command do both.
+    const callId = call.turn ? `${call.turn}:${request.command ?? request.path ?? request.tool}` : call.callId;
+    const used = useGrant(request, { only: 'intent', ...(call.session ? { session: call.session } : {}), ...(callId ? { callId } : {}) });
     if (!used) return undefined;
     ids.push(used.id);
   }
@@ -499,6 +503,7 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       harness: preToolUse ? (typeof h.turn_id === 'string' ? 'codex' : preHarness) : 'codex',
       tool: h.tool_name,
       ...(typeof h.tool_use_id === 'string' ? { callId: h.tool_use_id } : {}),
+      ...(typeof h.turn_id === 'string' ? { turn: h.turn_id } : {}),
       input: h.tool_input as Record<string, unknown>,
       ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}),
     };
