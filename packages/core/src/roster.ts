@@ -63,6 +63,7 @@ export interface RosterEntry {
   revisionAt?: string;
   /** What the trap last signed on with: the harness, its session, and the registration's model and config. */
   harness: string;
+  /** Empty once another trap signed on with this session: it's that trap's now. */
   sessionId: string;
   model?: string;
   config?: Record<string, string>;
@@ -220,7 +221,21 @@ export function recordRosterSignOn(
   setOrDrop(entry, 'model', seen.model);
   setOrDrop(entry, 'config', seen.config);
   if (opts.soakBranch ?? prior?.soakBranch) entry.soakBranch = opts.soakBranch ?? prior?.soakBranch;
+  releaseSessionFromOtherTraps(reg.sessionId, reg.trapId, at);
   return writeEntry(withRevision(entry, opts.revision));
+}
+
+/**
+ * A session belongs to the trap that last signed on with it, so an older
+ * record's claim is stale: left in place, a throw of that trap would resume
+ * this one's session. The older trap's next throw starts cold.
+ */
+function releaseSessionFromOtherTraps(sessionId: string, trapId: string, at: string): void {
+  for (const other of listRoster()) {
+    if (other.sessionId !== sessionId || other.trapId === trapId) continue;
+    const { harnessProcess: _gone, ...kept } = other;
+    writeEntry({ ...kept, sessionId: '', updatedAt: at });
+  }
 }
 
 function setOrDrop<K extends keyof RosterEntry>(entry: RosterEntry, key: K, value: RosterEntry[K] | undefined): void {

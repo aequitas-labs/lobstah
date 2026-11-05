@@ -34,7 +34,9 @@ import {
   listRequests,
   liveHelms,
   readReservationTicket,
+  listRoster,
   readRoster,
+  sessionClaimedElsewhere,
   trapRequestError,
   trapStartCommands,
   writeRequest,
@@ -672,6 +674,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   // Read once per snapshot, and only if a live Claude trap needs it.
   let claudeRead: { processes: ClaudeProcess[] | undefined } | undefined;
   const claudeProcesses = () => (claudeRead ??= { processes: readClaudeProcesses() }).processes;
+  const rosterEntries = listRoster();
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
@@ -679,7 +682,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const name = t.name ?? names(t.trapId);
     const window = t.window ?? (!registered ? roster?.window : undefined);
     const link = t.link ?? (!registered ? roster?.link : undefined);
-    const sessionId = t.sessionId ?? roster?.sessionId ?? signed?.by;
+    const savedSession = t.sessionId ?? roster?.sessionId ?? signed?.by;
+    // A trap that isn't live offers its session to resume, unless the session is another trap's.
+    const sessionId = !registered && savedSession && sessionClaimedElsewhere(savedSession, t.trapId, { traps: live, roster: rosterEntries }) ? undefined : savedSession;
     const harness = t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]);
     return {
       ...t,
