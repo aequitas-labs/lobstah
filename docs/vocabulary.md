@@ -314,10 +314,11 @@ plus Codex's `UserPromptSubmit` and `PermissionRequest` when declared, it says:
 - **trusted**: Codex runs a plugin hook only after the user trusts it in
   `/hooks`, and records trust in `config.toml` as
   `[hooks.state."lobstah@lobstah:hooks/hooks.json:<event>:<group>:<handler>"]`
-  with a `trusted_hash`, a hash of the hook's definition. The row says
-  `trusted` when that hash matches the hook as the plugin declares it now,
-  `changed since trusted` when the hook changed after it was trusted (a
-  plugin update; Codex asks again), and `untrusted` without an entry. Claude
+  with a `trusted_hash`, a hash of the hook's definition, and from Codex 0.166
+  a `trusted_content_hash` of the plugin's contents. The row reports Codex's
+  own answer when it can get one: `trusted`, `changed since trusted` when the
+  hook or plugin changed after it was trusted (a plugin update; Codex asks
+  again), or `untrusted` without an entry. Claude
   Code has no per-hook trust: `trust n/a`;
 - **last run**: when lobstah last saw the hook run (`never run` when it has
   not). Each hook run stamps `~/.lobstah/hook-runs.json` (`<harness>:<event>`

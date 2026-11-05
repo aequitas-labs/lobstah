@@ -10,7 +10,7 @@ import { unhandledTrapMessages } from './inbox.js';
 import { gitCommonDir, protectedRevision, trapRef } from './worktree-safety.js';
 import { codexDesktopThread, codexRolloutFile } from './resume.js';
 import { harnessProcessAlive } from './harness-process.js';
-import { sessionHolders, sessionHolderText } from './session-holder.js';
+import { sessionClaimedElsewhere, sessionHolders, sessionHolderText } from './session-holder.js';
 
 /**
  * `man throw --plan`: what a throw would do for each selected trap, read
@@ -114,6 +114,9 @@ function startMode(
   cwds: string[],
   opts: ThrowPlanOptions,
 ): { action: 'resume' | 'cold'; why: string; from?: string } {
+  if (!entry.sessionId) return { action: 'cold', why: 'no saved session: another trap took it over' };
+  const claimed = sessionClaimedElsewhere(entry.sessionId, entry.trapId);
+  if (claimed) return { action: 'cold', why: `${claimed}; a resume would make a second writer` };
   const sid = short(entry.sessionId);
   if (harness !== entry.harness) {
     return { action: 'cold', why: `profile harness ${harness} differs from the ${entry.harness} session ${sid}; a session resumes only under the harness that wrote it` };
@@ -137,7 +140,8 @@ function startMode(
     if (entry.harnessProcess && harnessProcessAlive(entry.harnessProcess)) {
       return { action: 'cold', why: `thread ${sid} is still open in Codex process ${entry.harnessProcess.pid}; a resume cannot write a thread another process holds` };
     }
-    return { action: 'resume', why: `codex resume ${sid}`, from: entry.worktree };
+    // In full: a Codex id starts with its time, so two threads from one day can share their first characters.
+    return { action: 'resume', why: `codex resume ${entry.sessionId}`, from: entry.worktree };
   }
   return { action: 'cold', why: `no resume support for harness ${harness}` };
 }
@@ -178,7 +182,7 @@ function planEntry(entry: RosterEntry, cfg: Config, opts: ThrowPlanOptions): Thr
   if (!entry.repo) return done('unresolved', 'no repo recorded: the trap only took addressed work');
   const repo = cfg.repos[entry.repo];
   if (!repo) return done('unresolved', `repo ${entry.repo} is no longer configured`);
-  if (!entry.harness || !entry.sessionId) return done('unresolved', 'incomplete record: no harness or session recorded');
+  if (!entry.harness) return done('unresolved', 'incomplete record: no harness recorded');
   const configured = gitCommonDir(repo.path);
   if (entry.gitDir && configured && configured !== entry.gitDir) {
     return done('unresolved', `repo ${entry.repo} now points at another repository (${configured}, recorded ${entry.gitDir})`);

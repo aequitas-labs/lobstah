@@ -20,6 +20,7 @@ import { Reports } from './reports.js';
 import { Reviews } from './reviews.js';
 import { Stats } from './stats.js';
 import { SessionGrants } from './session-grants.js';
+import { Settings } from './settings.js';
 import { Traps } from './traps.js';
 import { Todos } from './todos.js';
 
@@ -49,6 +50,7 @@ export function App({ state }: { state: GlassState }) {
     if (t === 'reviews') return html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`;
     if (t === 'todos') return html`<${Todos} passes=${d?.helmPasses} todos=${inp.deck.todos} note=${inp.deck.todoNote} />`;
     if (t === 'grants') return html`<${SessionGrants} grants=${d?.sessionGrants ?? []} />`;
+    if (t === 'settings') return html`<${Settings} page=${state.settings} error=${state.settingsError} />`;
     if (t === 'stats') return html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`;
     return html`<${Notices} inp=${inp.notices} more=${more('notices')} />`;
   };

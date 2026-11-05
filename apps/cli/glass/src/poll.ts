@@ -1,5 +1,5 @@
 import type { GlassBeats, GlassSnapshot } from '@lobstah/core';
-import { loadStats, markStale, receive, receiveBeats, refreshDetail } from './actions.js';
+import { loadSettings, loadStats, markStale, receive, receiveBeats, refreshDetail } from './actions.js';
 import { getState } from './store.js';
 import { sendPresence } from './presence.js';
 
@@ -44,6 +44,7 @@ export async function poll(): Promise<void> {
     }
     void refreshDetail();
     if (getState().route === 'stats') void loadStats();
+    if (getState().route === 'settings') void loadSettings();
   } catch (e) {
     markStale();
   } finally {
