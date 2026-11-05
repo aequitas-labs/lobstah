@@ -1647,6 +1647,36 @@ a.lob {
   padding: 0;
   background: none;
 }
+/* Copy controls change no layout: the button floats over its block's corner, and inline code copies when clicked. */
+.mdcodewrap {
+  position: relative;
+}
+.copybtn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+}
+.copybtn:hover {
+  color: var(--fg);
+}
+.copyinline {
+  cursor: copy;
+}
+.copyinline:hover {
+  box-shadow: inset 0 0 0 1px var(--line-hover);
+}
+.copyinline.copied {
+  box-shadow: inset 0 0 0 1px var(--ok);
+}
 .mdpage blockquote {
   border-left: 3px solid var(--line);
   padding-left: 10px;
@@ -2072,4 +2102,49 @@ footer .glass-brand {
 }
 .grant-audit code {
   overflow-wrap: anywhere;
+}
+
+/* Settings: each row is a key, its value and where it came from; on a phone the key sits above. */
+.cfg h2 {
+  letter-spacing: normal;
+  text-transform: none;
+  font-size: 13px;
+  color: var(--fg);
+}
+.cfg h3 {
+  font-size: 12px;
+  margin: 12px 0 4px;
+}
+.cfgtraps {
+  font-weight: normal;
+}
+.cfgrow {
+  display: grid;
+  grid-template-columns: minmax(0, 18em) minmax(0, 1fr) 4.5em;
+  gap: 2px 12px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+}
+.cfgkey {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.cfgvalue {
+  overflow-wrap: anywhere;
+}
+.cfgsource {
+  color: var(--dim);
+  font-size: 11px;
+  text-align: right;
+}
+.cfgsource.set {
+  color: var(--ok);
+}
+@media (max-width: 640px) {
+  .cfgrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .cfgkey {
+    grid-column: 1 / -1;
+  }
 }

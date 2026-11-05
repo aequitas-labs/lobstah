@@ -75,12 +75,12 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  */
 /**
  * Take what the old page never had out of a live page, so the page compares
- * with the old one: the Reports and Stats tabs, and the decision modal, the
+ * with the old one: the Reports, Stats and Settings tabs, and the decision modal, the
  * new-decision alert, and the unread badge on the deck tab
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
-  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
+  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
   const bar = g.$('.navbar');
   if (bar) bar.replaceWith(...Array.from(bar.childNodes));
 }

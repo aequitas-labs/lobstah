@@ -87,7 +87,7 @@ describe('safe window focus ladder', () => {
     const { seen, run } = calls();
     const read: FileReader = async () => '';
     const result = await focusRegistration(reg({ termProgram: 'tmux', tmuxPane: '%3', bundleId: 'com.apple.Terminal' }), { platform: 'darwin', run, read, machine: 'studio' });
-    expect(result).toEqual({ focused: false, reason: "Selected the trap's tmux pane on studio, but no Terminal window shows it — run `tmux -L lobstah attach`" });
+    expect(result).toEqual({ focused: false, reason: "Selected the trap's tmux pane on studio, but no Terminal window shows it — run `tmux -L lobstah attach -t %3`" });
     expect(seen.map(([file]) => file)).toEqual(['tmux']);
     expect(await focusRegistration(reg({ tmuxPane: '%3', tmuxSocket: 'relative/socket' }), { platform: 'darwin', run, read })).toEqual({ focused: false, reason: 'Invalid recorded tmux socket' });
   });
@@ -122,6 +122,76 @@ describe('safe window focus ladder', () => {
     expect(tmuxAttachCommand({ tmuxPane: '%1', tmuxSocket: '/tmp/a b' }, here)).toBeUndefined();
     expect(tmuxAttachCommand({ tmuxPane: '%1', tmuxSocket: '/tmp/$(id)' }, here)).toBeUndefined();
     expect(tmuxAttachCommand({ tmuxPane: '%1' }, { onMachine: false, machine: '-oProxyCommand=id' })).toBeUndefined();
+  });
+
+  describe('a tmux pane with nothing showing it', () => {
+    const pane = reg({ termProgram: 'tmux', tmuxPane: '%3' });
+    const glass = { platform: 'darwin' as const, machine: 'studio', openTerminal: true };
+
+    it('opens one Terminal window attached to the pane when the glass asks', async () => {
+      const { seen, run } = calls();
+      const result = await focusRegistration(pane, { ...glass, run, read: async () => '' });
+      expect(result).toEqual({ focused: true, step: 'tmux', message: 'Opened a Terminal window on studio' });
+      expect(seen.map(([file]) => file)).toEqual(['tmux', 'osascript']);
+      expect(seen[1]?.[1].slice(-2)).toEqual(['--', 'tmux -L lobstah attach -t %3']);
+      const script = seen[1]?.[1][1] ?? '';
+      expect(script.indexOf('do script')).toBeLessThan(script.indexOf('activate'));
+    });
+
+    it('prints the command and opens nothing from the CLI', async () => {
+      const { seen, run } = calls();
+      const result = await focusRegistration(pane, { platform: 'darwin', machine: 'studio', run, read: async () => '' });
+      expect(result).toMatchObject({ focused: false, reason: expect.stringContaining('tmux -L lobstah attach -t %3') });
+      expect(seen.map(([file]) => file)).toEqual(['tmux']);
+    });
+
+    it('opens no second window when a client is attached in another app', async () => {
+      const { seen, run } = calls();
+      const notTerminal: FileRunner = async (file, args) => {
+        await run(file, args);
+        if (file === 'osascript') throw new Error('tab not found');
+      };
+      const result = await focusRegistration(pane, { ...glass, run: notTerminal, read: tmuxAnswers(['$0 @1'], ['$0 @1 100 /dev/ttys021']) });
+      expect(result).toEqual({ focused: true, step: 'tmux', message: "Selected the pane on studio, it's open in another app" });
+      expect(seen.filter(([file]) => file === 'osascript')).toHaveLength(1);
+      expect(seen.at(-1)?.[1].slice(2, 5)).toEqual(['select-window', '-t', '$0:@1']);
+    });
+
+    it('counts a client whose tty Terminal could never match as attached, without asking Terminal', async () => {
+      const { seen, run } = calls();
+      const result = await focusRegistration(pane, { ...glass, run, read: tmuxAnswers(['$0 @1'], ['$0 @1 100 /dev/pts/4']) });
+      expect(result).toEqual({ focused: true, step: 'tmux', message: "Selected the pane on studio, it's open in another app" });
+      expect(seen.map(([file]) => file)).toEqual(['tmux']);
+    });
+
+    it('opens a window when the only clients are on sessions that do not hold the pane', async () => {
+      const { seen, run } = calls();
+      const result = await focusRegistration(pane, { ...glass, run, read: tmuxAnswers(['$0 @1'], ['$7 @9 100 /dev/ttys021']) });
+      expect(result).toEqual({ focused: true, step: 'tmux', message: 'Opened a Terminal window on studio' });
+      expect(seen.map(([file]) => file)).toEqual(['tmux', 'osascript']);
+    });
+
+    it('opens nothing when tmux cannot list its clients', async () => {
+      const { seen, run } = calls();
+      const result = await focusRegistration(pane, { ...glass, run, read: async () => { throw new Error('no server'); } });
+      expect(result).toMatchObject({ focused: false });
+      expect(seen.map(([file]) => file)).toEqual(['tmux']);
+    });
+
+    it('falls back to the command when Terminal refuses', async () => {
+      const refused: FileRunner = async (file) => { if (file === 'osascript') throw new Error('not allowed'); };
+      const result = await focusRegistration(pane, { ...glass, run: refused, read: async () => '' });
+      expect(result).toMatchObject({ focused: false, reason: expect.stringContaining('attach -t %3') });
+    });
+
+    it('opens no window for a recorded value that fails validation or needs quoting', async () => {
+      for (const window of [{ tmuxPane: '%3;id' }, { tmuxPane: '%3', tmuxSocket: 'relative/socket' }, { tmuxPane: '%3', tmuxSocket: '/tmp/a b' }]) {
+        const { seen, run } = calls();
+        const result = await focusRegistration(reg(window), { ...glass, run, read: async () => '' });
+        expect(result).toMatchObject({ focused: false });
+        expect(seen.filter(([file]) => file === 'osascript')).toHaveLength(0);
+      }
+    });
   });
 
   it('opens a validated session link before any native window step', async () => {

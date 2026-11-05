@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, soakingDir } from './paths.js';
+import type { WindowRef } from './window.js';
 import { withDirLock } from './dir-lock.js';
 import { postNotice } from './notices.js';
 import { pendingIds, queuedDescriptor } from './queue.js';
@@ -47,6 +48,10 @@ export interface TrapReservation {
   startMode?: string;
   /** Set when this trap starts with Claude's `--remote-control`: the time before which a URL can't be this run's. */
   remoteControlSince?: string;
+  /** This Codex trap attaches to the shared app-server, so a paired phone can drive it. */
+  codexServer?: true;
+  /** Its window, recorded from inside the pane: on the shared server, a tool's environment is the server's. */
+  window?: WindowRef;
 }
 
 /** `<trapId>-<32 hex>`: the id prefix finds the reservation, the rest proves it. */
@@ -159,6 +164,8 @@ export function reserveTrap(opts: {
   startMode?: string;
   /** The trap starts with Claude's `--remote-control`. */
   remoteControl?: boolean;
+  /** The Codex trap attaches to the shared app-server. */
+  codexServer?: boolean;
   /** A new throw enforces its configured repo cap under a cross-process reservation lock. */
   maxTraps?: number;
   now?: number;
@@ -223,6 +230,7 @@ export function reserveTrap(opts: {
     ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
     ...(opts.startMode ? { startMode: opts.startMode } : {}),
     ...(opts.remoteControl ? { remoteControlSince: new Date(now).toISOString() } : {}),
+    ...(opts.codexServer ? { codexServer: true as const } : {}),
     ...(opts.returning ? { worktree: opts.returning.worktree } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   };
@@ -238,6 +246,14 @@ export function reserveTrap(opts: {
     by: opts.by,
   });
   return { reservation, ticket };
+}
+
+/** Record the window of a reserved trap's pane, from inside that pane. False for a ticket that redeems nothing. */
+export function rememberReservationWindow(ticket: string, window: WindowRef | undefined): boolean {
+  const reservation = reservationForTicket(ticket);
+  if (!reservation) return false;
+  if (window) writeReservation({ ...reservation, window });
+  return true;
 }
 
 /** The reservation a ticket proves, or undefined for a malformed, unknown, or wrong ticket. */
