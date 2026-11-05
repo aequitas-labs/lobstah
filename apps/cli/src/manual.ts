@@ -93,8 +93,10 @@ getting woken instead of asking:
                             tend notes the stale ones. \`--at <time>\` or
                             \`--in <duration>\` gives it a time, \`todo snooze
                             <id> --until <time>\` moves it; at its time man wait
-                            wakes you with a todo-due event
-                            Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.
+                            wakes you with a todo-due event. \`--every <schedule>\`
+                            repeats it: \`todo done\` moves it on, \`todo skip
+                            <id>\` passes one, \`todo drop\` ends it
+                            Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.
   lobstah man ask           put a question the helm cannot decide to the human:
                             [<dispatch-id>] --title, --detail <f.md>,
                             --option (0-6), --attach. The glass shows it as a

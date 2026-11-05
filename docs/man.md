@@ -613,7 +613,12 @@ the helm files to keep.
   overdue until `done`, `snooze` or `drop`. Times read in `[helm].timezone`, in
   24-hour form: `fri 09:00`, `tomorrow 09:00`, `09:00`, `thu` (09:00 that day),
   `2026-11-06 09:00`, `2026-11-06T14:00Z`. A day name means a goal day, which
-  runs from 04:00 to 04:00. So `fri 01:00` is the late end of Friday. They are stored per grounds in `todos/<grounds>.json` with
+  runs from 04:00 to 04:00. So `fri 01:00` is the late end of Friday.
+  `todo add "<text>" --every "daily 09:00"`, `"weekdays 09:00"` or
+  `"weekly fri 09:00"` repeats one, and `--every` stands alone. `todo done`
+  moves it to the next occurrence, `todo skip <id>` passes one without counting
+  it as done, and `todo drop` ends it. Missed occurrences fire once when lobstah
+  next checks, with no backfill. A done on a series counts in `goals recap-data`. They are stored per grounds in `todos/<grounds>.json` with
   created and updated times. `man tend`, `man report`, and the glass deck
   show the open ones, and `man brief` re-injects them beside the charter at
   every session start and after compaction. A todo marked done stays in

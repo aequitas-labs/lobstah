@@ -1,5 +1,5 @@
 import { goalDate } from './goals.js';
-import { TodoError } from './todos.js';
+import { TodoError, type TodoRecurrence, type TodoWeekday } from './todos.js';
 
 /**
  * Reading and printing todo times. A time is read in `[helm].timezone`, or the
@@ -201,6 +201,71 @@ export function parseTodoTime(input: string, now = Date.now(), timezone?: string
 /** `snooze --until`: a duration from now, or any form `--at` reads. */
 export function parseTodoUntil(input: string, now = Date.now(), timezone?: string): string {
   return DURATION.test(input.trim()) ? parseTodoDuration(input, now) : parseTodoTime(input, now, timezone);
+}
+
+const WEEKDAY_NAMES: readonly TodoWeekday[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+function refuseSchedule(): never {
+  throw new TodoError(`--every needs a schedule and a time: "daily 09:00", "weekdays 09:00" or "weekly fri 09:00"`);
+}
+
+/** `--every`: a repeat rule. The time is required, and is always 24-hour. */
+export function parseTodoRecurrence(input: string): TodoRecurrence {
+  const text = input.trim().replace(/\s+/g, ' ');
+  const twelveHour = TWELVE_HOUR.exec(text);
+  if (twelveHour) refuseTwelveHour(text, twelveHour);
+  const words = text.toLowerCase().split(' ');
+  const clockText = words.at(-1) ?? '';
+  const clock = parseClockTime(clockText);
+  if (!clock) refuseSchedule();
+  const at = `${String(clock.hour).padStart(2, '0')}:${String(clock.minute).padStart(2, '0')}`;
+  if (words.length === 2 && (words[0] === 'daily' || words[0] === 'weekdays')) return { cadence: words[0], at };
+  if (words.length === 3 && words[0] === 'weekly') {
+    const weekday = parseWeekday(words[1]!);
+    if (weekday !== undefined) return { cadence: 'weekly', day: WEEKDAY_NAMES[weekday]!, at };
+  }
+  return refuseSchedule();
+}
+
+/** A repeat rule in the form `--every` reads: `weekly fri 09:00`. */
+export function formatTodoRecurrence(every: TodoRecurrence): string {
+  return every.cadence === 'weekly' ? `weekly ${every.day} ${every.at}` : `${every.cadence} ${every.at}`;
+}
+
+/** Whether a repeat falls on this goal day. */
+function occursOn(every: TodoRecurrence, goalDay: string): boolean {
+  const weekday = calendarWeekday(goalDay);
+  if (every.cadence === 'weekly') return WEEKDAY_NAMES[weekday] === every.day;
+  return every.cadence === 'daily' || (weekday >= 1 && weekday <= 5);
+}
+
+/** The instant of a repeat on a goal day, keeping its wall-clock time across a clock change. */
+function occurrenceInstant(every: TodoRecurrence, goalDay: string, timezone?: string): number {
+  return goalDayInstant(goalDay, parseClockTime(every.at)!, timezone);
+}
+
+/** The first occurrence strictly after an instant. */
+export function nextOccurrenceAfter(every: TodoRecurrence, after: number, timezone?: string): number {
+  const start = goalDate(new Date(after), timezone);
+  for (let ahead = -1; ahead <= 8; ahead += 1) {
+    const day = addCalendarDays(start, ahead);
+    if (!occursOn(every, day)) continue;
+    const instant = occurrenceInstant(every, day, timezone);
+    if (instant > after) return instant;
+  }
+  throw new TodoError(`no occurrence of "${formatTodoRecurrence(every)}" after ${new Date(after).toISOString()}`);
+}
+
+/** The newest occurrence at or before an instant. */
+export function latestOccurrenceBy(every: TodoRecurrence, by: number, timezone?: string): number {
+  const start = goalDate(new Date(by), timezone);
+  for (let ahead = 1; ahead >= -8; ahead -= 1) {
+    const day = addCalendarDays(start, ahead);
+    if (!occursOn(every, day)) continue;
+    const instant = occurrenceInstant(every, day, timezone);
+    if (instant <= by) return instant;
+  }
+  throw new TodoError(`no occurrence of "${formatTodoRecurrence(every)}" by ${new Date(by).toISOString()}`);
 }
 
 /** A due time in full, so a misread day shows at once: `Fri Nov 6, 09:00 EST`. */

@@ -226,3 +226,63 @@ describe('todo verbs: times', () => {
     expect(text.indexOf(',plain,')).toBeLessThan(text.indexOf(',waiting,'));
   });
 });
+
+describe('todo verbs: repeats', () => {
+  it('add --every prints the next time and the rule, and stores both', () => {
+    const out = run(['todo', 'add', 'Check the numbers', '--every', 'weekly fri 09:00']);
+    expect(out.status, out.stderr).toBe(0);
+    expect(out.stdout).toContain('every: weekly fri 09:00');
+    const [todo] = listTodos('fleet');
+    expect(todo!.every).toEqual({ cadence: 'weekly', day: 'fri', at: '09:00' });
+    expect(Date.parse(todo!.dueAt!)).toBeGreaterThan(Date.now());
+  });
+
+  it.each([
+    [['--every', 'daily 09:00', '--at', 'fri 09:00'], '--every stands alone'],
+    [['--every', 'daily 09:00', '--in', '2h'], '--every stands alone'],
+    [['--every', 'weekly'], '--every needs a schedule and a time'],
+  ])('refuses %j with exit 2 and stores nothing', (flags, message) => {
+    const out = run(['todo', 'add', 'Nope', ...flags]);
+    expect(out.status).toBe(2);
+    expect(out.stdout + out.stderr).toContain(message);
+    expect(listTodos('fleet')).toEqual([]);
+  });
+
+  it('done keeps a series open and prints what comes next; skip does the same; drop ends it', () => {
+    run(['todo', 'add', 'Standup', '--every', 'daily 09:00']);
+    const firstDue = listTodos('fleet')[0]!.dueAt!;
+
+    const done = run(['todo', 'done', '1']);
+    expect(done.status, done.stderr).toBe(0);
+    expect(done.stdout).toContain('state: open');
+    expect(done.stdout).toContain('next:');
+    expect(listTodos('fleet')[0]!.lastDoneAt).toBeDefined();
+    const secondDue = listTodos('fleet')[0]!.dueAt!;
+    expect(Date.parse(secondDue)).toBeGreaterThan(Date.parse(firstDue));
+
+    const lastDone = listTodos('fleet')[0]!.lastDoneAt;
+    const skip = run(['todo', 'skip', '1']);
+    expect(skip.status, skip.stderr).toBe(0);
+    expect(Date.parse(listTodos('fleet')[0]!.dueAt!)).toBeGreaterThan(Date.parse(secondDue));
+    expect(listTodos('fleet')[0]!.lastDoneAt).toBe(lastDone);
+
+    expect(run(['todo', 'drop', '1']).status).toBe(0);
+    expect(listTodos('fleet')).toEqual([]);
+  });
+
+  it('skip refuses a one-off with the plan’s message', () => {
+    addTodo('fleet', 'one-off');
+    const out = run(['todo', 'skip', '1']);
+    expect(out.status).toBe(2);
+    expect(out.stdout + out.stderr).toContain("todo 1 doesn't repeat: snooze it or drop it");
+  });
+
+  it('todo ls shows an every column only when a todo repeats', () => {
+    addTodo('fleet', 'plain');
+    expect(run(['todo', 'ls']).stdout).not.toContain('every');
+    run(['todo', 'add', 'Standup', '--every', 'weekdays 09:00']);
+    const out = run(['todo', 'ls']);
+    expect(out.stdout).toContain('{id,text,due,every,added}');
+    expect(out.stdout).toContain('weekdays 09:00');
+  });
+});
