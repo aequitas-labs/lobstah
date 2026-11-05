@@ -378,6 +378,7 @@ describe('glass page: tabs and hash routing', () => {
         const [link] = links(g);
         expect(links(g)).toHaveLength(1);
         expect(text(link)).toBe('Open live Claude');
+        expect(link?.querySelector('.harness-icon')).toBeNull();
         expect(link!.getAttribute('target')).toBe('_blank');
         expect(link!.getAttribute('rel')).toContain('noopener');
         expect(text(g.$('#modalbox'))).toContain('Running on studio');
@@ -939,7 +940,7 @@ describe('glass page: On deck', () => {
         '🪤 wt:t7',
         '🪤 wt:t2',
       ]);
-      expect(items.map((l) => text(l.querySelector('.badge')))).toEqual([
+      expect(items.map((l) => l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')))).toEqual([
         'claude',
         'claude',
         'codex',

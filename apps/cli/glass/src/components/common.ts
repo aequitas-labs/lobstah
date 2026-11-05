@@ -11,6 +11,7 @@ import { html } from '../html.js';
 import type { Children } from '../html.js';
 import { linkParts } from '../../../src/glass-links.js';
 import { LinkedText, UrlLink } from './links.js';
+import { HarnessIcon, harnessLabel } from './harness-icon.js';
 import { workerMetadata } from '../../../../../packages/core/src/worker-metadata.js';
 import type { WorkerMetadata, WorkerConfig } from '@lobstah/core';
 
@@ -36,7 +37,17 @@ export function lastPassText(at: string | undefined): string {
 type WorkerInfo = { harness?: string | null; model?: string | null; config?: WorkerConfig; observedAt?: string };
 
 /** Only the existing harness indicator at rest; model/effort on hover or focus. */
-export function Harness({ worker, label, cls = 'badge' }: { worker: WorkerInfo; label?: Children; cls?: string }) {
+export function Harness({
+  worker,
+  label,
+  cls = 'badge',
+  compact = false,
+}: {
+  worker: WorkerInfo;
+  label?: Children;
+  cls?: string;
+  compact?: boolean;
+}): Children {
   const w = workerMetadata(worker);
   const text = [w.model ?? 'model unknown', w.config.effort].filter(Boolean).join(' · ');
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -44,7 +55,7 @@ export function Harness({ worker, label, cls = 'badge' }: { worker: WorkerInfo; 
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 280)), top: r.bottom + 6 });
   };
-  return html`<span class=${cls + ' worker-harness'} tabindex="0" aria-label=${text}
+  return html`<span class=${cls + ' worker-harness' + (compact ? ' worker-compact' : '')} tabindex="0" aria-label=${compact ? harnessLabel(w.harness) + ' · ' + text : text} title=${compact ? harnessLabel(w.harness) + ' · ' + text : undefined}
     onMouseEnter=${show} onFocus=${show} onBlur=${() => setPos(null)}
     onMouseLeave=${(e: Event) => {
       if (document.activeElement !== e.currentTarget) setPos(null);
@@ -52,7 +63,7 @@ export function Harness({ worker, label, cls = 'badge' }: { worker: WorkerInfo; 
     onKeyDown=${(e: KeyboardEvent) => {
       if (e.key === 'Escape') setPos(null);
     }}>
-    ${label ?? w.harness ?? 'unknown harness'}${pos && !getState().modal && html`<span class="worker-tooltip" role="tooltip" aria-hidden="true" style=${pos}>${text}</span>`}
+    ${compact ? html`<${HarnessIcon} harness=${w.harness} />` : (label ?? w.harness ?? 'unknown harness')}${pos && !getState().modal && html`<span class="worker-tooltip" role="tooltip" aria-hidden="true" style=${pos}>${text}</span>`}
   </span>`;
 }
 export const WorkerIndicator = (x: Pick<GlassDispatchSummary, 'worker'>) => x.worker && html`<${Harness} worker=${x.worker} />`;
@@ -680,7 +691,7 @@ export function NewTrap() {
     return html`<span class="newtrap"><button class="btn" onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap</button></span>`;
   return html`<form class="newtrap" onClick=${stop} onSubmit=${submit}>
     <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
-    <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">claude</option><option value="codex">codex</option></select></label>
+    <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
     <button class="btn" type="submit" disabled=${!chosen}>Request</button>
     <button class="btn" type="button" onClick=${() => setOpen(false)}>Cancel</button>
     ${result && html`<span class="bad">${result}</span>`}

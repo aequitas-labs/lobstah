@@ -537,6 +537,16 @@ tr.rowhead:hover {
 .card:hover {
   border-color: var(--line-hover);
 }
+.harness-icon {
+  display: inline-flex;
+  vertical-align: -3px;
+  flex: 0 0 auto;
+}
+.worker-compact {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
 .worker-harness {
   cursor: help;
 }
