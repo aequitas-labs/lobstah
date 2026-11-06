@@ -61,7 +61,7 @@ echo "database_id $id is in wrangler.jsonc (not a secret; commit it)"
 
 step "4/7 GitHub OAuth app client ID"
 if grep -q '"GITHUB_CLIENT_ID": ""' wrangler.jsonc; then
-  echo "Open $OAUTH_APPS_URL, open the "lobstah glass" app, and copy its Client ID."
+  echo "Open $OAUTH_APPS_URL, open the \"lobstah glass\" app, and copy its Client ID."
   read -r -p "Client ID: " client_id
   [ -n "$client_id" ] || { echo "No client ID; stopping." >&2; exit 1; }
   node -e '
