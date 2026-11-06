@@ -1,5 +1,5 @@
 import type { GlassBeats, GlassSnapshot } from '@lobstah/core';
-import { reportMarkdownUrl } from '../../src/glass-diff.js';
+import { decisionFileUrl, dispatchFileUrl, reportFileUrl, reportMarkdownUrl, trapFileUrl } from '../../src/glass-diff.js';
 import { ALL_CAPABILITIES } from '../backend.js';
 import type { GlassBackend, GlassPoll, GlassRead, GlassVerdict, GlassWrite } from '../backend.js';
 
@@ -46,6 +46,11 @@ export const localBackend: GlassBackend = {
   async reportText(key) {
     const r = await fetch(reportMarkdownUrl(key));
     return r.ok ? { ok: true, status: r.status, data: await r.text() } : { ok: false, status: r.status };
+  },
+  fileUrl(owner, name) {
+    if (owner.kind === 'dispatch') return dispatchFileUrl(owner.lane, owner.id, name);
+    if (owner.kind === 'trap') return trapFileUrl(owner.trapId, name);
+    return owner.kind === 'decision' ? decisionFileUrl(owner.key, name) : reportFileUrl(owner.key, name);
   },
   checklists: {
     load: (key) => read(`/api/checklist?key=${encodeURIComponent(key)}`, { cache: 'no-store' }),

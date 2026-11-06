@@ -3,11 +3,12 @@ import type { ImageSurface } from '../../src/glass-markdown.js';
 import { MarkdownElements, inlineAttachmentNames } from './markdown.js';
 import { getState } from '../store.js';
 import { openLightbox } from '../actions.js';
-import { reportFileUrl, reportFrom } from '../../src/glass-diff.js';
+import { reportFrom } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 import { Age, ImageThumb, attachmentRows, cmdRow } from './common.js';
 import { LinkedText } from './links.js';
+import { fileUrl } from '../backend.js';
 
 type FileUrl = (name: string) => string;
 const markdown = (
@@ -39,7 +40,7 @@ function attachmentsNotInline(
 export function ReportPage({ r, text, token }: { r: GlassReport; text: { text?: string; error?: string } | undefined; token?: string }) {
   const body =
     text?.text !== undefined
-      ? markdown(text.text, (name) => reportFileUrl(r.key, name), 'report', false, r.key, token)
+      ? markdown(text.text, (name) => fileUrl({ kind: 'report', key: r.key }, name), 'report', false, r.key, token)
       : text?.error
         ? html`<div class="bad">${text.error}</div>`
         : html`<div class="dim">loading…</div>`;
@@ -86,7 +87,7 @@ export function ReportSection({
     html`<${ReportPage} r=${r} text=${text} token=${token} />`,
     listed.length > 0 && [
       html`<div class="sec">report attachments (${listed.length})</div>`,
-      attachmentRows(listed, (name) => reportFileUrl(r.key, name)),
+      attachmentRows(listed, (name) => fileUrl({ kind: 'report', key: r.key }, name)),
     ],
     !r.acked && [html`<div class="sec">ack</div>`, cmdRow('lobstah attention ack ' + r.key)],
   ];

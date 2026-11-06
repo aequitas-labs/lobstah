@@ -695,6 +695,7 @@ build). The UI lives in `packages/glass-ui`, which the hosted glass bundles too;
 | `ui/glass.css` | every style; the design tokens (palette including the `.pr-*` badge states, spacing scale, card, badge, and modal metrics) are custom properties at the top |
 | `ui/backend.ts` | `GlassBackend`, the one seam between the UI and its host: every read and write the page makes, and its capabilities (the tabs it fills, the actions it takes; the UI hides the rest) |
 | `ui/backends/local.ts` | the local backend: `/data*`, `/report/*`, `/api/*` and `POST /requests` on the daemon that serves the page |
+| `ui/backends/wharf.ts` | the wharf backend: the hosted glass's cookie-only `/api/glass*`, projected onto the same snapshot by `ui/wharf-snapshot.ts` (types in `ui/wharf-model.ts`); it fills deck, dispatches, traps, reviews and reports, and nothing it does not record |
 | `ui/start.ts` | `startGlassPage(backend)`: builds the store from localStorage and the URL, renders `App` into the body on every change, starts polling (or renders one report on `/report/<key>`) |
 | `ui/store.ts` | the one store: the latest snapshot, the route, the prefs, the open modal, the stale flag, the lob state |
 | `ui/actions.ts` | every change the page can make (open or close a modal, set a preference, hide a lob, receive a snapshot) |

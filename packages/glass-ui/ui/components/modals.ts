@@ -1,6 +1,6 @@
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
-import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../src/glass-diff.js';
+import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal, changeHelmChat } from '../actions.js';
 import { useState } from 'preact/hooks';
@@ -35,7 +35,7 @@ import {
   viewerHasTerminal,
   windowAction,
 } from './common.js';
-import { can } from '../backend.js';
+import { can, fileUrl } from '../backend.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
@@ -230,7 +230,7 @@ function trapModal(t: GlassTrap) {
   const messages = t.messages.length
     ? t.messages.map(
         (m) =>
-          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${LinkedText(m.text)}${m.attachments?.length ? attachmentRows(m.attachments, (name) => trapFileUrl(t.trapId, name)) : ''}</div>`,
+          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${LinkedText(m.text)}${m.attachments?.length ? attachmentRows(m.attachments, (name) => fileUrl({ kind: 'trap', trapId: t.trapId }, name)) : ''}</div>`,
       )
     : html`<div class="empty">none</div>`;
   const sessionRow = trapSessionRow(t);

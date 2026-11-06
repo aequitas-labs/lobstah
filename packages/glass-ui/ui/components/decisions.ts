@@ -2,7 +2,6 @@ import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
 import type { Attachment } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
-import { decisionFileUrl } from '../../src/glass-diff.js';
 import type { DecisionCard } from '../../src/glass-diff.js';
 import {
   addFiles,
@@ -24,7 +23,7 @@ import { Age, ImageThumb, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
-import { can } from '../backend.js';
+import { can, fileUrl } from '../backend.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -50,7 +49,7 @@ function attachments(key: string, list: Attachment[]) {
   if (!list.length) return null;
   return html`<div class="dfiles">${list.map((a) =>
     IMAGE.test(a.name)
-      ? html`<span key=${a.name}>${ImageThumb(decisionFileUrl(key, a.name), a.name, 'dimg')}</span>`
+      ? html`<span key=${a.name}>${ImageThumb(fileUrl({ kind: 'decision', key }, a.name), a.name, 'dimg')}</span>`
       : html`<div key=${a.name} class="dfile"><span>${a.name}</span> <span class="dim">· ${a.type} · ${a.bytes} bytes · </span><code>${a.path}</code></div>`,
   )}</div>`;
 }
@@ -277,7 +276,7 @@ export function DecisionModal({
           : [
               c.kind === 'decision' &&
                 c.detail.trim() &&
-                html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent} fileUrl=${(name: string) => decisionFileUrl(c.key, name)} />`,
+                html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent} fileUrl=${(name: string) => fileUrl({ kind: 'decision', key: c.key }, name)} />`,
               c.kind === 'decision' && attachments(c.key, c.attachments),
               c.kind === 'decision' && !c.readOnly && c.appStart && validDesktopStartLink(c.appStart.url)
                 ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
