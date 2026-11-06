@@ -48,6 +48,8 @@ export interface PermissionAsk {
   trap?: string;
   /** The kind of action the trap proposes approving: the card offers it, for a person to read and choose. */
   intent?: GrantIntent;
+  /** A helm session's own command, refused by its harness's reviewer: Allow once is good for that session alone. */
+  helm?: boolean;
 }
 
 /** The options of a permission card, in order. */

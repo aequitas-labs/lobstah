@@ -8,6 +8,7 @@ import {
   DecisionError,
   addGrant,
   claimBait,
+  commandGrantScope,
   enqueue,
   ensureLayout,
   listGrants,
@@ -408,6 +409,81 @@ describe('a permission card', () => {
     answerKey(c.key, { option: 'No', by: 'cli' });
     expect(listGrants().grants).toEqual([]);
     expect(unhandled('d-1', 'work')[0]!.text).toContain('Do not run it');
+  });
+});
+
+describe('a helm command auto mode refused', () => {
+  const MERGE = 'gh pr merge 2681 --squash';
+  const denied = (session: string, command: string, tool = 'Bash') =>
+    run(['hook', 'permission-denied'], {
+      session_id: session,
+      hook_event_name: 'PermissionDenied',
+      permission_mode: 'auto',
+      tool_name: tool,
+      tool_input: { command, description: 'Merge the glass sync PR' },
+      tool_use_id: 'denied-call',
+      reason: '[Merge Without Review]',
+      cwd: home,
+    });
+  const preToolUse = (session: string, command: string) =>
+    run(['hook', 'pre-tool-use'], { session_id: session, tool_name: 'Bash', tool_input: { command }, tool_use_id: `call-${command.length}`, cwd: home });
+
+  it('becomes one glass card; Allow once mints a one-use grant for exactly that command in that helm session', () => {
+    takeHelm({ sessionId: 'helm-session', grounds: { name: 'home', repos: [] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+    expect(denied('helm-session', MERGE)).toMatchObject({ status: 0, stdout: '' });
+    denied('helm-session', MERGE);
+    expect(standingDecisions()).toHaveLength(1);
+    const card = standingDecisions()[0]!;
+    expect(card.options).toEqual(['Allow once', 'No']);
+    expect(card.permission).toMatchObject({ helm: true, session: 'helm-session', command: MERGE });
+    expect(readDecisionDetail(card.key)).toContain('[Merge Without Review]');
+    expect(preToolUse('helm-session', MERGE).stdout).toBe('');
+    expect(() => answerKey(card.key, { option: 'Allow once', by: 'cli' })).toThrow('person');
+    answerKey(card.key, { option: 'Allow once', by: 'glass' });
+    expect(listGrants().grants).toMatchObject([{ mode: 'once', session: 'helm-session', command: MERGE, match: 'exact', by: 'glass' }]);
+    expect(preToolUse('other-session', MERGE).stdout).toBe('');
+    expect(preToolUse('helm-session', `${MERGE} --admin`).stdout).toBe('');
+    expect(JSON.parse(preToolUse('helm-session', MERGE).stdout).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'allow' });
+    expect(preToolUse('helm-session', MERGE).stdout).toBe('');
+    expect(listGrants({ all: true }).grants[0]?.uses).toBe(1);
+  });
+
+  it("files nothing for a trap or another session, another tool, or a command no grant may cover; No grants nothing", () => {
+    takeHelm({ sessionId: 'helm-session', grounds: { name: 'home', repos: [] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+    trap('denied-trap', 'claude');
+    denied('denied-trap', MERGE);
+    denied('stranger', MERGE);
+    denied('helm-session', MERGE, 'Write');
+    denied('helm-session', `printf 'x' >> ${path.join(home, 'config.toml')}`);
+    expect(standingDecisions()).toEqual([]);
+    denied('helm-session', MERGE);
+    answerKey(standingDecisions()[0]!.key, { option: 'No', by: 'glass' });
+    expect(listGrants().grants).toEqual([]);
+  });
+
+  it("in a claimed trap becomes the trap's card; its Allow once and Allow always pass the trap's PreToolUse in auto mode", () => {
+    const t = trap('auto-trap', 'claude');
+    enqueue({ id: 'auto-job', repo: 'web', brief: 'Land the PR' });
+    claimBait(trapBySession('auto-trap')!);
+    denied('auto-trap', MERGE);
+    denied('auto-trap', MERGE);
+    expect(standingDecisions()).toHaveLength(1);
+    const card = standingDecisions()[0]!;
+    expect(card).toMatchObject({ dispatch: 'auto-job', options: ['Allow once', 'Allow always', 'Allow this tool family for 15 min', 'No'] });
+    expect(card.permission).toMatchObject({ command: MERGE, trap: t.name, session: 'auto-trap' });
+    answerKey(card.key, { option: 'Allow once', by: 'glass' });
+    const call = (mode: string) =>
+      run(['hook', 'pre-tool-use'], { session_id: 'auto-trap', permission_mode: mode, tool_name: 'Bash', tool_input: { command: MERGE }, tool_use_id: `call-${mode}`, cwd: t.worktree });
+    expect(call('default').stdout).toBe('');
+    expect(JSON.parse(call('auto').stdout).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'allow' });
+    expect(call('auto').stdout).toBe('');
+    addGrant({ ...commandGrantScope(MERGE), mode: 'always', harness: 'claude', by: 'glass' });
+    expect(JSON.parse(call('auto').stdout).hookSpecificOutput).toMatchObject({ permissionDecision: 'allow' });
+  });
+
+  it('a session command grant names one exact command, once', () => {
+    expect(() => addGrant({ mode: 'once', session: 'helm-session', command: 'gh pr merge', match: 'prefix', by: 'glass' })).toThrow('exact');
+    expect(() => addGrant({ mode: 'always', session: 'helm-session', command: MERGE, by: 'glass' })).toThrow('exact');
   });
 });
 
