@@ -14,6 +14,7 @@ import { LinkedText, UrlLink } from './links.js';
 import { HarnessIcon, harnessLabel } from './harness-icon.js';
 import { workerMetadata } from '../../../core/src/worker-metadata.js';
 import type { WorkerMetadata, WorkerConfig } from '@lobstah/core';
+import { can } from '../backend.js';
 
 /** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
 
@@ -193,6 +194,7 @@ export function windowAction(t: GlassTrap): Children {
     // The server focuses live traps only; a signed-off app session opens its stored link.
     return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
   }
+  if (!can('focus')) return null;
   const state = getState();
   const viewer = state.snapshot?.viewer;
   if (!viewer?.onMachine) return offMachineAction(t, viewer?.machine);
@@ -220,7 +222,7 @@ export interface OlderControl {
 
 /** `show 50 older (of 212)` under a list whose history pages in; nothing when none is left. */
 export function ShowOlder({ kind, more }: { kind: GlassOlderKind; more: OlderControl }) {
-  if (!more.left && !more.error) return null;
+  if (!can('older') || (!more.left && !more.error)) return null;
   return html`<div class="older">${
     more.left > 0 &&
     html`<button class="btn" disabled=${more.loading} onClick=${() => void loadOlder(kind)}>${
@@ -684,6 +686,8 @@ export function startCommands(t: GlassTrap): Children {
 
 /** The New trap button and its form: a repo and a harness, filed as a request for the helm. */
 export function NewTrap() {
+  // Constant for the page's life, so the hooks below always run in the same order.
+  if (!can('trap-request')) return null;
   const d = getState().snapshot;
   const repos = d?.repoKeys ?? [];
   const [open, setOpen] = useState(false);

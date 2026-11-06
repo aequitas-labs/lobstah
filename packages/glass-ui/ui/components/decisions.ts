@@ -24,6 +24,7 @@ import { Age, ImageThumb, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
+import { can } from '../backend.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -91,18 +92,21 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         grow(el);
         setDraft(key, { text: el.value, error: undefined });
       }}
-      onPaste=${(e: ClipboardEvent) => void pasteImages(key, e)}
+      onPaste=${can('answer-files') ? (e: ClipboardEvent) => void pasteImages(key, e) : undefined}
     ></textarea></div>`,
     !permission &&
       html`<div class="dfoot">
-      <label class="btn dattach" title="attach images or files">attach<input type="file" multiple accept=${accept} disabled=${sending} onChange=${(
-        e: Event,
-      ) => {
-        const input = e.currentTarget as HTMLInputElement;
-        void addFiles(key, input.files).then(() => {
-          input.value = '';
-        });
-      }} /></label>
+      ${
+        can('answer-files') &&
+        html`<label class="btn dattach" title="attach images or files">attach<input type="file" multiple accept=${accept} disabled=${sending} onChange=${(
+          e: Event,
+        ) => {
+          const input = e.currentTarget as HTMLInputElement;
+          void addFiles(key, input.files).then(() => {
+            input.value = '';
+          });
+        }} /></label>`
+      }
       ${files.map(
         (f, i) =>
           html`<span key=${f.name + i} class="dchip">${f.name}<button type="button" class="dx" title="remove" disabled=${sending} onClick=${() => removeFile(key, i)}>×</button></span>`,

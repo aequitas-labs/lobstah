@@ -10,6 +10,8 @@ import type {
   StatsPage,
 } from '@lobstah/core';
 import type { GlassRead, GlassVerdict, GlassWrite } from './answers.js';
+import { GLASS_TABS } from '../src/glass-diff.js';
+import type { GlassTab } from '../src/glass-diff.js';
 import { setChecklistSource } from './checklists.js';
 import type { ChecklistSource } from './checklists.js';
 
@@ -21,6 +23,8 @@ export type { GlassRead, GlassVerdict, GlassWrite } from './answers.js';
  * talks to its wharf. Components and actions never fetch on their own.
  */
 export interface GlassBackend {
+  /** What this source can fill and do. The UI hides a tab or control it lacks; it never shows one empty. */
+  capabilities: GlassCapabilities;
   /** One poll. With the last ETag, an unchanged snapshot answers only its beats. Throws when the server answers an error. */
   poll(etag: string | null): Promise<GlassPoll>;
   /** The whole snapshot now, read once after a write so its result shows. */
@@ -53,6 +57,38 @@ export interface GlassBackend {
 export type GlassPoll =
   { kind: 'snapshot'; snapshot: GlassSnapshot; etag: string | null } | { kind: 'unchanged'; beats: GlassBeats | undefined };
 
+/** The tabs a source fills, and the actions it takes beyond reading. */
+export interface GlassCapabilities {
+  /** The tabs shown, in GLASS_TABS order. A hash for any other tab opens the deck. */
+  tabs: readonly GlassTab[];
+  /** The controls shown. A control for an action not listed here does not render. */
+  actions: ReadonlySet<GlassAction>;
+}
+
+/** The actions a glass can offer that not every source takes. */
+export const GLASS_ACTIONS = [
+  /** Raise a live trap's window on this machine. */
+  'focus',
+  /** Ask the helm for a new trap. */
+  'trap-request',
+  /** Switch the helm between brief and full chat. */
+  'helm-chat',
+  /** Set or move a TODO's time. */
+  'todo-schedule',
+  /** Acknowledge PR and stack attention. */
+  'pr-ack',
+  /** Ask for, see or dismiss a review round. */
+  'review-request',
+  /** Attach files to a decision's answer. */
+  'answer-files',
+  /** Page in history older than the snapshot. */
+  'older',
+] as const;
+export type GlassAction = (typeof GLASS_ACTIONS)[number];
+
+/** Everything: the local daemon fills every tab and takes every action. */
+export const ALL_CAPABILITIES: GlassCapabilities = { tabs: GLASS_TABS, actions: new Set(GLASS_ACTIONS) };
+
 let current: GlassBackend | undefined;
 
 /** Choose the page's backend, once, before it starts. */
@@ -66,3 +102,9 @@ export function backend(): GlassBackend {
   if (!current) throw new Error('The glass has no backend; call setBackend before starting it.');
   return current;
 }
+
+/** Whether this page's source takes an action. Before a backend is set (the hosted glass's own pages), nothing optional shows. */
+export const can = (action: GlassAction): boolean => current?.capabilities.actions.has(action) ?? false;
+
+/** The tabs this page shows. */
+export const visibleTabs = (): readonly GlassTab[] => current?.capabilities.tabs ?? GLASS_TABS;

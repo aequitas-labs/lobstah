@@ -693,7 +693,7 @@ build). The UI lives in `packages/glass-ui`, which the hosted glass bundles too;
 | `apps/cli/glass/index.html` | the document shell: head, the stylesheet slot, the script slot |
 | `apps/cli/glass/src/main.ts` | the local entry: `startGlassPage(localBackend)` |
 | `ui/glass.css` | every style; the design tokens (palette including the `.pr-*` badge states, spacing scale, card, badge, and modal metrics) are custom properties at the top |
-| `ui/backend.ts` | `GlassBackend`, the one seam between the UI and its host: every read and write the page makes |
+| `ui/backend.ts` | `GlassBackend`, the one seam between the UI and its host: every read and write the page makes, and its capabilities (the tabs it fills, the actions it takes; the UI hides the rest) |
 | `ui/backends/local.ts` | the local backend: `/data*`, `/report/*`, `/api/*` and `POST /requests` on the daemon that serves the page |
 | `ui/start.ts` | `startGlassPage(backend)`: builds the store from localStorage and the URL, renders `App` into the body on every change, starts polling (or renders one report on `/report/<key>`) |
 | `ui/store.ts` | the one store: the latest snapshot, the route, the prefs, the open modal, the stale flag, the lob state |
