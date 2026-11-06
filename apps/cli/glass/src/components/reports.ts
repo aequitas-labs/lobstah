@@ -1,7 +1,7 @@
 import type { GlassReport } from '@lobstah/core';
 import { reportFrom, reportPageUrl } from '../../../src/glass-diff.js';
 import type { SectionInputs } from '../../../src/glass-diff.js';
-import { html } from '../html.js';
+import { html } from '../../../../../packages/glass-ui/ui/html.js';
 import { Age, Table, ageText } from './common.js';
 
 /**

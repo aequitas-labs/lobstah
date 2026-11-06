@@ -5,7 +5,7 @@ import { Fragment } from 'preact';
 import type { GlassPr, GlassStack } from '@lobstah/core';
 import { prBadgeClass, shownPrAttention } from '../../../src/glass-diff.js';
 import type { PrsInputs } from '../../../src/glass-diff.js';
-import { html } from '../html.js';
+import { html } from '../../../../../packages/glass-ui/ui/html.js';
 import {
   Age,
   Table,
@@ -23,7 +23,7 @@ import {
   watchCell,
 } from './common.js';
 import type { OlderControl } from './common.js';
-import { LinkedText } from './links.js';
+import { LinkedText } from '../../../../../packages/glass-ui/ui/components/links.js';
 
 /**
  * The PRs tab: PRs grouped by stack, then the watches that are not PR

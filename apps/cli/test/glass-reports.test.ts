@@ -9,7 +9,7 @@ import { dispatchReportKey, ensureLayout, fileReport, listReports } from '@lobst
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass, serveReport } from '../src/glass.js';
-import { imageDisplay, markdownImageSources, parseMarkdown, parseInline } from '../src/glass-markdown.js';
+import { imageDisplay, markdownImageSources, parseMarkdown, parseInline } from '../../../packages/glass-ui/src/glass-markdown.js';
 import { createHash } from 'node:crypto';
 import { lobItems } from '../src/glass-lobs.js';
 import { NOTE_MAX } from '../src/glass-poll.js';
@@ -325,7 +325,7 @@ describe('glass: cards keep their text inside', () => {
     expect(style(badge).getPropertyValue('flex')).toMatch(/^0 1 auto$/);
     expect(style(meta)).toMatchObject({ overflow: 'hidden' });
     // happy-dom does not compute line clamping: read the rule itself.
-    const css = fs.readFileSync(new URL('../glass/glass.css', import.meta.url), 'utf8');
+    const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8');
     for (const sel of ['.card .meta', '.card .note']) {
       const rule = css.slice(css.indexOf(`${sel} {`), css.indexOf('}', css.indexOf(`${sel} {`)));
       expect(rule, sel).toMatch(/-webkit-line-clamp: 2;/);

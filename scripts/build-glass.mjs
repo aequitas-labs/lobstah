@@ -1,5 +1,5 @@
 // Build the spyglass page: bundle apps/cli/glass/src/main.ts (esbuild,
-// one IIFE), minify apps/cli/glass/glass.css, inline both into
+// one IIFE), minify packages/glass-ui/ui/glass.css, inline both into
 // apps/cli/glass/index.html, and emit the result as one string module,
 // apps/cli/src/glass-page.generated.ts, which serveGlass imports. The page
 // stays one self-contained document, including the pet sprite and star;
@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const glass = path.join(root, 'apps', 'cli', 'glass');
+// The shared UI both glasses bundle: components, glass.css and the pure helpers.
+const glassUi = path.join(root, 'packages', 'glass-ui');
 const out = path.join(root, 'apps', 'cli', 'src', 'glass-page.generated.ts');
 const distOut = path.join(root, 'apps', 'cli', 'dist', 'glass-page.generated.js');
 const watch = process.argv.includes('--watch');
@@ -45,7 +47,7 @@ export async function buildGlass({ minify: min = minify } = {}) {
   });
   // Line endings are the checkout's (CRLF on Windows); the page is the same bytes everywhere.
   const read = (f) => fs.readFileSync(path.join(glass, f), 'utf8').replace(/\r\n/g, '\n');
-  const css = await esbuild.transform(read('glass.css'), {
+  const css = await esbuild.transform(fs.readFileSync(path.join(glassUi, 'ui', 'glass.css'), 'utf8').replace(/\r\n/g, '\n'), {
     loader: 'css',
     // Whitespace only: syntax minification rewrites values (bold → 700),
     // which the fidelity test's computed-style diff would rightly flag.
@@ -100,9 +102,11 @@ if (isMain) {
       clearTimeout(timer);
       timer = setTimeout(once, 50);
     };
-    // The client also imports the pure helpers from apps/cli/src.
+    // The client also imports the shared UI and the pure helpers from apps/cli/src.
     fs.watch(glass, { recursive: true }, rebuild);
+    fs.watch(path.join(glassUi, 'ui'), { recursive: true }, rebuild);
+    fs.watch(path.join(glassUi, 'src'), { recursive: true }, rebuild);
     for (const f of ['glass-diff.ts', 'glass-lobs.ts']) fs.watch(path.join(root, 'apps', 'cli', 'src', f), rebuild);
-    console.log('glass: watching apps/cli/glass (restart `lobstah glass` to serve a rebuilt page)');
+    console.log('glass: watching apps/cli/glass and packages/glass-ui (restart `lobstah glass` to serve a rebuilt page)');
   }
 }

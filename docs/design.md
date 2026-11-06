@@ -685,12 +685,16 @@ overrides the global, which overrides the adapter default.
 The spyglass (`lobstah glass`) is served as one self-contained HTML document,
 but it is written as ordinary source files under `apps/cli/glass/`, rendered
 with [Preact](https://preactjs.com) and [htm](https://github.com/developit/htm)
-(tagged-template markup, no JSX build):
+(tagged-template markup, no JSX build). What the hosted glass also renders lives
+in `packages/glass-ui`: `ui/glass.css`, `ui/html.ts`, `ui/app-badge.ts`, the
+shared components under `ui/components/` (Markdown, links, harness icons), and the
+Node-free Markdown and link parsers under `src/`, which the CLI imports as
+`@lobstah/glass-ui`. Both glass builds bundle that package from source.
 
 | File | Holds |
 |---|---|
 | `index.html` | the document shell: head, the stylesheet slot, the script slot |
-| `glass.css` | every style; the design tokens (palette including the `.pr-*` badge states, spacing scale, card, badge, and modal metrics) are custom properties at the top |
+| `packages/glass-ui/ui/glass.css` | every style; the design tokens (palette including the `.pr-*` badge states, spacing scale, card, badge, and modal metrics) are custom properties at the top |
 | `src/store.ts` | the one store: the latest snapshot, the route, the prefs, the open modal, the stale flag, the lob state |
 | `src/actions.ts` | every change the page can make (open or close a modal, set a preference, hide a lob, receive a snapshot) |
 | `src/main.ts` | the entry: builds the store from localStorage and the URL, renders `App` into the body on every change, starts polling |

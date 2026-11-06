@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { archivedDecisionDir, atomicRenameSync, decisionDir, readArchivedDecision, readDecision, readDecisionAnswer, readDecisionDetail, readReport, readReportMarkdown, reportDir, uniqueTempPath } from '@lobstah/core';
 import type { ChecklistProgress } from '@lobstah/core';
-import { markdownTasks, parseMarkdown } from './glass-markdown.js';
+import { markdownTasks, parseMarkdown } from '@lobstah/glass-ui';
 
 /** A missing document, changed task, or closed card cannot accept a tick. */
 export class ChecklistError extends Error {

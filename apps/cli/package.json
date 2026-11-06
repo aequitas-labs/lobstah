@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@lobstah/core": "workspace:*",
+    "@lobstah/glass-ui": "workspace:*",
     "@lobstah/pick": "workspace:*",
     "@lobstah/runner": "workspace:*",
     "@lobstah/supervisor": "workspace:*",

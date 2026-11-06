@@ -1,10 +1,10 @@
-import { HarnessIcon } from '../../../../apps/cli/glass/src/components/harness-icon.js';
+import { HarnessIcon } from '../../../../packages/glass-ui/ui/components/harness-icon.js';
 import logo from '../../../../docs/assets/favicon.png';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { acked, html, Session, when } from './common.js';
 import { Boats } from './boats.js';
 import { Document, Job, ReviewActions } from './details.js';
-import { safeHref } from '../../../../apps/cli/src/glass-markdown.js';
+import { safeHref } from '../../../../packages/glass-ui/src/glass-markdown.js';
 import { DeviceApproval } from './device.js';
 import { HttpError, json } from './api.js';
 import { AuthScreen, authDestination, authEntry } from './auth-screen.js';
@@ -14,8 +14,8 @@ import { glassWake } from './wake.js';
 import { parseRoute, routeHash, TABS } from './route.js';
 import type { Item, Tab } from './route.js';
 import type { DispatchView, Snapshot } from './model.js';
-import { setDecisionBadge } from '../../../../apps/cli/glass/src/app-badge.js';
-import { LinkedText } from '../../../../apps/cli/glass/src/components/links.js';
+import { setDecisionBadge } from '../../../../packages/glass-ui/ui/app-badge.js';
+import { LinkedText } from '../../../../packages/glass-ui/ui/components/links.js';
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(),

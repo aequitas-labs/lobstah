@@ -2,8 +2,8 @@ import { GLASS_TABS, olderLeft, sectionInputs } from '../../../src/glass-diff.js
 import type { GlassOlderKind } from '@lobstah/core';
 import type { GlassTab } from '../../../src/glass-diff.js';
 import { closeModal, modalOrder, unreadOrder } from '../actions.js';
-import { html } from '../html.js';
-import type { Children } from '../html.js';
+import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import type { Children } from '../../../../../packages/glass-ui/ui/html.js';
 import { viewOf } from '../store.js';
 import type { GlassState } from '../store.js';
 import type { OlderControl } from './common.js';

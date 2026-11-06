@@ -4,7 +4,7 @@ import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_TABS } from '../../../src/glass-diff.js';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../../src/glass-diff.js';
 import { setPrefs, showModal } from '../actions.js';
-import { html } from '../html.js';
+import { html } from '../../../../../packages/glass-ui/ui/html.js';
 import { GrantChip } from './session-grants.js';
 import { Age, Harness, opener } from './common.js';
 

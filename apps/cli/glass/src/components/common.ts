@@ -7,11 +7,11 @@ import type { DispatchDetail, ModalType } from '../../../src/glass-diff.js';
 import { copyText, loadOlder, openLightbox, openTrapWindow, READ_ONLY_REASON, requestTrap, showModal } from '../actions.js';
 import { getState } from '../store.js';
 import { prReviewUrl } from '../../../../../packages/core/src/pr-review.js';
-import { html } from '../html.js';
-import type { Children } from '../html.js';
-import { linkParts } from '../../../src/glass-links.js';
-import { LinkedText, UrlLink } from './links.js';
-import { HarnessIcon, harnessLabel } from './harness-icon.js';
+import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import type { Children } from '../../../../../packages/glass-ui/ui/html.js';
+import { linkParts } from '../../../../../packages/glass-ui/src/glass-links.js';
+import { LinkedText, UrlLink } from '../../../../../packages/glass-ui/ui/components/links.js';
+import { HarnessIcon, harnessLabel } from '../../../../../packages/glass-ui/ui/components/harness-icon.js';
 import { workerMetadata } from '../../../../../packages/core/src/worker-metadata.js';
 import type { WorkerMetadata, WorkerConfig } from '@lobstah/core';
 

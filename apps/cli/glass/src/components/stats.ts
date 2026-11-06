@@ -1,6 +1,6 @@
 import type { StatsDay, StatsPage } from '@lobstah/core';
 import { focusStatsDay } from '../actions.js';
-import { html } from '../html.js';
+import { html } from '../../../../../packages/glass-ui/ui/html.js';
 import { PetArt } from './pet-art.js';
 
 /**
