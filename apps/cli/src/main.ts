@@ -290,7 +290,7 @@ import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle, trapTabTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
-import { fileDispatchReport, fileHelmReport, reportRows, unattachedWarning } from './report-file.js';
+import { fileDispatchReport, fileHelmReport, reportRows, unattachedDecisionWarning, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
@@ -2187,6 +2187,7 @@ async function mainCli(): Promise<void> {
       }
       const { meta, replaced } = asked;
       const url = `${glassUrl(glassPort())}/${decisionHash(meta.key)}`;
+      const unshown = unattachedDecisionWarning(meta);
       console.log(
         toonKV({
           key: meta.key,
@@ -2197,6 +2198,7 @@ async function mainCli(): Promise<void> {
           attachments: meta.attachments.length,
           stored: decisionDir(meta.key)!,
           ...(replaced.length ? { replaced: replaced.join(', ') } : {}),
+          ...(unshown ? { warning: unshown } : {}),
         }),
       );
       console.log(

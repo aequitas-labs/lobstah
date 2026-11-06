@@ -8,7 +8,7 @@ import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as http from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   awaitingReply,
@@ -853,6 +853,31 @@ function decisionAnswerRequest(raw: unknown): { key: string; option?: string; te
  */
 const PAGE = GLASS_PAGE;
 
+/**
+ * The page's Content-Security-Policy. Its one inline script runs by hash;
+ * its inline stylesheet and style attributes are allowed. Images load from
+ * the glass, data and blob URLs (pasted files), and https (a card's remote
+ * images). Fetches and the manifest stay on the glass itself.
+ */
+export function glassPageCsp(page: string): string {
+  const script = /<script>([\s\S]*?)<\/script>/.exec(page)?.[1] ?? '';
+  const hash = createHash('sha256').update(script, 'utf8').digest('base64');
+  return [
+    "default-src 'none'",
+    `script-src 'sha256-${hash}'`,
+    "style-src 'unsafe-inline'",
+    "img-src 'self' https: data: blob:",
+    "connect-src 'self'",
+    "manifest-src 'self'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join('; ');
+}
+
+/** The headers the page is served with. */
+const PAGE_HEADERS = { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': glassPageCsp(PAGE) };
+
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(
   port: number,
@@ -1285,7 +1310,7 @@ export function serveGlass(
         res.end(JSON.stringify(row ?? { error: 'report not found' }));
         return;
       }
-      res.writeHead(row ? 200 : 404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.writeHead(row ? 200 : 404, { ...PAGE_HEADERS, 'cache-control': 'no-store' });
       res.end(PAGE);
     } else if ((req.url?.startsWith('/report/') || req.url?.startsWith('/decision/')) && req.method === 'GET' && serveReport(req.url, res)) {
       return;
@@ -1372,7 +1397,7 @@ export function serveGlass(
         }
       });
     } else {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.writeHead(200, PAGE_HEADERS);
       res.end(PAGE);
     }
   };

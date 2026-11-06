@@ -18,6 +18,8 @@ function mimeType(name: string): string {
     case '.png': return 'image/png';
     case '.jpg':
     case '.jpeg': return 'image/jpeg';
+    case '.gif': return 'image/gif';
+    case '.webp': return 'image/webp';
     case '.pdf': return 'application/pdf';
     case '.txt':
     case '.md':

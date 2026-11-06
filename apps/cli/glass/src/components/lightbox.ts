@@ -16,7 +16,7 @@ export function LightboxView({ box }: { box: Lightbox | null }) {
   };
   return html`<div id="lightbox" class="lightbox" role="dialog" aria-label=${box.name} onClick=${onBackdrop}>
     <button type="button" class="lbclose" title="close" onClick=${closeLightbox}>×</button>
-    <img class="lbimg" src=${box.src} alt=${box.name} />
-    <a class="lboriginal" href=${box.src} target="_blank" rel="noopener">open original · ${box.name}</a>
+    <img class="lbimg" src=${box.src} alt=${box.name} referrerpolicy="no-referrer" />
+    <a class="lboriginal" href=${box.src} target="_blank" rel="noopener noreferrer">open original · ${box.name}</a>
   </div>`;
 }

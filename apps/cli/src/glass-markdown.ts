@@ -45,6 +45,40 @@ export function bareImageName(src: string): string | undefined {
   return /^[^/\\:?#]+$/.test(s) && s !== '.' && s !== '..' ? s : undefined;
 }
 
+/** Where a Markdown body is shown: a decision card may load remote images, a report may not. */
+export type ImageSurface = 'card' | 'report';
+
+/**
+ * How one `![alt](src)` shows: an attachment by its bare name, a remote
+ * https image loaded inline (cards only), a plain link to a remote https
+ * image (reports), or nothing (any other scheme, a path, or a data URI).
+ */
+export type ImageDisplay =
+  | { kind: 'attachment'; name: string }
+  | { kind: 'remote'; url: string }
+  | { kind: 'link'; url: string };
+
+/** An https URL with no credentials, normalized; anything else is undefined. */
+function httpsImageUrl(src: string): string | undefined {
+  const s = src.trim();
+  if (!/^https:\/\/[^\s]+$/i.test(s)) return undefined;
+  try {
+    const url = new URL(s);
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The image policy: bare attachment names everywhere, https inline on cards and as a link on reports. */
+export function imageDisplay(src: string, surface: ImageSurface): ImageDisplay | undefined {
+  const name = bareImageName(src);
+  if (name) return { kind: 'attachment', name };
+  const url = httpsImageUrl(src);
+  if (!url) return undefined;
+  return surface === 'card' ? { kind: 'remote', url } : { kind: 'link', url };
+}
+
 // Inline -------------------------------------------------------------------
 
 function findClose(s: string, from: number, open: string, close: string): number {
@@ -314,6 +348,28 @@ function inlineText(nodes: MdInline[]): string {
 /** Task items in document order, including nested lists and block quotes. */
 export function markdownTasks(blocks: MdBlock[]): Array<Extract<MdBlock, { t: 'task' }>> {
   return blocks.flatMap((block) => block.t === 'task' ? [block] : block.t === 'list' ? block.items.flatMap(markdownTasks) : block.t === 'quote' ? markdownTasks(block.c) : []);
+}
+
+/** Each image's source in document order, in every block, link, and emphasis. */
+export function markdownImageSources(blocks: MdBlock[]): string[] {
+  const fromInline = (nodes: MdInline[]): string[] => nodes.flatMap((node) => node.t === 'img' ? [node.src] : 'c' in node ? fromInline(node.c) : []);
+  return blocks.flatMap((block): string[] => {
+    switch (block.t) {
+      case 'h':
+      case 'p':
+      case 'task':
+        return fromInline(block.c);
+      case 'list':
+        return block.items.flatMap(markdownImageSources);
+      case 'quote':
+        return markdownImageSources(block.c);
+      case 'table':
+        return [...block.head, ...block.rows.flat()].flatMap(fromInline);
+      case 'code':
+      case 'hr':
+        return [];
+    }
+  });
 }
 
 /** Parse Markdown and assign each task its document index and a short text hash. */

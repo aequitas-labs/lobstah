@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { AttachmentError, copyAttachments } from './attachments.js';
+import { ReportError, attachSources, linkAttachedImages } from './reports.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { newRequestId, readRequest, requestFilesDir, requestsDir, writeRequest } from './requests.js';
 import type { DecisionAnswerPayload } from './requests.js';
@@ -421,6 +422,15 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     detail = fs.readFileSync(opts.detailFile, 'utf8');
   }
   if (Buffer.byteLength(detail) > DECISION_DETAIL_MAX) throw new DecisionError(`detail exceeds ${DECISION_DETAIL_MAX} bytes`);
+  // As `man file` does: an --attach path may be given from the detail file's directory.
+  const pageDir = opts.detailFile !== undefined ? path.dirname(path.resolve(opts.detailFile)) : process.cwd();
+  let sources: string[];
+  try {
+    sources = opts.detailFile !== undefined ? attachSources(pageDir, opts.attach ?? [], []) : (opts.attach ?? []);
+  } catch (err) {
+    if (err instanceof ReportError) throw new DecisionError(err.message);
+    throw err;
+  }
   let rid = randomBytes(4).toString('hex');
   while (fs.existsSync(path.join(decisionsRoot(), rid))) rid = randomBytes(4).toString('hex');
   const key = `decision:${rid}`;
@@ -428,17 +438,22 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   fs.mkdirSync(dir, { recursive: true });
   let attached: Attachment[];
   try {
-    attached = copyAttachments(opts.attach ?? [], path.join(dir, 'attachments'), opts.maxBytes);
+    attached = copyAttachments(sources, path.join(dir, 'attachments'), opts.maxBytes);
   } catch (err) {
     fs.rmSync(dir, { recursive: true, force: true });
     if (err instanceof AttachmentError) throw new DecisionError(err.message);
     throw err;
   }
+  // A relative image link to an attached file shows that file: it is linked by its stored name.
+  const images = linkAttachedImages(detail, pageDir, sources, attached);
+  detail = images.markdown;
   const renamed: Record<string, string> = {};
-  (opts.attach ?? []).forEach((file, i) => {
+  sources.forEach((file, i) => {
     const base = path.basename(file);
     if (attached[i] && attached[i]!.name !== base) renamed[base] = attached[i]!.name;
   });
+  // A link rewritten to a stored name must reach that file, not a rename of it.
+  for (const name of images.linked) delete renamed[name];
   const askedAt = (opts.now ?? new Date()).toISOString();
   const meta: DecisionMeta = {
     key,
