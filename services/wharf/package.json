@@ -5,7 +5,9 @@
   "scripts": {
     "build": "node ../../scripts/build-wharf-glass.mjs && tsc --noEmit && tsc -p glass",
     "test": "node ../../scripts/build-wharf-glass.mjs && vitest run",
-    "types": "wrangler types --include-runtime false"
+    "types": "wrangler types --include-runtime false",
+    "deploy": "pnpm run build && node scripts/wrangler-local.mjs deploy",
+    "wrangler": "node scripts/wrangler-local.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.0",
