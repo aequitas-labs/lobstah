@@ -118,7 +118,7 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
     const [account, jobs] = await Promise.all([need<WharfGlass>('/api/glass'), need<DispatchView[]>('/api/glass/dispatches')]);
     await decisionTexts(account.documents);
     glass = account;
-    return wharfSnapshot(account, jobs, now(), texts, WRITES_BY_COOKIE, viewerDevice(navigator.userAgent));
+    return wharfSnapshot(account, jobs, now(), texts, WRITES_BY_COOKIE, viewerDevice(globalThis.navigator?.userAgent ?? ''));
   }
 
   const doc = (key: string): WharfDocument | undefined => glass?.documents.find((d) => d.id === key);
