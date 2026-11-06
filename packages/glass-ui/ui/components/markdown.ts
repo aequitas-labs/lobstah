@@ -3,6 +3,7 @@ import { imageDisplay, markdownImageSources, markdownTasks, parseMarkdown, safeH
 import type { ImageSurface, MdBlock, MdInline } from '../../src/glass-markdown.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../html.js';
+import { checklistSource } from '../checklists.js';
 import type { Children } from '../html.js';
 
 /** Shared safe Markdown: raw HTML stays text; images resolve to owned files, or to https on a card. */
@@ -246,9 +247,9 @@ export function MarkdownElements({
       if (saving.current || document.hidden) return;
       const version = revision.current;
       try {
-        const response = await fetch(`/api/checklist?key=${encodeURIComponent(documentKey)}`, { cache: 'no-store' });
+        const response = await checklistSource().load(documentKey);
         if (!response.ok) throw new Error('Checklist could not be loaded.');
-        const stored = (await response.json()) as ChecklistProgress;
+        const stored = response.data;
         if (!disposed && !saving.current && version === revision.current) {
           setProgress(stored);
           setError('');
@@ -273,12 +274,8 @@ export function MarkdownElements({
     setError('');
     setProgress({ ...progress, items: progress.items.map((item) => (item.id === id ? { ...item, checked } : item)) });
     try {
-      const response = await fetch('/requests', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-lobstah-token': token ?? '' },
-        body: JSON.stringify({ kind: 'checklist-tick', payload: { key: documentKey, item: id, checked } }),
-      });
-      const stored = (await response.json()) as ChecklistProgress & { ok: boolean; reason?: string };
+      const response = await checklistSource().tick(documentKey, id, checked, token ?? '');
+      const stored = response.body;
       if (!response.ok || !stored.ok) throw new Error(stored.reason ?? 'Checklist could not be saved.');
       if (version === revision.current) setProgress(stored);
     } catch (failure) {

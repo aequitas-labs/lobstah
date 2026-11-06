@@ -1,6 +1,6 @@
-import sprite from '../../../../../docs/assets/lob-sprite.png';
-import star from '../../../../../docs/assets/star.png';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import sprite from '../../../../docs/assets/lob-sprite.png';
+import star from '../../../../docs/assets/star.png';
+import { html } from '../html.js';
 
 /** Embed the existing pet art: even a standalone page keeps the lobster and star together. */
 export const PetArt = () =>

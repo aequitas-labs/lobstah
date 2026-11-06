@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GlassSnapshot, TendAttention } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
-import { lobItems } from '../src/glass-lobs.js';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
 import { NOW, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';

@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import type { Grant } from '@lobstah/core';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import { html } from '../html.js';
 import { reviewRequest } from '../actions.js';
 
 export function activeSessionGrants(grants: Grant[], now = Date.now()): Grant[] {

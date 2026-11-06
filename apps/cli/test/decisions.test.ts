@@ -27,7 +27,7 @@ import {
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { applyCull, planCull } from '../src/cull.js';
 import { buildGlassSnapshot, serveAttachment, serveGlass } from '../src/glass.js';
-import { decisionFromHash } from '../src/glass-diff.js';
+import { decisionFromHash } from '../../../packages/glass-ui/src/glass-diff.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**

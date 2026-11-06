@@ -1,7 +1,7 @@
-import type { GlassBeats, GlassSnapshot } from '@lobstah/core';
 import { loadSettings, loadStats, markStale, receive, receiveBeats, refreshDetail } from './actions.js';
 import { getState } from './store.js';
 import { sendPresence } from './presence.js';
+import { backend } from './backend.js';
 
 /**
  * Polling: /data every 2s, one request at a time, and not at all while the
@@ -17,30 +17,21 @@ let inflight = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 let etag: string | null = null;
 
-function beatsOf(r: Response): GlassBeats | undefined {
-  const raw = r.headers?.get('x-lobstah-beats');
-  if (!raw) return undefined;
-  try {
-    return JSON.parse(decodeURIComponent(raw)) as GlassBeats;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function poll(): Promise<void> {
   if (inflight) return;
   inflight = true;
   void sendPresence();
   try {
-    const r = await fetch('/data', { cache: 'no-store', headers: etag ? { 'if-none-match': etag } : {} });
-    if (r.status === 304) {
-      const beats = beatsOf(r);
-      if (beats) receiveBeats(beats);
-      else receive(await refetch());
-    } else {
-      if (!r.ok) throw new Error(`/data answered ${r.status}`);
-      etag = r.headers?.get('etag') ?? null;
-      receive((await r.json()) as GlassSnapshot);
+    let answer = await backend().poll(etag);
+    // An unchanged answer that carried no beats: read the whole snapshot, without the ETag.
+    if (answer.kind === 'unchanged' && !answer.beats) {
+      etag = null;
+      answer = await backend().poll(null);
+    }
+    if (answer.kind === 'unchanged') receiveBeats(answer.beats!);
+    else {
+      etag = answer.etag;
+      receive(answer.snapshot);
     }
     void refreshDetail();
     if (getState().route === 'stats') void loadStats();
@@ -50,15 +41,6 @@ export async function poll(): Promise<void> {
   } finally {
     inflight = false;
   }
-}
-
-/** A whole body, without the ETag: a 304 that carried no beats. */
-async function refetch(): Promise<GlassSnapshot> {
-  etag = null;
-  const r = await fetch('/data', { cache: 'no-store' });
-  if (!r.ok) throw new Error(`/data answered ${r.status}`);
-  etag = r.headers?.get('etag') ?? null;
-  return (await r.json()) as GlassSnapshot;
 }
 
 const startPoll = () => {

@@ -1,5 +1,5 @@
 import { closeLightbox } from '../actions.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import { html } from '../html.js';
 import type { Lightbox } from '../store.js';
 
 /**

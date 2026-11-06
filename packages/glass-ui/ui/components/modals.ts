@@ -1,12 +1,12 @@
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
-import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
-import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../../src/glass-diff.js';
-import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../../src/glass-diff.js';
+import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
+import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl, trapFileUrl } from '../../src/glass-diff.js';
+import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../src/glass-diff.js';
 import { closeModal, setLobs, setView, showModal, changeHelmChat } from '../actions.js';
 import { useState } from 'preact/hooks';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import { html } from '../html.js';
 import { reportByline } from './report.js';
-import { LinkedText } from '../../../../../packages/glass-ui/ui/components/links.js';
+import { LinkedText } from './links.js';
 import {
   Age,
   WorkerDetails,

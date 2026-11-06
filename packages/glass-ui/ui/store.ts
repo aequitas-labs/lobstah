@@ -1,7 +1,7 @@
 import type { GlassSettings } from '@lobstah/core';
 import type { GlassOlderKind, GlassSnapshot, StatsPage } from '@lobstah/core';
-import { withOlder } from '../../src/glass-diff.js';
-import type { DispatchDetail, GlassOlder, GlassPrefs, GlassTab, ModalRef } from '../../src/glass-diff.js';
+import { withOlder } from '../src/glass-diff.js';
+import type { DispatchDetail, GlassOlder, GlassPrefs, GlassTab, ModalRef } from '../src/glass-diff.js';
 
 /**
  * The page's one store. Every component is a pure function of this state;

@@ -683,26 +683,26 @@ overrides the global, which overrides the adapter default.
 ## Glass source
 
 The spyglass (`lobstah glass`) is served as one self-contained HTML document,
-but it is written as ordinary source files under `apps/cli/glass/`, rendered
-with [Preact](https://preactjs.com) and [htm](https://github.com/developit/htm)
-(tagged-template markup, no JSX build). What the hosted glass also renders lives
-in `packages/glass-ui`: `ui/glass.css`, `ui/html.ts`, `ui/app-badge.ts`, the
-shared components under `ui/components/` (Markdown, links, harness icons), and the
-Node-free Markdown and link parsers under `src/`, which the CLI imports as
-`@lobstah/glass-ui`. Both glass builds bundle that package from source.
+written as ordinary source files and rendered with [Preact](https://preactjs.com)
+and [htm](https://github.com/developit/htm) (tagged-template markup, no JSX
+build). The UI lives in `packages/glass-ui`, which the hosted glass bundles too;
+`apps/cli/glass/` holds only the local page's shell and its two-line entry.
 
 | File | Holds |
 |---|---|
-| `index.html` | the document shell: head, the stylesheet slot, the script slot |
-| `packages/glass-ui/ui/glass.css` | every style; the design tokens (palette including the `.pr-*` badge states, spacing scale, card, badge, and modal metrics) are custom properties at the top |
-| `src/store.ts` | the one store: the latest snapshot, the route, the prefs, the open modal, the stale flag, the lob state |
-| `src/actions.ts` | every change the page can make (open or close a modal, set a preference, hide a lob, receive a snapshot) |
-| `src/main.ts` | the entry: builds the store from localStorage and the URL, renders `App` into the body on every change, starts polling |
-| `src/poll.ts` | `/data` polling: every 2s, one request at a time, paused while the tab is hidden; a 304 applies only the beats (server time and heartbeats) |
-| `src/route.ts` | the hash tabs (`#deck`, `#dispatches`, `#traps`, `#prs`, `#notices`) |
-| `src/prefs.ts` | the per-browser preferences and lob hides, in localStorage |
-| `src/components/*.ts` | `App`, `Header`, `Deck`, `Dispatches`, `Traps`, `PRs`, `Notices`, `Modal` (dispatch, trap, helm, PR, settings), `Lobs` |
-| `src/html.ts` | htm bound to Preact's `h` |
+| `apps/cli/glass/index.html` | the document shell: head, the stylesheet slot, the script slot |
+| `apps/cli/glass/src/main.ts` | the local entry: `startGlassPage(localBackend)` |
+| `ui/glass.css` | every style; the design tokens (palette including the `.pr-*` badge states, spacing scale, card, badge, and modal metrics) are custom properties at the top |
+| `ui/backend.ts` | `GlassBackend`, the one seam between the UI and its host: every read and write the page makes |
+| `ui/backends/local.ts` | the local backend: `/data*`, `/report/*`, `/api/*` and `POST /requests` on the daemon that serves the page |
+| `ui/start.ts` | `startGlassPage(backend)`: builds the store from localStorage and the URL, renders `App` into the body on every change, starts polling (or renders one report on `/report/<key>`) |
+| `ui/store.ts` | the one store: the latest snapshot, the route, the prefs, the open modal, the stale flag, the lob state |
+| `ui/actions.ts` | every change the page can make (open or close a modal, set a preference, hide a lob, receive a snapshot) |
+| `ui/poll.ts` | snapshot polling: every 2s, one request at a time, paused while the tab is hidden; an unchanged answer applies only the beats (server time and heartbeats) |
+| `ui/route.ts` | the hash tabs (`#deck`, `#dispatches`, `#traps`, `#prs`, `#notices`) |
+| `ui/prefs.ts` | the per-browser preferences and lob hides, in localStorage |
+| `ui/components/*.ts` | `App`, `Header`, `Deck`, `Dispatches`, `Traps`, `PRs`, `Notices`, `Modal` (dispatch, trap, helm, PR, settings), `Lobs`, and the Markdown, link and harness-icon pieces |
+| `ui/html.ts` | htm bound to Preact's `h` |
 
 Components are pure functions of the store. A new snapshot re-renders the
 page and Preact's reconciliation changes only the DOM whose data changed:
@@ -711,9 +711,10 @@ modal keeps its nodes across ticks, and scroll positions stay where the
 reader left them — no per-section hashing or manual node preservation. Only
 the active tab's section renders.
 
-The pure helpers stay beside the server in `apps/cli/src` and are imported by
-both sides: `glass-diff.ts` (the per-section selectors, tab route, filters,
-PR modal data) and `glass-lobs.ts` (which lobs walk). The `/data` payload
+The pure helpers live in `packages/glass-ui/src` and are imported by both
+sides (the CLI as `@lobstah/glass-ui`, the page from source): `glass-diff.ts`
+(the per-section selectors, tab route, filters, PR modal data), `glass-lobs.ts`
+(which lobs walk), and the Markdown and link parsers. The `/data` payload
 type, `GlassSnapshot`, lives in `@lobstah/core`: `glass-poll.ts` builds it
 from `buildGlassSnapshot()` and every component reads it, so a renamed field
 fails typecheck on both sides. `/data` carries dispatch summaries and the

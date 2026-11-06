@@ -102,11 +102,10 @@ if (isMain) {
       clearTimeout(timer);
       timer = setTimeout(once, 50);
     };
-    // The client also imports the shared UI and the pure helpers from apps/cli/src.
+    // The entry is here; the UI and its pure helpers are the shared package.
     fs.watch(glass, { recursive: true }, rebuild);
     fs.watch(path.join(glassUi, 'ui'), { recursive: true }, rebuild);
     fs.watch(path.join(glassUi, 'src'), { recursive: true }, rebuild);
-    for (const f of ['glass-diff.ts', 'glass-lobs.ts']) fs.watch(path.join(root, 'apps', 'cli', 'src', f), rebuild);
     console.log('glass: watching apps/cli/glass and packages/glass-ui (restart `lobstah glass` to serve a rebuilt page)');
   }
 }

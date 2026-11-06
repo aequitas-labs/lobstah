@@ -249,7 +249,7 @@ import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
 import { requestShow, validShowHash } from './glass-presence.js';
-import { decisionHash } from './glass-diff.js';
+import { decisionHash } from '@lobstah/glass-ui';
 import { focusTrap } from './focus.js';
 import {
   glassLines,

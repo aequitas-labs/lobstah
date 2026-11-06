@@ -9,7 +9,7 @@ import { addPrWatch, observePr } from '../src/pr-watch.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildDigest, renderDigest } from '../src/digest.js';
 import { deriveGlassPrs } from '../src/glass-prs.js';
-import { lobItems } from '../src/glass-lobs.js';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { loadGlass } from './glass-dom.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { emptyFleet } from './fixtures/glass-snapshots.js';

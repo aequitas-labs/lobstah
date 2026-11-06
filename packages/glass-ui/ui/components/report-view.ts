@@ -1,10 +1,10 @@
 import type { GlassReport } from '@lobstah/core';
-import { reportMarkdownUrl } from '../../../src/glass-diff.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import { backend } from '../backend.js';
+import { html } from '../html.js';
 import type { Lightbox } from '../store.js';
 import { LightboxView } from './lightbox.js';
 import { ReportSection } from './report.js';
-import { LinkedText } from '../../../../../packages/glass-ui/ui/components/links.js';
+import { LinkedText } from './links.js';
 
 /**
  * A report on its own page (`/report/<key>`): fetched once and rendered
@@ -34,20 +34,19 @@ export function ReportShell({ view, box }: { view: ReportViewState; box: Lightbo
 
 /** Load a report's row and markdown once. */
 export async function loadReportView(key: string): Promise<ReportViewState> {
-  const enc = encodeURIComponent(key);
   let report: GlassReport;
   let token: string | undefined;
   try {
-    const res = await fetch(`/report/${enc}/meta`);
+    const res = await backend().report(key);
     if (!res.ok) return { state: 'error', error: `report not found (${res.status})` };
-    token = res.headers?.get('x-lobstah-token') ?? undefined;
-    report = JSON.parse(await res.text()) as GlassReport;
+    token = res.token;
+    report = res.data;
   } catch {
     return { state: 'error', error: 'report could not be read' };
   }
   try {
-    const res = await fetch(reportMarkdownUrl(key));
-    const page = res.ok ? { text: await res.text() } : { error: `report not found (${res.status})` };
+    const res = await backend().reportText(key);
+    const page = res.ok ? { text: res.data } : { error: `report not found (${res.status})` };
     return { state: 'ready', report, ...page, ...(token ? { token } : {}) };
   } catch {
     return { state: 'ready', report, error: 'report could not be read' };
@@ -63,11 +62,7 @@ export async function loadReportView(key: string): Promise<ReportViewState> {
 export async function markReportViewed(view: ReportViewState): Promise<void> {
   if (view.state !== 'ready' || view.text === undefined || view.report.acked || !view.token) return;
   try {
-    await fetch('/requests', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-lobstah-token': view.token },
-      body: JSON.stringify({ kind: 'report-viewed', payload: { key: view.report.key } }),
-    });
+    await backend().request('report-viewed', { key: view.report.key }, view.token);
   } catch {
     // The next open tries again.
   }

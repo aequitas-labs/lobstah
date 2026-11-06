@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import type { GlassSnapshot, GlassTrap } from '@lobstah/core';
-import { trapView } from '../src/glass-diff.js';
+import { trapView } from '../../../packages/glass-ui/src/glass-diff.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';

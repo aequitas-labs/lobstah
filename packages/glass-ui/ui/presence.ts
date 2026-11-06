@@ -1,4 +1,5 @@
-import { reportFromHash, reportPageUrl, validShowHash } from '../../src/glass-diff.js';
+import { reportFromHash, reportPageUrl, validShowHash } from '../src/glass-diff.js';
+import { backend } from './backend.js';
 
 /**
  * Presence: this page tells the glass server it is open, so the desktop pet
@@ -89,11 +90,10 @@ export async function sendPresence(): Promise<void> {
   if (inflight) return;
   inflight = true;
   try {
-    const vis = document.hidden ? 'hidden' : 'visible';
-    const app = window.matchMedia?.('(display-mode: standalone)').matches ? '&app=1' : '';
-    const r = await fetch(`/api/presence?page=${id()}&vis=${vis}${app}`, { method: 'POST', cache: 'no-store' });
+    const app = !!window.matchMedia?.('(display-mode: standalone)').matches;
+    const r = await backend().presence(id(), !document.hidden, app);
     if (!r.ok) return;
-    applyShow(((await r.json()) as { show?: unknown } | null)?.show);
+    applyShow(r.data?.show);
   } catch {
     // the next poll or heartbeat tries again
   } finally {

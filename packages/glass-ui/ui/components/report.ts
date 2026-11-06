@@ -1,13 +1,13 @@
 import type { Attachment, GlassReport } from '@lobstah/core';
-import type { ImageSurface } from '../../../../../packages/glass-ui/src/glass-markdown.js';
-import { MarkdownElements, inlineAttachmentNames } from '../../../../../packages/glass-ui/ui/components/markdown.js';
+import type { ImageSurface } from '../../src/glass-markdown.js';
+import { MarkdownElements, inlineAttachmentNames } from './markdown.js';
 import { getState } from '../store.js';
 import { openLightbox } from '../actions.js';
-import { reportFileUrl, reportFrom } from '../../../src/glass-diff.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
-import type { Children } from '../../../../../packages/glass-ui/ui/html.js';
+import { reportFileUrl, reportFrom } from '../../src/glass-diff.js';
+import { html } from '../html.js';
+import type { Children } from '../html.js';
 import { Age, ImageThumb, attachmentRows, cmdRow } from './common.js';
-import { LinkedText } from '../../../../../packages/glass-ui/ui/components/links.js';
+import { LinkedText } from './links.js';
 
 type FileUrl = (name: string) => string;
 const markdown = (

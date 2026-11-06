@@ -9,13 +9,14 @@ import {
   modalItem,
   openDecisionOrder,
   unreadDecisions,
-} from '../../src/glass-diff.js';
-import type { GlassPrefs, ModalRef, ModalType } from '../../src/glass-diff.js';
+} from '../src/glass-diff.js';
+import type { GlassPrefs, ModalRef, ModalType } from '../src/glass-diff.js';
 import { saveLobHidden, savePrefs } from './prefs.js';
 import { getState, setState, viewOf } from './store.js';
 import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
-import { setDecisionBadge } from '../../../../packages/glass-ui/ui/app-badge.js';
+import { setDecisionBadge } from './app-badge.js';
+import { backend } from './backend.js';
 
 /** Everything the page can do: each action updates the store (and localStorage for preferences). */
 
@@ -121,9 +122,9 @@ export function openDecision(key?: string): void {
 /** Fetch a closed card only when its deep link is outside the live queue. */
 async function loadClosedDecision(key: string): Promise<void> {
   try {
-    const response = await fetch(`/data/decision/${encodeURIComponent(key)}`);
-    if (!response.ok) return;
-    const archivedDecision = (await response.json()) as import('@lobstah/core').GlassDecision;
+    const answer = await backend().decision(key);
+    if (!answer.ok) return;
+    const archivedDecision = answer.data;
     if (getState().decisionModal?.key === key) setState({ archivedDecision });
   } catch {
     /* The existing empty state remains when a card cannot be read. */
@@ -187,11 +188,7 @@ export async function markViewed(key: string): Promise<void> {
   const token = state.snapshot?.focusToken;
   if (!token) return;
   try {
-    await fetch('/requests', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
-      body: JSON.stringify({ kind: 'decision-viewed', payload: { key } }),
-    });
+    await backend().request('decision-viewed', { key }, token);
   } catch {
     // The next view tries again on a fresh page; the count here already treats it as seen.
   }
@@ -216,10 +213,8 @@ export async function refreshDetail(): Promise<void> {
   const id = key.slice(key.indexOf(':') + 1);
   let next: { data?: GlassDispatch; error?: string };
   try {
-    const r = await fetch(`/data/dispatch/${encodeURIComponent(id)}`, { cache: 'no-store' });
-    next = r.ok
-      ? { data: (await r.json()) as GlassDispatch }
-      : { error: r.status === 404 ? 'this dispatch is gone' : `the detail answered ${r.status}` };
+    const r = await backend().dispatch(id);
+    next = r.ok ? { data: r.data } : { error: r.status === 404 ? 'this dispatch is gone' : `the detail answered ${r.status}` };
   } catch {
     next = { error: 'the detail could not be read' };
   }
@@ -236,9 +231,9 @@ export async function loadStats(): Promise<void> {
   if (statsInflight) return;
   statsInflight = true;
   try {
-    const r = await fetch('/data/stats', { cache: 'no-store' });
+    const r = await backend().stats();
     if (!r.ok) throw new Error(`/data/stats answered ${r.status}`);
-    setState({ stats: (await r.json()) as StatsPage, statsError: null });
+    setState({ stats: r.data, statsError: null });
   } catch {
     setState({ statsError: 'stats could not be read' });
   } finally {
@@ -253,9 +248,9 @@ export async function loadSettings(): Promise<void> {
   if (settingsInflight) return;
   settingsInflight = true;
   try {
-    const r = await fetch('/data/settings', { cache: 'no-store' });
+    const r = await backend().settings();
     if (!r.ok) throw new Error(`/data/settings answered ${r.status}`);
-    setState({ settings: (await r.json()) as GlassSettings, settingsError: null });
+    setState({ settings: r.data, settingsError: null });
   } catch {
     setState({ settingsError: 'Settings could not be read' });
   } finally {
@@ -274,10 +269,9 @@ export async function loadOlder(kind: GlassOlderKind): Promise<void> {
   if (olderLoading) return;
   setState({ olderLoading: kind, olderError: null });
   try {
-    const r = await fetch(`/data/older?kind=${kind}&offset=${older[kind].length}&limit=50`, { cache: 'no-store' });
+    const r = await backend().older(kind, older[kind].length, 50);
     if (!r.ok) throw new Error(`/data/older answered ${r.status}`);
-    const page = (await r.json()) as GlassOlderPage;
-    setState({ older: addOlder(getState().older, page), olderLoading: null });
+    setState({ older: addOlder(getState().older, r.data), olderLoading: null });
   } catch {
     setState({ olderLoading: null, olderError: { kind, text: 'older records could not be read' } });
   }
@@ -382,20 +376,17 @@ export async function sendAnswer(key: string): Promise<void> {
   }
   setDraft(key, { sending: true, error: undefined });
   try {
-    const response = await fetch('/requests', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
-      body: JSON.stringify({
-        kind: 'decision-answer',
-        payload: {
-          key,
-          ...(draft.option ? { option: draft.option } : {}),
-          ...(text.trim() ? { text } : {}),
-          files: files.map((f) => ({ name: f.name, data: f.data })),
-        },
-      }),
-    });
-    const result = (await response.json()) as { ok?: boolean; reason?: string };
+    const response = await backend().request(
+      'decision-answer',
+      {
+        key,
+        ...(draft.option ? { option: draft.option } : {}),
+        ...(text.trim() ? { text } : {}),
+        files: files.map((f) => ({ name: f.name, data: f.data })),
+      },
+      token,
+    );
+    const result = response.body;
     if (!response.ok || !result.ok) {
       setDraft(key, { sending: false, error: result.reason ?? `The answer was refused (${response.status}).` });
       return;
@@ -442,11 +433,7 @@ export async function openTrapWindow(trapId: string): Promise<void> {
   const token = getState().snapshot?.focusToken;
   if (!token) return;
   try {
-    const response = await fetch(`/api/focus/${encodeURIComponent(trapId)}`, {
-      method: 'POST',
-      headers: { 'x-lobstah-focus-token': token },
-    });
-    const result = (await response.json()) as { message?: string; reason?: string };
+    const result = (await backend().focus(trapId, token)).body;
     setState({ focusResults: { ...getState().focusResults, [trapId]: result.message ?? result.reason ?? 'Window focus failed' } });
   } catch {
     setState({ focusResults: { ...getState().focusResults, [trapId]: 'Window focus failed' } });
@@ -463,18 +450,13 @@ export async function requestTrap(repo: string, harness: string): Promise<string
   const token = snapshot?.focusToken;
   if (!token) return snapshot?.viewer?.onMachine === false ? READ_ONLY_REASON : 'The glass has no page token yet.';
   try {
-    const response = await fetch('/requests', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
-      body: JSON.stringify({ kind: 'trap-request', payload: { repo, harness } }),
-    });
-    const result = (await response.json()) as { ok?: boolean; reason?: string };
+    const result = (await backend().request('trap-request', { repo, harness }, token)).body;
     if (!result.ok) return result.reason ?? 'The request was refused.';
   } catch {
     return 'The request could not be sent.';
   }
   try {
-    receive((await (await fetch('/data')).json()) as GlassSnapshot);
+    receive(await backend().snapshot());
   } catch {
     // the next poll shows it
   }
@@ -516,18 +498,13 @@ async function glassRequest(kind: string, payload: Record<string, unknown>): Pro
   const token = snapshot?.focusToken;
   if (!token) return snapshot?.viewer?.onMachine === false ? READ_ONLY_REASON : 'The glass has no page token yet.';
   try {
-    const response = await fetch('/requests', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
-      body: JSON.stringify({ kind, payload }),
-    });
-    const result = (await response.json()) as { ok?: boolean; reason?: string };
+    const result = (await backend().request(kind, payload, token)).body;
     if (!result.ok) return result.reason ?? 'The request was refused.';
   } catch {
     return 'The request could not be sent.';
   }
   try {
-    receive((await (await fetch('/data')).json()) as GlassSnapshot);
+    receive(await backend().snapshot());
   } catch {
     // the next poll shows it
   }
@@ -567,16 +544,12 @@ export async function copyText(text: string): Promise<boolean> {
 export async function ackPrAttention(items: Array<{ key: string; stateHash: string }>): Promise<void> {
   const token = getState().snapshot?.focusToken;
   if (!token) throw new Error('Reload the glass before acknowledging.');
-  const response = await fetch('/requests', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
-    body: JSON.stringify({ kind: 'pr-ack', payload: { items: items.map(({ key, stateHash }) => ({ key, stateHash })) } }),
-  });
-  const result = (await response.json()) as {
+  const response = await backend().request<{
     ok: boolean;
     reason?: string;
     acked?: Array<{ key: string; stateHash: string; at: string; by: string }>;
-  };
+  }>('pr-ack', { items: items.map(({ key, stateHash }) => ({ key, stateHash })) }, token);
+  const result = response.body;
   if (!response.ok || !result.ok) throw new Error(result.reason ?? 'Could not acknowledge PRs.');
   const snapshot = getState().snapshot;
   if (snapshot)
@@ -598,12 +571,8 @@ async function permissionsProposalRequest(
 ): Promise<{ diff?: string; diffHash?: string }> {
   const token = getState().snapshot?.focusToken;
   if (!token) throw new Error('Reload this page before answering the proposal.');
-  const response = await fetch('/requests', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
-    body: JSON.stringify({ kind, payload }),
-  });
-  const result = (await response.json()) as { ok?: boolean; reason?: string; diff?: string; diffHash?: string };
+  const response = await backend().request<{ ok?: boolean; reason?: string; diff?: string; diffHash?: string }>(kind, payload, token);
+  const result = response.body;
   if (!response.ok || !result.ok) throw new Error(result.reason ?? 'The permission proposal request failed.');
   return result;
 }
