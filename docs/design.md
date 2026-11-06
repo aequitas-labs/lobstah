@@ -689,6 +689,11 @@ build). The UI lives in `packages/glass-ui`, which the hosted glass bundles too;
 `apps/cli/glass/` holds only the local page's shell and its two-line entry;
 the hosted glass (`services/wharf/glass/src/main.ts`) mounts the same UI on the
 wharf backend with its sign-in around it, so the two never drift apart.
+`apps/cli/test/glass-parity.test.ts` holds that: the same snapshot, rendered by
+the local page's entry on the wharf's capabilities and by the hosted glass, must
+give identical HTML for every shared tab and modal; `services/wharf/glass/src` may
+hold only the host's files, and its stylesheet only the sign-in screen's rules.
+A new view goes in `packages/glass-ui/ui/components`, where both glasses get it.
 
 | File | Holds |
 |---|---|
