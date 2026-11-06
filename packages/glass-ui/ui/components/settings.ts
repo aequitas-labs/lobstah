@@ -1,5 +1,5 @@
 import type { GlassSettings, SettingRow } from '@lobstah/core';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import { html } from '../html.js';
 
 /** A repo's trap count beside its cap, `3 of 5 traps`; a count past its cap says so. */
 export function trapCountText(traps: { used: number; limit?: number }): string {

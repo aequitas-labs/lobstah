@@ -1,9 +1,9 @@
 import { useState } from 'preact/hooks';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
-import type { SectionInputs } from '../../../src/glass-diff.js';
+import type { SectionInputs } from '../../src/glass-diff.js';
 import { reviewRequest } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
 
 /**

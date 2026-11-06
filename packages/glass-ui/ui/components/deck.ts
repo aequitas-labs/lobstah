@@ -8,10 +8,10 @@ import {
   goalLine,
   prBadgeClass,
   reportPageUrl,
-} from '../../../src/glass-diff.js';
-import type { DeckAttention, DeckInputs, GlassPrefs } from '../../../src/glass-diff.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
-import type { Children } from '../../../../../packages/glass-ui/ui/html.js';
+} from '../../src/glass-diff.js';
+import type { DeckAttention, DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
+import { html } from '../html.js';
+import type { Children } from '../html.js';
 import {
   Age,
   lastPassText,
@@ -40,7 +40,7 @@ import { GrantChip } from './session-grants.js';
 import { reportMeta } from './reports.js';
 import { PrAck } from './prs.js';
 import { DeckDecisions } from './decisions.js';
-import { LinkedText } from '../../../../../packages/glass-ui/ui/components/links.js';
+import { LinkedText } from './links.js';
 import { Todos } from './todos.js';
 import type { DecisionDraft } from '../store.js';
 

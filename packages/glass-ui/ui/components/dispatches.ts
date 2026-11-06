@@ -1,6 +1,6 @@
 import type { GlassDispatchSummary as GlassDispatch } from '@lobstah/core';
-import type { SectionInputs } from '../../../src/glass-diff.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import type { SectionInputs } from '../../src/glass-diff.js';
+import { html } from '../html.js';
 import {
   heavyPlace,
   ActivityLine,

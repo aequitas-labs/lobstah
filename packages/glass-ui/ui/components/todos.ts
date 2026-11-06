@@ -1,9 +1,9 @@
 import type { HelmPassView, TodoView } from '@lobstah/core';
 import { useState } from 'preact/hooks';
 import { scheduleTodo } from '../actions.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import { html } from '../html.js';
 import { Age, lastPassText } from './common.js';
-import { LinkedText } from '../../../../../packages/glass-ui/ui/components/links.js';
+import { LinkedText } from './links.js';
 
 /** The times the box offers in one click. They go through the same parser as anything typed. */
 const SCHEDULE_PRESETS: ReadonlyArray<{ label: string; until: string }> = [

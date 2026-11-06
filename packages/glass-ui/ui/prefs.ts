@@ -1,4 +1,4 @@
-import type { GlassPrefs } from '../../src/glass-diff.js';
+import type { GlassPrefs } from '../src/glass-diff.js';
 
 /**
  * This browser's preferences and filters, kept in localStorage — the

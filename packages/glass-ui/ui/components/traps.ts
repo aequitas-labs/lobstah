@@ -1,11 +1,11 @@
-import { HarnessIcon } from '../../../../../packages/glass-ui/ui/components/harness-icon.js';
-import { validDesktopStartLink } from '../../../../../packages/core/src/desktop-start-link.js';
+import { HarnessIcon } from './harness-icon.js';
+import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
 import type { Grant } from '@lobstah/core';
 import { GrantChip } from './session-grants.js';
-import type { GlassTrapView as GlassTrap } from '../../../src/glass-diff.js';
-import type { SectionInputs } from '../../../src/glass-diff.js';
-import { catchCount } from '../../../src/glass-diff.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
+import type { SectionInputs } from '../../src/glass-diff.js';
+import { catchCount } from '../../src/glass-diff.js';
+import { html } from '../html.js';
 import {
   badgeLong,
   badgeTitle,

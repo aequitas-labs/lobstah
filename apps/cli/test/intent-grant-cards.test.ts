@@ -8,7 +8,7 @@ import { addGrant, answerDecision, enqueue, ensureLayout, GrantError, INTENT_ALW
 import type { DecisionMeta, Grant, GrantIntent } from '@lobstah/core';
 import { applyPermissionAnswer, askPermission, checkCall, permissionAnswerAllowed } from '../src/grants-cli.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
-import { grantExpiryText } from '../glass/src/components/session-grants.js';
+import { grantExpiryText } from '../../../packages/glass-ui/ui/components/session-grants.js';
 import { loadGlass } from './glass-dom.js';
 import { NOW, emptyFleet } from './fixtures/glass-snapshots.js';
 import { removeTempDir } from '../../../test/temp-dir.js';

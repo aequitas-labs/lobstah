@@ -11,7 +11,7 @@ import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass, serveReport } from '../src/glass.js';
 import { imageDisplay, markdownImageSources, parseMarkdown, parseInline } from '../../../packages/glass-ui/src/glass-markdown.js';
 import { createHash } from 'node:crypto';
-import { lobItems } from '../src/glass-lobs.js';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { NOTE_MAX } from '../src/glass-poll.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';

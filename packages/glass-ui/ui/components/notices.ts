@@ -1,9 +1,9 @@
 import type { Notice } from '@lobstah/core';
-import type { SectionInputs } from '../../../src/glass-diff.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import type { SectionInputs } from '../../src/glass-diff.js';
+import { html } from '../html.js';
 import { Age, ShowOlder, Table } from './common.js';
 import type { OlderControl } from './common.js';
-import { LinkedText } from '../../../../../packages/glass-ui/ui/components/links.js';
+import { LinkedText } from './links.js';
 
 /** The Notices tab: always a table, whatever the view. */
 const row = (n: Notice) =>

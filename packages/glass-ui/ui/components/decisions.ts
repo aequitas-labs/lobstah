@@ -1,9 +1,9 @@
 import { DesktopStartAction } from './common.js';
-import { validDesktopStartLink } from '../../../../../packages/core/src/desktop-start-link.js';
+import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
 import type { Attachment } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
-import { decisionFileUrl } from '../../../src/glass-diff.js';
-import type { DecisionCard } from '../../../src/glass-diff.js';
+import { decisionFileUrl } from '../../src/glass-diff.js';
+import type { DecisionCard } from '../../src/glass-diff.js';
 import {
   addFiles,
   HOTKEY_MAX,
@@ -18,11 +18,11 @@ import {
   stepDecision,
   toggleOption,
 } from '../actions.js';
-import { html } from '../../../../../packages/glass-ui/ui/html.js';
+import { html } from '../html.js';
 import type { DecisionDraft } from '../store.js';
 import { Age, ImageThumb, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
-import { LinkedText } from '../../../../../packages/glass-ui/ui/components/links.js';
+import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
 
 /**

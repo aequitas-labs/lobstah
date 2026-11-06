@@ -10,7 +10,7 @@ import type {
   GlassSnapshot,
   Notice,
 } from '@lobstah/core';
-import { LANDED_WINDOW_MS } from './glass-diff.js';
+import { LANDED_WINDOW_MS } from '@lobstah/glass-ui';
 
 /**
  * What /data sends on each 2s poll, from a full snapshot: dispatch
