@@ -60,13 +60,14 @@ node -e '
 echo "database_id $id is in wrangler.jsonc (not a secret; commit it)"
 
 step "4/7 GitHub OAuth app client ID"
-if grep -q '"GITHUB_CLIENT_ID": ""' wrangler.jsonc; then
+# The deployed vars line is the one that admits Chris; env.local's stays empty.
+if grep -q '"GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "\[\\"5472765' wrangler.jsonc; then
   echo "Open $OAUTH_APPS_URL, open the \"lobstah glass\" app, and copy its Client ID."
   read -r -p "Client ID: " client_id
   [ -n "$client_id" ] || { echo "No client ID; stopping." >&2; exit 1; }
   node -e '
     const fs = require("fs"); const [file, id] = process.argv.slice(1);
-    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("\"GITHUB_CLIENT_ID\": \"\"", JSON.stringify("GITHUB_CLIENT_ID") + ": " + JSON.stringify(id)));
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("\"GITHUB_CLIENT_ID\": \"\", \"GITHUB_ALLOWLIST\": \"[\\\"5472765", "\"GITHUB_CLIENT_ID\": " + JSON.stringify(id) + ", \"GITHUB_ALLOWLIST\": \"[\\\"5472765"));
   ' wrangler.jsonc "$client_id"
 fi
 echo "client ID set"
