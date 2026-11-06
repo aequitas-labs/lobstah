@@ -264,7 +264,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
   'man:brief': { flags: {} },
-  hook: { flags: {}, subverbs: ['session-start', 'user-prompt-submit', 'stop', 'post-tool-use', 'session-end', 'permission-request', 'pre-tool-use', 'grant-check'], maxPositionals: 1 },
+  hook: { flags: {}, subverbs: ['session-start', 'user-prompt-submit', 'stop', 'post-tool-use', 'session-end', 'permission-request', 'pre-tool-use', 'grant-check', 'permission-denied'], maxPositionals: 1 },
   'man:file': {
     flags: {
       '--attach': { value: '<file>', repeatable: true },
@@ -489,9 +489,9 @@ Stores the answer; the helm's man wait receives it as decision-answer.`,
 the conversation.`,
   hook: `The plugin hook entry points. Each detects the session's role (helm, trap, or
 neither): session-start runs man brief, user-prompt-submit adds a helm card reminder,
-stop runs man haul (--park, --timeout),
-post-tool-use runs soak beat, session-end runs stow --quiet. The older commands
-stay as aliases. permission-request and grant-check allow a trap's call a grant covers.`,
+stop runs man haul (--park, --timeout), post-tool-use runs soak beat, session-end
+runs stow --quiet. The older commands stay as aliases. permission-request and
+grant-check allow a call a grant covers; permission-denied files a refused command as a card.`,
   __runner: `Internal: run one dispatch inside the compiled binary (the daemon re-execs
 itself with this verb). Not for direct use.`,
   '__heavy-push': `Internal: the git hook shim's pre-push. Takes a heavy slot, then runs the repo's own hook.`,

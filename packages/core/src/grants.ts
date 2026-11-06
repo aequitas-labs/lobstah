@@ -33,6 +33,10 @@ import type { CheckoutRoot } from './grant-scope.js';
  * Claude Code and Codex, from the moment the grant is made. The sentence only
  * labels the grant for the person reading it. Anything that doesn't match goes
  * to the harness's own reviewer, unchanged and told nothing.
+ *
+ * A session command grant is a once-grant bound to one session: a glass
+ * Allow on a helm's command card. It covers that session's shell call with
+ * exactly the granted command, one time.
  */
 
 export type GrantHarness = 'claude' | 'codex' | 'any';
@@ -79,6 +83,7 @@ export interface Grant {
   /** The dispatch whose request it answered, when it came from a card. */
   dispatch?: string;
   expiresAt?: string;
+  /** A session grant's session; on a once-grant, the one session whose call it covers (a session command grant). */
   session?: string;
   tools?: string;
   hosts?: string[];
@@ -295,6 +300,7 @@ function pathCovers(want: string, have: string, sep: string): boolean {
 export function grantCovers(g: Grant, req: GrantRequest, roots: readonly CheckoutRoot[] = checkoutRoots()): boolean {
   if (g.mode === 'session') return sessionGrantCovers(g, req);
   if (g.mode === 'intent') return intentGrantCovers(g, req, roots);
+  if (g.mode === 'once' && g.session !== undefined) return sessionCommandGrantCovers(g, req);
   if (req.session) return false;
   if (req.session && g.session && req.session !== g.session) return false;
   if (g.harness !== 'any' && g.harness !== req.harness) return false;
@@ -581,6 +587,12 @@ export function addGrant(input: GrantInput, now = new Date(), roots: readonly Ch
     });
   }
   if (!command === !target) throw new GrantError('a grant names one command or one path');
+  if (input.session !== undefined) {
+    // A session command grant: one session, one exact command, one use.
+    if (input.mode !== 'once' || !command || (input.match ?? 'exact') !== 'exact')
+      throw new GrantError('a once-grant for a session names one exact command');
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(input.session)) throw new GrantError('a session command grant needs exactly one session id');
+  }
   if (command && input.match === 'prefix' && SHELL_JOINERS.test(command)) {
     throw new GrantError('a prefix grant cannot contain shell syntax (;, &, |, a redirect or a subshell); grant the exact command instead');
   }
@@ -603,6 +615,7 @@ export function addGrant(input: GrantInput, now = new Date(), roots: readonly Ch
     harness: input.harness ?? 'any',
     mode: input.mode,
     ...what,
+    ...(input.session !== undefined ? { session: input.session } : {}),
     ...(input.trap ? { trap: input.trap } : {}),
     ...(input.dispatch ? { dispatch: input.dispatch } : {}),
     ...(expiresAt ? { expiresAt } : {}),
@@ -782,6 +795,17 @@ export function sessionGrantCovers(g: Grant, req: GrantRequest): boolean {
     return grantCovers({ ...g, mode: 'once', session: undefined, trap: undefined }, { ...req, session: undefined }, []);
   }
   return hostsCover(g, req);
+}
+
+/**
+ * A session command grant covers its own session's shell call when the
+ * command is exactly the granted one. Sensitive targets stay uncovered.
+ */
+export function sessionCommandGrantCovers(g: Grant, req: GrantRequest): boolean {
+  if (g.command === undefined || !req.session || req.session !== g.session || !req.command) return false;
+  if (g.harness !== 'any' && g.harness !== req.harness) return false;
+  if (!SHELL_TOOLS.includes(req.tool.split('.').at(-1)!) || sessionGuarded(req)) return false;
+  return req.command.trim() === g.command.trim();
 }
 
 /** The shell tools: a grant covers one only through its command. */

@@ -992,12 +992,13 @@ async function mainCli(): Promise<void> {
     } catch { /* a reminder never breaks the user's turn */ }
     return;
   }
-  // The grant hooks: the Claude Code mod's question and Codex's
-  // PermissionRequest. Before any layout or parsing work; they never fail,
-  // and an error means no grant.
-  if (cmd === 'hook' && (args[0] === 'grant-check' || args[0] === 'permission-request' || args[0] === 'pre-tool-use')) {
-    const { grantCheckHook, permissionRequestHook } = await import('./grants-cli.js');
+  // The grant hooks: the Claude Code mod's question, PermissionRequest, and
+  // PermissionDenied, which files a helm's refused command as a card. Before
+  // any layout or parsing work; they never fail, and an error means no grant.
+  if (cmd === 'hook' && (args[0] === 'grant-check' || args[0] === 'permission-request' || args[0] === 'pre-tool-use' || args[0] === 'permission-denied')) {
+    const { grantCheckHook, permissionDeniedHook, permissionRequestHook } = await import('./grants-cli.js');
     if (args[0] === 'grant-check') grantCheckHook();
+    else if (args[0] === 'permission-denied') permissionDeniedHook();
     else permissionRequestHook(args[0] === 'pre-tool-use', args.includes('codex') ? 'codex' : 'claude');
     return;
   }
