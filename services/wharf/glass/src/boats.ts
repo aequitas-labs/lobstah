@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { html, value, when } from './common.js';
 import type { Action } from './common.js';
 import type { Boat } from './model.js';
-import { LinkedText } from '../../../../apps/cli/glass/src/components/links.js';
+import { LinkedText } from '../../../../packages/glass-ui/ui/components/links.js';
 export function Boats({ boats, action, deleteAccount }: { boats: Boat[]; action: Action; deleteAccount: () => Promise<void> }) {
   const [confirmation, setConfirmation] = useState(''),
     [repo, setRepo] = useState('');

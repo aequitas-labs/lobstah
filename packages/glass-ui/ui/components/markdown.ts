@@ -1,6 +1,6 @@
-import type { ChecklistProgress } from '../../../../../packages/core/src/checklist-types.js';
-import { imageDisplay, markdownImageSources, markdownTasks, parseMarkdown, safeHref } from '../../../src/glass-markdown.js';
-import type { ImageSurface, MdBlock, MdInline } from '../../../src/glass-markdown.js';
+import type { ChecklistProgress } from '../../../core/src/checklist-types.js';
+import { imageDisplay, markdownImageSources, markdownTasks, parseMarkdown, safeHref } from '../../src/glass-markdown.js';
+import type { ImageSurface, MdBlock, MdInline } from '../../src/glass-markdown.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../html.js';
 import type { Children } from '../html.js';

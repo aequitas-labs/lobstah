@@ -1,4 +1,4 @@
-import { linkParts } from '../../../src/glass-links.js';
+import { linkParts } from '../../src/glass-links.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 

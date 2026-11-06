@@ -2,7 +2,7 @@ import { useMemo } from 'preact/hooks';
 import { lobItems } from '../../../src/glass-lobs.js';
 import type { LobItem } from '../../../src/glass-lobs.js';
 import { hideLob, showModal } from '../actions.js';
-import { html } from '../html.js';
+import { html } from '../../../../../packages/glass-ui/ui/html.js';
 import type { GlassState } from '../store.js';
 import { PetArt } from './pet-art.js';
 import { reviewLink } from './common.js';

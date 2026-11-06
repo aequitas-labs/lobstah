@@ -8,7 +8,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { askDecision, decisionDir, ensureLayout, fileReport, listRequests, readDecisionAnswer, withdrawDecision } from '@lobstah/core';
 import { readChecklist, setChecklistTick } from '../src/checklists.js';
-import { markdownTasks, parseMarkdown } from '../src/glass-markdown.js';
+import { markdownTasks, parseMarkdown } from '../../../packages/glass-ui/src/glass-markdown.js';
 import { answerKey } from '../src/decision-answer.js';
 import { serveGlass } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
@@ -198,7 +198,7 @@ it('does not apply a late save response to a different card with the same task t
 it('bundles the shared Markdown renderer before core build artifacts exist', async () => {
   const { build } = await import('esbuild');
   const result = await build({
-    entryPoints: [fileURLToPath(new URL('../glass/src/components/markdown.ts', import.meta.url))],
+    entryPoints: [fileURLToPath(new URL('../../../packages/glass-ui/ui/components/markdown.ts', import.meta.url))],
     bundle: true, write: false, platform: 'browser', format: 'esm',
     plugins: [{ name: 'no-built-core', setup(bundler) {
       bundler.onResolve({ filter: /^@lobstah\/core(?:\/|$)/ }, () => ({ errors: [{ text: 'Shared Markdown must not depend on core build artifacts; wharf builds alongside core.' }] }));

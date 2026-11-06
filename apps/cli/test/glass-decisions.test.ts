@@ -578,7 +578,7 @@ describe('glass: the new-decision alert', () => {
   });
 
   it("is layered below every modal and backdrop by the stylesheet's layer tokens", () => {
-    const css = fs.readFileSync(new URL('../glass/glass.css', import.meta.url), 'utf8');
+    const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8');
     const zOf = (sel: string) => {
       const at = css.indexOf(`\n${sel} {`);
       expect(at).toBeGreaterThanOrEqual(0);

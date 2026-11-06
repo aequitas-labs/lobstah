@@ -282,7 +282,7 @@ describe('the social card', () => {
     const card: Image = pngDecode(built.card.png);
     expect([card.width, card.height]).toEqual([1200, 630]);
 
-    const css = read('apps', 'cli', 'glass', 'glass.css');
+    const css = read('packages', 'glass-ui', 'ui', 'glass.css');
     const [bg, fg, dim] = ['bg', 'fg', 'dim'].map((token) => glassColor(css, token) as number[]);
     for (const [x, y] of [[0, 0], [1199, 0], [0, 629], [1199, 629], [600, 20]]) expect(at(card, x, y)).toEqual(bg); // prettier-ignore
     const colours = new Set<string>();

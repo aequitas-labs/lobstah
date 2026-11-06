@@ -847,8 +847,9 @@ function decisionAnswerRequest(raw: unknown): { key: string; option?: string; te
 }
 
 /**
- * The page itself: built from apps/cli/glass (index.html, glass.css, and the
- * TypeScript under src/) by scripts/build-glass.mjs into one self-contained
+ * The page itself: built from apps/cli/glass (index.html and the TypeScript
+ * under src/) and the shared packages/glass-ui (glass.css and the components
+ * both glasses use) by scripts/build-glass.mjs into one self-contained
  * HTML string — CSS and JS inlined, nothing else to serve.
  */
 const PAGE = GLASS_PAGE;

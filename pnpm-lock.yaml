@@ -32,6 +32,9 @@ importers:
       '@lobstah/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@lobstah/glass-ui':
+        specifier: workspace:*
+        version: link:../../packages/glass-ui
       '@lobstah/pick':
         specifier: workspace:*
         version: link:../pick
@@ -97,6 +100,15 @@ importers:
       smol-toml:
         specifier: ^1.3.1
         version: 1.8.0
+
+  packages/glass-ui:
+    devDependencies:
+      htm:
+        specifier: ^3.1.1
+        version: 3.1.1
+      preact:
+        specifier: ^10.29.8
+        version: 10.29.8
 
   packages/runner:
     dependencies:

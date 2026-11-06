@@ -15,7 +15,7 @@ import { saveLobHidden, savePrefs } from './prefs.js';
 import { getState, setState, viewOf } from './store.js';
 import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
-import { setDecisionBadge } from './app-badge.js';
+import { setDecisionBadge } from '../../../../packages/glass-ui/ui/app-badge.js';
 
 /** Everything the page can do: each action updates the store (and localStorage for preferences). */
 

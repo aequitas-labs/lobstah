@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
-import { MarkdownElements } from '../../../../apps/cli/glass/src/components/markdown.js';
-import { safeHref } from '../../../../apps/cli/src/glass-markdown.js';
-import { LinkedText } from '../../../../apps/cli/glass/src/components/links.js';
+import { MarkdownElements } from '../../../../packages/glass-ui/ui/components/markdown.js';
+import { safeHref } from '../../../../packages/glass-ui/src/glass-markdown.js';
+import { LinkedText } from '../../../../packages/glass-ui/ui/components/links.js';
 import { fileText, fileUrl, json } from './api.js';
 import { acked, Files, html, OwnedImage, Session, value, when } from './common.js';
 import type { Action } from './common.js';
