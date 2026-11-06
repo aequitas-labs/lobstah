@@ -32,8 +32,8 @@ describe('the wharf account as a glass snapshot', () => {
   });
 
   it('shows a standing decision on the deck with its Markdown, options and files', () => {
-    expect(d.attention).toContainEqual(expect.objectContaining({ kind: 'decision', key: 'decision:card', verb: 'needs-decision' }));
-    const card = d.decisions!.find((x) => x.key === 'decision:card')!;
+    expect(d.attention).toContainEqual(expect.objectContaining({ kind: 'decision', key: 'card', verb: 'needs-decision' }));
+    const card = d.decisions!.find((x) => x.key === 'card')!;
     expect(card).toMatchObject({ title: 'Choose the next catch', detail: '# Pick one', options: ['Keep it small', 'Split the work'], askedBy: 'helm' });
     expect(card.attachments).toEqual([
       { name: 'lob.png', path: '', bytes: 100, type: '', url: '/api/glass/documents/card/files/image' },
@@ -41,9 +41,9 @@ describe('the wharf account as a glass snapshot', () => {
   });
 
   it('lists reports and workers', () => {
-    expect(d.reports.map((r) => [r.key, r.title, r.author])).toEqual([['report:report', 'Wharf progress', 'kind-crab']]);
+    expect(d.reports.map((r) => [r.key, r.title, r.author])).toEqual([['report', 'Wharf progress', 'kind-crab']]);
     expect(d.traps).toEqual([trapOf(snapshot.workers[0]!)]);
-    expect(d.traps[0]).toMatchObject({ trapId: 'kind-crab', live: false, harness: 'codex', sessionId: 'test-session', repo: 'lobstah' });
+    expect(d.traps[0]).toMatchObject({ trapId: 'kind-crab', live: false, harness: 'codex', sessionId: 'test-session', repo: 'lobstah', boat: 'chris-macbook' });
   });
 
   it('fakes nothing the wharf does not record', () => {
@@ -102,9 +102,10 @@ describe('the wharf backend', () => {
     return calls;
   }
 
-  it('fills only the tabs the wharf has, and takes none of the local-only actions', () => {
-    expect(WHARF_CAPABILITIES.tabs).toEqual(['deck', 'dispatches', 'traps', 'reviews', 'reports']);
-    expect([...WHARF_CAPABILITIES.actions]).toEqual([]);
+  it('fills only the tabs the wharf has, takes none of the local-only actions, and runs no daemon', () => {
+    expect(WHARF_CAPABILITIES.tabs).toEqual(['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports']);
+    expect([...WHARF_CAPABILITIES.actions]).toEqual(['message-helm', 'cancel', 'review-dismiss']);
+    expect(WHARF_CAPABILITIES.daemon).toBe(false);
   });
 
   it('reads the account and its jobs same-origin, with the cookie, and each decision file once', async () => {
@@ -122,7 +123,7 @@ describe('the wharf backend', () => {
     const calls = wharf();
     const b = createWharfBackend({ now: () => NOW });
     await b.poll(null);
-    const sent = await b.request('decision-answer', { key: 'decision:card', option: 'Keep it small', text: 'go', files: [] }, 'token');
+    const sent = await b.request('decision-answer', { key: 'card', option: 'Keep it small', text: 'go', files: [] }, 'token');
     expect(sent).toEqual({ ok: true, status: 200, body: { ok: true } });
     const post = calls.find((c) => c.init.method === 'POST')!;
     expect(post.path).toBe('/api/glass/documents/card/answer');
@@ -130,27 +131,45 @@ describe('the wharf backend', () => {
     expect((post.init.headers as Record<string, string>)['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it('acks a report it showed, records nothing for a viewed decision, and refuses what the wharf lacks', async () => {
+  it('acks a report or decision it showed, and refuses what the wharf lacks', async () => {
     const calls = wharf();
     const b = createWharfBackend({ now: () => NOW });
     await b.poll(null);
-    expect((await b.request('report-viewed', { key: 'report:report' }, 'token')).ok).toBe(true);
-    expect((await b.request('decision-viewed', { key: 'decision:card' }, 'token')).ok).toBe(true);
+    expect((await b.request('report-viewed', { key: 'report' }, 'token')).ok).toBe(true);
+    expect((await b.request('decision-viewed', { key: 'card' }, 'token')).ok).toBe(true);
     expect((await b.request('trap-request', { repo: 'lobstah', harness: 'claude' }, 'token')).body).toEqual({
       ok: false,
       reason: 'This is not available on the wharf.',
     });
-    expect((await b.request('decision-answer', { key: 'decision:card', files: [{ name: 'a.png' }] }, 'token')).ok).toBe(false);
-    expect(calls.filter((c) => c.init.method === 'POST').map((c) => c.path)).toEqual(['/api/glass/documents/report/ack']);
+    expect((await b.request('decision-answer', { key: 'card', files: [{ name: 'a.png' }] }, 'token')).ok).toBe(false);
+    expect(calls.filter((c) => c.init.method === 'POST').map((c) => c.path)).toEqual([
+      '/api/glass/documents/report/ack',
+      '/api/glass/documents/card/ack',
+    ]);
+  });
+
+  it("queues a message, cancels a job and asks a review's boat to dismiss it, each on the wharf's route", async () => {
+    const calls = wharf();
+    const b = createWharfBackend({ now: () => NOW });
+    await b.poll(null);
+    await b.request('message', { dispatch: 'job', text: 'Please retry' }, 'token');
+    await b.request('cancel', { dispatch: 'job' }, 'token');
+    await b.request('review-dismiss', { key: 'review-7' }, 'token');
+    const posts = calls.filter((c) => c.init.method === 'POST').map((c) => [c.path, JSON.parse(String(c.init.body))]);
+    expect(posts).toEqual([
+      ['/api/glass/requests', { id: expect.any(String), kind: 'message', dispatch: 'job', text: 'Please retry' }],
+      ['/api/glass/dispatches/job/cancel', {}],
+      ['/api/glass/requests', { id: expect.any(String), kind: 'review-dismiss', document: 'review-7' }],
+    ]);
   });
 
   it('opens a report on its own page, with its Markdown and a write marker that acks it', async () => {
     wharf();
     const b = createWharfBackend({ now: () => NOW });
-    const report = await b.report('report:report');
+    const report = await b.report('report');
     expect(report).toMatchObject({ ok: true, token: 'wharf-session' });
-    expect(await b.reportText('report:report')).toEqual({ ok: true, status: 200, data: markdown });
-    expect(await b.report('report:nope')).toEqual({ ok: false, status: 404 });
+    expect(await b.reportText('report')).toEqual({ ok: true, status: 200, data: markdown });
+    expect(await b.report('nope')).toEqual({ ok: false, status: 404 });
   });
 
   it("resolves files by name to the wharf's own file URLs", async () => {
@@ -158,9 +177,9 @@ describe('the wharf backend', () => {
     const b = createWharfBackend({ now: () => NOW });
     await b.poll(null);
     await b.dispatch('job');
-    expect(b.fileUrl({ kind: 'decision', key: 'decision:card' }, 'lob.png')).toBe('/api/glass/documents/card/files/image');
+    expect(b.fileUrl({ kind: 'decision', key: 'card' }, 'lob.png')).toBe('/api/glass/documents/card/files/image');
     expect(b.fileUrl({ kind: 'dispatch', lane: 'work', id: 'job' }, 'lob.png')).toBe('/api/glass/dispatches/job/files/worker-image');
-    expect(b.fileUrl({ kind: 'decision', key: 'decision:card' }, 'other.png')).toBe('');
+    expect(b.fileUrl({ kind: 'decision', key: 'card' }, 'other.png')).toBe('');
     expect(b.fileUrl({ kind: 'trap', trapId: 'kind-crab' }, 'a.png')).toBe('');
   });
 

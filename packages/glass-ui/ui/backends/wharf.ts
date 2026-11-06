@@ -1,8 +1,9 @@
 import type { GlassSnapshot } from '@lobstah/core';
 import type { GlassBackend, GlassCapabilities } from '../backend.js';
 import type { GlassRead, GlassVerdict, GlassWrite } from '../answers.js';
-import { decisionOf, dispatchDetail, reportOf, wharfFileUrl, wharfId, wharfSnapshot } from '../wharf-snapshot.js';
+import { decisionOf, dispatchDetail, reportOf, wharfFileUrl, wharfSnapshot } from '../wharf-snapshot.js';
 import type { DispatchView, WharfDetail, WharfDocument, WharfGlass } from '../wharf-model.js';
+import { viewerDevice } from '../../../core/src/viewer-device.js';
 
 /**
  * The hosted glass's backend: the wharf's cookie-only browser API on the
@@ -13,11 +14,21 @@ import type { DispatchView, WharfDetail, WharfDocument, WharfGlass } from '../wh
  * and every write carries a fresh Idempotency-Key.
  */
 
-/** What the wharf fills: no PRs, stacks, grants, TODOs, notices, stats or settings, and none of the local-only actions. */
+/**
+ * What the wharf fills: no PRs, stacks, grants, TODOs, notices, stats or
+ * settings, and none of the local-only actions. It adds the account's boats,
+ * messages and cancellation from a job, and dismissing a review.
+ */
 export const WHARF_CAPABILITIES: GlassCapabilities = {
-  tabs: ['deck', 'dispatches', 'traps', 'reviews', 'reports'],
-  actions: new Set(),
+  tabs: ['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports'],
+  actions: new Set(['message-helm', 'cancel', 'review-dismiss']),
+  daemon: false,
 };
+
+/** The wharf backend, and the account it last read (the hosted glass's boats and human requests). */
+export interface WharfBackend extends GlassBackend {
+  account(): WharfGlass | undefined;
+}
 
 /**
  * Marks the page as able to write. The shared UI holds back a write when the
@@ -43,7 +54,7 @@ interface WharfAnswer<T> {
   body: (T & { error?: string; message?: string }) | undefined;
 }
 
-export function createWharfBackend(options: WharfBackendOptions = {}): GlassBackend {
+export function createWharfBackend(options: WharfBackendOptions = {}): WharfBackend {
   const now = options.now ?? Date.now;
   let glass: WharfGlass | undefined;
   /** Decision Markdown read so far, by file id. Wharf files never change, so each is read once. */
@@ -107,14 +118,17 @@ export function createWharfBackend(options: WharfBackendOptions = {}): GlassBack
     const [account, jobs] = await Promise.all([need<WharfGlass>('/api/glass'), need<DispatchView[]>('/api/glass/dispatches')]);
     await decisionTexts(account.documents);
     glass = account;
-    return wharfSnapshot(account, jobs, now(), texts, WRITES_BY_COOKIE);
+    return wharfSnapshot(account, jobs, now(), texts, WRITES_BY_COOKIE, viewerDevice(navigator.userAgent));
   }
 
-  const doc = (key: string): WharfDocument | undefined => glass?.documents.find((d) => d.id === wharfId(key));
+  const doc = (key: string): WharfDocument | undefined => glass?.documents.find((d) => d.id === key);
   const missing = <T>(): GlassRead<T> => ({ ok: false, status: 404 });
 
   return {
     capabilities: WHARF_CAPABILITIES,
+    // The wake socket reads at once on a hint; the poll is the floor.
+    pollMs: 15000,
+    account: () => glass,
     async poll() {
       // The wharf sends no ETag; its wake socket and the 15 s poll say when to read again.
       return { kind: 'snapshot', snapshot: await load(), etag: null };
@@ -136,19 +150,33 @@ export function createWharfBackend(options: WharfBackendOptions = {}): GlassBack
     stats: async () => missing(),
     settings: async () => missing(),
     async request<T extends GlassVerdict>(kind: string, payload: unknown): Promise<GlassWrite<T>> {
-      const p = (payload ?? {}) as { key?: string; option?: string; text?: string; files?: unknown[] };
+      const p = (payload ?? {}) as { key?: string; option?: string; text?: string; files?: unknown[]; dispatch?: string };
+      const documentPath = (key: string | undefined, route: string) => `/api/glass/documents/${encodeURIComponent(key ?? '')}/${route}`;
       if (kind === 'decision-answer') {
         if (p.files?.length) return refused<T>('The wharf takes an option or text; attach files on the boat.');
-        return (await post(`/api/glass/documents/${encodeURIComponent(wharfId(p.key ?? ''))}/answer`, {
+        return (await post(documentPath(p.key, 'answer'), {
           ...(p.option ? { option: p.option } : {}),
           ...(p.text ? { text: p.text } : {}),
         })) as GlassWrite<T>;
       }
-      // Looking at a decision acknowledges nothing on a wharf; there is nothing to record.
-      if (kind === 'decision-viewed') return { ok: true, status: 200, body: { ok: true } as T };
-      // Opening a report is reading it: the wharf records that once, for every boat and the glass.
-      if (kind === 'report-viewed')
-        return (await post(`/api/glass/documents/${encodeURIComponent(wharfId(p.key ?? ''))}/ack`, {})) as GlassWrite<T>;
+      // Opening a decision or report is reading it: the wharf records that once, for every boat and the glass.
+      if (kind === 'decision-viewed' || kind === 'report-viewed') {
+        if (doc(p.key ?? '')?.ack) return { ok: true, status: 200, body: { ok: true } as T };
+        return (await post(documentPath(p.key, 'ack'), {})) as GlassWrite<T>;
+      }
+      // A message waits for the live helm to receipt it; a cancel fences the job's worker at once.
+      if (kind === 'message')
+        return (await post('/api/glass/requests', {
+          id: crypto.randomUUID(),
+          kind: 'message',
+          dispatch: p.dispatch,
+          text: p.text,
+        })) as GlassWrite<T>;
+      if (kind === 'cancel')
+        return (await post(`/api/glass/dispatches/${encodeURIComponent(p.dispatch ?? '')}/cancel`, {})) as GlassWrite<T>;
+      // The boat that drafted the review dismisses it; the wharf never touches GitHub.
+      if (kind === 'review-dismiss')
+        return (await post('/api/glass/requests', { id: crypto.randomUUID(), kind: 'review-dismiss', document: p.key })) as GlassWrite<T>;
       return refused<T>('This is not available on the wharf.');
     },
     focus: async () => refused('Window focus works only in the local glass.'),

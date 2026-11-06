@@ -6,7 +6,8 @@ import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { GrantChip } from './session-grants.js';
 import { Age, Harness, opener } from './common.js';
-import { visibleTabs } from '../backend.js';
+import { capabilities, visibleTabs } from '../backend.js';
+import { host } from '../host.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -14,6 +15,7 @@ const TAB_LABEL: Record<GlassTab, string> = {
   deck: 'On deck',
   dispatches: 'Dispatches',
   traps: 'Traps',
+  boats: 'Boats',
   prs: 'PRs',
   reviews: 'Reviews',
   reports: 'Reports',
@@ -38,7 +40,8 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       ]
     : html`<span class="bad">down</span>`;
   return [
-    html`<span class="chip">daemon ${daemon}</span>`,
+    // A daemon on this machine: its heartbeat. A wharf has none, so it shows none.
+    capabilities().daemon && html`<span class="chip">daemon ${daemon}</span>`,
     (inp.backends?.some((b) => b.kind === 'wharf') ? inp.backends : []).map(
       (b) =>
         html`<span class=${b.unavailable ? 'chip warn' : 'chip dim'} title=${b.url ?? 'local files'}>${b.grounds} · ${b.wharf ?? 'local'}${b.unavailable ? ' · unknown' : ''}</span>`,
@@ -53,6 +56,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       ({ x: h, stale }) =>
         html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds} · chat ${h.chat ?? 'full'}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span><${GrantChip} session=${h.sessionId} grants=${d.sessionGrants} /></span>`,
     ),
+    host().chips?.(),
   ];
 }
 
@@ -202,6 +206,6 @@ export function Header({
 export const Footer = ({ d }: { d: GlassSnapshot | undefined }) =>
   d && [
     html`<img class="glass-brand" src=${logo} alt="" />`,
-    ' lobstah v' + d.version + ' · ',
+    d.version ? ` lobstah v${d.version} · ` : ` lobstah · ${host().footer ? host().footer + ' · ' : ''}`,
     html`<a href=${d.repoUrl} target="_blank">${d.repoUrl.replace('https://github.com/', '')}</a>`,
   ];

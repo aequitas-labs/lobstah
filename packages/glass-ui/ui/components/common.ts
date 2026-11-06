@@ -194,10 +194,11 @@ export function windowAction(t: GlassTrap): Children {
     // The server focuses live traps only; a signed-off app session opens its stored link.
     return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
   }
-  if (!can('focus')) return null;
   const state = getState();
   const viewer = state.snapshot?.viewer;
-  if (!viewer?.onMachine) return offMachineAction(t, viewer?.machine);
+  if (!viewer?.onMachine) return offMachineAction(t, t.boat ?? viewer?.machine);
+  // Where it runs is always said; raising its window needs a source that can.
+  if (!can('focus')) return null;
   if (!viewer.windowFocus && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;
   const clicked = (e: Event) => {
     stop(e);

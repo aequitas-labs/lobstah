@@ -10,12 +10,13 @@ import {
   openDecision,
   reviewRequest,
   sendAnswer,
+  showModal,
   stepDecision,
 } from './actions.js';
 import { App } from './components/app.js';
 import { ReportShell, loadReportView, markReportViewed } from './components/report-view.js';
 import type { ReportViewState } from './components/report-view.js';
-import { startPolling } from './poll.js';
+import { poll, startPolling } from './poll.js';
 import { startPresence } from './presence.js';
 import { loadLobHidden, loadPrefs } from './prefs.js';
 import { currentRoute, onRoute } from './route.js';
@@ -23,6 +24,8 @@ import { getState, initState, setState, subscribe } from './store.js';
 import type { GlassState } from './store.js';
 import { setBackend } from './backend.js';
 import type { GlassBackend } from './backend.js';
+import { setHost } from './host.js';
+import type { GlassHost } from './host.js';
 
 /**
  * The spyglass page. On `/report/<key>` it renders that report
@@ -70,25 +73,63 @@ const initialState = (): GlassState => ({
  * Start a glass page on this backend: the report page on `/report/<key>`,
  * otherwise the glass. Each host's entry calls this once.
  */
-export function startGlassPage(source: GlassBackend): void {
+export function startGlassPage(source: GlassBackend, parts: GlassHost = {}): GlassPage {
   setBackend(source);
+  setHost(parts);
   const reportKey = reportFromPath(location.pathname);
-  if (reportKey !== null) {
-    startReportPage(reportKey);
-  } else if (!reportRedirect()) {
-    startGlass();
+  const stops: Array<() => void> = [];
+  if (reportKey !== null) stops.push(...startReportPage(reportKey));
+  else if (!reportRedirect()) stops.push(...startGlass());
+  return {
+    refresh: poll,
+    repaint: () => setState({}),
+    open(item) {
+      pendingOpen = item;
+      openPending();
+    },
+    stop() {
+      for (const stop of stops.splice(0)) stop();
+    },
+  };
+}
+
+/** A started glass page, for its host: read again now, repaint, open an item, or stop for good. */
+export interface GlassPage {
+  /** Read the snapshot now (a wake hint arrived). */
+  refresh(): Promise<void>;
+  /** Paint again: the host's own parts changed. */
+  repaint(): void;
+  /** Open a dispatch or trap once the snapshot lists it (a link named it). */
+  open(item: { kind: 'dispatch' | 'trap'; id: string }): void;
+  /** No more polls, renders, keys or presence: the host signed out. */
+  stop(): void;
+}
+
+let pendingOpen: { kind: 'dispatch' | 'trap'; id: string } | undefined;
+
+/** Open the item a link named, once the snapshot lists it. */
+function openPending(): void {
+  const d = getState().snapshot;
+  if (!pendingOpen || !d) return;
+  const { kind, id } = pendingOpen;
+  pendingOpen = undefined;
+  if (kind === 'trap') {
+    if (d.traps.some((t) => t.trapId === id)) showModal('trap', id);
+  } else {
+    const x = d.dispatches.find((v) => v.id === id);
+    if (x) showModal('dispatch', `${x.lane}:${x.id}`);
   }
 }
 
 /** One report's page: loaded once, re-rendered only when its image overlay opens or closes. */
-function startReportPage(key: string): void {
+function startReportPage(key: string): Array<() => void> {
   initState(initialState());
   let view: ReportViewState = { state: 'loading' };
   const paint = () => render(h(ReportShell, { view, box: getState().lightbox }), document.body);
   document.title = 'report · lobstah glass';
-  subscribe(paint);
+  const unsubscribe = subscribe(paint);
   paint();
-  startPresence(2000);
+  const presence = startPresence(2000);
   void loadReportView(key).then((loaded) => {
     view = loaded;
     if (loaded.state === 'ready') document.title = `${loaded.report.title} · lobstah glass`;
@@ -96,12 +137,14 @@ function startReportPage(key: string): void {
     // Shown: the human has opened it, so ack it.
     void markReportViewed(loaded);
   });
-  document.addEventListener('keydown', (e) => {
+  const escape = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && getState().lightbox) closeLightbox();
-  });
+  };
+  document.addEventListener('keydown', escape);
+  return [unsubscribe, presence, () => document.removeEventListener('keydown', escape)];
 }
 
-function startGlass(): void {
+function startGlass(): Array<() => void> {
   initState(initialState());
 
   let paintedRoute: ReturnType<typeof currentRoute> | undefined;
@@ -144,10 +187,14 @@ function startGlass(): void {
     scrolledTo = key;
     card.scrollIntoView?.({ block: 'center' });
   }
-  subscribe(paint);
+  const unsubscribe = subscribe((state) => {
+    paint();
+    // A link named a dispatch or trap before the snapshot listed it.
+    if (pendingOpen && state.snapshot) openPending();
+  });
   paint();
 
-  onRoute((route) => {
+  const unroute = onRoute((route) => {
     if (reportRedirect()) return;
     const focusDecision = decisionFromHash(location.hash);
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
@@ -171,7 +218,7 @@ function startGlass(): void {
    * during IME composition, or while another layer is on top. No single key
    * answers a decision: a number selects, Enter on the selected option sends.
    */
-  document.addEventListener('keydown', (e) => {
+  const keys = (e: KeyboardEvent) => {
     const state = getState();
     const t = e.target as HTMLElement | null;
     if (e.key === 'Escape') {
@@ -204,9 +251,11 @@ function startGlass(): void {
       e.preventDefault();
       openDecision();
     }
-  });
-  startPresence();
-  startPolling();
+  };
+  document.addEventListener('keydown', keys);
+  const presence = startPresence();
+  const polling = startPolling();
   if (getState().route === 'stats') void loadStats();
   if (getState().route === 'settings') void loadSettings();
+  return [unsubscribe, unroute, presence, polling, () => document.removeEventListener('keydown', keys)];
 }

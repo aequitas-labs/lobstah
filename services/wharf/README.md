@@ -444,9 +444,19 @@ approved login from the boat; no public grant-editing or rename API exists.
 
 ## Browser glass
 
-`pnpm --filter @lobstah/wharf build` bundles the existing glass stylesheet and
-shared safe Markdown elements into the Worker. The configured glass host serves
-`/` and `/device`; no separately hosted assets or hardcoded domain are needed.
+The hosted glass is the local glass: the same UI from `packages/glass-ui`, running
+on the wharf backend (`ui/backends/wharf.ts`), which reads these `/api/glass` routes
+and shows what the wharf records in the local glass's own views. Its tabs are the
+ones the wharf fills (On deck, Dispatches, Traps, Reviews, Reports) and Boats, the
+account page; PRs, grants, TODOs, notices, stats and settings stay local.
+`services/wharf/glass` holds only the host's own parts: sign-in, sign-out, the
+wake hint, Boats, the human requests list and boat approval.
+
+`pnpm --filter @lobstah/wharf build` bundles that UI into the Worker; it declares
+`@lobstah/core` and `@lobstah/glass-ui` as workspace dependencies, so `pnpm -r
+build` builds them first. The configured glass host serves `/`, `/device` and a
+report's own page, `/report/<id>`; no separately hosted assets or hardcoded domain
+are needed.
 Sign in with invited GitHub credentials, then use `/device` to inspect a CLI
 approval code and approve the displayed boat with the same or lower access, or
 refuse it. No boat or dispatch token is issued to the page.
@@ -465,15 +475,16 @@ The glass host also serves `/manifest.webmanifest` and PNG icons under `/icons/`
 install the glass as an app. Both are public and carry no account data. There is
 no service worker: nothing is cached or available offline.
 
-The URL hash is the page's place: a view (`#jobs`), or one item open over its
-view (`#decision/<id>`, `#report/<id>`, `#job/<id>`, `#trap/<id>`). A link opens
-the glass on that item, and sign-in returns to the same link. An id that is not
-listed for the signed-in account says so and reads nothing.
+The URL hash is the page's place, as in the local glass: a tab (`#dispatches`;
+`#jobs` still opens it), a decision (`#decision/<id>`), or a dispatch or trap
+opened over its tab (`#job/<id>`, `#trap/<id>`, the links boats hand out). A
+report opens on its own page (`#report/<id>` goes to `/report/<id>`). Sign-in
+returns to the same link. An id that is not listed for the signed-in account
+opens nothing and reads nothing.
 
-Opening a report in the glass acknowledges it once, as the local glass does for
-its own reports. Cards and details show what the wharf records: a decision
-answered, and a document or a job's current status acked, by which boat or by the
-person. Looking at a decision or a job does not acknowledge it.
+Opening a decision or a report acknowledges it once, for every boat and the glass;
+looking at a job does not. The views show what the wharf records: a report read,
+a decision's answer.
 
 Snapshots poll every fifteen seconds. Missing check-ins or a failed feed are
 unknown, not completion. Remote sessions show their boat and a validated command

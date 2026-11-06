@@ -14,11 +14,13 @@ import { backend } from './backend.js';
  */
 
 let inflight = false;
+/** Between startPolling and its stop. A timer or hint that fires after the stop reads nothing. */
+let active = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 let etag: string | null = null;
 
 export async function poll(): Promise<void> {
-  if (inflight) return;
+  if (inflight || !active) return;
   inflight = true;
   void sendPresence();
   try {
@@ -44,22 +46,29 @@ export async function poll(): Promise<void> {
 }
 
 const startPoll = () => {
-  if (!timer) timer = setInterval(poll, 2000);
+  if (!timer) timer = setInterval(poll, backend().pollMs ?? 2000);
 };
 const stopPoll = () => {
   if (timer) clearInterval(timer);
   timer = null;
 };
 
-/** First fetch now; poll while the tab is visible, pause while hidden. */
-export function startPolling(): void {
-  document.addEventListener('visibilitychange', () => {
+/** First fetch now; poll while the tab is visible, pause while hidden. Returns the stop: no more polls, from any timer or tab change. */
+export function startPolling(): () => void {
+  const visibility = () => {
     if (document.hidden) stopPoll();
     else {
       poll();
       startPoll();
     }
-  });
+  };
+  document.addEventListener('visibilitychange', visibility);
+  active = true;
   poll();
   if (!document.hidden) startPoll();
+  return () => {
+    active = false;
+    document.removeEventListener('visibilitychange', visibility);
+    stopPoll();
+  };
 }

@@ -25,6 +25,8 @@ export type { GlassRead, GlassVerdict, GlassWrite } from './answers.js';
 export interface GlassBackend {
   /** What this source can fill and do. The UI hides a tab or control it lacks; it never shows one empty. */
   capabilities: GlassCapabilities;
+  /** How often the page polls while visible; 2 s when unset. */
+  pollMs?: number;
   /** One poll. With the last ETag, an unchanged snapshot answers only its beats. Throws when the server answers an error. */
   poll(etag: string | null): Promise<GlassPoll>;
   /** The whole snapshot now, read once after a write so its result shows. */
@@ -69,6 +71,8 @@ export interface GlassCapabilities {
   tabs: readonly GlassTab[];
   /** The controls shown. A control for an action not listed here does not render. */
   actions: ReadonlySet<GlassAction>;
+  /** The source runs a daemon on this machine, whose heartbeat the header shows. */
+  daemon: boolean;
 }
 
 /** The actions a glass can offer that not every source takes. */
@@ -89,11 +93,23 @@ export const GLASS_ACTIONS = [
   'answer-files',
   /** Page in history older than the snapshot. */
   'older',
+  /** Report this page's presence, so the pet can show an item in it. */
+  'presence',
+  /** Queue a message for the helm about a job, from its modal. */
+  'message-helm',
+  /** Cancel a job from its modal, fencing its worker. */
+  'cancel',
+  /** Ask the boat that drafted a review to dismiss it. */
+  'review-dismiss',
 ] as const;
 export type GlassAction = (typeof GLASS_ACTIONS)[number];
 
 /** Everything: the local daemon fills every tab and takes every action. */
-export const ALL_CAPABILITIES: GlassCapabilities = { tabs: GLASS_TABS, actions: new Set(GLASS_ACTIONS) };
+export const ALL_CAPABILITIES: GlassCapabilities = {
+  tabs: GLASS_TABS.filter((t) => t !== 'boats'),
+  actions: new Set(GLASS_ACTIONS.filter((a) => !['message-helm', 'cancel', 'review-dismiss'].includes(a))),
+  daemon: true,
+};
 
 let current: GlassBackend | undefined;
 
@@ -111,6 +127,9 @@ export function backend(): GlassBackend {
 
 /** Whether this page's source takes an action. Before a backend is set (the hosted glass's own pages), nothing optional shows. */
 export const can = (action: GlassAction): boolean => current?.capabilities.actions.has(action) ?? false;
+
+/** This page's source's capabilities; everything before a backend is set. */
+export const capabilities = (): GlassCapabilities => current?.capabilities ?? ALL_CAPABILITIES;
 
 /** The tabs this page shows. */
 export const visibleTabs = (): readonly GlassTab[] => current?.capabilities.tabs ?? GLASS_TABS;

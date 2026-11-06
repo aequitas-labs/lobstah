@@ -43,6 +43,8 @@ import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
 import { Todos } from './todos.js';
 import type { DecisionDraft } from '../store.js';
+import { visibleTabs } from '../backend.js';
+import type { GlassTab } from '../../src/glass-diff.js';
 
 /**
  * On deck: decisions (full-row cards), in flight, landed in the last 24h, reviews waiting on you (only when some are), reports, traps,
@@ -95,7 +97,9 @@ function deckItem(it: DeckItem, view: View) {
 
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
 
-function deckBlock(title: string, items: DeckItem[], tab: string, max: number, view: View, headAction?: Children) {
+function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number, view: View, headAction?: Children) {
+  // A section for a tab this page's source does not fill is not shown, empty or otherwise.
+  if (!visibleTabs().includes(tab)) return null;
   const shown = items.slice(0, max);
   const lines = shown.map((i) => deckItem(i, view));
   const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
@@ -137,6 +141,7 @@ function deckStack(
 }
 
 function deckPrs(inp: DeckInputs, view: View) {
+  if (!visibleTabs().includes('prs')) return null;
   const shown = inp.stacks.slice(0, 3);
   const standing = new Map<string, DeckAttention[]>();
   for (const a of inp.prAttention) {

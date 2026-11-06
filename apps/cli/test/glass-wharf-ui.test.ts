@@ -87,7 +87,7 @@ describe('the shared glass on the wharf backend', () => {
   it("lists only the wharf's tabs", async () => {
     const g = await open('#deck');
     const tabs = [...g.window.document.querySelectorAll('#tabs a')].map((a) => a.getAttribute('data-tab'));
-    expect(tabs).toEqual(['deck', 'dispatches', 'traps', 'reviews', 'reports']);
+    expect(tabs).toEqual(['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports']);
   });
 
   it('reads only same-origin wharf routes, with the cookie', async () => {

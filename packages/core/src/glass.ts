@@ -403,6 +403,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   };
   /** A trap asked for from the glass that no helm has reserved yet; `trapId` is the request id. */
   requested?: { at: string };
+  /** The boat this trap runs on, when it is not this machine (a wharf's trap). */
+  boat?: string;
   messages: GlassMessage[];
   /** This trap's notices, newest first. */
   notices: Notice[];

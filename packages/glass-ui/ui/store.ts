@@ -108,6 +108,8 @@ export function setState(patch: Partial<GlassState>): void {
   current = { ...current, ...patch };
   for (const fn of listeners) fn(current);
 }
-export const subscribe = (fn: (s: GlassState) => void): void => {
+/** Call fn on every change; returns the unsubscribe. */
+export const subscribe = (fn: (s: GlassState) => void): (() => void) => {
   listeners.add(fn);
+  return () => listeners.delete(fn);
 };
