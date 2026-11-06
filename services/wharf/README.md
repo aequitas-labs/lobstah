@@ -4,8 +4,8 @@ An optional coordination authority, separate from telemetry. One person's accoun
 is one SQLite Durable Object; R2 holds evidence files. Briefs, messages, reports
 and explicitly uploaded evidence go to the chosen wharf. Checkouts, harness
 credentials and local env are not automatically uploaded. Local files remain the default.
-This service has not been deployed. GitHub admission and boat approval APIs are
-implemented; the hosted glass UI follows in the next slice. There is no billing,
+This service has not been deployed yet. GitHub admission, boat approval and the
+hosted glass are implemented. There is no billing,
 second runtime, socket, alarm or background timer.
 
 ## Local development and tests
@@ -20,9 +20,12 @@ Never use real credentials in tests or pass secrets in process arguments.
 
 ## Deploying
 
-Deployed by the maintainers with `wrangler deploy`; no script or CI job deploys
-the wharf. `wrangler.jsonc` holds the deployment, including the Cloudflare
-account; there is no secret in it.
+Deployed by the maintainers with `wrangler deploy`; no CI job deploys the wharf.
+`wrangler.jsonc` holds the deployment, including the Cloudflare account; there
+is no secret in it. `scripts/go-online.sh` runs the steps below once, at a
+terminal: it logs in, creates the bucket and database, applies the schema, sets
+the secrets without showing them, builds and deploys. It skips what already
+exists, so a rerun continues where it stopped.
 
 | Name | Kind | Value or source |
 | --- | --- | --- |
