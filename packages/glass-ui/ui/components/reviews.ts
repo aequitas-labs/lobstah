@@ -5,6 +5,7 @@ import { reviewRequest } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
+import { can } from '../backend.js';
 
 /**
  * The Reviews tab: one row or card per PR that asked for your review,
@@ -37,6 +38,8 @@ export function reviewMeta(r: GlassReview): { nodes: unknown[]; text: string } {
 }
 
 function Actions({ r, canDraft, publish }: { r: GlassReview; canDraft: boolean; publish: boolean }) {
+  // Constant for the page's life, so the hooks below always run in the same order.
+  if (!can('review-request')) return null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const act = (kind: ReviewRequestKind) => async (e: Event) => {

@@ -1,12 +1,12 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import logo from '../../../../docs/assets/favicon.png';
 import type { GlassSnapshot } from '@lobstah/core';
-import { GLASS_TABS } from '../../src/glass-diff.js';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../src/glass-diff.js';
 import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { GrantChip } from './session-grants.js';
 import { Age, Harness, opener } from './common.js';
+import { visibleTabs } from '../backend.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -110,13 +110,14 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
 
 /** Always in the bar. The other tabs join them where the screen fits every tab on one line (glass.css), else sit behind More. */
 const PINNED: readonly GlassTab[] = ['deck', 'reviews'];
-const MORE_TABS = GLASS_TABS.filter((t) => !PINNED.includes(t));
 /** glass.css's breakpoint: from this width every tab is inline and More is hidden. */
 const ALL_TABS_FIT = '(min-width: 900px)';
 
 /** The tab bar, and More: a disclosure with ordinary navigation links, so Tab works without menu-specific keys. */
 function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unread: number }) {
   const [open, setOpen] = useState(false);
+  const tabs = visibleTabs();
+  const moreTabs = tabs.filter((t) => !PINNED.includes(t));
   const root = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLElement>(null);
@@ -166,11 +167,11 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
   const link = (t: GlassTab, inMenu = false) =>
     html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${inMenu && t === tab ? 'page' : undefined} onClick=${inMenu ? close : undefined}>${TAB_LABEL[t]}${badge(t)}</a>`;
   // With the active tab behind More, More carries the active tab's underline.
-  const here = MORE_TABS.includes(tab);
+  const here = moreTabs.includes(tab);
   return html`<div class="navbar" ref=${root}>
-    <nav class="tabs" id="tabs" aria-label="Spyglass views">${GLASS_TABS.map((t) => link(t))}</nav>
+    <nav class="tabs" id="tabs" aria-label="Spyglass views">${tabs.map((t) => link(t))}</nav>
     <button ref=${toggle} type="button" class=${here ? 'nav-toggle on' : 'nav-toggle'} aria-label="More" aria-expanded=${open} aria-controls="more-sections" onClick=${() => (open ? close() : setOpen(true))}><span aria-hidden="true">☰</span></button>
-    ${open && html`<nav ref=${menu} id="more-sections" class="more-sections" aria-label="Spyglass sections">${MORE_TABS.map((t) => link(t, true))}</nav>`}
+    ${open && html`<nav ref=${menu} id="more-sections" class="more-sections" aria-label="Spyglass sections">${moreTabs.map((t) => link(t, true))}</nav>`}
   </div>`;
 }
 

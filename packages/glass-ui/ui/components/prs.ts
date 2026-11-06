@@ -24,6 +24,7 @@ import {
 } from './common.js';
 import type { OlderControl } from './common.js';
 import { LinkedText } from './links.js';
+import { can } from '../backend.js';
 
 /**
  * The PRs tab: PRs grouped by stack, then the watches that are not PR
@@ -88,6 +89,8 @@ function prCards(inp: PrsInputs, older: unknown) {
  * page never acks a newer state. Nothing pending, nothing shown.
  */
 export function PrAck({ stack, prs, attention }: { stack: GlassStack; prs: GlassPr[]; attention: readonly DeckAttention[] }) {
+  // Constant for the page's life, so the hooks below always run in the same order.
+  if (!can('pr-ack')) return null;
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const pending = shownPrAttention(attention, prs, [stack]).filter((a) => !a.acked);

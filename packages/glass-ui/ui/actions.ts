@@ -16,7 +16,7 @@ import { getState, setState, viewOf } from './store.js';
 import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
 import { setDecisionBadge } from './app-badge.js';
-import { backend } from './backend.js';
+import { backend, can } from './backend.js';
 
 /** Everything the page can do: each action updates the store (and localStorage for preferences). */
 
@@ -481,6 +481,8 @@ export type ReviewRequestKind =
  * undefined on success; a fresh snapshot follows at once.
  */
 export async function reviewRequest(kind: ReviewRequestKind, payload: Record<string, unknown>): Promise<string | undefined> {
+  // A source without review actions shows none; a view it records (review-seen) is skipped.
+  if (!can('review-request')) return 'Reviews are read-only here.';
   return glassRequest(kind, payload);
 }
 

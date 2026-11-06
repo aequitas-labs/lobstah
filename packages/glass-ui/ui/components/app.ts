@@ -1,4 +1,5 @@
-import { GLASS_TABS, olderLeft, sectionInputs } from '../../src/glass-diff.js';
+import { olderLeft, sectionInputs } from '../../src/glass-diff.js';
+import { visibleTabs } from '../backend.js';
 import type { GlassOlderKind } from '@lobstah/core';
 import type { GlassTab } from '../../src/glass-diff.js';
 import { closeModal, modalOrder, unreadOrder } from '../actions.js';
@@ -60,7 +61,7 @@ export function App({ state }: { state: GlassState }) {
   // Each modal owns its controls: retain them on polls, reset them when switching cards.
   return [
     html`<${Header} d=${d} inp=${inp} tab=${tab} st=${state.prefs} stale=${state.stale} unread=${unread.length} />`,
-    GLASS_TABS.map(
+    visibleTabs().map(
       (t) =>
         html`<main key=${t} id=${'page-' + t} class=${d ? (t === tab ? 'tabpage on' : 'tabpage') : 'tabpage'}><div id=${t}>${page(t)}</div></main>`,
     ),

@@ -35,6 +35,7 @@ import {
   viewerHasTerminal,
   windowAction,
 } from './common.js';
+import { can } from '../backend.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
@@ -79,7 +80,7 @@ function settingsModal(item: SettingsItem, prefs: GlassPrefs) {
   return [
     close,
     html`<h3>⚙ settings</h3>`,
-    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this browser · cards or table</span></span>${view}</div><div class="row"><span class="lbl">lobs<span class="hint">this browser · crawling lobsters</span></span>${lobs}</div>${item.helms.map((helm) => html`<${HelmChatControl} key=${helm.grounds} helm=${helm} />`)}<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
+    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this browser · cards or table</span></span>${view}</div><div class="row"><span class="lbl">lobs<span class="hint">this browser · crawling lobsters</span></span>${lobs}</div>${can('helm-chat') && item.helms.map((helm) => html`<${HelmChatControl} key=${helm.grounds} helm=${helm} />`)}<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
   ];
 }
 

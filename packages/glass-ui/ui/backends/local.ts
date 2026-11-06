@@ -1,5 +1,6 @@
 import type { GlassBeats, GlassSnapshot } from '@lobstah/core';
 import { reportMarkdownUrl } from '../../src/glass-diff.js';
+import { ALL_CAPABILITIES } from '../backend.js';
 import type { GlassBackend, GlassPoll, GlassRead, GlassVerdict, GlassWrite } from '../backend.js';
 
 /**
@@ -8,6 +9,7 @@ import type { GlassBackend, GlassPoll, GlassRead, GlassVerdict, GlassWrite } fro
  * `POST /requests` (and `/api/focus`), each carrying the page's write token.
  */
 export const localBackend: GlassBackend = {
+  capabilities: ALL_CAPABILITIES,
   async poll(etag) {
     const r = await fetch('/data', { cache: 'no-store', headers: etag ? { 'if-none-match': etag } : {} });
     if (r.status === 304) return { kind: 'unchanged', beats: beatsOf(r) } satisfies GlassPoll;
