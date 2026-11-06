@@ -61,7 +61,7 @@ echo "database_id $id is in wrangler.jsonc (not a secret; commit it)"
 
 step "4/7 GitHub OAuth app client ID"
 if grep -q '"GITHUB_CLIENT_ID": ""' wrangler.jsonc; then
-  echo "Open $OAUTH_APPS_URL, find the lobstah wharf app, and copy its Client ID."
+  echo "Open $OAUTH_APPS_URL, open the "lobstah glass" app, and copy its Client ID."
   read -r -p "Client ID: " client_id
   [ -n "$client_id" ] || { echo "No client ID; stopping." >&2; exit 1; }
   node -e '
@@ -91,7 +91,7 @@ done
 if grep -qx GITHUB_CLIENT_SECRET <<<"$have"; then
   echo "GITHUB_CLIENT_SECRET: set, kept"
 else
-  echo "On the OAuth app's page, choose Generate a new client secret and copy it."
+  echo "On $OAUTH_APPS_URL/3952720 (\"lobstah glass\"), choose Generate a new client secret and copy it."
   read -r -s -p "Client secret (not shown): " client_secret; echo
   [ -n "$client_secret" ] || { echo "No client secret; stopping." >&2; exit 1; }
   printf '%s' "$client_secret" | wrangler secret put GITHUB_CLIENT_SECRET --name "$WORKER"

@@ -34,11 +34,11 @@
   },
   "logpush": false,
 
-  // GITHUB_CLIENT_ID is the OAuth app's public id, filled in once the app exists.
+  // GITHUB_CLIENT_ID is the public id of the aequitas-labs OAuth app "lobstah glass".
   // GITHUB_ALLOWLIST holds numeric GitHub account ids (5472765: chrishsu).
   "vars": {
     "GLASS_ORIGIN": "https://glass.lobstah.dev", "API_ORIGIN": "https://api.lobstah.dev",
-    "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[\"5472765\"]",
+    "GITHUB_CLIENT_ID": "Ov23liebhjSINd9KDQnK", "GITHUB_ALLOWLIST": "[\"5472765\"]",
     "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120"
   },
   // Secrets: AUTH_SECRET, GITHUB_CLIENT_SECRET, TOKEN_SECRET (wrangler secret put).
