@@ -33,6 +33,7 @@ function modalLives(s: Pick<GlassState, 'snapshot' | 'older' | 'detail'>, modal:
 /** A new snapshot; an open modal whose item vanished closes and stays closed. */
 export function receive(snapshot: GlassSnapshot): void {
   const { modal, drafts, older, detail, decisionModal } = getState();
+  const initialLink = !getState().snapshot && decisionModal?.key;
   // A card that left the snapshot (answered, withdrawn) takes its draft with it.
   const cards = decisionCards(snapshot.attention || [], snapshot.decisions || []);
   void setDecisionBadge(cards.length);
@@ -50,10 +51,15 @@ export function receive(snapshot: GlassSnapshot): void {
     modal: modal && modalLives({ snapshot, older, detail }, modal) ? modal : null,
     ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
     // Keep the old queue slot when the shown decision leaves through a live update.
-    ...(decisionModal?.key && !live.has(decisionModal.key) && !drafts[decisionModal.key]?.sent
+    ...(!initialLink &&
+    decisionModal?.key &&
+    !live.has(decisionModal.key) &&
+    getState().archivedDecision?.key !== decisionModal.key &&
+    !drafts[decisionModal.key]?.sent
       ? { decisionModal: nextOpen(modalOrder(), filteredDecisionCards(snapshot, getState().prefs), kept, decisionModal.key) }
       : {}),
   });
+  if (initialLink && !live.has(initialLink)) void loadClosedDecision(initialLink);
 }
 
 /** Keep the removed card's old index, clamped to the new last card; a null key shows the empty state. */
@@ -82,6 +88,8 @@ function currentCards() {
 export function modalOrder(): ReturnType<typeof decisionCards> {
   const state = getState();
   const cards = currentCards();
+  const archived = state.archivedDecision;
+  if (archived && archived.key === state.decisionModal?.key) return [{ ...archived, kind: 'decision', at: archived.askedAt }];
   // A direct decision link still opens its target, even with another repo selected.
   const key = state.decisionModal?.key;
   const view = viewOf(state);
@@ -107,6 +115,19 @@ export function openDecision(key?: string): void {
   const target = key ?? unreadOrder()[0]?.key ?? modalOrder()[0]?.key;
   if (!target) return;
   setState({ decisionModal: { key: target } });
+  if (!modalOrder().some((card) => card.key === target)) void loadClosedDecision(target);
+}
+
+/** Fetch a closed card only when its deep link is outside the live queue. */
+async function loadClosedDecision(key: string): Promise<void> {
+  try {
+    const response = await fetch(`/data/decision/${encodeURIComponent(key)}`);
+    if (!response.ok) return;
+    const archivedDecision = (await response.json()) as import('@lobstah/core').GlassDecision;
+    if (getState().decisionModal?.key === key) setState({ archivedDecision });
+  } catch {
+    /* The existing empty state remains when a card cannot be read. */
+  }
 }
 
 /** Previous (-1) or next (+1) in the modal's order. It never wraps and never sends anything. */
@@ -138,7 +159,7 @@ function shownDecision() {
  */
 export function decisionNumberKey(n: number): boolean {
   const c = shownDecision();
-  if (!c || n < 1 || n > HOTKEY_MAX) return false;
+  if (!c || (c.kind === 'decision' && c.readOnly) || n < 1 || n > HOTKEY_MAX) return false;
   if (c.kind === 'decision' && c.permissionsProposal) return false;
   const draft = getState().drafts[c.key];
   if (draft?.sending || draft?.sent) return false;

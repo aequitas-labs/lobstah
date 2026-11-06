@@ -27,7 +27,8 @@ export type MdBlock =
   | { t: 'list'; ordered: boolean; start: number; items: MdBlock[][] }
   | { t: 'table'; align: Array<'left' | 'center' | 'right' | ''>; head: MdInline[][]; rows: MdInline[][][] }
   | { t: 'quote'; c: MdBlock[] }
-  | { t: 'hr' };
+  | { t: 'hr' }
+  | { t: 'task'; id: string; text: string; checked: boolean; c: MdInline[] };
 
 /** A link the page may open: http(s), mailto, or an in-page anchor. Anything else is text. */
 export function safeHref(href: string): string | undefined {
@@ -191,7 +192,7 @@ function cells(line: string): string[] {
 const startsBlock = (line: string) =>
   FENCE.test(line) || HEADING.test(line) || HR.test(line) || BULLET.test(line) || ORDERED.test(line) || QUOTE.test(line);
 
-export function parseMarkdown(markdown: string): MdBlock[] {
+function parseBlocks(markdown: string): MdBlock[] {
   const lines = markdown.replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
   const out: MdBlock[] = [];
   let i = 0;
@@ -228,7 +229,7 @@ export function parseMarkdown(markdown: string): MdBlock[] {
         body.push(QUOTE.exec(lines[i]!)?.[1] ?? lines[i]!);
         i++;
       }
-      out.push({ t: 'quote', c: parseMarkdown(body.join('\n')) });
+      out.push({ t: 'quote', c: parseBlocks(body.join('\n')) });
       continue;
     }
     const bullet = BULLET.exec(line);
@@ -237,10 +238,13 @@ export function parseMarkdown(markdown: string): MdBlock[] {
       const isOrdered = !bullet;
       const itemRe = isOrdered ? ORDERED : BULLET;
       const items: string[][] = [];
+      const indent = (bullet ?? ordered)![1]!.length;
+      let contentIndent = 2;
       while (i < lines.length) {
         const l = lines[i]!;
         const m = itemRe.exec(l);
-        if (m && m[1]!.length <= 3) {
+        if (m && m[1]!.length === indent) {
+          contentIndent = m[0].length - m[3]!.length;
           items.push([m[3]!]);
           i++;
           continue;
@@ -254,8 +258,8 @@ export function parseMarkdown(markdown: string): MdBlock[] {
           }
           break;
         }
-        if (/^ {2,}\S/.test(l)) {
-          items.at(-1)!.push(l.replace(/^ {2,4}/, ''));
+        if (new RegExp(`^ {${indent + 1},}\\S`).test(l)) {
+          items.at(-1)!.push(l.slice(Math.min(contentIndent, /^ */.exec(l)![0].length)));
           i++;
           continue;
         }
@@ -263,7 +267,16 @@ export function parseMarkdown(markdown: string): MdBlock[] {
         items.at(-1)!.push(l.trim());
         i++;
       }
-      out.push({ t: 'list', ordered: isOrdered, start: isOrdered ? Number(ordered![2]) : 1, items: items.map((body) => parseMarkdown(body.join('\n'))) });
+      out.push({ t: 'list', ordered: isOrdered, start: isOrdered ? Number(ordered![2]) : 1, items: items.map((body) => {
+        const task = /^\[([ xX])\](?:\s+(.*)|$)/.exec(body[0]!);
+        if (!task) return parseBlocks(body.join('\n'));
+        body[0] = task[2] ?? '';
+        const content = parseBlocks(body.join('\n'));
+        const first = content[0];
+        const inline = first?.t === 'p' ? first.c : parseInline(body[0]);
+        return [{ t: 'task' as const, id: '', text: inlineText(inline), checked: task[1]!.toLowerCase() === 'x', c: inline },
+          ...(first?.t === 'p' ? content.slice(1) : parseBlocks(body.slice(1).join('\n')))];
+      }) });
       continue;
     }
     if (line.includes('|') && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1]!) && lines[i + 1]!.includes('-')) {
@@ -291,4 +304,25 @@ export function parseMarkdown(markdown: string): MdBlock[] {
     out.push({ t: 'p', c: parseInline(para.join('\n')) });
   }
   return out;
+}
+
+/** The visible text of an item, without Markdown formatting. */
+function inlineText(nodes: MdInline[]): string {
+  return nodes.map((node) => 'v' in node ? node.v : 'c' in node ? inlineText(node.c) : node.t === 'img' ? node.alt : ' ').join('');
+}
+
+/** Task items in document order, including nested lists and block quotes. */
+export function markdownTasks(blocks: MdBlock[]): Array<Extract<MdBlock, { t: 'task' }>> {
+  return blocks.flatMap((block) => block.t === 'task' ? [block] : block.t === 'list' ? block.items.flatMap(markdownTasks) : block.t === 'quote' ? markdownTasks(block.c) : []);
+}
+
+/** Parse Markdown and assign each task its document index and a short text hash. */
+export function parseMarkdown(markdown: string): MdBlock[] {
+  const blocks = parseBlocks(markdown);
+  markdownTasks(blocks).forEach((item, index) => {
+    let hash = 2166136261;
+    for (let offset = 0; offset < item.text.length; offset++) hash = Math.imul(hash ^ item.text.charCodeAt(offset), 16777619);
+    item.id = `${index}-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  });
+  return blocks;
 }

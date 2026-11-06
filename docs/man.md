@@ -705,8 +705,14 @@ the same rule.
   for a question such as "cut 0.6.0?"), who asked (`helm`), and when. It is
   stored in `~/.lobstah/decisions/<rid>/`: `decision.json`, `detail.md`, and
   `attachments/`. The claimed helm alone may ask.
+- **Checklists.** Task items (`- [ ] step` or `- [x] step`), including nested
+  items, are tickable in decision details and filed reports. Ticks are saved
+  with the document and shared between desktop and phone; ticking never
+  answers a card. `lobstah man ask --show <card-or-report-key>` prints the
+  checked count and every item's state. Answered and withdrawn cards retain
+  read-only checklists at their existing glass links.
 - **Standing.** A decision stands until it is answered or the helm withdraws
-  it with `lobstah man ask --withdraw <key>`, which removes its directory. A
+  it with `lobstah man ask --withdraw <key>`, which retains a read-only archive. A
   newer `man ask` on the same dispatch keeps the older decisions: each shows
   as its own card. `lobstah man ask ... --replace <key>` replaces that one
   standing decision; a key that is not standing is refused.

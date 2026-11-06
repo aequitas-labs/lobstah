@@ -342,6 +342,8 @@ export interface GlassReview {
   staged?: boolean;
 }
 
+export type { ChecklistItem, ChecklistProgress } from './checklist-types.js';
+
 export interface GlassReport {
   key: string;
   title: string;
@@ -412,6 +414,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
 
 /** A standing decision as the glass renders it: the record plus its detail page. */
 export interface GlassDecision {
+  /** Closed cards are available through their deep link, without answer controls. */
+  readOnly?: boolean;
   appStart?: import('./desktop-start-link.js').DesktopAppStart;
   key: string;
   title: string;

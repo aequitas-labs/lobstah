@@ -2207,3 +2207,19 @@ footer .glass-brand {
 .grant-id {
   font-size: 11px;
 }
+
+.mdtask {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-block: var(--space-1);
+}
+.mdtask input {
+  flex: none;
+  accent-color: var(--link);
+  margin: 0;
+}
+.mdtask span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

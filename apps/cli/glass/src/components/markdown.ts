@@ -1,6 +1,7 @@
-import { bareImageName, parseMarkdown, safeHref } from '../../../src/glass-markdown.js';
+import type { ChecklistProgress } from '../../../../../packages/core/src/checklist-types.js';
+import { bareImageName, markdownTasks, parseMarkdown, safeHref } from '../../../src/glass-markdown.js';
 import type { MdBlock, MdInline } from '../../../src/glass-markdown.js';
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 
@@ -11,6 +12,7 @@ type Image = (name: string, alt: string) => Children;
 interface RenderOptions {
   image: Image;
   copyCode: boolean;
+  checklist?: { progress?: ChecklistProgress; pending: boolean; readOnly: boolean; toggle: (id: string, checked: boolean) => void };
 }
 
 /** What a copy control shows and says in each state. */
@@ -118,6 +120,11 @@ function inline(options: RenderOptions, nodes: MdInline[]): Children {
 function blocks(options: RenderOptions, list: MdBlock[]): Children {
   return list.map((b) => {
     switch (b.t) {
+      case 'task': {
+        const state = options.checklist;
+        const checked = state?.progress?.items.find((item) => item.id === b.id)?.checked ?? b.checked;
+        return html`<label class="mdtask" onClick=${(event: Event) => event.stopPropagation()}><input type="checkbox" aria-label=${b.text} checked=${checked} disabled=${!state?.progress || state.pending || state.readOnly || state.progress.readOnly} onChange=${(event: Event) => state?.toggle(b.id, (event.target as HTMLInputElement).checked)} /><span>${inline({ ...options, copyCode: false }, b.c)}</span></label>`;
+      }
       case 'h': {
         const c = inline(options, b.c);
         return b.level === 1
@@ -146,12 +153,91 @@ function blocks(options: RenderOptions, list: MdBlock[]): Children {
   });
 }
 const parsed = new Map<string, MdBlock[]>();
-export function MarkdownElements({ text, image, copyCode = false }: { text: string; image: Image; copyCode?: boolean }) {
+/** Render Markdown, synchronizing task state only for a stored document. */
+export function MarkdownElements({
+  text,
+  image,
+  copyCode = false,
+  documentKey,
+  token,
+  readOnly = false,
+}: {
+  text: string;
+  image: Image;
+  copyCode?: boolean;
+  documentKey?: string;
+  token?: string;
+  readOnly?: boolean;
+}): Children {
   let tree = parsed.get(text);
   if (!tree) {
     tree = parseMarkdown(text);
     parsed.set(text, tree);
     if (parsed.size > 8) parsed.delete(parsed.keys().next().value!);
   }
-  return blocks({ image, copyCode }, tree);
+  const hasTasks = markdownTasks(tree).length > 0;
+  const [progress, setProgress] = useState<ChecklistProgress>();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const saving = useRef(false);
+  const revision = useRef(0);
+  useEffect(() => {
+    revision.current++;
+    setError('');
+    setProgress(undefined);
+    if (!documentKey || !hasTasks) return;
+    let disposed = false;
+    const load = async () => {
+      if (saving.current || document.hidden) return;
+      const version = revision.current;
+      try {
+        const response = await fetch(`/api/checklist?key=${encodeURIComponent(documentKey)}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Checklist could not be loaded.');
+        const stored = (await response.json()) as ChecklistProgress;
+        if (!disposed && !saving.current && version === revision.current) {
+          setProgress(stored);
+          setError('');
+        }
+      } catch {
+        if (!disposed) setError('Checklist could not be loaded.');
+      }
+    };
+    void load();
+    const interval = setInterval(() => void load(), 2000);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+    };
+  }, [documentKey, text, hasTasks]);
+  const toggle = async (id: string, checked: boolean) => {
+    if (!documentKey || !progress || progress.readOnly || readOnly || saving.current) return;
+    const previous = progress;
+    saving.current = true;
+    const version = ++revision.current;
+    setPending(true);
+    setError('');
+    setProgress({ ...progress, items: progress.items.map((item) => (item.id === id ? { ...item, checked } : item)) });
+    try {
+      const response = await fetch('/requests', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-lobstah-token': token ?? '' },
+        body: JSON.stringify({ kind: 'checklist-tick', payload: { key: documentKey, item: id, checked } }),
+      });
+      const stored = (await response.json()) as ChecklistProgress & { ok: boolean; reason?: string };
+      if (!response.ok || !stored.ok) throw new Error(stored.reason ?? 'Checklist could not be saved.');
+      if (version === revision.current) setProgress(stored);
+    } catch (failure) {
+      if (version === revision.current) {
+        setProgress(previous);
+        setError(failure instanceof Error ? failure.message : 'Checklist could not be saved.');
+      }
+    } finally {
+      saving.current = false;
+      setPending(false);
+    }
+  };
+  return [
+    blocks({ image, copyCode, checklist: { progress, pending, readOnly, toggle: (id, checked) => void toggle(id, checked) } }, tree),
+    error && html`<p class="bad" role="alert">${error}</p>`,
+  ];
 }
