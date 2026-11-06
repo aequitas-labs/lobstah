@@ -1,5 +1,5 @@
 import { reportFromHash, reportPageUrl, validShowHash } from '../src/glass-diff.js';
-import { backend } from './backend.js';
+import { backend, can } from './backend.js';
 
 /**
  * Presence: this page tells the glass server it is open, so the desktop pet
@@ -87,7 +87,7 @@ let inflight = false;
 
 /** Tell the server this page is open, and apply any show it holds for us. */
 export async function sendPresence(): Promise<void> {
-  if (inflight) return;
+  if (inflight || !can('presence')) return;
   inflight = true;
   try {
     const app = !!window.matchMedia?.('(display-mode: standalone)').matches;
@@ -106,7 +106,9 @@ export async function sendPresence(): Promise<void> {
  * hidden, and say goodbye on pagehide. `visibleEveryMs` adds a timer while
  * visible, for a page with no poll of its own.
  */
-export function startPresence(visibleEveryMs?: number): void {
+export function startPresence(visibleEveryMs?: number): () => void {
+  // A source with no pet to show items (the wharf) is told nothing.
+  if (!can('presence')) return () => {};
   let timer: ReturnType<typeof setInterval> | null = null;
   let timerMs = 0;
   const sync = () => {
@@ -116,17 +118,25 @@ export function startPresence(visibleEveryMs?: number): void {
     timer = want ? setInterval(() => void sendPresence(), want) : null;
     timerMs = want;
   };
-  document.addEventListener('visibilitychange', () => {
+  const visibility = () => {
     sync();
     void sendPresence();
-  });
-  window.addEventListener('pagehide', () => {
+  };
+  const gone = () => {
     try {
       navigator.sendBeacon?.(`/api/presence?page=${id()}&vis=gone`);
     } catch {
       // the page ages out instead
     }
-  });
+  };
+  document.addEventListener('visibilitychange', visibility);
+  window.addEventListener('pagehide', gone);
   sync();
   void sendPresence();
+  return () => {
+    document.removeEventListener('visibilitychange', visibility);
+    window.removeEventListener('pagehide', gone);
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
 }

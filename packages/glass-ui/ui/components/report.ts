@@ -8,7 +8,7 @@ import { html } from '../html.js';
 import type { Children } from '../html.js';
 import { Age, ImageThumb, attachmentRows, cmdRow } from './common.js';
 import { LinkedText } from './links.js';
-import { fileUrl } from '../backend.js';
+import { capabilities, fileUrl } from '../backend.js';
 
 type FileUrl = (name: string) => string;
 const markdown = (
@@ -89,6 +89,7 @@ export function ReportSection({
       html`<div class="sec">report attachments (${listed.length})</div>`,
       attachmentRows(listed, (name) => fileUrl({ kind: 'report', key: r.key }, name)),
     ],
-    !r.acked && [html`<div class="sec">ack</div>`, cmdRow('lobstah attention ack ' + r.key)],
+    // The ack command runs on this machine's daemon; a wharf acks the report when its page opens.
+    !r.acked && capabilities().daemon && [html`<div class="sec">ack</div>`, cmdRow('lobstah attention ack ' + r.key)],
   ];
 }

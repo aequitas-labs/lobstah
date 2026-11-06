@@ -10,4 +10,8 @@ export const currentRoute = (): GlassTab => {
 };
 
 /** Call fn with the new tab on every route change. */
-export const onRoute = (fn: (tab: GlassTab) => void): void => window.addEventListener('hashchange', () => fn(currentRoute()));
+export const onRoute = (fn: (tab: GlassTab) => void): (() => void) => {
+  const changed = () => fn(currentRoute());
+  window.addEventListener('hashchange', changed);
+  return () => window.removeEventListener('hashchange', changed);
+};

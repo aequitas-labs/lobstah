@@ -69,7 +69,7 @@ describe('the tab bar and More', () => {
     expect(toggle.classList.contains('on')).toBe(false);
     await click(g, '.nav-toggle');
     expect(g.$('.nav-toggle')?.getAttribute('aria-expanded')).toBe('true');
-    expect(g.$$('#more-sections a').map((a) => a.getAttribute('data-tab'))).toEqual(GLASS_TABS.filter((t) => t !== 'deck' && t !== 'reviews'));
+    expect(g.$$('#more-sections a').map((a) => a.getAttribute('data-tab'))).toEqual(GLASS_TABS.filter((t) => t !== 'deck' && t !== 'reviews' && t !== 'boats')); // Boats is the hosted glass's account page
     expect(g.document.activeElement?.getAttribute('data-tab')).toBe('dispatches');
     await click(g, '#more-sections [data-tab="todos"]');
     expect(g.window.location.hash).toBe('#todos');

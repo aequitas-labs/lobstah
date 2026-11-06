@@ -50,6 +50,10 @@ it('serves the same bundled look on the glass host only, with nonce CSP and no c
   expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
   expect(page.headers.get('cache-control')).toBe('no-store'); expect(content).not.toContain(token);
   expect((await SELF.fetch('https://glass.test/device')).status).toBe(200);
+  // A report opens on its own page, as in the local glass; the page reads the report through /api/glass.
+  const report = await SELF.fetch('https://glass.test/report/r1');
+  expect(report.status).toBe(200); expect(report.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+  for (const path of ['/report/', '/report/a/b', '/report/..%2Fdevice', '/report/' + 'a'.repeat(129)]) expect((await SELF.fetch('https://glass.test' + path)).status, path).toBe(404);
   expect((await SELF.fetch('https://state.test/')).status).toBe(404);
 });
 it('requires its cookie, not an API bearer, and derives the account rather than trusting a selector', async () => {

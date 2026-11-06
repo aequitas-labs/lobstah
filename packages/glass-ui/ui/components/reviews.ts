@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
-import { reviewRequest } from '../actions.js';
+import { dismissReview, reviewRequest } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
@@ -37,9 +37,28 @@ export function reviewMeta(r: GlassReview): { nodes: unknown[]; text: string } {
   };
 }
 
+/** The rounds a boat can still dismiss: not yet posted or dismissed. */
+const DISMISSABLE = ['requested', 'drafting', 'drafted', 'stale', 'failed'];
+
+/** Dismiss, for a source whose boats carry it out (the wharf): the boat that drafted the round deletes its pending draft. */
+function Dismiss({ r }: { r: GlassReview }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'sent'>('idle');
+  const [error, setError] = useState<string>();
+  if (!DISMISSABLE.includes(r.state)) return null;
+  const dismiss = async (e: Event) => {
+    e.stopPropagation();
+    setState('busy');
+    const refusal = await dismissReview(r.key);
+    setError(refusal);
+    setState(refusal ? 'idle' : 'sent');
+  };
+  if (state === 'sent') return html`<span class="ok" role="status">Sent to the boat that drafted it</span>`;
+  return html`<button class="btn" disabled=${state === 'busy'} onClick=${dismiss}>Dismiss</button>${error && html` <span class="bad" role="alert">${error}</span>`}`;
+}
+
 function Actions({ r, canDraft, publish }: { r: GlassReview; canDraft: boolean; publish: boolean }) {
-  // Constant for the page's life, so the hooks below always run in the same order.
-  if (!can('review-request')) return null;
+  // A source without review actions may still dismiss; the hooks below run only with them.
+  if (!can('review-request')) return can('review-dismiss') ? html`<${Dismiss} r=${r} />` : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const act = (kind: ReviewRequestKind) => async (e: Event) => {

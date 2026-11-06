@@ -491,6 +491,21 @@ export async function scheduleTodo(grounds: string, id: number, until: string): 
   return glassRequest('todo-schedule', { grounds, id, until });
 }
 
+/** Queue a message for the helm about a job. Resolves to the refusal, or undefined once it is queued. */
+export async function messageHelm(dispatch: string, text: string): Promise<string | undefined> {
+  return glassRequest('message', { dispatch, text });
+}
+
+/** Cancel a job, fencing its worker. Resolves to the refusal, or undefined once it is cancelled. */
+export async function cancelJob(dispatch: string): Promise<string | undefined> {
+  return glassRequest('cancel', { dispatch });
+}
+
+/** Ask the boat that drafted a review to dismiss it (and its pending draft). */
+export async function dismissReview(key: string): Promise<string | undefined> {
+  return glassRequest('review-dismiss', { key });
+}
+
 export async function changeHelmChat(grounds: string, chat: 'full' | 'brief'): Promise<string | undefined> {
   return glassRequest('helm-chat', { grounds, chat });
 }

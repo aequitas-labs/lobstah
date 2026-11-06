@@ -7,6 +7,7 @@ import type {
   GlassReview,
   GlassSnapshot,
   GlassTrap,
+  GlassViewer,
   LandedCatch,
   StatusEntry,
   TendAttention,
@@ -23,9 +24,9 @@ import type { DispatchView, WharfDetail, WharfDocument, WharfFile, WharfGlass, W
  * capabilities hide the tabs that would read them; nothing is faked as empty
  * or zero.
  *
- * Keys follow the local glass's: a job's attention key is `work:<id>`, and a
- * wharf document's is `decision:<id>` or `report:<id>`. Every write maps the
- * key back to the wharf id (wharfId).
+ * A job's attention key is `work:<id>`, as the local glass's. A document's
+ * key is its wharf id, so the links boats already hand out
+ * (`#decision/<id>`, `#report/<id>`) open it in the shared glass.
  */
 
 /** The wharf has one lane; its jobs show in the local glass's work lane. */
@@ -43,9 +44,8 @@ export interface WharfAttachment extends Attachment {
 export const wharfFileUrl = (kind: 'documents' | 'dispatches', id: string, file: string): string =>
   `/api/glass/${kind}/${encodeURIComponent(id)}/files/${encodeURIComponent(file)}`;
 
-/** A wharf document's glass key, and the wharf id behind a key. */
-export const documentKey = (doc: Pick<WharfDocument, 'kind' | 'id'>): string => `${doc.kind}:${doc.id}`;
-export const wharfId = (key: string): string => key.slice(key.indexOf(':') + 1);
+/** A wharf document's glass key: its wharf id, which is unique across kinds. */
+export const documentKey = (doc: Pick<WharfDocument, 'id'>): string => doc.id;
 
 /** The job's one-line title: the first line of its brief. */
 const titleOf = (job: Pick<DispatchView, 'brief' | 'id'>): string => job.brief.split('\n')[0]?.trim() || job.id;
@@ -78,8 +78,17 @@ export function dispatchSummary(job: DispatchView): GlassDispatchSummary {
     ...((job.status?.note ?? job.unservable?.note) ? { note: job.status?.note ?? job.unservable?.note } : {}),
     ...(at ? { verbAt: at } : {}),
     ...(job.workerId ? { claimedBy: job.workerId } : {}),
-    ...(prUrls.length ? { prList: prUrls.map((url) => ({ url, number: prNumber(url) })) } : {}),
+    ...prEvidence(prUrls),
     sort: at ? Date.parse(at) : 0,
+  };
+}
+
+/** A job's PRs as the glass shows them: one as its evidence link, several in stack order. */
+function prEvidence(urls: readonly string[]): Pick<GlassDispatchSummary, 'evidence' | 'prList'> {
+  if (!urls.length) return {};
+  return {
+    evidence: { prUrl: urls[0], prUrls: [...urls] },
+    ...(urls.length > 1 ? { prList: urls.map((url) => ({ url, number: prNumber(url) })) } : {}),
   };
 }
 
@@ -95,10 +104,14 @@ export function dispatchDetail(detail: WharfDetail): GlassDispatch {
     ...(r.waitingOn ? { waitingOn: r.waitingOn as StatusEntry['waitingOn'] } : {}),
     ...(r.until ? { until: r.until } : {}),
   }));
-  // A summary's evidence is a summary; the full record carries none until the wharf sends one.
+  // Every PR the job's reports named, oldest first, once each.
+  const prUrls = [...new Set(detail.reports.flatMap((r) => r.evidence?.prUrls ?? []))];
   const { evidence: _summary, ...summary } = dispatchSummary(detail);
+  const prs = prEvidence(prUrls);
   return {
     ...summary,
+    ...(prs.prList ? { prList: prs.prList } : {}),
+    ...(prUrls.length ? { evidence: { prUrl: prUrls[0], prUrls } } : {}),
     brief: detail.brief,
     attachments: attachments('dispatches', detail.id, detail.files),
     messageAttachments: [],
@@ -117,7 +130,7 @@ export function trapOf(worker: Worker): GlassTrap {
     ...(worker.session ? { sessionId: worker.session } : {}),
     ...(worker.repoRemote ? { repo: worker.repoRemote.split('/').pop() } : {}),
     heartbeatAt: worker.lastCheckIn,
-    label: `${worker.id} · ${worker.boatName}`,
+    boat: worker.boatName,
     ...(command ? { attachCommand: command } : {}),
     messages: [],
     notices: [],
@@ -136,6 +149,8 @@ export function decisionOf(doc: WharfDocument, detail: string | undefined): Glas
     ...(doc.dispatch ? { dispatch: doc.dispatch, lane: LANE } : {}),
     askedBy: doc.author,
     askedAt: doc.at,
+    // Opening a decision acks it on the wharf, so its ack is when it was first seen.
+    ...(doc.ack ? { viewedAt: doc.ack.at } : {}),
     stateHash: `${doc.id}:${doc.answer?.at ?? ''}:${doc.withdrawn ? 'withdrawn' : ''}`,
   };
 }
@@ -240,6 +255,7 @@ export function wharfSnapshot(
   now: number,
   details: ReadonlyMap<string, string>,
   token: string,
+  device: GlassViewer['device'] = 'unknown',
 ): GlassSnapshot {
   const docs = glass.documents.filter((d) => d.published);
   return {
@@ -247,6 +263,8 @@ export function wharfSnapshot(
     version: '',
     repoUrl: 'https://github.com/aequitas-labs/lobstah',
     focusToken: token,
+    // Never on a trap's machine: traps run on boats. The device decides which commands can work here.
+    viewer: { onMachine: false, windowFocus: false, machine: '', device },
     helms: [],
     traps: glass.workers.map(trapOf),
     notices: [],

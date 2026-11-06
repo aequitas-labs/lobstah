@@ -1,91 +1,10 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../../../../packages/glass-ui/ui/html.js';
-import { viewerDevice } from '../../../../packages/core/src/viewer-device.js';
-import { fileUrl } from './api.js';
-import { attachCommand, resume } from './model.js';
-import type { WharfFile, Worker } from './model.js';
+
+/** The hosted glass's own pages (sign-in, boats, boat approval) share the glass UI's htm. */
 export { html };
+/** An input's value, from its event. */
 export const value = (e: Event) => (e.currentTarget as HTMLInputElement).value;
+/** A time as the person's locale reads it; unknown when the wharf has none. */
 export const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : 'unknown');
+/** A write from a host page: true once the wharf took it. */
 export type Action = (path: string, body: unknown) => Promise<boolean>;
-/** How an item says a person has seen it: the wharf's ack, by a boat (its pet or CLI) or the signed-in person. */
-export const acked = (ack?: { at: string; by: string }) => (ack ? ` · acked by ${ack.by} ${when(ack.at)}` : '');
-export function Copy({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false),
-    [error, setError] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setError(false);
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => setCopied(false), 1000);
-    } catch {
-      setError(true);
-    }
-  };
-  return html`<div class="cmd"><code>${command}</code><button aria-label="copy command" title=${copied ? 'copied' : 'copy command'} onClick=${copy}>${copied ? '✓' : '⧉'}</button><span role="status">${copied ? 'copied' : error ? 'select the command to copy' : ''}</span></div>`;
-}
-/** How a worker's session is reached. A live one never offers resume, which would start a second process on a session still in use. */
-export function Session({ worker }: { worker: Worker }) {
-  const head = html`<div class="sec">session · on ${worker.boatName}</div>`;
-  // Only a desktop can use a copied command. A phone gets where the worker runs.
-  if (viewerDevice(navigator.userAgent) !== 'desktop') return html`${head}<div class="sub">${worker.live ? 'Running' : 'Ran'} on ${worker.boatName}, only reachable from there</div>`;
-  if (worker.live) {
-    const attach = attachCommand(worker);
-    return attach
-      ? html`${head}<div class="sub">Running on ${worker.boatName}</div><${Copy} command=${attach} />`
-      : html`${head}<div class="sub">Running on ${worker.boatName}, only reachable from there</div>`;
-  }
-  const command = resume(worker);
-  return html`${head}<div class="sub">Run on that boat, this page can't open a remote window</div>${command ? html`<${Copy} command=${command} />` : html`<div class="dim">Resume command unknown</div>`}`;
-}
-export function Files({ files, kind, id }: { files: WharfFile[]; kind: 'documents' | 'dispatches'; id: string }) {
-  return files.map(
-    (f) =>
-      html`<div class="dfile"><a href=${fileUrl(kind, id, f.id)} download=${f.name}>${f.name}</a> <span class="dim">${f.size} bytes</span></div>`,
-  );
-}
-/** Uploaded raster images only: no external paths, raw SVG/HTML or data URLs. */
-export function OwnedImage({
-  file,
-  document: id,
-  alt,
-  kind = 'documents',
-}: {
-  file: WharfFile;
-  document: string;
-  alt: string;
-  kind?: 'documents' | 'dispatches';
-}) {
-  const [url, setUrl] = useState<string>();
-  useEffect(() => {
-    let disposed = false,
-      objectUrl: string | undefined;
-    (async () => {
-      const res = await fetch(fileUrl(kind, id, file.id), { credentials: 'same-origin', cache: 'no-store' });
-      if (!res.ok) return;
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      const mime =
-        bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71
-          ? 'image/png'
-          : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
-            ? 'image/jpeg'
-            : /^GIF8[79]a$/.test(new TextDecoder().decode(bytes.slice(0, 6)))
-              ? 'image/gif'
-              : new TextDecoder().decode(bytes.slice(0, 4)) === 'RIFF' && new TextDecoder().decode(bytes.slice(8, 12)) === 'WEBP'
-                ? 'image/webp'
-                : undefined;
-      if (!mime || disposed) return;
-      objectUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
-      setUrl(objectUrl);
-    })().catch(() => {});
-    return () => {
-      disposed = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [file.id, id, kind]);
-  return url ? html`<img class="mdimg" src=${url} alt=${alt} />` : html`<span class="dim">[image not shown: ${alt}]</span>`;
-}

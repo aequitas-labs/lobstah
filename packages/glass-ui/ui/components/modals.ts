@@ -2,7 +2,7 @@ import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, Glass
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../src/glass-diff.js';
-import { closeModal, setLobs, setView, showModal, changeHelmChat } from '../actions.js';
+import { cancelJob, closeModal, setLobs, setView, showModal, changeHelmChat, messageHelm } from '../actions.js';
 import { useState } from 'preact/hooks';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
@@ -35,7 +35,7 @@ import {
   viewerHasTerminal,
   windowAction,
 } from './common.js';
-import { can, fileUrl } from '../backend.js';
+import { can, capabilities, fileUrl } from '../backend.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
@@ -162,7 +162,8 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
           cmdRow(namedText(x.claimedBy)),
           html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead: lobstah send ${namedText(x.claimedBy)} "…"</div>`,
         ]
-      : viewerHasTerminal() && [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
+      : // `lobstah attach` runs where the dispatch does: this machine's daemon, never a wharf's boat.
+        capabilities().daemon && viewerHasTerminal() && [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
   return [
     close,
     html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
@@ -177,6 +178,36 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
     x.transcript && [html`<div class="sec">transcript</div>`, cmdRow(x.transcript)],
     report && reportLink(report),
     detailBody(x, detail),
+    x.bucket !== 'done' && (can('message-helm') || can('cancel')) && html`<${JobControls} key=${x.id} id=${x.id} />`,
+  ];
+}
+
+/** A job's message-the-helm and cancel controls, for a source that takes them (the wharf). */
+function JobControls({ id }: { id: string }) {
+  const [message, setMessage] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string }>();
+  const send = async (e: Event) => {
+    e.preventDefault();
+    const refusal = await messageHelm(id, message);
+    setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Queued for the helm; it expires in 10 minutes.' });
+    if (!refusal) setMessage('');
+  };
+  const cancel = async () => {
+    const refusal = await cancelJob(id);
+    setConfirming(false);
+    setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Cancelled; its worker is fenced.' });
+  };
+  return [
+    can('message-helm') &&
+      html`<div class="sec">message the helm</div><form class="jobmsg" onSubmit=${send}><textarea class="danswer" aria-label="message to helm" maxLength="16000" value=${message} onInput=${(e: Event) => setMessage((e.target as HTMLTextAreaElement).value)}></textarea><button class="btn" disabled=${!message.trim()}>Queue message for helm</button></form>`,
+    can('cancel') &&
+      html`<div class="sec">cancel</div>${
+        confirming
+          ? html`<div>Cancel this job and fence its worker? <button class="btn" onClick=${cancel}>Confirm cancel</button> <button class="btn" onClick=${() => setConfirming(false)}>Keep job</button></div>`
+          : html`<button class="btn" onClick=${() => setConfirming(true)}>Cancel job…</button>`
+      }`,
+    result && html`<div class=${result.ok ? 'ok' : 'bad'} role=${result.ok ? 'status' : 'alert'}>${result.text}</div>`,
   ];
 }
 

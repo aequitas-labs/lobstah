@@ -24,6 +24,7 @@ import { SessionGrants } from './session-grants.js';
 import { Settings } from './settings.js';
 import { Traps } from './traps.js';
 import { Todos } from './todos.js';
+import { host } from '../host.js';
 
 /**
  * The whole page as a pure function of the store. Only the active tab's
@@ -43,7 +44,11 @@ export function App({ state }: { state: GlassState }) {
   const page = (t: GlassTab): Children => {
     if (!inp || t !== tab) return null;
     if (t === 'deck')
-      return html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} grants=${d?.sessionGrants ?? []} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`;
+      return [
+        html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} grants=${d?.sessionGrants ?? []} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`,
+        host().deck?.(),
+      ];
+    if (t === 'boats') return host().boats?.() ?? null;
     if (t === 'dispatches') return html`<${Dispatches} inp=${inp.dispatches} more=${more('dispatches')} />`;
     if (t === 'traps') return html`<${Traps} inp=${inp.traps} grants=${d?.sessionGrants ?? []} />`;
     if (t === 'prs') return html`<${PRs} inp=${inp.prs} more=${more('prs')} />`;
@@ -61,6 +66,7 @@ export function App({ state }: { state: GlassState }) {
   // Each modal owns its controls: retain them on polls, reset them when switching cards.
   return [
     html`<${Header} d=${d} inp=${inp} tab=${tab} st=${state.prefs} stale=${state.stale} unread=${unread.length} />`,
+    host().banner?.(),
     visibleTabs().map(
       (t) =>
         html`<main key=${t} id=${'page-' + t} class=${d ? (t === tab ? 'tabpage on' : 'tabpage') : 'tabpage'}><div id=${t}>${page(t)}</div></main>`,
