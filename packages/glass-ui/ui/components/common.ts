@@ -1,7 +1,7 @@
 import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { useState } from 'preact/hooks';
-import { desktopSession, dispatchFileUrl, isImageName, prBadgeClass, resumeCommand, watchState } from '../../src/glass-diff.js';
+import { desktopSession, isImageName, prBadgeClass, resumeCommand, watchState } from '../../src/glass-diff.js';
 import type { ResumeSession } from '../../src/glass-diff.js';
 import type { DispatchDetail, ModalType } from '../../src/glass-diff.js';
 import { copyText, loadOlder, openLightbox, openTrapWindow, READ_ONLY_REASON, requestTrap, showModal } from '../actions.js';
@@ -14,7 +14,7 @@ import { LinkedText, UrlLink } from './links.js';
 import { HarnessIcon, harnessLabel } from './harness-icon.js';
 import { workerMetadata } from '../../../core/src/worker-metadata.js';
 import type { WorkerMetadata, WorkerConfig } from '@lobstah/core';
-import { can } from '../backend.js';
+import { can, fileUrl } from '../backend.js';
 
 /** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
 
@@ -418,12 +418,12 @@ export function detailBody(x: GlassDispatchSummary | GlassDispatch, detail?: Dis
   return html`${head}<div class="sec">brief</div><pre>${LinkedText(x.brief)}</pre>${
     x.attachments.length > 0 && [
       html`<div class="sec">attachments (${x.attachments.length})</div>`,
-      attachmentRows(x.attachments, (name) => dispatchFileUrl(x.lane, x.id, name)),
+      attachmentRows(x.attachments, (name) => fileUrl({ kind: 'dispatch', lane: x.lane, id: x.id }, name)),
     ]
   }${
     x.messageAttachments.length > 0 && [
       html`<div class="sec">message attachments (${x.messageAttachments.length})</div>`,
-      attachmentRows(x.messageAttachments, (name) => dispatchFileUrl(x.lane, x.id, name)),
+      attachmentRows(x.messageAttachments, (name) => fileUrl({ kind: 'dispatch', lane: x.lane, id: x.id }, name)),
     ]
   }${x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${LinkedText(x.followUp)}</pre>`]}<div class="sec">log</div><div class="loglines">${
     x.log.length ? LogLines(x) : 'no entries yet'

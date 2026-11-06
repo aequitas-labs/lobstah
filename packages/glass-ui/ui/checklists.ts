@@ -11,10 +11,13 @@ export interface ChecklistSource {
 
 let current: ChecklistSource | undefined;
 
-/** Set by setBackend: the page's checklist source. */
-export function setChecklistSource(source: ChecklistSource): void {
+/** Set by setBackend: the page's checklist source, or none when its source stores no checklist progress. */
+export function setChecklistSource(source: ChecklistSource | undefined): void {
   current = source;
 }
+
+/** Whether this page stores checklist progress. Without it, a document's tasks show as written and read-only. */
+export const hasChecklistSource = (): boolean => current !== undefined;
 
 /** The page's checklist source. Only a document with a key and tasks asks for it. */
 export function checklistSource(): ChecklistSource {

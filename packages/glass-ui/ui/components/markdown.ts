@@ -3,7 +3,7 @@ import { imageDisplay, markdownImageSources, markdownTasks, parseMarkdown, safeH
 import type { ImageSurface, MdBlock, MdInline } from '../../src/glass-markdown.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../html.js';
-import { checklistSource } from '../checklists.js';
+import { checklistSource, hasChecklistSource } from '../checklists.js';
 import type { Children } from '../html.js';
 
 /** Shared safe Markdown: raw HTML stays text; images resolve to owned files, or to https on a card. */
@@ -241,7 +241,7 @@ export function MarkdownElements({
     revision.current++;
     setError('');
     setProgress(undefined);
-    if (!documentKey || !hasTasks) return;
+    if (!documentKey || !hasTasks || !hasChecklistSource()) return;
     let disposed = false;
     const load = async () => {
       if (saving.current || document.hidden) return;

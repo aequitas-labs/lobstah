@@ -49,9 +49,15 @@ export interface GlassBackend {
   report(key: string): Promise<GlassRead<GlassReport> & { token?: string }>;
   /** A report's Markdown. */
   reportText(key: string): Promise<GlassRead<string>>;
-  /** Documents' checklist progress: read and ticked. */
-  checklists: ChecklistSource;
+  /** Documents' checklist progress: read and ticked. Absent, tasks show as written and read-only. */
+  checklists?: ChecklistSource;
+  /** Where the browser loads a file the glass lists: a decision's, a report's, a dispatch's or a trap's. */
+  fileUrl(owner: GlassFileOwner, name: string): string;
 }
+
+/** What a listed file belongs to, as fileUrl names it. */
+export type GlassFileOwner =
+  { kind: 'decision' | 'report'; key: string } | { kind: 'dispatch'; lane: string; id: string } | { kind: 'trap'; trapId: string };
 
 /** A poll's answer: a new snapshot (and its ETag), or `unchanged` with the beats an unchanged answer carried. */
 export type GlassPoll =
@@ -108,3 +114,6 @@ export const can = (action: GlassAction): boolean => current?.capabilities.actio
 
 /** The tabs this page shows. */
 export const visibleTabs = (): readonly GlassTab[] => current?.capabilities.tabs ?? GLASS_TABS;
+
+/** Where this page loads a listed file. */
+export const fileUrl = (owner: GlassFileOwner, name: string): string => backend().fileUrl(owner, name);
