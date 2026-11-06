@@ -605,6 +605,36 @@ describe('glass: decision lobs', () => {
   });
 });
 
+describe('glass: remote images on a card', () => {
+  it('shows an https image inline with no referrer, opens it in the overlay, turns a failed one into a link, and shows no other scheme', async () => {
+    const d = fleet();
+    d.decisions![0]!.detail = '![public shot](https://example.com/p.png)\n\n![private shot](https://raw.githubusercontent.com/o/r/x.png)\n\n![plain](http://example.com/h.png) ![inline](data:image/png;base64,AAAA)\n';
+    const g = await page(d, { post: ok });
+    await show(g, KEY);
+    const md = () => card(g, KEY)!.querySelector('.mdpage')!;
+    const images = [...md().querySelectorAll('img')];
+    expect(images.map((i) => i.getAttribute('src'))).toEqual(['https://example.com/p.png', 'https://raw.githubusercontent.com/o/r/x.png']);
+    for (const image of images) {
+      expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
+      expect(image.getAttribute('loading')).toBe('lazy');
+    }
+    expect(text(md())).toContain('[image not shown: plain]');
+    expect(text(md())).toContain('[image not shown: inline]');
+
+    await click(g, images[0]!.closest('button.mdimg'));
+    expect(g.$('#lightbox img.lbimg')!.getAttribute('src')).toBe('https://example.com/p.png');
+    expect(g.$('#lightbox img.lbimg')!.getAttribute('referrerpolicy')).toBe('no-referrer');
+    await click(g, g.$('#lightbox button.lbclose'));
+
+    images[1]!.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('error'));
+    await g.settle();
+    expect([...md().querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual(['https://example.com/p.png']);
+    const link = [...md().querySelectorAll('a')].find((a) => text(a) === 'private shot')!;
+    expect(link.getAttribute('href')).toBe('https://raw.githubusercontent.com/o/r/x.png');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+});
+
 describe('glass: the image overlay', () => {
   const overlay = (g: GlassDom) => g.$('#lightbox');
   const escape = async (g: GlassDom) => {

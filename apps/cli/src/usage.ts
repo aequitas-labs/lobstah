@@ -481,7 +481,8 @@ by its stored name. A path out of the page's directory is refused. --title overr
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
   'man:ask': `Put a decision to the human: a card in the glass (decisions/<rid>/) until
 answered or withdrawn. Asks stand side by side; --replace <key> replaces one. The answer
-wakes man wait as decision-answer. Reserved for the claimed helm.`,
+wakes man wait as decision-answer. --detail images show inline: https URLs, and paths
+to --attach files. Reserved for the claimed helm.`,
   'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
 Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into

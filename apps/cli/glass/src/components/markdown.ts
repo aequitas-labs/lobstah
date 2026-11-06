@@ -1,16 +1,21 @@
 import type { ChecklistProgress } from '../../../../../packages/core/src/checklist-types.js';
-import { bareImageName, markdownTasks, parseMarkdown, safeHref } from '../../../src/glass-markdown.js';
-import type { MdBlock, MdInline } from '../../../src/glass-markdown.js';
+import { imageDisplay, markdownImageSources, markdownTasks, parseMarkdown, safeHref } from '../../../src/glass-markdown.js';
+import type { ImageSurface, MdBlock, MdInline } from '../../../src/glass-markdown.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 
-/** Shared safe Markdown: raw HTML stays text; images resolve only to owned files. */
+/** Shared safe Markdown: raw HTML stays text; images resolve to owned files, or to https on a card. */
 type Image = (name: string, alt: string) => Children;
+
+/** Opens an image larger, in the page's own overlay. */
+type OpenImage = (src: string, alt: string) => void;
 
 /** How one Markdown body renders: where its images come from, and whether its code can be copied. */
 interface RenderOptions {
   image: Image;
+  surface: ImageSurface;
+  openImage?: OpenImage;
   copyCode: boolean;
   checklist?: { progress?: ChecklistProgress; pending: boolean; readOnly: boolean; toggle: (id: string, checked: boolean) => void };
 }
@@ -90,6 +95,24 @@ function CopyableInline({ text }: { text: string }) {
   return html`<code ref=${code} class=${'copyinline' + (state === 'idle' ? '' : ' copied')} role="button" tabindex="0" title=${COPY_NOTE[state].title} onClick=${click} onKeyDown=${key}>${text}</code>`;
 }
 
+/**
+ * A card's remote https image, loaded lazily with no referrer, that opens
+ * with `open` when given. One that fails to load (a private repo's raw URL,
+ * say) becomes a plain link to the URL, its alt text as the label.
+ */
+function RemoteImage({ url, alt, open }: { url: string; alt: string; open?: OpenImage }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  if (failed) return html`<a href=${url} target="_blank" rel="noopener noreferrer" title=${url}>${alt || url}</a>`;
+  const img = html`<img src=${url} alt=${alt} loading="lazy" referrerpolicy="no-referrer" onError=${() => setFailed(true)} />`;
+  if (!open) return img;
+  const click = (e: Event) => {
+    e.stopPropagation();
+    open(url, alt || url);
+  };
+  return html`<button type="button" class="mdimg" title=${'view ' + (alt || url)} onClick=${click}>${img}</button>`;
+}
+
 function inline(options: RenderOptions, nodes: MdInline[]): Children {
   return nodes.map((n) => {
     switch (n.t) {
@@ -111,8 +134,17 @@ function inline(options: RenderOptions, nodes: MdInline[]): Children {
           : inline(options, n.c);
       }
       case 'img': {
-        const name = bareImageName(n.src);
-        return name ? options.image(name, n.alt || name) : html`<span class="dim">[image not shown: ${n.alt || n.src}]</span>`;
+        const shown = imageDisplay(n.src, options.surface);
+        switch (shown?.kind) {
+          case 'attachment':
+            return options.image(shown.name, n.alt || shown.name);
+          case 'remote':
+            return html`<${RemoteImage} url=${shown.url} alt=${n.alt} open=${options.openImage} />`;
+          case 'link':
+            return html`<a href=${shown.url} target="_blank" rel="noopener noreferrer">${n.alt || shown.url}</a>`;
+          default:
+            return html`<span class="dim">[image not shown: ${n.alt || n.src}]</span>`;
+        }
       }
     }
   });
@@ -153,10 +185,34 @@ function blocks(options: RenderOptions, list: MdBlock[]): Children {
   });
 }
 const parsed = new Map<string, MdBlock[]>();
+
+/** The parsed tree for `text`, from a small cache of recent bodies. */
+function parsedMarkdown(text: string): MdBlock[] {
+  let tree = parsed.get(text);
+  if (!tree) {
+    tree = parseMarkdown(text);
+    parsed.set(text, tree);
+    if (parsed.size > 8) parsed.delete(parsed.keys().next().value!);
+  }
+  return tree;
+}
+
+/** The attachment names a Markdown body shows inline, so its attachment list can leave them out. */
+export function inlineAttachmentNames(text: string): Set<string> {
+  const names = new Set<string>();
+  for (const src of markdownImageSources(parsedMarkdown(text))) {
+    const shown = imageDisplay(src, 'report');
+    if (shown?.kind === 'attachment') names.add(shown.name);
+  }
+  return names;
+}
+
 /** Render Markdown, synchronizing task state only for a stored document. */
 export function MarkdownElements({
   text,
   image,
+  surface = 'report',
+  openImage,
   copyCode = false,
   documentKey,
   token,
@@ -164,17 +220,16 @@ export function MarkdownElements({
 }: {
   text: string;
   image: Image;
+  /** A card loads remote https images; a report shows them as links. */
+  surface?: ImageSurface;
+  /** Where a remote image opens larger when clicked. */
+  openImage?: OpenImage;
   copyCode?: boolean;
   documentKey?: string;
   token?: string;
   readOnly?: boolean;
 }): Children {
-  let tree = parsed.get(text);
-  if (!tree) {
-    tree = parseMarkdown(text);
-    parsed.set(text, tree);
-    if (parsed.size > 8) parsed.delete(parsed.keys().next().value!);
-  }
+  const tree = parsedMarkdown(text);
   const hasTasks = markdownTasks(tree).length > 0;
   const [progress, setProgress] = useState<ChecklistProgress>();
   const [pending, setPending] = useState(false);
@@ -237,7 +292,16 @@ export function MarkdownElements({
     }
   };
   return [
-    blocks({ image, copyCode, checklist: { progress, pending, readOnly, toggle: (id, checked) => void toggle(id, checked) } }, tree),
+    blocks(
+      {
+        image,
+        surface,
+        openImage,
+        copyCode,
+        checklist: { progress, pending, readOnly, toggle: (id, checked) => void toggle(id, checked) },
+      },
+      tree,
+    ),
     error && html`<p class="bad" role="alert">${error}</p>`,
   ];
 }

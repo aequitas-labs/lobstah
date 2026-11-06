@@ -125,6 +125,24 @@ describe('man ask', () => {
     expect(item).toMatchObject({ kind: 'decision', id: A, note: 'Which schema should the tray use?', repo: 'web' });
   });
 
+  it('links a relative image in the detail to its attached file, as man file does, and warns about one it cannot show', () => {
+    fs.mkdirSync(path.join(src, 'shots'));
+    write('shots/x.png', PNG);
+    const detail = write('d.md', '![shot](shots/x.png) ![gone](shots/missing.png) ![web](https://example.com/w.png)\n');
+    // shots/x.png is not under the working directory: it is taken from the detail file's directory.
+    const res = lobstah('man', 'ask', '--title', 'Which shot?', '--detail', detail, '--attach', 'shots/x.png');
+    expect(res.status, res.stderr).toBe(0);
+    const key = keyOf(res.stdout)!;
+    expect(readDecision(key)!.attachments.map((a) => a.name)).toEqual(['x.png']);
+    expect(readDecisionDetail(key)).toBe('![shot](x.png) ![gone](shots/missing.png) ![web](https://example.com/w.png)\n');
+    expect(res.stdout).toContain('the detail links 1 image(s) the glass cannot show: shots/missing.png');
+
+    const clean = lobstah('man', 'ask', '--title', 'Which shot?', '--detail', write('ok.md', '![shot](shots/x.png)\n'), '--attach', path.join(src, 'shots', 'x.png'));
+    expect(clean.status, clean.stderr).toBe(0);
+    expect(readDecisionDetail(keyOf(clean.stdout)!)).toBe('![shot](x.png)\n');
+    expect(clean.stdout).not.toContain('warning');
+  });
+
   it('asks about no dispatch too, and takes no more than six options', () => {
     const ok = lobstah('man', 'ask', '--title', 'Cut 0.6.0?');
     expect(ok.status, ok.stderr).toBe(0);

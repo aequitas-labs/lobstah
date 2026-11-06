@@ -134,14 +134,7 @@ export function fileReport(opts: FileReportOptions): ReportMeta {
     if (err instanceof AttachmentError) throw new ReportError(err.message);
     throw err;
   }
-  const stored = new Map<string, string>();
-  sources.forEach((file, i) => attached[i] && stored.set(realOrResolved(file), attached[i]!.name));
-  const linked = new Set<string>();
-  const markdown = rewriteImageLinks(fs.readFileSync(opts.file, 'utf8'), (target) => {
-    const name = underDir(pageDir, target) && stored.get(realOrResolved(path.resolve(pageDir, target)));
-    if (name) linked.add(name);
-    return name || undefined;
-  });
+  const { markdown, linked } = linkAttachedImages(fs.readFileSync(opts.file, 'utf8'), pageDir, sources, attached);
   const previous = readReportAt(dir);
   const renamed: Record<string, string> = { ...previous?.renamed };
   sources.forEach((file, i) => {
@@ -209,7 +202,7 @@ function existsAs(p: string, kind: 'file' | 'dir'): boolean {
  * out of it, no absolute path elsewhere. A directory must be inside the
  * page's tree either way, so its images keep paths the page can link.
  */
-function attachSources(pageDir: string, attach: string[], dirs: string[]): string[] {
+export function attachSources(pageDir: string, attach: string[], dirs: string[]): string[] {
   const realPage = realOrResolved(pageDir);
   const fromPage = (flag: string, p: string): string => {
     if (!underDir(pageDir, p)) throw new ReportError(`${flag} ${p}: not under the page's directory ${pageDir}`);
@@ -229,6 +222,29 @@ function attachSources(pageDir: string, attach: string[], dirs: string[]): strin
     files.push(...images);
   }
   return files;
+}
+
+/** A page's markdown with its attached images linked by stored name, and the names it now links. */
+export interface LinkedImages {
+  markdown: string;
+  linked: Set<string>;
+}
+
+/**
+ * Point each image link under `pageDir` that names an attached source at the
+ * stored name it was copied to (`sources[i]` became `attached[i]`). A link out
+ * of the page's directory, or to a file not attached, stays as written.
+ */
+export function linkAttachedImages(markdown: string, pageDir: string, sources: readonly string[], attached: readonly Attachment[]): LinkedImages {
+  const stored = new Map<string, string>();
+  sources.forEach((file, i) => attached[i] && stored.set(realOrResolved(file), attached[i]!.name));
+  const linked = new Set<string>();
+  const rewritten = rewriteImageLinks(markdown, (target) => {
+    const name = underDir(pageDir, target) && stored.get(realOrResolved(path.resolve(pageDir, target)));
+    if (name) linked.add(name);
+    return name || undefined;
+  });
+  return { markdown: rewritten, linked };
 }
 
 /** A link target that is a URL or a data URI: never a file of the report. */
