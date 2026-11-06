@@ -20,22 +20,29 @@ Never use real credentials in tests or pass secrets in process arguments.
 
 ## Deploying
 
-Deployed by the maintainers with `wrangler deploy`; no script or CI job deploys
-the wharf. `wrangler.jsonc` holds the deployment, including the Cloudflare
-account; there is no secret in it.
+Deployed by the maintainers from their own machine; no CI job deploys the wharf.
+`wrangler.jsonc` holds the deployment's shape, including the Cloudflare account,
+and no id of this deployment: its D1 `database_id` is a placeholder, and the
+GitHub client ID is a variable on the Worker. This machine's real database id
+lives in `services/wharf/wrangler.local.jsonc`, which git ignores (copy
+`wrangler.local.example.jsonc`). Run wrangler for the deployment through
+`pnpm --filter @lobstah/wharf run wrangler -- <command>`, which merges that file
+in, and deploy with `pnpm --filter @lobstah/wharf run deploy`. Both refuse to run
+without the local file or with a placeholder in it, and the deploy refuses when
+the live Worker has no `GITHUB_CLIENT_ID`. Neither prints an id.
 
 | Name | Kind | Value or source |
 | --- | --- | --- |
 | `GLASS_ORIGIN` | var | `https://glass.lobstah.dev`: the browser, cookie sessions |
 | `API_ORIGIN` | var | `https://api.lobstah.dev`: boats and agents, bearer tokens only |
-| `GITHUB_CLIENT_ID` | var | the GitHub OAuth app's public client ID |
+| `GITHUB_CLIENT_ID` | Worker var, not in `wrangler.jsonc` | the GitHub OAuth app's public client ID, set once on the Worker (dashboard, or `wrangler secret put`); `keep_vars` keeps it across deploys |
 | `GITHUB_ALLOWLIST` | var | JSON array of numeric GitHub account IDs as strings (`gh api user --jq .id`) |
 | `MAX_*`, `REQUESTS_PER_MINUTE` | var | abuse caps, below |
 | `AUTH_SECRET` | secret | random, at least 32 characters: Better Auth signing and the encryption of stored GitHub tokens |
 | `TOKEN_SECRET` | secret | random, separate: signs retryable dispatch capabilities. Rotating it stops old claim responses from being rebuilt; issued token hashes stay valid until their leases end |
 | `GITHUB_CLIENT_SECRET` | secret | the GitHub OAuth app's client secret |
 | `ACCOUNTS` | Durable Object | SQLite class `Account`, migration `v1`, made by the first deploy |
-| `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/` |
+| `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/`; its id is in the git-ignored `wrangler.local.jsonc` |
 | `FILES` | R2 | `lobstah-wharf-files`, evidence files |
 
 The two origins must differ. The Worker answers only those two hosts; the
@@ -59,18 +66,20 @@ first. Secrets go in on standard input, never as arguments:
 ```bash
 npx wrangler whoami
 npx wrangler r2 bucket create lobstah-wharf-files
-npx wrangler d1 create lobstah-wharf-auth
-npx wrangler d1 migrations apply lobstah-wharf-auth --remote
+npx wrangler d1 create lobstah-wharf-auth          # put its id in wrangler.local.jsonc
+cp wrangler.local.example.jsonc wrangler.local.jsonc
+pnpm run wrangler -- d1 migrations apply lobstah-wharf-auth --remote
 openssl rand -base64 48 | npx wrangler secret put AUTH_SECRET
 openssl rand -base64 48 | npx wrangler secret put TOKEN_SECRET
 npx wrangler secret put GITHUB_CLIENT_SECRET
-pnpm build && npx wrangler deploy --dry-run
-pnpm build && npx wrangler deploy
+npx wrangler secret put GITHUB_CLIENT_ID           # or a variable in the dashboard; once
+pnpm run wrangler -- deploy --dry-run
+pnpm run deploy
 ```
 
-Put the `database_id` that `d1 create` prints and the OAuth app's client ID into
-`wrangler.jsonc` before the migration. `secret put` creates the Worker, asking
-first at a terminal, when it does not exist yet. Coordination uses each
+`secret put` creates the Worker, asking first at a terminal, when it does not
+exist yet. Later deploys need only `pnpm run deploy`: the local file stays on
+the deploying machine, and the Worker keeps its variables and secrets. Coordination uses each
 account's SQLite Durable Object; core does not import this service or Better Auth.
 
 ### Boats
