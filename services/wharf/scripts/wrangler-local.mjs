@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Runs wrangler for the deployed wharf with this machine's own ids, which stay
 // out of git. wrangler.jsonc keeps a placeholder database_id; the real one is
 // in the git-ignored wrangler.local.jsonc (copy wrangler.local.example.jsonc).
