@@ -27,7 +27,9 @@ type HookFile = { description: string; hooks: Record<string, Array<{ hooks: Hook
 function sharedHooks(raw: string): HookFile['hooks'] {
   const parsed = JSON.parse(raw) as HookFile;
   // Declared harness differences: description; Codex SessionStart/Stop
-  // statusMessage; SessionEnd timeout (Codex 3s, Claude 10s).
+  // statusMessage; SessionEnd timeout (Codex 3s, Claude 10s); PermissionDenied,
+  // which only Claude Code has.
+  delete parsed.hooks.PermissionDenied;
   for (const [event, groups] of Object.entries(parsed.hooks)) {
     for (const group of groups) {
       for (const hook of group.hooks) {
