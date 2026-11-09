@@ -3894,6 +3894,8 @@ async function mainCli(): Promise<void> {
             glass: status.info ? 'running' : 'stopped',
             port: status.port,
             ...(status.info ? { ...(status.info.pid ? { pid: status.info.pid } : {}), version: status.info.version } : {}),
+            // A glass keeps serving the build it started with, after an upgrade too.
+            ...(status.info && status.info.version !== lobstahVersion() ? { stale: `CLI is v${lobstahVersion()}: run lobstah glass restart` } : {}),
           }),
         );
         break;
