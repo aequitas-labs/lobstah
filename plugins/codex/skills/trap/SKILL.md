@@ -79,6 +79,11 @@ Work arrives at turn end (the Stop hook) or from `soak --wait`, as a brief
 naming a dispatch id. Then:
 
 - For repo catches, branch first and do the work in this worktree.
+- Never use lavish, `lavish-axi` or a repo's `/lavish-plan` skill: plans and
+  reviews for the human go to ume next only. Don't write a plan before coding
+  unless the scope is unclear or the human has a real decision to make;
+  otherwise build it and open the PR. When a decision is needed, report
+  `needs-decision` to the helm with the options, not a long plan.
 - Report with `lobstah report <id> <verb> "<note>"`. Six verbs exist:
   working, needs-decision, blocked, paused, done, failed. Nothing else.
 - Repo catches finish with `lobstah report <id> done "<note>" --pr <url>` (or `failed`). Configured catches use `--report <file.md>` and optional `--attach <file>` instead.

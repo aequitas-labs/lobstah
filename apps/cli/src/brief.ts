@@ -9,6 +9,7 @@ import {
   trapBySession,
   trapLabel,
   TITLE_REMINDERS,
+  TRAP_PLANNING_RULE,
   type Grounds,
   type HelmRegistration,
 } from '@lobstah/core';
@@ -110,7 +111,7 @@ export async function buildBriefContext(sessionId: string, cwd?: string): Promis
   if (workerTrap) {
     const title =
       workerTrap.titlePending && (workerTrap.titleReminders ?? 0) < TITLE_REMINDERS ? `\n${titleReminder(workerTrap.titlePending)}` : '';
-    return `lobstah: session id ${sessionId} — this session mans trap ${trapLabel(workerTrap)} (it takes assigned work at turn end) and works in ${workerTrap.worktree}; \`lobstah stow\` signs it off.${fleet}${title}`;
+    return `lobstah: session id ${sessionId} — this session mans trap ${trapLabel(workerTrap)} (it takes assigned work at turn end) and works in ${workerTrap.worktree}; \`lobstah stow\` signs it off. ${TRAP_PLANNING_RULE}${fleet}${title}`;
   }
   let help: string;
   try {
