@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.6 — 2026-11-09
+
+### The hosted glass is the local glass
+
+The wharf's glass now runs the local glass's own UI: its header, tabs, deck,
+dispatch table and modal, decision modal, report pages, traps and reviews. It
+shows only the tabs and controls the wharf can fill, and adds just its sign-in,
+Boats and boat approval. The shared UI lives in `packages/glass-ui` behind one
+backend interface, and a parity test fails the build when the two glasses
+render a view differently. (#355–#360)
+
+### A glass Allow is the go in auto mode
+
+In Claude Code's auto mode, the classifier never sees a glass answer, so it
+refused commands already allowed there. A refused call now files a card through
+a new PermissionDenied hook. For a trap, PreToolUse honours Allow once and Allow
+always. For the helm, the card reads `The helm wants to run: <command>`, and
+Allow once covers that exact command for its session. (#364)
+
+### Checklists and images on cards and reports
+
+Task lists in a card's detail or a report are checkboxes. Ticks are saved beside
+the document, show on desktop and phone, and never answer the card;
+`man ask --show <key>` prints them. A withdrawn card keeps a read-only archive
+at its link. Card details show remote `https:` images inline, with a plain link
+when one won't load, and `man ask --detail` maps relative image links to its
+`--attach` files as `man file` does. Reports show attached images where the
+text names them. The glass page sends a strict Content-Security-Policy.
+(#352, #353)
+
+### Also new
+
+- Wharf deploys keep the deployment's ids out of git: they live in a
+  git-ignored `wrangler.local.jsonc`, and
+  `pnpm --filter @lobstah/wharf run deploy` merges them in. (#363)
+- CI retries a failed Windows test run once on one worker. (#361)
+
 ## 0.8.5 — 2026-11-05
 
 ### The desk: traps without a repo
