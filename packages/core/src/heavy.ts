@@ -396,6 +396,47 @@ export function liveHeavyTickets(match: { dispatch?: string; trap?: string }, no
     (t.state === 'waiting' ? t.deadAt === undefined && ownerAlive(t, now) : t.state !== 'cancelled' && (ownerAlive(t, now) || groupAlive(t))));
 }
 
+/** How much of the run history's end `lastHeavyRunEnd` reads: recent runs are at the end. */
+const HISTORY_TAIL_BYTES = 64 * 1024;
+
+/**
+ * When the latest finished run of a dispatch or trap ended, from the run
+ * history, or undefined when it has none there. A trap that went quiet while
+ * its command ran in the line counts its idle time from this moment, not from
+ * when its turn ended.
+ */
+export function lastHeavyRunEnd(match: { dispatch?: string; trap?: string }): number | undefined {
+  let text: string;
+  try {
+    const file = path.join(heavyDir(), 'history.jsonl');
+    const size = fs.statSync(file).size;
+    const fd = fs.openSync(file, 'r');
+    try {
+      const length = Math.min(size, HISTORY_TAIL_BYTES);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, size - length);
+      text = buffer.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+  let latest: number | undefined;
+  for (const line of text.split('\n')) {
+    let run: { dispatch?: unknown; trap?: unknown; endedAt?: unknown };
+    try {
+      run = JSON.parse(line) as typeof run;
+    } catch {
+      continue; // The tail's cut first line, or a torn write.
+    }
+    const mine = (match.dispatch !== undefined && run.dispatch === match.dispatch) || (match.trap !== undefined && run.trap === match.trap);
+    const ended = mine && typeof run.endedAt === 'string' ? Date.parse(run.endedAt) : NaN;
+    if (Number.isFinite(ended) && (latest === undefined || ended > latest)) latest = ended;
+  }
+  return latest;
+}
+
 /**
  * The daemon's pass: clear what the dead left when nobody is waiting to notice,
  * and say what's worth saying. A long line is one quiet notice, once until the
