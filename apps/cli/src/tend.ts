@@ -53,6 +53,7 @@ import {
   readPrs,
   readSessionClaim,
   readTrap,
+  questionEntry,
   readStatusLog,
   queuedAt,
   readWatch,
@@ -681,7 +682,13 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
       ? 'queued'
       : displayState({ log, lastEventAt: lastEventAt(id, lane), queued: false, claimedAt });
   const evidence = readEvidence(id, lane);
-  const answered = last && (last.verb === 'needs-decision' || last.verb === 'blocked') ? answeredAt(id, lane, last.at) : undefined;
+  // The row's answered mark follows its question; a lone permission request is marked by its card's answer.
+  const asked = questionEntry(log);
+  const answered = asked
+    ? answeredAt(id, lane, asked.at)
+    : last?.permissionRequest && last.verb === 'needs-decision'
+      ? answeredAt(id, lane, last.at, { permissionAnswers: true })
+      : undefined;
   return {
     id,
     lane,
@@ -798,8 +805,9 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   const attention: TendReport['attention'] = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
     for (const id of [...pendingIds(lane), ...activeIds(lane)]) {
-      const last = readStatusLog(id, lane).at(-1);
-      if (!last || (last.verb !== 'needs-decision' && last.verb !== 'blocked')) continue;
+      // A permission request filed after the question has its own card; the question stands.
+      const last = questionEntry(readStatusLog(id, lane));
+      if (!last) continue;
       // Answered (a message newer than the question) is not standing, even
       // before the worker reads it and reports; the dispatch row carries
       // the marker instead.
