@@ -420,9 +420,10 @@ desktop pet (installed, running, whether its last read worked); exit 1 on
 failures.`,
   pet: `The desktop pet (macOS): attention questions crawl across the screen as
 the lobster, each with its question in a speech bubble; clicking one opens
-the helm. install copies the built binary under ~/.lobstah/bin and writes a
-login LaunchAgent (build it first: cd apps/pet && swift build -c release).
-Quitting the pet sticks until next login; uninstall removes the agent.`,
+the helm. install builds it from its sources (swift build), stamps it with
+this version under ~/.lobstah/bin, and writes a login LaunchAgent; --binary
+installs your own build. doctor flags a pet behind the CLI; a daemon restart
+rebuilds it. Quitting sticks until next login; uninstall removes the agent.`,
   glass: `The spyglass: tend as a live localhost web page — attention, dispatches,
 traps, notices, merge view. Read-only, on 127.0.0.1: looking steers nothing.
 --detach runs it in the background; stop, status, install, uninstall, and
