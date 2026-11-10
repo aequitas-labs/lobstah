@@ -228,7 +228,9 @@ function verifyAssertion<K extends 'run' | 'existing'>(
   kind: K,
   file: string,
 ): { scope: Extract<ChallengeScope, { kind: K }>; credentialId: string } {
-  if (!res || typeof res !== 'object') throw new PasskeyError('a passkey assertion is required', 400);
+  // No assertion is no confirmation: refused as unauthorized, like a wrong one.
+  if (!res || typeof res !== 'object' || (['credentialId', 'clientDataJSON', 'authenticatorData', 'signature'] as const).some((f) => typeof res[f] !== 'string'))
+    throw new PasskeyError('a passkey assertion is required');
   const clientRaw = b64u(res.clientDataJSON, 'clientDataJSON');
   const clientData = readClientData(clientRaw, 'webauthn.get', origin);
   const scope = challenges.spend(clientData.challenge);

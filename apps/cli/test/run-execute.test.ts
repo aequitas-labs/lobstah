@@ -191,7 +191,8 @@ printf '%s' "$S" | base64
     const marker = path.join(outside, 'ran');
     const c = card(`#!/bin/bash\ntouch "${marker}"\n`);
     const res = await post('run', { key: c.key, inputs: {} });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
+    expect(res.json.reason).toBe('a passkey assertion is required');
     const forged = await post('run', { key: c.key, credentialId: 'AAAA', clientDataJSON: 'e30', authenticatorData: 'AAAA', signature: 'AAAA', inputs: {} });
     expect(forged.status).toBe(403);
     await runs.settled();
