@@ -5,7 +5,7 @@
 // runs wrangler with it, and removes it again.
 //
 //   pnpm --filter @lobstah/wharf run deploy                  build, check, deploy
-//   pnpm --filter @lobstah/wharf run wrangler -- <command>   any wrangler command (d1 migrations apply …)
+//   pnpm --filter @lobstah/wharf run wrangler <command>   any wrangler command (d1 migrations apply …)
 //
 // It fails loudly, before wrangler runs, when the local file is missing or
 // still holds a placeholder, and before a deploy when the live Worker has no
@@ -92,7 +92,7 @@ export function liveHasClientId() {
 }
 
 function main(args) {
-  if (!args.length) fail('name a wrangler command: run wrangler -- <command>, or run deploy');
+  if (!args.length) fail('name a wrangler command: run wrangler <command>, or run deploy');
   if (!fs.existsSync(LOCAL))
     fail(`${path.relative(process.cwd(), LOCAL)} is missing. Copy wrangler.local.example.jsonc to it and set "database_id" (npx wrangler d1 list).`);
   let local;

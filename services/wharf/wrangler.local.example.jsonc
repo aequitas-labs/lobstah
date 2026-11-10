@@ -1,6 +1,6 @@
 // This deployment's own ids, which stay out of git. Copy this file to
 // wrangler.local.jsonc (git-ignored) on the machine that deploys, and fill it
-// in; `pnpm --filter @lobstah/wharf run wrangler -- <command>` and
+// in; `pnpm --filter @lobstah/wharf run wrangler <command>` and
 // `run deploy` merge it into wrangler.jsonc and refuse to run without it.
 {
   // The D1 database lobstah-wharf-auth: printed by `npx wrangler d1 create
