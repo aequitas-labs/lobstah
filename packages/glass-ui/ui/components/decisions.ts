@@ -19,6 +19,7 @@ import {
 } from '../actions.js';
 import { html } from '../html.js';
 import type { DecisionDraft } from '../store.js';
+import { getState } from '../store.js';
 import { Age, ImageThumb, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
@@ -243,7 +244,9 @@ export function DecisionModal({
       first.focus();
     }
   };
-  const c = key ? order.find((x) => x.key === key) : undefined;
+  // A run card stays on screen with its output after its run answers it and the snapshot drops it.
+  const ran = key ? getState().runs?.[key] : undefined;
+  const c = key ? (order.find((x) => x.key === key) ?? ran?.card) : undefined;
   const i = c ? order.indexOf(c) : -1;
   const shell = (label: string, body: unknown, shown = '') =>
     html`<div id="doverlay" class="open" onClick=${(e: Event) => e.target === e.currentTarget && closeDecision()}>
@@ -285,9 +288,11 @@ export function DecisionModal({
                 ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
                 : c.kind === 'decision' && c.readOnly
                   ? html`<div class="dim">Closed decision</div>`
-                  : draft?.sent
-                    ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
-                    : answerForm(c, draft, extensions.join(',')),
+                  : ran && (ran.busy || ran.result)
+                    ? html`<div class="danswered ok">${ran.busy ? 'running · its result answers the card' : 'answered by its run'}</div>`
+                    : draft?.sent
+                      ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
+                      : answerForm(c, draft, extensions.join(',')),
               !(c.kind === 'decision' && (c.appStart || c.readOnly)) &&
                 legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && (c.permission || !!c.run)),
             ]

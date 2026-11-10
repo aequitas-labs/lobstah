@@ -56,7 +56,8 @@ export function receive(snapshot: GlassSnapshot): void {
     decisionModal?.key &&
     !live.has(decisionModal.key) &&
     getState().archivedDecision?.key !== decisionModal.key &&
-    !drafts[decisionModal.key]?.sent
+    !drafts[decisionModal.key]?.sent &&
+    !getState().runs?.[decisionModal.key]
       ? { decisionModal: nextOpen(modalOrder(), filteredDecisionCards(snapshot, getState().prefs), kept, decisionModal.key) }
       : {}),
   });
@@ -754,7 +755,8 @@ const setRun = (key: string, patch: Partial<import('./store.js').RunView>) => {
 export async function runRunCard(key: string, sha256: string, inputs: Record<string, string>): Promise<void> {
   const token = getState().snapshot?.focusToken;
   if (!token) return setRun(key, { error: 'This page has no token; reload it.' });
-  setRun(key, { busy: true, error: undefined, output: '', next: 0, result: undefined });
+  const card = currentCards().find((c) => c.key === key);
+  setRun(key, { busy: true, error: undefined, output: '', next: 0, result: undefined, ...(card ? { card } : {}) });
   try {
     const start = (
       await backend().request<{ ok: boolean; reason?: string; challenge?: string; rpId?: string; credentialIds?: string[] }>(
