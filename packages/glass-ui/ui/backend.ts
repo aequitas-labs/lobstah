@@ -101,6 +101,8 @@ export const GLASS_ACTIONS = [
   'cancel',
   /** Ask the boat that drafted a review to dismiss it. */
   'review-dismiss',
+  /** Run a run card's script on this Mac. Only the local glass runs anything. */
+  'run',
 ] as const;
 export type GlassAction = (typeof GLASS_ACTIONS)[number];
 

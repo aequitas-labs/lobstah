@@ -5,6 +5,8 @@ import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
+import { RUN_KEY, runCardFleet } from './fixtures/run-card.js';
+import { WHARF_CAPABILITIES } from '../../../packages/glass-ui/ui/backends/wharf.js';
 
 /**
  * A glass shows only what its source can fill and do (GlassBackend's
@@ -87,5 +89,15 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(local.$('[data-helm-chat]')).not.toBeNull();
     expect(narrow.$('.settings')).not.toBeNull();
     expect(narrow.$('[data-helm-chat]')).toBeNull();
+  });
+  it('shows a run card with no Run button where its source runs nothing, as the wharf does', async () => {
+    expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
+    const hash = `#decision/${encodeURIComponent(RUN_KEY)}`;
+    const local = await loadGlass(GLASS_PAGE, runCardFleet(), { now: NOW, hash });
+    const narrow = await loadGlass(limited, runCardFleet(), { now: NOW, hash });
+    pages.push(local, narrow);
+    expect(local.$('#doverlay .runbtn')).not.toBeNull();
+    expect(narrow.$('#doverlay .runscript')).not.toBeNull();
+    expect(narrow.$('#doverlay .runbtn')).toBeNull();
   });
 });

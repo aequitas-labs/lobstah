@@ -1,0 +1,156 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { appendStatus, claimNext, decisionDir, enqueue, ensureLayout, executorPath, listDecisions, readStatusLog, sha256Hex } from '@lobstah/core';
+import { buildGlassSnapshot } from '../src/glass.js';
+import { GLASS_PAGE } from '../src/glass-page.generated.js';
+import { loadGlass } from './glass-dom.js';
+import type { GlassDom } from './glass-dom.js';
+import { NOW } from './fixtures/glass-snapshots.js';
+import { RUN_KEY, glassRun, runCardFleet } from './fixtures/run-card.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
+
+/**
+ * Run cards, PR 1 (ume 3ef69c1d-026, intent run-card-post): `man ask --run`
+ * posts a card that carries its script whole with the stored copy's hash, a
+ * trap proposes a script with `report needs-decision --run`, and the glass
+ * shows the script, its flagged characters and what runs it, with Run
+ * disabled until a passkey is set up.
+ */
+
+const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+const D = 'aaaaaaaa-1111-4000-8000-0000000000d1';
+
+let home: string;
+let src: string;
+beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-run-cards-cli-'));
+  process.env.LOBSTAH_HOME = home;
+  ensureLayout();
+  fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
+  src = path.join(home, 'src');
+  fs.mkdirSync(src);
+});
+afterEach(() => {
+  removeTempDir(home);
+  delete process.env.LOBSTAH_HOME;
+});
+
+function lobstah(...args: string[]) {
+  const env: NodeJS.ProcessEnv = { ...process.env, LOBSTAH_HOME: home };
+  delete env.CLAUDE_CODE_SESSION_ID;
+  return spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env, timeout: 15_000 });
+}
+/** What the CLI said, on either stream. */
+const said = (res: ReturnType<typeof lobstah>): string => `${res.stdout}${res.stderr}`;
+const write = (name: string, body: string) => {
+  const file = path.join(src, name);
+  fs.writeFileSync(file, body);
+  return file;
+};
+
+describe('man ask --run', () => {
+  it('posts a run card whose snapshot carries the script text and the hash of its stored copy', () => {
+    const body = '#!/bin/bash\nIFS= read -r CRON_SECRET\necho wiped\n';
+    const res = lobstah('man', 'ask', '--title', 'Wipe test mail', '--run', write('wipe.sh', body), '--input', 'CRON_SECRET', '--cwd', src, '--timeout', '2m');
+    expect(res.status, res.stderr).toBe(0);
+    const [card] = listDecisions();
+    expect(card!.options).toEqual(['Decline']);
+    expect(fs.readFileSync(path.join(decisionDir(card!.key)!, 'run', 'script'), 'utf8')).toBe(body);
+    const shown = buildGlassSnapshot().decisions.find((d) => d.key === card!.key)!;
+    expect(shown.run).toMatchObject({
+      script: body,
+      scriptSha256: sha256Hex(body),
+      inputs: [{ name: 'CRON_SECRET', secret: true }],
+      cwd: src,
+      timeoutSecs: 120,
+      output: 'scrubbed',
+      interpreter: '/bin/bash',
+    });
+    expect(shown.run!.altered).toBeUndefined();
+  });
+
+  it('refuses a script over 16 KB and stores no card', () => {
+    const res = lobstah('man', 'ask', '--title', 'Too big', '--run', write('big.sh', '#'.repeat(16 * 1024 + 1)), '--cwd', src);
+    expect(res.status).not.toBe(0);
+    expect(said(res)).toContain('exceeds 16384 bytes');
+    expect(listDecisions()).toEqual([]);
+  });
+
+  it('refuses run flags without --run, and --option with it', () => {
+    expect(said(lobstah('man', 'ask', '--title', 'X', '--input', 'A'))).toContain('--input goes with --run');
+    expect(said(lobstah('man', 'ask', '--title', 'X', '--run', write('x.sh', 'true\n'), '--option', 'Yes'))).toContain('--option does not go with --run');
+    expect(listDecisions()).toEqual([]);
+  });
+
+  it('shows a card whose stored script was changed as altered', () => {
+    expect(lobstah('man', 'ask', '--title', 'Hi', '--run', write('hi.sh', 'echo hi\n'), '--cwd', src).status).toBe(0);
+    const [card] = listDecisions();
+    fs.writeFileSync(path.join(decisionDir(card!.key)!, 'run', 'script'), 'echo pwned\n');
+    expect(buildGlassSnapshot().decisions[0]!.run!.altered).toBe(true);
+  });
+});
+
+describe('report needs-decision --run', () => {
+  it("stores a trap's script as a proposal for the helm, names it in the note, and posts no card", () => {
+    enqueue({ id: D, repo: 'web', brief: 'b' }, 'work');
+    claimNext('work');
+    appendStatus(D, 'work', 'working', 'on it');
+    const body = 'echo proposed\n';
+    const res = lobstah('report', D, 'needs-decision', 'needs the cron secret', '--run', write('p.sh', body));
+    expect(res.status, res.stderr).toBe(0);
+    const note = readStatusLog(D, 'work').at(-1)!.note!;
+    expect(note).toContain(`run proposal ${sha256Hex(body).slice(0, 12)}`);
+    expect(note).toContain(`lobstah man ask ${D}`);
+    expect(listDecisions()).toEqual([]);
+    expect(said(lobstah('report', D, 'working', 'x', '--run', write('q.sh', body)))).toContain('--run goes with needs-decision');
+  });
+});
+
+describe('a run card in the glass', () => {
+  let open: GlassDom[] = [];
+  afterEach(async () => {
+    await Promise.all(open.map((g) => g.close()));
+    open = [];
+  });
+  const modal = async (run = glassRun()) => {
+    const g = await loadGlass(GLASS_PAGE, runCardFleet(run), { now: NOW, hash: `#decision/${encodeURIComponent(RUN_KEY)}` });
+    open.push(g);
+    return g;
+  };
+
+  it('shows the whole script, its hash, what runs it and each input, with Run disabled until a passkey is set up', async () => {
+    const g = await modal();
+    const card = g.$('#doverlay .runcard')!;
+    expect(card.querySelector('.runscript')!.textContent).toBe(glassRun().script);
+    expect(card.querySelector('.runsha')!.textContent).toBe(glassRun().scriptSha256);
+    expect(card.textContent).toContain('/bin/bash');
+    expect(card.textContent).toContain('/Users/me/base/homebase');
+    expect(card.textContent).toContain('time limit 5m');
+    expect(card.textContent).toContain('the exit code and scrubbed output');
+    const input = card.querySelector('.runinput input') as HTMLInputElement;
+    expect(input.getAttribute('type')).toBe('password');
+    const run = card.querySelector('.runbtn') as HTMLButtonElement;
+    expect(run.disabled).toBe(true);
+    expect(card.textContent).toContain('Set up a passkey in Settings');
+    expect(g.$$('#doverlay .dopt').map((b) => b.textContent?.trim())).toEqual(['1Decline']);
+    expect(g.$('#doverlay textarea')).toBeNull();
+  });
+
+  it('marks and names a zero-width or bidi character by its code point', async () => {
+    const g = await modal(glassRun('echo safe‮ hs.dab\nrm​ -rf x\n'));
+    const marks = g.$$('#doverlay .runwarn').map((m) => m.getAttribute('title'));
+    expect(marks).toEqual(['U+202E RIGHT-TO-LEFT OVERRIDE', 'U+200B ZERO WIDTH SPACE']);
+    const list = g.$('#doverlay .runwarnings')!.textContent!;
+    expect(list).toContain('line 1, column 10: U+202E RIGHT-TO-LEFT OVERRIDE');
+    expect(list).toContain('line 2, column 3: U+200B ZERO WIDTH SPACE');
+  });
+
+  it("says a card whose stored copy changed won't run", async () => {
+    const g = await modal(glassRun(undefined, { altered: true }));
+    expect(g.$('#doverlay .runcard')!.textContent).toContain("no longer matches the card's hash");
+  });
+});

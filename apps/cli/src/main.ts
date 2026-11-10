@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { applyHeavyHooks } from '@lobstah/core';
-import type { GrantIntent } from '@lobstah/core';
+import type { GrantIntent, RunCard } from '@lobstah/core';
 import {
   IdleWait,
   reviewAttention,
@@ -222,6 +222,11 @@ import {
   releaseHeldQuestions,
   askDecision,
   withdrawDecision,
+  prepareRunCard,
+  findRunProposal,
+  proposeRunScript,
+  RunCardError,
+  RUN_DECLINE_OPTION,
   DecisionError,
   decisionDir,
   telemetryCliRun,
@@ -1667,9 +1672,23 @@ async function mainCli(): Promise<void> {
           throw err;
         }
       }
+      // A trap's script for a run card is a proposal to the helm, never a card: stored by hash, named in the note.
+      const runScript = opt('--run');
+      let runNote = '';
+      if (runScript !== undefined) {
+        if (verb !== 'needs-decision') throw new UsageError(`--run goes with needs-decision\n\n${usageFor('report')!}`);
+        try {
+          const by = readSessionClaim(id, lane)?.by;
+          const proposal = proposeRunScript(id, runScript, by?.startsWith('wt:') ? by : undefined);
+          runNote = ` [run proposal ${proposal.sha256.slice(0, 12)}: lobstah man ask ${id} --title "…" --run ${proposal.file}]`;
+        } catch (err) {
+          if (err instanceof RunCardError) throw new UsageError(err.message);
+          throw err;
+        }
+      }
       const titleClaim = verb === 'done' || verb === 'failed' ? readSessionClaim(id, lane) : undefined;
       const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
-      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true);
+      const entry = appendStatus(id, lane, verb, runNote ? `${note ?? ''}${runNote}`.trim() : note, undefined, saysWaiting ? waiting : undefined, true);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
       if (verb === 'failed') recordPushFailure(id, lane, note);
       // A trap reports from its own checkout, or names its session from
@@ -2164,6 +2183,22 @@ async function mainCli(): Promise<void> {
       if (title === undefined) throw new UsageError(`man ask requires --title "<question>"\n\n${usageFor('man:ask')!}`);
       if (pos.length > 1) throw new UsageError(`man ask takes at most one dispatch id\n\n${usageFor('man:ask')!}`);
       const dispatch = pos[0];
+      const runScript = opt('--run');
+      const runFlags = ['--input', '--cwd', '--timeout', '--output'].filter((f) => (f === '--input' ? values(f).length > 0 : opt(f) !== undefined));
+      if (runScript === undefined && runFlags.length) throw new UsageError(`${runFlags.join(', ')} ${runFlags.length === 1 ? 'goes' : 'go'} with --run\n\n${usageFor('man:ask')!}`);
+      if (runScript !== undefined && values('--option').length) throw new UsageError('a run card offers Run and Decline: --option does not go with --run');
+      let run: { card: RunCard; script: Buffer } | undefined;
+      if (runScript !== undefined) {
+        try {
+          const prepared = prepareRunCard({ scriptFile: runScript, inputs: values('--input'), cwd: opt('--cwd'), timeout: opt('--timeout'), output: opt('--output') });
+          // A trap's proposal for this dispatch, posted unchanged: the card names the trap.
+          const proposal = dispatch !== undefined ? findRunProposal(dispatch, prepared.card.scriptSha256) : undefined;
+          run = proposal?.trap ? { ...prepared, card: { ...prepared.card, proposedBy: proposal.trap } } : prepared;
+        } catch (err) {
+          if (err instanceof RunCardError) throw new UsageError(err.message);
+          throw err;
+        }
+      }
       const lane = dispatch !== undefined ? findLane(dispatch) : undefined;
       const repo = dispatch !== undefined ? repoOf(dispatch, lane!) : undefined;
       if (groundsName === undefined && caller?.id !== undefined) groundsName = helmOf(caller.id)?.grounds;
@@ -2173,8 +2208,9 @@ async function mainCli(): Promise<void> {
         asked = askDecision({
           title,
           detailFile: opt('--detail'),
-          options: values('--option'),
+          options: run ? [RUN_DECLINE_OPTION] : values('--option'),
           attach: values('--attach'),
+          ...(run ? { run } : {}),
           ...(dispatch !== undefined ? { dispatch, lane } : {}),
           ...(repo ? { repo } : {}),
           ...(grounds ? { grounds } : {}),
@@ -2196,6 +2232,7 @@ async function mainCli(): Promise<void> {
           title: meta.title,
           ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
           options: meta.options.join(' | '),
+          ...(meta.run ? { run: `sha256 ${meta.run.scriptSha256} · ${meta.run.inputs.length} input(s) · cwd ${meta.run.cwd} · timeout ${meta.run.timeoutSecs}s · output ${meta.run.output}${meta.run.proposedBy ? ` · proposed by ${meta.run.proposedBy}` : ''}` } : {}),
           attachments: meta.attachments.length,
           stored: decisionDir(meta.key)!,
           ...(replaced.length ? { replaced: replaced.join(', ') } : {}),
