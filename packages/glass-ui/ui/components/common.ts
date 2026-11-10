@@ -149,10 +149,6 @@ export function readOnlyNotice(): Children {
   return getState().snapshot?.viewer?.onMachine === false && html`<div class="dim">${READ_ONLY_REASON}</div>`;
 }
 
-/** A link to the live session in Claude. It works on any device, so no viewer check. */
-const liveLinkButton = (href: string) =>
-  html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" onClick=${stop}>Open live Claude</a>`;
-
 /** What the live link does, said once in the modal: which client takes it depends on the device. */
 export function liveLinkNote(t: GlassTrap): Children {
   if (t.live && t.sessionWriters)
@@ -165,48 +161,125 @@ export function liveLinkNote(t: GlassTrap): Children {
 }
 
 /**
- * A live trap seen from a page that isn't on its machine: where it runs and
- * what can reach it, instead of a button that can't help. Presentation only:
- * the server refuses these pages' actions whatever they show.
+ * One way to open a trap from this page, best first. A row shows only the
+ * first as its one ↗ Open; the trap modal lists them all, each under its own
+ * label.
  */
-function offMachineAction(t: GlassTrap, machine = 'its machine'): Children {
+export interface TrapRoute {
+  kind: 'raise' | 'live' | 'link';
+  /** The modal's button text. */
+  name: string;
+  /** Where it works, beside the modal's button. */
+  where: string;
+  /** The control, with the text it carries. */
+  control: (text: string) => Children;
+}
+
+/**
+ * The ways this page can open a trap, best first: raise its window on this
+ * Mac, open it live in Claude (any device), or its session link (an app on
+ * this Mac). A desktop session's own link is the modal's session row, so it
+ * isn't repeated here. Presentation only: the server refuses what a page
+ * may not do.
+ */
+export function trapRoutes(t: GlassTrap): TrapRoute[] {
+  if (t.requested || t.starting || !t.live) return [];
+  const viewer = getState().snapshot?.viewer;
+  const routes: TrapRoute[] = [];
+  if (viewer?.onMachine && can('focus') && (viewer.windowFocus || t.link)) {
+    const clicked = (e: Event) => {
+      stop(e);
+      void openTrapWindow(t.trapId);
+    };
+    routes.push({
+      kind: 'raise',
+      name: 'Raise window',
+      where: 'on this Mac',
+      control: (text) => html`<button class="btn open" title="Raise this trap's window on this Mac" onClick=${clicked}>${text}</button>`,
+    });
+  }
+  if (t.liveLink) {
+    const href = t.liveLink;
+    routes.push({
+      kind: 'live',
+      name: 'Open live in Claude',
+      where: 'any device',
+      control: (text) =>
+        html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" onClick=${stop}>${text}</a>`,
+    });
+  }
+  if (t.link && !desktopSession(t) && viewer?.onMachine && sessionLinkOpens()) {
+    const href = t.link;
+    routes.push({
+      kind: 'link',
+      name: 'Session link',
+      where: 'opens its app on this Mac',
+      control: (text) => html`<a class="btn open" href=${href} title="Open this session's link in its app" onClick=${stop}>${text}</a>`,
+    });
+  }
+  return routes;
+}
+
+/** Where a live trap runs, for a page off its machine. */
+const runningOn = (t: GlassTrap): string => `Running on ${t.boat ?? getState().snapshot?.viewer?.machine ?? 'its machine'}`;
+
+/**
+ * A live trap seen from a page that isn't on its machine and has no route to
+ * it: where it runs, instead of a button that can't help.
+ */
+function offMachineNote(t: GlassTrap): Children {
   // Same machine by another name. The server can't accept actions at this address, but the page can point at the one it does.
   if (location.hostname === 'localhost') {
     const address = `127.0.0.1${location.port ? ':' + location.port : ''}`;
     return html`<span class="winaction"><span class="dim">Open controls need</span> <a href=${'http://' + address} onClick=${stop}>${address}</a></span>`;
   }
-  if (t.liveLink)
-    return html`<span class="winaction offmachine"><span class="dim">Running on ${machine}</span> ${liveLinkButton(t.liveLink)}</span>`;
-  return html`<span class="dim offmachine">${t.attachCommand && viewerHasTerminal() ? `Running on ${machine}` : `Running on ${machine}, only reachable from there`}</span>`;
+  return html`<span class="dim offmachine">${t.attachCommand && viewerHasTerminal() ? runningOn(t) : `${runningOn(t)}, only reachable from there`}</span>`;
 }
 
+/** What a live trap with no route to it says, or nothing. */
+function noRouteNote(t: GlassTrap): Children {
+  const viewer = getState().snapshot?.viewer;
+  if (!viewer?.onMachine) return offMachineNote(t);
+  return can('focus') && !viewer.windowFocus && !t.link ? html`<span class="dim">Window focus is not supported here</span>` : null;
+}
+
+/** The answer to the last raise of this trap's window. */
+const focusResult = (t: GlassTrap): Children => {
+  const result = getState().focusResults[t.trapId];
+  return result && [' ', html`<span class="dim">${result}</span>`];
+};
+
 /**
- * The same live-trap action and honest result wherever a trap is shown: an
- * open button, a state note, or nothing. Resume commands and raw session
- * links with their copy controls live in the trap modal only.
+ * The one ↗ Open wherever a trap is a row (table, card, deck), or a state
+ * note, or nothing. It takes the trap's best route: its window on this Mac,
+ * else its live link, else its session link. Every route, and the resume
+ * and attach commands, are in the trap modal.
  */
 export function windowAction(t: GlassTrap): Children {
   if (t.requested) return html`<span class="dim">Requested — no window yet</span>`;
   if (t.starting) return html`<span class="dim">${t.starting.failedAt ? 'Did not start' : 'Starting — no window yet'}</span>`;
-  const desktop = desktopSession(t) && !!t.link;
   if (!t.live) {
-    if (!desktop || !sessionLinkOpens()) return null;
+    if (!(desktopSession(t) && t.link) || !sessionLinkOpens()) return null;
     // The server focuses live traps only; a signed-off app session opens its stored link.
     return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
   }
-  const state = getState();
-  const viewer = state.snapshot?.viewer;
-  if (!viewer?.onMachine) return offMachineAction(t, t.boat ?? viewer?.machine);
-  // Where it runs is always said; raising its window needs a source that can.
-  if (!can('focus')) return null;
-  if (!viewer.windowFocus && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;
-  const clicked = (e: Event) => {
-    stop(e);
-    void openTrapWindow(t.trapId);
-  };
-  return html`<span class="winaction"><button class="btn open" title="Open this trap's window" onClick=${clicked}>↗ Open</button>${t.link && !desktop && sessionLinkOpens() && [' ', html`<a href=${t.link} onClick=${stop}>Session link</a>`]}${t.liveLink && [' ', liveLinkButton(t.liveLink)]}${
-    state.focusResults[t.trapId] && [' ', html`<span class="dim">${state.focusResults[t.trapId]}</span>`]
-  }</span>`;
+  const [best] = trapRoutes(t);
+  if (!best) return noRouteNote(t);
+  const where = !getState().snapshot?.viewer?.onMachine && html`<span class="dim">${runningOn(t)}</span> `;
+  return html`<span class=${'winaction' + (where ? ' offmachine' : '')}>${where}${best.control('↗ Open')}${focusResult(t)}</span>`;
+}
+
+/** The trap modal's open section: every route under its label, or the row's note when there is none. */
+export function trapOpenRoutes(t: GlassTrap): Children {
+  const routes = trapRoutes(t);
+  if (!routes.length) return windowAction(t) ?? html`<span class="dim">Signed off — no window</span>`;
+  return [
+    !getState().snapshot?.viewer?.onMachine && html`<div class="dim offmachine">${runningOn(t)}</div>`,
+    html`<div class="routes">${routes.map(
+      (r) =>
+        html`<div key=${r.kind} class="route">${r.control(r.name)} <span class="dim">${r.where}</span>${r.kind === 'raise' && focusResult(t)}</div>`,
+    )}</div>`,
+  ];
 }
 
 export function Table(headers: readonly string[], rows: Children[], empty: string) {
@@ -260,7 +333,7 @@ export const cmdRow = (text: string, key?: string, label?: string, href?: string
  * on this device.
  */
 export const trapSessionRow = (t: GlassTrap): Children => {
-  if (t.live && !desktopSession(t)) return t.attachCommand && viewerHasTerminal() ? cmdRow(t.attachCommand) : null;
+  if (t.live && !desktopSession(t)) return t.attachCommand && viewerHasTerminal() ? cmdRow(t.attachCommand, undefined, 'attach:') : null;
   return t.sessionId || (t.link && desktopSession(t)) ? resumeRow(t) : null;
 };
 
@@ -273,7 +346,7 @@ export const resumeRow = (session: ResumeSession): Children => {
   }
   if (!viewerHasTerminal()) return null;
   const command = resumeCommand(session);
-  return command ? cmdRow(command) : html`<span class="dim">Resume command unavailable</span>`;
+  return command ? cmdRow(command, undefined, 'resume:') : html`<span class="dim">Resume command unavailable</span>`;
 };
 
 /** A clickable image that opens in the in-page overlay. */
