@@ -3843,6 +3843,14 @@ async function mainCli(): Promise<void> {
         await daemon(Number(opt('--interval') ?? '5000'), console.log, {
           hostedStart: async () => {
             if (!loadConfig().wharves || !Object.keys(loadConfig().wharves!).length) return;
+            // `[glass] mirror` shows this machine's glass on that wharf's hosted glass; without it, no wharf request.
+            // A mirror that cannot start is logged and left off; it never stops the daemon.
+            try {
+              const { startWharfMirror } = await import('./wharf-mirror.js');
+              startWharfMirror(loadConfig());
+            } catch (err) {
+              console.log(`wharf mirror: ${err instanceof Error ? err.message : String(err)}`);
+            }
             const { startWharfBroker, daemonBrokerOptions } = await import('./wharf-trap-broker.js');
             hostedBroker = await startWharfBroker(daemonBrokerOptions(loadConfig));
           },

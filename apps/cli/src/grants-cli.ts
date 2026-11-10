@@ -37,8 +37,10 @@ import {
   toonKV,
   toonTable,
   useGrant,
+  answeredInGlass,
 } from '@lobstah/core';
 import type {
+  AnswerSource,
   CheckoutRoot,
   DecisionAnswer,
   DecisionMeta,
@@ -801,8 +803,8 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
  * from the command line (`man answer`, which the helm runs) may say No but
  * never grants.
  */
-export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: 'glass' | 'cli'): void {
-  if (!decision.permission || by === 'glass') return;
+export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: AnswerSource): void {
+  if (!decision.permission || answeredInGlass(by)) return;
   if (option !== undefined && option !== 'No') {
     throw new GrantError(
       'a permission is granted in the glass, or by a person with `lobstah grant` at a terminal; `man answer` can only say No',
@@ -819,14 +821,14 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
   const ask = decision.permission;
   if (!ask) return undefined;
   if (ask.helm) {
-    if (answer.by !== 'glass' || answer.option !== HELM_COMMAND_OPTION || !ask.session || ask.command === undefined) return undefined;
+    if (!answeredInGlass(answer.by) || answer.option !== HELM_COMMAND_OPTION || !ask.session || ask.command === undefined) return undefined;
     return addGrant({ mode: 'once', session: ask.session, command: ask.command, match: 'exact', harness: ask.harness, by: 'glass' });
   }
-  if (answer.by === 'glass' && ask.sessionGrant && !ask.sessionGrant.command && answer.option === STANDING_TOOL_OPTION) {
+  if (answeredInGlass(answer.by) && ask.sessionGrant && !ask.sessionGrant.command && answer.option === STANDING_TOOL_OPTION) {
     const r = ask.sessionGrant;
     return addGrant({ mode: 'always', tools: r.tools, hosts: r.hosts, reason: r.reason, by: 'glass' });
   }
-  if (answer.by === 'glass' && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
+  if (answeredInGlass(answer.by) && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
     const r = ask.sessionGrant;
     const duration = answer.option === 'Allow for 1h' ? 3600_000 : r.durationMs;
     return addGrant({
@@ -840,7 +842,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       expiresAt: new Date(Date.now() + duration).toISOString(),
     });
   }
-  if (answer.by === 'glass' && answer.option === TOOL_FAMILY_OPTION && ask.session) {
+  if (answeredInGlass(answer.by) && answer.option === TOOL_FAMILY_OPTION && ask.session) {
     const grant = addGrant({
       mode: 'session',
       session: ask.session,
@@ -859,7 +861,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       );
     return grant;
   }
-  if (answer.by === 'glass' && ask.intent && (answer.option === INTENT_HOUR_OPTION || answer.option === INTENT_ALWAYS_OPTION)) {
+  if (answeredInGlass(answer.by) && ask.intent && (answer.option === INTENT_HOUR_OPTION || answer.option === INTENT_ALWAYS_OPTION)) {
     const hour = answer.option === INTENT_HOUR_OPTION;
     // For an hour, this trap only. Always, every trap in the repo. Each falls back to the other's scope when a card has only that.
     const scope = hour ? (ask.trap ? { trap: ask.trap } : { repo: decision.repo }) : decision.repo ? { repo: decision.repo } : { trap: ask.trap };
@@ -888,7 +890,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
   if (!decision.dispatch) return undefined;
   const lane: Lane = decision.lane ?? 'work';
   const target = ask.command !== undefined ? `\`${ask.command}\`` : `writes to ${ask.path}`;
-  if (answer.by !== 'glass' || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
+  if (!answeredInGlass(answer.by) || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
     if (answer.option === 'No')
       sendMessage(
         decision.dispatch,

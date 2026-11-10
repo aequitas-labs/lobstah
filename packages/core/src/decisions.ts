@@ -117,7 +117,7 @@ export interface DecisionAnswer {
   attachments: Attachment[];
   answeredAt: string;
   /** Where it was answered. */
-  by: 'glass' | 'cli';
+  by: AnswerSource;
 }
 
 /**
@@ -133,7 +133,18 @@ interface AnswerMarker {
   text?: string;
   attachments?: Attachment[];
   answeredAt: string;
-  by: 'glass' | 'cli';
+  by: AnswerSource;
+}
+
+/**
+ * Where a decision was answered: this machine's glass, the hosted glass (a
+ * mirror boat carries out what a person did there, so `wharf`), or the
+ * command line (`man answer`).
+ */
+export type AnswerSource = 'glass' | 'cli' | 'wharf';
+/** Whether a person answered in a glass, local or hosted: the only answers that may allow a permission card. */
+export function answeredInGlass(by: AnswerSource): boolean {
+  return by === 'glass' || by === 'wharf';
 }
 
 /** A file the glass uploaded: its name as the browser gave it, and its bytes. */
@@ -520,7 +531,7 @@ export interface AnswerInput {
   attach?: string[];
   /** Files the glass uploaded. */
   uploads?: DecisionUpload[];
-  by: 'glass' | 'cli';
+  by: AnswerSource;
   /** Per-file limit (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;

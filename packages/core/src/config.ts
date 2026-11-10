@@ -425,6 +425,12 @@ export interface WatchConfig {
 
 export interface GlassConfig {
   port: number;
+  /**
+   * A wharf in `[wharves]` that shows this machine's glass on its hosted
+   * glass: the daemon puts the glass snapshot there and carries out what a
+   * person does there. Omitted, the glass stays on this machine.
+   */
+  mirror?: string;
 }
 
 export type PetOpen = 'tab' | 'app' | 'helm';
@@ -620,6 +626,15 @@ export const DEFAULT_HELM: HelmConfig = {
 };
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
+
+/** `[glass]`: its port, and the wharf it mirrors to, which must be one in `[wharves]`. */
+function glassConfig(raw: unknown, wharves: Record<string, unknown>): GlassConfig {
+  const glass: GlassConfig = { ...DEFAULT_GLASS, ...((raw as Partial<GlassConfig>) ?? {}) };
+  if (glass.mirror !== undefined && (typeof glass.mirror !== 'string' || !Object.hasOwn(wharves, glass.mirror))) {
+    throw new Error(`[glass] mirror must name a wharf in [wharves]; ${JSON.stringify(glass.mirror)} is not one`);
+  }
+  return glass;
+}
 export const DEFAULT_WAIT: WaitConfig = { baseTimeoutSecs: 900, baseRepeats: 3, maxTimeoutSecs: 14400 };
 
 export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, maxRepairsWithoutProgress: 2, repairSettleSecs: 600, repairCooldownSecs: 0, repairTrapWaitSecs: 600 };
@@ -749,7 +764,7 @@ export function loadConfig(): Config {
     heavy: parseHeavy(raw.heavy),
     helm,
     wait,
-    glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
+    glass: glassConfig(raw.glass, wharves),
     pet: { open: petOpen },
     watch,
     grounds,
