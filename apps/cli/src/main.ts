@@ -2184,13 +2184,13 @@ async function mainCli(): Promise<void> {
       if (pos.length > 1) throw new UsageError(`man ask takes at most one dispatch id\n\n${usageFor('man:ask')!}`);
       const dispatch = pos[0];
       const runScript = opt('--run');
-      const runFlags = ['--input', '--cwd', '--timeout', '--output'].filter((f) => (f === '--input' ? values(f).length > 0 : opt(f) !== undefined));
+      const runFlags = ['--input', '--cwd', '--timeout', '--output', '--interactive'].filter((f) => (f === '--input' ? values(f).length > 0 : f === '--interactive' ? has(f) : opt(f) !== undefined));
       if (runScript === undefined && runFlags.length) throw new UsageError(`${runFlags.join(', ')} ${runFlags.length === 1 ? 'goes' : 'go'} with --run\n\n${usageFor('man:ask')!}`);
       if (runScript !== undefined && values('--option').length) throw new UsageError('a run card offers Run and Decline: --option does not go with --run');
       let run: { card: RunCard; script: Buffer } | undefined;
       if (runScript !== undefined) {
         try {
-          const prepared = prepareRunCard({ scriptFile: runScript, inputs: values('--input'), cwd: opt('--cwd'), timeout: opt('--timeout'), output: opt('--output') });
+          const prepared = prepareRunCard({ scriptFile: runScript, inputs: values('--input'), cwd: opt('--cwd'), timeout: opt('--timeout'), output: opt('--output'), interactive: has('--interactive') });
           // A trap's proposal for this dispatch, posted unchanged: the card names the trap.
           const proposal = dispatch !== undefined ? findRunProposal(dispatch, prepared.card.scriptSha256) : undefined;
           run = proposal?.trap ? { ...prepared, card: { ...prepared.card, proposedBy: proposal.trap } } : prepared;
@@ -2232,7 +2232,7 @@ async function mainCli(): Promise<void> {
           title: meta.title,
           ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
           options: meta.options.join(' | '),
-          ...(meta.run ? { run: `sha256 ${meta.run.scriptSha256} · ${meta.run.inputs.length} input(s) · cwd ${meta.run.cwd} · timeout ${meta.run.timeoutSecs}s · output ${meta.run.output}${meta.run.proposedBy ? ` · proposed by ${meta.run.proposedBy}` : ''}` } : {}),
+          ...(meta.run ? { run: `sha256 ${meta.run.scriptSha256} · ${meta.run.inputs.length} input(s) · cwd ${meta.run.cwd} · timeout ${meta.run.timeoutSecs}s · output ${meta.run.output}${meta.run.interactive ? ' · interactive' : ''}${meta.run.proposedBy ? ` · proposed by ${meta.run.proposedBy}` : ''}` } : {}),
           attachments: meta.attachments.length,
           stored: decisionDir(meta.key)!,
           ...(replaced.length ? { replaced: replaced.join(', ') } : {}),

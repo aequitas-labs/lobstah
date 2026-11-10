@@ -34,15 +34,24 @@ export function scrubForms(values: readonly ScrubValue[]): Array<{ form: string;
 
 /** A streaming scrubber for one output stream. */
 export class OutputScrubber {
-  private readonly forms: Array<{ form: string; mark: string }>;
-  private readonly hold: number;
+  private forms: Array<{ form: string; mark: string }>;
+  private hold: number;
+  private readonly values: ScrubValue[];
   private readonly decoder = new StringDecoder('utf8');
   private pending = '';
   /** How many values it replaced so far. */
   replaced = 0;
 
   constructor(values: readonly ScrubValue[]) {
-    this.forms = scrubForms(values);
+    this.values = [...values];
+    this.forms = scrubForms(this.values);
+    this.hold = Math.max(0, ...this.forms.map((f) => f.form.length - 1));
+  }
+
+  /** Scrub one more value from here on: a secret line typed into a running console. */
+  add(value: ScrubValue): void {
+    this.values.push(value);
+    this.forms = scrubForms(this.values);
     this.hold = Math.max(0, ...this.forms.map((f) => f.form.length - 1));
   }
 

@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { OutputScrubber, answerDecision, appendRunAudit, decisionDir, runScriptFile } from '@lobstah/core';
+import * as path from 'node:path';
+import { OutputScrubber, RUN_RELAY, answerDecision, appendRunAudit, decisionDir, lobstahHome, runScriptFile } from '@lobstah/core';
 import type { DecisionMeta, RunCard } from '@lobstah/core';
 
 /**
@@ -24,8 +26,38 @@ export const RUN_LIVE_OUTPUT_MAX = 256 * 1024;
 export const RUN_KILL_GRACE_MS = 3_000;
 /** The exit code a run that hit its time limit records, as timeout(1) does. */
 export const RUN_TIMEOUT_EXIT = 124;
-/** The longest value one input may carry. */
+/** The longest value one input, or one console line, may carry. */
 export const RUN_INPUT_MAX_CHARS = 8192;
+/** What a secret console line is scrubbed as. */
+export const RUN_SECRET_LINE_NAME = 'secret';
+
+/**
+ * The terminal relay for an interactive run (`--interactive`), run by
+ * expect(1): it spawns the script under a pseudo-terminal, sends each line
+ * of its own stdin to it, copies the terminal's output to stdout, and exits
+ * with the script's status. On SIGTERM (the time limit) it kills the script,
+ * which runs in its own session, and exits 124.
+ */
+export const RUN_RELAY_SCRIPT = `log_user 1
+set timeout -1
+trap { catch {exec kill -KILL [exp_pid]}; exit 124 } {SIGTERM}
+spawn -noecho {*}$argv
+fconfigure stdin -blocking 0 -buffering line
+fileevent stdin readable {
+  if {[gets stdin line] >= 0} { send -- "$line\r" } elseif {[eof stdin]} { fileevent stdin readable {} }
+}
+expect eof
+lassign [wait] pid spawnid oserr status
+exit $status
+`;
+
+/** The relay script on disk, rewritten from RUN_RELAY_SCRIPT before each interactive run. */
+function relayFile(): string {
+  const file = path.join(lobstahHome(), 'run', 'relay.exp');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, RUN_RELAY_SCRIPT, { mode: 0o600 });
+  return file;
+}
 
 /** How a run ended. */
 export interface RunResult {
@@ -91,13 +123,36 @@ export function runAnswerText(card: RunCard, result: RunResult, output: string):
   return `${head}\n\nScrubbed output:\n${cut}\`\`\`\n${tail.replace(/```/g, '`​``')}\n\`\`\``;
 }
 
+/** A live interactive run's console: where a line goes, and the scrubbers a secret line joins. */
+interface RunConsole {
+  write: (line: string) => void;
+  scrubbers: OutputScrubber[];
+}
+
 /** Runs the glass started, by card key; one at a time per card. */
 export class RunRegistry {
   private readonly runs = new Map<string, LiveRun>();
+  private readonly consoles = new Map<string, RunConsole>();
   private readonly pending = new Set<Promise<RunResult>>();
 
   get(key: string): LiveRun | undefined {
     return this.runs.get(key);
+  }
+
+  /**
+   * Send one line to a card's live interactive run. A secret line's value is
+   * scrubbed from everything the run prints after it, its echo included.
+   * Returns why it was refused, or undefined when sent.
+   */
+  sendLine(key: string, line: unknown, secret: boolean): string | undefined {
+    const live = this.runs.get(key);
+    const console = this.consoles.get(key);
+    if (!live || live.result || !console) return 'That card has no run waiting for a line.';
+    if (typeof line !== 'string' || line.length > RUN_INPUT_MAX_CHARS) return `A line is text of at most ${RUN_INPUT_MAX_CHARS} characters.`;
+    if (/[\r\n\0]/.test(line)) return 'Send one line at a time.';
+    if (secret && line) for (const s of console.scrubbers) s.add({ name: RUN_SECRET_LINE_NAME, value: line });
+    console.write(line);
+    return undefined;
   }
 
   /** Every run started so far has ended and answered its card. */
@@ -128,7 +183,10 @@ export class RunRegistry {
     };
     const done = new Promise<RunResult>((resolve) => {
       let outputBytes = 0;
-      const child = spawn(card.interpreter, ['--noprofile', '--norc', runScriptFile(decisionDir(meta.key)!)], {
+      const script = [card.interpreter, '--noprofile', '--norc', runScriptFile(decisionDir(meta.key)!)];
+      // An interactive run gets a terminal through the relay; a plain one reads EOF after its inputs.
+      const [command, ...args] = card.interactive ? [RUN_RELAY, '-f', relayFile(), ...script] : script;
+      const child = spawn(command!, args, {
         cwd: card.cwd,
         env: opts.env ?? runEnvironment(),
         detached: true,
@@ -157,12 +215,17 @@ export class RunRegistry {
       });
       // A script that never reads stdin closes it early: that is not an error.
       child.stdin.on('error', () => {});
-      child.stdin.end(stdin);
+      if (card.interactive) {
+        child.stdin.write(stdin);
+        this.consoles.set(meta.key, { write: (line) => child.stdin.write(`${line}\n`), scrubbers: [out, err] });
+      } else child.stdin.end(stdin);
       let settled = false;
       const finish = (code: number | null) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        this.consoles.delete(meta.key);
+        child.stdin.destroy();
         take(out.end());
         take(err.end());
         const result: RunResult = {

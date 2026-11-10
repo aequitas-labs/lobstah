@@ -20,7 +20,7 @@ import { RunRegistry, runStdin } from './run-exec.js';
  */
 
 /** The request kinds this module answers. */
-export const RUN_REQUEST_KINDS = ['run-passkey-challenge', 'run-passkey-register', 'run-challenge', 'run', 'run-output'] as const;
+export const RUN_REQUEST_KINDS = ['run-passkey-challenge', 'run-passkey-register', 'run-challenge', 'run', 'run-output', 'run-line'] as const;
 export type RunRequestKind = (typeof RUN_REQUEST_KINDS)[number];
 
 export const isRunRequestKind = (kind: unknown): kind is RunRequestKind => RUN_REQUEST_KINDS.includes(kind as RunRequestKind);
@@ -103,6 +103,11 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         if ('reason' in input) return refuse(400, input.reason);
         void ctx.runs.start(card.meta, input.values, input.stdin, verified.credentialId, { maxBytes: ctx.maxBytes });
         return { status: 202, body: { ok: true, running: true, key: card.meta.key } };
+      }
+      case 'run-line': {
+        // A line only reaches the card's own live run, from the page that holds the token.
+        const refused = ctx.runs.sendLine(typeof p.key === 'string' ? p.key : '', p.line, p.secret === true);
+        return refused ? refuse(409, refused) : { status: 200, body: { ok: true } };
       }
       case 'run-output': {
         const key = typeof p.key === 'string' ? p.key : '';
