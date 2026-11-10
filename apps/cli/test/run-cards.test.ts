@@ -175,7 +175,7 @@ describe('a run card in the glass', () => {
     };
     expect(rule('.runcard')).toContain('overflow-wrap: anywhere;');
     const shrinks = css.slice(css.indexOf('\n.runcard > *,'), css.indexOf('}', css.indexOf('\n.runcard > *,')));
-    for (const row of ['.runcard', '.runhead', '.runmeta', '.runinput', '.runfoot']) expect(shrinks).toContain(`${row} > *`);
+    for (const row of ['.runcard', '.runhead', '.runmeta', '.runinput', '.runfoot', '.runout']) expect(shrinks).toContain(`${row} > *`);
     expect(shrinks).toContain('min-width: 0;');
     expect(rule('.runcard .badge')).toContain('white-space: normal;');
   });

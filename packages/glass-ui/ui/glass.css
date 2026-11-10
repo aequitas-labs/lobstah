@@ -2251,7 +2251,8 @@ footer .glass-brand {
 .runhead > *,
 .runmeta > *,
 .runinput > *,
-.runfoot > * {
+.runfoot > *,
+.runout > * {
   min-width: 0;
 }
 .runcard .btn,
