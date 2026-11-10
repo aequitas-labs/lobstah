@@ -377,7 +377,8 @@ describe('glass page: tabs and hash routing', () => {
         const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device });
         const [link] = links(g);
         expect(links(g)).toHaveLength(1);
-        expect(text(link)).toBe('Open live Claude');
+        expect(text(link)).toBe('Open live in Claude');
+        expect(text(link!.parentElement)).toContain('any device');
         expect(link?.querySelector('.harness-icon')).toBeNull();
         expect(link!.getAttribute('target')).toBe('_blank');
         expect(link!.getAttribute('rel')).toContain('noopener');
@@ -472,6 +473,65 @@ describe('glass page: tabs and hash routing', () => {
     expect(text(g.$('#modalbox'))).not.toContain('codex resume');
   });
 
+  describe('one Open per trap row, every route in the modal', () => {
+    const LIVE = 'https://claude.ai/code/session_01AbC';
+    const fleet = (viewer: GlassSnapshot['viewer']) => {
+      const d = acceptanceFleet();
+      d.viewer = viewer;
+      d.focusToken = viewer?.onMachine ? 'fixture-token' : undefined;
+      Object.assign(d.traps[0]!, {
+        harness: 'claude',
+        liveLink: LIVE,
+        link: 'vscode://anthropic.claude-code/open?session=abc',
+        attachCommand: 'tmux -L lobstah attach -t %7',
+      });
+      return d;
+    };
+    const opens = (root: Element | null | undefined) => [...(root?.querySelectorAll('.btn.open') ?? [])];
+    const trapRow = (g: GlassDom, selector: string) => g.$$(selector).find((el) => text(el).includes('wt:t1'));
+
+    it("raises the window from the one row button on the trap's Mac, and lists every route in the modal", async () => {
+      const d = fleet({ onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' });
+      for (const [view, selector] of [['table', '#traps tr.rowhead'], ['cards', '#traps .card']] as const) {
+        const g = await page(d, { hash: '#traps', prefs: { view } });
+        const row = trapRow(g, selector);
+        expect(opens(row).map(text), view).toEqual(['↗ Open']);
+        expect(opens(row)[0]!.tagName, view).toBe('BUTTON');
+        expect(text(row), view).not.toContain('Open live');
+        expect(text(row), view).not.toContain('Session link');
+      }
+      const modal = await page(d, { hash: '#traps' });
+      await openRow(modal, '#traps', 'wt:t1');
+      expect(modal.$$('#modalbox .route').map(text)).toEqual([
+        'Raise window on this Mac',
+        'Open live in Claude any device',
+        'Session link opens its app on this Mac',
+        'attach:tmux -L lobstah attach -t %7⧉',
+      ]);
+    });
+
+    it('opens the live link from the one row button off the machine', async () => {
+      const d = fleet({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' });
+      const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
+      const card = trapRow(g, '#traps .card');
+      expect(opens(card).map(text)).toEqual(['↗ Open']);
+      expect(opens(card)[0]!.getAttribute('href')).toBe(LIVE);
+      expect(text(card)).toContain('Running on studio');
+      const modal = await page(d, { hash: '#traps' });
+      await openRow(modal, '#traps', 'wt:t1');
+      expect(modal.$$('#modalbox .route').map(text)).toEqual(['Open live in Claude any device']);
+    });
+
+    it('opens the live link from the one row button on the Mac when this source cannot raise windows', async () => {
+      const d = fleet({ onMachine: true, windowFocus: false, machine: 'studio', device: 'desktop' });
+      Object.assign(d.traps[0]!, { link: undefined });
+      const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
+      const card = trapRow(g, '#traps .card');
+      expect(opens(card).map(text)).toEqual(['↗ Open']);
+      expect(opens(card)[0]!.getAttribute('href')).toBe(LIVE);
+    });
+  });
+
   it('gives a signed-off trap a grey state dot', async () => {
     const g = await page(acceptanceFleet(), { hash: '#traps', prefs: { view: 'table' } });
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
@@ -493,7 +553,7 @@ describe('glass page: tabs and hash routing', () => {
     await click(g, t1.querySelector('button'));
     expect(g.$('#overlay')!.className).toBe('');
     await click(g, t1);
-    expect(text(g.$('#modalbox'))).toContain('↗ Open');
+    expect(text(g.$('#modalbox'))).toContain('Raise window on this Mac');
     await escape(g);
     await g.go('#deck');
     expect(text(g.$('#deck'))).toContain('↗ Open');
