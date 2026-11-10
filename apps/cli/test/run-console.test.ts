@@ -9,6 +9,10 @@ import { askDecision, ensureLayout, prepareRunCard, readDecisionAnswer } from '@
 import { serveGlass } from '../src/glass.js';
 import { RunChallenges } from '../src/run-passkey.js';
 import { RunRegistry } from '../src/run-exec.js';
+import { GLASS_PAGE } from '../src/glass-page.generated.js';
+import { loadGlass } from './glass-dom.js';
+import { NOW } from './fixtures/glass-snapshots.js';
+import { RUN_KEY, glassRun, runCardFleet } from './fixtures/run-card.js';
 import { SoftPasskey } from './fixtures/soft-passkey.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -135,6 +139,30 @@ describe.skipIf(process.platform === 'win32' || !fs.existsSync('/usr/bin/expect'
     }
   }, 15_000);
 
+  it('keeps a secret line out of everything the server keeps: files, logs, the snapshot and the answer', async () => {
+    const c = card('#!/bin/bash\nread -r -p "Token: " t\necho "got $t"\nprintf %s "$t" | base64\n', { interactive: true, output: 'scrubbed' });
+    await run(c);
+    await waitFor(c.key, 'Token:');
+    expect((await line(c.key, SECRET, true)).status).toBe(200);
+    await runs.settled();
+    const forms = [SECRET, Buffer.from(SECRET).toString('base64')];
+    // Every file under the lobstah home: the decision, its answer, the run audit, the logs.
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else files.push(p);
+      }
+    };
+    walk(home);
+    expect(files.some((f) => f.endsWith('audit.jsonl'))).toBe(true);
+    for (const f of files) for (const form of forms) expect(fs.readFileSync(f, 'utf8').includes(form), `${form} in ${f}`).toBe(false);
+    const kept = [await answer(c.key), JSON.stringify((await call(`localhost:${port}`, '/data')).json), (await post('run-output', { key: c.key, after: 0 })).json.text as string, logged.join('\n')];
+    for (const text of kept) for (const form of forms) expect(text).not.toContain(form);
+    expect(await answer(c.key)).toContain('got ‹secret›');
+  }, 15_000);
+
   it('gives the agent only the exit code from an interactive card posted without --output', async () => {
     const c = card('#!/bin/bash\nread -r -p "Name? " n\necho "hello $n"\n', { interactive: true });
     await run(c);
@@ -166,5 +194,106 @@ describe.skipIf(process.platform === 'win32' || !fs.existsSync('/usr/bin/expect'
     await run(c, { A: 'one' });
     expect(await answer(c.key)).toContain('eof');
     expect((await line(c.key, 'two')).status).toBe(409);
+  });
+});
+
+/**
+ * The eye on a secret line (dispatch c33b3ca5): the console field shows its
+ * value before it is sent, and each secret line sent from this tab can be
+ * shown again from the tab's memory. It is never stored, and a reload has
+ * none. The page runs in happy-dom on localhost with a stand-in passkey; the
+ * server's side is the stand-in below.
+ */
+describe('the eye on a secret line', () => {
+  const TOKEN = 'pk_live_51HqLyjWDarjtT1zdp7dc';
+
+  async function console_() {
+    let sent = false;
+    const fleet = runCardFleet(glassRun('#!/bin/bash\nread -r -s -p "Token: " t\n', { inputs: [], interactive: true }));
+    fleet.runPasskeys = { count: 1 };
+    const g = await loadGlass(GLASS_PAGE, fleet, {
+      now: NOW,
+      host: 'localhost:7777',
+      hash: `#decision/${encodeURIComponent(RUN_KEY)}`,
+      prepare: (w) => {
+        const buf = () => new Uint8Array([1, 2, 3]).buffer;
+        Object.defineProperty(w, 'PublicKeyCredential', { value: class {}, configurable: true });
+        Object.defineProperty(w.navigator, 'credentials', {
+          value: { get: async () => ({ rawId: buf(), response: { clientDataJSON: buf(), authenticatorData: buf(), signature: buf() } }) },
+          configurable: true,
+        });
+      },
+      post: (_url, req) => {
+        const { kind, payload } = JSON.parse(req.body) as { kind: string; payload: { line?: string } };
+        if (kind === 'run-challenge') return { status: 200, body: { ok: true, challenge: 'AAAA', rpId: 'localhost', credentialIds: [] } };
+        if (kind === 'run') return { status: 202, body: { ok: true } };
+        if (kind === 'run-line') {
+          sent = true;
+          return { status: 200, body: { ok: true } };
+        }
+        if (kind === 'run-output')
+          return { status: 200, body: { ok: true, text: '', next: 0, ...(sent ? { result: { exitCode: 0, timedOut: false, durationMs: 900, scrubbed: 1 } } : {}) } };
+        return { status: 404, body: { ok: false } };
+      },
+    });
+    return g;
+  }
+  /** Wait for `sel` without settling: the run's output poll keeps a timer pending while it runs. */
+  async function until<T>(get: () => T | null | undefined | false): Promise<T> {
+    for (let i = 0; i < 100; i++) {
+      const got = get();
+      if (got) return got;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    throw new Error('timed out');
+  }
+
+  it('shows the typed secret and each sent one only on asking, and keeps it nowhere', async () => {
+    const g = await console_();
+    try {
+      (g.$('#doverlay .runbtn') as HTMLButtonElement).click();
+      const field = await until(() => g.$('#doverlay .runlinein') as HTMLInputElement | null);
+      expect(g.$('#doverlay .runconsole .runeye')).toBeNull();
+      (g.$('#doverlay .runsecret') as HTMLButtonElement).click();
+      const eye = await until(() => g.$('#doverlay .runconsole .runeye') as HTMLButtonElement | null);
+      field.value = TOKEN;
+      field.dispatchEvent(new g.window.Event('input', { bubbles: true }) as unknown as Event);
+      await until(() => (g.$('#doverlay .runlinein') as HTMLInputElement).getAttribute('type') === 'password');
+      expect(eye.getAttribute('aria-label')).toBe('Show secret');
+      eye.click();
+      await until(() => (g.$('#doverlay .runlinein') as HTMLInputElement).getAttribute('type') === 'text');
+      expect(g.$('#doverlay .runconsole .runeye')!.getAttribute('aria-label')).toBe('Hide secret');
+      g.$('#doverlay .runlinein')!.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event);
+      const row = await until(() => g.$('#doverlay .runsent li'));
+      await until(() => g.$('#doverlay .runstate .ok'));
+      // Sent: masked by default, the same mask whatever its length, and its own eye shows it.
+      expect(row.querySelector('.runsentval')!.textContent).toBe('••••••••');
+      expect(g.$('#doverlay .runcard')!.textContent).not.toContain(TOKEN);
+      const rowEye = row.querySelector('.runeye') as HTMLButtonElement;
+      expect(rowEye.getAttribute('aria-label')).toBe('Show secret');
+      rowEye.click();
+      await until(() => g.$('#doverlay .runsent .runsentval')!.textContent === TOKEN);
+      expect(g.$('#doverlay .runsent .runeye')!.getAttribute('aria-label')).toBe('Hide secret');
+      (g.$('#doverlay .runsent .runeye') as HTMLButtonElement).click();
+      await until(() => g.$('#doverlay .runsent .runsentval')!.textContent === '••••••••');
+      // Only the request that sent the line carries it; no storage, URL or other request does.
+      const carrying = g.posts().filter((p) => p.body.includes(TOKEN));
+      expect(carrying.map((p) => (JSON.parse(p.body) as { kind: string }).kind)).toEqual(['run-line']);
+      const stored = [g.window.localStorage, g.window.sessionStorage].flatMap((st) => Array.from({ length: st.length }, (_, i) => st.getItem(st.key(i)!) ?? ''));
+      for (const v of [...stored, g.window.location.href, ...g.dataFetches()]) expect(v).not.toContain(TOKEN);
+    } finally {
+      await g.close();
+    }
+  });
+
+  it('has no sent secret and no eye after a reload', async () => {
+    const g = await console_();
+    try {
+      expect(g.$('#doverlay .runcard')).not.toBeNull();
+      expect(g.$('#doverlay .runsent')).toBeNull();
+      expect(g.$('#doverlay .runeye')).toBeNull();
+    } finally {
+      await g.close();
+    }
   });
 });

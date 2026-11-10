@@ -66,22 +66,56 @@ export function runBlocked(run: GlassRunCard, passkeys = getState().snapshot?.ru
 }
 
 /**
+ * The secret lines sent from this tab, by card key, so the eye beside each
+ * can show it again. Only this module's memory holds them: not the store,
+ * browser storage, the URL, or any request but the one that sent the line.
+ * A reload, another tab or another device has none, and shows no eye.
+ */
+const sentSecrets = new Map<string, string[]>();
+
+/** What a hidden secret shows: the same length whatever the value, so it gives away nothing. */
+const SECRET_MASK = '••••••••';
+
+/** The eye that shows or hides a secret; slashed while the secret shows. */
+function Eye({ shown, onToggle }: { shown: boolean; onToggle: () => void }) {
+  const label = shown ? 'Hide secret' : 'Show secret';
+  return html`<button type="button" class="runeye" aria-label=${label} title=${label} onClick=${onToggle}><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" />${shown ? html`<path d="M3 3l18 18" />` : null}</svg></button>`;
+}
+
+/** A secret line sent from this tab: masked until its eye shows it. */
+function SentSecret({ value, n }: { value: string; n: number }) {
+  const [shown, setShown] = useState(false);
+  return html`<li class="runsentline">
+    <span class="dim runsentname">› secret line ${n}</span>
+    <code class="runsentval">${shown ? value : SECRET_MASK}</code>
+    <${Eye} shown=${shown} onToggle=${() => setShown(!shown)} />
+  </li>`;
+}
+
+/**
  * The console line under an interactive run's output: Chris answers at the
  * prompt, Enter sends the line, and the secret toggle masks it and has the
- * glass scrub its value from everything printed after.
+ * glass scrub its value from everything printed after. A secret line has
+ * the eye to check it before it goes; once sent, `onSent` hands it to the
+ * card so its eye can show it again.
  */
-function ConsoleLine({ cardKey }: { cardKey: string }) {
+function ConsoleLine({ cardKey, onSent }: { cardKey: string; onSent: (secret: string) => void }) {
   const [line, setLine] = useState('');
   const [secret, setSecret] = useState(false);
+  const [shown, setShown] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const send = async () => {
     const text = line;
+    const masked = secret;
     setLine('');
-    setError(await sendRunLine(cardKey, text, secret));
+    setShown(false);
+    const refused = await sendRunLine(cardKey, text, masked);
+    setError(refused);
+    if (!refused && masked && text) onSent(text);
   };
   return html`<div class="runconsole">
-    <label class="runprompt"><span aria-hidden="true">›</span><input
-      type=${secret ? 'password' : 'text'}
+    <div class="runprompt"><span aria-hidden="true">›</span><input
+      type=${secret && !shown ? 'password' : 'text'}
       class="runlinein"
       autocomplete="off"
       spellcheck="false"
@@ -94,16 +128,26 @@ function ConsoleLine({ cardKey }: { cardKey: string }) {
         e.preventDefault();
         void send();
       }}
-    /></label>
-    <button type="button" class=${'btn runsecret' + (secret ? ' on' : '')} aria-pressed=${secret ? 'true' : 'false'} title="Mask this line and scrub its value from the output" onClick=${() => setSecret(!secret)}>secret</button>
+    />${secret && html`<${Eye} shown=${shown} onToggle=${() => setShown(!shown)} />`}</div>
+    <button type="button" class=${'btn runsecret' + (secret ? ' on' : '')} aria-pressed=${secret ? 'true' : 'false'} title="Mask this line and scrub its value from the output" onClick=${() => {
+      setSecret(!secret);
+      setShown(false);
+    }}>secret</button>
     <span class="dim">Enter sends the line</span>
     ${error && html`<span class="bad">${error}</span>`}
   </div>`;
 }
 
-/** The run's scrubbed output on the card, how it ended, and the console line while an interactive run waits. */
+/** The run's scrubbed output on the card, how it ended, the secret lines sent from this tab, and the console line while an interactive run waits. */
 function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; cardKey: string; interactive: boolean }) {
+  // Re-render when a secret line is sent: the list lives outside the store, in sentSecrets.
+  const [, setSentCount] = useState(0);
   if (!view || (!view.busy && !view.output && !view.result && !view.error)) return null;
+  const sent = sentSecrets.get(cardKey) ?? [];
+  const onSent = (value: string) => {
+    sentSecrets.set(cardKey, [...(sentSecrets.get(cardKey) ?? []), value]);
+    setSentCount((n) => n + 1);
+  };
   const ended =
     view.result &&
     (view.result.timedOut
@@ -112,7 +156,8 @@ function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; 
   return html`<div class="runout">
     <div class="runstate">${view.busy ? html`<span class="warn">Running…</span>` : ended && html`<span class=${view.result!.exitCode === 0 ? 'ok' : 'bad'}>${ended}</span>`}${view.result?.scrubbed ? html`<span class="dim"> · ${view.result.scrubbed} value${view.result.scrubbed === 1 ? '' : 's'} scrubbed</span>` : null}</div>
     ${(view.output || (interactive && view.busy)) && html`<pre class="runscript runlog"><code>${view.output}</code></pre>`}
-    ${interactive && view.busy && html`<${ConsoleLine} cardKey=${cardKey} />`}
+    ${sent.length > 0 && html`<ul class="runsent" aria-label="Secret lines sent from this tab">${sent.map((value, i) => html`<${SentSecret} key=${i} value=${value} n=${i + 1} />`)}</ul>`}
+    ${interactive && view.busy && html`<${ConsoleLine} cardKey=${cardKey} onSent=${onSent} />`}
     ${view.error && html`<div class="bad">${view.error}</div>`}
   </div>`;
 }
