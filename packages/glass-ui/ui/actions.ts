@@ -631,3 +631,81 @@ export async function sendPermissionsProposal(key: string, option: 'Approve' | '
     setDraft(key, { sending: false, error: error instanceof Error ? error.message : 'The proposal could not be answered.' });
   }
 }
+
+/** Where passkeys work: the glass at localhost on this port (WebAuthn can't use an IP address). */
+export function runPasskeyUrl(hash = ''): string {
+  return `http://localhost${location.port ? ':' + location.port : ''}/${hash}`;
+}
+
+/** This page can hold a passkey ceremony: it is the localhost glass, in a browser with WebAuthn. */
+export function passkeysWorkHere(): boolean {
+  return (
+    location.hostname === 'localhost' &&
+    typeof navigator !== 'undefined' &&
+    !!navigator.credentials &&
+    typeof PublicKeyCredential !== 'undefined'
+  );
+}
+
+const b64url = (buf: ArrayBuffer): string => {
+  let s = '';
+  for (const b of new Uint8Array(buf)) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const fromB64url = (s: string): Uint8Array<ArrayBuffer> => {
+  const text = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(new ArrayBuffer(text.length));
+  for (let i = 0; i < text.length; i++) out[i] = text.charCodeAt(i);
+  return out;
+};
+
+/**
+ * Register this Mac's passkey for run cards: the server issues a challenge,
+ * the browser creates an ES256 passkey for `localhost` with user
+ * verification, and the server checks it and asks Chris outside the browser
+ * before storing its public key.
+ */
+export async function registerRunPasskey(): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) return setState({ runPasskey: { error: 'This page has no token; reload it.' } });
+  setState({ runPasskey: { busy: true } });
+  try {
+    const start = (
+      await backend().request<{ ok: boolean; reason?: string; challenge?: string; rpId?: string }>('run-passkey-challenge', {}, token)
+    ).body;
+    if (!start.ok || !start.challenge) return setState({ runPasskey: { error: start.reason ?? 'The glass refused to start.' } });
+    const created = (await navigator.credentials.create({
+      publicKey: {
+        challenge: fromB64url(start.challenge),
+        rp: { id: start.rpId ?? 'localhost', name: 'lobstah glass' },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'run cards', displayName: 'lobstah run cards' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        authenticatorSelection: { userVerification: 'required', residentKey: 'preferred' },
+        attestation: 'none',
+        timeout: 120_000,
+      },
+    })) as PublicKeyCredential | null;
+    if (!created) return setState({ runPasskey: { error: 'No passkey was created.' } });
+    const response = created.response as AuthenticatorAttestationResponse;
+    const publicKey = response.getPublicKey();
+    if (!publicKey) return setState({ runPasskey: { error: 'This browser did not give the passkey’s public key.' } });
+    const done = (
+      await backend().request<{ ok: boolean; reason?: string }>(
+        'run-passkey-register',
+        {
+          credentialId: b64url(created.rawId),
+          clientDataJSON: b64url(response.clientDataJSON),
+          authenticatorData: b64url(response.getAuthenticatorData()),
+          publicKey: b64url(publicKey),
+          alg: response.getPublicKeyAlgorithm(),
+        },
+        token,
+      )
+    ).body;
+    setState({
+      runPasskey: done.ok ? { done: 'Passkey registered for run cards.' } : { error: done.reason ?? 'The passkey was not registered.' },
+    });
+  } catch (err) {
+    setState({ runPasskey: { error: err instanceof Error ? err.message : 'The passkey was not registered.' } });
+  }
+}

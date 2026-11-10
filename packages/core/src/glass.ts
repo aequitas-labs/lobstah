@@ -506,6 +506,8 @@ export interface GlassSnapshot {
   focusToken?: string;
   /** What the server can tell about who asked for this page. */
   viewer?: GlassViewer;
+  /** The passkeys registered to confirm run cards' Run (count only; never a key). */
+  runPasskeys?: { count: number; newestAt?: string };
   /** Configured repo keys, for the New trap form. */
   repoKeys?: string[];
   /** A helm is signed on and beating: a trap request will be answered. */

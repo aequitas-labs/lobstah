@@ -117,6 +117,8 @@ import { focusRegistration, liveTrap, machineName, tmuxAttachCommand } from './f
 import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
+import { handleRunRequest, isRunRequestKind } from './run-routes.js';
+import { RunChallenges, runPasskeyStatus } from './run-passkey.js';
 
 /**
  * The spyglass: a localhost dashboard over ~/.lobstah — the same
@@ -784,6 +786,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
+    runPasskeys: runPasskeyStatus(),
     answerLimits: {
       maxBytes: attachmentLimit(),
       maxFiles: ANSWER_FILES_MAX,
@@ -886,8 +889,15 @@ export function serveGlass(
     focus?: (reg: TrapRegistration) => Promise<FocusResult>;
     snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot;
     presence?: GlassPresence;
+    /** Run-card challenges this server issued (tests share one to sign them). */
+    runChallenges?: RunChallenges;
+    /** Chris's go-ahead to store a run passkey, asked outside the browser; resolves to a refusal reason. */
+    confirmPasskeyRegistration?: () => Promise<string | undefined>;
+    /** Where run passkeys are kept (tests). */
+    passkeysFile?: string;
   } = {},
 ): http.Server {
+  const runChallenges = options.runChallenges ?? new RunChallenges();
   const presence = options.presence ?? new GlassPresence();
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   // A caller's own snapshot function runs here; the default builds on the snapshot thread.
@@ -903,17 +913,26 @@ export function serveGlass(
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
-  /** Same host, same origin, and this server's page token: the only writes the glass accepts. */
-  const ownHost = () => {
+  /** The port this server listens on. */
+  const ownPort = () => {
     const address = server.address();
-    return `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
+    return typeof address === 'object' && address ? address.port : port;
   };
+  /** This server's canonical address. */
+  const ownHost = () => `127.0.0.1:${ownPort()}`;
+  /**
+   * A Host header naming this server: 127.0.0.1 or localhost on its own port.
+   * localhost is the WebAuthn relying party a run card's passkey needs (an IP
+   * can't be one); any other name, a rebound domain included, is refused.
+   */
+  const isOwnHost = (host: string | undefined): host is string => host === ownHost() || host === `localhost:${ownPort()}`;
+  /** Same host, same origin, and this server's page token: the only writes the glass accepts. */
   const authorized = (req: http.IncomingMessage, header: string): boolean => {
     const supplied = req.headers[header];
     const token = typeof supplied === 'string' ? supplied : '';
     return (
-      req.headers.host === ownHost() &&
-      req.headers.origin === `http://${ownHost()}` &&
+      isOwnHost(req.headers.host) &&
+      req.headers.origin === `http://${req.headers.host}` &&
       token.length === focusToken.length &&
       timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
     );
@@ -1116,6 +1135,22 @@ export function serveGlass(
               return reply(500, { ok: false, reason: 'The acknowledgments could not be stored.' });
             }
           }
+          case 'run-passkey-challenge':
+          case 'run-passkey-register':
+          case 'run-challenge':
+          case 'run-assert': {
+            if (!isRunRequestKind(body.kind)) return reply(400, { ok: false, reason: 'Unknown run request.' });
+            void handleRunRequest(body.kind, body.payload, {
+              origin: `http://${req.headers.host}`,
+              challenges: runChallenges,
+              confirmRegistration: options.confirmPasskeyRegistration ?? (async () => 'Registering a run passkey is not available yet.'),
+              ...(options.passkeysFile ? { passkeysFile: options.passkeysFile } : {}),
+            }).then(
+              (r) => reply(r.status, r.body),
+              () => reply(500, { ok: false, reason: 'The run request failed.' }),
+            );
+            return;
+          }
           case 'trap-request': {
             const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
             if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
@@ -1141,7 +1176,7 @@ export function serveGlass(
         res.end(JSON.stringify(result));
       };
       if (req.method !== 'POST') return reply(405, { ok: false, reason: 'POST required.' });
-      if (req.headers.host !== ownHost() || req.headers.origin !== `http://${ownHost()}`) {
+      if (!isOwnHost(req.headers.host) || req.headers.origin !== `http://${req.headers.host}`) {
         return reply(403, { ok: false, reason: 'Presence was not authorized.' });
       }
       const q = new URL(req.url, 'http://glass').searchParams;
@@ -1171,7 +1206,7 @@ export function serveGlass(
         return reply(405, { delivered: false, reason: 'POST required.' });
       }
       if (
-        req.headers.host !== ownHost() ||
+        !isOwnHost(req.headers.host) ||
         req.headers.origin !== undefined ||
         !showSecretMatches(req.headers['x-lobstah-show-secret']) ||
         !/^application\/json\b/.test(req.headers['content-type'] ?? '')
@@ -1227,7 +1262,7 @@ export function serveGlass(
       return;
     }
     if (req.method === 'GET' && (req.url?.startsWith('/api/checklist?') || req.url?.startsWith('/data/decision/'))) {
-      if (req.headers.host !== ownHost()) { res.writeHead(403); res.end(); return; }
+      if (!isOwnHost(req.headers.host)) { res.writeHead(403); res.end(); return; }
       try {
         let value: unknown;
         if (req.url.startsWith('/api/checklist?')) {
@@ -1288,7 +1323,7 @@ export function serveGlass(
       // address gets them: a rebound name is refused. Fetching them acks
       // nothing: the page acks through /requests (report-viewed) once it has
       // shown the report, with the page token the row carries in a header.
-      if (req.headers.host !== ownHost()) {
+      if (!isOwnHost(req.headers.host)) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
         res.end('Not this glass.');
         return;
@@ -1320,7 +1355,7 @@ export function serveGlass(
     } else if (req.url === '/data') {
       // Start commands carry a ticket: only a same-host request (this
       // machine's own page, not a rebound name) gets them.
-      const local = req.headers.host === ownHost();
+      const local = isOwnHost(req.headers.host);
       const viewer: GlassViewer = { onMachine: local, windowFocus: local && process.platform === 'darwin', machine: machineName(), device: viewerDevice(req.headers['user-agent'], req.headers['sec-ch-ua-mobile']) };
       const page = `"viewer":${JSON.stringify(viewer)}${local ? `,"focusToken":${JSON.stringify(focusToken)}` : ''}`;
       const send = (p: PollBody) => {

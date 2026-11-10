@@ -31,6 +31,8 @@ export interface GlassState {
   lobHidden: Record<string, string>;
   /** Last focus outcome per trap, visible beside the action. */
   focusResults: Record<string, string>;
+  /** Registering a run passkey from Settings: in progress, done, or why it failed. */
+  runPasskey?: { busy?: boolean; done?: string; error?: string };
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */
   preview: boolean;
   /** Answers being written on the deck's decision cards, by card key. */
