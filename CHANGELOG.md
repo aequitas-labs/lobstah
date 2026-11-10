@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.8.7 — 2026-11-10
+
+### The hosted glass shows this machine's fleet
+
+A boat can now mirror its own glass to a wharf while its fleet stays on local
+grounds. With `[glass] mirror = "<wharf>"` and
+`lobstah wharf login --wharf <wharf> --mirror` (mirror and read access only),
+the daemon puts the glass snapshot on the wharf, without the page token. It
+does so within seconds of a change while a hosted glass is open, and every five
+minutes otherwise. It carries out on the local glass the reads and writes made
+there, and a relayed answer is recorded `by: wharf`. On one boat the hosted
+glass renders exactly what the local glass does, in every tab: PRs, TODOs,
+Notices, Grants, Stats, Settings and the rest. Several boats show at once as one
+fleet, each row naming its boat, and each call goes to its row's boat. A boat
+asleep for over two minutes shows its age, and its rows are read-only. ↗ Open is
+never relayed: it shows only on the trap rows of the boat the browser runs on,
+which a loopback probe finds. `lobstah wharf whoami --wharf <wharf>` and
+`lobstah doctor` say how fresh the mirror is. (#372, #375, #377)
+
+### A question and a permission request are two cards
+
+A trap that asks a question and has a permission request pending gets both: a
+decision card that takes options or text, and a permission card with Allow once,
+Allow always and No. Either can come first. Answering one never answers or
+clears the other. (#371)
+
+### One Open per trap
+
+Every trap row shows a single ↗ Open, which takes the trap's best route: raise
+its window on this Mac, else its live link, else its session link. The trap
+modal lists every way in, each with where it works. (#373)
+
+### Stale builds are caught
+
+- A running glass or daemon reports the version it started with, so after an
+  upgrade `lobstah daemon restart` restarts a detached glass that still serves
+  the old page, and `glass status` and `doctor` flag one. (#367)
+- `lobstah pet install` builds the desktop pet from the sources the npm package
+  now ships, and stamps it with the CLI version. `doctor` warns when the pet is
+  behind, and the daemon rebuilds a stale one. (#370)
+
+### Also new
+
+- A trap whose command waits or runs in the heavy line is working: no
+  `idle-while-working` notice until the run ends and the grace period passes.
+  (#368)
+- Trap briefs and skills suggest summarizing a long heavy run through a subagent
+  (the Agent tool, or Codex's `spawn_agent`). (#369)
+- lobstah's ume plans and reports wear the glass's look (`.ume/theme.css`).
+  (#374)
+
 ## 0.8.6 — 2026-11-09
 
 ### The hosted glass is the local glass

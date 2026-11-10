@@ -144,9 +144,10 @@ export function DesktopStartAction({ url, decision = false }: { url: string; dec
   </div>`;
 }
 
-/** The notice for a page whose actions the server refuses. */
+/** The notice for a page whose actions the server refuses: off the machine, with no way to write. A hosted glass writes from anywhere. */
 export function readOnlyNotice(): Children {
-  return getState().snapshot?.viewer?.onMachine === false && html`<div class="dim">${READ_ONLY_REASON}</div>`;
+  const snapshot = getState().snapshot;
+  return snapshot?.viewer?.onMachine === false && !snapshot.focusToken && html`<div class="dim">${READ_ONLY_REASON}</div>`;
 }
 
 /** What the live link does, said once in the modal: which client takes it depends on the device. */
@@ -185,8 +186,9 @@ export interface TrapRoute {
 export function trapRoutes(t: GlassTrap): TrapRoute[] {
   if (t.requested || t.starting || !t.live) return [];
   const viewer = getState().snapshot?.viewer;
+  const here = onThisMachine(t);
   const routes: TrapRoute[] = [];
-  if (viewer?.onMachine && can('focus') && (viewer.windowFocus || t.link)) {
+  if (here && can('focus') && (viewer!.windowFocus || t.link)) {
     const clicked = (e: Event) => {
       stop(e);
       void openTrapWindow(t.trapId);
@@ -208,7 +210,7 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
         html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" onClick=${stop}>${text}</a>`,
     });
   }
-  if (t.link && !desktopSession(t) && viewer?.onMachine && sessionLinkOpens()) {
+  if (t.link && !desktopSession(t) && here && sessionLinkOpens()) {
     const href = t.link;
     routes.push({
       kind: 'link',
@@ -219,6 +221,13 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
   }
   return routes;
 }
+
+/**
+ * Whether this page runs on the trap's machine. A trap that names a boat
+ * runs elsewhere, even when the page is on a machine of the fleet (the
+ * hosted glass on one of several mirror boats).
+ */
+const onThisMachine = (t: GlassTrap): boolean => !!getState().snapshot?.viewer?.onMachine && !t.boat;
 
 /** Where a live trap runs, for a page off its machine. */
 const runningOn = (t: GlassTrap): string => `Running on ${t.boat ?? getState().snapshot?.viewer?.machine ?? 'its machine'}`;
@@ -239,8 +248,8 @@ function offMachineNote(t: GlassTrap): Children {
 /** What a live trap with no route to it says, or nothing. */
 function noRouteNote(t: GlassTrap): Children {
   const viewer = getState().snapshot?.viewer;
-  if (!viewer?.onMachine) return offMachineNote(t);
-  return can('focus') && !viewer.windowFocus && !t.link ? html`<span class="dim">Window focus is not supported here</span>` : null;
+  if (!onThisMachine(t)) return offMachineNote(t);
+  return can('focus') && !viewer!.windowFocus && !t.link ? html`<span class="dim">Window focus is not supported here</span>` : null;
 }
 
 /** The answer to the last raise of this trap's window. */
@@ -265,7 +274,7 @@ export function windowAction(t: GlassTrap): Children {
   }
   const [best] = trapRoutes(t);
   if (!best) return noRouteNote(t);
-  const where = !getState().snapshot?.viewer?.onMachine && html`<span class="dim">${runningOn(t)}</span> `;
+  const where = !onThisMachine(t) && html`<span class="dim">${runningOn(t)}</span> `;
   return html`<span class=${'winaction' + (where ? ' offmachine' : '')}>${where}${best.control('↗ Open')}${focusResult(t)}</span>`;
 }
 
@@ -274,7 +283,7 @@ export function trapOpenRoutes(t: GlassTrap): Children {
   const routes = trapRoutes(t);
   if (!routes.length) return windowAction(t) ?? html`<span class="dim">Signed off — no window</span>`;
   return [
-    !getState().snapshot?.viewer?.onMachine && html`<div class="dim offmachine">${runningOn(t)}</div>`,
+    !onThisMachine(t) && html`<div class="dim offmachine">${runningOn(t)}</div>`,
     html`<div class="routes">${routes.map(
       (r) =>
         html`<div key=${r.kind} class="route">${r.control(r.name)} <span class="dim">${r.where}</span>${r.kind === 'raise' && focusResult(t)}</div>`,

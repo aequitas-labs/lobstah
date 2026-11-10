@@ -7,6 +7,8 @@ import type { GlassDom } from './glass-dom.js';
 import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
 import { RUN_KEY, runCardFleet } from './fixtures/run-card.js';
 import { WHARF_CAPABILITIES } from '../../../packages/glass-ui/ui/backends/wharf.js';
+import { MIRROR_CAPABILITIES } from '../../../packages/glass-ui/ui/backends/mirror.js';
+import { mirrorWriteAllowed } from '@lobstah/core';
 
 /**
  * A glass shows only what its source can fill and do (GlassBackend's
@@ -99,5 +101,10 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(local.$('#doverlay .runbtn')).not.toBeNull();
     expect(narrow.$('#doverlay .runscript')).not.toBeNull();
     expect(narrow.$('#doverlay .runbtn')).toBeNull();
+  });
+  it('runs a card only from the local glass: neither hosted glass offers Run, and a mirror boat relays no run request', () => {
+    expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
+    expect(MIRROR_CAPABILITIES.actions.has('run')).toBe(false);
+    for (const kind of ['run-challenge', 'run', 'run-output', 'run-line', 'run-passkey-challenge', 'run-passkey-register']) expect(mirrorWriteAllowed(kind), kind).toBe(false);
   });
 });

@@ -11,6 +11,7 @@ import { wharfLogin } from './wharf-login.js';
 import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-soak.js';
 import { readHookStdin } from './soak-site.js';
 import { WharfWake } from './wharf-wake.js';
+import { mirrorScope } from './wharf-mirror.js';
 
 export function commandScope(config: Config, grounds?: string, repo?: string): BackendScope | undefined {
   if (grounds) return backendScope(config, grounds);
@@ -34,6 +35,8 @@ const OVERVIEW = new Set(['ls', 'status', 'man:tend', 'man:report', 'prs', 'repo
 export async function wharfCommand(cmd: string | undefined, pos: string[], opts: Options, config: Config): Promise<boolean> {
   if (cmd === 'goals' && backendScopes(config).some((s) => readBrokerAgent(s.grounds))) throw new Error('a hosted trap cannot write helm goals');
   if (!cmd || GLOBAL.has(cmd)) return false;
+  // A mirror is this machine's boat on a wharf, named by --wharf: it has no wharf grounds to scope it.
+  if (cmd === 'wharf' && opts.opt('--wharf') !== undefined) { await mirrorWharfCommand(pos, opts, config); return true; }
   const configuredName = opts.opt('--trap') ?? (opts.opt('--for')?.startsWith('trap:') ? opts.opt('--for')!.slice(5) : cmd === 'man:throw' && pos[0]?.startsWith('trap:') ? pos[0].slice(5) : undefined);
   const configuredProfile = configuredName ? config.traps?.[configuredName] : undefined;
   if (configuredName && !configuredProfile) throw new Error(`unknown configured profile trap:${configuredName}`);
@@ -266,6 +269,33 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     default: throw new Error(`${cmd} is not supported on wharf grounds; nothing was written locally`);
   }
   return true;
+}
+
+/**
+ * `lobstah wharf login|logout|whoami --wharf <name>`: this machine as a
+ * mirror boat on that wharf. Login with `--mirror` asks for mirror and read
+ * access only. Whoami names the boat and how fresh its mirror is.
+ */
+async function mirrorWharfCommand(pos: string[], opts: Options, config: Config): Promise<void> {
+  const wharf = opts.opt('--wharf')!;
+  const scope = mirrorScope(config, wharf);
+  if (pos.length !== 1) throw new Error('wharf login, logout and whoami --wharf act only as this boat; no positional argument');
+  if (pos[0] === 'login' || pos[0] === 'logout') {
+    if (pos[0] === 'login' && !opts.has('--mirror') && !opts.opt('--credential-file')) throw new Error(`--wharf without grounds enrolls a mirror boat: lobstah wharf login --wharf ${wharf} --mirror`);
+    await wharfLogin(scope, pos[0], opts); return;
+  }
+  if (pos[0] !== 'whoami') throw new Error('--wharf takes login, logout or whoami');
+  const { mirrorFreshness, readMirrorStatus } = await import('@lobstah/core');
+  const boat = await wharfFor(scope).request('_boat') as { id: string; name: string; permissions: string[] };
+  const status = readMirrorStatus();
+  const mine = status?.wharf === wharf ? status : undefined;
+  console.log(toonKV({
+    wharf, boat: boat.name, id: boat.id, permissions: boat.permissions.join(' + '),
+    mirror: config.glass.mirror !== wharf ? 'off ([glass] mirror names another wharf or none)' : mirrorFreshness(mine),
+    ...(mine?.lastPutAt ? { lastPut: mine.lastPutAt } : {}),
+    ...(mine?.watchedUntil && Date.parse(mine.watchedUntil) > Date.now() ? { watching: 'a hosted glass is open' } : {}),
+    ...(mine?.error ? { error: mine.error } : {}),
+  }));
 }
 
 /**
