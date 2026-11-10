@@ -3,7 +3,7 @@ import { can } from '../backend.js';
 import { html } from '../html.js';
 import { getState } from '../store.js';
 import type { RunView } from '../store.js';
-import { passkeysWorkHere, runPasskeyUrl, runRunCard } from '../actions.js';
+import { passkeysWorkHere, runPasskeyUrl, runRunCard, sendRunLine } from '../actions.js';
 import { useState } from 'preact/hooks';
 
 /**
@@ -65,8 +65,44 @@ export function runBlocked(run: GlassRunCard, passkeys = getState().snapshot?.ru
   return undefined;
 }
 
-/** The run's scrubbed output on the card, and how it ended. */
-function RunOutput({ view }: { view: RunView | undefined }) {
+/**
+ * The console line under an interactive run's output: Chris answers at the
+ * prompt, Enter sends the line, and the secret toggle masks it and has the
+ * glass scrub its value from everything printed after.
+ */
+function ConsoleLine({ cardKey }: { cardKey: string }) {
+  const [line, setLine] = useState('');
+  const [secret, setSecret] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const send = async () => {
+    const text = line;
+    setLine('');
+    setError(await sendRunLine(cardKey, text, secret));
+  };
+  return html`<div class="runconsole">
+    <label class="runprompt"><span aria-hidden="true">›</span><input
+      type=${secret ? 'password' : 'text'}
+      class="runlinein"
+      autocomplete="off"
+      spellcheck="false"
+      aria-label="Answer the script"
+      placeholder=${secret ? 'secret answer' : 'answer'}
+      value=${line}
+      onInput=${(e: Event) => setLine((e.currentTarget as HTMLInputElement).value)}
+      onKeyDown=${(e: KeyboardEvent) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        void send();
+      }}
+    /></label>
+    <button type="button" class=${'btn runsecret' + (secret ? ' on' : '')} aria-pressed=${secret ? 'true' : 'false'} title="Mask this line and scrub its value from the output" onClick=${() => setSecret(!secret)}>secret</button>
+    <span class="dim">Enter sends the line</span>
+    ${error && html`<span class="bad">${error}</span>`}
+  </div>`;
+}
+
+/** The run's scrubbed output on the card, how it ended, and the console line while an interactive run waits. */
+function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; cardKey: string; interactive: boolean }) {
   if (!view || (!view.busy && !view.output && !view.result && !view.error)) return null;
   const ended =
     view.result &&
@@ -75,7 +111,8 @@ function RunOutput({ view }: { view: RunView | undefined }) {
       : `Exit ${view.result.exitCode} in ${(view.result.durationMs / 1000).toFixed(1)}s`);
   return html`<div class="runout">
     <div class="runstate">${view.busy ? html`<span class="warn">Running…</span>` : ended && html`<span class=${view.result!.exitCode === 0 ? 'ok' : 'bad'}>${ended}</span>`}${view.result?.scrubbed ? html`<span class="dim"> · ${view.result.scrubbed} value${view.result.scrubbed === 1 ? '' : 's'} scrubbed</span>` : null}</div>
-    ${view.output && html`<pre class="runscript runlog"><code>${view.output}</code></pre>`}
+    ${(view.output || (interactive && view.busy)) && html`<pre class="runscript runlog"><code>${view.output}</code></pre>`}
+    ${interactive && view.busy && html`<${ConsoleLine} cardKey=${cardKey} />`}
     ${view.error && html`<div class="bad">${view.error}</div>`}
   </div>`;
 }
@@ -102,6 +139,7 @@ export function RunCardBody({ cardKey, run }: { cardKey: string; run: GlassRunCa
       <span>runs <code>${run.interpreter}</code> in <code>${run.cwd}</code></span>
       <span>time limit ${limit(run.timeoutSecs)}</span>
       <span>the agent gets ${run.output === 'exit' ? 'the exit code only' : 'the exit code and scrubbed output'}</span>
+      ${run.interactive && html`<span>interactive: answer its prompts here</span>`}
     </div>
     ${run.altered && html`<div class="bad">${blocked}</div>`}
     ${
@@ -126,6 +164,6 @@ export function RunCardBody({ cardKey, run }: { cardKey: string; run: GlassRunCa
         ? html`<div class="runfoot"><button type="button" class="btn runbtn" disabled=${locked || missing.length > 0} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : 'Confirm with your passkey and run')} onClick=${start}>${view?.busy ? 'Running…' : 'Run'}</button>${blocked ? html`<span class="dim">${!run.altered && blocked}</span>` : html`<span class="dim">Asks for your passkey (Touch ID), then runs on this Mac.</span>`}</div>`
         : html`<div class="runfoot"><a class="btn runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>Run from localhost</a><span class="dim">Passkeys work from the glass at localhost.</span></div>`)
     }
-    <${RunOutput} view=${view} />
+    <${RunOutput} view=${view} cardKey=${cardKey} interactive=${!!run.interactive} />
   </div>`;
 }

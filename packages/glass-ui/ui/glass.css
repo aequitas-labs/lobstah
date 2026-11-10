@@ -2313,3 +2313,34 @@ footer .glass-brand {
 a.runbtn {
   text-decoration: none;
 }
+/* An interactive run's console line: it reads as the next line of the terminal above it. */
+.runconsole {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.runprompt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-width: 0;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+.runprompt input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.runsecret.on {
+  border-color: var(--warn);
+  color: var(--warn);
+}

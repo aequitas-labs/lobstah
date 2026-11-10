@@ -77,6 +77,16 @@ describe('run card inputs and limits', () => {
   });
 });
 
+describe('an interactive run card', () => {
+  it('defaults to the exit code only, and needs the expect relay', () => {
+    const file = script('i.sh', 'read -r a\n');
+    const relay = script('expect', '');
+    expect(prepareRunCard({ scriptFile: file, interactive: true, relay }).card).toMatchObject({ interactive: true, output: 'exit' });
+    expect(prepareRunCard({ scriptFile: file, interactive: true, relay, output: 'scrubbed' }).card.output).toBe('scrubbed');
+    expect(() => prepareRunCard({ scriptFile: file, interactive: true, relay: path.join(home, 'no-expect') })).toThrow(/needs expect/);
+  });
+});
+
 describe('a run card on the decisions store', () => {
   it('stores the script beside the card, and the stored copy hashes to the card', () => {
     const body = '#!/bin/bash\necho hi\n';
