@@ -7,7 +7,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { askDecision, decisionDir, ensureLayout, prepareRunCard, readDecisionAnswer } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
-import { RUN_CHALLENGE_MS, RunChallenges, readRunPasskeys } from '../src/run-passkey.js';
+import { PASSKEY_DIALOG_PROMPT, RUN_CHALLENGE_MS, RunChallenges, macPasswordGate, readRunPasskeys } from '../src/run-passkey.js';
 import { SoftPasskey } from './fixtures/soft-passkey.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -109,6 +109,33 @@ describe('registering the run passkey', () => {
     const res = await post(localhost(), 'run-passkey-register', new SoftPasskey().register(challenge, origin(), 0x01));
     expect(res.status).toBe(403);
     expect(res.json.reason).toContain('did not verify the user');
+  });
+
+  it('registers another passkey only with consent from a current one', async () => {
+    const { passkey: first } = await register();
+    const second = new SoftPasskey();
+    const bare = await register(second);
+    expect(bare.res.status).toBe(403);
+    expect(bare.res.json.reason).toContain('confirm with it to register another');
+    const start = (await post(localhost(), 'run-passkey-challenge', {})).json;
+    expect(start.credentialIds).toEqual([first.credentialId.toString('base64url')]);
+    const stranger = await post(localhost(), 'run-passkey-register', { ...second.register(start.challenge as string, origin()), existing: new SoftPasskey().assert(start.existingChallenge as string, origin()) });
+    expect(stranger.status).toBe(403);
+    const again = (await post(localhost(), 'run-passkey-challenge', {})).json;
+    const ok = await post(localhost(), 'run-passkey-register', { ...second.register(again.challenge as string, origin()), existing: first.assert(again.existingChallenge as string, origin()) });
+    expect(ok.status).toBe(201);
+    expect(readRunPasskeys(passkeysFile)).toHaveLength(2);
+  });
+
+  it("asks with macOS's own password dialog, and refuses without the password or off macOS", async () => {
+    const calls: string[][] = [];
+    const allowed = macPasswordGate(async (command, args) => (calls.push([command, ...args]), 0), 'darwin');
+    expect(await allowed()).toBeUndefined();
+    expect(calls[0]![0]).toBe('/usr/bin/osascript');
+    expect(calls[0]![2]).toContain('with administrator privileges');
+    expect(calls[0]![2]).toContain(PASSKEY_DIALOG_PROMPT);
+    expect(await macPasswordGate(async () => 1, 'darwin')()).toBe("The macOS password wasn't given, so the passkey was not stored.");
+    expect(await macPasswordGate(async () => 0, 'linux')()).toContain('macOS');
   });
 
   it('works only from the localhost page, and says where', async () => {

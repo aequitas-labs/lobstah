@@ -6,6 +6,7 @@ import {
   RunChallenges,
   addRunPasskey,
   readRunPasskeys,
+  verifyExistingPasskey,
   verifyRegistration,
   verifyRunAssertion,
   type AssertionResponse,
@@ -67,10 +68,26 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
   const p = (payload ?? {}) as Record<string, unknown>;
   try {
     switch (kind) {
-      case 'run-passkey-challenge':
-        return { status: 200, body: { ok: true, challenge: ctx.challenges.issue({ kind: 'register' }), rpId: RUN_RP_ID, registered: readRunPasskeys(ctx.passkeysFile).length } };
+      case 'run-passkey-challenge': {
+        // Once a passkey exists, another needs its consent too: a second challenge, for it to sign.
+        const existing = readRunPasskeys(ctx.passkeysFile);
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            challenge: ctx.challenges.issue({ kind: 'register' }),
+            rpId: RUN_RP_ID,
+            registered: existing.length,
+            ...(existing.length ? { existingChallenge: ctx.challenges.issue({ kind: 'existing' }), credentialIds: existing.map((k) => k.credentialId) } : {}),
+          },
+        };
+      }
       case 'run-passkey-register': {
         const passkey = verifyRegistration(p as unknown as RegistrationResponse, ctx.challenges, ctx.origin);
+        if (readRunPasskeys(ctx.passkeysFile).length) {
+          if (!p.existing) return refuse(403, 'A passkey is already registered: confirm with it to register another.');
+          verifyExistingPasskey(p.existing as AssertionResponse, ctx.challenges, ctx.origin, ctx.passkeysFile);
+        }
         const refused = await ctx.confirmRegistration();
         if (refused) return refuse(403, refused);
         addRunPasskey(passkey, ctx.passkeysFile);
