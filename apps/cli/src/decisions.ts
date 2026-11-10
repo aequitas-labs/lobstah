@@ -1,5 +1,5 @@
-import { decisionViewedAt, listDecisions, readDecisionDetail, standingDecisions } from '@lobstah/core';
-import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, LobstahRequest, TendAttention } from '@lobstah/core';
+import { decisionDir, decisionViewedAt, listDecisions, readDecisionDetail, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
+import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, GlassRunCard, LobstahRequest, TendAttention } from '@lobstah/core';
 
 /**
  * The CLI half of decisions (core's decisions.ts stores them): the
@@ -48,6 +48,24 @@ export function hideFramedQuestions(
   );
 }
 
+/**
+ * A run card as the glass shows it: the stored script, read now, with the
+ * characters to warn about. A copy that no longer hashes to the card's value
+ * is shown as altered, and never runs.
+ */
+export function glassRunCard(d: DecisionMeta): GlassRunCard | undefined {
+  if (!d.run) return undefined;
+  const dir = decisionDir(d.key);
+  const stored = dir ? readStoredRunScript(dir) : undefined;
+  const script = stored?.text ?? '';
+  return {
+    ...d.run,
+    script,
+    warnings: scriptWarnings(script),
+    ...(stored?.sha256 !== d.run.scriptSha256 ? { altered: true } : {}),
+  };
+}
+
 /** Standing decisions as the glass renders them, newest first. */
 export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()): GlassDecision[] {
   return decisions.map((d) => {
@@ -60,6 +78,7 @@ export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()):
     options: d.options,
     ...(d.permission ? { permission: true } : {}),
     ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
+    ...(d.run ? { run: glassRunCard(d) } : {}),
     ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
     attachments: d.attachments,
     ...(d.dispatch ? { dispatch: d.dispatch } : {}),

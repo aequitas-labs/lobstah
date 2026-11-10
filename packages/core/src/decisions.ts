@@ -9,6 +9,7 @@ import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { newRequestId, readRequest, requestFilesDir, requestsDir, writeRequest } from './requests.js';
 import type { DecisionAnswerPayload } from './requests.js';
 import type { Attachment, Lane } from './types.js';
+import { runScriptFile, type RunCard } from './run-cards.js';
 
 /**
  * Decisions: a question the helm puts to the human (`man ask`), answered in
@@ -102,6 +103,8 @@ export interface DecisionMeta {
   /** Set on a trap's permission request: what it asked to run or write. */
   permission?: PermissionAsk;
   permissionsProposal?: PermissionsProposal;
+  /** Set on a run card: the script the glass runs once Chris confirms it (run-cards.ts). */
+  run?: RunCard;
   /** Changes with every ask; an ack holds only while it matches. */
   stateHash: string;
 }
@@ -386,6 +389,8 @@ export interface AskOptions {
   /** A trap's permission request. */
   permission?: PermissionAsk;
   permissionsProposal?: PermissionsProposal;
+  /** A run card: what it runs, and the script's bytes, stored as `run/script` (run-cards.ts). */
+  run?: { card: RunCard; script: Buffer };
   /** Per-file limit for attachments (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -485,9 +490,16 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     askedAt,
     ...(opts.permission ? { permission: opts.permission } : {}),
     ...(opts.permissionsProposal ? { permissionsProposal: opts.permissionsProposal } : {}),
+    ...(opts.run ? { run: opts.run.card } : {}),
     stateHash: createHash('sha1').update(`${key}\n${askedAt}\n${title}`).digest('hex').slice(0, 16),
   };
   writeAtomic(path.join(dir, DETAIL_MD), detail);
+  // The run card's script lands before the card that names it. The copy is what runs, and only while it still hashes to the card's value.
+  if (opts.run) {
+    const script = runScriptFile(dir);
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(script, opts.run.script, { mode: 0o600, flag: 'wx' });
+  }
   writeAtomic(path.join(dir, DECISION_JSON), `${JSON.stringify(meta, null, 2)}\n`);
   const replaced = opts.replace !== undefined && opts.replace !== key ? [opts.replace] : [];
   for (const old of replaced) fs.rmSync(decisionDir(old)!, { recursive: true, force: true });

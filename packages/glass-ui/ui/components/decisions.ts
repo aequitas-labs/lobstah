@@ -23,6 +23,7 @@ import { Age, ImageThumb, NamedText, opener } from './common.js';
 import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
+import { RunCardBody } from './run-card.js';
 import { can, fileUrl } from '../backend.js';
 
 /**
@@ -56,7 +57,8 @@ function attachments(key: string, list: Attachment[]) {
 
 function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: string) {
   const key = c.key;
-  const permission = c.kind === 'decision' && c.permission;
+  // A run card, like a permission card, takes only an explicit option (Decline); Run is its own button.
+  const permission = c.kind === 'decision' && (c.permission || !!c.run);
   const options = c.kind === 'decision' ? c.options : [];
   const notes = (c.kind === 'decision' && c.optionNotes) || {};
   const text = draft?.text ?? '';
@@ -278,6 +280,7 @@ export function DecisionModal({
                 c.detail.trim() &&
                 html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent} fileUrl=${(name: string) => fileUrl({ kind: 'decision', key: c.key }, name)} />`,
               c.kind === 'decision' && attachments(c.key, c.attachments),
+              c.kind === 'decision' && c.run && html`<${RunCardBody} cardKey=${c.key} run=${c.run} />`,
               c.kind === 'decision' && !c.readOnly && c.appStart && validDesktopStartLink(c.appStart.url)
                 ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
                 : c.kind === 'decision' && c.readOnly
@@ -286,7 +289,7 @@ export function DecisionModal({
                     ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
                     : answerForm(c, draft, extensions.join(',')),
               !(c.kind === 'decision' && (c.appStart || c.readOnly)) &&
-                legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && c.permission),
+                legend(c.kind === 'decision' ? c.options.length : 0, c.kind === 'decision' && (c.permission || !!c.run)),
             ]
       }`,
     c.key,

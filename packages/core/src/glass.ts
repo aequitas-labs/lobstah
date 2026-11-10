@@ -10,6 +10,7 @@ import type { WaitingView } from './status.js';
 import type { Watch } from './watch.js';
 import type { ActivityView } from './activity.js';
 import type { TodoView } from './todos.js';
+import type { RunCard, ScriptWarning } from './run-cards.js';
 import type { HelmPassView } from './helm-pass.js';
 import type { PermissionsProposal } from './decisions.js';
 import type { ViewerDevice } from './viewer-device.js';
@@ -429,6 +430,8 @@ export interface GlassDecision {
   /** Permission cards accept only an explicit option, with no free-form inputs. */
   permission?: boolean;
   permissionsProposal?: PermissionsProposal;
+  /** A run card: the script the glass runs once Chris confirms it. */
+  run?: GlassRunCard;
   attachments: Attachment[];
   dispatch?: string;
   lane?: Lane;
@@ -438,6 +441,16 @@ export interface GlassDecision {
   stateHash: string;
   /** When the human first viewed it in the decision modal; absent = unread. */
   viewedAt?: string;
+}
+
+/** A run card as the glass shows it: the stored script in full, what runs it, and what a reader could miss in it. */
+export interface GlassRunCard extends RunCard {
+  /** The stored script's text, whole. */
+  script: string;
+  /** Characters a reader could miss or misread, by line and column. */
+  warnings: ScriptWarning[];
+  /** The stored copy no longer hashes to the card's value, or is gone: it never runs. */
+  altered?: boolean;
 }
 
 /** What an answer from the glass may carry (the server checks the same limits). */

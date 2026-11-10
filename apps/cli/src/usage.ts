@@ -124,6 +124,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--ask-path': { value: '<file>' },
       '--intent': { value: '<sentence>' },
       '--allow': { value: '<pattern>', repeatable: true },
+      '--run': { value: '<script>' },
     },
     positionals: '<uuid> <verb> [note...]',
   },
@@ -286,6 +287,11 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--replace': { value: '<key>' },
       '--grounds': { value: '<name>' },
       '--session': { value: '<id>' },
+      '--run': { value: '<script>' },
+      '--input': { value: 'NAME[:secret|:text]', repeatable: true },
+      '--cwd': { value: '<dir>' },
+      '--timeout': { value: '<5m>' },
+      '--output': { value: 'scrubbed|exit' },
     },
     positionals: '[<dispatch-id>]',
   },
@@ -358,7 +364,7 @@ frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
   report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note. \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
---waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No; --allow <pattern> with an --intent <sentence> label propose allowing that kind of action.`,
+--waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No; --allow <pattern> with an --intent <sentence> label propose allowing that kind of action. needs-decision --run <script> proposes a script to the helm for a run card.`,
   goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
 ${GOAL_WORDING_RULE}
 set replaces today's lines; add appends one; rm removes the displayed line number. Edits are allowed all day.
@@ -480,10 +486,8 @@ work in flight requires a live watcher or the hook blocks with the arm command.
 (shots/01.png); --attach-dir <dir> copies every image in a folder under it. The filed copy links each
 by its stored name. A path out of the page's directory is refused. --title overrides its first # heading.
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
-  'man:ask': `Put a decision to the human: a card in the glass (decisions/<rid>/) until
-answered or withdrawn. Asks stand side by side; --replace <key> replaces one. The answer
-wakes man wait as decision-answer. --detail images show inline: https URLs, and paths
-to --attach files. Reserved for the claimed helm.`,
+  'man:ask': `A card for the human in the glass, until answered or withdrawn (--replace <key> swaps one); the answer wakes man wait. --detail images show inline (https, or --attach paths).
+--run <script>: a run card, which the glass runs once confirmed, --input values on stdin. Helm only.`,
   'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
 Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into

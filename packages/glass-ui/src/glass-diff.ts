@@ -4,6 +4,7 @@ import type {
   PermissionsProposal,
   GlassBeats,
   GlassDecision,
+  GlassRunCard,
   GlassDispatch,
   GlassDispatchSummary,
   GlassHelm,
@@ -200,6 +201,8 @@ export type DecisionCard =
       optionNotes?: Record<string, string>;
       permission?: boolean;
       permissionsProposal?: PermissionsProposal;
+      /** A run card: the script the local glass runs once Chris confirms it. */
+      run?: GlassRunCard;
       attachments: Attachment[];
       dispatch?: string;
       lane?: string;
@@ -238,6 +241,7 @@ export function decisionCards(
         ...(d.permission ? { permission: true } : {}),
         ...(d.appStart ? { appStart: d.appStart } : {}),
         ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
+        ...(d.run ? { run: d.run } : {}),
         ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
         attachments: d.attachments,
         ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),
