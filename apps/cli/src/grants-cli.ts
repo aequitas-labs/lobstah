@@ -31,7 +31,7 @@ import {
   readSessionClaim,
   rosterByAddress,
   setRosterProfile,
-  sendMessage,
+  sendPermissionAnswer,
   standingDecisions,
   trapBySession,
   toonKV,
@@ -851,11 +851,11 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       reason: 'Allowed this tool family on the permission card',
     });
     if (decision.dispatch)
-      sendMessage(
+      sendPermissionAnswer(
         decision.dispatch,
         decision.lane ?? 'work',
         `Chris allowed this tool family for 15 minutes: grant ${grant.id}. Retry the call; lobstah grants shows its scope and expiry.`,
-        'glass',
+        decision.key,
       );
     return grant;
   }
@@ -874,13 +874,13 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       ...(hour ? { expiresAt: new Date(Date.now() + INTENT_HOUR_MS).toISOString() } : {}),
     });
     if (decision.dispatch) {
-      sendMessage(
+      sendPermissionAnswer(
         decision.dispatch,
         decision.lane ?? 'work',
         `Chris allowed this kind of action ${hour ? 'for this trap, for an hour' : `for every trap in ${grant.repo ?? 'this repo'}, until revoked`}: grant ${grant.id}. ` +
           `Commands matching ${grant.intent!.patterns.map((item) => `\`${intentPatternText(item)}\``).join(', ')} now run without asking. ` +
           "Anything else goes to your harness's reviewer as usual.",
-        'glass',
+        decision.key,
       );
     }
     return grant;
@@ -890,11 +890,11 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
   const target = ask.command !== undefined ? `\`${ask.command}\`` : `writes to ${ask.path}`;
   if (answer.by !== 'glass' || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
     if (answer.option === 'No')
-      sendMessage(
+      sendPermissionAnswer(
         decision.dispatch,
         lane,
         `Chris answered No to ${target}. Do not run it. Carry on without it, or report what you need instead.`,
-        'glass',
+        decision.key,
       );
     return undefined;
   }
@@ -911,7 +911,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
     dispatch: decision.dispatch,
     ...(once && ask.trap ? { trap: ask.trap } : {}),
   });
-  sendMessage(
+  sendPermissionAnswer(
     decision.dispatch,
     lane,
     `Chris allowed ${target} ${once ? 'once' : `always (${what(g)})`} in the glass: grant ${g.id}. ` +
@@ -919,7 +919,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       (ask.command !== undefined
         ? `Run the command again exactly as shown, with nothing added before or after it: ${ask.command}`
         : `Make the write to ${ask.path} again.`),
-    'glass',
+    decision.key,
   );
   return g;
 }

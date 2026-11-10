@@ -20,6 +20,8 @@ export interface MessageMeta {
   attachments?: Attachment[];
   /** Stable internal delivery receipt, retained after the message is handled. */
   deliveryId?: string;
+  /** The permission card (`decision:<id>`) this message answers. It never answers the dispatch's question. */
+  permissionCard?: string;
 }
 
 const metaName = (file: string): string => file.replace(/\.msg$/, '.meta.json');
@@ -39,6 +41,15 @@ function withInboxWrite<T>(id: string, lane: Lane, action: () => T): T {
   return withDirLock(path.join(directory, '.write-lock'), action, { staleMs: 30_000, waitMs: 1000, busy: () => new Error(`inbox ${id} is busy; retry`) });
 }
 
+/**
+ * Tell a dispatch how its permission card was answered. The message is
+ * marked with the card, so it does not answer the dispatch's question:
+ * the trap's question stands until it is answered on its own card.
+ */
+export function sendPermissionAnswer(id: string, lane: Lane, text: string, card: string): string {
+  return withInboxWrite(id, lane, () => appendMessage(id, lane, text, 'glass', [], undefined, card));
+}
+
 /** Publish one visible result across retries, including a crash after delivery but before its outbox receipt. */
 export function sendMessageOnce(id: string, lane: Lane, deliveryId: string, text: string, from: string, attachments: Attachment[] = []): string {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(deliveryId)) throw new Error('invalid inbox delivery id');
@@ -52,7 +63,7 @@ export function sendMessageOnce(id: string, lane: Lane, deliveryId: string, text
   });
 }
 
-function appendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = [], deliveryId?: string): string {
+function appendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = [], deliveryId?: string, permissionCard?: string): string {
   const dir = inboxDir(id, lane);
   fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
   const existing = fs.readdirSync(dir).filter((f) => f.endsWith('.msg')).length;
@@ -60,7 +71,13 @@ function appendMessage(id: string, lane: Lane, text: string, from?: string, atta
   const name = `${String(existing + handled + 1).padStart(3, '0')}.msg`;
   const tmp = uniqueTempPath(path.join(dir, name));
   if (from !== undefined || attachments.length > 0) {
-    const meta: MessageMeta = { ...(deliveryId ? { deliveryId } : {}), from: from ?? 'unknown', at: new Date().toISOString(), ...(attachments.length ? { attachments } : {}) };
+    const meta: MessageMeta = {
+      ...(deliveryId ? { deliveryId } : {}),
+      from: from ?? 'unknown',
+      at: new Date().toISOString(),
+      ...(attachments.length ? { attachments } : {}),
+      ...(permissionCard ? { permissionCard } : {}),
+    };
     const metaTmp = `${tmp}.meta`;
     fs.writeFileSync(metaTmp, JSON.stringify(meta, null, 2));
     atomicRenameSync(metaTmp, path.join(dir, metaName(name)));
@@ -93,7 +110,8 @@ export function messageMetas(id: string, lane: Lane): MessageMeta[] {
     for (const f of files) {
       try {
         const m = JSON.parse(fs.readFileSync(path.join(d, f), 'utf8')) as Partial<MessageMeta>;
-        if (typeof m.from === 'string' && m.from !== '' && typeof m.at === 'string') out.push({ from: m.from, at: m.at });
+        if (typeof m.from === 'string' && m.from !== '' && typeof m.at === 'string')
+          out.push({ from: m.from, at: m.at, ...(typeof m.permissionCard === 'string' ? { permissionCard: m.permissionCard } : {}) });
       } catch {
         // unreadable sidecar: no provenance, never counts
       }
@@ -102,17 +120,25 @@ export function messageMetas(id: string, lane: Lane): MessageMeta[] {
   return out;
 }
 
+/** Which messages `answeredAt` counts. */
+export interface AnsweredAtOptions {
+  /** Count answers to permission cards too: for a status entry that is itself a permission request. */
+  permissionAnswers?: boolean;
+}
+
 /**
  * When a question standing since `since` (its status entry's at) was
  * answered: the newest message with provenance sent after it, else
  * undefined. Any sender counts — every inbound message to a dispatch is an
  * instruction from someone acting for the human; a record without a
- * sidecar never does. Uses the sidecar's at, never file mtime.
+ * sidecar never does. A permission card's answer counts only with
+ * `permissionAnswers`: it answers that card, not the trap's question.
+ * Uses the sidecar's at, never file mtime.
  */
-export function answeredAt(id: string, lane: Lane, since: string): string | undefined {
+export function answeredAt(id: string, lane: Lane, since: string, options: AnsweredAtOptions = {}): string | undefined {
   const t = Date.parse(since) || 0;
   return messageMetas(id, lane)
-    .filter((m) => (Date.parse(m.at) || 0) > t)
+    .filter((m) => (Date.parse(m.at) || 0) > t && (options.permissionAnswers || m.permissionCard === undefined))
     .map((m) => m.at)
     .sort()
     .at(-1);
