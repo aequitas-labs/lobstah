@@ -56,7 +56,8 @@ export function receive(snapshot: GlassSnapshot): void {
     decisionModal?.key &&
     !live.has(decisionModal.key) &&
     getState().archivedDecision?.key !== decisionModal.key &&
-    !drafts[decisionModal.key]?.sent
+    !drafts[decisionModal.key]?.sent &&
+    !getState().runs?.[decisionModal.key]
       ? { decisionModal: nextOpen(modalOrder(), filteredDecisionCards(snapshot, getState().prefs), kept, decisionModal.key) }
       : {}),
   });
@@ -738,5 +739,78 @@ export async function registerRunPasskey(): Promise<void> {
     if (done.ok) receive(await backend().snapshot());
   } catch (err) {
     setState({ runPasskey: { error: err instanceof Error ? err.message : 'The passkey was not registered.' } });
+  }
+}
+
+const setRun = (key: string, patch: Partial<import('./store.js').RunView>) => {
+  const runs = getState().runs ?? {};
+  const current = runs[key] ?? { busy: false, output: '', next: 0 };
+  setState({ runs: { ...runs, [key]: { ...current, ...patch } } });
+};
+
+/**
+ * Run a run card: ask the server for a challenge bound to this card and the
+ * script hash this page shows, confirm it with the passkey (Touch ID), send
+ * the assertion with the typed inputs, then follow the scrubbed output until
+ * the run ends. The inputs go in that one request and are kept nowhere here.
+ */
+export async function runRunCard(key: string, sha256: string, inputs: Record<string, string>): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) return setRun(key, { error: 'This page has no token; reload it.' });
+  const card = currentCards().find((c) => c.key === key);
+  setRun(key, { busy: true, error: undefined, output: '', next: 0, result: undefined, ...(card ? { card } : {}) });
+  try {
+    const start = (
+      await backend().request<{ ok: boolean; reason?: string; challenge?: string; rpId?: string; credentialIds?: string[] }>(
+        'run-challenge',
+        { key, sha256 },
+        token,
+      )
+    ).body;
+    if (!start.ok || !start.challenge) return setRun(key, { busy: false, error: start.reason ?? 'The glass refused the run.' });
+    const got = (await navigator.credentials.get({
+      publicKey: {
+        challenge: fromB64url(start.challenge),
+        rpId: start.rpId ?? 'localhost',
+        allowCredentials: (start.credentialIds ?? []).map((id) => ({ type: 'public-key' as const, id: fromB64url(id) })),
+        userVerification: 'required',
+        timeout: 120_000,
+      },
+    })) as PublicKeyCredential | null;
+    if (!got) return setRun(key, { busy: false, error: 'The passkey was not used.' });
+    const response = got.response as AuthenticatorAssertionResponse;
+    const started = (
+      await backend().request<{ ok: boolean; reason?: string }>(
+        'run',
+        {
+          key,
+          credentialId: b64url(got.rawId),
+          clientDataJSON: b64url(response.clientDataJSON),
+          authenticatorData: b64url(response.authenticatorData),
+          signature: b64url(response.signature),
+          inputs,
+        },
+        token,
+      )
+    ).body;
+    if (!started.ok) return setRun(key, { busy: false, error: started.reason ?? 'The run did not start.' });
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 700));
+      const after = getState().runs?.[key]?.next ?? 0;
+      const page = (
+        await backend().request<{
+          ok: boolean;
+          reason?: string;
+          text?: string;
+          next?: number;
+          result?: import('./store.js').RunView['result'];
+        }>('run-output', { key, after }, token)
+      ).body;
+      if (!page.ok) return setRun(key, { busy: false, error: page.reason ?? 'The run’s output stopped.' });
+      setRun(key, { output: (getState().runs?.[key]?.output ?? '') + (page.text ?? ''), next: page.next ?? after });
+      if (page.result) return setRun(key, { busy: false, result: page.result });
+    }
+  } catch (err) {
+    setRun(key, { busy: false, error: err instanceof Error ? err.message : 'The run did not start.' });
   }
 }

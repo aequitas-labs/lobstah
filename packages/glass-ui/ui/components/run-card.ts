@@ -2,6 +2,9 @@ import type { GlassRunCard, ScriptWarning } from '@lobstah/core';
 import { can } from '../backend.js';
 import { html } from '../html.js';
 import { getState } from '../store.js';
+import type { RunView } from '../store.js';
+import { passkeysWorkHere, runPasskeyUrl, runRunCard } from '../actions.js';
+import { useState } from 'preact/hooks';
 
 /**
  * A run card's body in the decision modal: the script in full, with every
@@ -59,11 +62,37 @@ function Warnings({ warnings }: { warnings: ScriptWarning[] }) {
 export function runBlocked(run: GlassRunCard, passkeys = getState().snapshot?.runPasskeys?.count ?? 0): string | undefined {
   if (run.altered) return "The stored script no longer matches the card's hash, so it won't run.";
   if (!passkeys) return 'Set up a passkey in Settings to run cards.';
-  return 'Passkey ready.';
+  return undefined;
+}
+
+/** The run's scrubbed output on the card, and how it ended. */
+function RunOutput({ view }: { view: RunView | undefined }) {
+  if (!view || (!view.busy && !view.output && !view.result && !view.error)) return null;
+  const ended =
+    view.result &&
+    (view.result.timedOut
+      ? `Timed out and stopped (exit 124)`
+      : `Exit ${view.result.exitCode} in ${(view.result.durationMs / 1000).toFixed(1)}s`);
+  return html`<div class="runout">
+    <div class="runstate">${view.busy ? html`<span class="warn">Running…</span>` : ended && html`<span class=${view.result!.exitCode === 0 ? 'ok' : 'bad'}>${ended}</span>`}${view.result?.scrubbed ? html`<span class="dim"> · ${view.result.scrubbed} value${view.result.scrubbed === 1 ? '' : 's'} scrubbed</span>` : null}</div>
+    ${view.output && html`<pre class="runscript runlog"><code>${view.output}</code></pre>`}
+    ${view.error && html`<div class="bad">${view.error}</div>`}
+  </div>`;
 }
 
 export function RunCardBody({ cardKey, run }: { cardKey: string; run: GlassRunCard }) {
   const blocked = runBlocked(run);
+  // Typed values live only in this component until Run sends them, then they are cleared.
+  const [values, setValues] = useState<Record<string, string>>({});
+  const view = getState().runs?.[cardKey];
+  const here = passkeysWorkHere();
+  const missing = run.inputs.filter((i) => !values[i.name]).map((i) => i.name);
+  const locked = !!blocked || !!view?.busy || !!view?.result;
+  const start = () => {
+    const inputs = values;
+    setValues({});
+    void runRunCard(cardKey, run.scriptSha256, inputs);
+  };
   return html`<div class="runcard" data-run=${cardKey}>
     <div class="runhead"><span class="badge warn">run on this Mac</span>${run.proposedBy && html`<span class="dim"> proposed by ${run.proposedBy}</span>`}</div>
     <${Script} run=${run} />
@@ -84,14 +113,19 @@ export function RunCardBody({ cardKey, run }: { cardKey: string; run: GlassRunCa
           type=${input.secret ? 'password' : 'text'}
           autocomplete="off"
           spellcheck="false"
-          disabled
+          disabled=${locked || !can('run') || !here}
           aria-label=${input.name}
+          value=${values[input.name] ?? ''}
+          onInput=${(e: Event) => setValues({ ...values, [input.name]: (e.currentTarget as HTMLInputElement).value })}
         /></label>`,
       )}</div>`
     }
     ${
       can('run') &&
-      html`<div class="runfoot"><button type="button" class="btn runbtn" disabled title=${blocked}>Run</button>${!run.altered && html`<span class="dim">${blocked}</span>`}</div>`
+      (here || blocked
+        ? html`<div class="runfoot"><button type="button" class="btn runbtn" disabled=${locked || missing.length > 0} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : 'Confirm with your passkey and run')} onClick=${start}>${view?.busy ? 'Running…' : 'Run'}</button>${blocked ? html`<span class="dim">${!run.altered && blocked}</span>` : html`<span class="dim">Asks for your passkey (Touch ID), then runs on this Mac.</span>`}</div>`
+        : html`<div class="runfoot"><a class="btn runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>Run from localhost</a><span class="dim">Passkeys work from the glass at localhost.</span></div>`)
     }
+    <${RunOutput} view=${view} />
   </div>`;
 }

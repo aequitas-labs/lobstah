@@ -12,6 +12,7 @@ import {
   type AssertionResponse,
   type RegistrationResponse,
 } from './run-passkey.js';
+import { RunRegistry, runStdin } from './run-exec.js';
 
 /**
  * The glass's run-card requests (`/requests` kinds `run-*`), behind its
@@ -20,7 +21,7 @@ import {
  */
 
 /** The request kinds this module answers. */
-export const RUN_REQUEST_KINDS = ['run-passkey-challenge', 'run-passkey-register', 'run-challenge', 'run-assert'] as const;
+export const RUN_REQUEST_KINDS = ['run-passkey-challenge', 'run-passkey-register', 'run-challenge', 'run', 'run-output'] as const;
 export type RunRequestKind = (typeof RUN_REQUEST_KINDS)[number];
 
 export const isRunRequestKind = (kind: unknown): kind is RunRequestKind => RUN_REQUEST_KINDS.includes(kind as RunRequestKind);
@@ -43,6 +44,10 @@ export interface RunRequestContext {
    */
   confirmRegistration: () => Promise<string | undefined>;
   passkeysFile?: string;
+  /** The runs this server started. */
+  runs: RunRegistry;
+  /** Per-file answer limit (limits.attachmentMaxBytes), for the answer a run writes. */
+  maxBytes: number;
 }
 
 const refuse = (status: number, reason: string): RunReply => ({ status, body: { ok: false, reason } });
@@ -103,13 +108,29 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
           body: { ok: true, challenge: ctx.challenges.issue({ kind: 'run', key: card.meta.key, sha256: card.meta.run.scriptSha256 }), rpId: RUN_RP_ID, credentialIds: readRunPasskeys(ctx.passkeysFile).map((k) => k.credentialId) },
         };
       }
-      case 'run-assert': {
+      case 'run': {
+        // Every check before anything runs: the passkey, the card, the hash it signed, the stored copy, the inputs.
         const verified = verifyRunAssertion(p as unknown as AssertionResponse, ctx.challenges, ctx.origin, ctx.passkeysFile);
         if (verified.key !== p.key) return refuse(403, 'The passkey signed a different card.');
         const card = runnableCard(p.key);
         if ('status' in card) return card;
         if (verified.sha256 !== card.meta.run.scriptSha256) return refuse(409, "The passkey signed a script that is not the card's.");
-        return { status: 200, body: { ok: true, verified: true, key: card.meta.key } };
+        if (ctx.runs.get(card.meta.key)) return refuse(409, 'This card has already run.');
+        const input = runStdin(card.meta.run, p.inputs);
+        if ('reason' in input) return refuse(400, input.reason);
+        void ctx.runs.start(card.meta, input.values, input.stdin, verified.credentialId, { maxBytes: ctx.maxBytes });
+        return { status: 202, body: { ok: true, running: true, key: card.meta.key } };
+      }
+      case 'run-output': {
+        const key = typeof p.key === 'string' ? p.key : '';
+        const live = ctx.runs.get(key);
+        if (!live) return refuse(404, 'No run for that card on this glass.');
+        const after = typeof p.after === 'number' && p.after >= 0 ? p.after : 0;
+        const from = Math.max(0, after - live.dropped);
+        return {
+          status: 200,
+          body: { ok: true, text: live.output.slice(from), next: live.dropped + live.output.length, ...(live.result ? { result: live.result } : {}) },
+        };
       }
     }
   } catch (err) {

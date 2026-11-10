@@ -119,6 +119,7 @@ import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
 import { handleRunRequest, isRunRequestKind } from './run-routes.js';
 import { RunChallenges, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
+import { RunRegistry } from './run-exec.js';
 
 /**
  * The spyglass: a localhost dashboard over ~/.lobstah — the same
@@ -895,9 +896,12 @@ export function serveGlass(
     confirmPasskeyRegistration?: () => Promise<string | undefined>;
     /** Where run passkeys are kept (tests). */
     passkeysFile?: string;
+    /** The runs this server starts (tests read them). */
+    runs?: RunRegistry;
   } = {},
 ): http.Server {
   const runChallenges = options.runChallenges ?? new RunChallenges();
+  const runs = options.runs ?? new RunRegistry();
   const confirmWithMacPassword = macPasswordGate();
   const presence = options.presence ?? new GlassPresence();
   const snapshot = options.snapshot ?? buildGlassSnapshot;
@@ -1197,13 +1201,16 @@ export function serveGlass(
           case 'run-passkey-challenge':
           case 'run-passkey-register':
           case 'run-challenge':
-          case 'run-assert': {
+          case 'run':
+          case 'run-output': {
             if (!isRunRequestKind(body.kind)) return reply(400, { ok: false, reason: 'Unknown run request.' });
             void handleRunRequest(body.kind, body.payload, {
               origin: `http://${req.headers.host}`,
               challenges: runChallenges,
               confirmRegistration: options.confirmPasskeyRegistration ?? confirmWithMacPassword,
               ...(options.passkeysFile ? { passkeysFile: options.passkeysFile } : {}),
+              runs,
+              maxBytes: attachmentLimit(),
             }).then(
               (r) => reply(r.status, r.body),
               () => reply(500, { ok: false, reason: 'The run request failed.' }),

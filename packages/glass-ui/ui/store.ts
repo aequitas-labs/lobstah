@@ -8,6 +8,17 @@ import type { DispatchDetail, GlassOlder, GlassPrefs, GlassTab, ModalRef } from 
  * a change replaces the state object and re-renders the page, and Preact's
  * reconciliation touches only the DOM that differs.
  */
+/** A run card's run as this page sees it. */
+export interface RunView {
+  /** The card as it was when Run was pressed: it stays on screen after its run answers it. */
+  card?: import('../src/glass-diff.js').DecisionCard;
+  busy: boolean;
+  output: string;
+  next: number;
+  result?: { exitCode: number; timedOut: boolean; durationMs: number; scrubbed: number };
+  error?: string;
+}
+
 export interface GlassState {
   /** A closed decision opened by its deep link, outside the live queue. */
   archivedDecision?: import('@lobstah/core').GlassDecision;
@@ -33,6 +44,8 @@ export interface GlassState {
   focusResults: Record<string, string>;
   /** Registering a run passkey from Settings: in progress, done, or why it failed. */
   runPasskey?: { busy?: boolean; done?: string; error?: string };
+  /** Each run card's run from this page: in progress, its scrubbed output so far, how it ended, or why it didn't start. Never its inputs. */
+  runs?: Record<string, RunView>;
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */
   preview: boolean;
   /** Answers being written on the deck's decision cards, by card key. */

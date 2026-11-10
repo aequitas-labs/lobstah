@@ -149,6 +149,17 @@ describe('a run card in the glass', () => {
     expect(list).toContain('line 2, column 3: U+200B ZERO WIDTH SPACE');
   });
 
+  it('sends the 127.0.0.1 page to localhost to run, once a passkey is set up', async () => {
+    const d = runCardFleet();
+    d.runPasskeys = { count: 1 };
+    const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: `#decision/${encodeURIComponent(RUN_KEY)}` });
+    open.push(g);
+    const link = g.$('#doverlay a.runbtn')!;
+    expect(link.textContent).toBe('Run from localhost');
+    expect(link.getAttribute('href')).toBe(`http://localhost:7777/#decision/${encodeURIComponent(RUN_KEY)}`);
+    expect((g.$('#doverlay .runinput input') as HTMLInputElement).disabled).toBe(true);
+  });
+
   it("says a card whose stored copy changed won't run", async () => {
     const g = await modal(glassRun(undefined, { altered: true }));
     expect(g.$('#doverlay .runcard')!.textContent).toContain("no longer matches the card's hash");
@@ -164,7 +175,7 @@ describe('a run card in the glass', () => {
     };
     expect(rule('.runcard')).toContain('overflow-wrap: anywhere;');
     const shrinks = css.slice(css.indexOf('\n.runcard > *,'), css.indexOf('}', css.indexOf('\n.runcard > *,')));
-    for (const row of ['.runcard', '.runhead', '.runmeta', '.runinput', '.runfoot']) expect(shrinks).toContain(`${row} > *`);
+    for (const row of ['.runcard', '.runhead', '.runmeta', '.runinput', '.runfoot', '.runout']) expect(shrinks).toContain(`${row} > *`);
     expect(shrinks).toContain('min-width: 0;');
     expect(rule('.runcard .badge')).toContain('white-space: normal;');
   });
