@@ -78,13 +78,17 @@ export interface GlassDomOptions {
   reportToken?: string;
   /** Serve /data whole, without an ETag, as the server did before it slimmed the poll: the legacy page reads whole dispatches. */
   whole?: boolean;
+  /** The page's host; the default is 127.0.0.1:7777. Passkeys work only on localhost. */
+  host?: string;
+  /** Set up the window before the page's script runs (stand-in browser APIs). */
+  prepare?: (window: Window) => void;
   /** Answers a POST the page makes (an answer to a decision); the default is a 404. */
   post?: (url: string, init: { headers: Record<string, string>; body: string }) => { status: number; body: unknown } | Promise<{ status: number; body: unknown }>;
 }
 
 export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts: GlassDomOptions): Promise<GlassDom> {
   const window = new Window({
-    url: `http://127.0.0.1:7777${opts.path ?? '/'}${opts.search ?? ''}${opts.hash ?? ''}`,
+    url: `http://${opts.host ?? '127.0.0.1:7777'}${opts.path ?? '/'}${opts.search ?? ''}${opts.hash ?? ''}`,
     width: 1280,
     height: 800,
     settings: {
@@ -210,6 +214,7 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
     }
   };
   if (opts.badge) Object.defineProperty(window.navigator, 'setAppBadge', { value: opts.badge });
+  opts.prepare?.(window);
   window.document.write(page);
   await settle();
   const call = async (name: string, ...args: unknown[]) => {

@@ -814,3 +814,15 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
     setRun(key, { busy: false, error: err instanceof Error ? err.message : 'The run did not start.' });
   }
 }
+
+/** Send one line to a card's running interactive script; a secret line is scrubbed like an input. Resolves to why it failed, if it did. */
+export async function sendRunLine(key: string, line: string, secret: boolean): Promise<string | undefined> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) return 'This page has no token; reload it.';
+  try {
+    const res = (await backend().request<{ ok: boolean; reason?: string }>('run-line', { key, line, secret }, token)).body;
+    return res.ok ? undefined : (res.reason ?? 'The line was not sent.');
+  } catch {
+    return 'The line was not sent.';
+  }
+}

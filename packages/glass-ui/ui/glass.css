@@ -2252,7 +2252,8 @@ footer .glass-brand {
 .runmeta > *,
 .runinput > *,
 .runfoot > *,
-.runout > * {
+.runout > *,
+.runconsole > * {
   min-width: 0;
 }
 .runcard .btn,
@@ -2337,4 +2338,71 @@ footer .glass-brand {
 }
 a.runbtn {
   text-decoration: none;
+}
+/* An interactive run's console line: it reads as the next line of the terminal above it. */
+.runconsole {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.runprompt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-width: 0;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+.runprompt input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.runsecret.on {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+/* The eye beside a secret: on the console line before it is sent, and on each secret line sent from this tab. */
+.runeye {
+  flex: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--dim);
+  padding: 2px 4px;
+  line-height: 0;
+  cursor: pointer;
+}
+.runeye:hover,
+.runeye:focus-visible {
+  color: var(--fg);
+  border-color: var(--line-hover);
+}
+.runsent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.runsentline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.runsentline > * {
+  min-width: 0;
+}
+.runsentname {
+  flex: none;
+  white-space: nowrap;
 }

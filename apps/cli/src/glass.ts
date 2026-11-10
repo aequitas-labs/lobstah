@@ -1202,7 +1202,8 @@ export function serveGlass(
           case 'run-passkey-register':
           case 'run-challenge':
           case 'run':
-          case 'run-output': {
+          case 'run-output':
+          case 'run-line': {
             if (!isRunRequestKind(body.kind)) return reply(400, { ok: false, reason: 'Unknown run request.' });
             void handleRunRequest(body.kind, body.payload, {
               origin: `http://${req.headers.host}`,

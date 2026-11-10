@@ -160,6 +160,12 @@ describe('a run card in the glass', () => {
     expect((g.$('#doverlay .runinput input') as HTMLInputElement).disabled).toBe(true);
   });
 
+  it('tells an interactive card apart, so Chris knows it will ask him for lines', async () => {
+    const g = await modal(glassRun(undefined, { interactive: true, output: 'exit' }));
+    expect(g.$('#doverlay .runmeta')!.textContent).toContain('interactive: answer its prompts here');
+    expect(g.$('#doverlay .runmeta')!.textContent).toContain('the exit code only');
+  });
+
   it("says a card whose stored copy changed won't run", async () => {
     const g = await modal(glassRun(undefined, { altered: true }));
     expect(g.$('#doverlay .runcard')!.textContent).toContain("no longer matches the card's hash");

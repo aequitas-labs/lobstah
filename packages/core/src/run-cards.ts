@@ -54,7 +54,12 @@ export interface RunCard {
   interpreter: string;
   /** The trap whose proposal this card carries, when the helm posted one. */
   proposedBy?: string;
+  /** The script prompts as it runs: it gets a terminal, and the card a line console (run-exec.ts). */
+  interactive?: boolean;
 }
+
+/** What relays a terminal to an interactive run: expect(1), which ships with macOS. */
+export const RUN_RELAY = '/usr/bin/expect';
 
 /** A refused run card or proposal. */
 export class RunCardError extends Error {}
@@ -111,6 +116,10 @@ export interface RunCardRequest {
   timeout?: string;
   output?: string;
   proposedBy?: string;
+  /** The script prompts as it runs (`--interactive`). */
+  interactive?: boolean;
+  /** Where the terminal relay is looked for (tests). */
+  relay?: string;
 }
 
 /** Check a run card's request and read its script. Nothing is written. */
@@ -127,7 +136,9 @@ export function prepareRunCard(req: RunCardRequest): { card: RunCard; script: Bu
     dir = undefined;
   }
   if (!dir?.isDirectory()) throw new RunCardError(`--cwd is not a directory: ${cwd}`);
-  const output = (req.output ?? 'scrubbed') as RunOutputMode;
+  if (req.interactive && !fs.existsSync(req.relay ?? RUN_RELAY)) throw new RunCardError(`--interactive needs expect(1) at ${req.relay ?? RUN_RELAY}, which relays the run's terminal`);
+  // An interactive transcript can hold any line Chris typed: unless asked, the agent gets the exit code only.
+  const output = (req.output ?? (req.interactive ? 'exit' : 'scrubbed')) as RunOutputMode;
   if (!RUN_OUTPUT_MODES.includes(output)) throw new RunCardError(`--output is scrubbed or exit: ${req.output}`);
   return {
     script,
@@ -140,6 +151,7 @@ export function prepareRunCard(req: RunCardRequest): { card: RunCard; script: Bu
       output,
       interpreter: RUN_INTERPRETER,
       ...(req.proposedBy ? { proposedBy: req.proposedBy } : {}),
+      ...(req.interactive ? { interactive: true } : {}),
     },
   };
 }

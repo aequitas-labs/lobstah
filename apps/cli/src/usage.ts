@@ -292,6 +292,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--cwd': { value: '<dir>' },
       '--timeout': { value: '<5m>' },
       '--output': { value: 'scrubbed|exit' },
+      '--interactive': {},
     },
     positionals: '[<dispatch-id>]',
   },
