@@ -323,6 +323,7 @@ harness's blocking Stop-hook timeout too.
 | Key | Default | Meaning |
 |---|---|---|
 | `port` | `4949` | Localhost port for the glass. `LOBSTAH_GLASS_PORT` takes precedence. |
+| `mirror` | unset | A wharf in `[wharves]` that shows this machine's glass on its hosted glass. The fleet stays on its local grounds. The daemon puts the glass snapshot there (never the page token): within seconds of a change while a hosted glass is open, and every five minutes otherwise. It carries out on this glass, over loopback, the reads and writes a person makes there, except ↗ Open. Enroll with `lobstah wharf login --wharf <name> --mirror` (mirror and read access only), then `lobstah daemon restart`; `lobstah wharf whoami --wharf <name>` and `lobstah doctor` show how fresh the mirror is. Unset, nothing is sent. |
 
 ## `[pet]` — report and decision clicks
 

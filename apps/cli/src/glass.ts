@@ -1,5 +1,5 @@
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
-import { readArchivedDecision, readDecision, readDecisionAnswer } from '@lobstah/core';
+import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus } from '@lobstah/core';
 import { configuredTrapViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
@@ -89,7 +89,7 @@ import {
   TodoError,
   heavyGlassView,
 } from '@lobstah/core';
-import type { Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
+import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
@@ -942,6 +942,61 @@ export function serveGlass(
       timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
     );
   };
+  /** Raise one live trap's window: the local page's ↗ Open, and the hosted glass's when it runs on this machine. */
+  const focusTrap = (trapId: string, reply: (status: number, result: unknown) => void): void => {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id' });
+    const reg = liveTrap(trapId);
+    if (!reg) return reply(409, { focused: false, reason: 'Trap is not live' });
+    void (options.focus ?? ((trap: TrapRegistration) => focusRegistration(trap, { openTerminal: true })))(reg)
+      .then((result) => reply(result.focused ? 200 : 409, result))
+      .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
+  };
+  /**
+   * The hosted glass's two loopback calls, for its one origin only (the one
+   * the wharf named to this machine's mirror): the probe, which answers this
+   * mirror's id and a focus-only token, and focus with that token. The token
+   * opens nothing else: every other write here needs this page's own origin.
+   */
+  const mirrorFocusToken = randomBytes(32).toString('hex');
+  const mirrorFocus = (req: http.IncomingMessage, res: http.ServerResponse): void => {
+    res.setHeader('cache-control', 'no-store');
+    res.setHeader('vary', 'Origin');
+    const status = readMirrorStatus();
+    let named: string | undefined;
+    try { named = loadConfig().glass.mirror; } catch { named = undefined; } // a broken config mirrors nothing
+    const mirrored = status && named === status.wharf ? status : undefined;
+    const origin = req.headers.origin;
+    if (!mirrored?.glass || !mirrored.id || origin !== mirrored.glass || req.headers.host !== ownHost()) {
+      req.resume();
+      res.writeHead(403, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, reason: 'Not this machine’s hosted glass.' }));
+      return;
+    }
+    // A public page reaching a loopback address: the browser asks first (CORS and private network access).
+    res.setHeader('access-control-allow-origin', origin);
+    res.setHeader('access-control-allow-headers', 'x-lobstah-focus-token');
+    res.setHeader('access-control-allow-methods', 'GET, POST');
+    res.setHeader('access-control-allow-private-network', 'true');
+    res.setHeader('access-control-max-age', '600');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    const reply = (code: number, result: unknown) => {
+      res.writeHead(code, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(result));
+    };
+    if (req.url === '/api/mirror/probe') {
+      if (req.method !== 'GET') return reply(405, { ok: false, reason: 'GET required' });
+      return reply(200, { ok: true, mirror: mirrored.id, token: mirrorFocusToken, windowFocus: process.platform === 'darwin' });
+    }
+    if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required' });
+    const supplied = req.headers['x-lobstah-focus-token'];
+    const token = typeof supplied === 'string' ? supplied : '';
+    if (token.length !== mirrorFocusToken.length || !timingSafeEqual(Buffer.from(token), Buffer.from(mirrorFocusToken)) ||
+        (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') || req.headers['transfer-encoding'] !== undefined) {
+      req.resume();
+      return reply(403, { focused: false, reason: 'Focus request was not authorized' });
+    }
+    return focusTrap(req.url!.slice('/api/mirror/focus/'.length), reply);
+  };
   const handle = (req: http.IncomingMessage, res: http.ServerResponse): void => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
     if (req.url === '/requests') {
@@ -985,6 +1040,9 @@ export function serveGlass(
           return reply(400, { ok: false, reason: 'Invalid JSON.' });
         }
         const kindMax = typeof body?.kind === 'string' ? REQUEST_KIND_MAX_BYTES.get(body.kind) : undefined;
+        // A mirror boat's daemon carries out on this glass what a person did on the hosted glass, and says so.
+        // The header counts only on a request this glass already authorized with its own page token.
+        const source: AnswerSource = req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass';
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
@@ -1032,7 +1090,7 @@ export function serveGlass(
           case 'decision-answer': {
             try {
               const { key, ...answer } = decisionAnswerRequest(body.payload);
-              const { decision, answer: stored } = answerKey(key, { ...answer, by: 'glass' });
+              const { decision, answer: stored } = answerKey(key, { ...answer, by: source });
               return reply(201, { ok: true, id: stored.request, key: decision.key });
             } catch (err) {
               if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });
@@ -1262,15 +1320,10 @@ export function serveGlass(
       ) {
         return reply(403, { focused: false, reason: 'Focus request was not authorized' });
       }
-      const trapId = req.url.slice('/api/focus/'.length);
-      if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id' });
-      const reg = liveTrap(trapId);
-      if (!reg) return reply(409, { focused: false, reason: 'Trap is not live' });
-      void (options.focus ?? ((trap: TrapRegistration) => focusRegistration(trap, { openTerminal: true })))(reg)
-        .then((result) => reply(result.focused ? 200 : 409, result))
-        .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
-      return;
+      return focusTrap(req.url.slice('/api/focus/'.length), reply);
     }
+    // The hosted glass, open in a browser on this machine, asks whether it runs here, and raises a trap's window from here.
+    if (req.url === '/api/mirror/probe' || req.url?.startsWith('/api/mirror/focus/')) return mirrorFocus(req, res);
     if (req.method === 'GET' && (req.url?.startsWith('/api/checklist?') || req.url?.startsWith('/data/decision/'))) {
       if (!isOwnHost(req.headers.host)) { res.writeHead(403); res.end(); return; }
       try {
