@@ -153,4 +153,19 @@ describe('a run card in the glass', () => {
     const g = await modal(glassRun(undefined, { altered: true }));
     expect(g.$('#doverlay .runcard')!.textContent).toContain("no longer matches the card's hash");
   });
+
+  it('wraps a long path, hash or name at phone width, and lets each row of the card shrink', () => {
+    // happy-dom lays nothing out, so this reads the stylesheet; the PR's 375px screenshots show the result.
+    const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8');
+    const rule = (sel: string) => {
+      const at = css.indexOf(`\n${sel} {`);
+      expect(at, sel).toBeGreaterThanOrEqual(0);
+      return css.slice(at, css.indexOf('}', at));
+    };
+    expect(rule('.runcard')).toContain('overflow-wrap: anywhere;');
+    const shrinks = css.slice(css.indexOf('\n.runcard > *,'), css.indexOf('}', css.indexOf('\n.runcard > *,')));
+    for (const row of ['.runcard', '.runhead', '.runmeta', '.runinput', '.runfoot']) expect(shrinks).toContain(`${row} > *`);
+    expect(shrinks).toContain('min-width: 0;');
+    expect(rule('.runcard .badge')).toContain('white-space: normal;');
+  });
 });
