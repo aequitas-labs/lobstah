@@ -941,6 +941,7 @@ export function baitBrief(id: string, d: Descriptor): string {
     'Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`.',
     `Before you wait on something external (a PR review or deploy), report \`lobstah report ${id} paused "<note>" --waiting-on review|pr|deploy|external --link <url>\`.`,
     'Run full test suites, full builds and Playwright as `lobstah heavy -- <command>`: one line per machine keeps them from overloading it. A focused test file or single-package build doesn\'t need it. Your pushes queue on their own.',
+    'A full run\'s output is long. To keep it out of your own context, you can hand the run to a subagent (Claude Code\'s Agent tool, Codex\'s `spawn_agent`) that runs it, or reads its log, and returns only the failures: each failing test or step with its first error lines.',
     'After EVERY report, run `lobstah soak --wait` again — it delivers inbox answers and your next assignment. Never end your turn without it unless you are signing off (`lobstah stow`).',
     TRAP_INSTRUCTION_RULE,
     'The task:',

@@ -133,6 +133,11 @@ it. A person's own pushes never wait.
   `lobstah heavy -- <command>`. A focused test file or single-package build
   doesn't need it. The exit code is the command's. If you forget, a one-line
   reminder corrects you for next time.
+- A full run's output is long, and reading all of it fills your context. You
+  can hand the run to a subagent (the Agent tool) that runs it and returns only
+  the failures: each failing test or step with its first error lines. A run
+  longer than the shell timeout goes in the background with its output in a
+  file; the subagent then reads that file.
 - `git push` queues on its own. Run it as a tracked background task, and report
   `paused "Push in line" --waiting-on heavy`, then run `lobstah soak --wait`
   as usual. The helm isn't woken for this. The task's notification tells you
