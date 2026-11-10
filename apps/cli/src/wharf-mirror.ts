@@ -1,4 +1,5 @@
 import * as http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import {
   BackendError,
@@ -48,7 +49,7 @@ export interface LocalGlass {
 }
 
 /** What the mirror needs of its wharf. */
-export type MirrorWharf = Pick<WharfBackend, 'putMirrorSnapshot' | 'mirrorCalls' | 'takeMirrorCall' | 'answerMirrorCall' | 'mirrorFile'>;
+export type MirrorWharf = Pick<WharfBackend, 'putMirrorSnapshot' | 'mirrorCalls' | 'takeMirrorCall' | 'answerMirrorCall' | 'mirrorFile'> & { glass?: string };
 
 export interface WharfMirrorOptions {
   /** The wharf `[glass] mirror` names, for the status file. */
@@ -59,6 +60,8 @@ export interface WharfMirrorOptions {
   log?: (message: string) => void;
   /** Where the mirror's status goes; the status file by default. */
   writeStatus?: (status: MirrorStatus) => void;
+  /** This glass's loopback port, put with the snapshot for the hosted glass's focus probe. */
+  glassPort?: number;
 }
 
 /** The mirror's state between passes. */
@@ -72,7 +75,8 @@ export class WharfMirror {
   private status: MirrorStatus;
   constructor(private options: WharfMirrorOptions) {
     const prior = readMirrorStatus();
-    this.status = { wharf: options.wharf, calls: 0, at: new Date(this.now()).toISOString(), ...(prior?.wharf === options.wharf && prior.boat ? { boat: prior.boat } : {}) };
+    const same = prior?.wharf === options.wharf ? prior : undefined;
+    this.status = { wharf: options.wharf, id: same?.id ?? randomUUID(), calls: 0, at: new Date(this.now()).toISOString(), ...(same?.boat ? { boat: same.boat } : {}), ...(same?.glass ? { glass: same.glass } : {}) };
   }
   private now(): number {
     return (this.options.now ?? Date.now)();
@@ -90,6 +94,7 @@ export class WharfMirror {
     try {
       const { calls, watchedUntil } = await this.options.backend.mirrorCalls();
       this.watchedUntil = watchedUntil ? Date.parse(watchedUntil) : 0;
+      if (this.options.backend.glass) this.status.glass = this.options.backend.glass;
       await this.readSnapshot();
       await this.putIfDue();
       for (const call of calls) await this.carryOut(call);
@@ -112,6 +117,7 @@ export class WharfMirror {
     // The page token opens this glass for writes. The mirror keeps it here, for the calls it carries out, and never sends it.
     if (typeof snapshot.focusToken === 'string') this.token = snapshot.focusToken;
     delete snapshot.focusToken;
+    if (this.options.glassPort) snapshot.mirror = { port: this.options.glassPort, id: this.status.id };
     this.snapshotJson = JSON.stringify(snapshot);
     this.localEtag = r.etag;
   }
@@ -228,7 +234,8 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
     log(`wharf mirror: no boat credential for ${wharf}; run lobstah wharf login --wharf ${wharf} --mirror`);
     return undefined;
   }
-  const mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, token), glass: loopbackGlass(glassPort()), log });
+  const port = glassPort();
+  const mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, token), glass: loopbackGlass(port), glassPort: port, log });
   const hints = new WharfWake(scope.location, token, ['mirror-call', 'mirror-watch']);
   let stopped = false;
   void (async () => {

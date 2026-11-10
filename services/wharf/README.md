@@ -267,6 +267,7 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Mirror boat | GET mirror/calls; POST mirror/calls/:id/take, answer | The calls addressed to it (and `watchedUntil` while a hosted glass is open); take one, then answer it with the local glass's status, type and body |
 | Mirror boat | GET mirror/files/:file | A file the person attached to a relayed answer for this boat |
 | Signed-in person | GET mirror; POST mirror/calls; GET mirror/calls/:id; POST mirror/files | The hosted glass's side: see Mirror boats |
+| Signed-in person | POST mirror/relay; GET mirror/read?boat=&path= | One call, waited for: the boat's own answer, or 202 after 20 seconds for the page to poll. `read` is a relayed read in one GET, for an image's `src` |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; approve another login to receive a new
@@ -378,6 +379,17 @@ each boat's latest snapshot and calls in transit, never a second record.
   seconds. The boats hear `{ "type": "mirror-watch", "until": … }` when that
   begins, and `GET mirror/calls` carries `watchedUntil`, so a boat puts often
   only while someone is looking.
+- **The hosted glass.** An account with a mirror boat runs the glass on the
+  mirror backend (`packages/glass-ui/ui/backends/mirror.ts`): every boat's
+  snapshot merged into one fleet, with the wharf's own grounds beside them
+  when it holds any of their work. With one boat the glass renders exactly
+  what that boat's local glass renders (`apps/cli/test/glass-parity.test.ts`).
+  With several, every row carries its boat's name on its repo or grounds, and
+  each read or write goes to that row's boat. A boat whose snapshot is over two
+  minutes old shows its age in the header, and its rows are read-only. ↗ Open is
+  never relayed: the page probes each boat's glass on loopback
+  (`/api/mirror/probe`, answered only for this glass's origin), and shows
+  ↗ Open only on the trap rows of the boat that answers.
 - **Limits.** Mirror routes keep no idempotency records (a put replaces, a take
   or an answer succeeds once) and have their own per-minute budget, four times
   the account's, so a polling glass never starves coordination.

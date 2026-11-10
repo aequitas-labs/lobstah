@@ -51,6 +51,12 @@ export function mirrorRawBody(path: string, method: string): boolean {
  */
 async function mirrorResponse(request: Request, env: Env, c: Command): Promise<Response> {
   const stub = env.ACCOUNTS.getByName(c.account);
+  // The hosted glass's relay: post one call and wait for its boat's answer, so a read is one request (an image's src too).
+  if (c.path === 'mirror/read' && c.method === 'GET') {
+    const query = new URL(request.url).searchParams;
+    return relayAndWait(request, env, c, { id: crypto.randomUUID(), boat: query.get('boat') ?? '', read: query.get('path') ?? '' });
+  }
+  if (c.path === 'mirror/relay' && c.method === 'POST') return relayAndWait(request, env, c, c.body);
   let serialized: string;
   if (mirrorRawBody(c.path, c.method)) {
     const max = c.path === 'mirror/snapshot' ? MIRROR_SNAPSHOT_MAX_BYTES : Number(env.MAX_FILE_BYTES);
@@ -96,4 +102,29 @@ async function mirrorResponse(request: Request, env: Env, c: Command): Promise<R
       'X-File-Name': encodeURIComponent(String(file.name)) } });
   }
   return Response.json(result.value, { status: 200, headers: noStore });
+}
+
+/** How long the relay waits for a boat before it answers 202 and leaves the page to poll the call. */
+const MIRROR_RELAY_WAIT_MS = 20_000;
+/** How often it looks. */
+const MIRROR_RELAY_POLL_MS = 400;
+
+/**
+ * Post one call and wait for its boat's answer, then answer with it: the
+ * boat's status, type and body. A boat that has not answered in time gives
+ * 202 with the call's id, which the page polls. Posting the same id again
+ * waits for that call, so a page's retry never runs a write twice.
+ */
+async function relayAndWait(request: Request, env: Env, c: Command, call: unknown): Promise<Response> {
+  const stub = env.ACCOUNTS.getByName(c.account);
+  const created = object(JSON.parse(await stub.mirror(JSON.stringify({ ...c, method: 'POST', path: 'mirror/calls', body: call }))));
+  const id = typeof (call as { id?: unknown })?.id === 'string' ? (call as { id: string }).id : '';
+  if (created.status !== 200 && !(created.status === 409 && id)) return Response.json(created.value, { status: Number(created.status), headers: noStore });
+  const deadline = Date.now() + MIRROR_RELAY_WAIT_MS;
+  for (;;) {
+    const answer = await mirrorResponse(request, env, { ...c, method: 'GET', path: `mirror/calls/${id}`, body: {} });
+    if (answer.status !== 202 || Date.now() >= deadline) return answer;
+    await answer.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, MIRROR_RELAY_POLL_MS));
+  }
 }

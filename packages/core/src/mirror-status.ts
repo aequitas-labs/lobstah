@@ -10,6 +10,8 @@ import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
 export interface MirrorStatus {
   /** The wharf `[glass] mirror` names. */
   wharf: string;
+  /** This mirror's id, kept across restarts: the glass's focus probe answers with it, and the put snapshot carries it. */
+  id?: string;
   /** This boat's name on that wharf, once the wharf has said. */
   boat?: string;
   /** The last snapshot put, and its ETag and gzip size. */
@@ -18,6 +20,8 @@ export interface MirrorStatus {
   bytes?: number;
   /** Until when a hosted glass is open, as the wharf last said. */
   watchedUntil?: string;
+  /** The hosted glass's origin, as the wharf names it: the one origin this glass answers its focus probe for. */
+  glass?: string;
   /** Relayed calls carried out since the daemon started, and the last one's time. */
   calls: number;
   lastCallAt?: string;

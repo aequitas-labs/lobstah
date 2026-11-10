@@ -239,3 +239,47 @@ describe('the mirror permission', () => {
     expect(permits(['work', 'helm'], 'mirror')).toBe(false);
   });
 });
+
+describe('the waiting relay', () => {
+  /** The boat's side: wait for one call, take it, answer it with what `body` gives. */
+  async function boatAnswers(boat: Boat, status: number, body: (call: WharfMirrorCall) => string, contentType = 'application/json'): Promise<WharfMirrorCall> {
+    for (let i = 0; i < 50; i++) {
+      const { calls } = await (await boatCall(boat, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>();
+      if (calls[0]) {
+        await boatCall(boat, `mirror/calls/${calls[0].id}/take`, { body: '{}' });
+        await answer(boat, calls[0].id, status, body(calls[0]), contentType);
+        return calls[0];
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('no call arrived');
+  }
+
+  it('posts one call and answers with the boat’s own response once it comes', async () => {
+    const north = await enrol('north', ['mirror', 'read']);
+    const relayed = browser('mirror/relay', { body: { id: 'relay-1', boat: north.id, write: { kind: 'pr-ack', payload: { key: 'pr:1' } } } });
+    const handled = await boatAnswers(north, 201, () => '{"ok":true}');
+    expect(handled).toMatchObject({ id: 'relay-1', write: { kind: 'pr-ack' } });
+    const response = await relayed;
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it('reads a boat’s file in one GET, as an image’s src would', async () => {
+    const north = await enrol('north', ['mirror', 'read']);
+    const path = '/decision/decision%3A0a1b2c3d/files/tray.png';
+    const read = browser(`mirror/read?boat=${north.id}&path=${encodeURIComponent(path)}`);
+    const handled = await boatAnswers(north, 200, () => 'PNGDATA', 'image/png');
+    expect(handled.read).toBe(path);
+    const response = await read;
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('image/png');
+    expect(await response.text()).toBe('PNGDATA');
+  });
+
+  it('refuses a relay the hosted glass may not make, before any boat hears of it', async () => {
+    const north = await enrol('north', ['mirror', 'read']);
+    expect((await browser('mirror/relay', { body: { id: 'relay-2', boat: north.id, write: { kind: 'focus', payload: {} } } })).status).toBe(403);
+    expect((await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>()).calls).toEqual([]);
+  });
+});
