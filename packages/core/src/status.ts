@@ -84,6 +84,7 @@ export function appendStatus(
   at?: string,
   waiting?: WaitingFields,
   reported = false,
+  permissionRequest = false,
 ): StatusEntry {
   if (!isVerb(verb)) {
     throw new Error(`invalid status verb "${verb}" — must be one of: ${VERBS.join(', ')}`);
@@ -95,6 +96,7 @@ export function appendStatus(
     ...(note ? { note } : {}),
     ...extra,
     ...(reported ? { reported: true as const } : {}),
+    ...(permissionRequest ? { permissionRequest: true as const } : {}),
   };
   if (verb === 'done') {
     try { observeLocalCatch(id, lane, 'finish'); } catch { /* Unknown is better than failing a report. */ }
@@ -134,6 +136,18 @@ export function readStatusLog(id: string, lane: Lane): StatusEntry[] {
         return [];
       }
     });
+}
+
+/**
+ * The status entry that holds a dispatch's question, when one stands: the
+ * newest entry that is not a permission request, if its verb is
+ * needs-decision or blocked. A permission request has its own card, so
+ * one filed after a question leaves that question standing.
+ */
+export function questionEntry(log: readonly StatusEntry[]): StatusEntry | undefined {
+  let entry: StatusEntry | undefined;
+  for (let i = log.length - 1; i >= 0 && !entry; i--) if (!log[i]!.permissionRequest) entry = log[i];
+  return entry && (entry.verb === 'needs-decision' || entry.verb === 'blocked') ? entry : undefined;
 }
 
 export type ReconciledState = Verb | 'unknown';
