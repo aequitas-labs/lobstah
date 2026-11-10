@@ -11,6 +11,7 @@ import { readActivity, ageLabel } from './activity.js';
 import { lastEventAt } from './events.js';
 import { slotUsage } from './slots.js';
 import { poolWaits } from './pools.js';
+import { lastHeavyRunEnd, liveHeavyTickets } from './heavy.js';
 import { readHold, holdReason } from './disk.js';
 import { postNotice } from './notices.js';
 import { trapCapacityReason } from './trap-availability.js';
@@ -48,6 +49,20 @@ export interface DispatchProgress {
   thresholdSecs: number;
 }
 
+/**
+ * When an idle trap's quiet started, counting its heavy work as working: undefined
+ * while a command of its dispatch waits or runs in the heavy line, else the later
+ * of `idleSince` and the end of its latest heavy run. A trap that ends its turn
+ * while its checks run in the line is waiting on them, the same as a report of
+ * `paused` waiting on heavy; once they finish, the usual grace period starts over.
+ */
+export function idleSinceAfterHeavy(dispatchId: string, trapId: string, idleSince: string, now = Date.now()): string | undefined {
+  const match = { dispatch: dispatchId, trap: trapId };
+  if (liveHeavyTickets(match, now).length > 0) return undefined;
+  const ended = lastHeavyRunEnd(match);
+  return ended !== undefined && ended > Date.parse(idleSince) ? new Date(ended).toISOString() : idleSince;
+}
+
 /** Current conditions, independent of notice consumption or daemon restarts. */
 export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): DispatchProgress[] {
   const out: DispatchProgress[] = [];
@@ -71,10 +86,12 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): 
       const trap = claim?.by ? trapByAddress(claim.by) : undefined;
       const idle = trap ? idleWorkingTrap(trap, now) : undefined;
       if (d && idle) {
-        const ageSecs = (now - Date.parse(idle.since)) / 1000;
+        const since = idleSinceAfterHeavy(id, trap!.trapId, idle.since, now);
+        if (since === undefined) continue; // Its command waits or runs in the heavy line: the trap is working.
+        const ageSecs = (now - Date.parse(since)) / 1000;
         if (cfg.helm.idleWorkingNoticeSecs > 0 && ageSecs >= cfg.helm.idleWorkingNoticeSecs) {
-          out.push({ id, lane, repo: d.repo, state: 'idle-while-working', since: idle.since, ageSecs,
-            thresholdSecs: cfg.helm.idleWorkingNoticeSecs, stateHash: `idle-working:${idle.since}`,
+          out.push({ id, lane, repo: d.repo, state: 'idle-while-working', since, ageSecs,
+            thresholdSecs: cfg.helm.idleWorkingNoticeSecs, stateHash: `idle-working:${since}`,
             text: `idle-while-working ${id}: ${trapRepoLabel(trap!)} ended its turn ${ageLabel(ageSecs * 1000)} ago while reporting working; last note: ${idle.note}. Read the note, resolve the question on a card, or ask the worker to keep working.` });
         }
         continue; // Explicitly idle is not a silent execution stall.
