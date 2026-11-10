@@ -334,10 +334,11 @@ export const cmdRow = (text: string, key?: string, label?: string, href?: string
  */
 export const trapSessionRow = (t: GlassTrap): Children => {
   if (t.live && !desktopSession(t)) return t.attachCommand && viewerHasTerminal() ? cmdRow(t.attachCommand, undefined, 'attach:') : null;
-  return t.sessionId || (t.link && desktopSession(t)) ? resumeRow(t) : null;
+  return t.sessionId || (t.link && desktopSession(t)) ? resumeRow(t, 'resume:') : null;
 };
 
-export const resumeRow = (session: ResumeSession): Children => {
+/** A session's resume row; `label` names it where it sits among other routes (the trap modal). */
+export const resumeRow = (session: ResumeSession, label?: string): Children => {
   if (desktopSession(session)) {
     if (!sessionLinkOpens()) return null;
     return session.link
@@ -346,7 +347,7 @@ export const resumeRow = (session: ResumeSession): Children => {
   }
   if (!viewerHasTerminal()) return null;
   const command = resumeCommand(session);
-  return command ? cmdRow(command, undefined, 'resume:') : html`<span class="dim">Resume command unavailable</span>`;
+  return command ? cmdRow(command, undefined, label) : html`<span class="dim">Resume command unavailable</span>`;
 };
 
 /** A clickable image that opens in the in-page overlay. */
