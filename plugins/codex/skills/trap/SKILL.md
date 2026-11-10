@@ -129,6 +129,11 @@ it. A person's own pushes never wait.
   `lobstah heavy -- <command>`. A focused test file or single-package build
   doesn't need it. The exit code is the command's. If you forget, a one-line
   reminder corrects you for next time.
+- A full run's output is long, and reading all of it fills your context. You
+  can hand the run to a subagent (`spawn_agent`, then `wait_agent`) that runs
+  it and returns only the failures: each failing test or step with its first
+  error lines. Subagents need Codex's `multi_agent` feature, on by default
+  (`codex features list`).
 - Push with `lobstah heavy --bg -- git push origin <branch>`. It returns at
   once, and a detached holder waits its turn, runs the push, and posts the exit
   code, log path and last lines to your dispatch's inbox. Report
