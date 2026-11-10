@@ -35,7 +35,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   setup: { subverbs: ['reviews'], flags: { '--identity': { value: '<github-login>' } }, maxPositionals: 1 },
   wharf: {
     subverbs: ['login', 'logout', 'whoami', 'requests', 'request-receipt', 'request-execute', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries'],
-    flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--name': { value: '<boat>' }, '--helm': {}, '--work-only': {}, '--credential-file': { value: '<file|->' }, '--timeout': { value: '<seconds>' } },
+    flags: { '--session': { value: '<id>' }, '--worker': { value: '<id>' }, '--name': { value: '<boat>' }, '--helm': {}, '--work-only': {}, '--credential-file': { value: '<file|->' }, '--timeout': { value: '<seconds>' }, '--wharf': { value: '<name>' }, '--mirror': {} },
     positionals: '<action> [<id>] [<file>|<message-id>]',
   },
   dispatch: {

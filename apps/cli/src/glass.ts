@@ -89,7 +89,7 @@ import {
   TodoError,
   heavyGlassView,
 } from '@lobstah/core';
-import type { Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
+import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
@@ -961,6 +961,9 @@ export function serveGlass(
           return reply(400, { ok: false, reason: 'Invalid JSON.' });
         }
         const kindMax = typeof body?.kind === 'string' ? REQUEST_KIND_MAX_BYTES.get(body.kind) : undefined;
+        // A mirror boat's daemon carries out on this glass what a person did on the hosted glass, and says so.
+        // The header counts only on a request this glass already authorized with its own page token.
+        const source: AnswerSource = req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass';
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
@@ -1008,7 +1011,7 @@ export function serveGlass(
           case 'decision-answer': {
             try {
               const { key, ...answer } = decisionAnswerRequest(body.payload);
-              const { decision, answer: stored } = answerKey(key, { ...answer, by: 'glass' });
+              const { decision, answer: stored } = answerKey(key, { ...answer, by: source });
               return reply(201, { ok: true, id: stored.request, key: decision.key });
             } catch (err) {
               if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });

@@ -152,6 +152,11 @@ plugins; their routes are also refused by the HTTP allowlist. The device client/
 scope approval fix predates this pin. Recheck upstream advisories before deployment;
 this narrow configuration is not a claim that every 1.7.6 plugin is safe.
 
+A mirror boat enrols by wharf, not by grounds: `lobstah wharf login --wharf <name> --mirror`
+asks for mirror and read only, and `[glass] mirror = "<name>"` starts the daemon's
+mirror (see Mirror boats). `lobstah wharf whoami --wharf <name>` names the boat and
+whether its mirror is fresh.
+
 `lobstah wharf login --grounds <grounds> [--name <boat>] [--helm|--work-only]`
 prints a browser approval URL/code and stores only that wharf's boat credential
 under `~/.lobstah/credentials/`, with owner-only file permissions where supported.
