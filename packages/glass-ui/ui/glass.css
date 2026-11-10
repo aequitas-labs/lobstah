@@ -925,6 +925,17 @@ a {
 #modalbox .offmachine {
   max-width: none;
 }
+/* The trap modal's ways in: one per line, each control with where it works beside it. */
+.route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin: 6px 0;
+}
+.route > * {
+  min-width: 0;
+}
 /* A finger needs more room than a pointer. */
 @media (pointer: coarse) {
   .btn.open {
