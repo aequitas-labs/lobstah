@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { askDecision, decisionDir, ensureLayout, prepareRunCard, readDecisionAnswer } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { RUN_CHALLENGE_MS, RunChallenges, readRunPasskeys } from '../src/run-passkey.js';
+import { RunRegistry } from '../src/run-exec.js';
 import { SoftPasskey } from './fixtures/soft-passkey.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -26,6 +27,7 @@ let clock: number;
 let challenges: RunChallenges;
 let confirm: () => Promise<string | undefined>;
 let passkeysFile: string;
+let runs: RunRegistry;
 
 beforeEach(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-run-passkey-'));
@@ -35,11 +37,13 @@ beforeEach(async () => {
   challenges = new RunChallenges(() => clock);
   confirm = async () => undefined;
   passkeysFile = path.join(home, 'run', 'passkeys.json');
-  server = serveGlass(0, { runChallenges: challenges, confirmPasskeyRegistration: () => confirm(), passkeysFile });
+  runs = new RunRegistry();
+  server = serveGlass(0, { runChallenges: challenges, confirmPasskeyRegistration: () => confirm(), passkeysFile, runs });
   await new Promise<void>((resolve) => server!.once('listening', resolve));
   port = (server.address() as AddressInfo).port;
 });
 afterEach(async () => {
+  await runs.settled();
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
@@ -124,10 +128,10 @@ describe('confirming a Run with the passkey', () => {
     const card = runCard();
     const challenge = (await runChallenge(card)).json.challenge as string;
     const assertion = passkey.assert(challenge, origin());
-    const ok = await post(localhost(), 'run-assert', { key: card.key, ...assertion });
-    expect(ok.status).toBe(200);
-    expect(ok.json).toMatchObject({ ok: true, verified: true, key: card.key });
-    const replay = await post(localhost(), 'run-assert', { key: card.key, ...assertion });
+    const ok = await post(localhost(), 'run', { key: card.key, ...assertion, inputs: {} });
+    expect(ok.status).toBe(202);
+    expect(ok.json).toMatchObject({ ok: true, running: true, key: card.key });
+    const replay = await post(localhost(), 'run', { key: card.key, ...assertion });
     expect(replay.status).toBe(403);
     expect(replay.json.reason).toContain('unknown, spent or older than two minutes');
   });
@@ -137,7 +141,7 @@ describe('confirming a Run with the passkey', () => {
     const card = runCard();
     const challenge = (await runChallenge(card)).json.challenge as string;
     clock += RUN_CHALLENGE_MS + 1_000;
-    const res = await post(localhost(), 'run-assert', { key: card.key, ...passkey.assert(challenge, origin()) });
+    const res = await post(localhost(), 'run', { key: card.key, ...passkey.assert(challenge, origin()) });
     expect(res.status).toBe(403);
   });
 
@@ -147,13 +151,13 @@ describe('confirming a Run with the passkey', () => {
     const other = runCard('#!/bin/bash\necho other\n');
     const stranger = new SoftPasskey();
     let challenge = (await runChallenge(card)).json.challenge as string;
-    expect((await post(localhost(), 'run-assert', { key: card.key, ...stranger.assert(challenge, origin()) })).status).toBe(403);
+    expect((await post(localhost(), 'run', { key: card.key, ...stranger.assert(challenge, origin()) })).status).toBe(403);
     challenge = (await runChallenge(card)).json.challenge as string;
     const signed = passkey.assert(challenge, origin());
     const forged = { ...signed, signature: passkey.assert((await runChallenge(card)).json.challenge as string, origin()).signature };
-    expect((await post(localhost(), 'run-assert', { key: card.key, ...forged })).status).toBe(403);
+    expect((await post(localhost(), 'run', { key: card.key, ...forged })).status).toBe(403);
     challenge = (await runChallenge(card)).json.challenge as string;
-    const moved = await post(localhost(), 'run-assert', { key: other.key, ...passkey.assert(challenge, origin()) });
+    const moved = await post(localhost(), 'run', { key: other.key, ...passkey.assert(challenge, origin()) });
     expect(moved.status).toBe(403);
     expect(moved.json.reason).toContain('different card');
   });

@@ -2300,3 +2300,16 @@ footer .glass-brand {
   border-color: var(--ok);
   color: var(--ok);
 }
+.runout {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.runlog {
+  max-height: 40vh;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+a.runbtn {
+  text-decoration: none;
+}
