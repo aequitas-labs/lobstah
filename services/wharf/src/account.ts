@@ -5,6 +5,9 @@ import { boatPermissions, permits, personPermissions, requiredPermission } from 
 import type { Permission } from './permissions.js';
 import { personSessionLive } from './auth.js';
 import { GlassState, glassSchema, glassTables } from './glass-state.js';
+import { MIRROR_WATCH_MS, MirrorState, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
+import type { MirrorCleanup } from './mirror-state.js';
+import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
@@ -20,6 +23,7 @@ const HELM_MS = 120_000;
 /** One account's only coordination authority. No alarms, timers or socket pings. */
 export class Account extends DurableObject<Env> {
   private glass: GlassState;
+  private mirrorState: MirrorState;
   private hintPending = false;
   /** Fetch is only for the private upgrade binding: normal state uses RPC. */
   async fetch(request: Request): Promise<Response> {
@@ -111,10 +115,12 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, dispatch TEXT NOT NULL, text TEXT NOT NULL, received INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, hash TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0);
       ${glassSchema}
+      ${mirrorSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
     this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now) });
+    this.mirrorState = new MirrorState(ctx.storage.sql, { read: (a) => this.requirePermission(a, 'read'), mirror: (a) => this.requirePermission(a, 'mirror') });
   }
   private get(key: string): string | undefined {
     return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key=?', key).toArray()[0]?.value;
@@ -232,7 +238,7 @@ export class Account extends DurableObject<Env> {
     b.count++; this.set('budget', JSON.stringify(b));
   }
   private capacity() {
-    const tables = ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables];
+    const tables = ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
@@ -325,7 +331,9 @@ export class Account extends DurableObject<Env> {
       this.requirePermission(actor, 'admin');
       const id = identifier(c.path.split('/')[1]); const target = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', id).toArray()[0];
       requireThat(target, 404, 'boat not found');
-      this.ctx.storage.sql.exec('UPDATE boats SET revoked=1 WHERE id=?', id); this.event('boat-revoked', undefined, `boat: ${target.name}`); return ok();
+      this.ctx.storage.sql.exec('UPDATE boats SET revoked=1 WHERE id=?', id); this.event('boat-revoked', undefined, `boat: ${target.name}`);
+      // A revoked boat mirrors nothing: its snapshot and calls are dropped with its credential.
+      this.dropMirrorFiles(this.mirrorState.forget(c.account, id)); return ok();
     }
     if (c.path === 'workers/sign-on' && c.method === 'POST') {
       requireThat(actor.kind === 'boat', 403, 'boat scope required');
@@ -536,6 +544,111 @@ export class Account extends DurableObject<Env> {
     // are checked against this account's dispatch and claim history.
     return { ...result, value: { dispatch: r.dispatch, epoch: r.epoch, token, leaseUntil: r.leaseUntil } };
   }
+  /** Delete what a mirror operation left in R2, after its transaction, in the R2 serial queue. */
+  private dropMirrorFiles(cleanup: MirrorCleanup) {
+    if (cleanup.keys.length) this.ctx.waitUntil(this.serialFile(() => this.env.FILES.delete(cleanup.keys)).catch(() => {}));
+  }
+  /** Tell mirror boats something through their wake sockets: a call waits, or a hosted glass is open. No content travels. */
+  private async mirrorHint(boats: ReadonlySet<string> | 'all', message: { type: 'mirror-call' } | { type: 'mirror-watch'; until: string }) {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        const a = socket.deserializeAttachment() as { actor: Actor; hash: string };
+        if (a.actor.kind !== 'boat' || (boats !== 'all' && !boats.has(a.actor.id))) continue;
+        const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
+        const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
+        if (!this.get('deleted') && row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], 'mirror')) socket.send(JSON.stringify(message));
+      } catch { /* disconnected */ }
+    }
+  }
+  /**
+   * The mirror's own rate budget, apart from the account's: a hosted glass
+   * polling a mirror boat must never starve the fleet's coordination.
+   */
+  private mirrorBudget(now: number) {
+    const window = Math.floor(now / 60000); const b = JSON.parse(this.get('mirror-budget') ?? '{"window":0,"count":0}');
+    if (b.window !== window) { b.window = window; b.count = 0; }
+    requireThat(b.count < 4 * Number(this.env.REQUESTS_PER_MINUTE), 429, 'mirror rate limit');
+    b.count++; this.set('mirror-budget', JSON.stringify(b));
+  }
+  /**
+   * Every mirror route. Mirror operations keep no idempotency records: a
+   * put replaces the boat's latest snapshot, and a take or an answer
+   * succeeds once. `bytes` is a put's gzip, an answer's body or an uploaded
+   * file; `meta` is what the request's headers said about it.
+   */
+  async mirror(command: string, bytes?: Uint8Array, meta: { status?: number; contentType?: string; name?: string; boat?: string } = {}): Promise<string> {
+    return this.serialFile(async () => {
+      const c: Command = JSON.parse(command);
+      try {
+        // A catch's own credential reaches its dispatch only, never a boat's mirror.
+        requireThat(!c.token.startsWith('d.'), 403, 'mirror routes take a mirror boat credential or a signed-in person');
+        const hash = await digest(c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
+        const run = <T>(fn: (actor: Actor, now: number) => T): T => {
+          let cleanup: MirrorCleanup = { keys: [] };
+          const result = this.ctx.storage.transactionSync(() => {
+            const now = Date.now();
+            requireThat(!this.get('deleted'), 410, 'account deleted');
+            const actor = this.authenticate(c, hash, now); this.mirrorBudget(now);
+            this.authorize(c, actor);
+            cleanup = this.mirrorState.expire(c.account, now);
+            return fn(actor, now);
+          });
+          this.dropMirrorFiles(cleanup);
+          return result;
+        };
+        if (c.path === 'mirror/snapshot' && c.method === 'PUT') {
+          run((actor) => this.mirrorState.authorizeSnapshot(actor));
+          const json = await gunzipText(bytes ?? new Uint8Array(), MIRROR_SNAPSHOT_MAX_JSON_BYTES);
+          let snapshot: unknown;
+          try { snapshot = JSON.parse(json); } catch { throw new ApiError(400, 'the snapshot is not JSON'); }
+          requireThat(snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot), 400, 'the snapshot is not a glass snapshot');
+          // The page token opens the boat's own glass for writes; it never leaves the boat.
+          requireThat(!('focusToken' in (snapshot as object)), 400, 'a mirrored snapshot never carries the page token');
+          const etag = await digest(json);
+          const actor = run((a) => a);
+          await this.env.FILES.put(mirrorSnapshotKey(c.account, actor.id), bytes!, { customMetadata: { etag } });
+          return JSON.stringify(run((a, now) => this.mirrorState.recordSnapshot(a, etag, bytes!.byteLength, now)));
+        }
+        const answer = /^mirror\/calls\/([A-Za-z0-9_-]+)\/answer$/.exec(c.path);
+        if (answer && c.method === 'POST') {
+          const id = answer[1]!;
+          run((actor, now) => this.mirrorState.authorizeAnswer(actor, id, now));
+          const status = Number(meta.status);
+          requireThat(Number.isInteger(status) && status >= 200 && status <= 599, 400, 'invalid answer status');
+          const contentType = text(meta.contentType ?? 'application/octet-stream', 200);
+          await this.env.FILES.put(mirrorAnswerKey(c.account, id), bytes ?? new Uint8Array(), { httpMetadata: { contentType } });
+          return JSON.stringify(run((actor, now) => this.mirrorState.recordAnswer(actor, id, { status, contentType, bytes: bytes?.byteLength ?? 0 }, now)));
+        }
+        if (c.path === 'mirror/files' && c.method === 'POST') {
+          const boat = identifier(meta.boat), name = text(meta.name ?? 'attachment', 200);
+          requireThat(!/[\x00-\x1f/\\]/.test(name) && name !== '.' && name !== '..', 400, 'invalid file name');
+          run((actor) => this.mirrorState.authorizeFile(actor, boat));
+          const id = crypto.randomUUID();
+          await this.env.FILES.put(mirrorFileKey(c.account, id), bytes ?? new Uint8Array(), { httpMetadata: { contentType: 'application/octet-stream', contentDisposition: 'attachment' } });
+          return JSON.stringify(run((actor, now) => this.mirrorState.recordFile(actor, boat, id, name, bytes?.byteLength ?? 0, now)));
+        }
+        const result = run((actor, now) => {
+          const r = this.mirrorState.execute(c, actor, now, c.account);
+          if (r.watch) {
+            const watched = Number(this.get('mirror-watched') ?? 0) > now;
+            this.set('mirror-watched', String(now + MIRROR_WATCH_MS));
+            if (!watched) this.ctx.waitUntil(this.mirrorHint('all', { type: 'mirror-watch', until: new Date(now + MIRROR_WATCH_MS).toISOString() }));
+          }
+          if (r.hint) this.ctx.waitUntil(this.mirrorHint(new Set([r.hint]), { type: 'mirror-call' }));
+          // A boat's call list says whether a hosted glass is open, so it knows how often to put.
+          if (c.path === 'mirror/calls' && c.method === 'GET' && r.status === 200) {
+            const until = Number(this.get('mirror-watched') ?? 0);
+            return { status: r.status, value: { ...(r.value as object), ...(until > now ? { watchedUntil: new Date(until).toISOString() } : {}) } };
+          }
+          return { status: r.status, value: r.value };
+        });
+        return JSON.stringify(result);
+      } catch (e) {
+        if (e instanceof ApiError) return JSON.stringify({ status: e.status, value: { error: e.message } });
+        throw e;
+      }
+    });
+  }
   private serialFile<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.fileTail.catch(() => {}).then(fn); this.fileTail = result.catch(() => {}); return result;
   }
@@ -582,7 +695,7 @@ export class Account extends DurableObject<Env> {
           await this.env.FILES.delete(files.objects.map((f) => f.key));
         }
         this.ctx.storage.transactionSync(() => {
-          for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables]) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+          for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables]) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
           this.ctx.storage.sql.exec("DELETE FROM meta WHERE key NOT IN ('deleted','delete-authority')");
         });
         // Keep only a tombstone; the Worker also removes this person's D1 identity.
@@ -593,4 +706,22 @@ export class Account extends DurableObject<Env> {
       }
     });
   }
+}
+
+/** Unpack a gzip body as text, refusing more than `max` bytes of it. */
+async function gunzipText(bytes: Uint8Array, max: number): Promise<string> {
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')).getReader();
+  const chunks: Uint8Array[] = []; let n = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      n += value.byteLength; requireThat(n <= max, 413, 'snapshot too large once unpacked'); chunks.push(value);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(400, 'the snapshot is not gzip');
+  } finally { await reader.cancel().catch(() => {}); }
+  const out = new Uint8Array(n); let offset = 0;
+  for (const c of chunks) { out.set(c, offset); offset += c.length; }
+  return new TextDecoder().decode(out);
 }

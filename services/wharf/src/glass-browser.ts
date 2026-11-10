@@ -19,18 +19,23 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
   const headers = new Headers({ Cookie: request.headers.get('Cookie') ?? '' });
   const person = await personSession(env, headers);
   const route = url.pathname === '/api/glass' ? 'glass' : url.pathname.slice('/api/glass/'.length);
-  const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake'].includes(route)
+  const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake', 'mirror'].includes(route)
+    || /^mirror\/calls\/[A-Za-z0-9_-]+$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
     || /^(documents|dispatches)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));
   const input = request.method === 'POST' && (route === 'requests'
     || /^documents\/[A-Za-z0-9_-]+\/(answer|ack)$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/ack$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/cancel$/.test(route)
-    || /^boats\/[A-Za-z0-9_-]+\/revoke$/.test(route));
+    || /^boats\/[A-Za-z0-9_-]+\/revoke$/.test(route)
+    || route === 'mirror/calls');
+  // A file the person attaches to a relayed answer: raw bytes, stored for the boat to fetch.
+  const mirrorFile = request.method === 'POST' && route === 'mirror/files';
   const deleting = request.method === 'DELETE' && route === 'account';
-  requireThat(read || input || deleting, 404, 'browser action not available');
+  requireThat(read || input || deleting || mirrorFile, 404, 'browser action not available');
   let body: unknown = {};
-  if (!read) {
+  if (mirrorFile) requireThat(request.headers.get('Origin') === authOrigins(env).glass, 403, 'same-origin browser action required');
+  else if (!read) {
     requireThat(request.headers.get('Origin') === authOrigins(env).glass, 403, 'same-origin browser action required');
     try { body = JSON.parse(new TextDecoder().decode(await boundedBody(request))); }
     catch (e) { if (e instanceof ApiError) throw e; throw new ApiError(400, 'invalid JSON'); }
